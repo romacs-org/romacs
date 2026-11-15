@@ -553,12 +553,12 @@ seq in the whole journal."
                            (funcall (romacs-agent--harness-get session :events) (romacs-agent--scratch session) out))
                :output)))
 
-(defun romacs-agent-ui--open-payload (id)
-  "Draw call ID's kept payload under its row, shown, and forget it: its
-row opened.  Nil when it has none."
+(defun romacs-agent-ui--open-payload (id &optional folded)
+  "Draw call ID's kept payload under its row, shown or FOLDED, and forget
+it; nil when it has none, or no row any more."
   (when-let* ((payload (and romacs-agent-ui--payloads (gethash id romacs-agent-ui--payloads)))
+              ((progn (remhash id romacs-agent-ui--payloads) t))
               (mark (gethash id romacs-agent-ui--tool-lines)))
-    (remhash id romacs-agent-ui--payloads)
     (let* ((call (plist-get payload :call))
            (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (cadr call))
                                              (romacs-agent-ui--payload-output payload) (plist-get payload :failed))))
@@ -566,10 +566,20 @@ row opened.  Nil when it has none."
         (save-excursion
           (goto-char mark)
           (forward-line 1)
-          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id)))
+          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
+                                  'invisible (and folded '(romacs-agent-output)))))
             (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
             (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))
       t)))
+
+(defun romacs-agent-ui--open-payloads-in (start end)
+  "Draw, folded, the kept payloads of the calls whose rows are between
+START and END: what reads the transcript's text there (copy, quote)
+finds them as it found every output."
+  (when romacs-agent-ui--payloads
+    (dolist (id (hash-table-keys romacs-agent-ui--payloads))
+      (when-let* ((mark (gethash id romacs-agent-ui--tool-lines)))
+        (when (and (>= mark start) (< mark end)) (romacs-agent-ui--open-payload id t))))))
 
 (defun romacs-agent-ui--tool-end (event failed)
   "EVENT ends its call, FAILED or not: the row's mark settles and the row
@@ -2160,6 +2170,10 @@ the row at the start draws them again."
        (dolist (table (list romacs-agent-ui--tool-lines romacs-agent-ui--tasks))
          (maphash (lambda (id marker) (when (= marker (point-min)) (set-marker marker nil) (remhash id table)))
                   (copy-hash-table table)))
+       ;; And the payloads their rows kept.
+       (when romacs-agent-ui--payloads
+         (maphash (lambda (id _) (unless (gethash id romacs-agent-ui--tool-lines) (remhash id romacs-agent-ui--payloads)))
+                  (copy-hash-table romacs-agent-ui--payloads)))
        (setq romacs-agent-ui--fills
              (seq-filter (lambda (marker)
                            (or (> marker (point-min)) (progn (set-marker marker nil) nil)))
@@ -2766,7 +2780,9 @@ or what only decorates (a quote's bar, `romacs-agent-decor')."
   "Copy the region, else the turn at point (its prompt and reply)."
   (interactive nil romacs-agent-chat-mode)
   (pcase-let ((`(,start . ,end) (if (use-region-p) (cons (region-beginning) (region-end)) (romacs-agent-ui--turn-bounds))))
-    (kill-new (string-trim (romacs-agent-ui--text-of start end)))
+    (let ((end (copy-marker end t)))
+      (romacs-agent-ui--open-payloads-in start end)
+      (kill-new (string-trim (romacs-agent-ui--text-of start end))))
     (message "Copied")))
 
 (defun romacs-agent-chat-edit-turn ()
@@ -2866,7 +2882,9 @@ what was there."
   "Quote the region in the composer, each line after \"> \"."
   (interactive nil romacs-agent-chat-mode)
   (unless (use-region-p) (user-error "No region to quote"))
-  (let ((text (buffer-substring-no-properties (region-beginning) (region-end))))
+  (let ((text (let ((end (copy-marker (region-end) t)))
+                (romacs-agent-ui--open-payloads-in (region-beginning) end)
+                (buffer-substring-no-properties (region-beginning) end))))
     (deactivate-mark)
     (goto-char (point-max))
     (unless (bolp) (insert "\n"))
@@ -2877,7 +2895,12 @@ what was there."
 too where the run left no row.  An open run is left as it is: it settles
 folded.  Shown, the outputs kept for their rows are drawn first."
   (when (and (not hide) romacs-agent-ui--payloads)
-    (mapc #'romacs-agent-ui--open-payload (hash-table-keys romacs-agent-ui--payloads)))
+    ;; But the open run's: it settles folded, as the sweep below leaves it.
+    (dolist (id (hash-table-keys romacs-agent-ui--payloads))
+      (let ((mark (gethash id romacs-agent-ui--tool-lines)))
+        (unless (and mark romacs-agent-ui--run
+                     (equal (get-text-property mark 'romacs-agent-run) (plist-get romacs-agent-ui--run :id)))
+          (romacs-agent-ui--open-payload id)))))
   (let ((end (marker-position (if romacs-agent-ui--run (plist-get romacs-agent-ui--run :head) romacs-agent-ui--end))))
     (dolist (fold '((romacs-agent-run . romacs-agent-steps) (romacs-agent-output . romacs-agent-output)))
       (let ((position (point-min)))

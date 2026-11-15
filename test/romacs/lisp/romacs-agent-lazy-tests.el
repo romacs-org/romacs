@@ -154,4 +154,38 @@ failed, Grep (whose row counts what it found)."
       (should (equal (mapcar (lambda (r) (list (plist-get r :id) (plist-get r :failed))) (funcall summary two))
                      '(("t1" nil) ("t2" t)))))))
 
+(ert-deftest romacs-agent-lazy-scan-keeps-to-the-message ()
+  ;; A result-shaped object in the record's own metadata after the message
+  ;; (`tool_use_result') is no result of the message's.
+  (let* ((line (romacs-agent-lazy-tests--line
+                12 "out" (romacs-mcp--object
+                          "message" (romacs-mcp--object
+                                     "content" (vector (romacs-mcp--object "content" "ok" "tool_use_id" "t1" "type" "tool_result"))
+                                     "role" "user")
+                          "parent_tool_use_id" "toolu_p"
+                          "tool_use_result" (romacs-mcp--object
+                                             "inner" (romacs-mcp--object "content" "x" "is_error" t
+                                                                         "tool_use_id" "t9" "type" "tool_result"))
+                          "type" "user" "uuid" "u")))
+         (results (with-temp-buffer (insert line) (romacs-agent--claude-result-summary 1 (1- (point-max))))))
+    (should (equal (mapcar (lambda (r) (list (plist-get r :id) (plist-get r :failed) (plist-get r :parent))) results)
+                   '(("t1" nil "toolu_p"))))))
+
+(ert-deftest romacs-agent-lazy-copy-trim-and-expand ()
+  (romacs-agent-lazy-tests--with-chat
+   (lambda (_session)
+     (romacs-agent-ui--fill (current-buffer))
+     ;; Copying the turn copies outputs not yet opened, as before.
+     (goto-char (point-min))
+     (search-forward "$ ls")
+     (romacs-agent-chat-copy)
+     (should (string-search "alpha é" (current-kill 0)))
+     ;; Rows trimmed away take their payloads with them.
+     (romacs-agent-ui--open-payloads-in (point-min) (point-max))
+     (let ((romacs-agent-ui--tool-lines (make-hash-table :test #'equal)))
+       (puthash "x" '(:output "kept") (or romacs-agent-ui--payloads (setq romacs-agent-ui--payloads (make-hash-table :test #'equal))))
+       ;; Opened with no row, a payload is forgotten.
+       (should-not (romacs-agent-ui--open-payload "x"))
+       (should-not (gethash "x" romacs-agent-ui--payloads))))))
+
 ;;; romacs-agent-lazy-tests.el ends here

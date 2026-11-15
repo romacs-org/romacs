@@ -566,14 +566,18 @@ says: its length."
             (results nil) (from start))
         (goto-char start)
         (catch 'not-results
-          (while (re-search-forward "\\(,\"is_error\":true\\)?,\"tool_use_id\":\"\\([^\"]+\\)\",\"type\":\"tool_result\"}" end t)
+          ;; Within the message's own blocks: the list ends before its
+          ;; role, and what follows (`tool_use_result') is not its.
+          (let ((blocks (save-excursion (if (search-forward "],\"role\":\"user\"}" end t) (match-beginning 0)
+                                          (throw 'not-results nil)))))
+          (while (re-search-forward "\\(,\"is_error\":true\\)?,\"tool_use_id\":\"\\([^\"]+\\)\",\"type\":\"tool_result\"}" blocks t)
             (push (list :id (match-string 2) :failed (and (match-beginning 1) t)
                         :bytes (- (point) from) :seq seq :time time)
                   results)
             (setq from (point))
             ;; The next of the message's blocks is a result too, or none is.
             (unless (looking-at-p "\\]\\|,{\"content\":")
-              (throw 'not-results (setq results nil))))
+              (throw 'not-results (setq results nil)))))
           (when results
             (let ((parent (and (re-search-forward "\"parent_tool_use_id\":\\(?:\"\\([^\"]+\\)\"\\|null\\)" end t)
                                (match-string 1))))
