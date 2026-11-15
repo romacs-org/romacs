@@ -158,10 +158,12 @@ def main():
                 subprocess.run(['wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1280x800'],
                                env=env, check=True, timeout=15)
 
-                def launch(name, init, extra_env=None, linger=0):
+                def launch(name, init, extra_env=None, compiles=False):
                     """Run --loadup with INIT to its first frame and its state
-                    file, linger, end it, and let the builders and compiles it
-                    started finish: how it booted and what its init found."""
+                    file, and with COMPILES until the compiles it started in the
+                    background are done (they end with it), end it, and let the
+                    builders it started finish: how it booted and what its init
+                    found."""
                     # One state file for every launch, outside HOME: the init's
                     # content and the listing of HOME, the parent of a
                     # load-path directory, key its layer.
@@ -176,7 +178,9 @@ def main():
                             fio.wait(lambda: ff.current_rows(log_path.read_text(errors='replace')),
                                      args.timeout, f'{name}: first frame', process)
                             fio.wait(state.exists, args.timeout, f'{name}: init state', process)
-                            time.sleep(linger)
+                            if compiles:
+                                time.sleep(5)
+                                settle(['--compile-lisp'], args.timeout)
                         finally:
                             process.terminate()
                             try:
@@ -186,12 +190,22 @@ def main():
                                 process.wait()
                     settle([f'--world-store {store}', '--compile-lisp'], args.timeout)
                     text = log_path.read_text(errors='replace')
-                    boot = [line.split(': ', 1)[1] for line in text.splitlines() if line.startswith('romacs-world: {') and '"mode"' in line]
+                    boot = [json.loads(line.split(': ', 1)[1]) for line in text.splitlines() if line.startswith('romacs-world: {') and '"mode"' in line]
                     found = state.read_text()
                     (output / f'{name}.state').write_text(found)
                     entry = {'launch': name, 'boot': boot, 'state': found}
                     report['launches'].append(entry)
                     return entry
+
+                def booted(entry, mode, layer):
+                    """Whether ENTRY booted in MODE, from an init layer when LAYER."""
+                    return any(b.get('mode') == mode and ('layer' in b) == layer for b in entry['boot'])
+
+                def bundled_used(before):
+                    """Whether the store's use log names each shadowed library's
+                    bundled file more often than BEFORE, the counts by name."""
+                    return all(len([line for line in uses(Path(src).name) if str(my_lisp) not in line]) > before[name]
+                               for name, src in SHADOWED)
 
                 def user_versions(entry):
                     found = entry['state']
@@ -199,13 +213,24 @@ def main():
                             and ':diff-marker user' in found and ':hexl-marker user' in found
                             and ':redefined user-redefined' in found and ':advised user-advised' in found)
 
-                bundled = launch('bundled', BUNDLED_INIT, linger=20)
+                # Bundled sessions until the compiled-Lisp store holds both
+                # bundled copies and a session loads them from it: the first
+                # compiles in the background, a later one uses the artifacts.
+                start_uses = {name: len([line for line in uses(Path(src).name) if str(my_lisp) not in line]) for name, src in SHADOWED}
+                for attempt in range(4):
+                    bundled = launch(f'bundled-{attempt}', BUNDLED_INIT, compiles=True)
+                    if attempt and bundled_used(start_uses):
+                        break
                 check('the bundled session loads the bundled copies',
                       'my-lisp' not in bundled['state'] and ':hexl-marker nil' in bundled['state'], bundled)
-                bundled_uses = {name: len(uses(Path(source).name)) for name, source in SHADOWED}
+                check('the compiled-Lisp store holds the bundled copies, and a session loads them from it',
+                      bundled_used(start_uses), {name: uses(Path(src).name)[-3:] for name, src in SHADOWED})
+                bundled_uses = {name: len([line for line in uses(Path(src).name) if str(my_lisp) not in line]) for name, src in SHADOWED}
                 source = launch('source', USER_INIT, {'ROMACS_WORLD': 'off'})
+                check('the source launch boots from source', booted(source, 'source', False), source['boot'])
                 check("a source boot runs the user's copies, redefinition and advice", user_versions(source), source)
                 base = launch('base', USER_INIT)
+                check('the base launch restores the base world, no layer', booted(base, 'restored', False), base['boot'])
                 check("a session restored from the base world runs the user's copies, redefinition and advice",
                       user_versions(base), base)
                 layer = launch('layer', USER_INIT)
@@ -216,16 +241,17 @@ def main():
                         report['layer_builds'].append({'manifest': manifest.name[:16],
                                                        'entries': [e.get('name') for e in data.get('events', {}).get('init-layer', {}).get('entries', [])],
                                                        'uncaptured': (data.get('uncaptured') or data.get('refusals') or [])[:20]})
-                check('the warm session restores its init layer', any('"layer"' in b for b in layer['boot']), layer['boot'])
+                check('the warm session restores its init layer', booted(layer, 'restored', True), layer['boot'])
                 check("a session restored from the init layer runs the user's copies, redefinition and advice",
                       user_versions(layer), layer)
                 plans = store / 'plans'
                 if plans.exists():
                     shutil.rmtree(plans)
-                compiled = launch('compiled', USER_INIT, linger=10)
+                compiled = launch('compiled', USER_INIT, compiles=True)
+                check('the compiled launch restores the base world, no layer', booted(compiled, 'restored', False), compiled['boot'])
                 check("a session loading through the compiled-Lisp store runs the user's copies, redefinition and advice",
                       user_versions(compiled), compiled)
-                later_uses = {name: len(uses(Path(source).name)) for name, source in SHADOWED}
+                later_uses = {name: len(uses(Path(src).name)) for name, src in SHADOWED}
                 bundled_paths = {name: [line for line in uses(Path(src).name) if str(my_lisp) not in line][bundled_uses[name]:]
                                  for name, src in SHADOWED}
                 check('no bundled artifact of a shadowed library is used once the user copies shadow it',
