@@ -406,4 +406,28 @@ unless CUT, then its turn's end."
     (romacs-agent-ui--undo-shifted pending 10 4 seen)
     (should (equal shared '(16 . 18)))))
 
+(ert-deftest romacs-agent-chat-undo-barrier-and-pending-owner ()
+  ;; An entry that cannot be placed ends each list holding it, even one
+  ;; whose entries were moved already through another.
+  (let* ((barrier (list 'apply 'delete-region 12 14))
+         (entries (list nil barrier (cons 24 26)))
+         (pending (cdr entries))
+         (seen (make-hash-table :test #'eq)))
+    (setq entries (romacs-agent-ui--undo-shifted entries 10 4 seen))
+    (setq pending (romacs-agent-ui--undo-shifted pending 10 4 seen))
+    (should (equal entries '(nil)))
+    (should-not pending))
+  ;; Another buffer's pending undo is left as it is.
+  (with-temp-buffer
+    (setq-local romacs-agent-ui--end (point-marker))
+    (let ((pending-undo-list (list (cons 12 14)))
+          (last-command 'undo))
+      (romacs-agent-ui--editing (insert "abcd"))
+      (should (equal pending-undo-list '((12 . 14))))
+      ;; The chat's own, an undo run where it is shown, moves.
+      (cl-letf (((symbol-function 'window-buffer) (lambda (&rest _) (current-buffer))))
+        (set-marker romacs-agent-ui--end 1)
+        (romacs-agent-ui--editing (goto-char 1) (insert "abcd")))
+      (should (equal pending-undo-list '((16 . 18)))))))
+
 ;;; romacs-agent-tail-tests.el ends here

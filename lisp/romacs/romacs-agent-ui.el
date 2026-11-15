@@ -211,9 +211,16 @@ what the transcript grew or shrank before it (`romacs-agent-ui--undo-shifted')."
            (let ((seen (make-hash-table :test #'eq)) (delta (- (buffer-size) ,size)))
              (when (consp buffer-undo-list)
                (setq buffer-undo-list (romacs-agent-ui--undo-shifted buffer-undo-list ,at delta seen)))
-             ;; An undo under way in a region works from a list of its own.
-             (when (consp pending-undo-list)
+             ;; An undo under way in a region works from a list of its own,
+             ;; one for every buffer: moved only when it is this chat's.
+             (when (and (consp pending-undo-list) (romacs-agent-ui--undoing-here-p))
                (setq pending-undo-list (romacs-agent-ui--undo-shifted pending-undo-list ,at delta seen)))))))))
+
+(defun romacs-agent-ui--undoing-here-p ()
+  "Whether `pending-undo-list' is the current buffer's: undo goes on from
+it only right after an undo (`undo' names itself the command), run where
+the selected window shows this buffer."
+  (and (eq last-command 'undo) (eq (window-buffer (selected-window)) (current-buffer))))
 
 (defun romacs-agent-ui--undo-shifted (entries at delta &optional seen)
   "Undo ENTRIES with their places at or past AT moved by DELTA, in place:
@@ -229,21 +236,21 @@ rather than undone in the wrong place."
       (let ((cell entries) (previous nil))
         (while (consp cell)
           (let ((entry (car cell)))
-            (unless (gethash (if (consp entry) entry cell) seen)
-              (puthash (if (consp entry) entry cell) t seen)
-              (pcase entry
-                ((pred integerp) (setcar cell (funcall shift entry)))
-                (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
-                 (setcar entry (funcall shift beg)) (setcdr entry (funcall shift end)))
-                (`(,(pred stringp) . ,(and pos (pred integerp))) (setcdr entry (funcall shift pos)))
-                (`(nil ,_ ,_ ,(and beg (pred integerp)) . ,(and end (pred integerp)))
-                 (let ((tail (nthcdr 3 entry))) (setcar tail (funcall shift beg)) (setcdr tail (funcall shift end))))
-                ;; A change combined (`combine-change-calls'): its bounds move.
-                (`(apply ,(pred integerp) ,(and beg (pred integerp)) ,(and end (pred integerp)) . ,_)
-                 (setcar (nthcdr 2 entry) (funcall shift beg)) (setcar (nthcdr 3 entry) (funcall shift end)))
-                ((and `(apply . ,_) (guard previous))
-                 (setcdr previous nil) (setq cell nil))
-                (`(apply . ,_) (setq entries nil cell nil)))))
+            (if (and (eq (car-safe entry) 'apply) (not (integerp (car-safe (cdr entry)))))
+                ;; Each list ends there, moved before or not.
+                (if previous (progn (setcdr previous nil) (setq cell nil)) (setq entries nil cell nil))
+              (unless (gethash (if (consp entry) entry cell) seen)
+                (puthash (if (consp entry) entry cell) t seen)
+                (pcase entry
+                  ((pred integerp) (setcar cell (funcall shift entry)))
+                  (`(,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                   (setcar entry (funcall shift beg)) (setcdr entry (funcall shift end)))
+                  (`(,(pred stringp) . ,(and pos (pred integerp))) (setcdr entry (funcall shift pos)))
+                  (`(nil ,_ ,_ ,(and beg (pred integerp)) . ,(and end (pred integerp)))
+                   (let ((tail (nthcdr 3 entry))) (setcar tail (funcall shift beg)) (setcdr tail (funcall shift end))))
+                  ;; A change combined (`combine-change-calls'): its bounds move.
+                  (`(apply ,(pred integerp) ,(and beg (pred integerp)) ,(and end (pred integerp)) . ,_)
+                   (setcar (nthcdr 2 entry) (funcall shift beg)) (setcar (nthcdr 3 entry) (funcall shift end)))))))
           (setq previous cell cell (cdr-safe cell)))))
     entries))
 
