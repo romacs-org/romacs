@@ -129,7 +129,9 @@ fn after(phase: &str) -> Option<&'static str> {
 }
 
 /// Startup phase PHASE ended: an event, with what comes next.
-pub fn phase(phase: &str) { step(phase, after(phase).unwrap_or("")); }
+pub fn phase(phase: &str) {
+    if let Some(report) = report().as_mut() { report.phase(phase); }
+}
 
 impl Report {
     fn phase(&mut self, phase: &str) { self.step(phase, after(phase).unwrap_or("")); }
