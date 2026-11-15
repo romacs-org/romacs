@@ -77,5 +77,11 @@ failure is said once, and steps all done show no card that was not up."
                                  (init :label "Loading your init: org"))))
     (should (equal (mapcar #'car (romacs-progress-view--steps)) '(agents)))))
 
+;; Sol, round 1: a view that fails must not stop the step that reported.
+(ert-deftest romacs-progress-view-failing-never-stops-a-step ()
+  (skip-unless (fboundp 'romacs-gui-loadup--progress-view))
+  (cl-letf (((symbol-function 'romacs-progress-view-update) (lambda (&rest _) (error "Boom"))))
+    (should-not (condition-case nil (progn (romacs-gui-loadup--progress-view nil) nil) (error t)))))
+
 (provide 'romacs-progress-view-tests)
 ;;; romacs-progress-view-tests.el ends here

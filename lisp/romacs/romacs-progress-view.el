@@ -161,7 +161,7 @@ session's first frame is up.  Each failure is said in *Messages* once."
         ((and (display-graphic-p) (not noninteractive)
               ;; A card shows while a step goes on or failed; one already up
               ;; follows its steps to the end.
-              (or (get-buffer-window romacs-progress-view--name t)
+              (or (get-buffer-window romacs-progress-view--name 'visible)
                   (seq-some (lambda (entry) (memq (plist-get (cdr entry) :status) '(running failed)))
                             (romacs-progress-view--steps))))
          (romacs-progress-view--card))))
