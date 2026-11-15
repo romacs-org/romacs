@@ -275,4 +275,23 @@ turns, and its journal's file; a state root of its own."
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
          (delete-file socket))))))
 
+(ert-deftest romacs-agent-events-a-large-database-is-compacted-as-it-is ()
+  ;; Too large to be made to give pages back: compacted all the same, its
+  ;; freed pages left for reuse, and done.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--vacuum-limit 0))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--delta 2 "m1" (make-string 20000 ?x))
+                             (romacs-agent-events-tests--line
+                              3 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content" []))))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (should (= (romacs-agent-events-compact-all) 1))
+       (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 0))))))
+
 ;;; romacs-agent-events-tests.el ends here

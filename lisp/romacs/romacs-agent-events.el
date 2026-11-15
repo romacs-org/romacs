@@ -338,6 +338,9 @@ over a quarter of the database is free; the records removed."
       (setq removed (+ removed (condition-case err (romacs-agent-events-compact id)
                                 (error (message "romacs-agent-events: compacting %s: %s" id (error-message-string err)) 0)))))
     (when-let* ((db (romacs-agent-events--db))
+                ;; Only a database made to give its pages back can: one left
+                ;; as it was reuses them.
+                ((equal (caar (sqlite-select db "pragma auto_vacuum")) 2))
                 (free (caar (sqlite-select db "pragma freelist_count")))
                 (pages (caar (sqlite-select db "pragma page_count")))
                 ((> (* 4 free) pages)))
