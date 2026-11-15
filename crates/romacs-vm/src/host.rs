@@ -3403,6 +3403,37 @@ pub fn inspect_enable(on: bool) {
 pub fn inspect_answer() -> Option<String> {
     inspect_lock(&INSPECT_SLOT).as_ref().map(|snapshot| snapshot.json.to_string())
 }
+/// Make the calling thread, the evaluator's, the one that answers
+/// inspections, unless a listener already named one (`inspect_listen'):
+/// the stall watchdog asks it even where no client may.
+pub fn inspect_target_unless_named() {
+    if INSPECT_TARGET.load(std::sync::atomic::Ordering::SeqCst) == 0 { inspect_target_here(); }
+}
+/// Raise a request, as the stall watchdog does from its own thread, for
+/// the target's evaluator to answer at its next safe point: its generation.
+pub fn inspect_raise() -> u64 {
+    INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+/// The newest answer's JSON, once it answers GENERATION or a later request.
+pub fn inspect_answer_since(generation: u64) -> Option<String> {
+    inspect_lock(&INSPECT_SLOT).as_ref().filter(|s| s.generation >= generation).map(|s| s.json.to_string())
+}
+
+/// The main VM's stalls the watchdog recorded, as JSON lines, until the
+/// usage log takes them (`romacs--take-stalls'), at most [`STALLS_KEPT`].
+static STALLS: std::sync::Mutex<(Vec<String>, u64)> = std::sync::Mutex::new((Vec::new(), 0));
+const STALLS_KEPT: usize = 256;
+/// Keep LINE, a stall's record, for the usage log.
+pub fn note_stall(line: String) {
+    let mut stalls = inspect_lock(&STALLS);
+    if stalls.0.len() < STALLS_KEPT { stalls.0.push(line); } else { stalls.1 += 1; }
+}
+/// The stalls kept since the last call, oldest first, and how many were
+/// dropped meanwhile.
+pub fn take_stalls() -> (Vec<String>, u64) {
+    std::mem::take(&mut *inspect_lock(&STALLS))
+}
+
 /// The newest request, which a snapshot taken now answers.
 pub fn inspect_generation() -> u64 {
     INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
