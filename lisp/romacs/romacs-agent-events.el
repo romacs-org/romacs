@@ -40,6 +40,9 @@
   "The database, its records' tables made; nil without SQLite."
   (when-let* ((db (romacs-agent-store--open)))
     (unless (eq romacs-agent-events--made db)
+      ;; Before any record is in it: a database made to give back its
+      ;; freed pages while it is small, as it is when first opened here.
+      (romacs-agent-events--compact-schema db)
       (dolist (statement romacs-agent-events--schema) (sqlite-execute db statement))
       (setq romacs-agent-events--made db))
     db))

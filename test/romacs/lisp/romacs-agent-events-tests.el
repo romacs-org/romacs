@@ -294,4 +294,13 @@ turns, and its journal's file; a state root of its own."
        (should (= (romacs-agent-events-compact-all) 1))
        (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 0))))))
 
+(ert-deftest romacs-agent-events-a-new-database-gives-pages-back ()
+  ;; Its first opening for records, before any is in it, makes it one that
+  ;; gives back its freed pages.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil))
+    (romacs-agent-events-tests--with-session
+     0 (lambda (_session _journal)
+         (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 2))))))
+
 ;;; romacs-agent-events-tests.el ends here
