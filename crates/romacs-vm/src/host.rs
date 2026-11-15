@@ -2961,6 +2961,15 @@ pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
     TcpStream::connect(addr)
 }
 
+/// `sqlite-open` of NAME is about to open it: the connection is a live
+/// resource of this process, which no image holds, and SQLite reads and
+/// writes the file itself, past this boundary. In a build the open is an
+/// effect, so it is not made: a definition form that opens one is deferred
+/// to restore, and any other form leaves its entry to load in the session.
+pub fn sqlite_open(name: &[u8]) -> io::Result<()> {
+    effect(|| format!("open sqlite database {}", String::from_utf8_lossy(name)))
+}
+
 /// A listening local (Unix domain) stream socket bound to PATH.
 pub fn listen_local(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
     effect(|| format!("listen {}", bytes(path)))?;

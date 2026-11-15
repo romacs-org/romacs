@@ -332,6 +332,23 @@ fn a_build_reads_any_file_its_user_can_and_keys_it() {
     assert!(reads.contains(&outside.to_string_lossy().into_owned()), "{reads:?}");
 }
 
+/// A SQLite database is a live resource SQLite reads and writes past the
+/// host boundary: a build opens none. `sqlite-open' answers nil there, the
+/// file is not made, and the effect is listed, so the form or its entry
+/// runs in the session instead.
+#[test]
+fn a_build_opens_no_sqlite_database() {
+    let dir = scratch("sqlite");
+    let database = dir.join("data/db.sqlite");
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+    let file = write(&dir.join("open.el"), &format!("(setq d (sqlite-open {}))\n", lisp(&database)));
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "d"), "nil");
+    assert!(!database.exists(), "the build made {}", database.display());
+    let refused: Vec<_> = items(&trace, "refusals", "effect").iter().filter_map(|r| r["what"].as_str()).map(str::to_owned).collect();
+    assert!(refused.iter().any(|what| what.starts_with("open sqlite database ")), "{refused:?}");
+}
+
 #[test]
 fn an_input_serves_the_bytes_its_record_describes() {
     let dir = scratch("captured");
