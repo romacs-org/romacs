@@ -4,12 +4,10 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;;; Commentary:
-;; Romacs's own interface to agent sessions (romacs-agent.el), in the look of
-;; emacs-hermes's chat (lisp/romacs/hermes, by the same author): its pure
-;; formatting helpers (hermes-chat-format.el: the clock, token counts,
-;; Markdown) are used as they are; the prompt face, the full-width rule, the
-;; turn footer, the composer hint and the header's shape are adapted from
-;; hermes-chat.el and hermes-chat-buffer.el to romacs-agent's sessions.
+;; Romacs's own interface to agent sessions (romacs-agent.el).  Replies
+;; are Markdown (romacs-markdown.el), faced as they stream in while the chat
+;; is seen, and once more whole when they end, their tables then drawn as
+;; grids.
 ;;
 ;; - One state for a session (`romacs-agent-ui--state'), every view's:
 ;;   the header, the workers' rows, the cards of delegated tasks, the status
@@ -34,6 +32,7 @@
 (require 'romacs-agent)
 (require 'romacs-key-hint)
 (require 'romacs-agent-rows)
+(require 'romacs-markdown)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -50,11 +49,8 @@
 (declare-function romacs-agents "romacs-agent-board" ())
 (declare-function romacs-agent-resume-time "romacs-agent-tools" (session))
 (declare-function romacs-agent-tools--cancel-resume "romacs-agent-tools" (session &optional why))
-(declare-function hermes-chat--clock "hermes-chat-format" (seconds &optional tenths))
-(declare-function hermes-chat--abbrev-tokens "hermes-chat-format" (n))
-(declare-function hermes-chat--fontify-markdown-string "hermes-chat-format" (text))
 
-;;; Faces (hermes-chat's, for the same look)
+;;; Faces
 
 (defface romacs-agent-prompt '((t :inherit highlight :extend t))
   "A user's prompt in a chat: a band across the window, so what the user
@@ -65,9 +61,9 @@ fork), said by no one: the quietest row.")
 (defface romacs-agent-rule
   '((((background light)) :foreground "gray70")
     (t :foreground "gray30"))
-  "The rule closing a turn and above the composer (hermes-chat-separator's colours).")
+  "The rule closing a turn and above the composer.")
 (defface romacs-agent-running '((t :inherit font-lock-keyword-face))
-  "What is running: a tool's mark, the live rule (hermes-chat-turn-running).")
+  "What is running: a tool's mark, the live rule.")
 (defface romacs-agent-dim '((t :inherit shadow))
   "Settled rows, thinking, folded output and metadata.")
 (defface romacs-agent-done '((t :inherit success))
@@ -79,7 +75,7 @@ fork), said by no one: the quietest row.")
 (defface romacs-agent-error '((t :inherit error))
   "A failed tool call or turn.")
 (defface romacs-agent-model '((t :inherit font-lock-type-face))
-  "The model in a chat's header (hermes-chat-header-model).")
+  "The model in a chat's header.")
 (defface romacs-agent-effort '((t :weight bold))
   "A reasoning effort; each level's face inherits it.")
 (defface romacs-agent-effort-default '((t :inherit shadow))
@@ -93,7 +89,7 @@ fork), said by no one: the quietest row.")
 (defface romacs-agent-project '((t :inherit font-lock-function-name-face))
   "A session's project, where a row names it.")
 (defface romacs-agent-context '((t :inherit font-lock-number-face))
-  "Context tokens in a chat's header (hermes-chat-header-context).")
+  "Context tokens in a chat's header.")
 (defface romacs-agent-mode '((t :inherit font-lock-builtin-face))
   "The harness's permission mode in a chat's header.")
 (defface romacs-agent-section '((t :inherit font-lock-function-name-face :weight bold))
@@ -127,6 +123,12 @@ fork), said by no one: the quietest row.")
 (defvar-local romacs-agent-ui--messages nil
   "An open message's id to (START . LENGTH): where its text starts and how
 much of it its deltas wrote.")
+(defvar-local romacs-agent-ui--faced nil
+  "An open message's id to how much of its text is faced as Markdown.")
+
+(defun romacs-agent-ui--faced ()
+  "This chat's `romacs-agent-ui--faced', made when first wanted."
+  (or romacs-agent-ui--faced (setq romacs-agent-ui--faced (make-hash-table :test #'equal))))
 (defvar-local romacs-agent-ui--shown 0
   "The last journal record this buffer shows whole.")
 (defvar-local romacs-agent-ui--open nil
@@ -140,9 +142,12 @@ much of it its deltas wrote.")
 (defvar-local romacs-agent-ui--fitted nil
   "The width the rules' fills last fitted.")
 
-(defun romacs-agent-ui--helpers ()
-  "Hermes's formatting helpers, loaded when a view first needs them."
-  (require 'hermes-chat-format))
+(defun romacs-agent-ui--clock (seconds)
+  "SECONDS as a clock: 12s, 4:26 or 1:02:03."
+  (let ((s (max 0 (floor seconds))))
+    (cond ((< s 60) (format "%ds" s))
+          ((< s 3600) (format "%d:%02d" (/ s 60) (% s 60)))
+          (t (format "%d:%02d:%02d" (/ s 3600) (/ (% s 3600) 60) (% s 60))))))
 
 ;;; The transcript
 
@@ -724,10 +729,9 @@ says so, its text in its fold) or `sub', a subagent's own words."
 own words or how many, and how long the run took; nil when it made no
 quiet call.  The row keeps RUN, for a late failure to count again."
   (when-let* ((quiet (plist-get run :quiet)) ((> (hash-table-count quiet) 0)))
-    (romacs-agent-ui--helpers)
     (let* ((first (plist-get run :first)) (last (plist-get run :last))
            (seconds (and (numberp first) (numberp last) (- last first)))
-           (clock (if (and seconds (>= seconds 1)) (concat " · " (hermes-chat--clock seconds)) ""))
+           (clock (if (and seconds (>= seconds 1)) (concat " · " (romacs-agent-ui--clock seconds)) ""))
            (text (concat (if shown "▾ " "▸ ")
                          (romacs-agent-ui--fit (if (> (hash-table-count quiet) 1)
                                                    (format "%d tools" (hash-table-count quiet))
@@ -869,28 +873,46 @@ marker at the reply's row, when this chat shows it."
         (set-marker hint start)))))
 
 (defun romacs-agent-ui--table-width ()
-  "Columns a table may take, as hermes-chat--table-window-width counts them:
-the window's pixels in the fixed-pitch font's width, less two for the line's
-end.  Hidden, the rule's width."
+  "Columns a table may take: the window's pixels in the fixed-pitch font's
+width, less two for the line's end.  Hidden, the rule's width."
   (let ((window (get-buffer-window (current-buffer) t)))
     (max 20 (- (if window
                    (/ (window-body-width window t) (max 1 (window-font-width window 'fixed-pitch)))
                  (romacs-agent-ui--rule-width))
                2))))
 
+(defun romacs-agent-ui--tables (start end width insert)
+  "Draw each top-level pipe table between START and END, its Markdown
+faced, as a grid within WIDTH that keeps its source in
+`romacs-agent-table', for a later width.  INSERT puts a grid at a
+position."
+  (dolist (block (reverse (romacs-markdown-blocks start end)))
+    (pcase-let ((`(,kind ,beg ,stop . ,plist) block))
+      (when (and (eq kind 'table) (eql (plist-get plist :depth) 0))
+        (let* ((source (buffer-substring-no-properties beg stop))
+               (grid (romacs-agent-ui--grid source width)))
+          (when grid
+            (let ((inhibit-read-only t))
+              (delete-region beg stop)
+              (funcall insert beg grid))))))))
+
+(defun romacs-agent-ui--grid (source width)
+  "SOURCE, a pipe table, as a grid within WIDTH that keeps SOURCE in
+`romacs-agent-table', ending in a newline as SOURCE does; nil when SOURCE
+is no table."
+  (when-let* ((grid (romacs-markdown-table-grid source width)))
+    (propertize (if (string-suffix-p "\n" source) grid (string-remove-suffix "\n" grid))
+                'romacs-agent-table source)))
+
 (defun romacs-agent-ui--markdown (body width)
-  "BODY as the transcript shows it: fontified, each pipe table a grid within
-WIDTH that keeps its source in `romacs-agent-table', for a later width."
-  (let* ((text (hermes-chat--fontify-markdown-string body)) (end (length text)) (start 0) (parts nil))
-    (while (< start end)
-      (let ((next (next-single-property-change start 'hermes-chat-table text end))
-            (table (get-text-property start 'hermes-chat-table text)))
-        (push (if table
-                  (propertize (hermes-chat--format-table table width) 'romacs-agent-table table)
-                (substring text start next))
-              parts)
-        (setq start next)))
-    (apply #'concat (nreverse parts))))
+  "BODY as the transcript shows it: faced as Markdown, each pipe table a
+grid within WIDTH that keeps its source in `romacs-agent-table'."
+  (with-temp-buffer
+    (insert body)
+    (romacs-markdown-fontify-region (point-min) (point-max))
+    (romacs-agent-ui--tables (point-min) (point-max) width
+                             (lambda (position grid) (goto-char position) (insert grid)))
+    (buffer-string)))
 
 (defun romacs-agent-ui--refit-tables ()
   "Draw each rendered table again at the window's width.  They are found by
@@ -900,39 +922,53 @@ their source property: a resize is rare, and no record of them can go stale."
       (let ((source (get-text-property at 'romacs-agent-table))
             (end (next-single-property-change at 'romacs-agent-table nil (+ 0 romacs-agent-ui--end))))
         (if (not source) (setq at end)
-          (let ((grid (propertize (hermes-chat--format-table source width) 'romacs-agent-table source)))
+          (let ((grid (romacs-agent-ui--grid source width)))
             (delete-region at end)
             (romacs-agent-ui--insert-at at grid)
             (setq at (+ at (length grid)))))))))
 
+(defvar romacs-agent-ui--replaying nil
+  "Non-nil while a journal is replayed into a chat: its messages are faced
+when they end, not delta by delta.")
+
+(defun romacs-agent-ui--seen-p ()
+  "Whether this chat shows in a visible window, live."
+  (and (not romacs-agent-ui--replaying) (get-buffer-window (current-buffer) 'visible)))
+
+(defun romacs-agent-ui--face-delta (id)
+  "Face message ID as Markdown from where its faces end, while the chat is
+seen: a chat drawn unseen (a journal replayed, a session in the
+background) is faced when seen again, or when the message ends."
+  (when-let* ((range (gethash id romacs-agent-ui--messages))
+              ((romacs-agent-ui--seen-p)))
+    (let* ((start (marker-position (car range)))
+           (end (min (+ start (cdr range)) romacs-agent-ui--end)))
+      (when (< start end)
+        (romacs-markdown-fontify-region start end (+ start (gethash id (romacs-agent-ui--faced) 0)))
+        (puthash id (- end start) (romacs-agent-ui--faced))))))
+
 (defun romacs-agent-ui--message-end (id)
-  "Render message ID's text, whole now, as Markdown, in place: exactly the
-range its deltas wrote."
+  "Message ID's text is whole: face it as Markdown once more, whole (a link's
+definition may come last), and draw its tables as grids."
   (when-let* ((range (gethash id romacs-agent-ui--messages)))
     (remhash id romacs-agent-ui--messages)
-    (let* ((start (marker-position (car range))) (end (min (+ start (cdr range)) romacs-agent-ui--end)))
+    (remhash id (romacs-agent-ui--faced))
+    (let* ((start (marker-position (car range)))
+           (end (min (+ start (cdr range)) romacs-agent-ui--end)))
       (when (< start end)
-        (romacs-agent-ui--helpers)
-        (let* ((inhibit-read-only t)
-               (body (string-trim-right (buffer-substring-no-properties start end)))
-               (fontified (romacs-agent-ui--markdown body (romacs-agent-ui--table-width))))
-          (save-excursion
-            (goto-char start)
-            (delete-region start (+ start (length body)))
-            (romacs-agent-ui--insert-at
-             start fontified)))))
+        (romacs-markdown-fontify-region start end)
+        (romacs-agent-ui--tables start end (romacs-agent-ui--table-width) #'romacs-agent-ui--insert-at)))
     (set-marker (car range) nil)))
 
 (defun romacs-agent-ui--footer (session event)
   "The rule closing a turn: ✓ or !, and how long it took."
-  (romacs-agent-ui--helpers)
   (maphash (lambda (id _) (romacs-agent-ui--message-end id)) (copy-hash-table romacs-agent-ui--messages))
   (let* ((failed (plist-get event :error))
          (duration (or (plist-get event :duration)
                        (and (numberp (plist-get event :time)) (numberp (romacs-agent-turn-start session))
                             (- (plist-get event :time) (romacs-agent-turn-start session)))))
          (text (concat (propertize (if failed "!" "✓") 'face (if failed 'romacs-agent-error 'romacs-agent-dim))
-                       (if duration (propertize (concat " " (hermes-chat--clock duration)) 'face 'romacs-agent-dim) ""))))
+                       (if duration (propertize (concat " " (romacs-agent-ui--clock duration)) 'face 'romacs-agent-dim) ""))))
     (romacs-agent-ui--line session event (romacs-agent-ui--rule text))))
 
 (defun romacs-agent-ui--rule-width ()
@@ -941,10 +977,9 @@ range its deltas wrote."
     (max 20 (1- (if window (window-body-width window) (frame-width))))))
 
 (defun romacs-agent-ui--rule (&optional text)
-  "A rule across the chat, carrying TEXT after a short lead
-\(hermes-chat--status-rule-line's shape).  Drawn with box-drawing
-characters to the window's width: Romacs's display does not yet paint
-a face's strike-through on hermes's stretch glyphs."
+  "A rule across the chat, carrying TEXT after a short lead.  Drawn with
+box-drawing characters to the window's width: Romacs's display does not
+yet paint a face's strike-through on a stretch glyph."
   (let* ((lead (propertize "──" 'face 'romacs-agent-rule))
          (head (if text (concat lead " " text " ") lead)))
     (concat head (propertize (make-string (max 1 (- (romacs-agent-ui--rule-width) (string-width head))) ?─)
@@ -1042,7 +1077,8 @@ or a repeat."
                  ;; Advancing: a tool's output written where the reply
                  ;; starts goes before it.
                  (puthash id (cons (copy-marker (- romacs-agent-ui--end (length text)) t) (length text))
-                          romacs-agent-ui--messages))))))
+                          romacs-agent-ui--messages)))
+             (romacs-agent-ui--face-delta id))))
         ('message-end (romacs-agent-ui--message-end (plist-get event :message)))
         ;; A state the live rule says, its text a step: never a row.
         ('thinking (romacs-agent-ui--run-words session event 'thinking))
@@ -1564,7 +1600,7 @@ and the pools whose accounts near their limits."
         (setq-default romacs-mode-line-agent rollup)
         (force-mode-line-update t)))))
 
-;;; The header (hermes-chat--header-line's shape)
+;;; The header
 ;;
 ;; A value, never a form: the buffer's `header-line-format' is the string
 ;; `romacs-agent-ui--header-show' last made, so showing it runs no Lisp.
@@ -1676,13 +1712,13 @@ made again."
 ;;; The composer
 
 (defun romacs-agent-ui--key (command)
-  "COMMAND's key in a chat, as hermes-chat--command-key-hint shows it."
+  "COMMAND's key in a chat."
   (substitute-command-keys (format "\\<romacs-agent-chat-mode-map>\\[%s]" command)))
 
 (defvar romacs-agent-ui--hint nil "The composer's hint, made once: looking up keys is slow.")
 
 (defun romacs-agent-ui--hint ()
-  "The empty composer's hint (hermes-chat--placeholder-string)."
+  "The empty composer's hint."
   (or romacs-agent-ui--hint (setq romacs-agent-ui--hint (romacs-agent-ui--make-hint "Message…"))))
 
 (defun romacs-agent-ui--make-hint (text &optional key)
@@ -1710,10 +1746,9 @@ then what the open run does now (a call, thinking) and how many calls it
 made: the one line that moves while the run's own steps stay folded."
   (let ((session romacs-agent-ui--session))
     (when (memq (romacs-agent-state session) '(starting running waiting-approval))
-      (romacs-agent-ui--helpers)
       (let* ((approval (eq (romacs-agent-state session) 'waiting-approval))
              (start (romacs-agent-turn-start session))
-             (clock (and (numberp start) (hermes-chat--clock (- (float-time) start))))
+             (clock (and (numberp start) (romacs-agent-ui--clock (- (float-time) start))))
              (run romacs-agent-ui--run)
              (calls (if run (plist-get run :calls) 0))
              (state (concat (propertize (if approval "◆ Waiting for you" "● Running")
@@ -1796,8 +1831,7 @@ there."
     ;; Completion (the predicted prompt, `romacs-agent-ui--suggestion-capf'),
     ;; as M-TAB and C-M-i complete anywhere.
     (define-key map (kbd "TAB") #'completion-at-point)
-    ;; emacs-hermes's chat keys (hermes-chat-mode-map), where a session
-    ;; has the same action; stopping and resuming are in the actions menu.
+    ;; Stopping and resuming are in the actions menu.
     (define-key map (kbd "C-j") #'newline)
     (define-key map (kbd "S-<return>") #'newline)
     (define-key map (kbd "C-c C-c") #'romacs-agent-chat-interrupt)
@@ -1874,7 +1908,6 @@ event is drawn in it before.")
 (defun romacs-agent-ui--make-chat (session)
   "SESSION's chat buffer, made empty: its composer, no transcript yet
 \(`romacs-agent-ui--fill')."
-  (romacs-agent-ui--helpers)
   ;; The session's own buffer: never found by its title, which another
   ;; session may share.
   (let ((buffer (generate-new-buffer (format "*agent: %s*" (romacs-agent-title session)))))
@@ -1913,7 +1946,6 @@ event is drawn in it before.")
 
 (defun romacs-agent-show (session)
   "Show SESSION's chat buffer, made from its journal when new."
-  (romacs-agent-ui--helpers)
   (let ((buffer (romacs-agent-buffer session)))
     (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
     ;; Shown first: its rules fit its window.
@@ -1968,7 +2000,7 @@ harness's own transcript it was imported from, when it was."
     (require 'romacs-agent-history)
     (romacs-agent-history-draw session (romacs-agent-imported session)))
   ;; A copy parses, so the live session's own state is not replayed over.
-  (let ((scratch (romacs-agent--scratch session)))
+  (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    ;; The scratch copy's turn data, for the footers it draws.
@@ -1996,7 +2028,7 @@ the source's own source and imported transcript first, then a rule."
         (require 'romacs-agent-history)
         ;; Drawn as the fork's: its rows name the fork, its facts are the fork's.
         (romacs-agent-history-draw session (romacs-agent-imported source)))
-      (let ((scratch (romacs-agent--scratch source)) (buffer (current-buffer)))
+      (let ((scratch (romacs-agent--scratch source)) (buffer (current-buffer)) (romacs-agent-ui--replaying t))
         (let ((romacs-agent-event-functions
                ;; Read in a buffer of its own: drawn in the chat's.
                (list (lambda (_ drawn)
@@ -2118,7 +2150,6 @@ strings, compared by value."
                     (get-text-property (point) 'romacs-agent-compaction)))
          (width (romacs-agent-ui--table-width)))
     (unless summary (user-error "No compaction on this row"))
-    (romacs-agent-ui--helpers)
     (let ((buffer (romacs-agent-ui--compaction-buffer)))
       (with-current-buffer buffer
         (romacs-agent-compaction-mode)
@@ -2209,7 +2240,7 @@ of the session; a question is answered instead."
     (unless id (user-error "No approval here"))
     (romacs-agent-respond romacs-agent-ui--session id nil)))
 
-;;; emacs-hermes's chat actions
+;;; Chat actions
 
 (defun romacs-agent-ui--running-p ()
   (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))

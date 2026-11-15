@@ -56,7 +56,8 @@ mod models;
 mod pattern_effects;
 mod pointer_override;
 mod resources;
-mod row_reuse;
+mod root_picture;
+pub use root_picture::{Painted, PaintTarget, RootPicture};
 mod scene_placements;
 mod scissor;
 mod snapshot_pool;
@@ -70,7 +71,6 @@ mod window_effects;
 pub use fx_state::RendererFrameEffects;
 pub(crate) use fx_state::*;
 pub(crate) use resources::*;
-pub use row_reuse::FrameRowDamage;
 pub use stats::*;
 
 #[cfg(feature = "video")]
@@ -241,8 +241,6 @@ pub struct WgpuRenderer {
     pub(super) clocks: EffectClocks,
     /// Ambient clocks shared by every frame context (not transferred)
     pub(super) ambient: AmbientClocks,
-    /// Cached per-row text vertex streams for RowDamage-driven reuse
-    pub(super) row_reuse: row_reuse::RowReuseCache,
     pub glyph_stats: GlyphRenderStats,
     /// Absolute time this frame's animation samples target (the frame tick's
     /// target presentation time). Set by the runtime before each render so
@@ -1200,7 +1198,6 @@ impl WgpuRenderer {
             fx: EffectsState::default(),
             clocks: EffectClocks::default(),
             ambient: AmbientClocks::default(),
-            row_reuse: row_reuse::RowReuseCache::default(),
             glyph_stats: GlyphRenderStats::new(),
             frame_seq: 0,
             frame_sample: romacs_display_protocol::frame_time::FrameSample::new(

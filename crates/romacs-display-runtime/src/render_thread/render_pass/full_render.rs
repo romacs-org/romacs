@@ -35,7 +35,8 @@ pub(super) fn through_composition_ring(
     render: &mut GuiFrameRenderState,
     composition: &SnapshotLease,
     composition_view: &wgpu::TextureView,
-    frame: &mut romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     inputs: &FrameDrawInputs<'_>,
     accept_derived_effects: bool,
     pane_blits: &[PaneBlit],
@@ -57,7 +58,7 @@ pub(super) fn through_composition_ring(
         render.emacs_frame_id,
         frame.presentation_id,
     );
-    detect_transitions(acquired, renderer, render, frame, accept_derived_effects);
+    detect_transitions(acquired, renderer, render, hints, accept_derived_effects);
     if render.compositor.renderer_effects.needs_redraw() {
         render.mark_dirty();
     }
@@ -157,7 +158,8 @@ pub(super) fn onto_target(
     native: &GuiFrameNativeWindowState,
     render: &mut GuiFrameRenderState,
     composition_view: &wgpu::TextureView,
-    frame: &mut romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     inputs: &FrameDrawInputs<'_>,
     accept_derived_effects: bool,
 ) -> Result<(), super::surface::FrameRenderFailure> {
@@ -177,7 +179,7 @@ pub(super) fn onto_target(
         render.emacs_frame_id,
         frame.presentation_id,
     );
-    detect_transitions(acquired, renderer, render, frame, accept_derived_effects);
+    detect_transitions(acquired, renderer, render, hints, accept_derived_effects);
     render.mark_active_visuals_dirty();
     Ok(())
 }
@@ -200,7 +202,7 @@ fn detect_transitions(
     acquired: &super::surface::SurfaceAcquired,
     renderer: &mut WgpuRenderer,
     render: &mut GuiFrameRenderState,
-    frame: &mut romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    hints: &[romacs_display_protocol::ContentTransitionHint],
     accept_derived_effects: bool,
 ) {
     let pending_continuity = render.take_pending_continuity(acquired, accept_derived_effects);
@@ -209,7 +211,7 @@ fn detect_transitions(
             renderer,
             &mut render.compositor.transitions,
             &renderer.effects.clone(),
-            frame,
+            hints,
             pending_continuity,
             &mut render.compositor.dirty,
         );

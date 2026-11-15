@@ -18,6 +18,10 @@ mod indent_guides_test;
 mod menu_test;
 #[path = "offscreen_frame/opacity_test.rs"]
 mod opacity_test;
+#[path = "offscreen_frame/root_picture_test.rs"]
+mod root_picture_test;
+#[path = "offscreen_frame/root_picture_moves_test.rs"]
+mod root_picture_moves_test;
 use romacs_display_protocol::frame_chrome::PresentationId;
 use romacs_display_protocol::frame_glyphs::{
     CursorStyle, DisplaySlotId, FrameGlyph, FrameGlyphBuffer, GlyphRowRole, PhysCursor,
@@ -162,7 +166,6 @@ fn gnu_box_line_width_is_one_device_pixel_at_two_x_scale() {
         &mut h.atlas,
         mapping_for_scale(&frame, W, H, scale),
         false,
-        None,
         None,
         None,
         None,
@@ -497,7 +500,6 @@ fn offscreen_frame_renders_background_and_cursor() {
         None,
         None,
         None,
-        None,
     );
     let buf = read_back(&h);
     // A corner pixel is background (dark blue-ish), definitely not the red cursor.
@@ -598,7 +600,6 @@ fn primary_frame_inline_image_samples_only_its_source_slice() {
         None,
         None,
         None,
-        None,
     );
     let rendered = read_back(&h);
     let sampled = px(&rendered, 24, 24);
@@ -695,7 +696,6 @@ fn unboxed_image_face_background_fills_the_glyph_box_extent() {
         None,
         None,
         None,
-        None,
     );
     let rendered = read_back(&h);
     let content = px(&rendered, 24, 24);
@@ -763,7 +763,6 @@ fn stale_presentation_is_clipped_at_native_scale_after_surface_growth() {
         None,
         None,
         None,
-        None,
     );
     let buf = read_back(&h);
 
@@ -794,7 +793,6 @@ fn ime_preedit_cjk_background_covers_the_shaped_run() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -893,7 +891,6 @@ fn negative_box_line_width_paints_an_inset_border() {
         None,
         None,
         None,
-        None,
     );
     let buf = read_back(&h);
     let top = px(&buf, 40, 20);
@@ -956,7 +953,6 @@ fn negative_box_border_does_not_cover_a_one_cell_glyph() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -1071,7 +1067,6 @@ fn primary_frame_rounded_extend_box_has_no_terminal_vertical_edge() {
         None,
         None,
         None,
-        None,
     );
     assert_open_ended_box(&read_back(&h));
 }
@@ -1118,7 +1113,6 @@ fn primary_frame_sharp_extend_box_has_no_terminal_vertical_edge() {
         None,
         None,
         None,
-        None,
     );
     assert_open_ended_box(&read_back(&h));
 }
@@ -1161,7 +1155,6 @@ fn cursor_visible_false_suppresses_cursor() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -1272,7 +1265,6 @@ fn presented_pointer_integration_image_relief_flips_edge_polarity_without_moving
             None,
             None,
             selection,
-            None,
         );
         read_back(h)
     };
@@ -1422,7 +1414,6 @@ fn composite_matches_full_render() {
         None,
         None,
         None,
-        None,
     );
     let full = read_tex(&h.renderer, &ta);
 
@@ -1434,7 +1425,6 @@ fn composite_matches_full_render() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -1495,7 +1485,7 @@ fn composite_cursor_colors(h: &mut Harness) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let frame_b = frame_with_cursor(Color::rgb(0.0, 0.4, 1.0)); // blue cursor
 
     let (_ts, vs) = make_tex(&h.renderer, "static");
-    h.renderer.render_frame_glyphs(&vs, &frame_a, &mut h.atlas, mapping_for(&frame_a, W, H), false, None, None, None, None, None);
+    h.renderer.render_frame_glyphs(&vs, &frame_a, &mut h.atlas, mapping_for(&frame_a, W, H), false, None, None, None, None);
     let bg = h.renderer.create_texture_bind_group(&vs);
 
     let composite = |h: &mut Harness, frame: Option<&FrameGlyphBuffer>, label: &str| {
@@ -1643,7 +1633,6 @@ fn filled_box_composite_matches_full_render() {
         None,
         None,
         None,
-        None,
     );
     let full = read_tex(&h.renderer, &ta);
 
@@ -1655,7 +1644,6 @@ fn filled_box_composite_matches_full_render() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,
@@ -1726,7 +1714,6 @@ fn filled_box_vertical_motion_keeps_destination_text_normal_until_arrival() {
             None,
             None,
             None,
-            None,
         );
         read_tex(&h.renderer, &texture)
     };
@@ -1788,7 +1775,6 @@ fn child_filled_box_motion_uses_the_same_inverse_video_contract() {
             &mut h.atlas,
             mapping_for(&frame, W, H),
             false,
-            None,
             None,
             None,
             None,
@@ -2370,7 +2356,6 @@ fn a_frame_drawn_mid_decode_shows_only_the_rows_that_have_arrived() {
         &mut h.atlas,
         mapping_for(&frame, W, H),
         false,
-        None,
         None,
         None,
         None,

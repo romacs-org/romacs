@@ -51,6 +51,8 @@ memchr.workspace = true
 # collector's threads (src/gc_mark.rs), which share chunks through a deque.
 rayon = "1.12"
 crossbeam-deque.workspace = true
+# CommonMark with GFM tables, for romacs-markdown (src/markdown/): pure Rust.
+pulldown-cmark = { version = "=0.13.6", default-features = false }
 # FSRS, the scheduler Anki uses, for Gnosis (src/prims/fsrs.rs).
 fsrs = "=6.6.1"
 # SQLite for sqlite.c's primitives, built from the bundled amalgamation.

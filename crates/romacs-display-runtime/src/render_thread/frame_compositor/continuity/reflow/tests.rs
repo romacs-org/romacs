@@ -511,7 +511,7 @@ fn install(
     by_window.insert(info.window_id, imprints(rows));
     render.measure_reflow(Some(&frame), &by_window);
     render.compositor.incoming_reflow_imprints = by_window;
-    render.compositor.current_frame = Some(frame);
+    render.compositor.current_frame = Some(std::sync::Arc::new(frame));
     // Say the frame reached the screen. The measurement baseline advances only
     // on composition, so a test that installed without composing would be
     // measuring the next presentation against one the user never saw — which
@@ -682,7 +682,7 @@ fn install_without_composing(
     by_window.insert(info.window_id, imprints(rows));
     render.measure_reflow(Some(&frame), &by_window);
     render.compositor.incoming_reflow_imprints = by_window;
-    render.compositor.current_frame = Some(frame);
+    render.compositor.current_frame = Some(std::sync::Arc::new(frame));
 }
 
 #[test]

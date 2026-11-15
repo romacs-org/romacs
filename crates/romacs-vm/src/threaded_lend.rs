@@ -214,7 +214,8 @@ pub(crate) fn call_source<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc
 pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, b: B,
     then: impl FnOnce(&mut Vm, B, (std::time::Instant, Result<romacs_layout_input::FrameSnapshot>)) -> R + Copy + 'static) -> R {
     m.request(&EngineKey, gc, |vm| {
-        let (width, height) = (vm.window_state.width, vm.window_state.height);
+        let native = vm.ensure_windows().and_then(|()| vm.top_geometry(vm.selected_top_frame()));
+        let (width, height) = native.map_or((0, 0), |native| (native.width, native.height));
         let started = crate::host::monotonic();
         vm.redisplay_begin();
         (started, vm.frame_snapshot(width, height))
@@ -226,7 +227,8 @@ pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'
 pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (width, height): (u32, u32)) -> Result<()> {
     m.request(&EngineKey, gc, |vm| {
         let cell = (vm.window_state.line, vm.window_state.column);
-        (cell, vm.resize_root_window(width, height))
+        let frame = vm.ensure_windows().and_then(|()| Ok(vm.frame(vm.selected_top_frame())?.id));
+        (cell, frame.and_then(|frame| vm.resize_root_window(frame, width, height)))
     }, (width, height), |vm, (width, height), ((line, column), resized)| {
         resized?;
         vm.set_frame_geometry(width, height, line, column)

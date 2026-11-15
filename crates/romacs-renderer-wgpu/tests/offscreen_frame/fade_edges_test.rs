@@ -74,7 +74,6 @@ fn render(h: &mut Harness, frame: &FrameGlyphBuffer, view: &wgpu::TextureView) {
         None,
         None,
         None,
-        None,
     );
 }
 

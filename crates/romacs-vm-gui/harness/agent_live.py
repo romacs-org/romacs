@@ -1481,9 +1481,11 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project).
+                        # tree is (the tour's project); romacs_attach from a caller that is no
+                        # agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch', 'romacs_dev_check')
+                                                                  'romacs_task_watch', 'romacs_dev_check',
+                                                                  'romacs_attach')
                                 for n in errors)
                         and task is not None)
         return result
@@ -1861,7 +1863,7 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
-        # emacs-hermes's chat keys and its actions menu, with real keys.
+        # The chat's keys and its actions menu, with real keys.
         ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
         good.append(cleared('composer cleared for keys'))
@@ -1988,8 +1990,8 @@ def composer(args, base, real=False):
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
         # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer (SPC there scrolls, as in hermes's
-        # chat); M-> from there reaches it too.
+        # there goes to the composer (SPC there scrolls); M-> from there
+        # reaches it too.
         a.keys('-M', 'alt', '<', '-m', 'alt')
         good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
         a.keys('-M', 'alt', '<', '-m', 'alt')

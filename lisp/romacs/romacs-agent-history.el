@@ -511,7 +511,6 @@ buffer, for SESSION: its end, from a prompt on."
 ;;;###autoload
 (defun romacs-agent-history-open (item)
   "Show the transcript ITEM (one of `romacs-agent-history-items') read-only."
-  (romacs-agent-ui--helpers)
   (let ((buffer (cl-find-if (lambda (buffer) (equal (plist-get (buffer-local-value 'romacs-agent-history--item buffer) :path)
                                                     (plist-get item :path)))
                             (buffer-list))))

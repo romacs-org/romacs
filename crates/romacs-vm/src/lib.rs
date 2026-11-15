@@ -85,6 +85,7 @@ impl romacs_snapshot::Schema for NameState {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
 }
 
 impl Default for NameState {
@@ -107,6 +108,7 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod treesit;
+pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
@@ -192,6 +194,7 @@ mod protocol;
 mod reader;
 mod regexp;
 mod syntax_index;
+mod markdown;
 mod syntax_scan;
 mod syntax_summary;
 mod surface;
@@ -519,7 +522,6 @@ enum Primitive {
     Puthash,
     Remhash,
     Clrhash,
-    Maphash,
     HashTableCount,
     HashTableP,
     HashTableTest,
@@ -779,7 +781,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("puthash", Primitive::Puthash),
     ("remhash", Primitive::Remhash),
     ("clrhash", Primitive::Clrhash),
-    ("maphash", Primitive::Maphash),
     ("hash-table-count", Primitive::HashTableCount),
     ("hash-table-p", Primitive::HashTableP),
     ("hash-table-test", Primitive::HashTableTest),
@@ -1524,7 +1525,7 @@ pub struct Vm {
     expanded_symbols: NameSet<String>,
     image: Option<std::sync::Arc<ImageRegion>>,
     /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
-    regions: Vec<Option<Box<frozen::Region>>>,
+    regions: frozen::Regions,
     region_free: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
     region_collect: bool,
@@ -1872,6 +1873,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
     face_keys,
     debug_event_slots,
+    pending,
 } at_rest {
     site_leaf,
     regexp_cache,
@@ -1898,7 +1900,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     keeper,
     inotify,
     fence,
-    pending,
     execution,
     spare_programs,
     idle_since,
@@ -2026,7 +2027,7 @@ impl Vm {
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
-            regions: vec![None],
+            regions: frozen::Regions::default(),
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),

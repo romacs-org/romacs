@@ -109,6 +109,11 @@ class Select(unittest.TestCase):
         self.assertNotIn('romacs-vm-gui', found['romacs-vm'][1])
         self.assertIsNone(impact.runs(self.select('Cargo.lock'), self.root))
 
+    def test_a_package_without_folded_targets_runs_its_test_targets(self):
+        # --lib refuses a package that has no library (romacs-gnu-tests); --tests takes what it has.
+        runs = {package: flags for package, flags, _ in impact.runs(self.select('crates/romacs-display-runtime/src/lib.rs'), self.root)}
+        self.assertEqual(runs['romacs-display-runtime'], ['--tests'])
+
     def test_runs_can_leave_rules_out(self):
         slow = impact.test_file('romacs-vm::compile_boundaries')
         # A package the change does not reach runs its rules by name: a rule left is not named.

@@ -36,12 +36,11 @@ O(offset); this does not promise O(page-size) total cost or atomic pagination.")
 
 (defun romacs-mcp--editor-denied-p (buffer)
   "Return non-nil if BUFFER's native metadata denies structured disclosure.
-Exclude minibuffers and their indirect aliases, credential-like names/paths,
-and eval-approval modes.  Never inspect contents or resolve file paths.
+Exclude minibuffers and their indirect aliases and credential-like
+names/paths.  Never inspect contents or resolve file paths.
 This lexical policy is not a sandbox and cannot identify renamed secret copies."
   (with-current-buffer buffer
     (or (minibufferp buffer)
-        (derived-mode-p 'hermes-exec-approval-mode)
         (cl-some #'romacs-mcp--editor-credential-name-p
                  (list (buffer-name) buffer-file-name buffer-file-truename))
         (when-let* ((base (buffer-base-buffer)))

@@ -166,8 +166,8 @@ pub(super) fn report_unpooled_gpu_textures(
         Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedStaticScene),
     }
-    match render.compositor.retained_root.as_ref() {
-        Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
+    match render.compositor.root_picture.as_ref() {
+        Some(picture) => renderer.record_full_frame_texture(owner, picture.texture()),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedRootScene),
     }
     let atlas_bytes = render
@@ -316,7 +316,6 @@ fn reclaim_finished_child_composition(
         // of the old animated scene as well as requesting its final repaint.
         render.compositor.current_scene_generation =
             crate::render_thread::frame_state::next_scene_generation();
-        render.compositor.current_row_damage = None;
         render.mark_dirty();
     }
 }
