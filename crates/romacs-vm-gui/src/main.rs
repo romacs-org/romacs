@@ -629,6 +629,10 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         exit (what an installer runs); before --batch, the
                         batch world alone (an installation's, in
                         --world-store EXECUTABLE.worlds)
+  --world-build-layer INIT
+                        build INIT's layer from the plan the store keeps, with
+                        each round a refusal needs, over the ready base world,
+                        and exit (what a session starts after its init)
   --world-census        print what the base world of a live --loadup launch
                         holds, kind by kind (JSON), reading the store only
   --world-reset         forget the store's failed and refused builds, so the next
@@ -720,11 +724,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let mut world_store = None;
     let mut world_reset = None;
     let mut world_build = false;
+    let mut world_build_layer = None;
     let mut world_census = false;
     let mut init_layer = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-build" => world_build = true,
+            "--world-build-layer" => world_build_layer = Some(std::path::absolute(args.next().ok_or("missing init file")?).map_err(|e| e.to_string())?),
             "--world-census" => world_census = true,
             // The server a client started (client.rs): no window until a client asks.
             // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
@@ -858,6 +864,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // (built here, or waited for), with no window, and a batch session's
     // beside it (batch.rs); then exit. What an installer runs so a user's
     // first launch and first batch session restore.
+    if let Some(init) = world_build_layer {
+        if !(live && launch == startup::Launch::Loadup) { return Err("--world-build-layer needs a live --loadup launch".into()); }
+        if romacs_vm::world::store::disabled() { return Err("--world-build-layer with ROMACS_WORLD=off".into()); }
+        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+        world::prepare_layer(&world::open(store, width, height, floor)?, &init, width, height, floor);
+        return Ok(None);
+    }
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
