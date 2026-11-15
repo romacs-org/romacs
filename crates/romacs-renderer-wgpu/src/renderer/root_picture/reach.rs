@@ -204,9 +204,17 @@ pub(crate) fn note_points(window: i64, cell: Rect, points: impl Iterator<Item = 
 /// What DRAW returns, and how far the ink it drew reached past its cells:
 /// the farthest, and by cell.
 pub(crate) fn seen<T>(draw: impl FnOnce() -> T) -> (T, Reach, Rows) {
-    let outer = SEEN.replace(Some((Reach::default(), Rows::default())));
+    /// The collector `seen` set aside, put back however its draw ends.
+    struct Outer(Option<(Reach, Rows)>);
+    impl Drop for Outer {
+        fn drop(&mut self) {
+            SEEN.set(self.0.take());
+        }
+    }
+    let outer = Outer(SEEN.replace(Some((Reach::default(), Rows::default()))));
     let out = draw();
-    let (reach, rows) = SEEN.replace(outer).unwrap_or_default();
+    let (reach, rows) = SEEN.take().unwrap_or_default();
+    drop(outer);
     (out, reach, rows)
 }
 
@@ -263,6 +271,25 @@ mod tests {
                 ..Reach::default()
             }
         );
+    }
+
+    #[test]
+    fn a_draw_that_panics_inside_seen_leaves_the_collector_as_it_was() {
+        let quiet = |draw: &dyn Fn()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(draw)).is_err();
+        let far = Rect::new(0.0, 0.0, 9.0, 9.0);
+        assert!(quiet(&|| {
+            seen(|| panic!("a draw"));
+        }));
+        assert!(SEEN.with_borrow(Option::is_none), "none outside `seen`");
+        let ((), reach, rows) = seen(|| {
+            note(1, Rect::new(0.0, 0.0, 1.0, 1.0), far);
+            assert!(quiet(&|| {
+                seen(|| panic!("a nested draw"));
+            }));
+            note(1, Rect::new(0.0, 20.0, 1.0, 1.0), Rect::new(0.0, 20.0, 1.0, 3.0));
+        });
+        assert_eq!(reach, Reach { right: 8.0, down: 8.0, ..Reach::default() }, "the outer draw's notes, before and after");
+        assert_eq!(rows.cells().count(), 2);
     }
 
     #[test]
