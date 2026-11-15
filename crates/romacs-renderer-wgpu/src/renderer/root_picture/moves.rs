@@ -50,8 +50,6 @@ use super::reach::{Inks, Reach};
 /// whole device pixels, and how far down it goes (up when negative).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Move {
-    /// The window whose rows it moves.
-    pub(crate) window: i64,
     pub(crate) from: Rect,
     pub(crate) dy: f32,
 }
@@ -128,7 +126,7 @@ fn band(sides: &Sides<'_>, changed: &[Key], window: i64, dy: f32, inks: Inks<'_>
     let area = outward(intersection(rows, frame)?, scale);
     let from = Rect::new(area.x, area.y - dy, area.width, area.height);
     let inside = from.y >= 0.0 && from.y + from.height <= sides.new.height;
-    let step = Move { window, from, dy };
+    let step = Move { from, dy };
     (inside && alone(sides, changed, &placed, (area, step), inks, scale)).then_some((step, area, placed))
 }
 

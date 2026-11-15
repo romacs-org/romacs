@@ -571,3 +571,41 @@ fn a_band_moved_beside_another_window_keeps_that_window_s_reach() {
     let frames = [(0, 1), (0, 1), (1, 1), (1, 0)].map(|(left, right)| split_frame(left, right));
     assert!(through_picture(&mut h, &frames, 1.0) > 0, "the windows' rows move");
 }
+
+/// One window's rows ROW tall from x 10, showing lines from FIRST, and a
+/// fringe bitmap sixteen wide in a two-pixel column at x 60 and y AT, seven
+/// tall: a row of its own, beside the text's rows, its ink past its cells.
+#[expect(clippy::cast_precision_loss, reason = "a test's few rows and columns")]
+fn beside_frame(first: usize, at: f32) -> FrameGlyphBuffer {
+    const LINES: [&str; 7] = ["ka", "kb", "kc", "kd", "ke", "kf", "kg"];
+    let mut frame = FrameGlyphBuffer::with_size(W as f32, H as f32);
+    (frame.char_width, frame.char_height) = (CELL, ROW);
+    frame.background = BG;
+    text_face(&mut frame, NORMAL, BG);
+    frame.register_fringe_bitmap(
+        1,
+        FringeBitmapData { bits: vec![0xFFFF; 7], width: 16, height: 7, period: 0, align: 0 },
+    );
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    frame.add_background(0.0, 0.0, W as f32, 5.0 * ROW, BG);
+    for (row, line) in LINES.iter().skip(first).take(5).enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            frame.add_char(ch, 10.0 + col as f32 * CELL, row as f32 * ROW, CELL, ROW, 6.0, false);
+        }
+    }
+    frame.push_fringe_bitmap(60.0, at, 2.0, 7.0, 1, FaceId::new(NORMAL), FringeSide::Left);
+    frame
+}
+
+#[test]
+fn a_band_moved_past_its_window_s_bitmap_keeps_the_bitmap_s_reach() {
+    // The text's rows scroll down over the heights of the bitmap beside
+    // them, which stays; then the rows and the bitmap scroll down together.
+    // The second band holds all the bitmap's ink.
+    let Some(mut h) = try_harness() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let frames = [(2, 16.0), (2, 16.0), (1, 16.0), (0, 24.0)].map(|(first, at)| beside_frame(first, at));
+    assert!(through_picture(&mut h, &frames, 1.0) > 0, "the rows move");
+}

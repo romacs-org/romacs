@@ -295,7 +295,7 @@ impl RootPicture {
         renderer.submit_commands([encoder.finish()]);
         crate::cost::add(crate::cost::BANDS_MOVED, moves.len());
         for m in moves {
-            self.rows.moved(m.window, m.from, m.dy);
+            self.rows.moved(m.from, m.dy);
         }
         true
     }
