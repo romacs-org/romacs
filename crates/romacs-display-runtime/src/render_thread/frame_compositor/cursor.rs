@@ -138,7 +138,7 @@ impl GuiFrameRenderState {
                 )
             })
             .collect();
-        let Some(frame) = self.compositor.current_frame.as_mut() else {
+        let Some(frame) = self.compositor.current_frame.as_mut().map(std::sync::Arc::make_mut) else {
             return;
         };
         for cursor in &mut frame.window_cursors {

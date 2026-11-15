@@ -63,3 +63,10 @@ reaches its limit, as ~⛽claude 2/3~: two of its three accounts have room.
 Hovering over it lists each account, its status, how much of its window
 it has used and when it resets.  Agents read the same through the
 ~romacs_orchestrator_capabilities~ tool.
+
+An agent placing work reads ~romacs_limits~: for each harness, its accounts
+in pool order, each limit window (five-hour, weekly) with how much is used,
+its status and when it resets, how many sessions run on the account, which
+account new work goes to, and one line saying so.  It reads the reports the
+harnesses last made, and asks no provider: an account that has not run for a
+while shows its last report.

@@ -58,9 +58,6 @@ pub(super) struct FrameParams<'a> {
     /// Whether line/scroll-spacing animations are active this frame
     /// (glyph Y positions then go through `line_y_offset`).
     pub(super) has_line_anims: bool,
-    /// Layout row damage for this frame (built by display-runtime from the
-    /// same FrameDisplayState the glyph buffer was materialized from).
-    pub(super) row_damage: Option<&'a super::row_reuse::FrameRowDamage>,
 }
 
 /// The active render pass plus the per-frame params, handed to each draw
@@ -72,6 +69,9 @@ pub(super) struct FramePassCtx<'e, 'a> {
 
 /// A merged span of adjacent boxed glyphs on the same row.
 pub(super) struct BoxSpan {
+    /// The window whose glyphs it boxes (0 for none): a box run is one
+    /// window's, as GNU draws a window's boxes within its own glyph rows.
+    pub(super) window: i64,
     pub(super) x: f32,
     pub(super) y: f32,
     pub(super) width: f32,
@@ -111,19 +111,25 @@ pub(super) const fn box_edges_for_face_paint(
     }
 }
 
+/// Whether the glyph beside the one at INDEX (on its left, or its right),
+/// in its window, carries the same pointer face PAINTED_FACE on.
 fn transient_face_continues(
     frame_glyphs: &FrameGlyphBuffer,
     pointer_override: &PointerOverrideResolver,
-    neighbor_index: Option<usize>,
+    index: usize,
     current_rect: Rect,
     current_role: GlyphRowRole,
     painted_face: FaceId,
     neighbor_on_left: bool,
 ) -> bool {
-    let Some(neighbor_index) = neighbor_index else {
+    let neighbor_index = if neighbor_on_left { index.checked_sub(1) } else { index.checked_add(1) };
+    let (Some(current), Some(neighbor)) = (
+        frame_glyphs.glyphs.get(index),
+        neighbor_index.and_then(|at| frame_glyphs.glyphs.get(at)),
+    ) else {
         return false;
     };
-    let Some(neighbor) = frame_glyphs.glyphs.get(neighbor_index) else {
+    let Some(neighbor_index) = neighbor_index else {
         return false;
     };
     if pointer_override.transient_face(box_pointer_kind(neighbor), neighbor_index)
@@ -134,7 +140,8 @@ fn transient_face_continues(
     let Some(neighbor_rect) = neighbor.box_rect() else {
         return false;
     };
-    if neighbor.row_role() != Some(current_role)
+    if neighbor.window_id() != current.window_id()
+        || neighbor.row_role() != Some(current_role)
         || (neighbor_rect.y - current_rect.y).abs() >= 1.0
         || (neighbor_rect.height - current_rect.height).abs() >= 1.0
     {
@@ -157,6 +164,7 @@ const fn box_pointer_kind(glyph: &FrameGlyph) -> PresentedPrimitiveKind {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct BoxGroupKey {
+    window: i64,
     row_role: GlyphRowRole,
     y: u32,
     height: u32,
@@ -177,6 +185,7 @@ impl BoxGroupKey {
             )
         });
         Self {
+            window: span.window,
             row_role: span.row_role,
             y: span.y.to_bits(),
             height: span.height.to_bits(),
@@ -279,6 +288,7 @@ pub(super) fn collect_frame_box_spans(
                 BoxPaintPolicy::Sharp
             };
             box_spans.push(BoxSpan {
+                window: glyph.window_id().map_or(0, romacs_display_protocol::types::DisplayWindowId::get),
                 x: gx,
                 y: gy,
                 width: gw,
@@ -296,7 +306,7 @@ pub(super) fn collect_frame_box_spans(
                     transient_face_continues(
                         frame_glyphs,
                         pointer_override,
-                        glyph_index.checked_sub(1),
+                        glyph_index,
                         glyph_rect,
                         row_role,
                         face_id,
@@ -305,7 +315,7 @@ pub(super) fn collect_frame_box_spans(
                     transient_face_continues(
                         frame_glyphs,
                         pointer_override,
-                        glyph_index.checked_add(1),
+                        glyph_index,
                         glyph_rect,
                         row_role,
                         face_id,

@@ -1,4 +1,4 @@
-//! The host frame's tab bar as the frame's snapshot publishes it (xdisp.c
+//! The top-level frame's tab bar as the frame's snapshot publishes it (xdisp.c
 //! display_tab_bar): the row `romacs--tab-bar-string' (lisp/romacs/vm/prelude.el)
 //! makes of the tab bar keymap's captions, each character in its `face'
 //! property's named face over the `tab-bar' face, `tab-bar-lines' lines
@@ -8,11 +8,11 @@ use crate::{data::Object, *};
 use romacs_layout_input::{FaceHandle, FaceRun, TabBarSnapshot, TextSlice};
 
 impl Vm {
-    /// The tab bar to paint, None while the frame shows none. A signal
-    /// from the Lisp that makes its row is a display diagnostic, and the
-    /// row is empty.
-    pub(crate) fn tab_bar_snapshot(&mut self) -> Result<Option<TabBarSnapshot>> {
-        let lines = self.tab_bar_lines();
+    /// The tab bar to paint of the top-level frame whose id is FRAME, None
+    /// while it shows none. A signal from the Lisp that makes its row is a
+    /// display diagnostic, and the row is empty.
+    pub(crate) fn tab_bar_snapshot(&mut self, frame: u64) -> Result<Option<TabBarSnapshot>> {
+        let lines = self.tab_bar_lines(self.frame_of_id(frame)?);
         if lines == 0 { return Ok(None); }
         // What may allocate comes first: the row is read with nothing
         // collecting after the call that returns it.

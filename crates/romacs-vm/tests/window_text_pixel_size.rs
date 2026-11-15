@@ -88,7 +88,7 @@ const CASES: &str = r###"
 (let ((unibyte-display-via-language-environment t)) (insert "a" (propertize "X" 'display "é中\t") "b") (overlay-put (make-overlay 2 2) 'before-string "ü中\t") (setq line-prefix "ñ中" wrap-prefix "中ö") (insert (make-string 100 ?y)) (list (window-text-pixel-size) (window-text-pixel-size nil 1 3) (window-text-pixel-size nil 3 4)))
 "###;
 
-/// window.el's callers, on side windows as keymap-popup and Hermes make them.
+/// window.el's callers, on side windows as keymap-popup makes them.
 const CONSUMERS: &str = r###"
 (let ((w (display-buffer-in-side-window (get-buffer-create "*side*") '((side . bottom))))) (with-current-buffer "*side*" (erase-buffer) (insert "a\nb\nc")) (fit-window-to-buffer w) (list (window-total-height w) (window-body-height w) (window-total-height (frame-root-window)) (window-text-pixel-size w nil t nil (frame-pixel-height) t)))
 (let ((w (display-buffer-in-side-window (get-buffer-create "*side*") '((side . bottom))))) (with-current-buffer "*side*" (erase-buffer) (dotimes (i 40) (insert (format "line %d\n" i)))) (fit-window-to-buffer w) (list (window-total-height w) (progn (fit-window-to-buffer w 8 3) (window-total-height w)) (progn (with-current-buffer "*side*" (erase-buffer) (insert "x")) (fit-window-to-buffer w) (window-total-height w)) (progn (fit-window-to-buffer w nil 4) (window-total-height w))))

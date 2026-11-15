@@ -338,13 +338,6 @@ comment and string syntax, its summaries made by one parse to the end."
   (dolist (name (scaling--names "scaling-session" n))
     (with-current-buffer (get-buffer-create name) (text-mode) (insert name "\nsecond line\n"))))
 
-;; N Hermes chats restored through Hermes's own desktop handler beside N
-;; text buffers, then attached at activation (offline: no dashboard).
-(defun scaling--offline-hermes (function)
-  "Call FUNCTION with Hermes's dashboard transport off."
-  (cl-letf (((symbol-function 'hermes-chat--dashboard-default-transport-p) #'ignore))
-    (funcall function)))
-
 ;; Motion and measurement in one long wrapped line of N words, around its
 ;; middle: a step's rows are laid out from the line's start, so the work
 ;; is linear in the line; a rescan per row would make it quadratic.

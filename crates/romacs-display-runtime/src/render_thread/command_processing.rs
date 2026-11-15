@@ -88,7 +88,10 @@ impl RenderApp {
             .or_else(|| self.comms.cmd_rx.try_recv().ok())
         {
             match cmd {
-                RenderCommand::Paint(scene) => self.ingest_paint(*scene),
+                RenderCommand::Paint(scene) => romacs_display_protocol::meter::spent(
+                    super::frame_cost::INGEST,
+                    || self.ingest_paint(*scene),
+                ),
                 RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
                     tracing::info!("Render thread received shutdown command");
                     self.lifecycle_flags

@@ -11,7 +11,7 @@ init and your muscle memory come with you.
 | Log the entire Emacs history, {{vc-history-commits}} commits | **{{vc-history-romacs}}** | {{vc-history-gnu}} |
 | Open a {{open-big-size}} C header, tree-sitter in both | **{{open-big-romacs}}** | {{open-big-ts-gnu}} |
 | Open `xdisp.c`, tree-sitter in both | **{{open-xdisp-romacs}}** | {{open-xdisp-ts-gnu}} |
-| Switch themes | **{{theme-romacs}}** | {{theme-gnu}} |
+| Switch to a theme the first time | **{{theme-romacs}}** | {{theme-gnu}} |
 | Uncompiled Lisp, one function call | **{{uncompiled-call-romacs}}** | {{uncompiled-call-gnu}} |
 
 The clip is the real program; the race runs at real speed.  Every number, losses
