@@ -183,7 +183,11 @@ keys act on: its face, and the host's band over it."
   (move-overlay romacs-agent-ask--row (line-beginning-position) (line-beginning-position 2))
   (when-let* ((columns romacs-agent-ask--columns)
               (window (get-buffer-window (current-buffer) t)))
-    (let ((row (romacs-agent-ask-row-at (buffer-string) (line-beginning-position) columns))
+    ;; In view, its row counted from the window's start, as the host's is.
+    (unless (pos-visible-in-window-p (line-beginning-position) window)
+      (with-selected-window window (recenter (if (< (point) (window-start window)) 0 -1))))
+    (let ((row (- (romacs-agent-ask-row-at (buffer-string) (line-beginning-position) columns)
+                  (romacs-agent-ask-row-at (buffer-string) (window-start window) columns)))
           (frame (window-frame window)))
       (unless (eq (frame-parameter frame 'romacs-layer-selection) row)
         (set-frame-parameter frame 'romacs-layer-selection row)))))
@@ -226,13 +230,19 @@ most MOST columns, and as tall as its lines wrapped at words there."
     (cons columns (apply #'+ (mapcar (lambda (line) (romacs-agent-ask--rows-of line columns)) lines)))))
 
 (defun romacs-agent-ask-place (row-top row-height height frame-height)
-  "Where the layer's top goes, in pixels: below the question's row, at
-ROW-TOP and ROW-HEIGHT tall, when HEIGHT fits under it in FRAME-HEIGHT,
-else above it, so the row stays in view; nil when the row is not."
+  "Where the layer goes, (TOP . ROOM) in pixels, clear of the question's
+row at ROW-TOP, ROW-HEIGHT tall: below it when HEIGHT fits there in
+FRAME-HEIGHT, else above it when it fits there, else on the side with
+more room; ROOM is the most it may be tall there.  Nil when the row is
+not in view."
   (when row-top
-    (if (<= (+ row-top (* 2 row-height) height) frame-height)
-        (+ row-top (* 2 row-height))
-      (max 0 (- row-top height row-height)))))
+    (let* ((below-top (+ row-top (* 2 row-height)))
+           (below (- frame-height below-top))
+           (above (- row-top row-height)))
+      (cond ((<= height below) (cons below-top below))
+            ((<= height above) (cons (- above height) above))
+            ((>= below above) (cons below-top below))
+            (t (cons 0 above))))))
 
 (defun romacs-agent-ask--row-top (place)
   "The top of PLACE's row, (WINDOW . POSITION), in its frame's pixels,
@@ -250,8 +260,11 @@ clear of PLACE, the question's row in its chat, (WINDOW . POSITION)."
          (most (max 6 (- (frame-text-lines root) 6)))
          (lines (min most (cdr size)))
          (line (frame-char-height root))
-         (top (romacs-agent-ask-place (and place (romacs-agent-ask--row-top place)) line
-                                      (+ (* lines line) 24) (frame-text-height root))))
+         (placed (romacs-agent-ask-place (and place (romacs-agent-ask--row-top place)) line
+                                         (+ (* lines line) 24) (frame-text-height root)))
+         (top (car placed))
+         ;; No taller than its side has room for: it scrolls instead.
+         (lines (if placed (max 3 (min lines (/ (- (cdr placed) 24) line))) lines)))
     (with-current-buffer buffer (setq romacs-agent-ask--columns (car size)))
     (romacs-popup-show 'palette buffer :columns (car size) :lines lines :max-lines most
                        :anchor (and top (cons (+ (frame-internal-border-width root)

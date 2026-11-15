@@ -142,8 +142,9 @@
      (should (equal (romacs-agent-rows-tests--draw "romacs_limits" :body (romacs-agent-rows-tests--table) limits)
                     "●  claude2  5h 58%  week 27%  3 sessions")))
    ;; No account: no table, and no error.
-   (should-not (romacs-agent-rows-tests--draw "romacs_limits" :body (romacs-agent-rows-tests--table)
-                                              "{\"harnesses\":[{\"harness\":\"claude\",\"accounts\":[]}]}"))))
+   (should (equal (romacs-agent-rows-tests--draw "romacs_limits" :body (romacs-agent-rows-tests--table)
+                                                 "{\"harnesses\":[{\"harness\":\"claude\",\"accounts\":[]}]}")
+                  ""))))
 
 (ert-deftest romacs-agent-rows-restart-and-dev-check ()
   (romacs-agent-rows-tests--plain
@@ -181,6 +182,13 @@
                                                 "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")
                  "name  notes\nsize  12\nlines  a, b\nrows  1 items"))
   (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table) "plain text")
-                 "plain text")))
+                 "plain text"))
+  ;; A text of several lines, whole, under its key.
+  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table)
+                                                "{\"text\":\"one\\ntwo\\nthree\"}")
+                 "text  \n  one\n  two\n  three"))
+  ;; A renderer whose body says nothing: the answer as words, here none.
+  (should (equal (romacs-agent-rows-tests--draw "romacs_limits" :body (romacs-agent-rows-tests--table) "{\"harnesses\":[]}")
+                 "")))
 
 ;;; romacs-agent-rows-tests.el ends here

@@ -45,19 +45,26 @@ reads as words where its renderer says nothing of it, never as JSON."
         (renderer (gethash name romacs-agent-rows)))
     (cond ((not romacs) renderer)
           ((not renderer) (romacs-agent-rows--romacs-generic name))
-          ((plist-get renderer :body) renderer)
+          ;; Its body when it says something, else the answer as words.
+          ((plist-get renderer :body)
+           (let ((body (plist-get renderer :body)))
+             (append (list :body (lambda (input output) (or (funcall body input output) (romacs-agent-rows-words output))))
+                     renderer)))
           (t (append renderer (list :body (lambda (_input output) (romacs-agent-rows-words output))))))))
 
 (defun romacs-agent-rows-words (output)
   "OUTPUT, a tool's answer, as words: a JSON object's keys and values a
-line each (a list as its items, or how many when they are records), any
-other text as it is."
+line each (a text of several lines in full under its key, a list as its
+items, or how many when they are records), any other text as it is."
   (let ((record (romacs-agent-rows--json output)))
     (if (not (hash-table-p record)) (or output "")
       (let ((lines nil))
         (maphash
          (lambda (key value)
-           (let ((said (cond ((stringp value) (car (split-string value "\n")))
+           (let ((said (cond ((stringp value)
+                              (if (string-search "\n" value)
+                                  (concat "\n" (replace-regexp-in-string "^" "  " (string-trim-right value)))
+                                value))
                              ((numberp value) (number-to-string value))
                              ((eq value t) "yes")
                              ((memq value '(:false :null nil)) nil)
@@ -332,15 +339,17 @@ known."
                    (if-let* ((suggestion (romacs-agent-rows--field (car (romacs-agent-rows--harnesses output)) "suggestion")))
                        (romacs-agent-rows--dim (concat " · " suggestion))
                      ""))))
+ ;; No account, no table: nothing to say.
  :body (lambda (_input output)
-         (romacs-agent-rows--table
+         (or (romacs-agent-rows--table
           (cl-loop for harness in (romacs-agent-rows--harnesses output)
                    append (cl-loop for account across (or (gethash "accounts" harness) [])
                                    when (hash-table-p account)
                                    collect (list (if (eq (gethash "pick" account) t) "●" "·")
                                                  (or (romacs-agent-rows--field account "account") "?")
                                                  (romacs-agent-rows--windows account)
-                                                 (format "%s sessions" (or (gethash "sessions" account) 0))))))))
+                                                 (format "%s sessions" (or (gethash "sessions" account) 0))))))
+             "")))
 
 ;;; Romacs itself
 

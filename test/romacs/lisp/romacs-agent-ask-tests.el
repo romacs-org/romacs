@@ -189,8 +189,11 @@
     (should (= (romacs-agent-ask-row-at text 23 7) 5)))
   ;; Below the question's row when it fits, else above; nowhere in
   ;; particular when the row is not in view.
-  (should (= (romacs-agent-ask-place 100 20 200 900) 140))
-  (should (= (romacs-agent-ask-place 800 20 200 900) 580))
+  (should (equal (romacs-agent-ask-place 100 20 200 900) '(140 . 760)))
+  (should (equal (romacs-agent-ask-place 800 20 200 900) '(580 . 780)))
+  ;; Too tall for either side: the roomier one, no taller than it is.
+  (should (equal (romacs-agent-ask-place 300 20 700 900) '(340 . 560)))
+  (should (equal (romacs-agent-ask-place 700 20 800 900) '(0 . 680)))
   (should-not (romacs-agent-ask-place nil 20 200 900)))
 
 ;;; romacs-agent-ask-tests.el ends here
