@@ -6,6 +6,9 @@
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
 
+;; What `romacs-startup-progress' keeps: bound here around each restore.
+(defvar romacs-progress-state)
+
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
@@ -404,5 +407,42 @@ contents, so two equal states print the same."
                                                                                  :host-socket socket)))
                  (should (file-exists-p socket)))
         (delete-process server)))))
+
+(ert-deftest romacs-agent-kept-restore-soon-loads-every-session-in-turns ()
+  ;; A server's start: sessions load from the command loop after it, the
+  ;; `agents' step saying how far, and a restored chat's one loads alone.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let* ((romacs-agent--restore-pending nil) (restored 0) (romacs-progress-state nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored)))))
+      (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore))
+        (should (romacs-agent-load-session romacs-agent-kept-tests--id))
+        (should (= restored 0))
+        (clrhash romacs-agent--sessions)
+        (romacs-agent-restore-soon)
+        (should romacs-agent--restore-pending)
+        (should-not (gethash romacs-agent-kept-tests--id romacs-agent--sessions))
+        (with-timeout (10 (ert-fail "the restore did not end"))
+          (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+        (should (romacs-agent-get romacs-agent-kept-tests--id))
+        (should (= restored 1))
+        (let ((agents (alist-get 'agents romacs-progress-state)))
+          (should (eq (plist-get agents :status) 'done))
+          (should (equal (plist-get agents :label) "Agent sessions 1/1")))))))
+
+(ert-deftest romacs-agent-kept-a-session-asked-for-mid-restore-loads-at-once ()
+  ;; While sessions load a turn at a time, one attached early may ask for
+  ;; another not reached yet (its child): it is loaded then and there.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending (list dir)))
+      (should (romacs-agent-get romacs-agent-kept-tests--id))
+      (should-not (romacs-agent-get "../escape")))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending nil))
+      (should-not (romacs-agent-get romacs-agent-kept-tests--id)))))
 
 ;;; romacs-agent-kept-tests.el ends here
