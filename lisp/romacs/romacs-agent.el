@@ -783,10 +783,11 @@ instances) is derived again when it changes.")
       up, or nil to wait for an answer; absent, it is ready at launch.
       Messages wait until ready;
   :resume-environment ENTRIES   added to its environment on a resume;
-  :streamed-line REGEXP   optional: how the line of a record that only
-      streams what a later record of its says whole ends (Claude's
-      `stream_event'): a chat's replay passes over such lines before its
-      turn under way, unparsed (`romacs-agent--read-journal');
+  :streamed-skip ()   optional: called in a buffer of journal lines, a
+      function of a line's start and end saying whether it only streams
+      what a whole record among them says again (Claude's `stream_event'
+      deltas before their `assistant' record): a chat's replay passes over
+      it unparsed (`romacs-agent--read-journal');
   :suggestions WORDS   optional: the words its command line asks for a
       predicted next prompt by (`romacs-agent--suggestion-words'), each a
       `suggestion' event (:text) after a turn's end;
@@ -1806,22 +1807,23 @@ stays.  The journal itself keeps them all."
 (defun romacs-agent--read-journal (session function &optional from end skip)
   "Call FUNCTION with each record of SESSION's journal, in order, from
 byte FROM (a record's start) when given, to byte END (a record's end)
-when given.  SKIP, (REGEXP . BYTE), passes over the lines before byte
-BYTE that end as REGEXP does, unparsed."
+when given.  SKIP, called in the buffer of the lines read, returns a
+function of a line's start and end, or nil: the lines it says yes to are
+passed over, unparsed."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
         (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from end))
         (goto-char (point-min))
-        (while (not (eobp))
+        (let ((skip (and skip (save-excursion (funcall skip)))))
+         (while (not (eobp))
           (let ((end (line-end-position)))
-            (unless (and skip (< (+ (or from 0) (1- (position-bytes (point)))) (cdr skip))
-                         (save-excursion (goto-char end) (looking-back (car skip) (max (point-min) (- end 200)))))
+            (unless (and skip (funcall skip (point) end))
               (let ((record (ignore-errors
                               (json-parse-string (buffer-substring (point) end)
                                                  :object-type 'hash-table :null-object :null :false-object :false))))
                 (when (hash-table-p record) (funcall function record)))))
-          (forward-line 1))))))
+          (forward-line 1)))))))
 
 (defun romacs-agent--filter (process chunk)
   (let* ((session (process-get process 'romacs-agent))
@@ -3346,7 +3348,8 @@ SESSION (`romacs-agent--scratch'), is what the harness parses them in."
           (forward-line -1)
           (setq steps (1+ steps))
           (let ((record (ignore-errors
-                          (json-parse-string (buffer-substring (point) (line-end-position))
+                          (json-parse-string (let ((line (buffer-substring (point) (line-end-position))))
+                                               (if enable-multibyte-characters line (decode-coding-string line 'utf-8)))
                                              :object-type 'hash-table :null-object :null :false-object :false))))
             (when (hash-table-p record)
               (let ((out (gethash "out" record)) (in (gethash "in" record)))
@@ -3366,9 +3369,12 @@ SESSION (`romacs-agent--scratch'), is what the harness parses them in."
 in place of what it held, and return where they start: START, or the
 next character's first byte when START falls inside one, so each
 position's byte is that plus its `position-bytes' less one.  Decoded,
-megabytes read many times faster here than as raw bytes."
+megabytes read many times faster here than as raw bytes; bytes that do
+not decode as plain UTF-8 lines (a carriage return, a malformed
+sequence) would break that, and are read as raw bytes instead."
   (widen)
   (erase-buffer)
+  (set-buffer-multibyte t)
   (let ((start (if (= start 0) 0
                  (let ((head (with-temp-buffer
                                (set-buffer-multibyte nil)
@@ -3376,8 +3382,13 @@ megabytes read many times faster here than as raw bytes."
                                (buffer-string))))
                    ;; UTF-8's continuation bytes are #x80 to #xBF.
                    (+ start (or (cl-position-if-not (lambda (byte) (<= #x80 byte #xbf)) head) (length head))))))
-        (coding-system-for-read 'utf-8))
+        (coding-system-for-read 'utf-8-unix))
     (insert-file-contents journal nil start end)
+    ;; Each byte of the file is one of the buffer's, or it is no map.
+    (unless (= (1- (position-bytes (point-max))) (- end start))
+      (erase-buffer)
+      (set-buffer-multibyte nil)
+      (insert-file-contents-literally journal nil start end))
     start))
 
 (defun romacs-agent--journal-tail (session turns &optional end begin)

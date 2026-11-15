@@ -1797,19 +1797,10 @@ its start) into the current chat buffer."
                    ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
+      ;; A message said whole later is drawn whole, as one delta, not
+      ;; each of its stream's (its harness's `:streamed-skip').
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from nil
-                                  (romacs-agent-ui--replay-skip session)))))
-
-(defun romacs-agent-ui--replay-skip (session)
-  "What SESSION's replay may pass over unparsed, as
-`romacs-agent--read-journal' takes it: its harness's streamed lines
-\(`:streamed-line'), but in a turn under way, which no whole record
-says yet.  Drawn whole, a message is one delta, not each of its own."
-  (when-let* ((regexp (romacs-agent--harness-get session :streamed-line)))
-    (let ((until (if (memq (romacs-agent-state session) '(starting running waiting-approval))
-                     (or (car (romacs-agent--journal-tail session 1)) 0)
-                   most-positive-fixnum)))
-      (and (> until 0) (cons regexp until)))))
+                                  (romacs-agent--harness-get session :streamed-skip)))))
 
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the

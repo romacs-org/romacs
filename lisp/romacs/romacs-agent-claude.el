@@ -535,6 +535,39 @@ answer to a hook; (:line ID MODE), a switch to permission mode MODE."
                            :notes (cl-remove-if-not #'cdr options)
                            :multi (eq (gethash "multiSelect" q) t)))))
 
+(defconst romacs-agent--claude-stream-end
+  "\"type\":\"stream_event\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}"
+  "How a `stream_event' record's line ends: keys are written sorted.")
+
+(defconst romacs-agent--claude-assistant-end
+  "\"type\":\"assistant\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
+  "How an `assistant' record's line ends.")
+
+(defun romacs-agent--claude-streamed-skip ()
+  "In a buffer of journal lines, a function of a line's start and end
+saying whether it is a `stream_event' of a message whose `assistant'
+record, which says it whole, is among them; nil when none is.  A message
+cut short, or still streaming, has no such record: its deltas are read.
+A message's id starts its stream lines (`api_message_id') and is the
+first message id of its `assistant' line: no string can hold a quoted
+key."
+  (let ((whole (make-hash-table :test #'equal)))
+    (goto-char (point-min))
+    (while (re-search-forward romacs-agent--claude-assistant-end nil t)
+      (let ((end (point)))
+        (beginning-of-line)
+        (when (re-search-forward "\"id\":\"\\(msg_[^\"]+\\)\"" end t)
+          (puthash (match-string 1) t whole))
+        (goto-char end)))
+    (and (> (hash-table-count whole) 0)
+         (lambda (start end)
+           (and (eq (char-after (+ start 9)) ?a)
+                (save-excursion
+                  (goto-char start)
+                  (and (looking-at "{\"out\":{\"api_message_id\":\"\\([^\"]+\\)\"")
+                       (gethash (match-string 1) whole)
+                       (progn (goto-char end) (looking-back romacs-agent--claude-stream-end (max start (- end 200)))))))))))
+
 (defun romacs-agent--claude-session-rules (request)
   "The permission updates allowing REQUEST's tool for the rest of the
 session: what Claude Code suggests, kept to the session, else its tool."
@@ -593,8 +626,7 @@ environment."
            "CLAUDE_CODE_EXECPATH" "CLAUDE_CODE_MESSAGING_SOCKET" "CLAUDE_CODE_MESSAGING_TOKEN"
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
-  ;; Its streamed deltas: the `assistant' record that follows says them whole.
-  :streamed-line "\"type\":\"stream_event\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}"
+  :streamed-skip #'romacs-agent--claude-streamed-skip
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
   :next #'romacs-agent--claude-next
