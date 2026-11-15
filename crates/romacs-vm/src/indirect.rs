@@ -44,6 +44,11 @@ impl<T: romacs_snapshot::Schema> romacs_snapshot::Schema for Shared<T> {
     fn any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut romacs_snapshot::Settle) {
+        if s.first(Rc::as_ptr(&self.0).cast::<u8>() as usize) {
+            (**self).settle(s);
+        }
+    }
 }
 
 impl<T> Shared<T> {

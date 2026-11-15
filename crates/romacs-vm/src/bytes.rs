@@ -71,7 +71,7 @@ pub(crate) struct ByteBuffer {
     /// What a window shows of these bytes (`shown'), once one has.
     pub(crate) mirror: Option<Box<Mirror>>,
 }
-romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held } at_rest { mirror });
+romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held, mirror });
 
 /// The text of a unibyte buffer as display reads it: each byte one
 /// character, so its positions are the buffer's, a byte above 127 the
@@ -81,6 +81,7 @@ romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, categ
 pub(crate) struct Mirror {
     text: crate::annotations::AnnotatedBuffer,
 }
+romacs_snapshot::snapshot_struct!(Mirror { text });
 impl Mirror {
     /// The byte range of the mirror's text that R, of the buffer's bytes, is.
     fn range(&self, r: &Range<ByteOffset>) -> Result<Range<ByteOffset>> {

@@ -108,6 +108,9 @@ fn act_in_role() -> bool {
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         Ok("census") => census(&store.unwrap()),
+        Ok("guard") => guard(&store.unwrap()),
+        #[cfg(target_arch = "x86_64")]
+        Ok("stray") => stray(&store.unwrap()),
         _ => return false,
     }
     true
@@ -122,7 +125,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn restored() -> String {
-    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true, "forked": false}).to_string()
+    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "forked": false}).to_string()
 }
 
 /// What a child printed of its outcome.
@@ -165,6 +168,7 @@ fn census(store: &Path) {
     println!("WORLD-IMAGE {}", json!({
         "vm": count("romacs_vm::Vm"), "image": census["image"]["used"].as_u64() == Some(published),
         "primitives": census["notes"]["ordinal: a primitive, by its index in the primitive table"].as_u64() > Some(0),
+        "executable": census["notes"].get(romacs_snapshot::EMPTY_HASH_TABLE).is_none(),
         "within": census["totals"]["owned_bytes"].as_u64() <= census["image"]["used"].as_u64(),
     }));
 }
@@ -193,9 +197,7 @@ fn launch(store: &Path) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
             let value = vm.eval_source("(world-image-probe)").and_then(|v| v.display()).unwrap();
-            let builder = arena::mapped_image().unwrap().executable;
             println!("WORLD-IMAGE {}", json!({"mode": "restored", "carry": carry, "value": value,
-                                               "moved": builder != arena::executable_base(),
                                                "forked": FORKS.with(std::cell::Cell::get) > 0}));
         }
         Launch::Build => {
@@ -221,7 +223,10 @@ fn launch(store: &Path) {
                 vm.eval_source("(defalias 'world-image-probe (let ((table (make-hash-table :test 'equal))) \
                                 (puthash \"key\" 'built table) (lambda () (list (gethash \"key\" table) (hash-table-count table)))))")
                     .unwrap();
-                Ok((vm, 42u64, json!({})))
+                // An address of this executable, which no image should
+                // hold: the stray test's carry.
+                let carry = if flag.trim() == "stray" { std::ptr::addr_of!(STRAY_BYTE) as u64 } else { 42 };
+                Ok((vm, carry, json!({})))
             });
             let len = match built {
                 Ok(len) => len,
@@ -285,9 +290,130 @@ fn launch_reserved(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"taken_after": mapping_at(base) == Some(libc::EEXIST)}));
 }
 
+/// Where the executable of the process that built the image in STORE
+/// loaded, from the image's header: past the arena's own fields, the
+/// image's length, root and counters.
+fn image_executable(store: &Path) -> usize {
+    const AT: usize = 8 * (6 + 3 * 84 + 40) + 8 * 6;
+    let bytes = std::fs::read(image(store)).unwrap();
+    usize::from_le_bytes(bytes[AT..AT + 8].try_into().unwrap())
+}
+
+/// The permissions of the mapping that holds AT, from /proc/self/maps.
+fn permissions_at(at: usize) -> Option<String> {
+    std::fs::read_to_string("/proc/self/maps").unwrap().lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let (start, end) = fields.next()?.split_once('-')?;
+        let range = usize::from_str_radix(start, 16).ok()?..usize::from_str_radix(end, 16).ok()?;
+        range.contains(&at).then(|| fields.next().map(str::to_owned)).flatten()
+    })
+}
+
+/// Launch as `launch` does, the range the builder's executable lay in first
+/// taken by a readable page of this process's when the parent asks
+/// (`ROMACS_WORLD_IMAGE_TEST_TAKE`): what the restore made of that range.
+fn guard(store: &Path) {
+    let old = image_executable(store);
+    if std::env::var_os("ROMACS_WORLD_IMAGE_TEST_TAKE").is_some() {
+        let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED_NOREPLACE;
+        // SAFETY: a new anonymous page where nothing of this process is
+        // (MAP_FIXED_NOREPLACE): it replaces nothing, and is never freed.
+        unsafe { libc::mmap(old as *mut libc::c_void, 4096, libc::PROT_READ, flags, -1, 0) };
+    }
+    launch(store);
+    println!("WORLD-IMAGE {}", json!({"guard": format!("{:?}", arena::executable_guard()),
+                                       "inaccessible": permissions_at(old).as_deref() == Some("---p")}));
+}
+
+/// A byte of this executable's read-only data, whose address a stray
+/// world carries.
+static STRAY_BYTE: u8 = 7;
+
+#[cfg(target_arch = "x86_64")]
+/// Restore the world in STORE, whose carry is an address in its builder's
+/// executable: what the restore made of that range is printed first, and,
+/// where the range is reserved, a load from the address faults.
+fn stray(store: &Path) {
+    use std::io::Write;
+    let Launch::Restored { carry, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    let guard = arena::executable_guard();
+    println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
+    std::io::stdout().flush().unwrap();
+    if guard == arena::Guard::Reserved {
+        // SAFETY: a load, in assembly, from a page this process reserved
+        // inaccessible: it faults, which is what the parent expects. Rust
+        // code never reads the address, and the instruction writes nothing.
+        unsafe {
+            std::arch::asm!("mov {0}, byte ptr [{1}]", out(reg_byte) _, in(reg) carry as usize, options(nostack, readonly));
+        }
+        println!("WORLD-IMAGE {}", json!({"read": true}));
+    }
+}
+
 /// Adopt FILE as an image in a child: what its arena made of it.
 fn probe_file(store: &Path, file: &Path) -> String {
     outcome(child("probe", store).env("ROMACS_WORLD_IMAGE_TEST_FILE", file))
+}
+
+const GUARD: &str = "a_restore_keeps_the_builders_executable_range_inaccessible_and_restores_when_it_is_taken";
+
+/// An image holds no address of its builder's executable, so the range the
+/// builder's executable lay in is no restore's to need. A restore keeps it
+/// inaccessible when it is free, so an address left by mistake faults; and
+/// restores all the same when something of the process lies there, where it
+/// once refused the image.
+#[test]
+fn a_restore_keeps_the_builders_executable_range_inaccessible_and_restores_when_it_is_taken() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(GUARD);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(GUARD, "launch", &store)), restored());
+    // Free (but in the few restores whose own mappings lie there): reserved.
+    let free = outcomes(&mut child_of(GUARD, "guard", &store));
+    let reserved = json!({"guard": "Reserved", "inaccessible": true}).to_string();
+    let taken = json!({"guard": "Taken", "inaccessible": false}).to_string();
+    assert!(free[0] == restored() && (free[1] == reserved || free[1] == taken), "{free:?}");
+    // Taken: the image restores, and the range is left as it was.
+    let held = outcomes(child_of(GUARD, "guard", &store).env("ROMACS_WORLD_IMAGE_TEST_TAKE", "1"));
+    assert_eq!(held, [restored(), taken]);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const STRAY: &str = "an_address_of_the_builders_executable_left_in_an_image_faults_when_followed";
+
+/// An image that holds an address of its builder's executable, which a
+/// capture should never leave, is caught loudly: following it in a restored
+/// process faults where the range is reserved, instead of reading what lies
+/// there. (Where something of the process took the range, one restore in
+/// thousands, there is nothing to show.)
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn an_address_of_the_builders_executable_left_in_an_image_faults_when_followed() {
+    use std::os::unix::process::ExitStatusExt;
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(STRAY);
+    let store = scratch.join("store");
+    std::fs::create_dir_all(scratch.join("input")).unwrap();
+    std::fs::write(scratch.join("input").join("flag"), "stray").unwrap();
+    let built: serde_json::Value = serde_json::from_str(&outcome(&mut child_of(STRAY, "launch", &store))).unwrap();
+    assert_eq!(built["mode"], "restored", "{built}");
+    let output = child_of(STRAY, "stray", &store).output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = text.lines().filter_map(|l| l.split_once("WORLD-IMAGE ").map(|(_, o)| o)).collect();
+    if lines.first() == Some(&json!({"guard": "Reserved"}).to_string().as_str()) {
+        assert_eq!((lines.len(), output.status.signal()), (1, Some(libc::SIGSEGV)), "{text}");
+    } else {
+        assert_eq!(lines, [json!({"guard": "Taken"}).to_string()], "{text}");
+        assert!(output.status.success(), "{text}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
 }
 
 #[test]
@@ -308,8 +434,10 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     assert!(kept.iter().all(|name| !name.starts_with("library-")), "{kept:?}");
     // Its census, read in a process that restores it read only: the VM met,
     // the image's arena alone counted, the primitives it names by this
-    // build's table counted, and the walk's owned bytes within the image.
-    assert_eq!(outcome(&mut child("census", &store)), json!({"vm": 1, "image": true, "primitives": true, "within": true}).to_string());
+    // build's table counted, no empty hash table pointing into the
+    // executable (each got its own allocation at capture), and the walk's
+    // owned bytes within the image.
+    assert_eq!(outcome(&mut child("census", &store)), json!({"vm": 1, "image": true, "primitives": true, "executable": true, "within": true}).to_string());
 
     // A byte changed in place: the content is not the one the manifest
     // binds. The launch rebuilds the world, a new image, and boots from it.
