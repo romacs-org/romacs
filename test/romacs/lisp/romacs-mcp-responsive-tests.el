@@ -310,12 +310,45 @@ are left out of the listing by their leading space."
               ((symbol-function 'cancel-timer) #'ignore)
               ((symbol-function 'romacs-mcp--send) (lambda (&rest args) (push args sent))))
       (romacs-mcp--defer-request (romacs-mcp-test--request 'a 1) 1
-                                 (lambda () (cl-incf polls) nil) nil)
+                                 (lambda () (cl-incf polls) nil) nil nil)
       (romacs-mcp--frame 'a "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":1}}")
       (romacs-mcp--poll-deferred)
       (should (= polls 0))
       (should-not romacs-mcp--deferred)
       (should-not sent))))
+
+;; His session idled at ~11 redisplay cycles a second: two agent waits
+;; kept a 0.05 s poll running for minutes.
+(ert-deftest romacs-mcp-responsive-woken-deferred-needs-no-clock ()
+  "A deferred request with a deadline is asked when woken, once a turn
+however often, and at its deadline; no clock polls it meanwhile."
+  (let* ((romacs-mcp--generation 7) (romacs-mcp--peers '(a))
+         (romacs-mcp--deferred nil) (romacs-mcp--deferred-timer nil)
+         (romacs-mcp--deferred-alarm nil) (romacs-mcp--deferred-woken nil)
+         (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+         (timers nil) (polls 0) (ready nil) (sent nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'run-at-time) (lambda (time repeat _fn) (push (list time repeat) timers) 'timer))
+              ((symbol-function 'cancel-timer) #'ignore)
+              ((symbol-function 'romacs-mcp--send) (lambda (&rest args) (push args sent))))
+      (romacs-mcp--defer-request (romacs-mcp-test--request 'a 1) 1
+                                 (lambda () (cl-incf polls) (and ready (list "done"))) nil (+ (float-time) 600))
+      (should-not romacs-mcp--deferred-timer)
+      (should (> (caar timers) 500))
+      (setq timers nil)
+      (romacs-mcp-deferred-wake)
+      (romacs-mcp-deferred-wake)
+      (should (equal timers '((0 nil))))
+      (romacs-mcp--poll-deferred)
+      (should (= polls 1))
+      (should-not sent)
+      (setq ready t)
+      (romacs-mcp-deferred-wake)
+      (romacs-mcp--poll-deferred)
+      (should (= polls 2))
+      (should sent)
+      (should-not romacs-mcp--deferred)
+      (should-not (cl-some #'cadr timers)))))
 
 (provide 'romacs-mcp-responsive-tests)
 ;;; romacs-mcp-responsive-tests.el ends here
