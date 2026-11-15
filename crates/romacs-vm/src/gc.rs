@@ -1349,8 +1349,6 @@ impl Vm {
         if before_scan {
             let _ = self.alloc_cons(Value::NIL, Value::NIL);
         }
-        let dead = marking.dead_objects(self);
-        self.unanchor(&dead);
         // Dead-owner entries have been swept. Discard only their unowned
         // slot values before forwarding; every live-owner and active-binding
         // value was marked above and is rewritten by the ordinary slot pass.
@@ -1394,7 +1392,7 @@ impl Vm {
                 let _ = self.alloc_cons(Value::NIL, Value::NIL);
             }
             // What the full freed needs no account: its books start again.
-            let _ = self.sweep_in_place(&marking, own, &dead);
+            let _ = self.sweep_in_place(&marking, own);
             lap.lap(&mut self.gc_times, Phase::Sweep);
             self.shrink_tables();
             lap.lap(&mut self.gc_times, Phase::Shrink);
@@ -1403,6 +1401,10 @@ impl Vm {
             if self.gc_stress.verify { self.check_settled(); }
             return true;
         }
+        // The dead with side effects end before their entries move: markers
+        // leave their buffers (a sweep in place finds them itself).
+        let dead = marking.dead_objects(self);
+        self.unanchor(&dead);
         // Compaction: every live entry moves down, every reference is
         // rewritten, and no entry is left free. Past here a panic leaves the
         // references half rewritten, which nothing can undo.
@@ -1690,15 +1692,20 @@ impl Vm {
     /// Free in place what MARKING left unmarked, DEAD being its dead
     /// objects: every survivor is left old and clean, and the logs empty.
     /// The payload the freed objects held.
-    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker, dead: &[u32]) -> usize {
+    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker) -> usize {
         let cells = &self.cells;
         self.cell_pairs.retain(|&i, _| cells.marked(i));
-        if let Some(referrers) = &mut self.referrers { referrers.forget(dead, &self.objects); }
-        for &i in dead {
+        let verify = self.gc_stress.verify;
+        let gc_mark::Swept { tables: swept, payload, dead } = marking.sweep(self, &mut own);
+        // The dead with side effects, still where they were, end here, on
+        // this thread, before the books may cut a table's dead tail: markers
+        // leave their buffers, the referrers index lets them go, and the
+        // rest are dropped.
+        self.unanchor(&dead);
+        if let Some(referrers) = &mut self.referrers { referrers.forget(&dead, &self.objects); }
+        for &i in &dead {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
-        let verify = self.gc_stress.verify;
-        let gc_mark::Swept { tables: swept, payload } = marking.sweep(self, &mut own);
         self.conses.swept(swept[0].0, swept[0].1, verify);
         self.closures.swept(swept[1].0, swept[1].1, verify);
         self.cells.swept(swept[2].0, swept[2].1, verify);
@@ -1808,14 +1815,12 @@ impl Vm {
         self.settle_cell_pairs();
         self.doom(&doomed);
         self.drop_weak(&weak_tables, untraced_lists, &symbols, &regions);
-        let dead = marking.dead_objects(self);
-        self.unanchor(&dead);
         self.empty_dead_caches(&symbols, &regions, true);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
         // The payload the young dead held was charged to the next full, which
         // the old generation's growth alone should pace: give it back.
-        let freed = self.sweep_in_place(&marking, own, &dead);
+        let freed = self.sweep_in_place(&marking, own);
         self.gc_payload_bytes = self.gc_payload_bytes.saturating_sub(freed);
         lap.lap(&mut self.gc_times, Phase::Sweep);
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];

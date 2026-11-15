@@ -125,7 +125,7 @@ impl<T> RawTable<T> {
     /// every survivor exactly old. The entries freed, and the end of the last
     /// still in use. SAFETY: RANGE is this caller's alone, and starts on a
     /// multiple of 8.
-    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(&mut T)) -> (usize, usize) {
+    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
         assert!(range.end <= self.len, "a range past its table");
         debug_assert!(range.start % 8 == 0);
         let dead = if quarantine { QUARANTINED } else { FREE };
@@ -166,7 +166,7 @@ impl<T> RawTable<T> {
             for i in at..end {
                 let color = colors[i];
                 if unreached(color, self.sticky) {
-                    destroy(&mut entries[i]);
+                    destroy(base + i, &mut entries[i]);
                     colors[i] = dead;
                     freed += 1;
                     if quarantine { last = base + i + 1; }
@@ -637,7 +637,8 @@ impl<T> Table<T> {
     #[cfg(test)]
     pub(crate) fn sweep(&mut self, quarantine: bool, destroy: impl FnMut(&mut T)) -> usize {
         let raw = tests::raw_of(self);
-        let (freed, last) = tests::sweep_whole(&raw, quarantine, destroy);
+        let mut destroy = destroy;
+        let (freed, last) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
         self.swept(freed, last, quarantine);
         freed
     }
@@ -864,7 +865,7 @@ mod tests {
         unsafe { t.raw(false) }
     }
     /// A sweep of all RAW sees, on the test's one thread.
-    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(&mut T)) -> (usize, usize) {
+    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
         // SAFETY: the whole table is this thread's, and the range starts at 0.
         unsafe { raw.sweep_range(0..raw.len(), quarantine, destroy) }
     }
@@ -1144,7 +1145,7 @@ mod tests {
         let raw = raw_of(&mut t);
         for i in (0..16).filter(|i| i % 2 == 0) { assert!(raw.claim(i)); }
         // The sweep, and no `swept': a collection stopped after its sweep.
-        assert_eq!(sweep_whole(&raw, false, |entry| *entry = u64::MAX).0, 8);
+        assert_eq!(sweep_whole(&raw, false, |_, entry| *entry = u64::MAX).0, 8);
         assert_eq!(t.unused(), 0, "nothing counted yet");
         t.settle_old();
         assert!(t.settled() && t.marks().all(|marked| !marked));
@@ -1357,7 +1358,7 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        let (freed, last) = sweep_whole(&raw, false, |_| {});
+        let (freed, last) = sweep_whole(&raw, false, |_, _| {});
         t.swept(freed, last, false);
         assert!(!raw.holds(&t), "swept with every entry kept");
     }

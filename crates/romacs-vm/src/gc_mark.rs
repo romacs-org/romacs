@@ -281,11 +281,14 @@ pub(super) struct Worker {
 }
 
 /// What a sweep did: each table's freed count and the end of its last entry
-/// in use, and the payload of the objects it freed.
+/// in use, the payload of the objects it freed, and the dead objects whose
+/// end has side effects (`Seen::buried` refuses them), left where they were
+/// for the collecting thread.
 #[derive(Default)]
 pub(super) struct Swept {
     pub(super) tables: [(usize, usize); 4],
     pub(super) payload: usize,
+    pub(super) dead: Vec<u32>,
 }
 
 /// What a collection's threads share, but for the `MarkView' of a mark.
@@ -663,7 +666,8 @@ impl Marking {
             && self.cells.holds(&vm.cells) && self.objects.holds(&vm.objects)
     }
     /// The dead objects `buried' refuses in VM: those whose end has side
-    /// effects, which the collecting thread sees to before the sweep.
+    /// effects, which the collecting thread sees to before a compaction. A
+    /// sweep in place finds them itself (`Swept::dead`).
     pub(super) fn dead_objects(&self, vm: &Vm) -> Vec<u32> {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
         vm.objects.unreached(|object| !Seen::of(object).buried())
@@ -682,28 +686,30 @@ impl Marking {
         let swept = Mutex::new(Swept::default());
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last, payload) = self.sweep_range(w, table, range, defer);
+            let (freed, last, payload, mut dead) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
             swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
             swept.payload += payload;
+            swept.dead.append(&mut dead);
         });
         swept.into_inner().unwrap()
     }
     /// One range of a sweep: its freed count, the end of its last entry in
-    /// use, and the payload its freed objects held. Conses and cells own
-    /// nothing; a closure's vectors are small and few; what an object owns
-    /// goes to W's graves when DEFER, or is dropped here (one thread, or the
-    /// dropper busy).
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, usize) {
+    /// use, the payload its freed objects held, and its dead objects with
+    /// side effects, left in place. Conses and cells own nothing; a closure's
+    /// vectors are small and few; what an object owns goes to W's graves when
+    /// DEFER, or is dropped here (one thread, or the dropper busy).
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, usize, Vec<u32>) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
-        let mut payload = 0;
+        let (mut payload, mut kept) = (0, Vec::new());
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
         let (freed, last) = unsafe {
             match table {
-                0 => self.conses.sweep_range(range, self.verify, |pair| *pair = (dead, dead)),
-                1 => self.closures.sweep_range(range, self.verify, |c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
-                2 => self.cells.sweep_range(range, self.verify, |cell| *cell = dead),
-                _ => self.objects.sweep_range(range, self.verify, |object| {
+                0 => self.conses.sweep_range(range, self.verify, |_, pair| *pair = (dead, dead)),
+                1 => self.closures.sweep_range(range, self.verify, |_, c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
+                2 => self.cells.sweep_range(range, self.verify, |_, cell| *cell = dead),
+                _ => self.objects.sweep_range(range, self.verify, |i, object| {
+                    if !Seen::of(object).buried() { return kept.push(i as u32); }
                     payload += data::payload_bytes(object);
                     if let Some(grave) = Grave::of(std::mem::replace(object, data::Object::Free)) && defer {
                         w.graves.push(grave);
@@ -711,7 +717,7 @@ impl Marking {
                 }),
             }
         };
-        (freed, last, payload)
+        (freed, last, payload, kept)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.
