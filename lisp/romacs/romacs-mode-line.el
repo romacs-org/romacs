@@ -284,7 +284,10 @@ last, or all of them, cut; `truncate-nil' the whole path."
          (root (and root (abbreviate-file-name (file-name-as-directory root))))
          (name (file-name-nondirectory file))
          (project (and root (file-name-nondirectory (directory-file-name root))))
-         (before (and root (split-string (directory-file-name (file-name-directory (directory-file-name root))) "/")))
+         ;; What lies above the root: nothing for a root with no parent in
+         ;; its abbreviated form, as `~/' has none.
+         (parent (and root (file-name-directory (directory-file-name root))))
+         (before (and parent (split-string (directory-file-name parent) "/")))
          (inside (and root (butlast (split-string (file-relative-name file root) "/"))))
          (all (butlast (split-string file "/")))
          (join (lambda (&rest parts) (string-join (apply #'append parts) "/"))))
