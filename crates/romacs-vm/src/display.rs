@@ -2600,7 +2600,8 @@ impl Vm {
     fn treesit_stopgap(&mut self, root: usize, text_height: u32) -> Result<()> {
         let window = self.slots[root].value;
         let Some((start, end)) = self.displayed_range(window, text_height)? else { return Ok(()) };
-        let args = [window, Value::integer(start as i64)?, Value::integer(end as i64)?];
+        let position = |n: usize| Value::integer(i64::try_from(n).unwrap_or(i64::MAX));
+        let args = [window, position(start)?, position(end)?];
         let call = "(lambda (window start end) (when (fboundp 'romacs-treesit--stopgap) (romacs-treesit--stopgap window start end)))";
         if let Err(error) = self.call_prepared_source_raw(call, &args) {
             self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
