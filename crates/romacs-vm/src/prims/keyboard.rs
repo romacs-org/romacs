@@ -4,7 +4,7 @@
 //! Tier: T2 (PRIMITIVE-DOCTRINE section 3), like prims/minibuf.rs. GNU's
 //! `command_loop_1', `read_key_sequence' and `read_char' call Lisp at every
 //! step (hooks, keymap lookup, the command itself), so they are Lisp here:
-//! lisp/romacs/vm/keyboard.el, the "Lisp half". Each entry point below enters it
+//! lisp/vm/keyboard.el, the "Lisp half". Each entry point below enters it
 //! with one `Step::Call', installing it on first use so a bare `Vm::new()'
 //! stays bare. The Rust half keeps what reads no Lisp: the record of this
 //! command's keys (`this-command-keys' and its siblings, over the traced
@@ -18,9 +18,9 @@ use crate::prim::leaf::Kind;
 /// (host_input.rs).
 const LISP_HALF: [&str; 4] = [
     super::HOOKS_LISP,
-    include_str!("../../../../lisp/romacs/vm/keyboard.el"),
-    include_str!("../../../../lisp/romacs/vm/minibuf.el"),
-    include_str!("../../../../lisp/romacs/vm/window-change.el"),
+    include_str!("../../../../lisp/vm/keyboard.el"),
+    include_str!("../../../../lisp/vm/minibuf.el"),
+    include_str!("../../../../lisp/vm/window-change.el"),
 ];
 
 /// keyboard.c `this_command_keys' (a vector of the events read for this
@@ -318,7 +318,7 @@ defsubr! { name = "discard-input", gnu = "keyboard.c:12400", effect = Global,
 fn discard_input(cx) -> Step { enter(cx, "romacs--discard-input", vec![], DONE) }}
 
 // macros.c: defining a keyboard macro, whose events read_char stores
-// (lisp/romacs/vm/keyboard.el `romacs--store-kbd-macro-char').
+// (lisp/vm/keyboard.el `romacs--store-kbd-macro-char').
 defsubr! { name = "start-kbd-macro", gnu = "macros.c:43", effect = Global,
 fn start_kbd_macro(cx, append: Value; optional no_exec: Value) -> Step {
     enter(cx, "romacs--start-kbd-macro", vec![append, no_exec], DONE)
@@ -430,7 +430,7 @@ fn timer_next(cx, timers: Value, idle_timers: Value) {
 defsubr! { name = "romacs--set-idle", gnu = "keyboard.c:4695", effect = Global,
 fn set_idle(cx, idle: Value) {
     // The state timer_start_idle (IDLE non-nil) and timer_stop_idle set;
-    // lisp/romacs/vm/subprocess.el `romacs--timer-start-idle' is the rest.
+    // lisp/vm/subprocess.el `romacs--timer-start-idle' is the rest.
     cx.set_idle_since((idle != Value::NIL).then(crate::host::monotonic));
     Ok(Value::NIL)
 }}
@@ -458,7 +458,7 @@ fn input_pending_p(cx; optional check_timers: Value) {
 }}
 
 // What the display saw of native key repeat since the last call, for the
-// usage log (lisp/romacs/romacs-usage-log.el): (REPEATS AFTER-PRESS
+// usage log (lisp/session/romacs-usage-log.el): (REPEATS AFTER-PRESS
 // LONGEST-HOLD-MS), AFTER-PRESS a vector of counts by the usage log's
 // doubling buckets; nil with no display.
 defsubr! { name = "romacs--take-key-repeats", gnu = "romacs:display", effect = Global,
@@ -543,7 +543,7 @@ fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
 }}
 
 // A deadline on one call the host admits, an agent's evaluation
-// (lisp/romacs/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
+// (lisp/agents/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
 // quit at its next safepoint, as by C-g, unless it ended first. GENERATION
 // names the call; nil disarms.
 // What a quit from C-g left pending when it interrupted a macro's

@@ -136,7 +136,7 @@ class ProcessControls(unittest.TestCase):
         with mock.patch('sys.argv', ['lisp-census.py', '--mode', 'warm', '--files', str(self.path), '--output', str(output)]), \
              mock.patch.dict(os.environ, {'CENSUS_TARGET_DIR': str(binary_dir.parent)}), \
              mock.patch.object(census, 'fingerprint', return_value='fixture-fingerprint'), \
-             mock.patch.object(census, 'oracle_inventory', return_value={'gnu_commit': census.GNU_PIN, 'gnu_files': [], 'bundled_paths': []}), \
+             mock.patch.object(census, 'oracle_inventory', return_value={'library_paths': [], 'generated_support_paths': [], 'bundled_paths': []}), \
              mock.patch.object(census, 'gnu_oracle_binary', return_value=str(self.directory / 'fake-gnu-oracle')), \
              mock.patch.object(census.subprocess, 'run', return_value=oracle), \
              mock.patch.object(census.subprocess, 'check_output', side_effect=discover), \
