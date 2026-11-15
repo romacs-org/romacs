@@ -22,7 +22,6 @@
 #[cfg(test)]
 mod tests {
     use crate::fonts::Display;
-    use romacs_vm::Vm;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
@@ -52,11 +51,13 @@ mod tests {
     /// (fboundp, boundp) refuses.
     fn undefined(names: Vec<String>, predicate: &'static str) -> Vec<String> {
         std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 24, 10).unwrap();
+            // The chain from a world, then the display, as a restored
+            // launch attaches it (main.rs), and the session.
+            let boot = crate::test_world::Boot { frame: (1200, 800, 24, 10), ..crate::test_world::Boot::LOADUP };
+            let (mut vm, loadup) = crate::test_world::chain(boot);
             vm.set_display_host(Some(Box::new(Display::new().unwrap())));
             let home = crate::test_home::private_home(&mut vm, &format!("census-{predicate}"));
-            let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
+            let started = crate::startup::resume_loadup(&mut vm, crate::startup::Launch::Loadup, loadup).unwrap();
             crate::startup::finish_loadup(&mut vm, &started).unwrap();
             // The Lisp halves primitives install on first use (the command
             // loop, the minibuffer, insdel, messages, scrolling, treesit),

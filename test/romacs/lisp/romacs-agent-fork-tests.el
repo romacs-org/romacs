@@ -173,6 +173,86 @@ start launched, its manifest written."
                 (should (< (string-search "hello source" text) (string-search "Forked from" text)))))
           (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-fork-draws-its-source-s-last-turns ()
+  ;; A fork of a long conversation draws the source's last turns that
+  ;; fit the chat's, under the row that draws the rest.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (let ((romacs-agent-chat-turns 2))
+      (write-region (mapconcat
+                     (lambda (n)
+                       (concat (json-serialize
+                                (romacs-mcp--object
+                                 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                                          "romacsRequest" n "type" "user")
+                                 "seq" (1- (* 2 n)) "t" n))
+                               "\n"
+                               (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
+                                                                   "seq" (* 2 n) "t" n))
+                               "\n"))
+                     (number-sequence 1 5) "")
+                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
+      (setf (romacs-agent-seq source) 10)
+      (let* ((fork (romacs-agent-fork source))
+             (buffer (save-window-excursion (romacs-agent-show fork))))
+        (unwind-protect
+            (with-current-buffer buffer
+              (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                (should (string-prefix-p "▴ Earlier turns" text))
+                (should-not (string-search "question 3" text))
+                (should (string-search "question 4" text))
+                (should (string-search "question 5" text))
+                (should (string-search "Forked from Plan" text))))
+          (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-fork-made-again-draws-the-latest-turns ()
+  ;; Forked at the source's turn 5, then again at its turn 10 (the fork
+  ;; had not spoken): its last two turns are the source's 9 and 10.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (let ((romacs-agent-chat-turns 2) (id (romacs-agent-id source)))
+      (write-region (mapconcat
+                     (lambda (n)
+                       (concat (json-serialize
+                                (romacs-mcp--object
+                                 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                                          "romacsRequest" n "type" "user")
+                                 "seq" (1- (* 2 n)) "t" n))
+                               "\n"
+                               (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
+                                                                   "seq" (* 2 n) "t" n))
+                               "\n"))
+                     (number-sequence 1 10) "")
+                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
+      (setf (romacs-agent-seq source) 20)
+      (let ((fork (romacs-agent-fork source)))
+        (write-region (concat (json-serialize (romacs-mcp--object
+                                               "note" (romacs-mcp--object "from" id "seq" 10 "title" "Plan" "turns" 5 "type" "fork")
+                                               "seq" 1 "t" 1))
+                              "\n"
+                              (json-serialize (romacs-mcp--object
+                                               "note" (romacs-mcp--object "after" 10 "from" id "seq" 20 "title" "Plan"
+                                                                          "turns" 10 "type" "fork")
+                                               "seq" 2 "t" 2))
+                              "\n")
+                      nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)
+        (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+          (unwind-protect
+              (with-current-buffer buffer
+                (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                  (should (string-prefix-p "▴ Earlier turns" text))
+                  (should-not (string-match-p "question [1-8]\\b" text))
+                  (should (string-search "question 9" text))
+                  (should (string-search "question 10" text))
+                  ;; Two more: the source's 7 and 8, point at 9, where it was.
+                  (goto-char (point-min))
+                  (romacs-agent-chat-earlier)
+                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                    (should-not (string-match-p "question [1-6]\\b" text))
+                    (should (string-search "question 7" text)))
+                  (should (looking-at-p "> question 9"))))
+            (kill-buffer buffer)))))))
+
 (ert-deftest romacs-agent-fork-names ()
   ;; A fork's fork is no "(fork) (fork)"; one whose only turn was cut has
   ;; a conversation.
