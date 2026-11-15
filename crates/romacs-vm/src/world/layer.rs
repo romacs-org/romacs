@@ -387,8 +387,10 @@ impl Plan {
     /// This plan with what RECORDED adds: a session restored from this
     /// plan's layer issues no autoload for a library the layer holds, so
     /// RECORDED lacks those entries; they are kept, and each entry of
-    /// RECORDED not in this plan is inserted where RECORDED has it. The
-    /// init's digest is RECORDED's.
+    /// RECORDED not in this plan is inserted where RECORDED has it. One
+    /// this plan holds earlier than RECORDED's order reaches it (the
+    /// restored session issued its loads in another order) is this plan's
+    /// already. The init's digest is RECORDED's.
     pub fn merged(&self, recorded: &Plan) -> Plan {
         let path = |plan: &Plan, entry: &Entry| plan.load_paths[entry.load_path].clone();
         let same = |a: &Entry, pa: &[String], b: &Entry, pb: &[String]| a.same(b) && pa == pb;
@@ -401,6 +403,7 @@ impl Plan {
                     merged.extend(self.entries[cursor..cursor + ahead + 1].iter().map(|kept| (kept.clone(), path(self, kept))));
                     cursor += ahead + 1;
                 }
+                None if self.entries[..cursor].iter().any(|kept| same(kept, &path(self, kept), entry, &paths)) => {}
                 None => merged.push((entry.clone(), paths)),
             }
         }
@@ -869,6 +872,8 @@ mod tests {
                    ["display-line-numbers", "savehist", "which-key", "org", "new", "eat"]);
         assert_eq!(merged.init_digest, recorded.init_digest);
         assert!(layer.merged(&plan(vec![require("savehist"), require("org"), require("eat")])).same_loads(&layer));
+        // Loads issued in another order are the layer's already, not new ones.
+        assert!(layer.merged(&plan(vec![require("org"), require("savehist"), require("eat")])).same_loads(&layer));
         // The store's plan is replaced for a load, an init or a sibling change, and only those.
         let kept = plan(vec![require("org")]);
         assert!(!kept.supersedes(Some(&kept)) && kept.supersedes(None));
