@@ -6,7 +6,10 @@ unknown functions, wrong argument counts, untrue `declare-function`s, free and
 unused variables, line pins, and hints for what Romacs offers instead. One
 finding a line, with its fix.
 
-By default it reports what the change adds: the files' text at the base (the
+Each file is linted in a machine of its own, since loading a file can change
+the machine that loads it (a load script resets `load-path`, reloads
+libraries, or writes files), and that machine works in a private home, not in
+the tree. By default it reports what the change adds: the files' text at the base (the
 merge-base with the trunk, or --base) is linted the same way, and a finding
 the base also gives is counted, not shown. --all shows every finding. Exit 1
 when an error or a warning is shown, 2 when the host gave no result.
@@ -16,6 +19,7 @@ world, so a run takes about a second; a build's host boots from source.
 """
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import re
@@ -91,19 +95,31 @@ def summary(files, lines, base, older):
     return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}'
 
 
-def lint(binary, arguments, cwd, timeout):
-    """Run the host's lint with ARGUMENTS in CWD: (STATUS, OUTPUT, ERRORS).
-    STATUS is None unless the lint ran to its closing line: a host that did
-    not start, a file that ended the host as it loaded, a timeout."""
+def lint(binary, arguments, timeout):
+    """Run the host's lint with ARGUMENTS in a private home, its working
+    directory too: (STATUS, OUTPUT, ERRORS). STATUS is None unless the lint
+    ran to its closing line: a host that did not start, a file that ended the
+    host as it loaded, a timeout."""
     command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/romacs/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
-            done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=cwd,
+            done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=home,
                                   capture_output=True, text=True, errors='replace', timeout=timeout)
         except subprocess.TimeoutExpired:
             return None, '', f'no result within {timeout:g}s\n'
     finished = done.returncode in (0, 1) and COMPLETE.search(done.stdout)
     return (done.returncode if finished else None), done.stdout, done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n')
+
+
+def lint_each(binary, options, files, timeout, jobs=4):
+    """Lint each of FILES in a machine of its own, with the lint's OPTIONS:
+    (FINDINGS, ERRORS), FINDINGS None when a file's lint gave no result."""
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(files)))) as pool:
+        runs = list(pool.map(lambda file: lint(binary, [*options, str(file)], timeout), files))
+    errors = ''.join(errors for _, _, errors in runs)
+    if any(status is None for status, _, _ in runs):
+        return None, errors
+    return [line for _, output, _ in runs for line in findings(output)], errors
 
 
 def base_files(root, base, files, into):
@@ -138,21 +154,22 @@ def main():
         parser.error('no such file: ' + ', '.join(missing))
     files = [path.resolve() for path in args.files]
     base = args.base or merge_base(ROOT, os.environ.get('ROMACS_BASE', 'beta'))
-    status, output, errors = lint(binary, (['--base', base] if base else []) + [str(path) for path in files], ROOT, args.timeout)
-    if status is None:
+    shown, errors = lint_each(binary, (['--base', base] if base else []) + ['--names-from', str(ROOT)], files, args.timeout)
+    if shown is None:
         sys.stderr.write(errors)
         print('romacs-lint: the host gave no result', file=sys.stderr)
         return 2
-    shown, older = findings(output), 0
+    older = 0
     if base and not args.all:
         with tempfile.TemporaryDirectory(prefix='romacs-lint-base-') as directory:
-            had = base_files(ROOT, base, files, Path(directory))
-            base_status, base_output, base_errors = lint(binary, ['--root', str(ROOT)] + had, directory, args.timeout) if had else (0, '', '')
-        if base_status is None:
+            had = [Path(directory) / name for name in base_files(ROOT, base, files, Path(directory))]
+            before, base_errors = (lint_each(binary, ['--root', str(ROOT), '--names-from', directory], had, args.timeout)
+                                   if had else ([], ''))
+        if before is None:
             sys.stderr.write(base_errors)
             print('romacs-lint: the base did not lint: every finding counts as new', file=sys.stderr)
-            base_output = ''
-        fresh = added(shown, findings(base_output))
+            before = []
+        fresh = added(shown, before)
         shown, older = fresh, len(shown) - len(fresh)
     for line in shown:
         print(line)
