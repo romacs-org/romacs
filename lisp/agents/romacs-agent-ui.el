@@ -1789,6 +1789,10 @@ keeps every turn."
 (defvar-local romacs-agent-ui--turns nil
   "How many of its last turns this chat draws, nil for all.")
 
+(defvar-local romacs-agent-ui--paged nil
+  "Non-nil once earlier turns were asked for by hand: the journal is read
+as far back as they go, past the bound a first show keeps to.")
+
 (defconst romacs-agent-ui--drawn-state
   '(romacs-agent-ui--run romacs-agent-ui--runs
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
@@ -1920,7 +1924,8 @@ recorded before it would land elsewhere."
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
   (let ((drawn (length (romacs-agent-ui--input-starts))))
-    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12)))
+    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12))
+          romacs-agent-ui--paged t)
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
     (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
@@ -1978,8 +1983,7 @@ composer as it is."
 its journal the first time a window shows it: a start brings back every
 chat that was open, and reads no journal for one not looked at."
   (let ((id (plist-get misc :session)))
-    (unless (romacs-agent-get id) (romacs-agent-know-sessions))
-    (when-let* ((session (romacs-agent-get id))
+    (when-let* ((session (romacs-agent-load-session id))
                 (buffer (let ((live (romacs-agent-buffer session)))
                           (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer
@@ -2006,7 +2010,8 @@ draw BUDGET turns of them, its journal read to byte END: an alist as
 claim (a fork made again takes on from where its last one took), and a
 source's own source what the fork's first part leaves."
   (let ((plan nil))
-    (dolist (note (reverse (romacs-agent--journal-notes session "fork" end)) plan)
+    ;; A fork's notes come before its first prompt: only that is read.
+    (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session end))) plan)
       (let* ((source (romacs-agent-get (gethash "from" note)))
              (after (or (romacs-agent--value (gethash "after" note)) 0))
              (upto (or (romacs-agent--value (gethash "seq" note)) 0))
@@ -2029,7 +2034,7 @@ harness's own transcript it was imported from, when it was: its last
 `romacs-agent-ui--turns' turns, under a row that draws earlier ones, when
 it has more."
   (let* ((turns romacs-agent-ui--turns)
-         (tail (and turns (romacs-agent--journal-tail session turns)))
+         (tail (and turns (romacs-agent--journal-tail session turns nil nil (and romacs-agent-ui--paged 'none))))
          (from (car tail))
          ;; A fork's own turns short of them: its sources draw the rest.
          (romacs-agent-ui--source-plan (and turns (not from) (romacs-agent-ui--plan-sources session (- turns (cdr tail))))))

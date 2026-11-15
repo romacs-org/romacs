@@ -48,14 +48,15 @@ whose kept state predates that is read once to know."
         head))))
 
 (defun romacs-agent--claude-head-read (session)
-  "`romacs-agent--claude-head', from all of SESSION's records."
-  (let* ((records (romacs-agent--journal-records session))
-         (said (cl-position-if #'romacs-agent--record-request records :from-end t))
-         (rolled (cl-position-if (lambda (record) (or (romacs-agent--rollback-note-p record)
-                                                      (romacs-agent--note-p record "renew")))
-                                 records :from-end t)))
-    (when (and rolled (or (not said) (> rolled said)))
-      (or (romacs-agent--claude-cursor (romacs-agent--live-records records)) 'fresh))))
+  "`romacs-agent--claude-head', from SESSION's records: its journal's last
+prompt, rollback or renewal, read from its end (only as far back as that),
+and all of them only after a rollback or renewal."
+  (when-let* ((last (romacs-agent--journal-last
+                     session '("romacsRequest" "\"rollback\"" "\"renew\"")
+                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)
+                                          (romacs-agent--note-p record "renew")))))
+              ((or (romacs-agent--rollback-note-p last) (romacs-agent--note-p last "renew"))))
+    (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh)))
 
 (cl-defun romacs-agent--claude-rollback (session records request)
   "SESSION goes back to before prompt REQUEST by its next run: resumed at

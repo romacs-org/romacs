@@ -333,17 +333,25 @@ call stays running until its answer is ready."
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
 
+(defvar romacs-agent-tools--woken-seqs (make-hash-table :test #'eq :weakness 'key)
+  "Each session's last turn end delivered to its parent, as its file was
+read or written here: an end is checked against it without reading it.")
+
 (defun romacs-agent-tools--woken (session)
   "The journal seq of SESSION's last turn end delivered to its parent."
-  (or (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--woken-file session))
-                                       (string-to-number (buffer-string))))
-      0))
+  (or (gethash session romacs-agent-tools--woken-seqs)
+      (puthash session
+               (or (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent-tools--woken-file session))
+                                                    (string-to-number (buffer-string))))
+                   0)
+               romacs-agent-tools--woken-seqs)))
 
 (defun romacs-agent-tools--mark-woken (session seq)
   "SESSION's turn ends through SEQ are delivered (never moving back): the
 parent's harness takes them in order."
   (when (> seq (romacs-agent-tools--woken session))
-    (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))))
+    (with-temp-file (romacs-agent-tools--woken-file session) (insert (number-to-string seq)))
+    (puthash session seq romacs-agent-tools--woken-seqs)))
 
 (defconst romacs-agent-tools--wake-limit 16000
   "The most of a child's result a wake carries: the rest is
@@ -667,6 +675,7 @@ waiting for its parent: a session with no journal has had no end but its
 launches' failures, each numbered as the first, so the next one wakes
 its parent again."
   (delete-file (romacs-agent-tools--woken-file child))
+  (remhash child romacs-agent-tools--woken-seqs)
   (delete-file (expand-file-name "answered" (romacs-agent-dir child)))
   (remhash (romacs-agent-id child) romacs-agent-tools--answered)
   (remhash child romacs-agent-tools--handed)
@@ -1432,35 +1441,47 @@ from; and each one Romacs cannot run, with why."
 (defun romacs-agent-tools--restart-wake-file (session)
   (expand-file-name "restart-wake" (romacs-agent-dir session)))
 
-(defun romacs-agent-tools--restart-ready (id)
-  "A restart request's READY for session ID: its turn has ended."
-  (lambda ()
-    (when-let* ((session (romacs-agent-get id))
-                ((memq (romacs-agent-state session) '(starting running waiting-approval))))
-      (list (format "agent session %s's turn is running" (romacs-agent-title session))))))
+(defvar romacs-restart-requester)
+(declare-function romacs-restart-record "warm-restart" (&optional id))
 
 (defun romacs-agent-tools--restart (arguments)
-  "Schedule a restart after the calling session's turn; tell it after."
+  "Schedule a supervised restart once this call's reply is out and the
+editor is between commands; tell the calling session its verdict."
   (romacs-mcp--instance arguments)
   (require 'warm-restart)
   (let* ((id (romacs-agent-tools--caller))
          (session (and id (romacs-agent-get id))))
     (warm-restart-request
-     :ready (and session (romacs-agent-tools--restart-ready id))
      :target (gethash "target" arguments)
      :delay (gethash "delay" arguments)
      :expiry (gethash "expiry" arguments)
-     :force (eq (gethash "force" arguments) t)
-     ;; Written just before the restart: the successor tells the session.
-     :before (and session (lambda () (write-region "" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
+     ;; What the image cannot carry ends, or comes back with its package:
+     ;; no process of the user's holds a restart.
+     :force t
+     ;; Just before the restart: the supervisor's verdict is told this
+     ;; session; a build without verdicts (a rollback to an older one)
+     ;; tells it from the wake file.
+     :before (and session (lambda ()
+                            (setq romacs-restart-requester id)
+                            (write-region "verdict" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
      :failed (and session (lambda (why)
+                            (setq romacs-restart-requester nil)
                             (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
-                            (romacs-agent-tools--deliver session (format "Romacs restart failed, this session goes on: %s" why)
+                            (romacs-agent-tools--deliver session (format "Romacs restart did not start, this session goes on: %s" why)
                                                          #'ignore))))
     (romacs-mcp--object
      "status" (symbol-name (plist-get warm-restart-last-result :status))
      "target" (or (gethash "target" arguments) :null)
-     "waitsFor" (if session "this session's turn to end, then nothing in the way" "nothing in the way"))))
+     "waitsFor" "this call's reply, then the editor between commands"
+     "verdict" "told this session when the new Romacs is judged; romacs_restart_status reads the record")))
+
+(defun romacs-agent-tools--restart-status (arguments)
+  "The record of a restart: its plan, its phases with times, its verdict."
+  (romacs-mcp--instance arguments)
+  (require 'warm-restart)
+  (or (romacs-restart-record (gethash "restart" arguments))
+      (romacs-mcp--object "state" "none" "restart" (or (gethash "restart" arguments) :null)
+                          "message" "No restart record")))
 
 (defun romacs-agent-tools--build-text ()
   "Which build this process runs, for the restarted sessions' message."
@@ -1472,11 +1493,14 @@ from; and each one Romacs cannot run, with why."
                 (format "the build at %s" invocation-directory)))))
 
 (defun romacs-agent-tools--restart-wakes ()
-  "After a restart: tell each session that asked for it, once."
+  "After a restart: tell each session that asked for it, once.  One whose
+wake file says `verdict' is told by the restart's supervisor instead
+\(`romacs-restart-verdict')."
   (let ((text nil))
     (dolist (session (romacs-agent-sessions))
       (let ((file (romacs-agent-tools--restart-wake-file session)))
-        (when (file-exists-p file)
+        (when (and (file-exists-p file)
+                   (not (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "verdict")))
           (romacs-agent-tools--deliver session (or text (setq text (romacs-agent-tools--build-text)))
                                        (lambda () (ignore-errors (delete-file file)))
                                        (lambda () (file-exists-p file))))))))
@@ -1734,14 +1758,33 @@ far (its first request, the latest turns, its tool calls). Now when it is idle, 
  #'romacs-agent-tools--cancel)
 
 (romacs-mcp-register-tool
+ "romacs_restart"
+ "Restart Romacs into a new process, supervised: the session (buffers, windows, histories) and its agent sessions \
+carry over, and the new process must show its socket, a window, its init done and its restore done within \
+deadlines, or the old build is started again with the same session. target is a build directory (one holding \
+romacs-vm-gui and lisp/) or a binary; omitted, this build again. It starts once this call's reply is out and the \
+editor is between commands. This session is told the verdict (verified, rolled back and why) when it is known; \
+romacs_restart_status reads the record."
+ (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number") ("expiry" . "number")) nil)
+ #'romacs-agent-tools--restart)
+
+(romacs-mcp-register-tool
+ "romacs_restart_status"
+ "A restart's record, the newest when restart (its id) is omitted: its plan, each phase with its time, the \
+checks that failed and the verdict (verified, rolled-back, rollback-failed)."
+ (romacs-mcp--schema '(("instance" . "string") ("restart" . "string")) nil)
+ #'romacs-agent-tools--restart-status
+ (romacs-mcp--object "readOnlyHint" t))
+
+(romacs-mcp-register-tool
  "romacs_restart_request"
  "Restart Romacs into a new process once your turn ends, carrying the session (buffers, windows, histories) \
 and its agent sessions: after an install, the new build runs. target is a build directory (one holding \
 romacs-vm-gui and lisp, e.g. the launcher's current) or a binary; omitted, the session's restart \
 command or its own binary. It waits until your turn has ended, nothing is BLOCKED (unsaved work that cannot be \
 carried), no Romacs tool call is in flight and the editor is between commands, for delay seconds (default 2), up \
-to expiry seconds (default 900). A process that would end (a shell) is in the way unless force. After the \
-restart this session is told \"Romacs restarted into <commit>\"; if it fails, it is told why."
+to expiry seconds (default 900). The same supervised restart as romacs_restart, whose verdict this session is \
+told."
  (romacs-mcp--schema '(("instance" . "string") ("target" . "string") ("delay" . "number")
                        ("expiry" . "number") ("force" . "boolean"))
                      nil)
