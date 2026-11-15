@@ -202,6 +202,14 @@ rolls back by the line (revert REQUEST)."
         (setf (romacs-agent-driver-state session) (romacs-agent--without (romacs-agent-driver-state session) '(:rolled-back)))
         (romacs-agent--claude-argv session t)
         (romacs-agent--claude-argv session t)
+        (should (= reads 3))
+        ;; Spoken to, then its harness ending and starting again: still
+        ;; known across the runs, nothing read.
+        (romacs-agent--record session (let ((p (romacs-agent-rollback-tests--prompt 12 "c"))) (puthash "seq" 7 p) p))
+        (romacs-agent--record session (romacs-mcp--object "seq" 8 "exit" 0))
+        (romacs-agent--record session (romacs-mcp--object "seq" 9 "note" (romacs-mcp--object "type" "run")))
+        (should (plist-member (romacs-agent-driver-state session) :rolled-back))
+        (romacs-agent--claude-argv session t)
         (should (= reads 3))))))
 
 (ert-deftest romacs-agent-rollback-claude-to-its-start-is-a-conversation-anew ()

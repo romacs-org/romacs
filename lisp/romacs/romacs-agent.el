@@ -1400,7 +1400,7 @@ itself, so the turn goes on whatever becomes of this server."
     ;; A run starts on its driver as defined now: one loaded since speaks
     ;; to the next run, never to the one going on.
     ('run (setf (romacs-agent-driver session) nil
-                (romacs-agent-driver-state session) (list :run (plist-get event :seq))
+                (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
                 ;; The mode is the run's: unknown till its harness says.
                 (romacs-agent-permission-mode session) nil
                 (romacs-agent-startup-pending session) nil))
@@ -1504,7 +1504,8 @@ itself, so the turn goes on whatever becomes of this server."
     ('exit
      ;; A run's startup is its own: the next run starts over.  What its
      ;; harness asked is no longer anyone's to answer.
-     (setf (romacs-agent-driver-state session) nil (romacs-agent-startup-pending session) nil)
+     (setf (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
+           (romacs-agent-startup-pending session) nil)
      (clrhash (romacs-agent-approvals session))
      ;; Ended with its last prompt's turn never done: cut, however many
      ;; runs (a resumed one journals no prompt) it took.
@@ -1605,6 +1606,12 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
   (when (plist-get (romacs-agent-options session) :parent)
     (push (list (romacs-agent-done-seq session) (romacs-agent-reply session) (romacs-agent-failed session))
           (romacs-agent-ends session))))
+
+(defun romacs-agent--driver-anew (session &rest state)
+  "SESSION's driver state for a new run: STATE, and what its conversation
+keeps across runs (`:rolled-back', when known)."
+  (let ((old (romacs-agent-driver-state session)))
+    (if (plist-member old :rolled-back) (append state (list :rolled-back (plist-get old :rolled-back))) state)))
 
 (defun romacs-agent--record (session record)
   "Handle one journal RECORD of SESSION."
@@ -3210,7 +3217,7 @@ keeps the conversation there."
     ;; A conversation that never began (its first run never started) is
     ;; begun, under its own id: there is none to resume.
     (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
-  (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) nil
+  (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
   (romacs-agent--changed session)
   (romacs-agent--attach session romacs-agent--launch-tries)
