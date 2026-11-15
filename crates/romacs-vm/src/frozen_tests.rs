@@ -223,6 +223,8 @@ fn id_exhaustion_signals_instead_of_corrupting() {
 #[test]
 fn a_freeze_and_discard_loop_is_bounded() {
     let mut vm = vm();
+    // GNU's threshold, so that the loop's 40 MB collect as they are made (VM2-GC-PACING).
+    eval(&mut vm, "(setq gc-cons-threshold 800000)");
     eval(&mut vm, "(dotimes (i 400) (freeze (make-string 100000 ?a)))");
     assert!(vm.region_count() < 64, "{} regions live after the loop", vm.region_count());
 }
