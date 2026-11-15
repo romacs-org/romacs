@@ -46,7 +46,6 @@ mod composition_targets;
 mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
-pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
 mod scene;
 pub(in crate::render_thread) mod surface;
@@ -71,7 +70,7 @@ use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
 /// against pixels nobody saw.
 struct RenderedFrameSurface {
     output: wgpu::SurfaceTexture,
-    frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    frame: std::sync::Arc<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
     projection: Option<romacs_display_protocol::InteractionProjection>,
     /// What the composed picture holds of the native models (design §6.2).
     models: super::models::ModelPicture,
@@ -298,7 +297,9 @@ fn render_frame_window_contents_reserved(
             render.emacs_frame_id,
             present_mapping.presentation(),
         );
-        surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)?
+        romacs_display_protocol::meter::spent(crate::render_thread::frame_cost::ACQUIRE, || {
+            surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)
+        })?
     };
 
     // Placed here, after the surface is in hand: `sample_pane_layout`
@@ -355,7 +356,7 @@ fn render_frame_window_contents_reserved(
     // running.
     let need_offscreen = feature_plan.compose_offscreen || !pane_blits.is_empty();
 
-    let mut frame = render
+    let (mut frame, mut hints) = render
         .take_current_frame_for_render(&acquired)
         .ok_or(FrameRenderFailure::AwaitingContent)?;
     romacs_display_protocol::present_trace::record(
@@ -363,9 +364,12 @@ fn render_frame_window_contents_reserved(
         render.emacs_frame_id,
         frame.presentation_id,
     );
-    feature_plan.prepare_frame(&mut frame);
+    feature_plan.prepare_frame(&mut frame, &mut hints);
     render.begin_presentable_render();
     if extra_line_spacing != 0.0 || extra_letter_spacing != 0.0 {
+        let frame = std::sync::Arc::make_mut(&mut frame);
+        // Moved glyphs are no longer the layout's (see `layout_identity`).
+        frame.layout_identity = 0;
         RenderApp::apply_extra_spacing(
             &mut frame.glyphs,
             &mut frame.window_cursors,
@@ -520,7 +524,8 @@ fn render_frame_window_contents_reserved(
             render,
             composition,
             &composition_view,
-            &mut frame,
+            &frame,
+            &hints,
             &inputs,
             feature_plan.accept_derived_effects,
             &pane_blits,
@@ -531,7 +536,8 @@ fn render_frame_window_contents_reserved(
             native,
             render,
             &composition_view,
-            &mut frame,
+            &frame,
+            &hints,
             &inputs,
             feature_plan.accept_derived_effects,
         ),

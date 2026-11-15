@@ -838,6 +838,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
                       std::sync::atomic::Ordering::Relaxed);
     // Batch and the isolates keep GNU's `noninteractive' messages on stderr.
     romacs_vm::host::set_messages_to_stderr(diagnostics());
+    // A frame's cost in instructions, said per frame on the render thread.
+    if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
+        romacs_display_protocol::meter::install(romacs_vm::host::instruction_count);
+    }
     if trace_latency { romacs_display_runtime::paint_host::enable_key_latency_trace(); }
     // Startup phases, on the clock of this process's exec, under the trace.
     let mut phases = trace_latency.then(startup::Phases::from_exec);
@@ -913,7 +917,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let start = phases.as_ref().map(startup::Phases::start);
     let serving = serve.is_some();
     let early_window = match &serve {
-        Some(_) if serve_frame => Some(sender.show_primary(width, height, "romacs".into())?),
+        Some(_) if serve_frame => Some(sender.realize(romacs_display_runtime::paint_host::INITIAL_FRAME, width, height, "romacs".into())?),
         _ => None,
     };
     let worker = spawn_evaluator(move || {
@@ -1142,7 +1146,7 @@ fn paint(
     if wait != Wait::No { activate(sender, presentation, host)?; }
     let activation_ns = activation_start.elapsed().as_nanos();
     let wait_start = Instant::now();
-    let render = || sender.wait_for_render(presentation, std::time::Duration::from_secs(30));
+    let render = || sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, std::time::Duration::from_secs(30));
     let diagnostic = match wait {
         Wait::No => None,
         Wait::Rendered => Some(render()?),
@@ -1526,7 +1530,7 @@ fn evaluate(
         loop {
             // read_char returns the quit character for a quit still pending
             // (keyboard.c:4102), ahead of the keys typed meanwhile.
-            if live && vm.take_quit_key() { queue(&host).push_front(quit::quit_key()); }
+            if live && vm.take_quit_key() { queue(&host).push_front(quit::quit_key(romacs_display_runtime::paint_host::INITIAL_FRAME)); }
             // read_char takes Lisp's unread queues before host input: a key
             // Lisp read and pushed back (sit-for in a timer) starts the next
             // command, which the Lisp command loop reads.
@@ -1709,7 +1713,7 @@ fn evaluate(
             // repainting timer has already submitted the next.
             let mut retired = false;
             if let Some((in_flight, submitted)) = live_presentation.in_flight() {
-                if let Ok(diagnostic) = sender.wait_for_render(in_flight, std::time::Duration::ZERO) {
+                if let Ok(diagnostic) = sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, in_flight, std::time::Duration::ZERO) {
                     live_presentation.completed(in_flight, Instant::now());
                     if diagnostics() { crate::diagnostic_line(&json!({"diagnostic":"paint","presentation":diagnostic.presentation,
                         "buffer_versions":previous.frame.snapshot.windows.iter().map(|w|w.snapshot.buffer_version).collect::<Vec<_>>(),
@@ -1818,7 +1822,7 @@ fn evaluate(
                 // A user signal `debug-on-event' names sets `quit-flag': its
                 // quit key runs into the debugger.
                 vm.take_debug_event();
-                if vm.take_quit_key() { queue(&host).push_back(quit::quit_key()); continue; }
+                if vm.take_quit_key() { queue(&host).push_back(quit::quit_key(romacs_display_runtime::paint_host::INITIAL_FRAME)); continue; }
                 match terminal_wait::wait(sender.input(), &terminal_ready, timers::sooner(live_presentation.wait(presentation::render_stall()), idle.delay), &processes) {
                     terminal_wait::Wake::Input(event) => queue(&host).push_back(event),
                     terminal_wait::Wake::Closed => return Ok(exit::Exit::new("host-input-closed", "", 1)),

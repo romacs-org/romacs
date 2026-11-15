@@ -406,6 +406,29 @@ Only the display backend is replaced; session and wrapper setup are real."
     (should (seq-every-p (lambda (line) (<= (string-width line) 8))
                         (split-string truncated "\n" t)))))
 
+(ert-deftest keymap-popup-descriptions-test-truncated-cell-keeps-next-column ()
+  "A description cut to its room, with a GUI session's three dots
+\(VM2-ELLIPSIS), leaves the next column where every other row has it:
+no `…', which some fonts draw wider than the one column it counts."
+  (let* ((truncate-string-ellipsis "...")
+         (long (keymap-popup--resolve-description
+                "Go on under another instance, a label far past the forty columns a description has"))
+         (rows `(((:name "Session" :entries ((:key "H" :description ,long) (:key "n" :description "New session")))
+                  (:name "Workers" :entries ((:key "1" :description "lane gen-gc")
+                                             (:key "2" :description "lane text-core"))))))
+         (lines (split-string (keymap-popup--render rows) "\n" t))
+         ;; Where the Workers group's entries start: on the truncated
+         ;; entry's row and on the one under it.
+         (column (lambda (line)
+                   (when-let* ((at (string-match "[12]  lane" line)))
+                     (string-width (substring line 0 at))))))
+    (should (string-suffix-p "..." long))
+    (should-not (string-search "…" long))
+    (should (= (string-width long) keymap-popup--max-description-width))
+    (let ((columns (delq nil (mapcar column lines))))
+      (should (= (length columns) 2))
+      (should (apply #'= columns)))))
+
 (defun keymap-popup-descriptions-test--child-local-rebinding (annotated)
   "Check inherited labels and policy after child-local ANNOTATED rebinding."
   (with-temp-buffer

@@ -233,16 +233,16 @@ string, an overlay."
       (romacs-agent-ui--children-flush)
       ;; Idle while a worker works: it waits on its workers.
       (should (string-search "  Waiting on its workers  " (romacs-agent-header-tests--header)))
-      (should (string-search "  1 working  " (romacs-agent-header-tests--header)))
+      (should (string-search "  1 threads live  " (romacs-agent-header-tests--header)))
       ;; Glyphs turned on: the line and the state are said by them.
       (setf (romacs-agent-state session) 'running)
       (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t))
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list session))))
         (unwind-protect
             (progn (customize-set-variable 'romacs-agent-glyphs t)
-                   (should (string-suffix-p "  🤖  opus-5-5 high  🤖1  44%%" (romacs-agent-header-tests--header))))
+                   (should (string-suffix-p "  🤖  opus-5-5 high  🧵1  44%%" (romacs-agent-header-tests--header))))
           (customize-set-variable 'romacs-agent-glyphs nil))
-        (should (string-suffix-p "  Working  opus-5-5 high  1 working  44%%" (romacs-agent-header-tests--header))))
+        (should (string-suffix-p "  Working  opus-5-5 high  1 threads live  44%%" (romacs-agent-header-tests--header))))
       ;; A font set that cannot draw the harness's icon: its name.
       (cl-letf (((symbol-function 'char-displayable-p) #'ignore)
                 ((symbol-function 'romacs-agent-sessions) (lambda () (list session))))

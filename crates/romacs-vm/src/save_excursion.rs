@@ -113,11 +113,25 @@ impl Vm {
         Ok(dest)
     }
 
-    /// editfns.c save_restriction_save_1: the current buffer when it is not
-    /// narrowed, else (BEG . END), a left-biased marker at BEGV and a
-    /// right-biased one at ZV.
+    /// editfns.c `save_restriction_save`: `save_restriction_save_1`'s current
+    /// buffer when it is not narrowed, else (BEG . END), a left-biased
+    /// marker at BEGV and a right-biased one at ZV; then the buffer and its
+    /// labeled restrictions (`prim/leaf/labeled_restrictions.rs`), as
+    /// (DATA BUFFER . LABELS), unless it is neither narrowed nor labeled,
+    /// when it is the buffer alone. The buffer is kept apart from the
+    /// markers, which `buffer-swap-text` moves to the other buffer.
     pub(crate) fn save_restriction_data(&mut self) -> Result<Value> {
         let index = self.buffer_index()?;
+        let restriction = self.saved_restriction(index)?;
+        let labeled = self.labeled_restrictions(index);
+        let buffer = self.slots[self.buffer_slot].value;
+        if restriction == buffer && labeled == Value::NIL { return Ok(buffer); }
+        let labels = self.alloc_cons(buffer, labeled);
+        Ok(self.alloc_cons(restriction, labels))
+    }
+
+    /// `save_restriction_save_1`.
+    fn saved_restriction(&mut self, index: usize) -> Result<Value> {
         let buffer = self.slots[self.buffer_slot].value;
         let bounds = match &self.objects[index] {
             Object::Buffer(t) if t.accessible() != (ByteOffset(0)..ByteOffset(t.len_bytes())) => t.accessible(),
@@ -133,10 +147,22 @@ impl Vm {
         Ok(self.alloc_cons(beg, end))
     }
 
-    /// editfns.c save_restriction_restore_1: widen a buffer saved unnarrowed,
-    /// or restore a saved restriction and detach its markers, unless the
-    /// buffer was killed. Point is clipped into the restored bounds.
-    pub(crate) fn restore_restriction_data(&mut self, data: Value) -> Result<()> {
+    /// editfns.c `save_restriction_restore`: the buffer's labeled
+    /// restrictions as they were saved, then `save_restriction_restore_1`:
+    /// widen a buffer saved unnarrowed, or restore a saved restriction and
+    /// detach its markers, unless the buffer was killed. Point is clipped
+    /// into the restored bounds.
+    pub(crate) fn restore_restriction_data(&mut self, saved: Value) -> Result<()> {
+        let (data, buffer, labeled) = match self.cons_pair(saved) {
+            Ok((data, rest)) => {
+                let (buffer, labeled) = self.cons_pair(rest)?;
+                (data, buffer, labeled)
+            }
+            Err(_) => (saved, saved, Value::NIL),
+        };
+        if buffer != Value::NIL && self.buffer_state(buffer)?.live {
+            self.set_labeled_restrictions(buffer.index(0)? - 1, labeled);
+        }
         let Ok((car, cdr)) = self.cons_pair(data) else {
             if self.buffer_state(data)?.live {
                 match self.object_mut(data)? {

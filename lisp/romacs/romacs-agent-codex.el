@@ -57,6 +57,21 @@ a thread is its startup's to say."
 run: its own is not named yet (Codex writes it when it forks)."
   (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-harness-session session))))
 
+(defun romacs-agent--codex-window (window place)
+  "A limit WINDOW Codex reports at PLACE (primary, secondary), as a
+rate-limit event's, or nil: :name by its length (five_hour, seven_day,
+N_minutes), else PLACE, :status, :used and :resets."
+  (when (and (hash-table-p window) (numberp (gethash "usedPercent" window)))
+    (let ((used (gethash "usedPercent" window))
+          (mins (romacs-agent--value (gethash "windowDurationMins" window))))
+      (list :name (romacs-agent--codex-window-name mins place)
+            :status (if (>= used 100) 'rejected 'allowed) :used (/ used 100.0)
+            :resets (romacs-agent--value (gethash "resetsAt" window))))))
+
+(defun romacs-agent--codex-window-name (mins place)
+  "A window MINS long, at PLACE: five_hour, seven_day, N_minutes, else PLACE."
+  (pcase mins (300 "five_hour") (10080 "seven_day") ((pred numberp) (format "%d_minutes" mins)) (_ place)))
+
 (defun romacs-agent--codex-rollback (session records request)
   "The `thread/revert' taking SESSION's live thread back to before prompt
 REQUEST: the turn it started, by the id its `turn/start' was answered
@@ -501,7 +516,9 @@ an approval or questions for the user, anything else refused."
                          :used (/ used 100.0)
                          :resets (romacs-agent--value (gethash "resetsAt" fullest))
                          :window (let ((mins (romacs-agent--value (gethash "windowDurationMins" fullest))))
-                                   (and (numberp mins) (format "%d minutes" mins)))))))))
+                                   (and (numberp mins) (format "%d minutes" mins)))
+                         :windows (delq nil (list (romacs-agent--codex-window (gethash "primary" limits) "primary")
+                                                  (romacs-agent--codex-window (gethash "secondary" limits) "secondary")))))))))
       ("thread/tokenUsage/updated"
        (let* ((usage (gethash "tokenUsage" params))
               (window (romacs-agent--value (gethash "modelContextWindow" usage))))
