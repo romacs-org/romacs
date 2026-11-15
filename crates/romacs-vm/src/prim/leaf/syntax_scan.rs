@@ -37,10 +37,21 @@ struct View<'a> {
     /// program runs.
     // CELL(Plain)
     ascii: [std::cell::Cell<i32>; 128],
-    /// The last character read, as (byte, code): a scan reads a
-    /// character, its syntax and its width at one position in turn.
+    /// The last non-ASCII character read, as (byte, code): a scan reads
+    /// a character and then its syntax at one position, and decoding one
+    /// costs more than this check.
     // CELL(Plain)
     last: std::cell::Cell<(usize, u32)>,
+    /// The chunk of text the scan is in, as (its first byte, its bytes):
+    /// a chunk never splits a character, so each read inside it decodes
+    /// in place instead of finding its chunk again.
+    // CELL(Plain)
+    window: std::cell::Cell<(usize, &'a [u8])>,
+}
+
+/// The UTF-8 width of the character whose first byte is LEAD.
+fn utf8_width(lead: u8) -> usize {
+    match lead { 0..0x80 => 1, 0xc0..0xe0 => 2, 0xe0..0xf0 => 3, _ => 4 }
 }
 
 /// The text of the multibyte buffer at INDEX.
@@ -69,6 +80,7 @@ fn cons_code(vm: &Vm, entry: Value) -> i32 {
 }
 
 impl<'a> View<'a> {
+    #[inline]
     fn new(vm: &'a Vm, index: usize, table: Value, properties: bool) -> Self {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
@@ -85,14 +97,41 @@ impl<'a> View<'a> {
             // than a short scan.
             ascii: [const { std::cell::Cell::new(UNREAD) }; 128],
             last: std::cell::Cell::new((usize::MAX, 0)),
+            window: std::cell::Cell::new((0, &[])),
         }
     }
+    /// The bytes from BYTE to the end of its chunk, the window moved
+    /// forward onto it when BYTE lies outside; empty at the end.
+    #[inline]
+    fn ahead(&self, t: &'a crate::text::Text, byte: usize) -> &'a [u8] {
+        let (base, bytes) = self.window.get();
+        if byte >= base && byte < base + bytes.len() {
+            return &bytes[byte - base..];
+        }
+        let bytes = t.chunk_from(byte);
+        self.window.set((byte, bytes));
+        bytes
+    }
+    /// The start of the character before byte END (END > 0, a character
+    /// boundary), the window moved back onto its chunk when needed.
+    #[inline]
+    fn start_before(&self, t: &'a crate::text::Text, end: usize) -> usize {
+        let (mut base, mut bytes) = self.window.get();
+        if !(end > base && end <= base + bytes.len()) {
+            let (chunk, start) = t.chunk_before(end);
+            (base, bytes) = (start, chunk);
+            self.window.set((base, bytes));
+        }
+        crate::text::char_start_in(bytes, base, end)
+    }
+    #[inline]
     fn len(&self) -> usize {
         match self.body {
             Body::Multibyte(t, _) => t.len_bytes(),
             Body::Unibyte(b) => b.bytes.len(),
         }
     }
+    #[inline]
     fn property(&self, byte: usize) -> Option<Value> {
         match self.body {
             Body::Multibyte(_, ref reader) => reader.as_ref()?.get(ByteOffset(byte)),
@@ -102,12 +141,18 @@ impl<'a> View<'a> {
 }
 
 impl scan::Text for View<'_> {
+    #[inline]
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
             Body::Multibyte(t, _) => {
+                let bytes = self.ahead(t, at.byte);
+                let Some(&lead) = bytes.first() else { return 0 };
+                if lead < 0x80 { return u32::from(lead); }
                 let (byte, code) = self.last.get();
                 if byte == at.byte { return code; }
-                let code = t.character_at(ByteOffset(at.byte)).ok().flatten().map_or(0, |c| c as u32);
+                let width = utf8_width(lead).min(bytes.len());
+                let code = std::str::from_utf8(&bytes[..width]).ok().and_then(|s| s.chars().next())
+                    .map_or(0, |c| t.code_at(at.byte, c));
                 self.last.set((at.byte, code));
                 code
             }
@@ -116,22 +161,25 @@ impl scan::Text for View<'_> {
             }),
         }
     }
+    #[inline]
     fn inc(&self, at: Pos) -> Pos {
         let width = match self.body {
             // A placeholder's UTF-8 width is its raw byte's internal width.
             Body::Multibyte(..) if at.byte >= self.len() => 1,
-            Body::Multibyte(..) => crate::lstring::char_string(self.char_at(at), &mut [0; 5]),
+            Body::Multibyte(t, _) => self.ahead(t, at.byte).first().map_or(1, |&lead| utf8_width(lead)),
             Body::Unibyte(_) => 1,
         };
         Pos { char: at.char + 1, byte: at.byte + width }
     }
+    #[inline]
     fn dec(&self, at: Pos) -> Pos {
         let mut byte = at.byte.saturating_sub(1).min(self.len());
         if let Body::Multibyte(t, _) = self.body && byte < self.len() {
-            byte = t.char_start_before(byte + 1);
+            byte = self.start_before(t, byte + 1);
         }
         Pos { char: at.char - 1, byte }
     }
+    #[inline]
     fn pos(&self, charpos: i64) -> Pos {
         match self.body {
             Body::Multibyte(t, _) => {
@@ -146,6 +194,7 @@ impl scan::Text for View<'_> {
             }
         }
     }
+    #[inline]
     fn syntax(&self, at: Pos) -> i32 {
         #[cfg(test)]
         READS.with(|n| n.set(n.get() + 1));
@@ -158,6 +207,7 @@ impl scan::Text for View<'_> {
         }
         self.table_syntax(c)
     }
+    #[inline]
     fn table_syntax(&self, c: u32) -> i32 {
         let Some(memo) = self.ascii.get(c as usize) else { return entry_code(self.vm, &self.table, c) };
         let read = memo.get();
@@ -168,6 +218,7 @@ impl scan::Text for View<'_> {
         memo.set(code);
         code
     }
+    #[inline]
     fn pass_comment_plain(&self, at: Pos, limit: i64) -> (Pos, Option<i32>) {
         let Body::Multibyte(text, ref reader) = self.body else { return (at, None) };
         let len = text.len_bytes();
