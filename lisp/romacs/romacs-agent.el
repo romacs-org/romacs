@@ -2048,9 +2048,31 @@ while it does not yet listen; the connection it replaces is let go."
               (romacs-agent--reattach-later session)
               nil)))))
 
+(defun romacs-agent--supervisor-listens-p (session)
+  "Whether SESSION's supervisor answers at its socket, as a server's load
+of its record asks.  A socket of this user's nothing answers at is one an
+ended supervisor left (a unit stop ends it before it removes its socket):
+it is dead, and removed, so SESSION and every later start load from what
+it kept, as with no socket, instead of replaying its whole journal each
+time.  One a supervisor starting now has bound there since it was looked
+at is another file, and stays.  A session whose attachment just ended
+looks again by the socket's presence (`romacs-agent--reattach-later'): its
+supervisor may be starting again."
+  (let* ((socket (romacs-agent-host-socket session))
+         (seen (file-attributes socket 'integer)))
+    (cond ((null seen) nil)
+          ((romacs-agent--listening-p socket) t)
+          (t (let ((now (file-attributes socket 'integer)) (delete-by-moving-to-trash nil))
+               (when (and now (eql (file-attribute-inode-number now) (file-attribute-inode-number seen))
+                          (eql (file-attribute-user-id now) (user-uid))
+                          (string-prefix-p "s" (file-attribute-modes now)))
+                 (ignore-errors (delete-file socket))))
+             nil))))
+
 (defun romacs-agent--caught-up-p (session)
   "Replay what SESSION's last supervisor journaled since it started, unseen
-here; non-nil when that ends with the harness's exit."
+here; non-nil when that ends with the harness's exit.  What the replay
+folded is kept, so the next start reads on from there."
   (when (romacs-agent-journal-start session)
     (let ((ended nil))
       (romacs-agent--read-journal
@@ -2058,6 +2080,7 @@ here; non-nil when that ends with the harness's exit."
                  (unless (eq (gethash "exit" record :absent) :absent) (setq ended t))
                  (romacs-agent--record session record))
        (romacs-agent-journal-start session))
+      (romacs-agent--keep-soon session)
       ended)))
 
 (defun romacs-agent--run-ended (session)
@@ -3582,7 +3605,7 @@ untouched."
         ;; supervisor's replay from that record, or here.
         (when-let* ((from (romacs-agent--restore-kept session)))
           (setf (romacs-agent-journal-start session) from))
-        (if (file-exists-p (romacs-agent-host-socket session))
+        (if (romacs-agent--supervisor-listens-p session)
             (romacs-agent--attach session 0)
           ;; No supervisor: what the journal says is all there is.
           (let ((romacs-agent-event-functions nil))

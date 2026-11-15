@@ -42,6 +42,8 @@
                         (cl-pushnew (file-name-nondirectory (directory-file-name (file-name-directory file))) manifests :test #'equal))
                       (apply read-json file args)))
                    ((symbol-function 'romacs-agent--attach) (lambda (s &rest _) (push (romacs-agent-id s) attached) nil))
+                   ;; Each fixture socket stands for a supervisor that answers.
+                   ((symbol-function 'romacs-agent--listening-p) #'file-exists-p)
                    ((symbol-function 'romacs-agent--endpoint) #'ignore)
                    ((symbol-function 'romacs-agent--sweep) #'ignore))
           (romacs-agent-know-tests--record root one)
