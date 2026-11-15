@@ -116,13 +116,6 @@ fn counter(line: &str) -> bool {
     line.contains("\"subtype\":\"thinking_tokens\"") && line.contains("\"type\":\"system\"")
 }
 
-/// WRITTEN, the result of appending to FILE from length START: on an error,
-/// FILE is cut back to START, whatever part of the line it took.
-fn undo_partial(file: &File, start: u64, written: std::io::Result<()>) -> std::io::Result<()> {
-    if written.is_err() { file.set_len(start)?; }
-    written
-}
-
 /// The records' tables, as lisp/romacs/romacs-agent-events.el makes them.
 const EVENTS_SCHEMA: &str = "create table if not exists events (
        session text not null, seq integer not null, t real, kind text, record text not null);
@@ -133,7 +126,9 @@ const EVENTS_SCHEMA: &str = "create table if not exists events (
 /// Where a session's records are kept: its journal file, or the events
 /// table of the agents' SQLite database once Romacs has imported it.
 enum Store {
-    Journal { file: File, path: PathBuf },
+    /// CUT, when set, is where a failed write's line began, not yet cut
+    /// back to: nothing is appended before it is.
+    Journal { file: File, path: PathBuf, cut: Option<u64> },
     Sqlite { db: rusqlite::Connection, session: String },
 }
 
@@ -143,7 +138,7 @@ impl Store {
             None => {
                 let path = dir.join("journal.jsonl");
                 let file = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                Ok(Store::Journal { file, path })
+                Ok(Store::Journal { file, path, cut: None })
             }
             Some(database) => {
                 let session = dir.file_name().and_then(|n| n.to_str()).ok_or("--dir names no session")?.to_owned();
@@ -161,12 +156,20 @@ impl Store {
     /// Keep record TEXT, its seq SEQ; on disk before this returns when SYNC.
     fn keep(&mut self, seq: u64, text: &str, sync: bool) -> Result<(), String> {
         match self {
-            Store::Journal { file, .. } => {
+            Store::Journal { file, cut, .. } => {
                 // A write that fails part way (a full disk) is undone, so its
-                // retry appends a whole line, never one after a fragment.
+                // retry appends a whole line, never one after a fragment; a
+                // cut that failed too is made before anything more is written.
+                if let Some(start) = *cut {
+                    file.set_len(start).map_err(|e| e.to_string())?;
+                    *cut = None;
+                }
                 let start = file.metadata().map_err(|e| e.to_string())?.len();
                 let written = file.write_all(format!("{text}\n").as_bytes());
-                undo_partial(file, start, written).map_err(|e| e.to_string())?;
+                if let Err(error) = written {
+                    if file.set_len(start).is_err() { *cut = Some(start); }
+                    return Err(error.to_string());
+                }
                 if sync { let _ = file.sync_data(); }
                 Ok(())
             }
@@ -199,7 +202,7 @@ impl Store {
     /// when EACH does.
     fn replay(&mut self, from: u64, mut each: impl FnMut(&str) -> bool) -> bool {
         match self {
-            Store::Journal { file, path } => {
+            Store::Journal { file, path, .. } => {
                 let _ = file.flush();
                 let Ok(read) = File::open(&*path) else { return true };
                 for line in BufReader::new(read).lines().map_while(Result::ok) {
@@ -500,7 +503,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::Journal { file: journal, path: path.clone() }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -525,7 +528,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone() }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
@@ -553,7 +556,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone() }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -603,7 +606,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
-        let mut shared = Shared { seq: 4, store: Store::Journal { file: journal, path: path.clone() }, attached: Some((1, server)), next_attachment: 1,
+        let mut shared = Shared { seq: 4, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: Some((1, server)), next_attachment: 1,
                                   stdin: Arc::new(Mutex::new(None)) };
         let note = json!({"type": "selection"});
         assert!(shared.note(1, &note));
@@ -673,19 +676,15 @@ mod tests {
     }
 
     #[test]
-    fn a_journal_line_cut_short_is_undone() {
+    fn a_journal_line_cut_short_is_undone_before_the_next() {
         let path = std::env::temp_dir().join(format!("romacs-host-partial-{}.jsonl", std::process::id()));
         std::fs::write(&path, "{\"seq\":1}\n").unwrap();
-        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
-        let start = file.metadata().unwrap().len();
-        // A write that took part of its line and then failed, as on a full disk.
-        file.write_all(b"{\"seq\":2,\"out").unwrap();
-        let failed: std::io::Result<()> = Err(std::io::Error::other("no space left"));
-        assert!(undo_partial(&file, start, failed).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n");
-        // Its retry appends a whole line after the last whole one.
-        let retried = file.write_all(b"{\"seq\":2}\n");
-        assert!(undo_partial(&file, start, retried).is_ok());
+        let file = OpenOptions::new().append(true).open(&path).unwrap();
+        // A write that took part of its line, its cut failing too: the cut is
+        // pending, and the next keep makes it before it appends.
+        std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{\"seq\":2,\"out").unwrap();
+        let mut store = Store::Journal { file, path: path.clone(), cut: Some(10) };
+        store.keep(2, r#"{"seq":2}"#, false).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n{\"seq\":2}\n");
         let _ = std::fs::remove_file(&path);
     }
