@@ -3068,6 +3068,10 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
             }
             cache.version = slot.version;
             cache.target = slot.function;
+            // A minor's sweep asks these alone whether their target died
+            // (`Vm::empty_dead_caches`); past its limit, it asks them all.
+            let filled = &mut en.vm.caches_filled;
+            if filled.len() < crate::gc::CACHES_FILLED { filled.push(i.c as u32); }
         }
         let target = cache.target;
         if target == Value::UNBOUND || target == Value::NIL {

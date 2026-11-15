@@ -662,8 +662,11 @@ def unit(args, base):
 # check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
 # tool the endpoint offers that is missing here fails the tour.
 # Tools the tour leaves to their own workflows: a restart ends the tour's
-# server (`restart'); gnosis's tools need its fixture database (`gnosis').
-ELSEWHERE = ['romacs_restart_request', 'romacs_restart']
+# server (`restart'); gnosis's tools need its fixture database (`gnosis');
+# romacs_attach journals into a live chat (romacs-agent-attach-tests.el,
+# `mcp_tour'); romacs_dev_check checks a Romacs source tree
+# (romacs-mcp-dev-tests.el, `mcp_tour').
+ELSEWHERE = ['romacs_restart_request', 'romacs_restart', 'romacs_attach', 'romacs_dev_check']
 
 
 def tour(work, delegate_target):
@@ -683,10 +686,20 @@ def tour(work, delegate_target):
         ('romacs_call_outcome', {'id': 1}, lambda t: '"outcome"' in t),
         ('romacs_restart_status', {}, lambda t: '"state"' in t),
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
+        ('romacs_limits', {}, lambda t: '"harnesses"' in t),
+        ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
+        ('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'}, lambda t: '62' in t),
         ('romacs_delegate_task', {'task': delegate_target['task'], 'role': 'review', 'mode': 'wait',
                                   'target': delegate_target['target'], 'clientRequestId': 'tour-review'},
          lambda t: '"completed"' in t and 'APPROVE' in t),
         ('romacs_task_status', {'taskId': '<the taskId romacs_delegate_task returned>'}, lambda t: '"completed"' in t),
+        ('romacs_task_list', {}, lambda t: '"tasks"' in t),
+        ('romacs_task_watch', {'taskId': '<the same taskId>', 'file': 'tour.txt', 'stop': True}, lambda t: '"watching":[]' in t),
+        ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
+        ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
     ]
 
@@ -728,7 +741,7 @@ def tools(args, base):
         task_id = None
         for tool, arguments, _ in steps:
             if 'taskId' in arguments:
-                arguments = {'taskId': task_id}
+                arguments = {**arguments, 'taskId': task_id}
             # No instance: it is optional, and the tour shows each tool works without one.
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
@@ -2364,7 +2377,7 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-c C-; a, RET): on a project, its
+    """The agent board by real keys (C-x C-a a, RET): on a project, its
     first row opens, the thread that wants the user most, else the newest
     (a delegated one folds under its parent) or, with no thread, its
     newest transcript; on "◇ N more", every transcript is shown and the
@@ -2411,7 +2424,7 @@ def board_keys(args, base):
             # host (seen: no command ran for it): keys must reach the frame,
             # then the board, before one is relied on.
             a.keyboard_ready()
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
+            a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
                 before = a.log().count('"native_command":"romacs-agent-board-next"')
