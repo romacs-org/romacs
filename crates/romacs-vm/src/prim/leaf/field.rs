@@ -102,7 +102,9 @@ impl Leaf<'_> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         if let data::Object::Buffer(b) = &self.vm.objects[index] {
             let (point, buffer) = (b.point, self.vm.slots[self.vm.buffer_slot].value);
-            if !self.field_near_bytes(buffer, ByteOffset(byte), point)? {
+            // A read that signals takes the general path, which first
+            // checks what would make it unnecessary.
+            if let Ok(false) = self.field_near_bytes(buffer, ByteOffset(byte), point) {
                 return self.position_of_byte(byte);
             }
         }
