@@ -295,7 +295,7 @@ romacs_eval (Emacs Lisp in the editor). Others: buffers and files \
 (romacs_send_keys, romacs_wait_idle); options (romacs_option_search/describe, \
 romacs_option_set/save); agents (romacs_delegate_task, \
 romacs_task_status/send/list/watch/switch/cancel, romacs_orchestrator_capabilities); restart \
-(romacs_restart_request, romacs_call_outcome); development (romacs_dev_guide, \
+(romacs_restart, romacs_restart_status, romacs_call_outcome); development (romacs_dev_guide, \
 romacs_dev_check); gnosis_* (spaced-repetition practice and review). romacs_help \
 lists them all, one line each."
   "What an MCP client is told at initialization: the entry points and the
@@ -309,7 +309,7 @@ tools' groups, short, since every session pays for it.")
     ("options" . "romacs_option_")
     ("agents" "romacs_delegate_task" "romacs_task_status" "romacs_task_send" "romacs_task_list"
      "romacs_task_watch" "romacs_task_switch" "romacs_task_cancel" "romacs_orchestrator_capabilities")
-    ("restart" "romacs_restart_request" "romacs_call_outcome")
+    ("restart" "romacs_restart" "romacs_restart_status" "romacs_restart_request" "romacs_call_outcome")
     ("development" . "romacs_dev_")
     ("gnosis" . "gnosis_"))
   "The tools' groups for `romacs_help': names, or a prefix; the rest are other.")

@@ -45,6 +45,7 @@
 (require 'imenu)
 (require 'use-package-core)
 (require 'display-line-numbers)
+(require 'romacs-ram-files)
 (require 'treesit)
 
 ;; vc.el stays out of the world: from source it loads dired, which runs tar
@@ -222,16 +223,22 @@ setting's, keeps its value."
   "Toggle Romacs's interactive defaults, `romacs-defaults-settings'.
 On, each setting is its option's standard value and the option has it.
 Settings for modes the first frame does not need wait for the first idle
-moment or command.  Off, each option has its GNU standard value again,
-unless it was given another value while the mode was on.  An interactive session turns this
+moment or command.  A file visited under a memory-only directory stays
+off the disk (lisp/session/romacs-ram-files.el).  Off, each option has its
+GNU standard value again, unless it was given another value while the mode
+was on.  An interactive session turns this
 on before the user's init, unless started with -Q."
   :global t
   :group 'romacs-defaults
   (if romacs-defaults-mode
       (progn (romacs-defaults--apply romacs-defaults-settings)
              (add-hook 'prog-mode-hook #'romacs-defaults--line-numbers)
+             (add-hook 'find-file-hook #'romacs-ram-files-keep-off-disk)
+             (add-hook 'after-change-major-mode-hook #'romacs-ram-files-keep-off-disk)
              (romacs-defaults--ensure-directories))
     (romacs-defaults--line-numbers-off)
+    (remove-hook 'find-file-hook #'romacs-ram-files-keep-off-disk)
+    (remove-hook 'after-change-major-mode-hook #'romacs-ram-files-keep-off-disk)
     (romacs-defaults--restore romacs-defaults-settings)))
 
 (defun romacs-defaults-log-stop ()
