@@ -1969,7 +1969,7 @@ says: one that has ended its journal, or been cancelled, is left as it is."
          (delay (nth tries romacs-agent--reattach-delays)))
     (when (and delay (not (romacs-agent--per-turn-p session)) (not (romacs-agent-cancelled session))
                (not (eq (romacs-agent-state session) 'ended))
-               (romacs-agent--supervisor-listens-p session))
+               (file-exists-p (romacs-agent-host-socket session)))
       (puthash session (1+ tries) romacs-agent--reattaching)
       (run-at-time delay nil #'romacs-agent--reattach session))))
 
@@ -2036,12 +2036,15 @@ while it does not yet listen; the connection it replaces is let go."
               nil)))))
 
 (defun romacs-agent--supervisor-listens-p (session)
-  "Whether SESSION's supervisor answers at its socket.  A socket of this
-user's nothing answers at is one an ended supervisor left (a unit stop ends
-it before it removes its socket): it is dead, and removed, so SESSION and
-every later start load from what it kept, as with no socket, instead of
-replaying its whole journal each time.  One a supervisor starting now has
-bound there since it was looked at is another file, and stays."
+  "Whether SESSION's supervisor answers at its socket, as a server's load
+of its record asks.  A socket of this user's nothing answers at is one an
+ended supervisor left (a unit stop ends it before it removes its socket):
+it is dead, and removed, so SESSION and every later start load from what
+it kept, as with no socket, instead of replaying its whole journal each
+time.  One a supervisor starting now has bound there since it was looked
+at is another file, and stays.  A session whose attachment just ended
+looks again by the socket's presence (`romacs-agent--reattach-later'): its
+supervisor may be starting again."
   (let* ((socket (romacs-agent-host-socket session))
          (seen (file-attributes socket 'integer)))
     (cond ((null seen) nil)
@@ -3593,13 +3596,12 @@ A server runs this at its start, so sessions survive it."
   (dolist (session (hash-table-values romacs-agent--sessions))
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
                (not (process-live-p (romacs-agent-connection session)))
-               (romacs-agent--supervisor-listens-p session))
+               (file-exists-p (romacs-agent-host-socket session)))
       (remhash session romacs-agent--reattaching)
       (romacs-agent--attach session 0)))
   ;; A session whose supervisor runs may call a tool any moment: the
   ;; endpoint listens now, where its relay looks.
-  (when (cl-some (lambda (session) (or (process-live-p (romacs-agent-connection session))
-                                       (romacs-agent--supervisor-listens-p session)))
+  (when (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
                  (hash-table-values romacs-agent--sessions))
     (romacs-agent--endpoint))
   (romacs-agent--sweep)
