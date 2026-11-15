@@ -147,7 +147,7 @@ enum Place {
     Slot(usize),
     /// A built-in's native storage.
     Native(forwarded::Fwd),
-    /// Found at each read: an alias, a per-buffer or a fenced built-in.
+    /// Found at each read: an alias, a per-buffer or a tracked built-in.
     Each,
 }
 
@@ -156,7 +156,7 @@ enum Place {
 /// set-buffer swapped the buffer's binding. A place holds for its buffer
 /// until a local-binding table changes or a collection moves the buffer
 /// (`Forwarded::local_epoch`, as `Vm::eval_limit_local`), and while the
-/// variable's redirect is the one it was found under (an alias, a fence
+/// variable's redirect is the one it was found under (an alias, a tracking
 /// and a first localization each change it).
 #[derive(Clone, Copy)]
 pub(crate) struct Places<const N: usize> {
@@ -278,7 +278,7 @@ impl Vm {
             let localized = self.slots[slot].local != Value::NIL;
             self.variable_redirects[slot] = Some(if localized { VariableRedirect::Localized } else { VariableRedirect::Plain });
         }
-        if self.fence.is_some() {
+        if self.tracking.is_some() {
             self.observe_new_variable(slot);
         }
     }
@@ -347,16 +347,16 @@ impl Vm {
         if slot == self.multibyte_slot {
             return Ok(if matches!(self.object(buffer)?, data::Object::ByteBuffer(_)) { Value::NIL } else { Value::TRUE });
         }
-        // A fenced variable's fence is checked here, for BUFFER: its
-        // forwarding below is the one the fence keeps, none for a fenced
+        // A tracked variable's tracking is checked here, for BUFFER: its
+        // forwarding below is the one the tracking keeps, none for a tracked
         // buffer-local variable.
-        if matches!(self.access_forwarding(slot), Some(forwarded::Fwd::Fence(_))) {
-            self.fence_access(slot, crate::world::Access::Read, buffer);
+        if matches!(self.access_forwarding(slot), Some(forwarded::Fwd::Tracked(_))) {
+            self.tracked_access(slot, crate::world::Access::Read, buffer);
         }
         if let Some(fwd) = self.forwarding(slot) {
             return match fwd {
                 forwarded::Fwd::Buffer(i) => Ok(self.forwarded_buffer_value(buffer.index(0)? - 1, i)),
-                forwarded::Fwd::Fence(_) => Ok(self.slots[slot].value),
+                forwarded::Fwd::Tracked(_) => Ok(self.slots[slot].value),
                 _ => self.forwarded_value(fwd),
             };
         }
@@ -433,7 +433,7 @@ impl Vm {
                 let local = self.variable_binding_slot(slot, false)?;
                 if local == slot { Place::Native(fwd) } else { Place::Slot(local) }
             }
-            Some(Fwd::Buffer(_) | Fwd::Fence(_)) => Place::Each,
+            Some(Fwd::Buffer(_) | Fwd::Tracked(_)) => Place::Each,
             None => Place::Slot(self.variable_binding_slot(slot, false)?),
         })
     }
@@ -450,7 +450,7 @@ impl Vm {
         self.assign_variable(slot, value)
     }
     /// `set_variable_value` once the watchers have been told: the store,
-    /// which a fenced variable makes through the fence.
+    /// which a tracked variable makes through the tracking.
     pub(super) fn assign_variable(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
         if let Some(fwd) = self.native_forwarding(base) {
@@ -502,7 +502,7 @@ impl Vm {
     /// Give the forwarded global built-in at SLOT its local-binding table.
     pub(super) fn promote_forwarded_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
         if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
-            // HOST(dynamic:saved): reads saved values of a localized Boolean, which the fence never
+            // HOST(dynamic:saved): reads saved values of a localized Boolean, which the tracking never
             // holds
             && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
@@ -520,11 +520,11 @@ impl Vm {
     /// set_default_internal, which reports `set'.
     pub(super) fn bind_variable(&mut self, slot: usize, value: Value) -> Result<()> {
         let base = self.indirect_variable(slot);
-        // A `let' moves a fenced value aside and back unread; a watcher
-        // would see it, so a build refuses that.
-        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(base) {
-            self.fence_watched(base);
-            return self.unfenced(cell as usize, |vm| vm.bind_variable(slot, value));
+        // A `let' moves a tracked value aside and back unread; a watcher
+        // would see it, so a build does not capture that.
+        if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(base) {
+            self.tracked_watched(base);
+            return self.untracked(cell as usize, |vm| vm.bind_variable(slot, value));
         }
         let local = self.variable_binding_slot(base, false)?;
         let forwarded = self.native_forwarding(base).filter(|_| local == base);
@@ -563,8 +563,8 @@ impl Vm {
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
         if self.protected_variable_slot(slot) || self.interned_keyword_slot(slot) { return Err("setting constant".into()); }
-        // A fenced variable's forwarding is `Fwd::Fence`, whose arm acts
-        // through the fence: the kept forwarding would never localize it.
+        // A tracked variable's forwarding is `Fwd::Tracked`, whose arm acts
+        // through the tracking: the kept forwarding would never localize it.
         if let Some(fwd) = self.access_forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
         let value = self.variable_value(slot)?;
         let table = if let Some(table) = self.local_table(slot)? { table } else {
@@ -662,7 +662,7 @@ impl Vm {
             MakeVariableBufferLocal if self.access_forwarding(slot).is_some() => {
                 match self.access_forwarding(slot) {
                     Some(forwarded::Fwd::Buffer(_)) => Ok(symbol),
-                    Some(forwarded::Fwd::Fence(_)) => self.fenced(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
+                    Some(forwarded::Fwd::Tracked(_)) => self.tracked(slot, crate::world::Access::Write, |vm| vm.variable_primitive(p, start, n)),
                     _ => { self.promote_forwarded_local(slot, false)?; Ok(symbol) }
                 }
             }
@@ -680,9 +680,9 @@ impl Vm {
             // A built-in variable is always bound (GNU Fboundp), so `defvar'
             // never replaces its value.
             // These read or write the toplevel or saved value, never a let's.
-            DefvarBoundp | DefvarSetDefault if matches!(self.native_forwarding(slot), Some(forwarded::Fwd::Fence(_))) => {
+            DefvarBoundp | DefvarSetDefault if matches!(self.native_forwarding(slot), Some(forwarded::Fwd::Tracked(_))) => {
                 let access = if p == DefvarBoundp { crate::world::Access::SavedRead } else { crate::world::Access::SavedWrite };
-                self.fenced(slot, access, |vm| vm.variable_primitive(p, start, n))
+                self.tracked(slot, access, |vm| vm.variable_primitive(p, start, n))
             }
             DefvarBoundp if self.native_forwarding(slot).is_some() => Ok(Value::TRUE),
             DefvarSetDefault if self.native_forwarding(slot).is_some() => {
@@ -695,7 +695,7 @@ impl Vm {
             // default is bound and no let shadows an unbound toplevel value.
             DefvarBoundp => {
                 // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
-                // checks a fenced variable first (F2)
+                // checks a tracked variable first (F2)
                 let shadowed_unbound = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
                 Ok(truth(self.slots[slot].value != Value::UNBOUND && !shadowed_unbound))
             }
@@ -720,7 +720,7 @@ impl Vm {
             DefvarSetDefault => {
                 let value = self.stack[start+1];
                 // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
-                // variable_primitive checks a fenced variable first (F2)
+                // variable_primitive checks a tracked variable first (F2)
                 let shadow = if self.slots[slot].value == Value::UNBOUND { None }
                     else { self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND) };
                 if let Some((_,old,_,_)) = shadow { *old = value; }

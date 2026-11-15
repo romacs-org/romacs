@@ -435,10 +435,12 @@ beside its build.json), or nil."
     ;; way: the session it carries is restored here, once.
     (when (file-exists-p (romacs-server--pending-restart name))
       (run-at-time 0 nil (lambda () (require 'warm-restart) (warm-restart-adopt-pending name))))
-    ;; Agent sessions outlive servers: attach to the ones still running.
+    ;; Agent sessions outlive servers: attach to the ones still running,
+    ;; from the command loop, so the socket answers and the window paints
+    ;; first, however many sessions are recorded.
     (when (file-directory-p (expand-file-name "romacs/agents/" (or (getenv "XDG_STATE_HOME") "~/.local/state")))
       (require 'romacs-agent)
-      (romacs-agent-restore))
+      (romacs-agent-restore-soon))
     name))
 
 (provide 'romacs-server)

@@ -3731,10 +3731,80 @@ opens."
     ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
     (when (romacs-agent--load-new) (run-hooks 'romacs-agent-restored-hook))))
 
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
+
+(defconst romacs-agent--restore-turn 0.2
+  "Seconds of loading `romacs-agent-restore-soon' does in one turn of the
+command loop, past the turn's first session.")
+
+(defvar romacs-agent--restore-pending nil
+  "The session directories `romacs-agent-restore-soon' has still to load.")
+
+(defvar romacs-agent--restore-count 0
+  "How many sessions the running `romacs-agent-restore-soon' loads in all.")
+
+(defun romacs-agent--new-session-dirs ()
+  "The directories of the recorded sessions this process does not know yet."
+  (and (file-directory-p (romacs-agent--state-root))
+       (cl-remove-if (lambda (dir) (gethash (file-name-nondirectory dir) romacs-agent--sessions))
+                     (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))))
+
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
-A server runs this at its start, so sessions survive it."
-  (romacs-agent--load-new)
+A server runs this at its start, so sessions survive it; a restore
+`romacs-agent-restore-soon' began ends here, at once."
+  (let ((pending romacs-agent--restore-pending))
+    (setq romacs-agent--restore-pending nil)
+    (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
+    (romacs-agent--restore-tail)
+    (when pending (romacs-agent--restore-progress 'done))))
+
+(defun romacs-agent-restore-soon ()
+  "`romacs-agent-restore' from the command loop, `romacs-agent--restore-turn'
+seconds of it a turn: a server's start answers its socket and shows its
+window first, and the editor answers between turns however many sessions
+are recorded.  Its progress is the `agents' stage of
+`romacs-startup-progress', a session at a time.  A server runs this at its
+start, so sessions survive it."
+  (unless romacs-agent--restore-pending
+    (if-let* ((dirs (romacs-agent--new-session-dirs)))
+        (progn (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
+               (romacs-agent--restore-progress 'running)
+               (run-at-time 0 nil #'romacs-agent--restore-step))
+      (romacs-agent--restore-tail))))
+
+(defun romacs-agent--restore-step ()
+  "Load the next turn's sessions of a `romacs-agent-restore-soon'; the last
+turn ends it.  A session that fails to load is reported and the others go
+on."
+  (when romacs-agent--restore-pending
+    (let ((until (+ (float-time) romacs-agent--restore-turn)))
+      (while (when-let* ((dir (pop romacs-agent--restore-pending)))
+               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load dir))
+               (romacs-agent--restore-progress 'running)
+               (< (float-time) until))))
+    (if romacs-agent--restore-pending
+        (run-at-time 0 nil #'romacs-agent--restore-step)
+      (romacs-agent--restore-tail)
+      (romacs-agent--restore-progress 'done))))
+
+(defun romacs-agent--restore-progress (status)
+  "Say where a `romacs-agent-restore-soon' is, its STATUS `running' or `done'."
+  (let ((done (- romacs-agent--restore-count (length romacs-agent--restore-pending))))
+    (romacs-startup-progress 'agents (format "Agent sessions %d/%d" done romacs-agent--restore-count)
+                             (list :status status :done done :of romacs-agent--restore-count))))
+
+(defun romacs-agent-load-session (id)
+  "The session ID names, loaded from its record when this editor does not
+know it yet, without loading every other one."
+  (or (gethash id romacs-agent--sessions)
+      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[^/]*\\'" id)
+           (let ((dir (expand-file-name id (romacs-agent--state-root))))
+             (and (file-directory-p dir) (romacs-agent--load dir))))))
+
+(defun romacs-agent--restore-tail ()
+  "Every recorded session is known: attach to the supervisors still
+listening, serve their relays, sweep what ended processes left, and say so."
   ;; Known and detached, its supervisor still listening: attached again.
   (dolist (session (hash-table-values romacs-agent--sessions))
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
@@ -3761,7 +3831,7 @@ A server runs this at its start, so sessions survive it."
       (let ((root (expand-file-name "romacs/agents/" (or (getenv "XDG_RUNTIME_DIR")
                                                          (format "/tmp/romacs%d" (user-uid))))))
         (when (and (file-directory-p root) (file-expand-wildcards (concat root "*/host.sock")))
-          (run-at-time 0 nil (lambda () (require 'romacs-agent) (romacs-agent-restore)))))))
+          (run-at-time 0 nil (lambda () (require 'romacs-agent) (romacs-agent-restore-soon)))))))
   (add-hook 'after-init-hook #'romacs-agent--restore-at-startup))
 
 (defun romacs-agent-sessions ()
@@ -3770,8 +3840,11 @@ A server runs this at its start, so sessions survive it."
         (lambda (a b) (string> (or (romacs-agent-dir a) "") (or (romacs-agent-dir b) "")))))
 
 (defun romacs-agent-get (id)
-  "The session ID names."
-  (gethash id romacs-agent--sessions))
+  "The session ID names.  While `romacs-agent-restore-soon' loads them, one
+it has not reached yet is loaded at once: a session attached meanwhile may
+ask for its children."
+  (or (gethash id romacs-agent--sessions)
+      (and romacs-agent--restore-pending (romacs-agent-load-session id))))
 
 (defvar romacs-agent--requests (make-hash-table :test #'equal)
   "A delegating session's id and a client request id, to the session it

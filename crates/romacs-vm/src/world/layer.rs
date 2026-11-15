@@ -16,7 +16,7 @@
 //! another layer; the init's digest is checked at the launch, so an edited
 //! init never restores a layer planned from the old one.
 //!
-//! The fence (`world`) keeps the layer to what the libraries define. A
+//! The tracking (`world`) keeps the layer to what the libraries define. A
 //! library's `defcustom`, `defvar`, `defconst` or `defvar-local` whose
 //! value reads a per-process fact (`executable-find`, a relative
 //! `expand-file-name`, a delayed variable) is what GNU evaluates in each
@@ -24,12 +24,12 @@
 //! restore evaluates it again, as GNU's delayed init does for its dumped
 //! options, and a later definition reading that variable is kept too. Any
 //! other form's read of such a fact, an effect, a signal, or a timer left
-//! behind refuses the entry by name, and the build publishes its refusal;
+//! behind leaves the entry to the session, named, and the build publishes that;
 //! the next launch plans without those entries, which load from source as
 //! they always did. After the libraries the builder runs the startup
 //! function again, as a restored process does after them, so startup's
 //! inputs are the state they left; what it computed before them it must
-//! compute again, or the build refuses.
+//! compute again, or the build is not captured.
 //!
 //! A library's load-time code may read a variable the init set before
 //! requiring it; the layer loads the library before the init, so such a
@@ -43,8 +43,9 @@ use std::path::{Path, PathBuf};
 pub const FORMAT: &str = "romacs-init-plan 2";
 /// Where a store keeps plans: `STORE/plans/<sha256 of the init's path>.json`.
 const PLANS: &str = "plans";
-/// The refusal kind a layer build lists for an entry it will not hold.
-pub const REFUSAL: &str = "init-layer";
+/// The kind a layer build notes for an entry it leaves to the session,
+/// which runs it live in its own place.
+pub const LIVE_ENTRY: &str = "init-layer";
 
 /// The functions that read a secret. In a layer build none runs: each
 /// signals `romacs-secret-deferred' (lisp/session/romacs-world-layer.el), as a
@@ -121,7 +122,7 @@ impl Entry {
     /// many of its commands the init declared; an `After` entry's forms
     /// are registered first, so they run where GNU runs them, at the
     /// library's `provide` or the end of its file, and the library must be
-    /// there: the layer holds what the init configured, or refuses it.
+    /// there: the layer holds what the init configured, or leaves it to the session.
     fn form(&self) -> String {
         let noerror = if self.noerror { "t" } else { "nil" };
         let name = lisp_string(&self.name);
@@ -421,7 +422,7 @@ impl Plan {
     }
 }
 
-/// The libraries whose configuration is refused, by what loading them
+/// The libraries whose configuration runs live, by what loading them
 /// leaves: features, and files named as `eval-after-load` names them
 /// (`load-history-regexp`): without the Lisp suffixes, an absolute name by
 /// its true name, a relative one as the tail of the loaded file's.
@@ -460,7 +461,7 @@ impl Deferred {
     }
 }
 
-/// The features a refused entry provided in the build, in the order they
+/// The features an entry left to the session provided in the build, in the order they
 /// loaded, when the init only declared its library: what the session may
 /// load ahead of its first use (`romacs--layer-preload'). None for a
 /// library the init loads at startup, which it loads in its own place.
@@ -690,7 +691,7 @@ impl Vm {
     /// What restore sets again: the values of the variables the built-in
     /// re-seed forms set (`host::reseed_variables`) and of the layer's
     /// definitions kept for restore (`romacs--world-reseed-forms`), read
-    /// past the fence, which a read of theirs would otherwise answer.
+    /// past the tracking, which a read of theirs would otherwise answer.
     fn remade_values(&mut self) -> Vec<crate::Value> {
         let mut names: Vec<String> = host::reseed_variables().map(str::to_owned).collect();
         let list = self.slot("romacs--world-reseed-forms");
@@ -704,7 +705,7 @@ impl Vm {
         }
         names.iter().map(|name| {
             let slot = self.slot(name);
-            self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(crate::Value::UNBOUND)
+            self.untracked(slot, |vm| vm.default_value(slot)).unwrap_or(crate::Value::UNBOUND)
         }).collect()
     }
 
@@ -719,20 +720,20 @@ impl Vm {
     /// Replay PLAN in a layer build: each entry under its recorded
     /// `load-path`, then `load-path` as it was, with whatever the libraries
     /// added ahead of it, then the startup function again. An entry that
-    /// signals, reads a fenced fact outside a definition form or has an
-    /// effect (the build's refusals grow), holds a resource of this process,
+    /// signals, reads a tracked fact outside a definition form or has an
+    /// effect (what the build cannot capture grows), holds a resource of this process,
     /// starts a timer no re-seed form makes, or changes what the startup run
-    /// after the libraries sets back, is refused by its index and name
-    /// (`REFUSAL`): the layer is built again without it, so the image holds
+    /// after the libraries sets back, is left to the session, by its index and name
+    /// (`LIVE_ENTRY`): the layer is built again without it, so the image holds
     /// nothing it did, and the init runs it in the session in its own place.
     /// The build goes on, so one build names every such entry. A definition
     /// form that reads a per-process fact is kept for restore instead
     /// (`world_form_done`); a form that asks for a secret, as code.
-    /// The refused entries.
+    /// The entries left to the session.
     pub fn world_layer_load(&mut self, plan: &Plan, deferred: &[Entry]) -> Vec<(usize, String)> {
         let kept = self.load_path_strings().unwrap_or_default();
         let mut added: Vec<String> = Vec::new();
-        let mut refused = Vec::new();
+        let mut live = Vec::new();
         // What each entry loaded: the features it provided and the files.
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
         // Each secret reader defers in this build (lisp/session/romacs-world-layer.el):
@@ -755,7 +756,7 @@ impl Vm {
         let mut changed_by: std::collections::HashMap<usize, usize> = Default::default();
         for (at, entry) in plan.entries.iter().enumerate() {
             let paths: Vec<PathBuf> = plan.load_paths[entry.load_path].iter().map(PathBuf::from).collect();
-            let refusals = host::refusals();
+            let uncaptured = host::uncaptured_count();
             let _ = self.cancel_entry_timers(true);
             let resources = self.foreign_resources().0;
             let heads = self.load_heads();
@@ -769,7 +770,7 @@ impl Vm {
             let asks = host::reader_asks();
             let result = self.set_load_path(&paths).and_then(|()| self.eval_source_raw(&entry.form()));
             // Startup's own observation, begun and ended inside the entry, took
-            // it over: its reads are the fence's to judge.
+            // it over: its reads are the tracking's to judge.
             let ran = if observed && self.backtrace.observing() { self.backtrace.observed() } else { Vec::new() };
             // Each top-level form and configuration form keeps for itself what
             // it asked; one asked outside them leaves the entry to the session.
@@ -794,7 +795,7 @@ impl Vm {
                 _ if secret.is_some() => secret.map(|f| format!("secret: {f}")),
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
                 Ok(_) if resource.is_some() => resource.map(|what| format!("resource: {what}")),
-                Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
+                Ok(_) if host::uncaptured_count() > uncaptured => Some("per-process".to_owned()),
                 Ok(_) if timers > 0 => Some("timer".to_owned()),
                 Ok(_) => None,
             };
@@ -807,26 +808,26 @@ impl Vm {
                 }
             }
             if let Some(why) = why {
-                host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
-                refused.push((at, why));
+                host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
+                live.push((at, why));
             }
         }
-        // A library whose configuration is refused, in this build or an
+        // A library whose configuration runs live, in this build or an
         // earlier one of the plan (DEFERRED), stays deferred whole: a
         // declared entry that loaded it anyway (an `autoload' of one of its
-        // commands, a library requiring it) is refused too, or the init
+        // commands, a library requiring it) is left to the session too, or the init
         // would run that configuration at every start.
-        let refused_after: Vec<&Entry> = refused.iter().map(|(at, _)| &plan.entries[*at]).filter(|e| e.kind == Kind::After).collect();
-        let deferred = Deferred::new(deferred.iter().chain(refused_after).map(|e| (e.name.as_str(), e.file.as_deref())));
-        let mut held: std::collections::HashSet<usize> = refused.iter().map(|(at, _)| *at).collect();
+        let live_after: Vec<&Entry> = live.iter().map(|(at, _)| &plan.entries[*at]).filter(|e| e.kind == Kind::After).collect();
+        let deferred = Deferred::new(deferred.iter().chain(live_after).map(|e| (e.name.as_str(), e.file.as_deref())));
+        let mut held: std::collections::HashSet<usize> = live.iter().map(|(at, _)| *at).collect();
         for (at, entry) in plan.entries.iter().enumerate() {
             if !entry.declared || held.contains(&at) { continue; }
             let (features, files) = &loaded[at];
             let Some(library) = deferred.loaded_by(features, files) else { continue };
-            let why = format!("loads {library}, whose configuration is refused");
-            host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
+            let why = format!("loads {library}, whose configuration runs live");
+            host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
             held.insert(at);
-            refused.push((at, why));
+            live.push((at, why));
         }
         host::layer_declared(false);
         let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) nil))"));
@@ -847,8 +848,8 @@ impl Vm {
             // what they leave; a restored one runs it after them. So an
             // output an entry changed must be, after the run, what the
             // libraries left (a global minor mode they turned on stays in
-            // `global-minor-modes'), or that entry is refused and runs in the
-            // session after startup, as from source. One no entry changed must
+            // `global-minor-modes'), or that entry is left to the session,
+            // which runs it after its startup, as from source. One no entry changed must
             // be what the first run made again, or what the layer's own setup
             // left, else the libraries changed what startup computes, and no
             // entry is named for it.
@@ -858,19 +859,19 @@ impl Vm {
                 match changed_by.get(&slot) {
                     Some(&at) if after != before => {
                         let why = format!("startup sets {symbol} again");
-                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why,
+                        host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": plan.entries[at].name, "why": why,
                                                      "features": preloads(&plan.entries[at], &loaded[at])}));
-                        if !refused.iter().any(|(entry, _)| *entry == at) { refused.push((at, why)); }
+                        if !live.iter().any(|(entry, _)| *entry == at) { live.push((at, why)); }
                     }
                     Some(_) => {}
                     None if after != first && setup != Some(&after) =>
-                        host::refuse("fence", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
+                        host::note_uncaptured("per-process", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
                     None => {}
                 }
             },
-            Err(error) => host::refuse("fence", json!({"access": "startup-rerun", "error": error})),
+            Err(error) => host::note_uncaptured("per-process", json!({"access": "startup-rerun", "error": error})),
         }
-        refused
+        live
     }
 }
 

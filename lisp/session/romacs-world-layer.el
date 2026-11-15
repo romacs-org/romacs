@@ -57,7 +57,7 @@ or run again.  A reader not defined yet is advised as it is defined."
 and the libraries' top-level forms that asked for a secret.
 Each is (KIND SYMBOL FORM CUT DECLARED), innermost first: KIND is
 `defcustom', `defvar', `defconst', `defvar-local' or `defimage', or `form'
-for another top-level form (SYMBOL nil), FORM the form as loaded, CUT non-nil when an effect the build refused cut the definition
+for another top-level form (SYMBOL nil), FORM the form as loaded, CUT non-nil when an effect the build did not perform cut the definition
 short, so SYMBOL was defined as nil, and DECLARED non-nil when a library
 the init only declared defined it.  A world build keeps them
 \(`world_form_done'); `romacs-world-restart' evaluates each again in this
@@ -209,8 +209,8 @@ Each of FORMS is a printed (LEXICAL . FORM) the init gave
 `eval-after-load', in order; each is registered first, so it runs where
 GNU runs it, and kept as made by its position (`romacs--layer-baked-after-loads').
 A form that does not read back (a closure, which prints as an object, or
-one the recording withheld after a secret reader ran) refuses LIBRARY,
-which then loads at its first use."
+one the recording withheld after a secret reader ran) leaves LIBRARY
+uncaptured, and it loads at its first use."
   (let ((n 0))
     (dolist (printed forms)
       (let* ((entry (condition-case nil (car (read-from-string printed))
