@@ -26,6 +26,7 @@
 (defvar jit-lock-chunk-size)
 (declare-function romacs--treesit-fontify "treesit.rs")
 (declare-function romacs--treesit-query-combine "treesit.rs")
+(declare-function romacs--treesit-subtree-exceeds "treesit.rs")
 (declare-function treesit-update-ranges "treesit")
 (declare-function treesit-local-parsers-on "treesit")
 (declare-function treesit--children-covering-range-recurse "treesit")
@@ -78,11 +79,11 @@ If LOUDLY is non-nil, display some debugging information."
          (query-start (max (- start (car expand)) (point-min)))
          (query-end (min (+ end (cdr expand)) (point-max)))
          (region (cons start end)))
-    ;; GNU's deterministic choice of "fast mode" (bug#60691, bug#60223).
+    ;; GNU's deterministic choice of "fast mode" (bug#60691, bug#60223),
+    ;; its tree walk stopped as soon as it decides.
     (when (and treesit-font-lock-settings (eq treesit--font-lock-fast-mode 'unspecified))
-      (pcase-let ((`(,max-depth ,max-width)
-                   (treesit-subtree-stat (treesit-parser-root-node treesit-primary-parser))))
-        (setq treesit--font-lock-fast-mode (or (> max-depth 100) (> max-width 4000)))))
+      (setq treesit--font-lock-fast-mode
+            (romacs--treesit-subtree-exceeds (treesit-parser-root-node treesit-primary-parser) 100 4000)))
     (with-silent-modifications
       (pcase-dolist (`(,language . ,combined) (romacs-treesit--font-lock-runs))
         (dolist (root root-nodes)
