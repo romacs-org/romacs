@@ -162,7 +162,13 @@ journal one turn long."
         (should-not (romacs-agent--unloaded-p (expand-file-name old root)))
         (setq romacs-agent-store--filled nil romacs-agent--restoring nil)
         (should-not (romacs-agent--unloaded-p (expand-file-name old root)))
-        (should (= fills 0))))))
+        (should (= fills 0))
+        ;; The restore over, a fill that ends without its row: loaded then.
+        (setq romacs-agent-store--filled t)
+        (should-not (romacs-agent-get old))
+        (romacs-agent-store--load-missing)
+        (should (romacs-agent-get old))
+        (should-not romacs-agent--restore-pending)))))
 
 (ert-deftest romacs-agent-store-what-waits-is-loaded ()
   ;; A session with watches kept, or a resume due, is loaded as a restore
