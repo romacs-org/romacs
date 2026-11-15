@@ -399,13 +399,13 @@ impl Vm {
         }))
     }
 
-    /// try_scrolling's new start over `scroll-conservatively' 100 from
+    /// `try_scrolling`'s new start over `scroll-conservatively` 100 from
     /// ROWS, or from the rows through point when they stop short of
-    /// WINDOW's start (`conservative_row'). None when the rows are all a
-    /// line tall, or when point's row ends more than SCROLL_LIMIT lines
-    /// below the window's bottom: try_scrolling searches no further and
-    /// fails, and redisplay's recentring for `scroll-conservatively' over
-    /// 100 puts point on the last whole row, as `start_for_point' does.
+    /// WINDOW's start (`conservative_row`). None when the rows are all a
+    /// line tall, or when point's row ends more than `SCROLL_LIMIT` lines
+    /// below the window's bottom: `try_scrolling` searches no further and
+    /// fails, and redisplay's recentring for `scroll-conservatively` over
+    /// 100 puts point on the last whole row, as `start_for_point` does.
     fn conservative_start(&mut self, window: Value, rows: &[(usize, f32, usize)], point_byte: usize, (body, margin): (f32, f32)) -> Result<Option<usize>> {
         let start = self.marker_position_value(self.window(window)?.start)?.integer_value().unwrap_or(1);
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
@@ -680,7 +680,7 @@ fn recenter_row(rows: &[(usize, f32, bool)], at: usize, point: usize, (body, bac
     }
 }
 
-/// GNU's SCROLL_LIMIT (xdisp.c): try_scrolling scrolls by no more than
+/// GNU's `SCROLL_LIMIT` (xdisp.c): `try_scrolling` scrolls by no more than
 /// this many lines, and searches for point no further below the window.
 const SCROLL_LIMIT: f32 = 100.0;
 
@@ -692,8 +692,8 @@ const SCROLL_LIMIT: f32 = 100.0;
 /// (line_bottom_y from row to row). Point on a partly shown last row asks
 /// a line more of margin (`last_line_misfit'), as does a start that leaves
 /// point's row partly shown (`too_near_end'). None when no row holds the
-/// margin, or when the distance passes SCROLL_LIMIT lines, where
-/// try_scrolling fails (`dy > scroll_max').
+/// margin, or when the distance passes `SCROLL_LIMIT` lines, where
+/// `try_scrolling` fails (`dy > scroll_max`).
 fn conservative_row(rows: &[(usize, f32, usize)], body: f32, margin: f32, line: f32) -> Option<usize> {
     let total: f32 = rows.iter().map(|r| r.1).sum();
     let point_top = total - rows.last()?.1;

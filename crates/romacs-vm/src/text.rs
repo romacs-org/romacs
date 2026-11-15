@@ -141,7 +141,7 @@ pub(crate) trait Newlines {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize>;
     /// The last newline in TO..FROM.
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize>;
-    /// Up to COUNT newlines of FROM..TO, from FROM on (GNU find_newline):
+    /// Up to COUNT newlines of FROM..TO, from FROM on (GNU `find_newline`):
     /// each piece of text is scanned once, however many lines it holds.
     fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found;
     /// Up to COUNT newlines of TO..FROM, from FROM back.

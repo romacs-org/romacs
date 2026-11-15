@@ -2895,10 +2895,8 @@ pub(crate) fn line_beginning(text: &(impl crate::text::Newlines + ?Sized), low: 
 pub(crate) fn line_end_after(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, count: i64) -> usize {
     if count == 0 { return point; }
     let wanted = crate::text::newline_count(count);
-    let (found, short) = match count > 0 {
-        true => (text.newlines_after(point, high, wanted), high),
-        false => (text.newlines_before(point, low, wanted), low),
-    };
+    let (found, short) = if count > 0 { (text.newlines_after(point, high, wanted), high) }
+        else { (text.newlines_before(point, low, wanted), low) };
     found.last.filter(|_| found.count == wanted).unwrap_or(short)
 }
 

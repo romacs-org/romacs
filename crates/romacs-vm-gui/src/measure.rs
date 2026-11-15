@@ -322,10 +322,10 @@ mod tests {
         assert!(scrolls > 20, "{scrolls} scrolls");
     }
 
-    /// A far jump under `scroll-conservatively' 101 puts point where GNU
+    /// A far jump under `scroll-conservatively` 101 puts point where GNU
     /// does, on the last whole row going down and the first going up, and
     /// redisplay lays out a window's rows and GNU's search past its bottom
-    /// (SCROLL_LIMIT, 100 lines), not every line the jump passed over.
+    /// (`SCROLL_LIMIT`, 100 lines), not every line the jump passed over.
     #[test]
     fn a_far_jump_lays_out_the_rows_near_point_only() {
         let mut h = hosted();

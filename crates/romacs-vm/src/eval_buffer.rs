@@ -259,7 +259,7 @@ mod tests {
         pos
     }
 
-    /// `forward-line', `line-beginning-position' and `line-end-position''s
+    /// `forward-line`, `line-beginning-position` and `line-end-position`'s
     /// motions find each run of lines in one scan of each piece of text, a
     /// slice or a rope of many chunks and a tail, and land where the motion
     /// a newline at a time did, short counts and narrowing included.
@@ -278,7 +278,7 @@ mod tests {
             let starts: Vec<usize> = std::iter::once(0).chain(memchr::memchr_iter(b'\n', &bytes).map(|i| i + 1)).collect();
             let ranges = [0..len, starts[40]..starts[2900], starts[1500]..len, 0..starts[3]];
             for r in ranges {
-                let points = [r.start, r.end, (r.start + r.end) / 2, starts[starts.len() / 3].clamp(r.start, r.end), r.end.saturating_sub(1).max(r.start)];
+                let points = [r.start, r.end, usize::midpoint(r.start, r.end), starts[starts.len() / 3].clamp(r.start, r.end), r.end.saturating_sub(1).max(r.start)];
                 for point in points.map(|p| if bytes.get(p).is_some_and(|b| b & 0xc0 == 0x80) { p - 1 } else { p }) {
                     for count in [-4000, -2999, -100, -3, -2, -1, 0, 1, 2, 3, 100, 2999, 4000, i64::MAX, i64::MIN + 1] {
                         let want = motion_by_lines(&bytes, r.clone(), point, count.clamp(-5000, 5000));
