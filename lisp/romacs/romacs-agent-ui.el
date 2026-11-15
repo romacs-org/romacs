@@ -1598,7 +1598,9 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
   "Put the row that draws earlier turns at the current chat's start."
   (romacs-agent-ui--insert-at
    (point-min)
-   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 12))
+   (propertize (format (substitute-command-keys
+                        "▴ Earlier turns: \\<romacs-agent-ui--earlier-map>\\[romacs-agent-chat-earlier] draws %d more\n")
+                       (or romacs-agent-chat-turns 12))
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
