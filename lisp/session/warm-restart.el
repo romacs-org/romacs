@@ -729,16 +729,21 @@ When it fails, a buffer the attempt made is replaced by the rescue."
 (defun warm-restart--live-leaf (leaf names)
   "Window state LEAF with its buffers renamed by NAMES, a table from old
 names to (BUFFER . OWNED).  A window on an OWNED buffer, whose handler
-rebuilt its text, shows the buffer's own point; a leaf whose buffer is
-gone shows its first live previous buffer."
+rebuilt its text, shows the buffer's own point from its beginning
+\(redisplay scrolls to point): the carried start and point were the old
+text's, and a state with no start would leave the window's start marker
+pointing nowhere, where `pos-visible-in-window-p' and `posn-at-point'
+signal.  A leaf whose buffer is gone shows its first live previous
+buffer."
   (let* ((rename (lambda (name) (let ((buffer (car (gethash name names))))
                                   (cond ((buffer-live-p buffer) (buffer-name buffer))
                                         ((get-buffer name) name)))))
          (own-point (lambda (name props)
                       (let ((entry (gethash name names)))
                         (if (and (cdr entry) (buffer-live-p (car entry)))
-                            (cons (cons 'point (with-current-buffer (car entry) (point)))
-                                  (cl-remove-if (lambda (p) (memq (car-safe p) '(point start))) props))
+                            (with-current-buffer (car entry)
+                              (append (list (cons 'start (point-min)) (cons 'point (point)))
+                                      (cl-remove-if (lambda (p) (memq (car-safe p) '(point start))) props)))
                           props))))
          (leaf (mapcar (lambda (item)
                          (pcase item

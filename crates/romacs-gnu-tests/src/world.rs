@@ -1,12 +1,12 @@
 //! `--world-trace OUT.json` (DESIGN-M1 §5, §13 step 2): run the recipe, the
 //! preloads, harness and adapter, as a world build would, and write its read
 //! trace. The process re-executes itself with the pinned per-process
-//! environment, confined, in build mode; the child lists every refusal
+//! environment, in build mode; the child lists every refusal
 //! rather than stopping at the first, writes the trace to OUT and exits 1 if
 //! there was any.
 use romacs_vm::host::{self, Pinned};
 use romacs_vm::world::store::{self, Launch, World};
-use romacs_vm::{Vm, world::sandbox};
+use romacs_vm::Vm;
 use serde_json::json;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -73,14 +73,8 @@ pub fn trace(out: &Path) -> ! {
     }
 }
 
-/// The child, before the VM is made: confine to the RECIPE's roots, the
-/// pinned table under DIR and the binary's own, writing only OUT; then
-/// record.
-pub fn begin(recipe: Vec<PathBuf>, out: &Path, dir: &Path) {
-    if let Err(e) = sandbox::confine(&sandbox::build_roots(recipe, dir), &[out.to_owned()]) {
-        crate::emit(json!({"event": "setup", "ok": false, "phase": "world-confine", "error": e.to_string()}));
-        std::process::exit(3);
-    }
+/// The child, before the VM is made: record in build mode.
+pub fn begin() {
     host::enter_build(Pinned { clock: host::clock(), pid: PID, seed: SEED });
 }
 
@@ -219,11 +213,10 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
     }
 }
 
-/// The builder: run the world's preloads in build mode, confined, then
-/// publish the world and exit, 0 when it was published.
+/// The builder: run the world's preloads in build mode, then publish the
+/// world and exit, 0 when it was published.
 fn build(world: &World, args: &crate::Args, count: usize) -> ! {
-    let roots = world.build_roots(world_load_path(&args.load_path, &args.preload).into_iter().chain(args.preload[..count].iter().cloned()).collect());
-    if let Err(e) = world.begin_build(&roots) {
+    if let Err(e) = world.begin_build() {
         crate::emit(json!({"event": "world-build", "ok": false, "error": e.to_string()}));
         std::process::exit(3);
     }

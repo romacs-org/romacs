@@ -156,6 +156,97 @@ fn a_library_that_changes_what_startup_computes_refuses_the_build() {
     assert!(refusals(&trace, "init-layer").is_empty(), "no entry is named: {trace}");
 }
 
+/// Build NAMES' libraries, written from LIBRARIES into a fresh scratch
+/// NAME, over BOOTSTRAP: the VM, the refused entries and the trace.
+fn build_libraries(name: &str, libraries: &[(&str, &str)], bootstrap: &str) -> (Vm, Vec<(usize, String)>, Json) {
+    let dir = scratch(name);
+    for (library, source) in libraries {
+        std::fs::write(dir.join(format!("lisp/{library}.el")), format!("{source}(provide '{library})\n")).unwrap();
+    }
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
+    let names: Vec<&str> = libraries.iter().map(|(library, _)| *library).collect();
+    let plan = plan(&dir, &names);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    (vm, refused, trace)
+}
+
+/// A form that meets what a build cannot hold, other than a secret's ask,
+/// leaves its entry to the session, however it writes: a `let' around an
+/// assignment, an assignment in a condition, a property, a list changed in
+/// place by its own syntax or by a function it calls. The layer is built
+/// again without the entry, so the image holds nothing it did.
+#[test]
+fn a_form_that_meets_a_fence_leaves_its_entry_to_the_session() {
+    let (mut vm, refused, trace) = build_libraries("live-entries", &[
+        ("lib-w1", "(let ((x (car exec-path))) (setq lib-w1-a x))\n(defvar lib-w1-b lib-w1-a)\n"),
+        ("lib-w2", "(when (setq lib-w2-a (car exec-path)) (setq lib-w2-b t))\n(defvar lib-w2-c lib-w2-a)\n"),
+        ("lib-w3", "(put 'lib-w3 'directory (car exec-path))\n(defvar lib-w3-directory (get 'lib-w3 'directory))\n"),
+        ("lib-w4", "(defvar lib-w4-list (list 'kept))\n(setq lib-w4-list (nconc lib-w4-list (list (car exec-path))))\n"),
+        ("lib-w5", "(defvar lib-w5-list (list 'kept))\n(defun lib-w5-grow (l) (nconc l (list (car exec-path))))\n(setq lib-w5-list (lib-w5-grow lib-w5-list))\n"),
+    ], BOOTSTRAP);
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "fence"), (1, "fence"), (2, "fence"), (3, "fence"), (4, "fence")], "{}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "romacs--world-reseed-forms"), "nil", "no form is kept as code");
+}
+
+/// A timer an entry starts is the image's only when restore makes it
+/// again: org-persist's lock refresh, which its re-seed form keeps in its
+/// variable. Any other, beside a re-seed form that read the clock for its
+/// own variable (cl-extra's random state), leaves its entry to the session.
+#[test]
+fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
+    let dir = scratch("timers");
+    let (extra, org) = (dir.join("lisp/emacs-lisp"), dir.join("lisp/org"));
+    std::fs::create_dir_all(&extra).unwrap();
+    std::fs::create_dir_all(&org).unwrap();
+    std::fs::write(extra.join("cl-extra.el"), "(defvar cl--random-state (list 'state (current-time)))\n\
+        (setq timer-list (cons (list 'unrelated) timer-list))\n(provide 'cl-extra)\n").unwrap();
+    std::fs::write(org.join("org-persist.el"), "(defvar org-persist--disable-when-emacs-Q nil)\n\
+        (defvar org-persist--refresh-gc-lock-timer nil)\n\
+        (unless (and org-persist--disable-when-emacs-Q nil)\n  \
+        (setq org-persist--refresh-gc-lock-timer (car (setq timer-list (cons (list 'lock (current-time)) timer-list)))))\n\
+        (provide 'org-persist)\n").unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
+    let paths = vec![vec![extra.display().to_string(), org.display().to_string()]];
+    let plan = Plan::new(&dir.join("init.el"), vec![require("cl-extra"), require("org-persist")], paths).unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "timer")], "{}", trace["refusals"]);
+    assert!(trace["refusals"].as_array().unwrap().iter().all(|r| r["kind"] == "init-layer"), "{}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "timer-list"), "nil", "no image holds a timer of the builder's");
+}
+
+/// A source session runs startup before its libraries and keeps what they
+/// set; a restored one runs it after them. A library whose value the
+/// startup run after the libraries sets again is refused, and the session
+/// runs it after its own startup, as from source. The coding system a read
+/// reports (`last-coding-system-used') is no startup output: every read
+/// sets it.
+#[test]
+fn a_library_whose_value_startup_sets_again_runs_in_the_session() {
+    let bootstrap = BOOTSTRAP.replace("(setq fence-out", "(setq last-coding-system-used 'utf-8)\n             (setq fence-out");
+    assert_ne!(bootstrap, BOOTSTRAP);
+    let (_, refused, trace) = build_libraries("reset", &[
+        ("lib-q", "(setq last-coding-system-used 'iso-latin-1)\n"),
+        ("lib-o", "(setq fence-out 'lib-o)\n"),
+    ], &bootstrap);
+    assert_eq!(refused, [(1, "startup sets fence-out again".to_owned())], "{}", trace["refusals"]);
+    assert!(!refusals(&trace, "fence").iter().any(|r| r["access"] == "startup-output"), "{}", trace["refusals"]);
+}
+
 #[test]
 fn a_library_may_ask_whether_a_delayed_variable_is_bound_and_rewrite_what_startup_reads() {
     let (mut vm, refused, trace) = build("cus-start", &["lib-k"]);
@@ -214,6 +305,100 @@ fn the_libraries_an_init_declares_are_noted_once_with_their_forms() {
     ], "the nested library's calls are lib-x's, not the init's; lib-q is excluded; held calls are not the init's");
     assert_eq!(Plan::from_json(&plan.json()).as_ref(), Some(&plan));
     assert_eq!(eval(&mut vm, "(list ordinals (romacs--init-after-load-ordinal 'lib-x))"), "((1 1 0) nil)", "no recording, no ordinal");
+}
+
+/// A library the init loads (not only declares) whose load calls a secret
+/// reader the build could not make defer (no romacs-world-layer.el here, so
+/// the reader runs) is left out by name: the observed call is the net.
+#[test]
+fn a_loaded_library_is_refused_for_reading_a_secret() {
+    let dir = scratch("loaded-secret");
+    std::fs::write(dir.join("lisp/lib-r.el"), "(defun auth-source-netrc-parse (&rest _) (list (list :secret \"romacs-fixture-netrc-4c1d\")))\n\
+(defvar lib-r-secret (auth-source-netrc-parse :file \"~/.authinfo\"))\n(provide 'lib-r)\n").unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-a", "lib-r", "lib-v"]);
+    std::fs::write(dir.join("lisp/lib-v.el"), "(defvar lib-v 1)\n(provide 'lib-v)\n").unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(1, "secret: auth-source-netrc-parse")], "{}", trace["refusals"]);
+}
+
+/// A library the init loads that reads a credential file itself, not
+/// through a reader: the read fails in the build, and the form that made it
+/// is kept, as code, for restore to evaluate, a definition or not; the
+/// library's other forms are captured, and the entry is not left out.
+#[test]
+fn a_library_s_credential_read_is_kept_as_code_for_restore() {
+    let dir = scratch("credential-file");
+    std::fs::write(dir.join(".authinfo"), "machine example login me password romacs-fixture-authinfo-5e2b\n").unwrap();
+    let read = format!("(condition-case nil (with-temp-buffer (insert-file-contents {:?}) (buffer-string)) (error nil))",
+                       dir.join(".authinfo").display().to_string());
+    std::fs::write(dir.join("lisp/lib-c.el"), format!(
+        "(defvar lib-c-text {read})\n(setq lib-c-plain {read})\n(defvar lib-c-after 1)\n(provide 'lib-c)\n")).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-c"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(list lib-c-text lib-c-plain lib-c-after)"), "(nil nil 1)",
+               "the builder read no credential and went on with the library");
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (nth 1 e) (car (nth 2 e)) (nth 3 e))) (reverse romacs--world-reseed-forms))"),
+               "((defvar lib-c-text defvar t) (form nil setq t))");
+}
+
+/// A definition that loads another file before it reads a per-process
+/// fact is still a definition once that file is loaded: it is re-seeded at
+/// restore, not refused (the file's own forms are judged as theirs).
+#[test]
+fn a_definition_stays_one_across_a_load_it_makes() {
+    let dir = scratch("nested");
+    std::fs::write(dir.join("lisp/lib-inner.el"), "(defvar lib-inner-x 1)\n(setq lib-inner-y 2)\n(provide 'lib-inner)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-outer.el"), "(defvar lib-outer-path (progn (require 'lib-inner) (car exec-path)))\n(provide 'lib-outer)\n").unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-outer"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (nth 1 e)) romacs--world-reseed-forms)"), "(lib-outer-path)");
+}
+
+/// The form that asked for a secret is the one kept, though a library it
+/// loads afterwards has forms of its own: their ends do not take its ask.
+#[test]
+fn a_form_keeps_its_ask_across_a_load_it_makes() {
+    let dir = scratch("nested-ask");
+    std::fs::write(dir.join(".netrc"), "machine example login me password romacs-fixture-netrc-9a1f\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-inner2.el"), "(defvar lib-inner2-x 1)\n(setq lib-inner2-y 2)\n(provide 'lib-inner2)\n").unwrap();
+    std::fs::write(dir.join("lisp/lib-asks.el"), format!(
+        "(progn (condition-case nil (with-temp-buffer (insert-file-contents {:?})) (error nil)) (require 'lib-inner2))\n(provide 'lib-asks)\n",
+        dir.join(".netrc").display().to_string())).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-asks"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (car (nth 2 e)))) romacs--world-reseed-forms)"), "((form progn))");
 }
 
 /// A declared library's definitions that read a per-process fact are kept
