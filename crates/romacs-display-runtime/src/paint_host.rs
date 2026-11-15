@@ -203,6 +203,14 @@ impl PaintSender {
         assert!(registered, "one render waiter per paint sender");
     }
 
+    /// FRAME's window size in logical pixels, as its last resize said: None
+    /// before one did.  The evaluator learns it from input; a painter that
+    /// draws before the evaluator reads any (the launch screen) asks here.
+    pub fn window_size(&self, frame: u64) -> Option<(u32, u32)> {
+        romacs_display_protocol::call_count::count("sender.window_size");
+        self.facts.window_size(frame)
+    }
+
     /// Whether the window draws on a software rasterizer: None until the
     /// render thread has chosen its adapter.
     pub fn software_adapter(&self) -> Option<bool> {
