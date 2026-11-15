@@ -122,10 +122,10 @@ impl<T> RawTable<T> {
     }
     /// A sweep of entries RANGE: each dead one through DESTROY, which leaves a
     /// tombstone owning nothing, then free (QUARANTINE: quarantined), and
-    /// every survivor exactly old. The entries freed, and the end of the last
-    /// still in use. SAFETY: RANGE is this caller's alone, and starts on a
+    /// every survivor exactly old. The entries freed, the end of the last
+    /// still in use, and the lowest made free (`usize::MAX` for none). SAFETY: RANGE is this caller's alone, and starts on a
     /// multiple of 8.
-    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
+    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> (usize, usize, usize) {
         assert!(range.end <= self.len, "a range past its table");
         debug_assert!(range.start % 8 == 0);
         let dead = if quarantine { QUARANTINED } else { FREE };
@@ -138,7 +138,7 @@ impl<T> RawTable<T> {
         let (colors, entries) = unsafe {
             (std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()), std::slice::from_raw_parts_mut(self.entries.add(base), range.len()))
         };
-        let (mut freed, mut last) = (0, 0);
+        let (mut freed, mut last, mut first) = (0, 0, usize::MAX);
         let mut at = 0;
         // OLD's bit of each byte, moved down beside its in-use bit, counts
         // as a mark in a minor's sweep.
@@ -169,6 +169,7 @@ impl<T> RawTable<T> {
                     destroy(base + i, &mut entries[i]);
                     colors[i] = dead;
                     freed += 1;
+                    if !quarantine { first = first.min(base + i); }
                     if quarantine { last = base + i + 1; }
                 } else if color != FREE {
                     if color & IN_USE != 0 { colors[i] = OLD | IN_USE; }
@@ -177,7 +178,7 @@ impl<T> RawTable<T> {
             }
             at = end;
         }
-        (freed, last)
+        (freed, last, first)
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
@@ -637,19 +638,24 @@ impl<T> Table<T> {
     pub(crate) fn sweep(&mut self, quarantine: bool, destroy: impl FnMut(&mut T)) -> usize {
         let raw = tests::raw_of(self);
         let mut destroy = destroy;
-        let (freed, last) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
-        self.swept(freed, last, quarantine);
+        let (freed, last, first) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
+        self.swept(freed, last, first, quarantine);
         freed
     }
     /// The books of a sweep in ranges (`RawTable::sweep_range'): FREED entries
     /// in all, the last in use before LAST.
-    pub(crate) fn swept(&mut self, freed: usize, last: usize, quarantine: bool) {
+    pub(crate) fn swept(&mut self, freed: usize, last: usize, first: usize, quarantine: bool) {
         if quarantine { self.quarantined += freed } else { self.free += freed }
-        (self.cursor, self.marking, self.sticky) = (0, false, 0);
+        // No free entry lay below the cursor, and the sweep freed none below
+        // FIRST: the next allocation looks from there, not through every
+        // live entry from the start.
+        self.cursor = self.cursor.min(first);
+        (self.marking, self.sticky) = (false, 0);
         self.generation += 1;
         // Every survivor is old and clean, so nothing logged still stands.
         self.barrier = Barrier::default();
         self.cut(last);
+        self.cursor = self.cursor.min(self.entries.len());
     }
     /// Drop the entries from LEN on, all free tombstones.
     fn cut(&mut self, len: usize) {
@@ -748,12 +754,12 @@ impl<T> Table<T> {
             .map(|(i, _)| i as u32).collect()
     }
     /// As `read_again`, of the entries AT alone: the old ones WHOLE asks for.
-    pub(crate) fn read_again_at(&mut self, at: &[u32], whole: &dyn Fn(usize, &T) -> bool) -> Vec<usize> {
+    pub(crate) fn read_again_at(&mut self, at: &[u32], whole: &dyn Fn(&T) -> bool) -> Vec<usize> {
         let mut again = Vec::new();
         let (colors, entries) = (&mut self.colors, &self.entries);
         for i in at.iter().map(|&i| i as usize) {
             let (Some(color), Some(entry)) = (colors.get_mut(i), entries.get(i)) else { continue };
-            if *color & (IN_USE | OLD) == (IN_USE | OLD) && whole(i, entry) {
+            if *color & (IN_USE | OLD) == (IN_USE | OLD) && whole(entry) {
                 *color &= !OLD;
                 again.push(i);
             }
@@ -842,7 +848,7 @@ mod tests {
         unsafe { t.raw(false) }
     }
     /// A sweep of all RAW sees, on the test's one thread.
-    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
+    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> (usize, usize, usize) {
         // SAFETY: the whole table is this thread's, and the range starts at 0.
         unsafe { raw.sweep_range(0..raw.len(), quarantine, destroy) }
     }
@@ -1335,8 +1341,8 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        let (freed, last) = sweep_whole(&raw, false, |_, _| {});
-        t.swept(freed, last, false);
+        let (freed, last, first) = sweep_whole(&raw, false, |_, _| {});
+        t.swept(freed, last, first, false);
         assert!(!raw.holds(&t), "swept with every entry kept");
     }
 }

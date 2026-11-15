@@ -130,9 +130,6 @@ enum Seen<'a> {
     Other,
 }
 
-impl Seen<'_> {
-}
-
 impl RawTable<data::Object> {
     /// Object I, as `Seen`. Private to this file, whose every call is in a mark
     /// or the scan for the dead. The mutator is stopped, so the only writer of
@@ -219,7 +216,7 @@ impl Grave {
                 // Not dropped here: off the collecting thread, it could free an
                 // `Rc' that thread holds.
                 std::mem::forget(other);
-                unreachable!("a kind `Seen::buried' refuses")
+                unreachable!("a kind `Grave::takes' refuses")
             }
         }
     }
@@ -284,11 +281,11 @@ pub(super) struct Worker {
 }
 
 /// What a sweep did: each table's freed count and the end of its last entry
-/// in use, and the dead objects whose end has side effects (`Seen::buried`
+/// in use, and the dead objects whose end has side effects (`Grave::takes`
 /// refuses them), left where they were for the collecting thread.
-#[derive(Default)]
 pub(super) struct Swept {
-    pub(super) tables: [(usize, usize); 4],
+    /// Freed, the end of the last in use, and the lowest freed.
+    pub(super) tables: [(usize, usize, usize); 4],
     pub(super) dead: Vec<u32>,
 }
 
@@ -674,7 +671,7 @@ impl Marking {
         self.conses.holds(&vm.conses) && self.closures.holds(&vm.closures)
             && self.cells.holds(&vm.cells) && self.objects.holds(&vm.objects)
     }
-    /// The dead objects `buried' refuses in VM: those whose end has side
+    /// The dead objects `Grave::takes' refuses in VM: those whose end has side
     /// effects, which the collecting thread sees to before a compaction. A
     /// sweep in place finds them itself (`Swept::dead`).
     pub(super) fn dead_objects(&self, vm: &Vm) -> Vec<u32> {
@@ -692,12 +689,13 @@ impl Marking {
         let chunks: Vec<(usize, Range<usize>)> = lens.iter().enumerate()
             .flat_map(|(table, &len)| (0..len).step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(len))))
             .collect();
-        let swept = Mutex::new(Swept::default());
+        let swept = Mutex::new(Swept { tables: [(0, 0, usize::MAX); 4], dead: Vec::new() });
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last, mut dead) = self.sweep_range(w, table, range, defer);
+            let (freed, last, first, mut dead) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
-            swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
+            let (all, end, lowest) = swept.tables[table];
+            swept.tables[table] = (all + freed, end.max(last), lowest.min(first));
             swept.dead.append(&mut dead);
         });
         // In index order whatever the threads' chunks were: their side
@@ -711,11 +709,11 @@ impl Marking {
     /// and cells own nothing; a closure's vectors are small and few; what an
     /// object owns goes to W's graves when DEFER, or is dropped here (one
     /// thread, or the dropper busy).
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, Vec<u32>) {
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, usize, Vec<u32>) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
         let mut kept = Vec::new();
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
-        let (freed, last) = unsafe {
+        let (freed, last, first) = unsafe {
             match table {
                 0 => self.conses.sweep_range(range, self.verify, |_, pair| *pair = (dead, dead)),
                 1 => self.closures.sweep_range(range, self.verify, |_, c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
@@ -728,7 +726,7 @@ impl Marking {
                 }),
             }
         };
-        (freed, last, kept)
+        (freed, last, first, kept)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.
