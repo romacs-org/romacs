@@ -169,4 +169,18 @@
         (should (equal (romacs-agent-rows-tests--draw "romacs_test_tool" :row (romacs-agent-rows-tests--table)) "drawn")))
     (remhash "romacs_test_tool" romacs-agent-rows)))
 
+(ert-deftest romacs-agent-rows-say-a-form-and-an-answer-once ()
+  ;; A short form is its row alone: under it, its value.
+  (should (equal (romacs-agent-rows-tests--draw "romacs_eval" :body (romacs-agent-rows-tests--table "code" "(buffer-size)") "42")
+                 "⇒ 42"))
+  ;; A Romacs tool's answer is words, never JSON.
+  (should (equal (romacs-agent-rows-tests--draw "romacs_task_status" :body (romacs-agent-rows-tests--table)
+                                                "{\"title\":\"lane x\",\"status\":\"running\"}")
+                 ""))
+  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table)
+                                                "{\"name\":\"notes\",\"size\":12,\"lines\":[\"a\",\"b\"],\"rows\":[{\"x\":1}]}")
+                 "name  notes\nsize  12\nlines  a, b\nrows  1 items"))
+  (should (equal (romacs-agent-rows-tests--draw "romacs_buffer_read" :body (romacs-agent-rows-tests--table) "plain text")
+                 "plain text")))
+
 ;;; romacs-agent-rows-tests.el ends here

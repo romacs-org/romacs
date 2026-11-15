@@ -35,8 +35,10 @@
   "An option of a question an agent asks.")
 (defface romacs-agent-ask-picked '((t :inherit (romacs-popup-key bold)))
   "An option picked.")
-(defface romacs-agent-ask-row '((t :inherit highlight :extend t))
-  "The option row the layer's keys act on.")
+(defface romacs-agent-ask-row '((t :inherit romacs-layer-selection :extend t))
+  "The option row the layer's keys act on: the completion panel's quiet
+selection, never the prompt's accent.  The host's band takes its
+background.")
 
 ;;; Pure parts
 
@@ -129,7 +131,8 @@ that it waits."
 (defvar-local romacs-agent-ask--id nil "Their request id.")
 (defvar-local romacs-agent-ask--questions nil "The questions, as the approval event gave them.")
 (defvar-local romacs-agent-ask--picks nil "The picks so far: question index to labels.")
-(defvar-local romacs-agent-ask--row nil "The highlight of the row the keys act on.")
+(defvar-local romacs-agent-ask--columns nil "The layer's width, while it shows.")
+(defvar-local romacs-agent-ask--row nil "The face of the row the keys act on.")
 
 (defvar romacs-agent-ask-mode-map
   (let ((map (make-sparse-keymap)))
@@ -162,12 +165,28 @@ that it waits."
   "The choosing row at point: (INDEX . WHAT), or nil."
   (get-text-property (line-beginning-position) 'romacs-agent-ask))
 
+(defun romacs-agent-ask-row-at (text position columns)
+  "The display row the line starting at POSITION is on, in TEXT (a
+buffer's, from its start) wrapped in COLUMNS: the rows of the lines
+before it."
+  (if (<= position 1) 0
+    ;; Its lines before the newline that ends the last of them.
+    (apply #'+ (mapcar (lambda (line) (romacs-agent-ask--rows-of line columns))
+                       (split-string (substring text 0 (- position 2)) "\n")))))
+
 (defun romacs-agent-ask--follow ()
-  "Highlight the row the keys act on."
+  "Put the layer's selection, as the completion panel's, on the row the
+keys act on: its face, and the host's band over it."
   (unless (overlayp romacs-agent-ask--row)
     (setq romacs-agent-ask--row (make-overlay (point) (point)))
     (overlay-put romacs-agent-ask--row 'face 'romacs-agent-ask-row))
-  (move-overlay romacs-agent-ask--row (line-beginning-position) (line-beginning-position 2)))
+  (move-overlay romacs-agent-ask--row (line-beginning-position) (line-beginning-position 2))
+  (when-let* ((columns romacs-agent-ask--columns)
+              (window (get-buffer-window (current-buffer) t)))
+    (let ((row (romacs-agent-ask-row-at (buffer-string) (line-beginning-position) columns))
+          (frame (window-frame window)))
+      (unless (eq (frame-parameter frame 'romacs-layer-selection) row)
+        (set-frame-parameter frame 'romacs-layer-selection row)))))
 
 (defun romacs-agent-ask--draw ()
   "Draw the layer's text, point on the row it was on, or on the first."
@@ -205,18 +224,47 @@ most MOST columns, and as tall as its lines wrapped at words there."
          (columns (min most (+ 2 (apply #'max 1 (mapcar #'string-width lines))))))
     (cons columns (apply #'+ (mapcar (lambda (line) (romacs-agent-ask--rows-of line columns)) lines)))))
 
-(defun romacs-agent-ask--show (buffer)
-  "Show BUFFER's layer, sized to its text and the frame, taking keys."
+(defun romacs-agent-ask-place (row-top row-height height frame-height)
+  "Where the layer's top goes, in pixels: below the question's row, at
+ROW-TOP and ROW-HEIGHT tall, when HEIGHT fits under it in FRAME-HEIGHT,
+else above it, so the row stays in view; nil when the row is not."
+  (when row-top
+    (if (<= (+ row-top (* 2 row-height) height) frame-height)
+        (+ row-top (* 2 row-height))
+      (max 0 (- row-top height row-height)))))
+
+(defun romacs-agent-ask--row-top (place)
+  "The top of PLACE's row, (WINDOW . POSITION), in its frame's pixels,
+or nil when it is not in view."
+  (when-let* ((window (car place)) ((window-live-p window))
+              (seen (pos-visible-in-window-p (cdr place) window t)))
+    (+ (nth 1 (window-inside-pixel-edges window)) (nth 1 seen))))
+
+(defun romacs-agent-ask--show (buffer &optional place)
+  "Show BUFFER's layer, sized to its text and the frame, taking keys,
+clear of PLACE, the question's row in its chat, (WINDOW . POSITION)."
   (let* ((root (romacs-layer--root-frame))
          (size (romacs-agent-ask-size (with-current-buffer buffer (buffer-string))
                                       (min 100 (max 30 (- (frame-width root) 8)))))
-         (most (max 6 (- (frame-text-lines root) 6))))
-    (romacs-popup-show 'palette buffer :columns (car size) :lines (min most (cdr size)) :max-lines most)
+         (most (max 6 (- (frame-text-lines root) 6)))
+         (lines (min most (cdr size)))
+         (line (frame-char-height root))
+         (top (romacs-agent-ask-place (and place (romacs-agent-ask--row-top place)) line
+                                      (+ (* lines line) 24) (frame-text-height root))))
+    (with-current-buffer buffer (setq romacs-agent-ask--columns (car size)))
+    (romacs-popup-show 'palette buffer :columns (car size) :lines lines :max-lines most
+                       :anchor (and top (cons (+ (frame-internal-border-width root)
+                                                 (max 0 (/ (- (frame-text-width root)
+                                                              (* (frame-char-width root) (car size)))
+                                                           2)))
+                                              top)))
+    (with-current-buffer buffer (romacs-agent-ask--follow))
     (romacs-popup-take-keys buffer)))
 
-(defun romacs-agent-ask-open (session id questions)
+(defun romacs-agent-ask-open (session id questions &optional place)
   "Show the layer asking SESSION's QUESTIONS, request ID, where they are
-answered, and return its buffer."
+answered, clear of PLACE, their row in the chat, (WINDOW . POSITION),
+and return its buffer."
   (let ((buffer (get-buffer-create (romacs-agent-ask--buffer-name session id))))
     (with-current-buffer buffer
       (unless (derived-mode-p 'romacs-agent-ask-mode)
@@ -224,7 +272,7 @@ answered, and return its buffer."
         (setq romacs-agent-ask--session session romacs-agent-ask--id id
               romacs-agent-ask--questions questions))
       (romacs-agent-ask--draw))
-    (when (display-graphic-p) (romacs-agent-ask--show buffer))
+    (when (display-graphic-p) (romacs-agent-ask--show buffer place))
     buffer))
 
 (defun romacs-agent-ask-close (session id)

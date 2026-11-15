@@ -177,4 +177,18 @@
       (romacs-agent-ask-tests--draw session :type 'done :seq 41)
       (should-not (buffer-live-p layer)))))
 
+(ert-deftest romacs-agent-ask-band-and-place ()
+  ;; The band's row: the wrapped rows above the line.
+  (let ((text "title\n\nlong long long\n 1 x\n"))
+    (should (= (romacs-agent-ask-row-at text 1 80) 0))
+    (should (= (romacs-agent-ask-row-at text 7 80) 1))
+    (should (= (romacs-agent-ask-row-at text 23 80) 3))
+    ;; Wrapped narrow, the long line takes three rows.
+    (should (= (romacs-agent-ask-row-at text 23 7) 5)))
+  ;; Below the question's row when it fits, else above; nowhere in
+  ;; particular when the row is not in view.
+  (should (= (romacs-agent-ask-place 100 20 200 900) 140))
+  (should (= (romacs-agent-ask-place 800 20 200 900) 580))
+  (should-not (romacs-agent-ask-place nil 20 200 900)))
+
 ;;; romacs-agent-ask-tests.el ends here

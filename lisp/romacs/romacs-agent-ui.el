@@ -1138,7 +1138,7 @@ or a repeat."
                                           'romacs-agent-asked id 'romacs-agent-approval id)
                (setq romacs-agent-ui--staying (delq start romacs-agent-ui--staying)))
              (setf (alist-get id romacs-agent-ui--asked-rows nil nil #'equal) start))
-           (when (romacs-agent-ui--seen-p) (romacs-agent-ask-open session id questions))))
+           (when (romacs-agent-ui--seen-p) (romacs-agent-ask-open session id questions (romacs-agent-ui--asked-place id)))))
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
          (romacs-agent-ui--line session event
@@ -2438,7 +2438,7 @@ PROPERTY: the previous one is the run point is in, past its start."
   (interactive nil romacs-agent-chat-mode)
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
-    (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions)
+    (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions (romacs-agent-ui--asked-place id))
       (romacs-agent-respond romacs-agent-ui--session id t))))
 
 (defun romacs-agent-chat-answer ()
@@ -2448,7 +2448,14 @@ PROPERTY: the previous one is the run point is in, past its start."
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
     (unless (member id (romacs-agent-asks romacs-agent-ui--session))
       (user-error "These questions are answered"))
-    (romacs-agent-ask-open romacs-agent-ui--session id questions)))
+    (romacs-agent-ask-open romacs-agent-ui--session id questions (romacs-agent-ui--asked-place id))))
+
+(defun romacs-agent-ui--asked-place (id)
+  "Where questions ID's row is, (WINDOW . POSITION), when a window shows
+this chat: their layer keeps clear of it."
+  (when-let* ((start (alist-get id romacs-agent-ui--asked-rows nil nil #'equal))
+              (window (get-buffer-window (current-buffer) t)))
+    (cons window (marker-position start))))
 
 (defvar-local romacs-agent-ui--asked-rows nil
   "Where each questions' row starts, by request id.")
