@@ -955,6 +955,15 @@ impl Vm {
             _ => return Err("buffer or string required".into()),
         })
     }
+    /// `annotation_place` of the character at byte AT of TEXT, a multibyte
+    /// buffer's, read in its runs with no position converted.
+    pub(super) fn annotation_place_at_byte(text: &AnnotatedBuffer, at: ByteOffset) -> Result<Place<'_>> {
+        let r = text.accessible();
+        if at < r.start || at > r.end {
+            return Err("index out of range".into());
+        }
+        Ok(Place::Runs(properties::At(&text.properties, at)))
+    }
     pub(super) fn annotation_raw(&self, object: Value, at: usize) -> Result<Vec<(Key, Value)>> {
         Ok(self.annotation_place(object, at)?.pairs())
     }
@@ -1019,6 +1028,11 @@ impl Vm {
             return Ok(v);
         }
         let (alist, defaults) = self.textget_variables();
+        // Most buffers have neither variable: skip their walks, each of
+        // which would first size the heap for its circularity bound.
+        if alist == Value::NIL && defaults == Value::NIL {
+            return Ok(Value::NIL);
+        }
         let mut aliases = self.annotation_alias_tail(alist, key)?;
         // The aliases are read from their list, checked whole first: a
         // read copies none of them.

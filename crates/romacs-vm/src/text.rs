@@ -909,8 +909,14 @@ impl TextBody {
         if c.0 > self.len_chars() {
             return Err("index out of range".into());
         }
-        if self.is_ascii {
+        // The ends need no chunk: a restriction's edges are read on every
+        // field and property check, and fetching them evicts the chunk
+        // point's reads are using.
+        if self.is_ascii || c.0 == 0 {
             return Ok(ByteOffset(c.0));
+        }
+        if c.0 == self.chars_len {
+            return Ok(ByteOffset(self.bytes_len));
         }
         let prefix_chars = self.chars_len - self.tail_chars;
         if c.0 >= prefix_chars {
@@ -918,9 +924,6 @@ impl TextBody {
                 self.bytes_len - self.tail.len()
                     + str_indices::chars::to_byte_idx(&self.tail, c.0 - prefix_chars),
             ));
-        }
-        if c.0 == self.len_chars() {
-            return Ok(ByteOffset(self.len_bytes()));
         }
         let (prior_char, prior_byte) = self.coordinate.get();
         if c.0 == prior_char {
@@ -955,8 +958,11 @@ impl TextBody {
         if b.0 > self.bytes_len {
             return Err("index out of range".into());
         }
-        if self.is_ascii {
+        if self.is_ascii || b.0 == 0 {
             return Ok(CharOffset(b.0));
+        }
+        if b.0 == self.bytes_len {
+            return Ok(CharOffset(self.chars_len));
         }
         let (prior_char, prior_byte) = self.coordinate.get();
         if b.0 == prior_byte {

@@ -234,7 +234,7 @@ impl<'l, 'a> Source<'l, 'a> {
     }
     fn property(&mut self, pos: i64, key: Value) -> R<(Value, Value)> {
         let byte = self.leaf.buffer_byte(self.view.buffer, pos)?;
-        self.leaf.vm.window_char_property(self.view.buffer, byte, key, self.view.window).map_err(Fault::Error)
+        self.leaf.vm.char_property_at_byte(self.view.buffer, byte, key, Some(self.view.window)).map_err(Fault::Error)
     }
 
     fn emit(&mut self, elem: Elem) {
