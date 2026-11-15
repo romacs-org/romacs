@@ -196,13 +196,20 @@ prompt before END, or END (its end by default) when it has none."
                                (list (romacs-agent-id session) end))))
         end)))
 
-(defun romacs-agent-events-size (session &optional from)
-  "The characters of SESSION's records from seq FROM on: what a fold of
-them reads, as a journal's bytes say for a journal."
-  (or (when-let* ((db (romacs-agent-events--db)))
-        (caar (sqlite-select db "select sum(length(record)) from events where session = ? and seq >= ?"
-                             (list (romacs-agent-id session) (or from 0)))))
-      0))
+(defun romacs-agent-events-over-p (session from limit)
+  "Whether SESSION's records from seq FROM on hold more than LIMIT bytes
+of UTF-8, as a journal's size says for a journal: added up a record at a
+time, stopping once past LIMIT."
+  (when-let* ((db (romacs-agent-events--db)))
+    (let ((rows (sqlite-select db (concat "select length(cast(record as blob)) from events"
+                                          " where session = ? and seq >= ? order by seq")
+                               (list (romacs-agent-id session) (or from 0)) 'set))
+          (bytes 0) row)
+      (unwind-protect
+          (while (and (<= bytes limit) (setq row (sqlite-next rows)))
+            (setq bytes (+ bytes (or (car row) 0))))
+        (sqlite-finalize rows))
+      (> bytes limit))))
 
 ;;; Writing, with no supervisor running
 
