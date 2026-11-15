@@ -3410,10 +3410,12 @@ and nothing nested can stand at a line's start or end."
         (progn (goto-char (point-max))
                (and (re-search-backward (format "^{\"seq\":%d," seq) nil t) (line-end-position))))))
 
-(defun romacs-agent--journal-after (session seq)
+(defun romacs-agent--journal-after (session seq &optional limit)
   "The byte at which SESSION's journal goes on after its record SEQ, looked
 for from the journal's end in growing spans; nil when no line there is
-record SEQ (`romacs-agent--record-line-end')."
+record SEQ (`romacs-agent--record-line-end').  With LIMIT, a number of
+bytes, `beyond' when the journal's last LIMIT bytes hold no such line: it
+is further back, if anywhere."
   (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
          (size (file-attribute-size (file-attributes journal)))
          (span 16384) (found nil))
@@ -3431,9 +3433,10 @@ record SEQ (`romacs-agent--record-line-end')."
               (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (setq found (let ((end (romacs-agent--record-line-end seq)))
                           (cond (end (min size (+ start end)))
-                                ((= start 0) 'none))))
+                                ((= start 0) 'none)
+                                ((and limit (<= start (- size limit))) 'beyond))))
             (setq span (* 4 span))))))
-    (and (integerp found) found)))
+    (and (or (integerp found) (eq found 'beyond)) found)))
 
 (defconst romacs-agent--prompt-line-end
   "\"romacsRequest\":[0-9]+\\(?:,\"[A-Za-z]+\":\"[^\"\\\\]*\"\\)*},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
@@ -3584,22 +3587,24 @@ no string in a record can hold, and only those are parsed."
         (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
         (ignore-errors (read (current-buffer)))))))
 
-(defun romacs-agent--restore-kept (session)
+(defun romacs-agent--restore-kept (session &optional limit)
   "Put SESSION's kept state back, when this build defines the session
 record as it was written and its journal holds the record it is at:
 the byte its journal goes on from after that record.  Else nil, SESSION
-untouched."
+untouched.  With LIMIT, `beyond' and SESSION untouched when that record
+is not within the journal's last LIMIT bytes (`romacs-agent--journal-after')."
   (when-let* ((kept (romacs-agent--read-kept session))
               ((eql (plist-get kept :version) romacs-agent--kept-version))
               ((equal (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
               ((integerp (plist-get kept :seq)))
-              (from (romacs-agent--journal-after session (plist-get kept :seq))))
-    ;; The layout is this build's: each field is where it was written.
-    (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
-      (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
-    (when-let* ((forked (plist-get kept :forked)))
-      (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
-    (puthash session (plist-get kept :seq) romacs-agent--kept)
+              (from (romacs-agent--journal-after session (plist-get kept :seq) limit)))
+    (unless (eq from 'beyond)
+      ;; The layout is this build's: each field is where it was written.
+      (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
+        (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
+      (when-let* ((forked (plist-get kept :forked)))
+        (setf (romacs-agent-options session) (plist-put (copy-sequence (romacs-agent-options session)) :forked forked)))
+      (puthash session (plist-get kept :seq) romacs-agent--kept))
     from))
 
 ;;; A new server
@@ -3647,8 +3652,9 @@ once, and loads on once its kept state is written."
         (romacs-agent--index session)
         ;; Its kept state back, its journal is read on from there: by its
         ;; supervisor's replay from that record, or here.
-        (let ((from (romacs-agent--restore-kept session)))
-          (if (romacs-agent--fold-aside-p session from)
+        (let ((from (romacs-agent--restore-kept session (and (romacs-agent--fold-aside-p session 0)
+                                                             romacs-agent-fold-bytes))))
+          (if (or (eq from 'beyond) (romacs-agent--fold-aside-p session from))
               (romacs-agent--fold-aside session manifest)
             (when from (setf (romacs-agent-journal-start session) from))
             (romacs-agent--load-rest session manifest)))
@@ -3739,7 +3745,9 @@ journal unread here."
     (pcase-let* ((`(,session . ,manifest) (pop romacs-agent--fold-queue))
                  (future (condition-case err
                              (isolate-spawn 'romacs-agent--fold-job (romacs-agent-dir session)
-                                            :name "romacs-agent fold" :require '(romacs-agent)
+                                            ;; All a fold loads: a worker that loads more is
+                                            ;; ended after its job, which waits for its exit.
+                                            :name "romacs-agent fold" :require '(romacs-agent cl-extra help-mode)
                                             :bindings (romacs-agent--fold-bindings))
                            (error (list 'error err)))))
       (cl-incf romacs-agent--fold-running)

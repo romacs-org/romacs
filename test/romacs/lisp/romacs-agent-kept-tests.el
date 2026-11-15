@@ -521,6 +521,31 @@ contents, so two equal states print the same."
           (should (= (romacs-agent-seq session) (length records)))
           (should (equal (romacs-agent-reply session) "bye")))))))
 
+(ert-deftest romacs-agent-kept-a-kept-state-far-back-is-not-searched-for-here ()
+  ;; Its kept record further back than a fold's worth of bytes: the editor
+  ;; does not search the journal for it, the worker does.
+  (romacs-agent-kept-tests--with
+    (let* ((records (romacs-agent-kept-tests--claude))
+           (head (cl-subseq records 0 12)) (tail (nthcdr 12 records)))
+      (romacs-agent-kept-tests--write dir head)
+      (romacs-agent-kept-tests--load dir)
+      (romacs-agent-kept-tests--write
+       dir (cl-loop for n from 100 to 400
+                    collect (romacs-agent-kept-tests--record n "note" (romacs-mcp--object "type" "pad" "text" (make-string 200 ?p))))
+       t)
+      (let ((session (romacs-agent--make :id romacs-agent-kept-tests--id :dir dir)))
+        (should (eq (romacs-agent--journal-after session 12 4096) 'beyond))
+        (should (integerp (romacs-agent--journal-after session 12)))
+        (should (integerp (romacs-agent--journal-after session 400 4096))))
+      (romacs-agent-kept-tests--with-workers
+        (setq romacs-agent-fold-bytes 4096)
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (= (romacs-agent-seq session) 0))
+          (should (= (length jobs) 1))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= (romacs-agent-seq session) 400)))))))
+
 (ert-deftest romacs-agent-kept-a-restore-ends-after-its-folds ()
   ;; The restore's tail (attaching, sweeping, the restored hook) waits for
   ;; the sessions folded aside; its progress says running until then.
