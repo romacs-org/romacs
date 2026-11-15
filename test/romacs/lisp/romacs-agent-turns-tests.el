@@ -58,9 +58,21 @@ call and result, an answer and a result a turn."
           (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root
                                              :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
             (puthash id session romacs-agent--sessions)
-            ;; As they come: the turns' rows are written.
-            (dolist (record records) (romacs-agent--record session record))
+            ;; Folded as they come, live: a moment after each turn's end its
+            ;; session's rows are caught up (here, at once).
+            (let ((due nil))
+              (cl-letf (((symbol-function 'run-with-timer) (lambda (&rest _) nil))
+                        ((symbol-function 'romacs-agent-turns-fill-soon) (lambda (ids) (setq due ids))))
+                (dolist (record records) (romacs-agent--record session record))
+                (should (equal romacs-agent-turns--due (list id))))
+              (ignore due))
+            (should (= (romacs-agent-turns-count session) 0))
+            (setq romacs-agent-turns--due nil)
+            (should (= (romacs-agent-turns-fill session) 12))
             (should (= (romacs-agent-turns-count session) 12))
+            ;; Each row at its prompt's time, not the fill's.
+            (should (= (caar (sqlite-select (romacs-agent-turns--db) "select t from turns where session = ? and first_seq = 2" (list id)))
+                       (+ 1794600000.25 2)))
             (let ((rows (sqlite-select (romacs-agent-turns--db)
                                        "select first_seq, last_seq, prompt, reply, tools from turns where session = ? order by first_seq limit 1"
                                        (list id))))
@@ -80,6 +92,44 @@ call and result, an answer and a result a turn."
             (should (= (romacs-agent-turns-fill session) 3))
             (should (= (romacs-agent-turns-count session) 12))
             (should (= (romacs-agent-turns-fill session) 0))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-agent-turns-a-turn-cut-and-resumed-is-one-row ()
+  ;; A turn its harness's exit cut, then resumed to its end with no new
+  ;; prompt: one row, its reply the end's, written once it ended; its
+  ;; search text there once.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let* ((root (make-temp-file "romacs-turns-" t))
+         (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state") (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                      process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-turns--made nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (id "a1a1a1a1-2222-4333-8444-555566668888")
+         (dir (expand-file-name id (romacs-agent--state-root)))
+         (records (list (romacs-mcp--object "seq" 1 "t" 10.0 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "go" "role" "user")
+                                                                                       "romacsRequest" 1 "type" "user"))
+                        (romacs-mcp--object "seq" 2 "t" 11.0 "exit" 1)
+                        (romacs-mcp--object "seq" 3 "t" 12.0 "note" (romacs-mcp--object "type" "run"))
+                        (romacs-mcp--object "seq" 4 "t" 13.0 "out" (romacs-mcp--object "type" "result" "result" "finished after resume")))))
+    (unwind-protect
+        (progn
+          (make-directory dir t)
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) (seq-take records 2) "")
+                          nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+          (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root
+                                             :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
+            (puthash id session romacs-agent--sessions)
+            ;; Cut: no row yet.
+            (should (= (romacs-agent-turns-fill session) 0))
+            (let ((coding-system-for-write 'utf-8-unix))
+              (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) (nthcdr 2 records) "")
+                            nil (expand-file-name "journal.jsonl" dir) t 'silent))
+            (should (= (romacs-agent-turns-fill session) 1))
+            (should (equal (sqlite-select (romacs-agent-turns--db) "select first_seq, last_seq, reply from turns where session = ?" (list id))
+                           '((1 4 "finished after resume"))))
+            (should (= (length (romacs-agent-turns-search "resume")) 1))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
