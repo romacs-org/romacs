@@ -1930,6 +1930,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod load_progress;
     mod model;
     mod effects;
     mod clipboard;
