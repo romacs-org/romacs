@@ -55,6 +55,15 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
     static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
+    /// A secret was asked for (`note_secret_asked`): in a build, by the form
+    /// loading, a secret reader or a credential file read; while the init's
+    /// plan is recorded, a credential file read by the init.
+    static CREDENTIAL_READ: Cell<bool> = const { Cell::new(false) };
+    /// How many secret reader calls a layer build deferred
+    /// (`romacs--world-secret-asked`).
+    static READER_ASKS: Cell<usize> = const { Cell::new(0) };
+    /// The init's plan is being recorded (`watch_credentials`).
+    static WATCH_CREDENTIALS: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn mode() -> Mode {
@@ -925,17 +934,23 @@ pub fn lisp_env(list: EnvList, name: &[u8]) {
 // Files.
 
 pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b)));
     if building() {
         file_read(path.as_ref(), &result);
+    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+        note_credential(path.as_ref());
     }
     result
 }
 
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read_to_string(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b.as_bytes())));
     if building() {
         file_read(path.as_ref(), &result);
+    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+        note_credential(path.as_ref());
     }
     result
 }
@@ -1036,8 +1051,12 @@ impl Captured {
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("open", || bytes(path.as_ref()), || OpenOptions::new().read(true).custom_flags(flags).open(&path), |r| crate::flight::outcome(r, |_| 0));
     if !building() {
+        if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+            note_credential(path.as_ref());
+        }
         return result.map(|file| Input(file, None, None, Source::file(path.as_ref())));
     }
     let path = path.as_ref();
@@ -1064,6 +1083,87 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
             Err(e)
         }
     }
+}
+
+/// Whether PATH names a credential store, read only for its secrets: an
+/// authinfo or netrc file (auth-source's defaults and their variants, a
+/// `.gpg' one too), a file in a password-store tree, or in a GnuPG home.
+fn credential_path(path: &Path) -> bool {
+    let name = path.file_name().map_or(&b""[..], OsStr::as_bytes);
+    let bare = name.strip_prefix(b".").or_else(|| name.strip_prefix(b"_")).unwrap_or(name);
+    let file = [&b"authinfo"[..], b"netrc"].iter()
+        .any(|stem| bare.strip_prefix(*stem).is_some_and(|rest| rest.is_empty() || rest[0] == b'.'));
+    let tree = path.components().any(|c| matches!(c.as_os_str().as_bytes(), b".password-store" | b"password-store" | b".gnupg"));
+    // The GnuPG home a credential read is under: no Lisp value depends on it.
+    let gnupg = std::env::var_os("GNUPGHOME").is_some_and(|home| !home.is_empty() && path.starts_with(home));
+    file || tree || gnupg
+}
+
+/// A read of PATH's content: a credential file's is noted, in a build and
+/// while the init's plan is recorded (`take_credential_read`). True when
+/// PATH is one.
+fn note_credential(path: &Path) -> bool {
+    let credential = credential_path(path);
+    if credential {
+        note_secret_asked();
+    }
+    credential
+}
+
+/// A secret was asked for: by a reader in a build (`romacs--world-secret-asked`)
+/// or a credential file read. A definition form that asked is cut short and
+/// kept whole for restore, as one an effect cut is (`layer_form_cut`); any
+/// other top-level form is kept whole too (`Vm::layer_form_finished`).
+pub(crate) fn note_secret_asked() {
+    CREDENTIAL_READ.with(|c| c.set(true));
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() && layer.form.is_some() { layer.tainted = true; layer.cut = true; });
+}
+
+/// A secret reader's call deferred in a build (`romacs--world-secret-asked`).
+pub(crate) fn note_reader_asked() {
+    READER_ASKS.with(|n| n.set(n.get() + 1));
+    note_secret_asked();
+}
+
+/// How many secret reader calls this thread's builds deferred.
+pub(crate) fn reader_asks() -> usize {
+    READER_ASKS.with(Cell::get)
+}
+
+/// Whether the top-level form loading in a layer build is a definition.
+pub(crate) fn layer_form_is_definition() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.is_some()))
+}
+
+/// A build reads no credential file: it fails with EPERM, as an effect
+/// does, so no secret reaches a builder's heap, log or manifest, and the
+/// form that asked is kept, as code, for the session (`note_secret_asked`),
+/// where the read is made. Ok outside a build or for any other file.
+fn credential_in_build(path: &Path) -> io::Result<()> {
+    if !refusing() || !note_credential(path) {
+        return Ok(());
+    }
+    record("secret-read", json!({"path": path_json(path)}));
+    Err(io::Error::from_raw_os_error(libc::EPERM))
+}
+
+/// The init's plan is recorded from here (ON) or no longer: its reads of
+/// credential files are noted (`credential_read`). Either way, none is
+/// noted yet.
+pub(crate) fn watch_credentials(on: bool) {
+    WATCH_CREDENTIALS.with(|w| w.set(on));
+    CREDENTIAL_READ.with(|c| c.set(false));
+}
+
+/// Whether a secret was asked for since the last `take_secret_asked` or
+/// `watch_credentials`.
+pub(crate) fn secret_asked() -> bool {
+    CREDENTIAL_READ.with(Cell::get)
+}
+
+/// `secret_asked`, forgetting it.
+pub(crate) fn take_secret_asked() -> bool {
+    CREDENTIAL_READ.with(|c| c.replace(false))
 }
 
 /// The kernel's random source, `/dev/urandom`.

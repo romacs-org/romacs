@@ -19,6 +19,30 @@ fn dumping(_cx) {
     Ok(if crate::host::dumping() { Value::TRUE } else { Value::NIL })
 }}
 
+// Romacs-only. Whether this process builds a world (`host::Mode::Build`).
+// A secret reader asked in one returns no value: it signals
+// `romacs-secret-deferred' (lisp/romacs/romacs-world-layer.el), and the form
+// that asked is kept, as code, for the session, where the reader runs.
+defsubr! { name = "romacs-world-building-p", gnu = "romacs:world", effect = Reads,
+fn world_building_p(_cx) {
+    Ok(if crate::host::mode() == crate::host::Mode::Build { Value::TRUE } else { Value::NIL })
+}}
+
+// Romacs-only. `romacs--world-defer-secret': the form running in a world
+// build asked for a secret (`host::note_secret_asked`). A no-op elsewhere.
+defsubr! { name = "romacs--world-secret-asked", gnu = "romacs:world", effect = Global,
+fn world_secret_asked(_cx) {
+    if crate::host::mode() == crate::host::Mode::Build { crate::host::note_reader_asked(); }
+    Ok(Value::NIL)
+}}
+
+// Romacs-only. `romacs--layer-walk': whether the form that ran last asked
+// for a secret in a world build, forgetting it. Nil elsewhere.
+defsubr! { name = "romacs--world-take-secret", gnu = "romacs:world", effect = Global,
+fn world_take_secret(_cx) {
+    Ok(if crate::host::mode() == crate::host::Mode::Build && crate::host::take_secret_asked() { Value::TRUE } else { Value::NIL })
+}}
+
 // Romacs-only. lisp/romacs/romacs-loadup-bootstrap.el's `romacs--init-eval-after-load':
 // the user's init gave `eval-after-load' PRINTED for FILE (a feature, or a
 // file named by a string), not loaded yet: noted for its layer's plan

@@ -349,6 +349,21 @@ fn a_build_opens_no_sqlite_database() {
     assert!(refused.iter().any(|what| what.starts_with("open sqlite database ")), "{refused:?}");
 }
 
+/// A build reads no credential file: the read fails as an effect does,
+/// is listed as a secret read, and keeps no digest of the content.
+#[test]
+fn a_build_reads_no_credential_file() {
+    let dir = scratch("credential");
+    let netrc = write(&dir.join("home/.netrc"), "machine example login me password hunter2\n");
+    let file = write(&dir.join("read.el"), &format!(
+        "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {}) (buffer-string)) (file-error 'failed)))\n", lisp(&netrc)));
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "r"), "failed");
+    let path = netrc.to_string_lossy().into_owned();
+    assert!(items(&trace, "records", "secret-read").iter().any(|r| r["path"] == path), "{trace}");
+    assert!(!items(&trace, "records", "file-read").iter().any(|r| r["path"] == path), "a digest of {path} was kept: {trace}");
+}
+
 #[test]
 fn an_input_serves_the_bytes_its_record_describes() {
     let dir = scratch("captured");

@@ -139,9 +139,10 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
 }
 
 /// Libraries the init only declared are built into its layer after their
-/// configuration's forms; one whose configuration reads a secret, through
-/// auth-source or straight from the password store, is refused and left
-/// out, and nothing the store holds contains the secret.
+/// configuration's forms. One whose configuration asks for a secret,
+/// through auth-source, straight from the password store or from a plaintext
+/// authinfo file, is built in too: the form that asked is kept as code for
+/// the init's own call, and nothing the store holds contains the secret.
 #[test]
 fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
     const SECRET: &str = "romacs-fixture-secret-7f3a9c";
@@ -154,6 +155,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         ("layer-reader", "(defvar layer-reader-value nil)\n(provide 'layer-reader)\n"),
         ("layer-closure", "(provide 'layer-closure)\n"),
         ("layer-withheld", "(provide 'layer-withheld)\n"),
+        ("layer-netrc", "(defvar layer-netrc-value nil)\n(provide 'layer-netrc)\n"),
     ] {
         std::fs::write(lisp.join(format!("{name}.el")), text).unwrap();
     }
@@ -161,6 +163,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
     std::fs::create_dir_all(&pass).unwrap();
     let entry = pass.join("me.gpg");
     std::fs::write(&entry, format!("{SECRET}\n")).unwrap();
+    let authinfo = home.home.join(".authinfo");
+    std::fs::write(&authinfo, format!("machine example login me password {SECRET}\n")).unwrap();
     home.build();
     let after = |name: &str, form: String| Entry { kind: Kind::After, name: name.into(), file: None, noerror: true, load_path: 0, declared: true, forms: vec![form] };
     let entries = vec![
@@ -172,6 +176,8 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         // A `with-eval-after-load' closure, and a form withheld after a secret reader ran.
         after("layer-closure", "(t . #<interpreted-function>)".into()),
         after("layer-withheld", "#<after a secret reader>".into()),
+        // A plaintext credential file read without any reader.
+        after("layer-netrc", format!("(t setq layer-netrc-value (with-temp-buffer (insert-file-contents {:?}) (buffer-string)))", authinfo.display().to_string())),
     ];
     // As an init's `load-path' is: its own directory before the installation's.
     let gnu_lisp = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/gnu").canonicalize().unwrap();
@@ -196,8 +202,9 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .flat_map(|m| m["refusals"].as_array().cloned().unwrap_or_default())
         .filter(|r| r["kind"] == "init-layer")
         .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
-    assert!(why.iter().any(|(name, why)| name == "layer-secret" && why == "secret: auth-source-pass-get"), "{why:?}");
-    assert!(why.iter().any(|(name, why)| name == "layer-reader" && why == "secret: epa-file-insert-file-contents"), "{why:?}");
+    for name in ["layer-secret", "layer-reader", "layer-netrc"] {
+        assert!(!why.iter().any(|(n, _)| n == name), "{name} was left out: {why:?}");
+    }
     for name in ["layer-closure", "layer-withheld"] {
         assert!(why.iter().any(|(n, why)| n == name && why.contains("a form a layer cannot replay")), "{why:?}");
     }
@@ -205,7 +212,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         .filter(|m| m["events"]["init-layer"].is_object() && m["refusals"].as_array().is_none_or(|r| r.is_empty()))
         .map(|m| m["events"]["init-layer"]["entries"].clone()).collect();
     let names: Vec<Vec<&str>> = built.iter().map(|entries| entries.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect()).collect();
-    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd"]), "{names:?}");
+    assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-netrc"]), "{names:?}");
     // No file the store holds contains the secret: images, manifests, plans.
     let mut files = vec![home.home.join("cache")];
     while let Some(path) = files.pop() {

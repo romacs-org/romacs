@@ -216,10 +216,9 @@ fn the_libraries_an_init_declares_are_noted_once_with_their_forms() {
     assert_eq!(eval(&mut vm, "(list ordinals (romacs--init-after-load-ordinal 'lib-x))"), "((1 1 0) nil)", "no recording, no ordinal");
 }
 
-/// A library the init loads (not only declares) whose load reads a secret,
-/// here a plaintext netrc file through auth-source's parser, is refused by
-/// name: nothing confines a builder, so the reader is what keeps the
-/// secret out of the layer.
+/// A library the init loads (not only declares) whose load calls a secret
+/// reader the build could not make defer (no romacs-world-layer.el here, so
+/// the reader runs) is left out by name: the observed call is the net.
 #[test]
 fn a_loaded_library_is_refused_for_reading_a_secret() {
     let dir = scratch("loaded-secret");
@@ -237,6 +236,34 @@ fn a_loaded_library_is_refused_for_reading_a_secret() {
     let trace = host::leave_build().unwrap();
     let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
     assert_eq!(refused, [(1, "secret: auth-source-netrc-parse")], "{}", trace["refusals"]);
+}
+
+/// A library the init loads that reads a credential file itself, not
+/// through a reader: the read fails in the build, and the form that made it
+/// is kept, as code, for restore to evaluate, a definition or not; the
+/// library's other forms are captured, and the entry is not left out.
+#[test]
+fn a_library_s_credential_read_is_kept_as_code_for_restore() {
+    let dir = scratch("credential-file");
+    std::fs::write(dir.join(".authinfo"), "machine example login me password romacs-fixture-authinfo-5e2b\n").unwrap();
+    let read = format!("(condition-case nil (with-temp-buffer (insert-file-contents {:?}) (buffer-string)) (error nil))",
+                       dir.join(".authinfo").display().to_string());
+    std::fs::write(dir.join("lisp/lib-c.el"), format!(
+        "(defvar lib-c-text {read})\n(setq lib-c-plain {read})\n(defvar lib-c-after 1)\n(provide 'lib-c)\n")).unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let plan = plan(&dir, &["lib-c"]);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    assert!(refused.is_empty(), "{refused:?} {}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "(list lib-c-text lib-c-plain lib-c-after)"), "(nil nil 1)",
+               "the builder read no credential and went on with the library");
+    assert_eq!(eval(&mut vm, "(mapcar (lambda (e) (list (car e) (nth 1 e) (car (nth 2 e)) (nth 3 e))) (reverse romacs--world-reseed-forms))"),
+               "((defvar lib-c-text defvar t) (form nil setq t))");
 }
 
 /// A declared library's definitions that read a per-process fact are kept

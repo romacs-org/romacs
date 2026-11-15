@@ -203,19 +203,31 @@ impl Vm {
 
     /// Keep the definition FORM of KIND, defining NAME, for restore: pushed
     /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT DECLARED),
-    /// CUT when a refused effect cut the form short and restore evaluates
-    /// it whole, DECLARED when a library the init only declared defined it,
-    /// so restore may leave it pending until its first read. NAME's
-    /// variable is fenced as tainted.
+    /// CUT when a refused effect or a secret asked for cut the form short
+    /// and restore evaluates it whole, DECLARED when a library the init only
+    /// declared defined it, so restore may leave it pending until its first
+    /// read. NAME's variable is fenced as tainted.
     fn record_reseed_form(&mut self, kind: &str, name: &str, form: &crate::Form, cut: bool) {
         let slot = self.slot(name);
         // Defined again by a file loaded again: the first form is kept.
         if self.fence_cell(slot).is_some_and(|cell| cell.root == Root::Tainted) {
             return;
         }
+        self.push_reseed_form(kind, Some(name), form, cut);
+        self.fence_variable(slot, Root::Tainted);
+    }
+
+    /// Keep a layer library's top-level FORM that is no definition and asked
+    /// for a secret, for restore to evaluate whole, as code, in load order:
+    /// (form nil FORM t DECLARED) (`romacs--world-reseed-form`).
+    pub(crate) fn record_deferred_form(&mut self, form: &crate::Form) {
+        self.push_reseed_form("form", None, form, true);
+    }
+
+    fn push_reseed_form(&mut self, kind: &str, name: Option<&str>, form: &crate::Form, cut: bool) {
         let entry = (|| -> crate::Result<()> {
             let kind = self.intern(kind);
-            let symbol = self.intern(name);
+            let symbol = name.map_or(Value::NIL, |name| self.intern(name));
             let form = self.literal(form)?;
             let cut = if cut { Value::TRUE } else { Value::NIL };
             let declared = if host::layer_in_declared() { Value::TRUE } else { Value::NIL };
@@ -226,7 +238,6 @@ impl Vm {
             Ok(())
         })();
         host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut, "declared": host::layer_in_declared()}));
-        self.fence_variable(slot, Root::Tainted);
     }
 
     /// After a layer's libraries, the startup function ran again: each

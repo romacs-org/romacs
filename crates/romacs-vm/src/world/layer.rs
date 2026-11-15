@@ -46,11 +46,17 @@ const PLANS: &str = "plans";
 /// The refusal kind a layer build lists for an entry it will not hold.
 pub const REFUSAL: &str = "init-layer";
 
-/// The functions that read a secret: an entry whose load or configuration
-/// calls one is refused, declared or loaded, so the layer never holds what
-/// one returns; the library loads in the session as from source, where the
-/// call happens. The build publishes no image of the plan that called one.
-const SECRET_READERS: [&str; 21] = [
+/// The functions that read a secret. In a layer build none runs: each
+/// signals `romacs-secret-deferred' (lisp/romacs/romacs-world-layer.el), as a
+/// credential file read fails (`host::credential_in_build`), and the
+/// smallest whole form that asked is kept, as code, for the session: a
+/// library's top-level form at restore, one form of the init's
+/// configuration at the init's own call. The layer holds the code that
+/// fetches a secret, never the secret. The password manager's one
+/// decryption entry is among them. The init's plan recording observes them
+/// too (`AFTER_SECRET`).
+const SECRET_READERS: [&str; 22] = [
+    "romacs-pass--decrypt",
     "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
     "auth-source-user-and-password", "auth-source-netrc-parse", "auth-source-netrc-parse-all",
     "netrc-parse", "netrc-credentials", "auth-source-pass-get", "auth-source-pass-parse-entry",
@@ -182,7 +188,8 @@ impl Recording {
 }
 
 /// The printed form noted for a form the init gave after a secret reader
-/// ran: never its text, which may hold the secret, and never replayed.
+/// ran or a credential file was read: never its text, which may hold the
+/// secret, and never replayed.
 const AFTER_SECRET: &str = "#<after a secret reader>";
 
 /// An init's plan: the loads it issued, in order, each under the
@@ -484,6 +491,7 @@ impl Vm {
     /// Record the loads the init issues from here, at the depth the next
     /// load (the init's own) runs at, until `take_init_loads`.
     pub fn record_init_loads(&mut self) {
+        host::watch_credentials(true);
         let secrets = !self.backtrace.observing();
         if secrets {
             let readers = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
@@ -497,6 +505,7 @@ impl Vm {
     /// broke (a `load-path` that is not all strings), or the init cannot be
     /// read.
     pub fn take_init_loads(&mut self, init: &Path) -> Option<Plan> {
+        host::watch_credentials(false);
         let recording = self.loader.recording.take()?;
         if recording.secrets && self.backtrace.observing() { self.backtrace.observed(); }
         let excluded = self.init_layer_exclusions();
@@ -580,7 +589,8 @@ impl Vm {
     /// noted with that library's entry, made at its first such call.
     pub(crate) fn note_init_after_load(&mut self, name: String, file: Option<String>, form: String) {
         let Some(at) = self.init_recording_point() else { return };
-        let secret = self.loader.recording.as_ref().is_some_and(|r| r.secrets) && self.backtrace.observed_any();
+        let secret = (self.loader.recording.as_ref().is_some_and(|r| r.secrets) && self.backtrace.observed_any())
+            || host::secret_asked();
         let form = if secret { AFTER_SECRET.to_owned() } else { form };
         let recording = self.loader.recording.as_mut().expect("the recording");
         let key = Recording::key(Kind::After, &name, file.as_deref());
@@ -606,18 +616,6 @@ impl Vm {
         self.list_values(value)?.into_iter()
             .map(|v| if v == crate::Value::NIL { Ok(".".to_owned()) } else { self.source_string(v).map(str::to_owned) })
             .collect()
-    }
-
-    /// The first function that reads a secret (`SECRET_READERS`) called
-    /// since `observe`, which ends here.
-    fn secret_call(&mut self) -> Option<String> {
-        // Startup's own observation, begun and ended inside the entry, took
-        // it over: its reads are the fence's to judge.
-        if !self.backtrace.observing() { return None; }
-        let mut calls = self.backtrace.observed();
-        calls.sort_unstable();
-        calls.dedup();
-        calls.into_iter().map(|slot| self.symbol_names[slot].as_str()).find(|name| SECRET_READERS.contains(name)).map(str::to_owned)
     }
 
     /// `features` as it is, rooted, and how many files the loader has
@@ -666,7 +664,11 @@ impl Vm {
         let mut refused = Vec::new();
         // What each entry loaded: the features it provided and the files.
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
-        let readers: Vec<usize> = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
+        // Each secret reader defers in this build (lisp/romacs/romacs-world-layer.el):
+        // the form that asks is kept, as code, for the session.
+        let readers = SECRET_READERS.join(" ");
+        let slots: Vec<usize> = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
+        let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) t))"));
         host::layer_begin();
         // As the init's libraries find the live session: interactive
         // (lisp/romacs/romacs-gui-loadup.el), with the init named before it loads
@@ -679,10 +681,21 @@ impl Vm {
             let (refusals, timers) = (host::refusals(), self.timer_count());
             let heads = self.load_heads();
             host::layer_declared(entry.declared);
+            host::take_secret_asked();
+            // The readers' calls are observed beside their deferrals: a call
+            // that was not deferred (a reader the build could not advise) ran,
+            // and the entry is left to the session.
             let observed = !self.backtrace.observing();
-            if observed { self.backtrace.observe_only(readers.clone()); }
+            if observed { self.backtrace.observe_only(slots.clone()); }
+            let asks = host::reader_asks();
             let result = self.set_load_path(&paths).and_then(|()| self.eval_source_raw(&entry.form()));
-            let secret = if observed { self.secret_call() } else { None };
+            // Startup's own observation, begun and ended inside the entry, took
+            // it over: its reads are the fence's to judge.
+            let ran = if observed && self.backtrace.observing() { self.backtrace.observed() } else { Vec::new() };
+            // Each top-level form and configuration form keeps for itself what
+            // it asked; one asked outside them leaves the entry to the session.
+            let secret = (ran.len() > host::reader_asks() - asks).then(|| ran.first().map(|&slot| self.symbol_names[slot].clone()).unwrap_or_default())
+                .or_else(|| host::take_secret_asked().then(|| "asked outside its forms".to_owned()));
             for path in self.load_path_strings().unwrap_or_default() {
                 if !plan.load_paths[entry.load_path].contains(&path) && !added.contains(&path) { added.push(path); }
             }
@@ -718,6 +731,7 @@ impl Vm {
             refused.push((at, why));
         }
         host::layer_declared(false);
+        let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) nil))"));
         let restored: Vec<PathBuf> = added.iter().chain(kept.iter().filter(|p| !added.contains(p))).map(PathBuf::from).collect();
         let _ = self.set_load_path(&restored);
         // The startup function runs again after the libraries, as a
