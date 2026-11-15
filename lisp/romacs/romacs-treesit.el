@@ -152,7 +152,10 @@ end of a token that is a word character there."
       (when (eq romacs-treesit--stopgap-rules 'unknown)
         (setq romacs-treesit--stopgap-rules (romacs-treesit--stopgap-read-rules)))
       (setq romacs-treesit--stopgapped (cons start end))
-      (let ((doc (car romacs-treesit--stopgap-rules)) (case-fold-search nil))
+      ;; No property lookup either: a scan that reaches the propertized
+      ;; frontier runs `syntax-propertize' from inside `parse-partial-sexp'.
+      (let ((doc (car romacs-treesit--stopgap-rules)) (case-fold-search nil)
+            (parse-sexp-lookup-properties nil))
         (with-silent-modifications
           (save-excursion
             (save-match-data

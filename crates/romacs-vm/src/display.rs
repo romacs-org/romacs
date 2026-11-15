@@ -2595,7 +2595,7 @@ impl Vm {
     }
     /// The window in ROOT, waiting for its first parse, takes the stopgap
     /// faces of the rows it shows (`romacs-treesit--stopgap`,
-    /// lisp/romacs/romacs-treesit.el): lexical faces from the syntax table
+    /// `lisp/romacs/romacs-treesit.el`): lexical faces from the syntax table
     /// and the mode's keywords, which the landing's fontification replaces.
     fn treesit_stopgap(&mut self, root: usize, text_height: u32) -> Result<()> {
         let window = self.slots[root].value;

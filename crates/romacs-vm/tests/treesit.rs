@@ -528,7 +528,7 @@ fn reparsing_predicates_signal_as_treesit_c() {
 /// the mode's comment rule matches it), and the keyword tokens of the
 /// mode's enabled font-lock rules, matched by case as whole tokens;
 /// nothing structural, no rule of a feature that is off, and no
-/// `syntax-propertize', which may ask for the tree.
+/// `syntax-propertize`, which may ask for the tree.
 #[test]
 fn a_window_waiting_for_its_first_parse_takes_lexical_faces() {
     let mut vm = gnu_lisp(&[]);
@@ -548,6 +548,7 @@ fn a_window_waiting_for_its_first_parse_takes_lexical_faces() {
               :language 'c :feature 'delimiter '([\";\"] @font-lock-delimiter-face))) \
           (setf (nth 1 (nth 3 treesit-font-lock-settings)) nil) \
           (setq-local syntax-propertize-function (lambda (&rest _) (error \"stopgap propertized\"))) \
+          (setq-local parse-sexp-lookup-properties t) (setq syntax-propertize--done 1) \
           (insert \"/** doc */ /* plain */ int f (int a) {{ if (a) return a + 1; Return xif; \\\"if x\\\"; }}\") \
           (romacs-treesit--stopgap (selected-window) (point-min) (point-max)) \
           (mapcar (lambda (word) (goto-char (point-min)) (let ((case-fold-search nil)) (search-forward word)) (get-text-property (1- (match-end 0)) 'face)) \
