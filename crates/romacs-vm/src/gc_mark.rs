@@ -284,7 +284,7 @@ pub(super) struct Worker {
 /// in use, and the dead objects whose end has side effects (`Grave::takes`
 /// refuses them), left where they were for the collecting thread.
 pub(super) struct Swept {
-    /// Freed, the end of the last in use, and the lowest freed.
+    /// Freed, the end of the last in use, and the lowest free.
     pub(super) tables: [(usize, usize, usize); 4],
     pub(super) dead: Vec<u32>,
 }
@@ -692,10 +692,10 @@ impl Marking {
         let swept = Mutex::new(Swept { tables: [(0, 0, usize::MAX); 4], dead: Vec::new() });
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last, first, mut dead) = self.sweep_range(w, table, range, defer);
+            let (freed, last, free, mut dead) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
             let (all, end, lowest) = swept.tables[table];
-            swept.tables[table] = (all + freed, end.max(last), lowest.min(first));
+            swept.tables[table] = (all + freed, end.max(last), lowest.min(free));
             swept.dead.append(&mut dead);
         });
         // In index order whatever the threads' chunks were: their side
@@ -713,7 +713,7 @@ impl Marking {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
         let mut kept = Vec::new();
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
-        let (freed, last, first) = unsafe {
+        let (freed, last, free) = unsafe {
             match table {
                 0 => self.conses.sweep_range(range, self.verify, |_, pair| *pair = (dead, dead)),
                 1 => self.closures.sweep_range(range, self.verify, |_, c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
@@ -726,7 +726,7 @@ impl Marking {
                 }),
             }
         };
-        (freed, last, first, kept)
+        (freed, last, free, kept)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.
