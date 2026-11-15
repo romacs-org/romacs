@@ -156,6 +156,97 @@ fn a_library_that_changes_what_startup_computes_refuses_the_build() {
     assert!(refusals(&trace, "init-layer").is_empty(), "no entry is named: {trace}");
 }
 
+/// Build NAMES' libraries, written from LIBRARIES into a fresh scratch
+/// NAME, over BOOTSTRAP: the VM, the refused entries and the trace.
+fn build_libraries(name: &str, libraries: &[(&str, &str)], bootstrap: &str) -> (Vm, Vec<(usize, String)>, Json) {
+    let dir = scratch(name);
+    for (library, source) in libraries {
+        std::fs::write(dir.join(format!("lisp/{library}.el")), format!("{source}(provide '{library})\n")).unwrap();
+    }
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), bootstrap).unwrap();
+    let names: Vec<&str> = libraries.iter().map(|(library, _)| *library).collect();
+    let plan = plan(&dir, &names);
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    (vm, refused, trace)
+}
+
+/// A form that meets what a build cannot hold, other than a secret's ask,
+/// leaves its entry to the session, however it writes: a `let' around an
+/// assignment, an assignment in a condition, a property, a list changed in
+/// place by its own syntax or by a function it calls. The layer is built
+/// again without the entry, so the image holds nothing it did.
+#[test]
+fn a_form_that_meets_a_fence_leaves_its_entry_to_the_session() {
+    let (mut vm, refused, trace) = build_libraries("live-entries", &[
+        ("lib-w1", "(let ((x (car exec-path))) (setq lib-w1-a x))\n(defvar lib-w1-b lib-w1-a)\n"),
+        ("lib-w2", "(when (setq lib-w2-a (car exec-path)) (setq lib-w2-b t))\n(defvar lib-w2-c lib-w2-a)\n"),
+        ("lib-w3", "(put 'lib-w3 'directory (car exec-path))\n(defvar lib-w3-directory (get 'lib-w3 'directory))\n"),
+        ("lib-w4", "(defvar lib-w4-list (list 'kept))\n(setq lib-w4-list (nconc lib-w4-list (list (car exec-path))))\n"),
+        ("lib-w5", "(defvar lib-w5-list (list 'kept))\n(defun lib-w5-grow (l) (nconc l (list (car exec-path))))\n(setq lib-w5-list (lib-w5-grow lib-w5-list))\n"),
+    ], BOOTSTRAP);
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "fence"), (1, "fence"), (2, "fence"), (3, "fence"), (4, "fence")], "{}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "romacs--world-reseed-forms"), "nil", "no form is kept as code");
+}
+
+/// A timer an entry starts is the image's only when restore makes it
+/// again: org-persist's lock refresh, which its re-seed form keeps in its
+/// variable. Any other, beside a re-seed form that read the clock for its
+/// own variable (cl-extra's random state), leaves its entry to the session.
+#[test]
+fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
+    let dir = scratch("timers");
+    let (extra, org) = (dir.join("lisp/emacs-lisp"), dir.join("lisp/org"));
+    std::fs::create_dir_all(&extra).unwrap();
+    std::fs::create_dir_all(&org).unwrap();
+    std::fs::write(extra.join("cl-extra.el"), "(defvar cl--random-state (list 'state (current-time)))\n\
+        (setq timer-list (cons (list 'unrelated) timer-list))\n(provide 'cl-extra)\n").unwrap();
+    std::fs::write(org.join("org-persist.el"), "(defvar org-persist--disable-when-emacs-Q nil)\n\
+        (defvar org-persist--refresh-gc-lock-timer nil)\n\
+        (unless (and org-persist--disable-when-emacs-Q nil)\n  \
+        (setq org-persist--refresh-gc-lock-timer (car (setq timer-list (cons (list 'lock (current-time)) timer-list)))))\n\
+        (provide 'org-persist)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
+    let paths = vec![vec![extra.display().to_string(), org.display().to_string()]];
+    let plan = Plan::new(&dir.join("init.el"), vec![require("cl-extra"), require("org-persist")], paths).unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "timer")], "{}", trace["refusals"]);
+    assert!(trace["refusals"].as_array().unwrap().iter().all(|r| r["kind"] == "init-layer"), "{}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "timer-list"), "nil", "no image holds a timer of the builder's");
+}
+
+/// A source session runs startup before its libraries and keeps what they
+/// set; a restored one runs it after them. A library whose value the
+/// startup run after the libraries sets again is refused, and the session
+/// runs it after its own startup, as from source. The coding system a read
+/// reports (`last-coding-system-used') is no startup output: every read
+/// sets it.
+#[test]
+fn a_library_whose_value_startup_sets_again_runs_in_the_session() {
+    let bootstrap = BOOTSTRAP.replace("(setq fence-out", "(setq last-coding-system-used 'utf-8)\n             (setq fence-out");
+    assert_ne!(bootstrap, BOOTSTRAP);
+    let (_, refused, trace) = build_libraries("reset", &[
+        ("lib-q", "(setq last-coding-system-used 'iso-latin-1)\n"),
+        ("lib-o", "(setq fence-out 'lib-o)\n"),
+    ], &bootstrap);
+    assert_eq!(refused, [(1, "startup sets fence-out again".to_owned())], "{}", trace["refusals"]);
+    assert!(!refusals(&trace, "fence").iter().any(|r| r["access"] == "startup-output"), "{}", trace["refusals"]);
+}
+
 #[test]
 fn a_library_may_ask_whether_a_delayed_variable_is_bound_and_rewrite_what_startup_reads() {
     let (mut vm, refused, trace) = build("cus-start", &["lib-k"]);

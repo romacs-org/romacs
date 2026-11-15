@@ -235,8 +235,6 @@ struct LayerState {
     /// An effect refused inside the definition form: the form is cut short
     /// and deferred whole to restore (`layer_form_cut`).
     cut: bool,
-    /// A re-seed form that starts a timer ran (`reseed_reads`).
-    timers: bool,
     rerun: bool,
     /// The entry loading is a library the init only declared
     /// (`layer::Entry::declared`): its re-seed forms may wait for their
@@ -354,22 +352,19 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
-        if what == "clock" {
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
-        }
     }
     allowed
-}
-
-/// Whether a re-seed form that reads the clock ran since the last call:
-/// a timer the form left is restarted at restore, so the layer may keep it.
-pub(crate) fn layer_timers_allowed() -> bool {
-    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
 pub(crate) fn at_baked_host() -> bool {
     with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
+}
+
+/// The variables the built-in re-seed forms set (`RESEED`), which restore
+/// sets again by evaluating those forms.
+pub(crate) fn reseed_variables() -> impl Iterator<Item = &'static str> {
+    RESEED.iter().filter_map(|r| r.3)
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
@@ -554,18 +549,6 @@ pub(crate) fn record(kind: &str, fields: Json) {
 /// How many refusals the build has listed so far; 0 outside a build.
 pub(crate) fn refusals() -> usize {
     with_build(|b| b.refusals.len()).unwrap_or(0)
-}
-
-/// Forget the refusals listed since there were MARK: what a form the
-/// layer keeps as code for the session met in the build
-/// (`romacs--layer-walk`), which it no longer answers for. Each may be
-/// listed again by a later form.
-pub(crate) fn forget_refusals_since(mark: usize) {
-    with_build(|b| {
-        for item in b.refusals.split_off(mark.min(b.refusals.len())) {
-            b.seen.remove(&format!("true{item}"));
-        }
-    });
 }
 
 /// List a refusal: KIND with FIELDS and the current site.
