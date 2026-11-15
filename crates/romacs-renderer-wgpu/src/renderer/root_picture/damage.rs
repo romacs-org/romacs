@@ -207,19 +207,7 @@ fn has_text(frame: &FrameGlyphBuffer, run: &Run) -> bool {
 pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     let mut out: Vec<Run> = Vec::new();
     for (at, glyph) in glyphs.iter().enumerate() {
-        let bounds = glyph.geometry().unwrap_or_default();
-        // An image fills its face's background over its box and slot, which
-        // can be larger than itself.
-        let painted = match glyph {
-            FrameGlyph::Image { slot_rect, box_rect, .. } => union(union(bounds, *slot_rect), *box_rect),
-            _ => bounds,
-        };
-        let text = matches!(glyph, FrameGlyph::Char { .. } | FrameGlyph::Stretch { .. });
-        let key = (
-            glyph.window_id().map_or(0, DisplayWindowId::get),
-            bounds.y.to_bits(),
-            bounds.height.to_bits(),
-        );
+        let (key, painted, text) = place(glyph);
         match out.last_mut() {
             Some(run) if run.key == key => {
                 run.glyphs.end = at + 1;
@@ -237,6 +225,33 @@ pub(crate) fn runs(glyphs: &[FrameGlyph]) -> Vec<Run> {
     }
     assign_rows(&mut out);
     out
+}
+
+/// GLYPH's group, the rectangle it paints, and whether it is text. A row's
+/// characters and stretches take one match; an image fills its face's
+/// background over its box and slot, which can be larger than itself.
+fn place(glyph: &FrameGlyph) -> (Key, Rect, bool) {
+    match glyph {
+        FrameGlyph::Char { window_id, x, y, width, height, .. }
+        | FrameGlyph::Stretch { window_id, x, y, width, height, .. } => (
+            (window_id.get(), y.to_bits(), height.to_bits()),
+            Rect::new(*x, *y, *width, *height),
+            true,
+        ),
+        _ => {
+            let bounds = glyph.geometry().unwrap_or_default();
+            let key = (
+                glyph.window_id().map_or(0, DisplayWindowId::get),
+                bounds.y.to_bits(),
+                bounds.height.to_bits(),
+            );
+            let painted = match glyph {
+                FrameGlyph::Image { slot_rect, box_rect, .. } => union(union(bounds, *slot_rect), *box_rect),
+                _ => bounds,
+            };
+            (key, painted, false)
+        }
+    }
 }
 
 /// Give RUNS their visual rows: a sweep over each window's text runs by y

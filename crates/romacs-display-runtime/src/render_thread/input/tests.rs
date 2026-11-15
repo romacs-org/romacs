@@ -1732,7 +1732,7 @@ fn chrome_hit_uses_absolute_semantic_hit_regions() {
     let Some(primary_frame) = ensure_primary_frame(&mut app) else {
         return;
     };
-    primary_frame.compositor.current_frame = Some(frame);
+    primary_frame.compositor.current_frame = Some(std::sync::Arc::new(frame));
     assert_eq!(app.toolbar_y_origin(), 18.0);
     assert_eq!(app.toolbar_hit_test(20.0, 30.0), Some(0));
     assert_eq!(app.tab_bar_hit_test(20.0, 56.0), Some((9, 12)));

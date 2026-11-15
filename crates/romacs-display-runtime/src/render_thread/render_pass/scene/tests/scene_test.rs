@@ -85,7 +85,7 @@ fn install_layout(
     origin: romacs_display_protocol::frame_time::EventTime,
 ) {
     render.measure_pane_layout(Some(root), origin);
-    render.compositor.current_frame = Some(root.clone());
+    render.compositor.current_frame = Some(std::sync::Arc::new(root.clone()));
     render.begin_presentable_render();
 }
 fn seed_pending_layout(

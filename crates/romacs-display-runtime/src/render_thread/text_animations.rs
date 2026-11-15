@@ -92,6 +92,11 @@ impl TextAnimations {
     }
 
     /// Scenes to free.
+    /// Whether any animation runs: whether `paint` changes a frame.
+    pub(crate) fn is_running(&self) -> bool {
+        !self.running.is_empty()
+    }
+
     pub(crate) fn take_retired(&mut self) -> Vec<PageScene> {
         std::mem::take(&mut self.retired)
     }
