@@ -550,9 +550,10 @@ record among them says whole; nil when none does.  Claude writes an
 `assistant' record as each of a message's blocks ends, in order, under
 the message's id: a message's first N blocks are whole when its records
 hold N.  A block cut short, or still streaming, has none: its deltas
-are read.  A stream line starts with its message's id (`api_message_id')
-and names its block by the event's `index'; no string can hold a quoted
-key."
+are read, and every message's own start and end, so a block read takes
+its message's id.  A stream line starts with its message's id
+\(`api_message_id') and names its block by the event's `index'; no
+string can hold a quoted key."
   (let ((whole (make-hash-table :test #'equal)))
     (goto-char (point-min))
     (while (re-search-forward romacs-agent--claude-assistant-end nil t)
@@ -575,11 +576,11 @@ key."
                               ((progn (goto-char end)
                                       (looking-back romacs-agent--claude-stream-end (max start (- end 200))))))
                     (goto-char start)
-                    ;; A block's event says which; a message's own (its start,
-                    ;; its end) draws nothing a whole record does not.
-                    (if (re-search-forward "\"index\":\\([0-9]+\\)" end t)
-                        (< (string-to-number (match-string 1)) blocks)
-                      t))))))))
+                    ;; A block's event says which.  A message's own (its
+                    ;; start, its end) are read: a block of it still read
+                    ;; takes its id from its start.
+                    (and (re-search-forward "\"index\":\\([0-9]+\\)" end t)
+                         (< (string-to-number (match-string 1)) blocks)))))))))
 
 (defun romacs-agent--claude-session-rules (request)
   "The permission updates allowing REQUEST's tool for the rest of the
