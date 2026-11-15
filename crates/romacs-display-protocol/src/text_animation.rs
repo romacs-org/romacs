@@ -107,33 +107,11 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
     if cols == 0 || cells.len() != cols * rows {
         return;
     }
-    let in_window = |glyph: &FrameGlyph| match glyph {
-        FrameGlyph::Char {
-            slot_id,
-            row_role: GlyphRowRole::Text,
-            composed: None,
-            ..
-        } if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
-        _ => None,
-    };
-    let Some((first_row, first_col)) =
-        frame
-            .glyphs
-            .iter()
-            .filter_map(in_window)
-            .fold(None, |origin: Option<(u32, u16)>, slot| {
-                Some(origin.map_or((slot.row, slot.col), |(r, c)| {
-                    (r.min(slot.row), c.min(slot.col))
-                }))
-            })
-    else {
+    let in_window = |glyph: &FrameGlyph| text_slot(glyph, animation);
+    let Some((first_row, first_col)) = origin(frame, animation) else {
         return;
     };
-    let block = |slot: &DisplaySlotId| -> Option<usize> {
-        let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
-        let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
-        ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
-    };
+    let block = |slot: &DisplaySlotId| cell_of(animation, (first_row, first_col), slot);
     // Each cell's glyph, and one glyph per row to model missing cells on.
     let mut at: Vec<Option<usize>> = vec![None; cells.len()];
     let mut model: Vec<Option<usize>> = vec![None; rows];
@@ -230,6 +208,51 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
                 .insert(ch, glyph);
         }
     }
+}
+
+/// GLYPH's slot, when it is a text cell of ANIMATION's window.
+fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlotId> {
+    match glyph {
+        FrameGlyph::Char {
+            slot_id,
+            row_role: GlyphRowRole::Text,
+            composed: None,
+            ..
+        } if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
+        _ => None,
+    }
+}
+
+/// ANIMATION's window's first text row and column in FRAME, where its
+/// block is placed from.
+fn origin(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<(u32, u16)> {
+    frame.glyphs.iter().filter_map(|glyph| text_slot(glyph, animation)).fold(None, |origin: Option<(u32, u16)>, slot| {
+        Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col))))
+    })
+}
+
+/// SLOT's cell in ANIMATION's block placed from ORIGIN, if it is in it.
+fn cell_of(animation: &TextAnimation, (first_row, first_col): (u32, u16), slot: &DisplaySlotId) -> Option<usize> {
+    let (cols, rows) = (animation.cols as usize, animation.rows as usize);
+    let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
+    let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
+    ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
+}
+
+/// Take from FRAME the text cells of ANIMATION's block that a scene drawn
+/// over the block covers: those whose face's background is the frame's,
+/// which draw nothing past what the frame's own background paints there.
+/// The same pixels as `paint` with blank cells, and a frame of the block's
+/// other glyphs alone, not a glyph for every one of its cells.
+pub fn clear(frame: &mut FrameGlyphBuffer, animation: &TextAnimation) {
+    let Some(origin) = origin(frame, animation) else { return };
+    let background = frame.background;
+    let faces = &frame.faces;
+    frame.glyphs.retain(|glyph| {
+        let covered = text_slot(glyph, animation).and_then(|slot| cell_of(animation, origin, &slot)).is_some()
+            && face_of(glyph).and_then(|id| faces.get(&id)).is_some_and(|face| face.background == background);
+        !covered
+    });
 }
 
 fn face_of(glyph: &FrameGlyph) -> Option<FaceId> {
