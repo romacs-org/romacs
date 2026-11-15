@@ -3679,18 +3679,20 @@ record, from its turns' rows; nil when it has fewer rows than that, none
 earlier (all of it is then drawn), or for a journal when it begins more
 than BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
 by default; `none', no bound)."
-  (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
-              (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
-              ;; One turn more than drawn: what is before it is earlier turns.
-              ((> (length seqs) turns))
-              (seq (nth (1- turns) seqs))
-              (from (if (romacs-agent-events-p session) seq
-                      (romacs-agent--journal-file-after session seq nil t)))
-              ;; Bounded as the journal's own tail is (`none', not at all).
-              (bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes)))
-              ((or (romacs-agent-events-p session) (not bound)
-                   (<= (- (romacs-agent--journal-end session) from) bound))))
-    (cons from turns)))
+  ;; Bounded as the journal's own tail is (`none', not at all): looked for
+  ;; only within the bound's bytes.
+  (let ((bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes))))
+    (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
+                (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+                ;; One turn more than drawn: what is before it is earlier turns.
+                ((> (length seqs) turns))
+                (seq (nth (1- turns) seqs))
+                (from (if (romacs-agent-events-p session) seq
+                        (romacs-agent--journal-file-after session seq bound t)))
+                ((integerp from))
+                ((or (romacs-agent-events-p session) (not bound)
+                     (<= (- (romacs-agent--journal-end session) from) bound))))
+      (cons from turns))))
 
 (defun romacs-agent--journal-file-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
@@ -4113,6 +4115,11 @@ it is first asked for: a start reads rows only."
                   'romacs-agent-pending-functions dir
                   (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))))
 
+(defun romacs-agent--restore-load (dir)
+  "Load the session recorded in DIR as a restore does: unless it is left
+unloaded (`romacs-agent--unloaded-p')."
+  (unless (romacs-agent--unloaded-p dir) (romacs-agent--load dir)))
+
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
@@ -4178,7 +4185,7 @@ A server runs this at its start, so sessions survive it; a restore
 `romacs-agent-restore-soon' began ends here, at once."
   (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t))
     (setq romacs-agent--restore-pending nil romacs-agent--restoring nil)
-    (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
+    (if pending (mapc #'romacs-agent--restore-load pending) (romacs-agent--load-new))
     (romacs-agent--fold-all-now)
     (romacs-agent--restore-tail)
     (when pending (romacs-agent--restore-progress 'done))))
@@ -4207,7 +4214,7 @@ on."
   (when romacs-agent--restore-pending
     (let ((until (+ (float-time) romacs-agent--restore-turn)))
       (while (when-let* ((dir (pop romacs-agent--restore-pending)))
-               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load dir))
+               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--restore-load dir))
                (romacs-agent--restore-progress 'running)
                (< (float-time) until))))
     (if romacs-agent--restore-pending
