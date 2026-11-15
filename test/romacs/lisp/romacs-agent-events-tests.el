@@ -82,7 +82,9 @@ turns, and its journal's file; a state root of its own."
               (tail-seq (romacs-agent-events-tests--at session (car tail)))
               (after (romacs-agent-events-tests--seqs session (romacs-agent--journal-after session 20)))
               (notes (length (romacs-agent--journal-notes session "run")))
-              (recorded (romacs-agent--recorded-p session)))
+              (recorded (romacs-agent--recorded-p session))
+              (last (gethash "seq" (romacs-agent--journal-last session '("romacsRequest") #'romacs-agent--record-request)))
+              (head (romacs-agent-events-tests--at session (romacs-agent--journal-head session))))
          (should (romacs-agent-events-import session))
          (should (romacs-agent-events-p session))
          (should-not (file-exists-p journal))
@@ -95,6 +97,11 @@ turns, and its journal's file; a state root of its own."
          (should-not (romacs-agent--journal-after session 999))
          (should (= (length (romacs-agent--journal-notes session "run")) notes))
          (should (eq (romacs-agent--recorded-p session) recorded))
+         ;; Read from their ends as the journal's were.
+         (should (= (gethash "seq" (romacs-agent--journal-last session '("romacsRequest") #'romacs-agent--record-request)) last))
+         (should (= (romacs-agent-events-tests--at session (romacs-agent--journal-head session)) head))
+         (should (= (romacs-agent--journal-head session 2) 2))
+         (should (> (romacs-agent-events-size session) (romacs-agent-events-size session 20) 0))
          ;; With no supervisor, Romacs's own note goes to SQLite.
          (romacs-agent--note session (romacs-mcp--object "type" "selection"))
          (should (= (length (romacs-agent--journal-notes session "selection")) 1))

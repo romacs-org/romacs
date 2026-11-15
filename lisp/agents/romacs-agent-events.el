@@ -166,6 +166,44 @@ them, which hold PROMPTS prompts."
           (or found (cons nil (+ seen (length prompts))))))
     (cons nil 0)))
 
+;; What a journal's readers find from its ends, from SQLite.
+
+(defun romacs-agent-events-last (session needles predicate)
+  "As `romacs-agent--journal-last': SESSION's last record that PREDICATE
+holds for, only a record holding one of NEEDLES (strings) parsed."
+  (when-let* ((db (romacs-agent-events--db)))
+    (romacs-agent-events--reading db
+      (let ((rows (sqlite-select db (concat "select record from events where session = ? and ("
+                                            (mapconcat (lambda (_) "instr(record, ?) > 0") needles " or ")
+                                            ") order by seq desc, rowid desc")
+                                 (cons (romacs-agent-id session) needles) 'set))
+            (found nil))
+        (unwind-protect
+            (let (row)
+              (while (and (not found) (setq row (sqlite-next rows)))
+                (let ((record (romacs-agent-events--parse (car row))))
+                  (when (and (hash-table-p record) (funcall predicate record)) (setq found record)))))
+          (sqlite-finalize rows))
+        found))))
+
+(defun romacs-agent-events-head (session &optional end)
+  "As `romacs-agent--journal-head', in seqs: the seq of SESSION's first
+prompt before END, or END (its end by default) when it has none."
+  (let ((end (or end (romacs-agent-events-end session))))
+    (or (when-let* ((db (romacs-agent-events--db)))
+          (caar (sqlite-select db (concat "select min(seq) from events where session = ? and kind = 'in' and seq < ?"
+                                          " and json_extract(record, '$.in.romacsRequest') is not null")
+                               (list (romacs-agent-id session) end))))
+        end)))
+
+(defun romacs-agent-events-size (session &optional from)
+  "The characters of SESSION's records from seq FROM on: what a fold of
+them reads, as a journal's bytes say for a journal."
+  (or (when-let* ((db (romacs-agent-events--db)))
+        (caar (sqlite-select db "select sum(length(record)) from events where session = ? and seq >= ?"
+                             (list (romacs-agent-id session) (or from 0)))))
+      0))
+
 ;;; Writing, with no supervisor running
 
 (defun romacs-agent-events-append (session record)

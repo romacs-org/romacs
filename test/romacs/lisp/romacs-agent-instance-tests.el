@@ -226,8 +226,8 @@ conversation is in `one'; `told' collects what a task is told."
         ;; Moved, the move journaled with why, told to go on, and its parent not woken for it.
         (should (equal (romacs-agent-provider session) "claude2"))
         (should (string-match-p "\"type\":\"handoff\",\"from\":\"claude\",\"to\":\"claude2\",\"why\":\"usage limit\""
-                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-                                                  (buffer-string))))
+                                (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "
+")))
         (should (string-match-p "stopped at claude's usage limit; you now run on claude2" (car sent)))
         (should-not (romacs-agent-tools--wanted-p session 9))
         ;; One that cannot move wakes its parent with its end, as without the option.
@@ -251,8 +251,8 @@ conversation is in `one'; `told' collects what a task is told."
           (romacs-agent--raise session (list :type 'done :error t :limit t :text "spent" :seq 20))
           (should-not waits)
           (should (string-match-p "\"from\":\"claude2\",\"to\":null,\"why\":\"every claude account is at its limit\",\"resets\":[0-9]"
-                                  (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-                                                    (buffer-string))))))))))
+                                  (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "
+")))))))))
 
 (ert-deftest romacs-agent-instance-the-tool ()
   (romacs-agent-instance-tests--with

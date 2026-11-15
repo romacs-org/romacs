@@ -1897,6 +1897,13 @@ event carries them: plists of :path :kind (image, file or capture) :alt
     (nreverse records)))
 
 (defun romacs-agent--journal-last (session needles predicate)
+  "The last record of SESSION's records that PREDICATE holds for, or nil.
+Only a record holding one of NEEDLES, strings, is parsed: from SQLite
+\(`romacs-agent-events-last') or a journal (`romacs-agent--journal-file-last')."
+  (if (romacs-agent-events-p session) (romacs-agent-events-last session needles predicate)
+    (romacs-agent--journal-file-last session needles predicate)))
+
+(defun romacs-agent--journal-file-last (session needles predicate)
   "The last record of SESSION's journal that PREDICATE holds for, or nil.
 Only a line holding one of NEEDLES, strings, is parsed: the journal is
 read back from its end in growing spans, so a long one is read only as
@@ -3759,6 +3766,13 @@ go."
         found))))
 
 (defun romacs-agent--journal-head (session &optional end)
+  "The place at which SESSION's first prompt starts, or END (its end by
+default) when it has none before: what comes before a session's first
+turn, from SQLite (a seq) or its journal (a byte)."
+  (if (romacs-agent-events-p session) (romacs-agent-events-head session end)
+    (romacs-agent--journal-file-head session end)))
+
+(defun romacs-agent--journal-file-head (session &optional end)
   "The byte at which SESSION's journal's first prompt starts, or END (its
 end by default) when it has none before: what comes before a session's
 first turn, read from its start in growing spans."
@@ -3954,14 +3968,15 @@ MANIFEST FAILURE), FAILURE why its job failed, or nil.")
 at once (`romacs-agent-restore').")
 
 (defun romacs-agent--fold-aside-p (session from)
-  "Whether a worker VM folds SESSION's journal from byte FROM, where its
+  "Whether a worker VM folds SESSION's records from place FROM, where its
 kept state ends (nil: its start): more than `romacs-agent-fold-bytes' of
-it is left to read."
+them are left to read (in SQLite, their text's characters)."
   (and romacs-agent-fold-bytes (not romacs-agent--fold-here)
        (fboundp 'isolate-spawn) (isolate-main-p)
-       (> (- (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
-                 0)
-             (or from 0))
+       (> (if (romacs-agent-events-p session) (romacs-agent-events-size session from)
+            (- (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+                   0)
+               (or from 0)))
           romacs-agent-fold-bytes)))
 
 (defun romacs-agent--fold-aside (session manifest)
