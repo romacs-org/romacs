@@ -36,8 +36,8 @@ import fileio_live as fio
 import find_file_live as ff
 import live_oracle as live
 
-SHADOWED = (('romacs-agent-diff', 'lisp/romacs/romacs-agent-diff.el'), ('hexl', 'lisp/gnu/hexl.el'))
-PRELOADED = (('thingatpt', 'lisp/gnu/thingatpt.el'), ('romacs-cursor', 'lisp/romacs/romacs-cursor.el'))
+SHADOWED = (('romacs-agent-diff', 'lisp/agents/romacs-agent-diff.el'), ('hexl', 'lisp/hexl.el'))
+PRELOADED = (('thingatpt', 'lisp/thingatpt.el'), ('romacs-cursor', 'lisp/ui/romacs-cursor.el'))
 
 STATE = '''(add-hook 'emacs-startup-hook (lambda () (write-region
  (prin1-to-string
