@@ -2,21 +2,25 @@
 //! leaves its wait for input and when it goes back to it
 //! (`terminal_wait::wait` calls [`working`] and [`waiting`]): whatever it
 //! runs in between (a command, a timer, process output, a server's
-//! request, startup itself) is one span of work.  A thread of its own looks
-//! ten times a second; a span past [`threshold`] is a stall.  While it lasts
-//! the watchdog asks the evaluator for its call stack once a second, through
-//! the debugger's inspection (`romacs_vm::host::inspect_*`: answered at the
-//! next safe point, read with no Lisp run).  When it ends, the stall is one
-//! JSON line: on stderr at once (a server's journal), and kept for the usage
-//! log, which takes it with its counts (`romacs--take-stalls`).  A stall
-//! still going at [`ONGOING`] is said once on stderr then, so a wedged
-//! session leaves a trace.
+//! request, startup itself) is one span of work.  A span past the
+//! threshold (`ROMACS_STALL_MS`, one second) is a stall: [`waiting`] keeps
+//! its start and end, so none is missed however short its excess.  A thread
+//! of its own looks ten times a second: while a stall lasts it asks the
+//! evaluator for its call stack once a second, through the debugger's
+//! inspection (`romacs_vm::host::inspect_*`: answered at the next safe
+//! point, native loops included, read with no Lisp run); once it ended, its
+//! record is one JSON line, on stderr at once (a server's journal) and kept
+//! for the usage log, which takes it with its counts (`romacs--take-stalls`).
+//! A stall still going is kept as an `ongoing` record the usage log takes
+//! too (so a session that ends inside one still says it), and is said on
+//! stderr at [`ONGOING`], so a wedged session leaves a trace.
 //!
 //!   {"kind":"stall","ms":MS,"during":"startup"|"session","buffer":B,
 //!    "samples":[[FUNCTION...],...]}
 //!
 //! MS is how long the span ran; each sample the stack's functions,
 //! innermost first, a second apart from the first second.
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -34,6 +38,10 @@ const ONGOING: Duration = Duration::from_secs(10);
 /// When the evaluator's span of work began, in nanoseconds past [`epoch`]
 /// plus one; 0 while it waits for input.
 static SINCE: AtomicU64 = AtomicU64::new(0);
+/// The threshold in nanoseconds, once the watchdog runs.
+static THRESHOLD: AtomicU64 = AtomicU64::new(u64::MAX);
+/// The stalls that ended, (start, end), for the watchdog to record.
+static ENDED: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
 
 fn epoch() -> Instant {
     static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
@@ -45,8 +53,16 @@ fn now() -> u64 { u64::try_from(epoch().elapsed().as_nanos()).unwrap_or(u64::MAX
 /// The evaluator left its wait: its span of work begins.
 pub fn working() { SINCE.store(now(), Ordering::Relaxed); }
 
-/// The evaluator waits for input: its span of work ended.
-pub fn waiting() { SINCE.store(0, Ordering::Relaxed); }
+/// The evaluator waits for input: its span of work ended, a stall kept when
+/// it ran past the threshold.
+pub fn waiting() {
+    let since = SINCE.swap(0, Ordering::Relaxed);
+    if since == 0 { return; }
+    let end = now();
+    if end - since >= THRESHOLD.load(Ordering::Relaxed) {
+        ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((since, end));
+    }
+}
 
 /// The span past which work is a stall: `ROMACS_STALL_MS` milliseconds, by
 /// default one second.
@@ -54,18 +70,32 @@ pub fn threshold() -> Duration {
     Duration::from_millis(std::env::var("ROMACS_STALL_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(1000))
 }
 
-/// A stall as it is watched.
+/// A stall as it is watched: its span's start, the stacks taken so far and
+/// the buffer they were taken in, the inspection asked and not yet
+/// answered, and when the last was asked.
 #[derive(Debug, Default)]
 struct Stall {
-    /// Its span's start ([`SINCE`]).
     since: u64,
-    /// The stacks taken so far.
     samples: Vec<Vec<String>>,
     buffer: Option<String>,
-    /// The inspection asked for and not yet answered, and when the last was.
     asked: Option<u64>,
     last: Option<Instant>,
     said_ongoing: bool,
+}
+
+impl Stall {
+    /// Take the answer to the inspection asked, if it came.
+    fn collect(&mut self) {
+        if let Some(generation) = self.asked
+            && let Some(answer) = romacs_vm::host::inspect_answer_since(generation)
+            && let Ok(answer) = serde_json::from_str::<serde_json::Value>(&answer)
+        {
+            let (frames, buffer) = stack(&answer);
+            self.samples.push(frames);
+            self.buffer = self.buffer.take().or(buffer);
+            self.asked = None;
+        }
+    }
 }
 
 /// The functions of an inspection's JSON SNAPSHOT, innermost first, and its
@@ -82,57 +112,63 @@ fn stack(snapshot: &serde_json::Value) -> (Vec<String>, Option<String>) {
     (frames, buffer)
 }
 
-/// STALL's record, MS long; ONGOING while it still runs.
-fn record(stall: &Stall, ms: u128, startup: bool, ongoing: bool) -> String {
+/// STALL's record, NS long, during startup when STARTUP; ONGOING while it
+/// still runs.
+fn record(stall: &Stall, ns: u64, startup: bool, ongoing: bool) -> String {
     let mut line = serde_json::json!({
-        "kind": "stall", "ms": ms, "during": if startup { "startup" } else { "session" },
+        "kind": "stall", "ms": Duration::from_nanos(ns).as_millis(), "during": if startup { "startup" } else { "session" },
         "buffer": stall.buffer, "samples": stall.samples,
     });
     if ongoing { line["ongoing"] = serde_json::Value::Bool(true); }
     line.to_string()
 }
 
+/// One look: record the stalls that ended, then watch the span running.
+/// STALL is the one being watched, STARTUP startup's span's start.
+fn look(stall: &mut Option<Stall>, startup: u64) {
+    // An answer asked during a span that has ended belongs to that span.
+    if let Some(watched) = stall.as_mut() { watched.collect(); }
+    let ended = std::mem::take(&mut *ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    for (since, end) in ended {
+        let done = stall.take_if(|s| s.since == since).unwrap_or(Stall { since, ..Stall::default() });
+        let line = record(&done, end - since, since == startup, false);
+        eprintln!("romacs-stall: {line}");
+        romacs_vm::host::note_stall(line);
+    }
+    let since = SINCE.load(Ordering::Relaxed);
+    let running = (since != 0).then(|| now().saturating_sub(since)).filter(|&ran| ran >= THRESHOLD.load(Ordering::Relaxed));
+    let Some(ran) = running else {
+        stall.take();
+        romacs_vm::host::note_ongoing_stall(None);
+        return;
+    };
+    if stall.as_ref().is_some_and(|s| s.since != since) { stall.take(); }
+    let watched = stall.get_or_insert_with(|| Stall { since, ..Stall::default() });
+    if watched.asked.is_none() && watched.samples.len() < SAMPLES && watched.last.is_none_or(|last| last.elapsed() >= SAMPLE) {
+        watched.asked = Some(romacs_vm::host::inspect_raise());
+        watched.last = Some(Instant::now());
+    }
+    let line = record(watched, ran, since == startup, true);
+    if Duration::from_nanos(ran) >= ONGOING && !watched.said_ongoing {
+        watched.said_ongoing = true;
+        eprintln!("romacs-stall: {line}");
+    }
+    romacs_vm::host::note_ongoing_stall(Some(line));
+}
+
 /// Watch the evaluator, whose thread this is called on: it answers the
 /// watchdog's inspections, and its span of work begins now (startup).
 /// Stalls past THRESHOLD are recorded.
 pub fn start(threshold: Duration) {
-    romacs_vm::host::inspect_target_unless_named();
+    THRESHOLD.store(u64::try_from(threshold.as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
+    romacs_vm::host::inspect_watch();
     working();
-    // The first span is startup's, until the evaluator first waits.
     let startup = SINCE.load(Ordering::Relaxed);
     let started = std::thread::Builder::new().name("romacs-watchdog".into()).spawn(move || {
-        let mut stall: Option<Stall> = None;
+        let mut stall = None;
         loop {
             std::thread::sleep(LOOK);
-            let since = SINCE.load(Ordering::Relaxed);
-            // The span the stall was in ended.
-            if let Some(ended) = stall.take_if(|s| s.since != since) {
-                let ms = Duration::from_nanos(now().saturating_sub(ended.since)).as_millis();
-                let line = record(&ended, ms, ended.since == startup, false);
-                eprintln!("romacs-stall: {line}");
-                romacs_vm::host::note_stall(line);
-            }
-            if since == 0 { continue; }
-            let ran = Duration::from_nanos(now().saturating_sub(since));
-            if ran < threshold { continue; }
-            let watched = stall.get_or_insert_with(|| Stall { since, ..Stall::default() });
-            if let Some(generation) = watched.asked
-                && let Some(answer) = romacs_vm::host::inspect_answer_since(generation)
-                && let Ok(answer) = serde_json::from_str::<serde_json::Value>(&answer)
-            {
-                let (frames, buffer) = stack(&answer);
-                watched.samples.push(frames);
-                watched.buffer = watched.buffer.take().or(buffer);
-                watched.asked = None;
-            }
-            if watched.asked.is_none() && watched.samples.len() < SAMPLES && watched.last.is_none_or(|last| last.elapsed() >= SAMPLE) {
-                watched.asked = Some(romacs_vm::host::inspect_raise());
-                watched.last = Some(Instant::now());
-            }
-            if ran >= ONGOING && !watched.said_ongoing {
-                watched.said_ongoing = true;
-                eprintln!("romacs-stall: {}", record(watched, ran.as_millis(), since == startup, true));
-            }
+            look(&mut stall, startup);
         }
     });
     if let Err(error) = started { eprintln!("romacs: stall watchdog: {error}"); }
@@ -155,11 +191,27 @@ mod tests {
     #[test]
     fn a_record_says_how_long_and_where() {
         let stall = Stall { samples: vec![vec!["notmuch-hello".into()]], buffer: Some("*notmuch-hello*".into()), ..Stall::default() };
-        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5159, false, false)).unwrap();
+        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, false)).unwrap();
         assert_eq!(line["kind"], "stall");
         assert_eq!(line["ms"], 5159);
         assert_eq!(line["during"], "session");
         assert_eq!(line["samples"][0][0], "notmuch-hello");
         assert!(line.get("ongoing").is_none());
+    }
+
+    /// A span past the threshold that ends between two looks is kept by
+    /// its wait, exactly as long as it ran; a shorter one is not.
+    #[test]
+    fn a_wait_keeps_a_stall_however_briefly_it_overran() {
+        THRESHOLD.store(1_000_000, Ordering::Relaxed);
+        working();
+        std::thread::sleep(Duration::from_millis(2));
+        waiting();
+        working();
+        waiting();
+        let ended = std::mem::take(&mut *ENDED.lock().unwrap());
+        assert_eq!(ended.len(), 1);
+        assert!(ended[0].1 - ended[0].0 >= 2_000_000);
+        THRESHOLD.store(u64::MAX, Ordering::Relaxed);
     }
 }

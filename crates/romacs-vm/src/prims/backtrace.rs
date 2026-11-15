@@ -52,11 +52,12 @@ fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
     Ok(Value::NIL)
 }}
 // The main VM's stalls over a second since the last call, for the usage
-// log: (DROPPED LINE...), each LINE a stall's JSON record, oldest first
+// log: (DROPPED LINE...), each LINE a stall's JSON record, oldest first;
+// with ENDING (the session ends) the stall still going too, last
 // (romacs-vm-gui watchdog.rs).
 defsubr! { name = "romacs--take-stalls", gnu = "romacs:inspect", effect = Global,
-fn romacs_take_stalls(cx) {
-    let (lines, dropped) = crate::host::take_stalls();
+fn romacs_take_stalls(cx; optional ending: Value) {
+    let (lines, dropped) = crate::host::take_stalls(ending != Value::NIL);
     let mut list = Value::NIL;
     for line in lines.iter().rev() {
         let text = cx.string(line);

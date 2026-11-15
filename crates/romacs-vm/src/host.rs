@@ -3383,9 +3383,10 @@ pub fn inspect_pending() -> bool {
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
         && INSPECT_HERE.with(std::cell::Cell::get) == INSPECT_TARGET.load(Relaxed)
 }
-/// Whether a listener runs, so that a native loop should poll for requests.
+/// Whether a listener runs or the stall watchdog watches, so that a native
+/// loop should poll for requests.
 pub fn inspect_enabled() -> bool {
-    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed) || INSPECT_WATCHED.load(std::sync::atomic::Ordering::Relaxed)
 }
 /// Raise a request, as a client does, for this thread's evaluator to answer.
 #[cfg(test)]
@@ -3403,12 +3404,16 @@ pub fn inspect_enable(on: bool) {
 pub fn inspect_answer() -> Option<String> {
     inspect_lock(&INSPECT_SLOT).as_ref().map(|snapshot| snapshot.json.to_string())
 }
-/// Make the calling thread, the evaluator's, the one that answers
-/// inspections, unless a listener already named one (`inspect_listen'):
-/// the stall watchdog asks it even where no client may.
-pub fn inspect_target_unless_named() {
+/// The stall watchdog watches the calling thread, the evaluator's: it
+/// answers inspections, unless a listener already named one
+/// (`inspect_listen'), and native loops poll for them (`inspect_enabled'),
+/// with a listener or without, for as long as the process runs.
+pub fn inspect_watch() {
     if INSPECT_TARGET.load(std::sync::atomic::Ordering::SeqCst) == 0 { inspect_target_here(); }
+    INSPECT_WATCHED.store(true, std::sync::atomic::Ordering::SeqCst);
 }
+/// The stall watchdog asks for inspections (`inspect_watch').
+static INSPECT_WATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Raise a request, as the stall watchdog does from its own thread, for
 /// the target's evaluator to answer at its next safe point: its generation.
 pub fn inspect_raise() -> u64 {
@@ -3422,16 +3427,25 @@ pub fn inspect_answer_since(generation: u64) -> Option<String> {
 /// The main VM's stalls the watchdog recorded, as JSON lines, until the
 /// usage log takes them (`romacs--take-stalls'), at most [`STALLS_KEPT`].
 static STALLS: std::sync::Mutex<(Vec<String>, u64)> = std::sync::Mutex::new((Vec::new(), 0));
+/// The record of a stall still going, while one is.
+static ONGOING_STALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Keep LINE as the record of the stall still going, or none.
+pub fn note_ongoing_stall(line: Option<String>) {
+    *inspect_lock(&ONGOING_STALL) = line;
+}
 const STALLS_KEPT: usize = 256;
 /// Keep LINE, a stall's record, for the usage log.
 pub fn note_stall(line: String) {
     let mut stalls = inspect_lock(&STALLS);
     if stalls.0.len() < STALLS_KEPT { stalls.0.push(line); } else { stalls.1 += 1; }
 }
-/// The stalls kept since the last call, oldest first, and how many were
-/// dropped meanwhile.
-pub fn take_stalls() -> (Vec<String>, u64) {
-    std::mem::take(&mut *inspect_lock(&STALLS))
+/// The stalls kept since the last call, oldest first, and, when the
+/// session is ENDING, the one still going last (it ends inside it), and how
+/// many were dropped meanwhile.
+pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
+    let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));
+    if ending { lines.extend(inspect_lock(&ONGOING_STALL).take()); }
+    (lines, dropped)
 }
 
 /// The newest request, which a snapshot taken now answers.
