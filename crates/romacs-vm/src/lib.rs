@@ -193,6 +193,7 @@ mod protocol;
 mod reader;
 mod regexp;
 mod syntax_index;
+mod markdown;
 mod syntax_scan;
 mod syntax_summary;
 mod surface;
