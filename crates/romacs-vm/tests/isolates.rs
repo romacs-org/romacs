@@ -221,8 +221,13 @@ fn identical_jobs_share_one_pooled_worker_and_the_pool_is_bounded() {
     assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (isolate-await (isolate-spawn 'list 'a)) (isolate-await (isolate-spawn 'list 'b)) (length (isolate-list)))"), "1");
     assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (let ((f (isolate-spawn '(lambda () (while t))))) (romacs--isolate-wait 0.2) (list (condition-case e (isolate-spawn 'list 'other :require '(other-feature)) (isolate-queue-full 'full)) (length (isolate-list)))))"), "(full 1)");
     eval(&mut vm, "(isolate-kill-all)");
-    // A job that loads a feature retires its worker: the next job gets a fresh one.
-    assert_eq!(eval(&mut vm, "(let ((isolate-pool-size 1)) (let ((iso (isolate-future-isolate (isolate-spawn '(lambda () (provide 'journey-feature)))))) (isolate-await (isolate-spawn 'list)) (list (aref iso 6) (eq iso (isolate-future-isolate (isolate-spawn 'list))) (length (isolate-list)))))"), "(t nil 1)");
+    // A job that loads a feature retires its worker: the next job gets a
+    // fresh one at once, the old one ending by itself, unwaited.
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((iso (isolate-future-isolate (isolate-spawn '(lambda () (provide 'journey-feature))))) (first (isolate-spawn 'list)) (pid (romacs--isolate-pid (romacs--isolate-id iso)))) (isolate-await first) (let* ((t0 (float-time)) (next (isolate-spawn 'list)) (quick (< (- (float-time) t0) 0.1))) (list pid (aref iso 6) (eq iso (isolate-future-isolate next)) quick (aref iso 3) (let ((n 0)) (dolist (i (isolate-list) n) (when (isolate-live-p i) (setq n (1+ n)))))))))");
+    let pid: i64 = out.trim_start_matches('(').split_whitespace().next().and_then(|p| p.parse().ok()).unwrap_or_else(|| panic!("{out}"));
+    // Retired, not killed: nothing waited for its exit.
+    assert!(out.ends_with(" t nil t retired 1)"), "{out}");
+    assert!(settles(|| !process_exists(pid)), "retired worker {pid} survived");
     eval(&mut vm, "(isolate-kill-all)");
 }
 
