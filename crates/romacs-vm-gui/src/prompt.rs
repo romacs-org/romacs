@@ -26,6 +26,9 @@ pub struct Shared {
     pub pending: VecDeque<InputEvent>,
     /// Last presentation id submitted, by either loop.
     pub presentation: u64,
+    /// The launch screen while it shows (loading.rs): whichever loop
+    /// paints first ends it (`end_loading`).
+    pub loading: Option<crate::loading::Loading>,
     /// The paint in flight and when its oldest undrawn paint was submitted
     /// (presentation.rs): the outer loop's, until a prompt's own replaces it.
     pub in_flight: Option<(u64, std::time::Instant)>,
@@ -62,6 +65,12 @@ pub struct ServerWindow {
 }
 
 impl Shared {
+    /// End the launch screen, if it shows: the next paint follows every
+    /// frame it submitted.
+    pub fn end_loading(&mut self) {
+        if let Some(loading) = self.loading.take() { self.presentation = self.presentation.max(loading.finish()); }
+    }
+
     /// Whether painting has a window to go to.
     pub fn window_shown(&self) -> bool {
         self.server.as_ref().is_none_or(|server| server.shown)
@@ -215,15 +224,6 @@ fn key_waits(shared: &Shared) -> bool {
     shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
 }
 
-/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
-/// and on a software rasterizer, every headless harness's, only when
-/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
-/// window has chosen its adapter.
-pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
-    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
-    sender.software_adapter().map(|software| !software || forced())
-}
-
 /// A key read in a prompt and the paint that carries it, timed until the
 /// paint is drawn.
 #[derive(Debug)]
@@ -280,7 +280,7 @@ impl HostInput for GuiHost {
     }
 
     fn display_animates(&mut self) -> Option<bool> {
-        display_animates(&self.sender)
+        romacs_vm_gui::presentation::display_animates(&self.sender)
     }
 
     fn pointer(&mut self) -> Option<(i32, i32)> {
@@ -353,6 +353,7 @@ impl HostInput for GuiHost {
         // since, submits no frame and answers that paint's window ends.
         // A server with no window shows nothing; the layout stays as it is.
         if !self.shared.borrow().window_shown() { return Ok(Vec::new()); }
+        self.shared.borrow_mut().end_loading();
         if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
