@@ -706,9 +706,10 @@ its next activity.  A settled one, bring back."
   (let ((finished (romacs-agent-board--finished (romacs-agent-board--shown-rows))))
     (unless finished (user-error "No finished threads"))
     (when (y-or-n-p (format "Settle %d finished thread%s? " (length finished) (if (cdr finished) "s" "")))
-      ;; Each loaded first when shown from its row alone; one gone is skipped.
+      ;; Each by its id, loaded first when shown from its row alone; one
+      ;; gone is skipped, and the board drawn once, after.
       (dolist (session finished)
-        (when-let* ((live (ignore-errors (romacs-agent-board--live session))))
+        (when-let* ((live (romacs-agent-find (romacs-agent-id session))))
           (romacs-agent-settle live)))
       (romacs-agent-board--redraw))))
 

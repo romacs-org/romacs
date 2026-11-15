@@ -113,8 +113,15 @@ be written."
            0)
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
-(defun romacs-agent-store-put (session &optional state)
-  "Write SESSION's row, its state STATE when given (as its records left it)."
+(defun romacs-agent-store-put (session &optional state again)
+  "Write SESSION's row, its state STATE when given (as its records left it);
+one that cannot be written now (the database busy) is tried once more a
+moment later, unless AGAIN says this is that try."
+  (unless (or (romacs-agent-store--put session state) again (not (romacs-agent-store--open)))
+    (run-with-idle-timer 1 nil #'romacs-agent-store-put session state t)))
+
+(defun romacs-agent-store--put (session state)
+  "Write SESSION's row, its state STATE when given; non-nil when written."
   (romacs-agent-store-write
    (list :id (romacs-agent-id session) :dir (romacs-agent-dir session)
          :harness (symbol-name (romacs-agent-harness session)) :provider (romacs-agent-provider session)
@@ -128,6 +135,19 @@ be written."
          :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session))))
 
 ;;; Filling it
+
+(defun romacs-agent-store--last-seq (journal)
+  "The seq of JOURNAL's last record, read from its last bytes alone, or nil."
+  (let ((size (file-attribute-size (file-attributes journal))))
+    (when (and size (> size 0))
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (insert-file-contents-literally journal nil (max 0 (- size 65536)) size)
+        (goto-char (point-max))
+        ;; A record's line ends with its seq and time, or starts with its seq.
+        (and (or (re-search-backward "\"seq\":\\([0-9]+\\),\"t\":[-+.0-9eE]+}$" nil t)
+                 (re-search-backward "^{\"seq\":\\([0-9]+\\)," nil t))
+             (string-to-number (match-string 1)))))))
 
 (defun romacs-agent-store--recorded-row (dir)
   "The row of the session recorded in DIR, from its manifest and its kept
@@ -164,7 +184,10 @@ manifest."
                              (and (file-exists-p file)
                                   (float-time (file-attribute-modification-time (file-attributes file))))))
             :cost (funcall field 'cost) :transcript transcript
-            :input_seq (funcall field 'input-seq) :done_seq (funcall field 'done-seq)
+            ;; With no kept state, its activity is at most its last record:
+            ;; settled only when settled since that.
+            :input_seq (if kept (funcall field 'input-seq) (romacs-agent-store--last-seq journal))
+            :done_seq (if kept (funcall field 'done-seq) (romacs-agent-store--last-seq journal))
             :seen_seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
             :settled_seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))))))
 
@@ -187,13 +210,15 @@ manifest."
     ;; write lock as it begins.
     (when db
       (dolist (dirs (seq-partition (romacs-agent-store--missing) 50))
-        (when (ignore-errors (sqlite-execute db "begin immediate") t)
-          (unwind-protect
-              (dolist (dir dirs)
-                (when-let* ((row (condition-case err (romacs-agent-store--recorded-row dir)
-                                   (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil))))
-                  (when (romacs-agent-store-write row t) (cl-incf count))))
-            (ignore-errors (sqlite-execute db "commit")))))
+        ;; Made first, the files read: the lock is held for the writes alone.
+        (let ((rows (delq nil (mapcar (lambda (dir)
+                                        (condition-case err (romacs-agent-store--recorded-row dir)
+                                          (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil)))
+                                      dirs))))
+          (when (and rows (ignore-errors (sqlite-execute db "begin immediate") t))
+            (unwind-protect
+                (dolist (row rows) (when (romacs-agent-store-write row t) (cl-incf count)))
+              (ignore-errors (sqlite-execute db "commit"))))))
       count)))
 
 (defun romacs-agent-store-fill-batch ()

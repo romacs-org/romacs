@@ -158,4 +158,42 @@ journal one turn long."
         (should (equal (mapcar #'romacs-agent-id settled) (list child)))
         (should (eq (car settled) (romacs-agent-get child)))))))
 
+(ert-deftest romacs-agent-store-settled-before-later-activity ()
+  ;; Unloaded with no kept state: settled only when settled since its last
+  ;; record, a later turn unsettling it.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((early "aaaaaaaa-0000-4000-8000-000000000007") (late "aaaaaaaa-0000-4000-8000-000000000008"))
+      (record early "early") (record late "late")
+      (dolist (entry (list (cons early 1) (cons late 2)))
+        (write-region (json-serialize (romacs-mcp--object "id" (car entry) "harness" "claude" "title" "x" "cwd" "/p/one/"
+                                                          "settledSeq" (cdr entry)))
+                      nil (expand-file-name (concat (car entry) "/manifest.json") root) nil 'silent))
+      (romacs-agent-store-fill)
+      (let ((shown (romacs-agent-store-unloaded)))
+        (should-not (romacs-agent-settled-p (cl-find early shown :key #'romacs-agent-id :test #'equal)))
+        (should (romacs-agent-settled-p (cl-find late shown :key #'romacs-agent-id :test #'equal)))))))
+
+(ert-deftest romacs-agent-store-settle-finished-past-a-gone-one ()
+  ;; Settling the finished: one gone meanwhile is skipped, the rest are
+  ;; settled, each as loaded.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-board)
+  (romacs-agent-store-tests--with
+    (let ((gone "aaaaaaaa-0000-4000-8000-000000000010") (kept "aaaaaaaa-0000-4000-8000-000000000011") (settled nil))
+      (record gone "gone") (record kept "kept")
+      (romacs-agent-store-fill)
+      (romacs-agent-board--sessions)
+      (let ((finished (list (gethash gone (car romacs-agent-board--unloaded))
+                            (gethash kept (car romacs-agent-board--unloaded)))))
+        (delete-directory (expand-file-name gone root) t)
+        (cl-letf (((symbol-function 'romacs-agent-board--finished) (lambda (_rows) finished))
+                  ((symbol-function 'romacs-agent-board--shown-rows) #'ignore)
+                  ((symbol-function 'romacs-agent-board--redraw) #'ignore)
+                  ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                  ((symbol-function 'romacs-agent-settle) (lambda (s) (push s settled))))
+          (romacs-agent-board-settle-finished)))
+      (should (equal (mapcar #'romacs-agent-id settled) (list kept)))
+      (should (eq (car settled) (romacs-agent-get kept))))))
+
 ;;; romacs-agent-store-tests.el ends here
