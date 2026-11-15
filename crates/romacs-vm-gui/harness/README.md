@@ -151,7 +151,7 @@ and its comparison policy in its docstring:
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
-with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/gnu and lisp/romacs, on a
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init
@@ -164,8 +164,8 @@ profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
 own completion layer (`romacs-complete-mode`), which takes the root
 window's last line, and the completion styles without fzf.  Each engine serves
-`lisp/romacs/romacs-mcp.el` with the session tools from
-`lisp/romacs/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
+`lisp/agents/romacs-mcp.el` with the session tools from
+`lisp/agents/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
 
 * `romacs_send_keys`: `kbd` keys or literal text, fed through
