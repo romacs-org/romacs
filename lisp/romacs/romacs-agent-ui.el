@@ -1522,7 +1522,7 @@ and a running turn's live rule ticks."
 back): its journal is replayed the first time a window shows it, and no
 event is drawn in it before.")
 
-(defcustom romacs-agent-chat-turns 30
+(defcustom romacs-agent-chat-turns 12
   "How many of its last turns a chat draws, or nil for all of them.  The
 turns before are a key away (RET on the chat's first row), and a chat
 that grows past twice as many drops its oldest at a turn's end: a day's
@@ -1598,7 +1598,7 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
   "Put the row that draws earlier turns at the current chat's start."
   (romacs-agent-ui--insert-at
    (point-min)
-   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 30))
+   (propertize (format "▴ Earlier turns: RET draws %d more\n" (or romacs-agent-chat-turns 12))
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
@@ -1663,7 +1663,7 @@ recorded before it would land elsewhere."
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
   (let ((drawn (length (romacs-agent-ui--input-starts))))
-    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 30)))
+    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12)))
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
     (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
@@ -1797,7 +1797,10 @@ its start) into the current chat buffer."
                    ;; follows a replay (`romacs-agent-show').
                    (romacs-agent-ui--track-children session event)
                    (romacs-agent-ui--render session event)))))
-      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from))))
+      ;; A message said whole later is drawn whole, as one delta, not
+      ;; each of its stream's (its harness's `:streamed-skip').
+      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from nil
+                                  (romacs-agent--harness-get session :streamed-skip)))))
 
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the
