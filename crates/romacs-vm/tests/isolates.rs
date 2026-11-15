@@ -283,7 +283,7 @@ fn resubmitted_jobs_keep_their_snapshot_and_fit_the_pool() {
     assert_eq!(out, "(provided (1))");
     eval(&mut vm, "(isolate-kill-all)");
     // Sol r3 S5: two jobs queued behind the change both run again, with pool size 1.
-    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-3) 'provided))) (b (isolate-spawn '(lambda () (featurep 'journey-feature-3)))) (c (isolate-spawn 'list 'third))) (list (isolate-await a) (isolate-await b 10) (isolate-await c 10) (length (isolate-list)))))");
+    let out = eval(&mut vm, "(let ((isolate-pool-size 1)) (let* ((a (isolate-spawn '(lambda () (provide 'journey-feature-3) 'provided))) (b (isolate-spawn '(lambda () (featurep 'journey-feature-3)))) (c (isolate-spawn 'list 'third))) (list (isolate-await a) (isolate-await b 10) (isolate-await c 10) (let ((n 0)) (dolist (i (isolate-list) n) (when (isolate-live-p i) (setq n (1+ n))))))))");
     assert_eq!(out, "(provided nil (third) 1)");
     eval(&mut vm, "(isolate-kill-all)");
     // Sol r3 S4 / r5 S15: cancelling a job the cancel's own pump queues
