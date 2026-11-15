@@ -248,7 +248,21 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                        (unless (process-live-p process)
                          (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process)))
                          (setq romacs-agent-store--filled t)
+                         (romacs-agent-store--load-missing)
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
+
+(defun romacs-agent-store--load-missing ()
+  "Load, a turn at a time as a start's restore does, each recorded session
+this process does not know that still has no row once a fill has run: a
+start left it to the fill (`romacs-agent-store-listed-p'), and with no
+row it is shown only once loaded."
+  (let ((idle (null romacs-agent--restore-pending)))
+    (dolist (dir (romacs-agent-store--missing))
+      (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                  (member dir romacs-agent--restore-pending))
+        (setq romacs-agent--restore-pending (append romacs-agent--restore-pending (list dir)))))
+    (when (and idle romacs-agent--restore-pending)
+      (run-at-time 0 nil #'romacs-agent--restore-step))))
 
 ;;; Listing
 

@@ -4230,7 +4230,9 @@ on."
     (let ((until (+ (float-time) romacs-agent--restore-turn)))
       (while (when-let* ((dir (pop romacs-agent--restore-pending)))
                (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--restore-load dir))
-               (romacs-agent--restore-progress 'running)
+               ;; Sessions loaded later (`romacs-agent-store--load-missing')
+               ;; are no start's progress.
+               (when romacs-agent--restoring (romacs-agent--restore-progress 'running))
                (< (float-time) until))))
     (if romacs-agent--restore-pending
         (run-at-time 0 nil #'romacs-agent--restore-step)
