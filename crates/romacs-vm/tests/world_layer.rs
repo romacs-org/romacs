@@ -238,14 +238,14 @@ fn a_refused_declared_library_names_its_features_in_load_order() {
     std::fs::write(dir.join("lisp/lib-r0.el"), "(provide 'lib-r0)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-r1.el"), "(require 'lib-r0)\n(setq lib-r1-seen (car exec-path))\n(provide 'lib-r1)\n").unwrap();
     std::fs::write(dir.join("lisp/lib-r2.el"), "(setq lib-r2-seen (car exec-path))\n(provide 'lib-r2)\n").unwrap();
-    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    std::fs::write(dir.join("lisp/session/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
     let entry = |name: &str, declared| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared, forms: Vec::new() };
     let plan = Plan::new(&dir.join("init.el"), vec![entry("lib-r1", true), entry("lib-r2", false)], vec![vec![dir.join("lisp").display().to_string()]]).unwrap();
     host::enter_build(PINNED);
     let mut vm = Vm::new();
     vm.world_begin();
     vm.install_lisp_prelude().expect("prelude");
-    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    vm.load_file(&dir.join("lisp/session/romacs-loadup-bootstrap.el")).expect("bootstrap");
     let refused = vm.world_layer_load(&plan, &[]);
     let trace = host::leave_build().unwrap();
     assert_eq!(refused.iter().map(|(at, _)| *at).collect::<Vec<_>>(), [0, 1], "{}", trace["refusals"]);
