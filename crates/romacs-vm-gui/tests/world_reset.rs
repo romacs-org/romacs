@@ -2,7 +2,8 @@
 //! the store itself, before any display is needed.
 
 /// A store in a private cache, with a world's files, a failure record and
-/// a refused manifest of another world, and a file no world owns.
+/// a manifest of what another world's build could not capture, and a file
+/// no world owns.
 fn store(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let home = std::env::temp_dir().join(format!("romacs-world-reset-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
@@ -12,13 +13,13 @@ fn store(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
     std::fs::write(store.join(".romacs-world-store"), "romacs-world-store 1\n").unwrap();
-    let (kept, refused) = ("a".repeat(64), "b".repeat(64));
+    let (kept, uncaptured) = ("a".repeat(64), "b".repeat(64));
     for suffix in ["rwi", "lock", "log"] {
         std::fs::write(store.join(format!("{kept}.{suffix}")), "x").unwrap();
     }
-    std::fs::write(store.join(format!("{kept}.json")), r#"{"refusals": []}"#).unwrap();
+    std::fs::write(store.join(format!("{kept}.json")), r#"{"uncaptured": []}"#).unwrap();
     std::fs::write(store.join(format!("{kept}.failed")), r#"{"attempts": 2, "at": 0}"#).unwrap();
-    std::fs::write(store.join(format!("{refused}.json")), r#"{"refusals": [{"kind": "capture"}]}"#).unwrap();
+    std::fs::write(store.join(format!("{uncaptured}.json")), r#"{"uncaptured": [{"kind": "capture"}]}"#).unwrap();
     std::fs::write(store.join("ids/1-2-3-4.5-6.7"), "00").unwrap();
     std::fs::write(store.join("notes.txt"), "mine").unwrap();
     (home, store)
@@ -39,7 +40,7 @@ fn names(store: &std::path::Path) -> Vec<String> {
 }
 
 #[test]
-fn world_reset_forgets_failures_and_refusals_and_keeps_worlds() {
+fn world_reset_forgets_failures_and_what_was_not_captured_and_keeps_worlds() {
     let (home, store) = store("records");
     let said = reset(&home, "--world-reset");
     assert!(said.contains(r#""event":"reset""#) && said.contains(r#""removed":2"#), "{said}");
