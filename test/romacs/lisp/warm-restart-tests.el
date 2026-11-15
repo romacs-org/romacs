@@ -190,3 +190,58 @@
             (should-not warm-restart--deferred)))
       (ignore-errors (kill-buffer (get-file-buffer file)))
       (delete-directory dir t))))
+
+(ert-deftest warm-restart-an-unseen-file-wakes-whole-when-a-visit-finds-it ()
+  ;; Found by a visit, as an agenda finds its files: woken first, its whole
+  ;; text read for its local variables, its narrowing kept.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "local.txt" dir))
+         (record (list :id "l" :name "local.txt" :strategy 'file :file file :mode 'text-mode :point 1
+                       :narrowing '(1 . 5) :directory dir)))
+    (unwind-protect
+        (progn
+          (write-region "body\n\n;; Local Variables:\n;; fill-column: 42\n;; End:\n" nil file nil 'silent)
+          (let ((warm-restart--defer t) (warm-restart--problems nil))
+            (warm-restart--restore-buffer record [] (make-hash-table :test #'equal)))
+          (with-current-buffer (get-file-buffer file)
+            (should (eq major-mode 'fundamental-mode))
+            (should (= (point-max) 5))
+            (should (eq (find-file-noselect file) (current-buffer)))
+            (should (eq major-mode 'text-mode))
+            (should (= fill-column 42))
+            (should (= (point-max) 5))))
+      (ignore-errors (kill-buffer (get-file-buffer file)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-modified-unseen-file-has-its-modes-and-asks-its-lock ()
+  ;; A modified file, which a save may write, is not left without its
+  ;; modes; its first edit locks its file, whenever it comes.
+  (let* ((dir (make-temp-file "romacs-wr-file-" t)) (file (expand-file-name "mod.el" dir))
+         (record (list :id "m" :name "mod.el" :strategy 'file :file file :mode 'emacs-lisp-mode :point 1
+                       :blob 0 :modified t :directory dir)))
+    (unwind-protect
+        (progn
+          (write-region "(old)\n" nil file nil 'silent)
+          (let ((warm-restart--defer t) (warm-restart--problems nil))
+            (warm-restart--restore-buffer record ["(new)\n"] (make-hash-table :test #'equal)))
+          (with-current-buffer (get-file-buffer file)
+            (should (eq major-mode 'emacs-lisp-mode))
+            (should-not warm-restart--deferred)
+            (should (buffer-modified-p))
+            (should (equal (buffer-string) "(new)\n"))
+            (should (local-variable-p 'warm-restart-lock-pending))))
+      (ignore-errors (with-current-buffer (get-file-buffer file) (set-buffer-modified-p nil) (kill-buffer)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-window-laid-out-early-gets-its-history-back ()
+  ;; Its windows laid out before every buffer was back: once they are, each
+  ;; window's earlier buffers come back after those shown in it since.
+  (let ((back (get-buffer-create "wr-history")) (names (make-hash-table :test #'equal)))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer back (insert "history"))
+          (puthash "old history" (cons back nil) names)
+          (let ((warm-restart--histories (list (list (selected-window) '(("old history" 1 3) ("gone" 1 1)) nil))))
+            (warm-restart--restore-histories names))
+          (should (eq (car (car (window-prev-buffers))) back))
+          (should (= (marker-position (nth 2 (car (window-prev-buffers)))) 3)))
+      (kill-buffer back))))

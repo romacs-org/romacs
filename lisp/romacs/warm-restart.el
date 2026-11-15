@@ -607,7 +607,9 @@ over a file changed on disk still asks."
       (when text
         (warm-restart--put-text text (plist-get record :unibyte))
         (set-buffer-modified-p (plist-get record :modified))
-        (ignore-errors (set-visited-file-modtime (plist-get record :modtime))))
+        (ignore-errors (set-visited-file-modtime (plist-get record :modtime)))
+        ;; Shown before the restore ends: its first edit locks its file.
+        (when (plist-get record :modified) (setq-local warm-restart-lock-pending t)))
       (warm-restart--put-properties (plist-get record :properties))
       (if warm-restart--defer (warm-restart--defer-modes record t) (warm-restart--apply-modes record))
       (warm-restart--apply-common record)
@@ -730,8 +732,10 @@ When it fails, a buffer the attempt made is replaced by the rescue.  A
 buffer it would reuse that was edited here first is left as it is
 \(`warm-restart--beside')."
   (let* ((existing (warm-restart--made-buffer record))
-         ;; One made here meanwhile keeps the modes it has: no deferral.
-         (warm-restart--defer (and warm-restart--defer (not (buffer-live-p existing))))
+         ;; One made here meanwhile keeps the modes it has, and a modified
+         ;; file, which a save may write, has its own at once: no deferral.
+         (warm-restart--defer (and warm-restart--defer (not (buffer-live-p existing))
+                                   (not (and (eq (plist-get record :strategy) 'file) (plist-get record :modified)))))
          (buffer
          (if (and (buffer-live-p existing) (buffer-modified-p existing)
                   (memq (plist-get record :strategy) '(file text)))
@@ -761,7 +765,9 @@ FILE's own first when it visits one (`warm-restart--deferred')."
   (setq warm-restart--deferred (cons record file))
   (push (current-buffer) warm-restart--deferred-buffers)
   (add-hook 'window-buffer-change-functions #'warm-restart--wake-shown)
-  (add-hook 'before-save-hook #'warm-restart--wake-current))
+  (add-hook 'before-save-hook #'warm-restart--wake-current)
+  ;; Code that reads a file's buffer (an agenda) finds it through this.
+  (advice-add 'find-file-noselect :filter-return #'warm-restart--wake-found))
 
 (defun warm-restart--wake (buffer)
   "Give BUFFER, restored unseen, the modes its record names: its file's
@@ -772,19 +778,29 @@ then the record's major mode, minor modes and locals."
       (when-let* ((deferred warm-restart--deferred))
         (setq warm-restart--deferred nil)
         (let ((record (car deferred)) (modified (buffer-modified-p)) (inhibit-read-only t))
-          (with-demoted-errors "warm-restart: %S"
-            (when (cdr deferred)
-              (let ((enable-local-variables :safe)) (normal-mode t))
-              (run-hooks 'find-file-hook))
-            (warm-restart--set-mode record)
-            (warm-restart--apply-modes record))
+          ;; Its modes read the whole text, as at a visit; its narrowing stays.
+          (save-excursion
+            (save-restriction
+              (widen)
+              (with-demoted-errors "warm-restart: %S"
+                (when (cdr deferred)
+                  (let ((enable-local-variables :safe)) (normal-mode t))
+                  (run-hooks 'find-file-hook))
+                (warm-restart--set-mode record)
+                (warm-restart--apply-modes record))))
           (set-buffer-modified-p modified)))))
   (setq warm-restart--deferred-buffers
         (cl-remove-if-not (lambda (b) (and (buffer-live-p b) (buffer-local-value 'warm-restart--deferred b)))
                           warm-restart--deferred-buffers))
   (unless warm-restart--deferred-buffers
     (remove-hook 'window-buffer-change-functions #'warm-restart--wake-shown)
-    (remove-hook 'before-save-hook #'warm-restart--wake-current)))
+    (remove-hook 'before-save-hook #'warm-restart--wake-current)
+    (advice-remove 'find-file-noselect #'warm-restart--wake-found)))
+
+(defun warm-restart--wake-found (buffer)
+  "BUFFER, which `find-file-noselect' found, woken first."
+  (warm-restart--wake buffer)
+  buffer)
 
 (defun warm-restart--wake-shown (frame)
   "Wake each buffer FRAME's windows show (`window-buffer-change-functions')."
@@ -899,6 +915,46 @@ startup, and the layout's sizes were the old frame's."
     (add-hook 'window-size-change-functions again)
     (add-hook 'pre-command-hook stop)))
 
+(defvar warm-restart--histories nil
+  "Each window a restore laid out before all its buffers were back, with
+the buffers it had shown before and after as its image saved them:
+\(WINDOW PREV NEXT), put back once they are (`warm-restart--restore-histories').")
+
+(defun warm-restart--leaves (tree)
+  "The leaves of window state TREE, in window order."
+  (cond ((eq (car-safe tree) 'leaf) (list tree))
+        ((memq (car-safe tree) '(vc hc)) (cl-mapcan #'warm-restart--leaves (cl-remove-if-not #'consp (cdr tree))))))
+
+(defun warm-restart--note-histories (frame state)
+  "Note the buffer histories window STATE gave FRAME's windows, in order."
+  (let ((windows (window-list frame 'never (frame-first-window frame)))
+        (leaves (warm-restart--leaves (cdr state))))
+    (when (= (length windows) (length leaves))
+      (cl-loop for window in windows for leaf in leaves
+               do (push (list window (alist-get 'prev-buffers (cdr leaf)) (alist-get 'next-buffers (cdr leaf)))
+                        warm-restart--histories)))))
+
+(defun warm-restart--restore-histories (names)
+  "Give each window laid out early the buffers it had shown before and
+after that are back now (NAMES, `warm-restart--names''s), after those it
+showed since."
+  (let ((buffer-of (lambda (name) (let ((buffer (car (gethash name names)))) (and (buffer-live-p buffer) buffer)))))
+    (pcase-dolist (`(,window ,prev ,next) warm-restart--histories)
+      (when (window-live-p window)
+        (let ((had (window-prev-buffers window)))
+          (set-window-prev-buffers
+           window (append had (cl-loop for (name start point) in prev
+                                       for buffer = (funcall buffer-of name)
+                                       when (and buffer (not (assq buffer had)) (not (eq buffer (window-buffer window))))
+                                       collect (list buffer (warm-restart--marker buffer (or start 1))
+                                                     (warm-restart--marker buffer (or point 1)))))))
+        (let ((had (window-next-buffers window)))
+          (set-window-next-buffers
+           window (append had (cl-loop for entry in next
+                                       for buffer = (funcall buffer-of (if (consp entry) (car entry) entry))
+                                       when (and buffer (not (memq buffer had))) collect buffer)))))))
+  (setq warm-restart--histories nil))
+
 (defun warm-restart--restore-frames (frames names)
   "Lay out FRAMES' window states; NAMES is `warm-restart--live-leaf''s.
 The first frame's goes in the selected frame; another needs a new frame."
@@ -910,6 +966,7 @@ The first frame's goes in the selected frame; another needs a new frame."
            if (frame-live-p frame)
            do (warm-restart--put-frame frame state)
            and do (warm-restart--put-again-on-resize frame state)
+           and do (warm-restart--note-histories frame (plist-get spec :state))
            else do (push (list :frame (1+ (length warm-restart--problems)) :reason "no frame for its windows")
                          warm-restart--problems)))
 
@@ -1091,6 +1148,7 @@ windows and all but its registers were already (`warm-restart--lay-out')."
 BUFFERS, first in the buffer list, and its kill ring, histories and
 globals; its registers wait for every buffer.  The problems."
   (let ((warm-restart--problems nil))
+    (setq warm-restart--histories nil)
     (let ((warm-restart-passive t)) (warm-restart--restore-globals form buffers 'early))
     (warm-restart--order records buffers)
     (condition-case err
@@ -1190,11 +1248,14 @@ the report."
          (records (plist-get state :records))
          (buffers (plist-get state :buffers))
          (warm-restart--problems nil))
-    (unless (plist-get state :laid-out)
+    (if (plist-get state :laid-out)
+        ;; Laid out before every buffer was back: their windows' histories now.
+        (warm-restart--restore-histories (warm-restart--names records buffers))
       (warm-restart--order records buffers)
       (condition-case err
           (warm-restart--restore-frames (plist-get form :frames) (warm-restart--names records buffers))
         (error (push (list :frame 1 :reason (error-message-string err)) warm-restart--problems))))
+    (setq warm-restart--histories nil)
     (setq warm-restart--problems (append (warm-restart--activate) warm-restart--problems))
     ;; The adopters have claimed what they restore.  What the previous
     ;; session left in the keeper and nobody claimed ends here, as it
