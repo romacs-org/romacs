@@ -501,9 +501,9 @@ an approval answered."
             (owed (plist-get (romacs-agent-driver-state session) :owed))
             (why (let ((out (gethash "response" (gethash "response" line))))
                    (and (hash-table-p out) (hash-table-p (gethash "hookSpecificOutput" out))
-                        (gethash "permissionDecisionReason" (gethash "hookSpecificOutput" out))))))
+                        (gethash "additionalContext" (gethash "hookSpecificOutput" out))))))
        (if (cl-find id owed :key #'cadr :test #'equal)
-           ;; A reply it owed, written: owed no more; a refusal is shown.
+           ;; A reply it owed, written: owed no more; what it told is shown.
            (append (and (stringp why) (list (list :type 'status :text why)))
                    (list (list :type 'handshake :state (list :owed (cl-remove id owed :key #'cadr :test #'equal)))))
          (remhash id (romacs-agent-approvals session))
@@ -516,7 +516,7 @@ an approval answered."
 (defconst romacs-agent--claude-hooks
   (romacs-mcp--object "PreToolUse" (vector (romacs-mcp--object "matcher" "Edit|Write|MultiEdit"
                                                                "hookCallbackIds" ["romacs-gate"])))
-  "The hooks Romacs takes on each run: Claude Code asks it about every
+  "The hooks Romacs takes on each run: Claude Code tells it of every
 edit before writing it (`romacs-agent-gate-check').")
 
 (defun romacs-agent--claude-next (session)
@@ -538,15 +538,15 @@ run's initialize, with Romacs's hooks; ready once that is answered."
               "request" (romacs-mcp--object "subtype" "initialize" "hooks" romacs-agent--claude-hooks))))))
 
 (defun romacs-agent--claude-hook (request)
-  "The answer to hook REQUEST: the gate's refusal of an edit, else nothing
-to say.  Judged as it is written, on the file as it is then."
+  "The answer to hook REQUEST: what the gate tells the model of an edit,
+as context, the edit going on under the session's own permission mode;
+else nothing to say.  Judged as it is written, on the file as it is then."
   (let* ((input (gethash "input" request))
          (why (and (hash-table-p input) (equal (gethash "hook_event_name" input) "PreToolUse")
                    (romacs-agent-gate-check (gethash "tool_name" input) (gethash "tool_input" input)))))
     (if why
         (romacs-mcp--object "hookSpecificOutput"
-                            (romacs-mcp--object "hookEventName" "PreToolUse" "permissionDecision" "deny"
-                                                "permissionDecisionReason" why))
+                            (romacs-mcp--object "hookEventName" "PreToolUse" "additionalContext" why))
       (romacs-mcp--object))))
 
 (defun romacs-agent--claude-reply (_session owed)

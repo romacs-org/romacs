@@ -127,6 +127,84 @@ fn an_early_parse_is_used_only_for_the_text_it_read() {
     assert_eq!(value.as_deref(), Ok("((t nil t) t t t t nil t)"));
 }
 
+/// In a session that can be woken, a typed character's parse runs on a
+/// thread: the frames meanwhile fontify nothing and wait for nothing, the
+/// frame its landing wakes has the tree without the evaluator parsing, and
+/// keys typed while it ran are caught up with the same way.
+#[test]
+fn a_small_edit_is_parsed_off_the_evaluator() {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (defvar romacs-treesit-show-before-parse 8) \
+        (setq parsed 0 pre 0 fontified 0) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") \
+        (dotimes (i 400) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+        (setq treesit-test-parser (treesit-parser-create 'c)) \
+        (setq treesit-test-twin (treesit-parser-create 'c nil nil 'twin)) \
+        (treesit-parser-add-notifier treesit-test-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (setq pre (1+ pre)) (treesit-parser-root-node treesit-test-parser) (treesit-parser-root-node treesit-test-twin))) \
+        (setq fontification-functions (list (lambda (pos) (setq fontified (1+ fontified)) (put-text-property pos (point-max) 'fontified t)))))");
+    vm.eval_source(&setup).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    vm.frame_snapshot(800, 600).unwrap();
+    let counts = |vm: &mut Vm| vm.eval_source("(list parsed pre (> fontified 0))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(counts(&mut vm), "(1 1 t)");
+    let landed = |vm: &mut Vm| {
+        for _ in 0..20_000 {
+            if vm.eval_source("(romacs--treesit-parsing-p)").unwrap().display().unwrap() == "nil" {
+                // As the session's loop does when a parse wakes it.
+                vm.land_treesit();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(500));
+        }
+        panic!("the reparse never landed");
+    };
+    let frame = |vm: &mut Vm| {
+        vm.defer_parse().unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        vm.deferred_parse_done()
+    };
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    // One key: its frame and any frame before the landing run no hook and
+    // fontify nothing; the frame after it has the new tree.
+    vm.eval_source("(progn (setq fontified 0) (goto-char 9) (insert \"x\"))").unwrap();
+    frame(&mut vm);
+    assert_eq!(counts(&mut vm), "(1 1 nil)", "the key's frame waits for nothing");
+    landed(&mut vm);
+    while frame(&mut vm) {}
+    assert_eq!(counts(&mut vm), "(2 2 t)", "the frame after the landing has the tree and the faces");
+    // Keys typed while a parse runs: the tree that lands is behind the
+    // text, and catches up on its thread.
+    vm.eval_source("(progn (setq fontified 0) (insert \"y\"))").unwrap();
+    frame(&mut vm);
+    vm.eval_source("(insert \"z\")").unwrap();
+    frame(&mut vm);
+    for _ in 0..4 {
+        landed(&mut vm);
+        frame(&mut vm);
+    }
+    assert_eq!(vm.eval_source("(list parsed (> fontified 0))").and_then(romacs_vm::Local::display).unwrap(), "(3 t)",
+        "one reparse for Lisp, however many the thread ran");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the evaluator parsed nothing");
+    // The trees are the ones a parse of the text gives.
+    let same = vm.eval_source("(let ((fresh (treesit-parser-create 'c nil t))) \
+        (list (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) (treesit-node-string (treesit-parser-root-node fresh))) \
+              (equal (treesit-node-string (treesit-parser-root-node treesit-test-twin)) (treesit-node-string (treesit-parser-root-node fresh))) \
+              (buffer-substring 1 20)))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(same, "(t t \"int f0 (xyzint a) {\")");
+    // What asks for the tree while its parse runs waits for it, and gets it.
+    vm.eval_source("(insert \"w\")").unwrap();
+    frame(&mut vm);
+    let asked = vm.eval_source("(list (treesit-node-text (treesit-node-at 9 treesit-test-parser)) \
+        (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) \
+               (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c nil t)))))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(asked, "(\"xyzwint\" t)");
+}
+
 /// A frame `defer_parse' starts shows a small edit without its parse, and
 /// so without `pre-redisplay-functions' or fontification; the next frame
 /// runs them, however small its own edit. A larger edit never waits.
@@ -443,4 +521,28 @@ fn reparsing_predicates_signal_as_treesit_c() {
                 (condition-case e (treesit-search-subtree (treesit-parser-root-node (car (treesit-parser-list))) 'treesit-test-reparse) (error e))))))");
     let value = vm.eval_source(&source).and_then(|v| v.display());
     assert_eq!(value.as_deref(), Ok("((treesit-query-error treesit-test-reparse) (treesit-buffer_changed treesit-test-reparse))"));
+}
+
+/// `romacs--treesit-subtree-exceeds' tells what `treesit-subtree-stat'
+/// does against a depth and a width, for a wide tree, a deep one and a
+/// small one, on each side of their numbers.
+#[test]
+fn subtree_exceeds_agrees_with_subtree_stat() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} \
+        (let (out) \
+          (dolist (text (list (mapconcat (lambda (i) (format \"int a%d;\" i)) (number-sequence 1 50) \"\\n\") \
+                              (concat \"int f(void) {{\" (make-string 30 ?{{) (make-string 30 ?}}) \"}}\") \
+                              \"int a;\")) \
+            (with-temp-buffer \
+              (insert text) \
+              (let* ((root (treesit-parser-root-node (treesit-parser-create 'c))) (stat (treesit-subtree-stat root))) \
+                (dolist (d (list 0 (1- (car stat)) (car stat))) \
+                  (dolist (w (list 0 (1- (cadr stat)) (cadr stat))) \
+                    (unless (eq (romacs--treesit-subtree-exceeds root d w) (or (> (car stat) d) (> (cadr stat) w))) \
+                      (push (list text d w stat) out))))))) \
+          out))");
+    let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("nil"));
 }

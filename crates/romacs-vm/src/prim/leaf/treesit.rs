@@ -587,7 +587,10 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
         let base = self.ts_base(buffer);
-        Ok(flag(self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending())))
+        if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
+            return Ok(Value::TRUE);
+        }
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
@@ -627,9 +630,19 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
+        // A reparse a frame started on a thread: its tree, waited for, is
+        // this parse's if the text has not changed since it began, and the
+        // nearest old tree if it has.
+        let ahead = core.borrow_mut().ahead.take();
+        let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
+            .filter(|(_, region, ..)| *region == visible);
+        let (ahead, ahead_changed) = match ahead {
+            Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
+            None => (None, None),
+        };
         let twin = self.ts_twin_tree(parser, old.is_none());
         let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
-        let (done, behind) = match early {
+        let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
             Some((tree, true)) => (None, Some(tree)),
             None => (twin, None),
@@ -637,13 +650,15 @@ impl Leaf<'_> {
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &reader)
+            // A thread's tree that fell behind the text is newer than the old one.
+            native.borrow_mut().parse(behind.as_ref().or(old.as_deref()), &reader)
         });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
         };
         let new = Rc::new(new);
-        let changed = old.as_ref().map(|old| new.changed_since(old));
+        // The thread compared the same two trees, when it parsed this one.
+        let changed = old.as_ref().map(|old| ahead_changed.unwrap_or_else(|| new.changed_since(old)));
         {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
@@ -700,7 +715,10 @@ impl Leaf<'_> {
         if !self.ts_parser(parser)?.native.borrow_mut().set_included_ranges(&bytes) {
             return Err(self.ts_message("treesit-range-invalid", "Something went wrong when setting ranges", &[ranges]));
         }
-        self.ts_parser(parser)?.core.borrow_mut().need_reparse = true;
+        let mut core = self.ts_parser(parser)?.core.borrow_mut();
+        core.need_reparse = true;
+        // A reparse on its thread read the old ranges.
+        core.ahead = None;
         Ok(Value::NIL)
     }
     /// treesit_check_range_argument, in the current buffer.
@@ -972,26 +990,53 @@ impl Leaf<'_> {
     /// treesit-subtree-stat: (MAX-DEPTH MAX-WIDTH COUNT) of NODE's subtree.
     pub(crate) fn ts_subtree_stat(&mut self, node: Value) -> Out {
         let n = self.ts_node(node)?.clone();
-        let mut cursor = native::Cursor::new(n.node);
-        let (mut max_depth, mut max_width, mut count, mut depth) = (1i64, 0i64, 0i64, 0i64);
-        loop {
-            count += 1;
-            while cursor.first_child() {
-                depth += 1;
-                count += 1;
-                let mut width = 1;
-                while cursor.next_sibling() { width += 1; }
-                max_width = max_width.max(width);
-                cursor.parent();
-                cursor.first_child();
+        let stat = subtree_stat(n.node, None);
+        Ok(self.ts_list(&[fixnum(stat.depth), fixnum(stat.width), fixnum(stat.count)]))
+    }
+    /// `romacs--treesit-subtree-exceeds`: whether NODE's subtree is deeper
+    /// than DEPTH or has a node with more than WIDTH children, as
+    /// `treesit-subtree-stat` would tell, without walking the rest of it
+    /// once it is.
+    pub(crate) fn ts_subtree_exceeds(&mut self, node: Value, depth: Value, width: Value) -> Out {
+        let n = self.ts_node(node)?.clone();
+        let (depth, width) = (self.ts_depth(depth)?, self.ts_depth(width)?);
+        let stat = subtree_stat(n.node, Some((depth, width)));
+        Ok(flag(stat.depth > depth || stat.width > width))
+    }
+}
+
+/// What `treesit-subtree-stat` tells of a subtree.
+struct Stat { depth: i64, width: i64, count: i64 }
+
+/// NODE's subtree's greatest depth and width and its node count, walked
+/// as GNU's treesit-subtree-stat walks it; with LIMIT (depth, width), the
+/// walk stops as soon as either is exceeded.
+fn subtree_stat(node: native::Node, limit: Option<(i64, i64)>) -> Stat {
+    let mut cursor = native::Cursor::new(node);
+    let mut stat = Stat { depth: 1, width: 0, count: 0 };
+    let mut depth = 0i64;
+    let over = |stat: &Stat| limit.is_some_and(|(d, w)| stat.depth > d || stat.width > w);
+    loop {
+        stat.count += 1;
+        while cursor.first_child() {
+            depth += 1;
+            stat.count += 1;
+            let mut width = 1;
+            while cursor.next_sibling() { width += 1; }
+            stat.width = stat.width.max(width);
+            stat.depth = stat.depth.max(depth);
+            if over(&stat) {
+                return stat;
             }
-            max_depth = max_depth.max(depth);
-            while !cursor.next_sibling() {
-                if cursor.parent() {
-                    depth -= 1;
-                } else {
-                    return Ok(self.ts_list(&[fixnum(max_depth), fixnum(max_width), fixnum(count)]));
-                }
+            cursor.parent();
+            cursor.first_child();
+        }
+        stat.depth = stat.depth.max(depth);
+        while !cursor.next_sibling() {
+            if cursor.parent() {
+                depth -= 1;
+            } else {
+                return stat;
             }
         }
     }
