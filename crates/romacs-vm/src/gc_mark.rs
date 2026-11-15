@@ -119,8 +119,8 @@ enum Seen<'a> {
     Values(&'a [Value], usize),
     /// A string: its bytes, and whether it has properties to hand over.
     Text { bytes: usize, properties: bool },
-    /// A bignum, bytes, a bool vector: memory, and no Values.
-    Memory,
+    /// A bignum, bytes, a bool vector: memory, and no Values, its payload.
+    Memory(usize),
     /// A syntax table, an SQLite handle, the thread: no Values, and side
     /// effects when dropped.
     Inert,
@@ -135,7 +135,7 @@ impl Seen<'_> {
     /// and no more (`Grave'). Every other kind has its side effects at a known
     /// time, on the collecting thread, before the sweep.
     fn buried(&self) -> bool {
-        matches!(self, Seen::Free | Seen::Float | Seen::Values(..) | Seen::Text { .. } | Seen::Memory)
+        matches!(self, Seen::Free | Seen::Float | Seen::Values(..) | Seen::Text { .. } | Seen::Memory(_))
     }
 }
 
@@ -163,7 +163,7 @@ impl<'a> Seen<'a> {
             Float(_) => Seen::Float,
             Vector(values) | Record(values) => Seen::Values(values, values.capacity() - values.len()),
             String(s) | RawString(s) => Seen::Text { bytes: s.bytes().len(), properties: !s.properties.is_empty() },
-            Bignum(_) | Bytes(..) | BoolVector(_) => Seen::Memory,
+            Bignum(_) | Bytes(..) | BoolVector(_) => Seen::Memory(data::payload_bytes(object)),
             SyntaxTable(_) | Sqlite(_) | Thread => Seen::Inert,
             Finalizer(function) => Seen::Finalizer(*function),
             Buffer(_) | ByteBuffer(_) => Seen::Buffer,
@@ -277,17 +277,17 @@ pub(super) struct Worker {
     /// Claimed entries for the coordinator.
     serial: Vec<Value>,
     census: Census,
+    /// The payload (`data::payload_bytes`) of what this thread marked.
+    payload: usize,
     graves: Vec<Grave>,
 }
 
 /// What a sweep did: each table's freed count and the end of its last entry
-/// in use, the payload of the objects it freed, and the dead objects whose
-/// end has side effects (`Seen::buried` refuses them), left where they were
-/// for the collecting thread.
+/// in use, and the dead objects whose end has side effects (`Seen::buried`
+/// refuses them), left where they were for the collecting thread.
 #[derive(Default)]
 pub(super) struct Swept {
     pub(super) tables: [(usize, usize); 4],
-    pub(super) payload: usize,
     pub(super) dead: Vec<u32>,
 }
 
@@ -331,6 +331,8 @@ pub(super) struct Marking {
     serial: Mutex<Vec<Value>>,
     // CELL(Plain)
     census: Mutex<Census>,
+    /// The payload of what the threads but the coordinator marked.
+    payload: AtomicUsize,
     /// Run just after the coordinator takes a hand-over: a worker's moment.
     // CELL(Plain)
     #[cfg(test)]
@@ -382,7 +384,7 @@ impl Marking {
             verify: vm.gc_stress.verify, n, graves: threads(vm.gc_stress.threads) > 1, batch: Mutex::default(),
             queue: Injector::new(), outstanding: AtomicUsize::new(0),
             stop: AtomicBool::new(false), parked: AtomicUsize::new(0), park: Mutex::new(()), wake: Condvar::new(),
-            serial: Mutex::new(Vec::new()), census: Mutex::default(),
+            serial: Mutex::new(Vec::new()), census: Mutex::default(), payload: AtomicUsize::new(0),
             #[cfg(test)]
             faults: vm.gc_stress.faults,
             #[cfg(test)]
@@ -435,6 +437,10 @@ impl Marking {
         let mut census = *self.census.lock().unwrap();
         census.add(&own.census);
         census
+    }
+    /// The payload of everything marked, once the mark is done.
+    pub(super) fn marked_payload(&self, own: &Worker) -> usize {
+        self.payload.load(Ordering::Acquire) + own.payload
     }
     /// The collection is over: its graves, each thread's list as it is, go to
     /// the dropper as one batch, off the pause, unless another VM's got there
@@ -607,6 +613,7 @@ impl Marking {
             self.hand_over(&mut w);
             // Before it ends: the coordinator reads them once none is held.
             self.census.lock().unwrap().add(&std::mem::take(&mut w.census));
+            self.payload.fetch_add(std::mem::take(&mut w.payload), Ordering::AcqRel);
             drop(holding);
             waits = 0;
         }
@@ -672,8 +679,8 @@ impl Marking {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
         vm.objects.unreached(|object| !Seen::of(object).buried())
     }
-    /// Sweep VM's tables: their freed counts and ends, and the payload the
-    /// freed objects held (`data::payload_bytes`), as allocation charged it.
+    /// Sweep VM's tables: their freed counts and ends, and the dead with
+    /// side effects.
     pub(super) fn sweep(&self, vm: &Vm, own: &mut Worker) -> Swept {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
         // One batch waits at a time (`DROPPING'); a process with no threads
@@ -686,22 +693,21 @@ impl Marking {
         let swept = Mutex::new(Swept::default());
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last, payload, mut dead) = self.sweep_range(w, table, range, defer);
+            let (freed, last, mut dead) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
             swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
-            swept.payload += payload;
             swept.dead.append(&mut dead);
         });
         swept.into_inner().unwrap()
     }
     /// One range of a sweep: its freed count, the end of its last entry in
-    /// use, the payload its freed objects held, and its dead objects with
-    /// side effects, left in place. Conses and cells own nothing; a closure's
-    /// vectors are small and few; what an object owns goes to W's graves when
-    /// DEFER, or is dropped here (one thread, or the dropper busy).
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, usize, Vec<u32>) {
+    /// use, and its dead objects with side effects, left in place. Conses
+    /// and cells own nothing; a closure's vectors are small and few; what an
+    /// object owns goes to W's graves when DEFER, or is dropped here (one
+    /// thread, or the dropper busy).
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, Vec<u32>) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
-        let (mut payload, mut kept) = (0, Vec::new());
+        let mut kept = Vec::new();
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
         let (freed, last) = unsafe {
             match table {
@@ -710,14 +716,13 @@ impl Marking {
                 2 => self.cells.sweep_range(range, self.verify, |_, cell| *cell = dead),
                 _ => self.objects.sweep_range(range, self.verify, |i, object| {
                     if !Seen::of(object).buried() { return kept.push(i as u32); }
-                    payload += data::payload_bytes(object);
                     if let Some(grave) = Grave::of(std::mem::replace(object, data::Object::Free)) && defer {
                         w.graves.push(grave);
                     }
                 }),
             }
         };
-        (freed, last, payload, kept)
+        (freed, last, kept)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.
@@ -792,6 +797,7 @@ impl Marking {
                         Seen::Values(values, spare) => {
                             w.census.vectors += 1;
                             w.census.vector_slots += values.len();
+                            w.payload += values.len() * size_of::<Value>();
                             w.census.vector_free += spare;
                             if values.len() <= RANGE {
                                 limit = limit.saturating_sub(values.len());
@@ -807,12 +813,14 @@ impl Marking {
                         Seen::Text { bytes, properties } => {
                             w.census.strings += 1;
                             w.census.string_bytes += bytes;
+                            w.payload += bytes;
                             #[cfg(test)]
                             let properties = properties && !self.faults.skip_properties;
                             if properties { w.serial.push(v); }
                         }
                         Seen::Float => w.census.floats += 1,
-                        Seen::Memory | Seen::Inert | Seen::Free => {}
+                        Seen::Memory(bytes) => w.payload += bytes,
+                        Seen::Inert | Seen::Free => {}
                         Seen::Finalizer(function) => w.stack.push(function),
                         Seen::Buffer => {
                             w.census.buffers += 1;

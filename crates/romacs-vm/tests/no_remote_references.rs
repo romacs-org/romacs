@@ -116,7 +116,7 @@ const FIELDS: &[(&str, Class)] = &[
     // a full reading the map; emptied at every collection.
     ("permanent_names_added", Root),
     // Object indices and call-cache ids, as a minor reads them (gc.rs).
-    ("shared_holders", Free), ("caches_filled", Free),
+    ("shared_holders", Free), ("caches_filled", Free), ("payload_settled", Free),
     // Weak references to nodes the case tables own.
     ("native_case_roots", Cache),
     ("obarray_free_slots", Free), ("generated_symbols", Free), ("generated_slots", Free),

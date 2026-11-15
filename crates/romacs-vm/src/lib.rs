@@ -1577,6 +1577,9 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
+    /// `gc_payload_bytes` as the last collection left it: what the minors
+    /// since the last full promoted (`Vm::minor`).
+    payload_settled: usize,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1893,6 +1896,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     shared_holders,
     caches_filled,
     permanent_names_added,
+    payload_settled,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1978,6 +1982,7 @@ impl Vm {
             shared_holders: None,
             caches_filled: Vec::new(),
             permanent_names_added: Vec::new(),
+            payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),

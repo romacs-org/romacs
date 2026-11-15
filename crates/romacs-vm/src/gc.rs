@@ -169,6 +169,8 @@ struct Marked {
     local_live: HashSet<usize>,
     code_marks: Vec<bool>,
     census: Census,
+    /// The payload (`data::payload_bytes`) of everything it marked.
+    payload: usize,
     state: MarkState,
 }
 
@@ -827,6 +829,7 @@ impl Vm {
     /// vector slots the live heap keeps, for the proportional rule.
     fn settle_payload(&mut self) {
         self.gc_payload_bytes = 0;
+        self.payload_settled = 0;
         self.allocation.collected_at = self.allocation.allocated;
         self.settle_poll();
         self.gc_retained_slots = self.gc_census.vector_slots;
@@ -1159,6 +1162,8 @@ impl Vm {
         self.shared_holders = None;
         self.caches_filled.clear();
         self.permanent_names_added.clear();
+        // Everything charged since the last collection is old now.
+        self.payload_settled = self.gc_payload_bytes;
         self.conses.settle_old();
         self.closures.settle_old();
         self.cells.settle_old();
@@ -1328,7 +1333,7 @@ impl Vm {
         if self.gc_stress.verify {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
-        let Marked { marking, own, doomed, local_live, code_marks, census, state } = marked;
+        let Marked { marking, own, doomed, local_live, code_marks, census, payload: _, state } = marked;
         let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
@@ -1391,8 +1396,7 @@ impl Vm {
             if before_sweep {
                 let _ = self.alloc_cons(Value::NIL, Value::NIL);
             }
-            // What the full freed needs no account: its books start again.
-            let _ = self.sweep_in_place(&marking, own);
+            self.sweep_in_place(&marking, own);
             lap.lap(&mut self.gc_times, Phase::Sweep);
             self.shrink_tables();
             lap.lap(&mut self.gc_times, Phase::Shrink);
@@ -1689,14 +1693,13 @@ impl Vm {
             }
         }
     }
-    /// Free in place what MARKING left unmarked, DEAD being its dead
-    /// objects: every survivor is left old and clean, and the logs empty.
-    /// The payload the freed objects held.
-    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker) -> usize {
+    /// Free in place what MARKING left unmarked: every survivor is left old
+    /// and clean, and the logs empty.
+    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker) {
         let cells = &self.cells;
         self.cell_pairs.retain(|&i, _| cells.marked(i));
         let verify = self.gc_stress.verify;
-        let gc_mark::Swept { tables: swept, payload, dead } = marking.sweep(self, &mut own);
+        let gc_mark::Swept { tables: swept, dead } = marking.sweep(self, &mut own);
         // The dead with side effects, still where they were, end here, on
         // this thread, before the books may cut a table's dead tail: markers
         // leave their buffers, the referrers index lets them go, and the
@@ -1714,7 +1717,6 @@ impl Vm {
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
         self.local_owners = None;
-        payload
     }
     /// A minor collection: what was made since the last collection and is
     /// no longer reached is freed, and nothing old is read but what may name
@@ -1782,6 +1784,8 @@ impl Vm {
                 objects
             }
         };
+        // Old, and marked as the young are: what they hold is no growth.
+        let old_payload: usize = objects.iter().map(|&i| data::payload_bytes(&self.objects[i])).sum();
         again.extend(objects.into_iter().map(|i| Value::reference(i + 1, 0)));
         for table in [self.conses.logged(), self.closures.logged(), self.cells.logged(), self.objects.logged()] {
             again.extend_from_slice(table);
@@ -1810,7 +1814,7 @@ impl Vm {
         if self.gc_stress.verify {
             self.check_minor(roots);
         }
-        let Marked { marking, own, doomed, state, .. } = marked;
+        let Marked { marking, own, doomed, payload: marked_payload, state, .. } = marked;
         let MarkState { weak_tables, untraced_lists, obarray_symbols_live: symbols, region_marks: regions, mut shared_seen, .. } = state;
         self.settle_cell_pairs();
         self.doom(&doomed);
@@ -1818,10 +1822,12 @@ impl Vm {
         self.empty_dead_caches(&symbols, &regions, true);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
-        // The payload the young dead held was charged to the next full, which
-        // the old generation's growth alone should pace: give it back.
-        let freed = self.sweep_in_place(&marking, own);
-        self.gc_payload_bytes = self.gc_payload_bytes.saturating_sub(freed);
+        self.sweep_in_place(&marking, own);
+        // The next full is paced by what the old generation grew by: the
+        // payload the young that survived hold now, beside what earlier
+        // minors since the last full promoted. Neither what the dead were
+        // charged nor how they changed size since enters it.
+        self.gc_payload_bytes = self.payload_settled.saturating_add(marked_payload.saturating_sub(old_payload));
         lap.lap(&mut self.gc_times, Phase::Sweep);
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
@@ -1837,6 +1843,7 @@ impl Vm {
     fn settle_minor(&mut self) {
         // A forced collection is over (a full's takes its fillers with it).
         self.gc_stress.shift = false;
+        self.payload_settled = self.gc_payload_bytes;
         self.permanent_names_added.clear();
         self.functions.settle();
         self.slots.settle();
@@ -1998,7 +2005,8 @@ impl Vm {
         if !finished { return None; }
         let census = marking.census(&own);
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();
-        Some(Marked { marking, own, doomed, local_live, code_marks, census, state })
+        let payload = marking.marked_payload(&own);
+        Some(Marked { marking, own, doomed, local_live, code_marks, census, payload, state })
     }
     /// The roots a mark starts from outside the heap's own entries, those it
     /// traces (`traced`): ROOTS and the external ones, suspended
@@ -2409,6 +2417,29 @@ mod tests {
         let minors = vm.collection_log.records.iter().filter(|record| record.minor).count();
         assert!(minors >= 64, "512 MiB of strings, a minor each 4 MiB: {minors}");
         assert_eq!(vm.collection_log.records.len(), minors, "and no full");
+    }
+
+    /// What a minor leaves charged to the next full is what the young that
+    /// survived hold, however the dead changed size after they were charged:
+    /// a string grown in place, or shrunk, dies beside a kept one, and only
+    /// the kept one's payload stays charged.
+    #[test]
+    fn a_minor_charges_the_full_what_the_young_survivors_hold() {
+        const N: usize = 1 << 20;
+        for (grown, how) in [("(string-to-multibyte (make-string n ?a))", "(aset minor-dead i ?😀)"), ("(make-string n ?😀)", "(aset minor-dead i ?a)")] {
+            // Its one minor is the one it asks for: four megabytes made bring
+            // one, which would promote the string while it is still held.
+            let mut vm = Vm::new();
+            vm.install_lisp_prelude().unwrap();
+            vm.eval_source_raw(&format!("(setq gc-cons-threshold 1000000000 n {N} minor-kept nil minor-dead nil)")).unwrap();
+            vm.collect(&mut []);
+            // A global, not a lexical: a minor keeps what a lexical pair
+            // names until the next full.
+            vm.eval_source_raw(&format!("(setq minor-dead {grown}) (dotimes (i 1000) {how}) (setq minor-dead nil minor-kept (make-string (* 3 n) ?k))")).unwrap();
+            assert!(vm.collect_minor(&[]));
+            let charged = vm.gc_payload_bytes;
+            assert!((3 * N..3 * N + N / 4).contains(&charged), "{how}: the kept string, about {} bytes, is what stays charged: {charged}", 3 * N);
+        }
     }
 
     /// A minor marks on one thread, yet where the process may hold threads
