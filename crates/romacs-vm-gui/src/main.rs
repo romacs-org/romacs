@@ -1429,7 +1429,12 @@ fn evaluate(
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
-                if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
+                if let Some(worlds) = &worlds {
+                    world::after_init(worlds, plan);
+                    if let Some(form) = world::preload_form(worlds) && let Err(error) = vm.eval_source(&form) {
+                        eprintln!("romacs: init layer preload: {error}");
+                    }
+                }
             }
         }
         startup::mark_phase("user-init");

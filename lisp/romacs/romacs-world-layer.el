@@ -271,5 +271,39 @@ noted as its library's, wherever that library was loaded."
   "The user's init has loaded."
   (advice-remove 'eval-after-load #'romacs--init-eval-after-load))
 
+;;; Libraries the layer left to the session, loaded ahead of their use
+
+(defvar romacs-layer-preload-delay 1
+  "Seconds of idleness before the next library the init layer left to the
+session loads ahead of its first use (`romacs--layer-preload').")
+
+(defun romacs--layer-preload (names)
+  "Load the features NAMES, strings, in order, ahead of their first use:
+the libraries the init only declared that its layer left to the session,
+as they loaded in the build.  One loads at a time, while no key waits; a
+waiting key stops the loading until the next idle moment.  An error
+stops it, as a warning: the library's first use meets it again."
+  (when names
+    (run-with-idle-timer romacs-layer-preload-delay nil
+                         #'romacs--layer-preload-step (mapcar #'intern names))))
+
+(defun romacs--layer-preload-step (queue)
+  "Load the first feature of QUEUE not loaded yet, unless a key waits,
+then go on with the rest (`romacs--layer-preload').  QUEUE is no
+`features': a parameter of that name would shadow the loaded ones."
+  (while (and queue (featurep (car queue)))
+    (setq queue (cdr queue)))
+  (cond
+   ((null queue))
+   ((input-pending-p)
+    (run-with-idle-timer romacs-layer-preload-delay nil #'romacs--layer-preload-step queue))
+   (t
+    (condition-case err
+        (progn (require (car queue))
+               (run-at-time 0 nil #'romacs--layer-preload-step (cdr queue)))
+      (error (display-warning 'romacs-layer
+                              (format-message "Loading `%s' ahead of its use: %s"
+                                              (car queue) (error-message-string err))))))))
+
 (provide 'romacs-world-layer)
 ;;; romacs-world-layer.el ends here

@@ -319,12 +319,14 @@ impl Plan {
     }
 
     /// The plan of the last layer usable for INIT in STORE (`write_last`),
-    /// with the digest of the plan it was resolved from.
-    pub fn read_last(store: &Path, init: &Path) -> Option<(Plan, String)> {
+    /// with the digest of the plan it was resolved from and the features
+    /// left to the session to load ahead of their use.
+    pub fn read_last(store: &Path, init: &Path) -> Option<(Plan, String, Vec<String>)> {
         let text = host::read_store_file(Self::path(store, init, true)).ok()?;
         let json: Json = serde_json::from_str(&text).ok()?;
         let from = json["resolved_from"].as_str()?.to_owned();
-        Some((Plan::from_json(&json).filter(|plan| plan.init == init)?, from))
+        let preload = json["preload"].as_array().map(|names| names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+        Some((Plan::from_json(&json).filter(|plan| plan.init == init)?, from, preload))
     }
 
     fn read_path(file: &Path, init: &Path) -> Option<Plan> {
@@ -338,12 +340,14 @@ impl Plan {
     }
 
     /// Keep this plan in STORE as its init's last usable layer's, resolved
-    /// from the plan of digest FROM: a launch restores it at once while
+    /// from the plan of digest FROM, with PRELOAD, the features of the
+    /// libraries it left to the session: a launch restores it at once while
     /// that plan is the init's, and while a newer plan's layer builds
     /// (romacs-vm-gui world.rs).
-    pub fn write_last(&self, store: &Path, from: &str) -> std::io::Result<()> {
+    pub fn write_last(&self, store: &Path, from: &str, preload: &[String]) -> std::io::Result<()> {
         let mut json = self.json();
         json["resolved_from"] = json!(from);
+        json["preload"] = json!(preload);
         Self::write_json(&json, &Self::path(store, &self.init, true), store)
     }
 
@@ -454,6 +458,14 @@ impl Deferred {
             std::iter::once(file.as_str()).chain(tails).find_map(|tail| self.files.get(tail))
         }).map(String::as_str)
     }
+}
+
+/// The features a refused entry provided in the build, in the order they
+/// loaded, when the init only declared its library: what the session may
+/// load ahead of its first use (`romacs--layer-preload'). None for a
+/// library the init loads at startup, which it loads in its own place.
+fn preloads(entry: &Entry, (features, _): &(Vec<String>, Vec<String>)) -> Vec<String> {
+    if entry.declared { features.iter().rev().cloned().collect() } else { Vec::new() }
 }
 
 /// The builder's question of each entry's loads LOADED (the features it
@@ -795,7 +807,7 @@ impl Vm {
                 }
             }
             if let Some(why) = why {
-                host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
+                host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
                 refused.push((at, why));
             }
         }
@@ -812,7 +824,7 @@ impl Vm {
             let (features, files) = &loaded[at];
             let Some(library) = deferred.loaded_by(features, files) else { continue };
             let why = format!("loads {library}, whose configuration is refused");
-            host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
+            host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
             held.insert(at);
             refused.push((at, why));
         }
@@ -846,7 +858,8 @@ impl Vm {
                 match changed_by.get(&slot) {
                     Some(&at) if after != before => {
                         let why = format!("startup sets {symbol} again");
-                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why}));
+                        host::refuse(REFUSAL, json!({"entry": at, "name": plan.entries[at].name, "why": why,
+                                                     "features": preloads(&plan.entries[at], &loaded[at])}));
                         if !refused.iter().any(|(entry, _)| *entry == at) { refused.push((at, why)); }
                     }
                     Some(_) => {}
