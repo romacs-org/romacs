@@ -1019,14 +1019,17 @@ mod tests {
         ] {
             // A parse to a position, not to a stop, may be answered from
             // the text's summaries instead of scanned at all.
+            // A summary's scan of each leaf reads a character or so at its
+            // ends.
             let scanned = source.starts_with("(let ((s") || source.contains("forward-comment");
             let (reads, passed) = counted(&mut vm, source, if scanned { "0" } else { "nil" });
-            assert!(reads <= 40 && (!scanned || passed >= 19_990), "{source}: {reads} syntax reads, {passed} characters passed");
+            let bound = if scanned { 40 } else { 40 + 20_000 / crate::syntax_index::LEAF };
+            assert!(reads <= bound && (!scanned || passed >= 19_990), "{source}: {reads} syntax reads, {passed} characters passed");
         }
         // A property in the middle is read; the text around it is passed.
         vm.eval_source_raw("(put-text-property 9000 9001 'syntax-table (string-to-syntax \"w\"))").unwrap();
         let (reads, passed) = counted(&mut vm, "(let ((parse-sexp-lookup-properties t)) (nth 4 (parse-partial-sexp 1 (point-max))))", "nil");
-        assert!(reads <= 40, "{reads} syntax reads, {passed} characters passed");
+        assert!(reads <= 40 + 20_000 / crate::syntax_index::LEAF, "{reads} syntax reads, {passed} characters passed");
         let (reads, passed) = counted(&mut vm, "(let ((parse-sexp-lookup-properties t)) (goto-char 3) (forward-comment 1) (- (point) 20009))", "0");
         assert!(reads <= 40 && passed >= 19_980, "{reads} syntax reads, {passed} characters passed");
     }
