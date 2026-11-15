@@ -238,6 +238,21 @@ reaches a harness as (TASK-TITLE . TEXT), `interrupted' each interrupted."
     (drain a)
     (should (equal (car written) '("a" . "first")))))
 
+(ert-deftest romacs-agent-delegate-send-steer-is-a-flag ()
+  ;; steer true: into the running turn at once; false: queued; with
+  ;; another mode, refused; mode steer, as it was, still steers.
+  (romacs-agent-delegate-tests--sending parent
+    (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id a) "message" "now" "steer" t))
+    (should (equal written '(("a" . "now"))))
+    (should-error (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id a) "message" "x"
+                                                                "steer" t "mode" "interrupt"))
+                  :type 'user-error)
+    (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id a) "message" "later" "steer" :false))
+    (should (= (romacs-agent-queue-length a) 1))
+    (send a "old way" "steer")
+    (should (equal (car written) '("a" . "old way")))
+    (ignore #'drain)))
+
 (ert-deftest romacs-agent-delegate-a-steer-is-marked-on-its-input ()
   ;; A message written into a turn under way is an input marked a steer;
   ;; one after the turn's end is not.
