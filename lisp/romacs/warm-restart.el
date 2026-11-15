@@ -684,11 +684,30 @@ or nil when there is neither."
   (with-current-buffer buffer (set-buffer-modified-p nil))
   (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))
 
+(defun warm-restart--beside (record blobs existing)
+  "EXISTING, a buffer edited here before RECORD's turn in the restore came,
+which keeps its edits; RECORD's carried text goes in a new buffer beside
+it, and the problem names both."
+  (when-let* ((text (warm-restart--carried-text record blobs)))
+    (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
+      (warm-restart--put-text text (plist-get record :unibyte))
+      (setq default-directory (plist-get record :directory))
+      (push (list :buffer (plist-get record :name) :text t
+                  :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
+                                  (buffer-name existing) (buffer-name)))
+            warm-restart--problems)))
+  existing)
+
 (defun warm-restart--restore-buffer (record blobs buffers)
   "Restore RECORD; record its buffer under its id in BUFFERS.
-When it fails, a buffer the attempt made is replaced by the rescue."
+When it fails, a buffer the attempt made is replaced by the rescue.  A
+buffer it would reuse that was edited here first is left as it is
+\(`warm-restart--beside')."
   (let* ((existing (warm-restart--made-buffer record))
          (buffer
+         (if (and (buffer-live-p existing) (buffer-modified-p existing)
+                  (memq (plist-get record :strategy) '(file text)))
+             (warm-restart--beside record blobs existing)
          (condition-case condition
              (let ((buffer (pcase (plist-get record :strategy)
                              ('file (warm-restart--restore-file record blobs))
@@ -702,7 +721,7 @@ When it fails, a buffer the attempt made is replaced by the rescue."
                   (or (warm-restart--rescue record blobs condition)
                       (progn (push (list :buffer (plist-get record :name) :reason (error-message-string condition))
                                    warm-restart--problems)
-                             nil))))))
+                             nil)))))))
     (when buffer (puthash (plist-get record :id) buffer buffers))))
 
 (defun warm-restart--verify (records buffers)

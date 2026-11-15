@@ -67,4 +67,30 @@
       (ignore-errors (kill-buffer "wr-carried"))
       (delete-directory warm-restart-directory t))))
 
+(ert-deftest warm-restart-an-edit-made-before-its-turn-is-kept ()
+  ;; A start serves while its restore goes on: a file edited here before
+  ;; its record's turn keeps the edit, and the carried text goes in a
+  ;; buffer beside it, named in the report.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (file (expand-file-name "edited.txt" warm-restart-directory))
+         image)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "on disk\n"))
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "carried edit\n")
+            (setq image (warm-restart-write))
+            (set-buffer-modified-p nil) (kill-buffer))
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "edited here first\n"))
+          (let ((report (warm-restart-restore-image image)))
+            (should (equal (with-current-buffer (get-file-buffer file) (buffer-string)) "on disk\nedited here first\n"))
+            (should (equal (with-current-buffer "edited.txt (restored)" (buffer-string)) "on disk\ncarried edit\n"))
+            (should (cl-some (lambda (p) (string-match-p "before its turn" (plist-get p :reason)))
+                             (plist-get report :problems)))))
+      (dolist (name '("edited.txt (restored)"))
+        (when (get-buffer name) (kill-buffer name)))
+      (when-let* ((b (get-file-buffer file))) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
 ;;; warm-restart-tests.el ends here

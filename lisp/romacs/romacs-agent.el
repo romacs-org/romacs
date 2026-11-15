@@ -3642,9 +3642,10 @@ on."
 (defun romacs-agent-load-session (id)
   "The session ID names, loaded from its record when this editor does not
 know it yet, without loading every other one."
-  (or (romacs-agent-get id)
-      (let ((dir (expand-file-name id (romacs-agent--state-root))))
-        (and (file-directory-p dir) (romacs-agent--load dir)))))
+  (or (gethash id romacs-agent--sessions)
+      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]+\\'" id)
+           (let ((dir (expand-file-name id (romacs-agent--state-root))))
+             (and (file-directory-p dir) (romacs-agent--load dir))))))
 
 (defun romacs-agent--restored ()
   "Every recorded session is known: attach to the supervisors still
@@ -3683,8 +3684,11 @@ listening, serve their relays, sweep what ended processes left, and say so."
         (lambda (a b) (string> (or (romacs-agent-dir a) "") (or (romacs-agent-dir b) "")))))
 
 (defun romacs-agent-get (id)
-  "The session ID names."
-  (gethash id romacs-agent--sessions))
+  "The session ID names.  While `romacs-agent-restore-soon' loads them, one
+it has not reached yet is loaded at once: a session attached meanwhile may
+ask for its children."
+  (or (gethash id romacs-agent--sessions)
+      (and romacs-agent--restore-pending (romacs-agent-load-session id))))
 
 (defvar romacs-agent--requests (make-hash-table :test #'equal)
   "A delegating session's id and a client request id, to the session it

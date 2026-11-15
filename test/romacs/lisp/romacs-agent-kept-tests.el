@@ -421,11 +421,24 @@ contents, so two equal states print the same."
         (clrhash romacs-agent--sessions)
         (romacs-agent-restore-soon)
         (should romacs-agent--restore-pending)
-        (should-not (romacs-agent-get romacs-agent-kept-tests--id))
+        (should-not (gethash romacs-agent-kept-tests--id romacs-agent--sessions))
         (with-timeout (10 (ert-fail "the restore did not end"))
           (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
         (should (romacs-agent-get romacs-agent-kept-tests--id))
         (should (= restored 1))
         (should (equal (car steps) 'done))))))
+
+(ert-deftest romacs-agent-kept-a-session-asked-for-mid-restore-loads-at-once ()
+  ;; While sessions load a turn at a time, one attached early may ask for
+  ;; another not reached yet (its child): it is loaded then and there.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending (list dir)))
+      (should (romacs-agent-get romacs-agent-kept-tests--id))
+      (should-not (romacs-agent-get "../escape")))
+    (clrhash romacs-agent--sessions)
+    (let ((romacs-agent--restore-pending nil))
+      (should-not (romacs-agent-get romacs-agent-kept-tests--id)))))
 
 ;;; romacs-agent-kept-tests.el ends here
