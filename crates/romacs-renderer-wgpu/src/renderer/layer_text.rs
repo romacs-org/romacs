@@ -359,6 +359,7 @@ impl TextTessellator<'_, '_> {
                         // An overstruck glyph is drawn a device pixel right again.
                         let struck = if overstrike { 1.0 / sf } else { 0.0 };
                         super::root_picture::reach::note(
+                            slot_id.window_id.get(),
                             Rect::new(*x, *y, *width, *height),
                             Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h),
                         );
@@ -1134,6 +1135,7 @@ impl WgpuRenderer {
                         );
                         // A wave or a low underline can leave the cell.
                         super::root_picture::reach::note_points(
+                            window_id.get(),
                             Rect::new(*x, *y, *width, *height),
                             decoration_vertices[decoration_start..].iter().map(|v| v.position),
                         );
@@ -1146,6 +1148,7 @@ impl WgpuRenderer {
             // underline/overline/strike-through attributes.
             for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
                 if let FrameGlyph::Stretch {
+                    window_id,
                     x,
                     y,
                     width,
@@ -1315,6 +1318,7 @@ impl WgpuRenderer {
                         );
                         // A wave or a low underline can leave the cell.
                         super::root_picture::reach::note_points(
+                            window_id.get(),
                             Rect::new(*x, *y, *width, *height),
                             decoration_vertices[decoration_start..].iter().map(|v| v.position),
                         );
@@ -1379,6 +1383,7 @@ impl WgpuRenderer {
                     self.fx.has_animated_borders = true;
                 }
                 super::root_picture::reach::note_points(
+                    span.window,
                     Rect::new(span.x, span.y, span.width, span.height),
                     sharp_border_vertices[sharp_start..]
                         .iter()
