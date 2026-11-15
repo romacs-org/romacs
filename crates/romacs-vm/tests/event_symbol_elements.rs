@@ -20,6 +20,8 @@ fn key_lookup_caches_event_symbol_elements_as_gnu() {
         (lookup-key map [f13])
         (push (get 'f13 'event-symbol-elements) out)
         (push (get 'down-mouse-9 'event-symbol-element-mask) out)
+        (push (eq (car (internal-event-symbol-parse-modifiers 'C-nil)) nil) out)
+        (push (eq (car (internal-event-symbol-parse-modifiers 'M-t)) t) out)
         (nreverse out))";
     let output = std::process::Command::new(oracle)
         .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])

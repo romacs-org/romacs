@@ -432,7 +432,7 @@ impl Vm {
         if self.plist_lookup(plist, mask_key).tag() == 3 { return Ok(()); }
         let name = self.key_event_name(symbol).ok_or("symbol event required")?.to_owned();
         let (modifiers, start) = parse_event_modifiers(name.as_bytes());
-        let base = self.keymap_symbol(&name[start..]);
+        let base = self.intern(&name[start..]);
         let mask = self.list_value(&[base, Value::integer(modifiers).expect("modifier bits are a fixnum")]);
         self.put_symbol_property(symbol, mask_key, mask)?;
         // lispy_modifier_list: consed from the lowest bit, so highest first.
