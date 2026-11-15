@@ -18,6 +18,9 @@ fn defvar_sets_the_binding_gnu_sets() {
         (push dv-c out)
         (eval '(defvar dv-d 7) t)
         (push dv-d out)
+        (defvar dv-e)
+        (eval '(defvar dv-e (progn (setq dv-e 1) 5)) t)
+        (push dv-e out)
         (nreverse out))";
     let output = std::process::Command::new(oracle)
         .args(["-Q", "--batch", "--eval", &format!("(princ (prin1-to-string {expression}))")])

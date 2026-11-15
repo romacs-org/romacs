@@ -712,18 +712,21 @@ impl Vm {
                 }
                 Ok(symbol)
             }
-            // GNU defvar: Fset_default of the current binding when it is void
-            // (a let's too), else a let-shadowed unbound toplevel binding's
-            // saved value written in place, without notification.
+            // GNU defvar, after the value: Fset_default of a void current
+            // binding (a let's too), else a let-shadowed unbound toplevel
+            // binding's saved value written in place, without notification.
+            // A current binding the value itself bound is set, as GNU sets it
+            // where no let shadowed (DefvarBoundp decided before the value ran).
             DefvarSetDefault => {
                 let value = self.stack[start+1];
-                if self.slots[slot].value == Value::UNBOUND {
-                    self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
-                    self.slots[slot].value = value;
                 // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
                 // variable_primitive checks a fenced variable first (F2)
-                } else if let Some((_,old,_,_)) = self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot) {
-                    if *old == Value::UNBOUND { *old = value; }
+                let shadow = if self.slots[slot].value == Value::UNBOUND { None }
+                    else { self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND) };
+                if let Some((_,old,_,_)) = shadow { *old = value; }
+                else {
+                    self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
+                    self.slots[slot].value = value;
                 }
                 Ok(value)
             }
