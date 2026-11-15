@@ -451,7 +451,8 @@ contents, so two equal states print the same."
   "BODY with every journal folded aside, its job pushed on `jobs'."
   (declare (indent 0))
   `(let ((jobs nil) (romacs-agent-fold-bytes 0) (romacs-agent--folding (make-hash-table :test #'equal))
-         (romacs-agent--fold-queue nil) (romacs-agent--fold-running 0) (romacs-agent--restoring nil))
+         (romacs-agent--fold-queue nil) (romacs-agent--fold-running 0) (romacs-agent--fold-loading nil)
+         (romacs-agent--fold-load-timer nil) (romacs-agent--restoring nil))
      (cl-letf (((symbol-function 'isolate-main-p) (lambda () t))
                ((symbol-function 'isolate-spawn)
                 (lambda (function dir &rest keys) (car (push (list 'future function dir nil nil keys) jobs))))
@@ -488,7 +489,7 @@ contents, so two equal states print the same."
               (setf (nth 4 future) (let ((romacs-agent--sessions (make-hash-table :test #'equal))
                                          (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
                                      (funcall (nth 1 future) (nth 2 future))))
-              (should (= (nth 4 future) (length records)))
+              (should (equal (nth 4 future) (list (length records))))
               (should (file-exists-p (romacs-agent--kept-file session)))
               (setq read nil)
               (funcall (nth 3 future) future)))

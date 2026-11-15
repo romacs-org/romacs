@@ -3718,7 +3718,19 @@ MANIFEST).")
   "The folds waiting for a worker, each (SESSION . MANIFEST), in order.")
 
 (defvar romacs-agent--fold-running 0
-  "How many folds workers run now.")
+  "How many fold jobs workers run now.")
+
+(defconst romacs-agent--fold-batch '(8 . 33554432)
+  "How much one fold job takes: (SESSIONS . BYTES), at most SESSIONS and,
+past its first, journals of at most BYTES in all.  Each job costs the
+editor a worker's start and end, a few hundred milliseconds under load.")
+
+(defvar romacs-agent--fold-loading nil
+  "Sessions a worker folded, waiting to load on here, each (SESSION
+MANIFEST FAILURE), FAILURE why its job failed, or nil.")
+
+(defvar romacs-agent--fold-load-timer nil
+  "The timer of the next `romacs-agent--fold-load-step', or nil.")
 
 (defvar romacs-agent--fold-here nil
   "Non-nil while every journal is folded in this VM: a restore that ends
@@ -3745,20 +3757,30 @@ journal unread here."
   (romacs-agent--fold-next))
 
 (defun romacs-agent--fold-next ()
-  "Start waiting folds while fewer than `romacs-agent-fold-jobs' run."
+  "Give waiting folds to worker VMs, a batch a job
+\(`romacs-agent--fold-batch'), while fewer than `romacs-agent-fold-jobs'
+run."
   (while (and romacs-agent--fold-queue (< romacs-agent--fold-running (max 1 romacs-agent-fold-jobs)))
-    (pcase-let* ((`(,session . ,manifest) (pop romacs-agent--fold-queue))
-                 (future (condition-case err
-                             (isolate-spawn 'romacs-agent--fold-job (romacs-agent-dir session)
-                                            ;; All a fold loads: a worker that loads more is
-                                            ;; ended after its job, which waits for its exit.
-                                            :name "romacs-agent fold" :require '(romacs-agent cl-extra help-mode)
-                                            :bindings (romacs-agent--fold-bindings))
-                           (error (list 'error err)))))
+    (let ((batch nil) (bytes 0))
+      (while (and romacs-agent--fold-queue (< (length batch) (car romacs-agent--fold-batch))
+                  (or (null batch) (< bytes (cdr romacs-agent--fold-batch))))
+        (let ((entry (pop romacs-agent--fold-queue)))
+          (push entry batch)
+          (cl-incf bytes (or (file-attribute-size
+                              (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir (car entry)))))
+                             0))))
+      (setq batch (nreverse batch))
       (cl-incf romacs-agent--fold-running)
-      (if (eq (car-safe future) 'error)
-          (romacs-agent--folded session manifest future)
-        (isolate-on-done future (lambda (done) (romacs-agent--folded session manifest done)))))))
+      (let ((future (condition-case err
+                        (isolate-spawn 'romacs-agent--fold-job (mapcar (lambda (entry) (romacs-agent-dir (car entry))) batch)
+                                       ;; All a fold loads: a worker that loads more is
+                                       ;; ended after its job, which waits for its exit.
+                                       :name "romacs-agent fold" :require '(romacs-agent cl-extra help-mode)
+                                       :bindings (romacs-agent--fold-bindings))
+                      (error (list 'error err)))))
+        (if (eq (car-safe future) 'error)
+            (romacs-agent--folded batch future)
+          (isolate-on-done future (lambda (done) (romacs-agent--folded batch done))))))))
 
 (defun romacs-agent--fold-bindings ()
   "This editor's values of the agents' options, which a worker's fold reads
@@ -3769,23 +3791,55 @@ worker can be given, a function made here, is left out."
                      (let ((value (symbol-value symbol))) (not (and (functionp value) (not (symbolp value))))))
            collect (cons symbol (symbol-value symbol))))
 
-(defun romacs-agent--fold-job (dir)
-  "In a worker VM: fold the journal of the session recorded in DIR and
-write its kept state.  The seq it is kept at, or nil."
+(defun romacs-agent--fold-job (dirs)
+  "In a worker VM: fold the journals of the sessions recorded in DIRS and
+write their kept states.  The seqs they are kept at, each or nil."
+  (mapcar #'romacs-agent--fold-one dirs))
+
+(defun romacs-agent--fold-one (dir)
+  "Fold the journal of the session recorded in DIR and write its kept
+state.  The seq it is kept at, or nil."
   (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir)))
               (session (romacs-agent--of-manifest dir manifest)))
-    (puthash (romacs-agent-id session) session romacs-agent--sessions)
-    (let ((romacs-agent-event-functions nil))
+    ;; A worker folds one journal after another: nothing of one stays.
+    (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+          (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key))
+          (romacs-agent-event-functions nil))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record session record))
-                                  (romacs-agent--restore-kept session)))
-    (romacs-agent--keep session)
-    (gethash session romacs-agent--kept)))
+                                  (romacs-agent--restore-kept session))
+      (romacs-agent--keep session)
+      (gethash session romacs-agent--kept))))
 
-(defun romacs-agent--folded (session manifest done)
-  "A worker's fold of SESSION's journal ended, DONE its future (or (error
-ERR) when none started): SESSION, made from MANIFEST, loads on from the
-kept state it wrote; with none, from its journal's start here."
+(defun romacs-agent--folded (batch done)
+  "A worker's fold of BATCH, (SESSION . MANIFEST) entries, ended, DONE its
+future (or (error ERR) when none started): its sessions load on here from
+the kept states it wrote, a turn's worth at a time."
   (cl-decf romacs-agent--fold-running)
+  (let ((failure (if (eq (car-safe done) 'error) (error-message-string (cadr done))
+                   (condition-case err (progn (isolate-await done) nil) (error (error-message-string err))))))
+    (setq romacs-agent--fold-loading
+          (append romacs-agent--fold-loading (mapcar (lambda (entry) (list (car entry) (cdr entry) failure)) batch))))
+  (romacs-agent--fold-next)
+  (romacs-agent--fold-load-step))
+
+(defun romacs-agent--fold-load-step ()
+  "Load on folded sessions, `romacs-agent--restore-turn' seconds of them;
+the rest a turn later."
+  (setq romacs-agent--fold-load-timer nil)
+  (let ((until (+ (float-time) romacs-agent--restore-turn)))
+    (while (when-let* ((entry (pop romacs-agent--fold-loading)))
+             (apply #'romacs-agent--folded-one entry)
+             (< (float-time) until))))
+  (if romacs-agent--fold-loading
+      (unless romacs-agent--fold-load-timer
+        (setq romacs-agent--fold-load-timer (run-at-time 0 nil #'romacs-agent--fold-load-step)))
+    (romacs-agent--restore-finish)))
+
+(defun romacs-agent--folded-one (session manifest failure)
+  "SESSION, made from MANIFEST, folded by a worker (FAILURE, why its job
+failed, or nil): it loads on from the kept state written; with none, from
+its journal's start here."
   ;; One acted on meanwhile was folded here already (`romacs-agent--fold-now').
   (when (and (eq (car (gethash (romacs-agent-id session) romacs-agent--folding)) session)
              (eq (gethash (romacs-agent-id session) romacs-agent--sessions) session))
@@ -3794,12 +3848,8 @@ kept state it wrote; with none, from its journal's start here."
       (if from
           (setf (romacs-agent-journal-start session) from)
         (message "romacs-agent: %s folded in the editor: %s" (romacs-agent-id session)
-                 (if (eq (car-safe done) 'error) (error-message-string (cadr done))
-                   (condition-case err (progn (isolate-await done) "no state was kept")
-                     (error (error-message-string err)))))))
-    (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load-rest session manifest)))
-  (romacs-agent--fold-next)
-  (romacs-agent--restore-finish))
+                 (or failure "no state was kept"))))
+    (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load-rest session manifest))))
 
 (defun romacs-agent--fold-now (session)
   "SESSION, when a worker folds it still, folded here at once: something
@@ -3808,7 +3858,8 @@ come before.  What the worker answers later is let go."
   (when-let* ((entry (gethash (romacs-agent-id session) romacs-agent--folding))
               ((eq (car entry) session)))
     (remhash (romacs-agent-id session) romacs-agent--folding)
-    (setq romacs-agent--fold-queue (cl-remove session romacs-agent--fold-queue :key #'car))
+    (setq romacs-agent--fold-queue (cl-remove session romacs-agent--fold-queue :key #'car)
+          romacs-agent--fold-loading (cl-remove session romacs-agent--fold-loading :key #'car))
     (when-let* ((from (romacs-agent--restore-kept session)))
       (setf (romacs-agent-journal-start session) from))
     (romacs-agent--load-rest session (cdr entry))
