@@ -12,9 +12,10 @@ and what the merge queue holds it to.
   the train's tier 1 ask it; `python3 -B tools/lib/impact.py plan` prints it for
   a shell. A rule about what reaches what goes there, with a case in
   `tools/tests/test_impact.py`; no tool keeps a path list of its own.
-- `tools/lib/test_modules.py` folds a package's test files into one executable,
-  `all`, or `gnu` for a file that boots GNU's Lisp; `targets` names what a check
-  builds.
+- `tools/lib/test_modules.py` folds a package's test files (romacs-vm's,
+  romacs-vm-gui's: `PACKAGES`, `FOLDED`) into one executable, `all`, or in
+  romacs-vm `gnu` for a file that boots GNU's Lisp; `targets PACKAGE` names
+  what a check builds.
 - `tools/gate` runs its inner half from a frozen copy of itself outside the
   tree, so that half imports nothing from `tools/lib/`.
 

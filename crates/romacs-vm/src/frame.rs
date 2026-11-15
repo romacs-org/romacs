@@ -1,17 +1,40 @@
 //! Lisp identity and ownership for the initial display device and its
-//! child frames. No TTY is claimed: the initial terminal has no native TTY
-//! top frame. The host frame is the one the display shows; every other
-//! frame is a child frame (`parent-frame'), painted over its parent and
-//! never resizing its windows (DIVERGENCES.md VM2-CHILD-FRAME).
+//! frames. No TTY is claimed: the initial terminal has no native TTY top
+//! frame. A top-level frame is one the display shows in a window of its
+//! own and owns its native geometry (`TopGeometry'); a child frame
+//! (`parent-frame') is painted over its parent and never resizes its
+//! windows (DIVERGENCES.md VM2-CHILD-FRAME).
 use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
-/// The frame the host displays: the initial frame.
-const HOST_FRAME: &str = "#:vm2-host-frame";
 /// The fringe width a frame parameter of nil or a non-integer gives
 /// (frame.c gui_set_left_fringe).
 pub(crate) const DEFAULT_FRINGE: u32 = 8;
 /// Live frames, newest first: GNU's `Vframe_list' (frame.c:1438).
 const FRAME_LIST: &str = "#:vm2-frame-list";
+/// A top-level frame's native geometry, as its window and its last
+/// layout left it. Unused on a child frame, whose size is its own.
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
+pub(super) struct TopGeometry {
+    pub width: u32,
+    pub height: u32,
+    /// The mini-window's height in lines (xdisp.c resize_mini_window).
+    pub mini_lines: u32,
+    /// The pixels the last layout left below the root windows for the
+    /// mini-window: none while a child frame hosts it.
+    pub mini_reserved: u32,
+    /// The text area at the last layout, tab bar included.
+    pub text_area: [u32; 2],
+    /// The status bar's height as the host measured its row (0 before
+    /// one did: a canonical line), and the pixels the last layout left
+    /// for it between the root window and the mini-window (VM2-STATUS-BAR).
+    pub status_height: u32,
+    pub status_reserved: u32,
+}
+impl Default for TopGeometry {
+    fn default() -> Self {
+        Self { width: 640, height: 480, mini_lines: 1, mini_reserved: 0, text_area: [640, 480], status_height: 0, status_reserved: 0 }
+    }
+}
 #[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Frame {
     pub root: Value,
@@ -20,18 +43,18 @@ pub(super) struct Frame {
     pub terminal: Value,
     pub parameters: Vec<(Value, Value)>,
     pub live: bool,
-    /// The display's identity for this frame: 1 for the host frame.
+    /// The display's identity for this frame: 1 for the initial frame.
     pub id: u64,
-    /// The parent frame, nil for the host frame.
+    /// The parent frame, nil for the top-level frame.
     pub parent: Value,
     /// A child frame's outer position in its parent's native area and its
-    /// native size, in pixels. The host frame's size is the window state's.
+    /// native size, in pixels. A top-level frame's size is its `native'.
     pub left: i32,
     pub top: i32,
     pub width: u32,
     pub height: u32,
     /// GNU `FRAME_INTERNAL_BORDER_WIDTH': the border a child frame draws
-    /// (`child-frame-border-width'), or the host frame's
+    /// (`child-frame-border-width'), or the top-level frame's
     /// `internal-border-width' around its text area (frame.h:1796).
     pub border: u32,
     pub visible: bool,
@@ -65,6 +88,8 @@ pub(super) struct Frame {
     /// `romacs-status-bar-position' `top' puts it; else above the
     /// mini-window (VM2-STATUS-BAR).
     pub status_bar_top: bool,
+    /// A top-level frame's native geometry.
+    pub native: TopGeometry,
 }
 
 impl Frame {
@@ -108,9 +133,27 @@ impl Vm {
     pub(super) fn frame_value_peek(&self) -> Value {
         self.names.get(SELECTED_FRAME).map_or(Value::UNBOUND, |&i| self.slots[i].value)
     }
-    /// The frame the host displays, unbound before `ensure_windows'.
-    pub(super) fn host_frame_peek(&self) -> Value {
-        self.names.get(HOST_FRAME).map_or(Value::UNBOUND, |&i| self.slots[i].value)
+    /// The top-level frame FRAME is, or is a descendant of.
+    pub(super) fn top_frame(&self, frame: Value) -> Value {
+        self.frame_ancestors(frame).last().copied().unwrap_or(frame)
+    }
+    /// The selected frame's top-level frame, unbound before
+    /// `ensure_windows'.
+    pub(super) fn selected_top_frame(&self) -> Value {
+        let selected = self.frame_value_peek();
+        if selected == Value::UNBOUND { selected } else { self.top_frame(selected) }
+    }
+    /// The live frame whose display identity is ID: what code that runs
+    /// Lisp keeps across it, as a collection may move the frame.
+    pub(super) fn frame_of_id(&self, id: u64) -> Result<Value> {
+        self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|f| f.id == id)).ok_or_else(|| format!("no live frame {id}"))
+    }
+    /// Top-level frame ROOT's native geometry.
+    pub(super) fn top_geometry(&self, root: Value) -> Result<TopGeometry> {
+        Ok(self.frame(root)?.native)
+    }
+    pub(super) fn top_geometry_mut(&mut self, root: Value) -> Result<&mut TopGeometry> {
+        Ok(&mut self.frame_mut(root)?.native)
     }
     pub(super) fn selected_frame_value(&mut self) -> Result<Value> {
         self.ensure_windows()?;
@@ -122,10 +165,10 @@ impl Vm {
             _ => Err("frame required".into()),
         }
     }
-    /// The host frame's background opacity, as painting presents it.
-    pub(crate) fn frame_background_alpha(&mut self) -> Result<f32> {
+    /// Top-level frame ROOT's background opacity, as painting presents it.
+    pub(crate) fn frame_background_alpha(&mut self, root: Value) -> Result<f32> {
         self.ensure_windows()?;
-        Ok(self.frame(self.host_frame_peek())?.alpha_background)
+        Ok(self.frame(root)?.alpha_background)
     }
     pub(super) fn frame_mut(&mut self, value: Value) -> Result<&mut Frame> {
         match self.objects.get_entry_mut(value.index(0)?.saturating_sub(1)) {
@@ -170,10 +213,11 @@ impl Vm {
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
             alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, status_bar_top: false,
+            native: TopGeometry::default(),
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
-        for name in [SELECTED_FRAME, HOST_FRAME, "#:vm2-last-nonminibuffer-frame"] {
+        for name in [SELECTED_FRAME, "#:vm2-last-nonminibuffer-frame"] {
             let slot = self.slot(name);
             self.slots[slot].value = frame;
         }
@@ -197,6 +241,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
             hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, status_bar_top: false,
+            native: TopGeometry::default(),
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();
@@ -209,13 +254,14 @@ impl Vm {
     /// area inside its border, which its fringes widen as they do in GNU
     /// (FRAME_TEXT_TO_PIXEL_WIDTH). Its parent's windows do not change. A frame
     /// hosting the minibuffer window gives it its lines at its edge, placed
-    /// in the host frame, whose window it stays; the root window takes the
+    /// in the top-level frame, whose window it stays; the root window takes the
     /// rest, possibly nothing.
     pub(super) fn set_child_geometry(&mut self, frame: Value, geometry: ChildGeometry) -> Result<()> {
         let (line, column) = (self.window_state.line.max(1), self.window_state.column.max(1));
         let ChildGeometry { left, top, width, height, border } = geometry;
         let hosts = self.frame(frame)?.hosts_minibuffer;
-        let mini_height = if hosts { self.window_state.mini_lines.max(1) * line } else { 0 };
+        let top_level = self.top_frame(frame);
+        let mini_height = if hosts { self.top_geometry(top_level)?.mini_lines.max(1) * line } else { 0 };
         // A child frame keeps at least one line of two columns.
         let [left_fringe, right_fringe] = self.frame_fringes(frame)?;
         let (width, height) = (width.max(2 * column) + left_fringe + right_fringe, height.max(line).max(mini_height));
@@ -238,7 +284,7 @@ impl Vm {
         if hosts {
             let (x, y) = self.frame_origin(frame)?;
             let to = |n: i32, by: u32| u32::try_from(i64::from(n) + i64::from(by)).unwrap_or(0);
-            geometry.push((self.mini_window(), to(x, border), to(y, mini_y), width, mini_height));
+            geometry.push((self.frame(top_level)?.minibuffer, to(x, border), to(y, mini_y), width, mini_height));
         }
         for (v, x, y, w, h) in geometry {
             let window = self.window_mut(v)?;
@@ -264,15 +310,15 @@ impl Vm {
     /// FRAME's native size in pixels.
     pub(super) fn frame_native(&self, frame: Value) -> Result<(u32, u32)> {
         let f = self.frame(frame)?;
-        Ok(if f.parent == Value::NIL { (self.window_state.width, self.window_state.height) } else { (f.width, f.height) })
+        Ok(if f.parent == Value::NIL { (f.native.width, f.native.height) } else { (f.width, f.height) })
     }
     /// Delete child FRAME and its descendants (frame.c delete_frame): their
     /// windows die, and a deleted selected frame passes the selection to
-    /// its nearest live ancestor. The host frame is never deleted here; the
+    /// its nearest live ancestor. The top-level frame is never deleted here; the
     /// minibuffer window a deleted frame hosted returns to its line.
     pub(super) fn delete_child_frame(&mut self, frame: Value) -> Result<()> {
         if !self.frame(frame)?.live { return Ok(()); }
-        if self.frame(frame)?.hosts_minibuffer { self.host_minibuffer(None)?; }
+        if self.frame(frame)?.hosts_minibuffer { self.host_minibuffer(self.top_frame(frame), None)?; }
         if self.frame(frame)?.parent == Value::NIL {
             return Err("Attempt to delete the sole visible or iconified frame".into());
         }
@@ -307,51 +353,51 @@ impl Vm {
     pub(super) fn frame_shown(&self, frame: Value) -> bool {
         std::iter::once(frame).chain(self.frame_ancestors(frame)).all(|f| self.frame(f).is_ok_and(|f| f.visible && f.live))
     }
-    /// FRAME's outer position in the host frame.
+    /// FRAME's outer position in the top-level frame.
     pub(super) fn frame_origin(&self, frame: Value) -> Result<(i32, i32)> {
         std::iter::once(frame).chain(self.frame_ancestors(frame))
             .try_fold((0, 0), |(x, y), f| self.frame(f).map(|f| (x + f.left, y + f.top)))
     }
-    /// Live child frames in stacking order, lowest first: a frame's
-    /// children above it, siblings by creation unless raised or lowered.
-    /// GNU leaves stacking to the window manager; `z-group' is not read.
-    pub(crate) fn child_frames_bottom_up(&self) -> Vec<Value> {
-        let host = self.host_frame_peek();
+    /// Top-level frame ROOT's live descendants in stacking order, lowest
+    /// first: a frame's children above it, siblings by creation unless
+    /// raised or lowered. GNU leaves stacking to the window manager;
+    /// `z-group' is not read.
+    pub(crate) fn child_frames_bottom_up(&self, root: Value) -> Vec<Value> {
         let mut out: Vec<Value> = self.frames().into_iter()
-            .filter(|&f| f != host && self.frame(f).is_ok_and(|f| f.live)).collect();
+            .filter(|&f| f != root && self.frame(f).is_ok_and(|f| f.live) && self.top_frame(f) == root).collect();
         let key = |vm: &Self, f: Value| (vm.frame_ancestors(f).len(), vm.frame(f).map_or(0, |f| f.z));
         out.sort_by_key(|&f| key(self, f));
         out
     }
-    /// The live child frame hosting the minibuffer window.
-    pub(crate) fn minibuffer_host(&self) -> Option<Value> {
-        self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|x| x.live && x.hosts_minibuffer))
+    /// The live child frame of top-level frame ROOT hosting its
+    /// minibuffer window.
+    pub(crate) fn minibuffer_host(&self, root: Value) -> Option<Value> {
+        self.frames().into_iter().find(|&f| self.frame(f).is_ok_and(|x| x.live && x.hosts_minibuffer) && self.top_frame(f) == root)
     }
-    /// Let child frame HOST show the minibuffer window on its top edge, or
-    /// with None give the window back its line at the host frame's bottom.
-    /// Either way the root frame's windows are laid out again: a hosted
-    /// minibuffer takes none of their lines.
-    pub(super) fn host_minibuffer(&mut self, host: Option<Value>) -> Result<()> {
-        let old = self.minibuffer_host();
+    /// Let child frame HOST of top-level frame ROOT show ROOT's minibuffer
+    /// window on its top edge, or with None give the window back its line
+    /// at ROOT's bottom. Either way ROOT's windows are laid out again: a
+    /// hosted minibuffer takes none of their lines.
+    pub(super) fn host_minibuffer(&mut self, root: Value, host: Option<Value>) -> Result<()> {
+        let old = self.minibuffer_host(root);
         if old == host { return Ok(()); }
-        for f in self.frames() { self.frame_mut(f)?.hosts_minibuffer = false; }
+        for f in old.into_iter() { self.frame_mut(f)?.hosts_minibuffer = false; }
         if let Some(frame) = host { self.frame_mut(frame)?.hosts_minibuffer = true; }
         for frame in old.into_iter().chain(host) {
             let geometry = self.child_geometry(frame)?;
             self.set_child_geometry(frame, geometry)?;
         }
-        let state = &self.window_state;
-        let (width, height, line, column) = (state.width, state.height, state.line, state.column);
-        self.set_frame_geometry(width, height, line, column)?;
+        self.relayout_top_frame(root)?;
         self.display_state.version += 1;
         Ok(())
     }
     /// Keep a hosting FRAME's top in place as the minibuffer window's lines
     /// change: the frame grows or shrinks by the difference downward.
     pub(super) fn refit_minibuffer_host(&mut self, frame: Value) -> Result<()> {
+        let top = self.top_frame(frame);
         let line = self.window_state.line.max(1);
-        let wanted = i64::from(self.window_state.mini_lines.max(1) * line);
-        let delta = wanted - i64::from(self.window(self.mini_window())?.height);
+        let wanted = i64::from(self.top_geometry(top)?.mini_lines.max(1) * line);
+        let delta = wanted - i64::from(self.window(self.frame(top)?.minibuffer)?.height);
         let mut geometry = self.child_geometry(frame)?;
         geometry.height = u32::try_from(i64::from(geometry.height) + delta).unwrap_or(0);
         self.set_child_geometry(frame, geometry)
@@ -371,7 +417,7 @@ fn internal(e: String) -> Fault { Fault::Error(e) }
 /// The frame surface `prims/frame.rs' declares beyond window.rs's: child
 /// frames (GNU frame.c and pgtkfns.c x-create-frame).
 impl crate::window::Windows<'_> {
-    /// A live child frame, or GNU's error for the host frame CALLER cannot
+    /// A live child frame, or GNU's error for the top-level frame CALLER cannot
     /// change.
     fn child(&mut self, frame: Value) -> std::result::Result<Option<Value>, Fault> {
         let frame = self.decode_live_frame(frame)?;
@@ -398,14 +444,14 @@ impl crate::window::Windows<'_> {
         let (a, d) = (self.decode_live_frame(ancestor)?, self.decode_live_frame(descendant)?);
         Ok(if self.vm.frame_ancestors(d).contains(&a) { Value::TRUE } else { Value::NIL })
     }
-    /// A child frame's geometry, nil for the host frame.
+    /// A child frame's geometry, nil for the top-level frame.
     pub(crate) fn child_geometry(&mut self, frame: Value) -> std::result::Result<Option<ChildGeometry>, Fault> {
         match self.child(frame)? {
             Some(frame) => Ok(Some(self.vm.child_geometry(frame).map_err(internal)?)),
             None => Ok(None),
         }
     }
-    /// Place or size child FRAME; the host frame's geometry is the host
+    /// Place or size child FRAME; the top-level frame's geometry is the host
     /// window's, which Lisp does not change.
     pub(crate) fn set_child_geometry(&mut self, frame: Value, geometry: ChildGeometry) -> std::result::Result<(), Fault> {
         if let Some(frame) = self.child(frame)? {
@@ -417,7 +463,7 @@ impl crate::window::Windows<'_> {
         let frame = self.decode_live_frame(frame)?;
         Ok(self.vm.frame(frame).map_err(internal)?.visible)
     }
-    /// Show or hide child FRAME; the host frame stays visible (VM2-FRAME-VIS).
+    /// Show or hide child FRAME; the top-level frame stays visible (VM2-FRAME-VIS).
     pub(crate) fn set_frame_visible(&mut self, frame: Value, visible: bool) -> std::result::Result<(), Fault> {
         if let Some(frame) = self.child(frame)? {
             let f = self.vm.frame_mut(frame).map_err(internal)?;
@@ -460,13 +506,14 @@ impl crate::window::Windows<'_> {
         let host = if frame == Value::NIL { None } else {
             Some(self.child(frame)?.ok_or_else(|| Fault::Error("Only a child frame hosts the minibuffer window".into()))?)
         };
-        self.vm.host_minibuffer(host).map_err(internal)?;
+        let root = match host { Some(host) => self.vm.top_frame(host), None => self.vm.selected_top_frame() };
+        self.vm.host_minibuffer(root, host).map_err(internal)?;
         Ok(frame)
     }
-    /// `romacs--minibuffer-host': the child frame hosting the minibuffer
-    /// window, or nil.
+    /// `romacs--minibuffer-host': the child frame hosting the selected
+    /// frame's minibuffer window, or nil.
     pub(crate) fn minibuffer_host(&mut self) -> Out {
-        Ok(self.vm.minibuffer_host().unwrap_or(Value::NIL))
+        Ok(self.vm.minibuffer_host(self.vm.selected_top_frame()).unwrap_or(Value::NIL))
     }
     /// Whether FRAME (nil, the selected one) is a live child frame.
     pub(crate) fn is_child_frame(&mut self, frame: Value) -> std::result::Result<bool, Fault> {
@@ -474,7 +521,7 @@ impl crate::window::Windows<'_> {
     }
     /// frame.c delete_frame's deletion, once `delete-frame-functions' ran:
     /// FRAME and its descendants die. A frame already dead is left alone;
-    /// the host frame is the sole frame GNU would refuse to delete.
+    /// the top-level frame is the sole frame GNU would refuse to delete.
     pub(crate) fn delete_frame(&mut self, frame: Value, force: Value) -> Out {
         let frame = if frame == Value::NIL { self.decode_live_frame(frame)? } else { frame };
         if !self.is_frame_value(frame) { return Err(Fault::Wrong("framep", frame)); }

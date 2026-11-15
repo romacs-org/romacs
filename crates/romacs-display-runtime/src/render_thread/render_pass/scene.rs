@@ -43,42 +43,87 @@ pub(super) fn render_frame_root_glyphs(
     if let Some(atlas) = render.compositor.glyph_atlas.as_mut() {
         atlas.set_current_frame_fonts(frame.font_bindings());
     }
-    // Only the frame's own glyphs and cursors decide its pixels: no
-    // gradient, animated cursor, pointer highlight or running effect.
-    // The cursor's light is the renderer's before any root is painted or
-    // reused: a child frame drawn after a reused root reads it too.
+    // The cursor's light is the renderer's before any root is painted: a
+    // child frame drawn after the root reads it too.
     renderer.cursor_light = render.cursor.light;
-    let stable = bg_gradient.is_none()
-        && root_animated_cursor.is_none()
-        && pointer_selection.is_none()
-        && hovered_scroll_bar.is_none()
-        && render.overlays.idle_dim.current_alpha == 0.0
-        && super::retained_static::static_body_effects(&renderer.effects)
-        && !render.compositor.renderer_effects.needs_redraw()
-        && !render.cursor.light_fading();
-    let key = romacs_renderer_wgpu::SnapshotSize::new(renderer.width(), renderer.height()).and_then(|size| {
-        super::retained_root::key(frame, cursor_visible, (&renderer.cursor_look, renderer.cursor_light), size, renderer.scale_factor(), stable)
-    });
-    let repeats = render.compositor.child_frames.has_animation_activity();
-    super::retained_root::paint(renderer, render, surface_view, present_mapping, key, repeats, |renderer, render, view| {
-        renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
-            renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
-            renderer.render_frame_glyphs(
-                view,
+    let size = romacs_renderer_wgpu::SnapshotSize::new(renderer.width(), renderer.height())
+        .filter(|_| pictured(renderer, render, frame, bg_gradient.is_some(), pointer_selection.is_some(), hovered_scroll_bar.is_some()));
+    if let Some(size) = size
+        && render.compositor.root_picture.as_ref().is_none_or(|picture| !picture.fits(size))
+    {
+        render.compositor.root_picture = Some(romacs_renderer_wgpu::RootPicture::new(renderer, size));
+    }
+    renderer.with_frame_effects(&mut render.compositor.renderer_effects, |renderer| {
+        renderer.set_idle_dim_alpha(render.overlays.idle_dim.current_alpha);
+        let atlas = render.compositor.glyph_atlas.as_mut().unwrap();
+        match render.compositor.root_picture.as_mut().filter(|_| size.is_some()) {
+            Some(picture) => {
+                let target = romacs_renderer_wgpu::PaintTarget {
+                    view: surface_view,
+                    mapping: present_mapping,
+                    cursor_visible,
+                    animated_cursor: root_animated_cursor,
+                };
+                let painted = picture.paint(renderer, atlas, frame, target);
+                if painted == romacs_renderer_wgpu::Painted::Clean {
+                    frame_stats::count(&frame_stats::RETAINED_ROOT_BLITS);
+                }
+            }
+            None => renderer.render_frame_glyphs(
+                surface_view,
                 frame,
-                render.compositor.glyph_atlas.as_mut().unwrap(),
+                atlas,
                 present_mapping,
                 cursor_visible,
                 root_animated_cursor,
                 hovered_scroll_bar,
                 bg_gradient,
                 pointer_selection,
-                render.compositor.current_row_damage.as_ref(),
-            );
-        });
+            ),
+        }
     });
     // The root pass draws the panes (VM2-PANE-CHROME).
     frame_stats::add(&frame_stats::CHROME_DIVIDER_QUADS, renderer.take_pane_quads() as u64);
+}
+
+/// Whether FRAME's root pass is drawn through the root picture: whether its
+/// pixels, cursors apart, are a function of its glyphs, tables and settings
+/// alone. Not under a background GRADIENT, a pointer's highlight (a POINTER selection, a
+/// HOVERED scroll bar), idle dimming, an enabled body effect or one still
+/// running, a box border that animates, or with media glyphs, whose textures
+/// change under the frame; nor on a translucent frame, nor under
+/// `ROMACS_DISABLE_RETAINED_ROOT`.
+fn pictured(
+    renderer: &WgpuRenderer,
+    render: &GuiFrameRenderState,
+    frame: &romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    gradient: bool,
+    pointer: bool,
+    hovered: bool,
+) -> bool {
+    use romacs_display_protocol::frame_glyphs::FrameGlyph;
+    let plain = |glyph: &FrameGlyph| {
+        matches!(
+            glyph,
+            FrameGlyph::Char { .. }
+                | FrameGlyph::Stretch { .. }
+                | FrameGlyph::Background { .. }
+                | FrameGlyph::Border { .. }
+                | FrameGlyph::FringeBitmap { .. }
+                | FrameGlyph::ScrollBar { .. }
+        )
+    };
+    !gradient
+        && !pointer
+        && !hovered
+        && render.overlays.idle_dim.current_alpha <= 0.0
+        && super::retained_static::static_body_effects(&renderer.effects)
+        && frame.cursor_effects_by_window.values().all(super::retained_static::static_body_effects)
+        && !render.compositor.renderer_effects.needs_redraw()
+        && frame.background_alpha >= 1.0
+        && !frame.faces.values().any(|face| face.box_corner_radius > 0 && face.box_border_style.is_fancy())
+        && frame.glyphs.iter().all(plain)
+        && std::env::var_os("ROMACS_DISABLE_RETAINED_ROOT").is_none()
 }
 
 #[allow(clippy::too_many_arguments)]

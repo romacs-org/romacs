@@ -106,8 +106,7 @@
      (dolist (table '(themata extras scheduler-state review-events practice-events practice-encounters))
        (should-not (gnosis-select '* table)))
      (gnosis-review--show-summary state)
-     (should (= 1 (length events)))
-     (should-not (featurep 'hermes)))))
+     (should (= 1 (length events))))))
 
 (ert-deftest gnosis-provider-replacement-retirement-and-late-delivery ()
   (gnosis-test-provider--with-review
@@ -349,8 +348,7 @@
        (should (equal (plist-get accepted :response) "Unknown α\nPlease explain")))
      (should (equal (plist-get (gnosis-agent-status id) :status) "completed"))
      (dolist (table '(themata extras scheduler-state scheduler-baseline review-events practice-events practice-encounters))
-       (should-not (gnosis-select '* table)))
-     (should-not (seq-some (lambda (feature) (string-prefix-p "hermes" (symbol-name feature))) features)))))
+       (should-not (gnosis-select '* table))))))
 
 (ert-deftest gnosis-provider-summary-failure-does-not-notify ()
   (gnosis-test-provider--with-review

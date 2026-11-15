@@ -64,23 +64,6 @@ impl RenderedGlyphGeometry {
         }
     }
 
-    #[cfg(test)]
-    pub(super) const fn cell(self) -> Rect {
-        self.cell
-    }
-
-    #[cfg(test)]
-    pub(super) const fn bitmap(self) -> Rect {
-        self.bitmap
-    }
-
-    pub(super) fn translated_y(mut self, dy: f32) -> Self {
-        self.cell.y += dy;
-        self.bitmap.y += dy;
-        self.raster_bounds.y += dy;
-        self
-    }
-
     fn submission_matches_raster(self) -> bool {
         self.bitmap.x >= self.raster_bounds.x - CHAR_OVERLAP_MIN_AXIS
             && self.bitmap.y >= self.raster_bounds.y - CHAR_OVERLAP_MIN_AXIS
@@ -1498,7 +1481,6 @@ impl WgpuRenderer {
         hovered_scroll_bar: Option<ScrollBarIdentity>,
         background_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
         pointer_selection: Option<PointerAppearanceSelection>,
-        row_damage: Option<&super::row_reuse::FrameRowDamage>,
     ) {
         self.render_frame_glyphs_impl(
             view,
@@ -1510,7 +1492,6 @@ impl WgpuRenderer {
             hovered_scroll_bar,
             background_gradient,
             pointer_selection,
-            row_damage,
             false,
             None,
         );
@@ -1544,7 +1525,6 @@ impl WgpuRenderer {
             None,
             None,
             None,
-            None,
             true,
             Some(scissor),
         );
@@ -1554,7 +1534,7 @@ impl WgpuRenderer {
     // boundary; a local alias would only hide this one site.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn render_frame_glyphs_impl(
+    pub(super) fn render_frame_glyphs_impl(
         &mut self,
         view: &wgpu::TextureView,
         frame_glyphs: &FrameGlyphBuffer,
@@ -1565,7 +1545,6 @@ impl WgpuRenderer {
         hovered_scroll_bar: Option<ScrollBarIdentity>,
         background_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
         pointer_selection: Option<PointerAppearanceSelection>,
-        row_damage: Option<&super::row_reuse::FrameRowDamage>,
         load_existing: bool,
         scissor: Option<(u32, u32, u32, u32)>,
     ) {
@@ -1683,7 +1662,6 @@ impl WgpuRenderer {
             face_debug_call_id,
             has_line_anims: !self.fx.line_anim.active.is_empty()
                 || !self.fx.scroll_spacing.active.is_empty(),
-            row_damage,
         };
 
         let box_spans = self.collect_box_spans(&params);
@@ -1694,6 +1672,7 @@ impl WgpuRenderer {
 
         let mut stats = GlyphRenderStats::new();
         stats.total_frame_glyphs = frame_glyphs.glyphs.len();
+        crate::cost::add(crate::cost::GLYPHS_WALKED, frame_glyphs.glyphs.len());
         for glyph in &frame_glyphs.glyphs {
             if let FrameGlyph::Char { composed, .. } = glyph {
                 stats.text_glyphs += 1;
@@ -1854,6 +1833,7 @@ impl WgpuRenderer {
         stats.cache_misses = glyph_atlas.cache_misses_this_frame;
         stats.glyph_texture_uploads = glyph_atlas.cache_misses_this_frame;
         stats.buffers_created = self.arenas.buffers_created_since_snapshot() as usize;
+        glyph_atlas.count_font_identities();
         self.glyph_stats = stats.clone();
         stats.log_if_enabled();
 
@@ -1917,7 +1897,6 @@ impl WgpuRenderer {
             device_scale: mapping.surface().device_scale(),
             face_debug_call_id: 0,
             has_line_anims: false,
-            row_damage: None,
         };
         let chrome = self.collect_chrome_layers(&params);
         let mut encoder = self

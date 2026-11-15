@@ -193,6 +193,7 @@ mod protocol;
 mod reader;
 mod regexp;
 mod syntax_index;
+mod markdown;
 mod syntax_scan;
 mod syntax_summary;
 mod surface;
@@ -506,7 +507,6 @@ enum Primitive {
     Puthash,
     Remhash,
     Clrhash,
-    Maphash,
     HashTableCount,
     HashTableP,
     HashTableTest,
@@ -766,7 +766,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("puthash", Primitive::Puthash),
     ("remhash", Primitive::Remhash),
     ("clrhash", Primitive::Clrhash),
-    ("maphash", Primitive::Maphash),
     ("hash-table-count", Primitive::HashTableCount),
     ("hash-table-p", Primitive::HashTableP),
     ("hash-table-test", Primitive::HashTableTest),

@@ -122,7 +122,7 @@ fn stale_root_presentation_does_not_own_newly_exposed_surface_area() {
     stale.presentation_id = PresentationId::new(88);
     window
         .render
-        .set_current_frame(Some(stale), None, Default::default(), Default::default());
+        .set_current_frame(Some(stale), Default::default(), Default::default());
 
     assert_eq!(
         RenderApp::pointer_owner(window, 150.0, 25.0),
@@ -230,7 +230,7 @@ fn wheel_input_atomically_carries_its_presented_region() {
         .unwrap();
     window
         .render
-        .set_current_frame(Some(frame), None, Default::default(), Default::default());
+        .set_current_frame(Some(frame), Default::default(), Default::default());
 
     app.handle_mouse_wheel(
         window_id,
@@ -312,7 +312,7 @@ fn continuous_x11_scroll_reaches_pixel_delivery_at_fractional_and_whole_units() 
     );
     window
         .render
-        .set_current_frame(Some(frame), None, Default::default(), Default::default());
+        .set_current_frame(Some(frame), Default::default(), Default::default());
 
     for (units, pixels) in [(0.125, 2.0), (1.0, 16.0), (3.0, 48.0)] {
         app.handle_mouse_wheel(
@@ -555,7 +555,6 @@ fn presented_pointer_integration_runtime_motion_drives_same_frame_mouse_face_pix
     );
     render.set_current_frame(
         Some(presented_pointer_integration_frame(69)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -572,7 +571,6 @@ fn presented_pointer_integration_runtime_motion_drives_same_frame_mouse_face_pix
         None,
         None,
         base_selection,
-        None,
     );
     let base = presented_pointer_runtime_render_readback(&harness);
 
@@ -588,7 +586,6 @@ fn presented_pointer_integration_runtime_motion_drives_same_frame_mouse_face_pix
         None,
         None,
         hover_selection,
-        None,
     );
     let hovered = presented_pointer_runtime_render_readback(&harness);
     assert_eq!(
@@ -620,7 +617,6 @@ fn presented_pointer_integration_runtime_motion_drives_same_frame_mouse_face_pix
         None,
         None,
         leave_selection,
-        None,
     );
     let restored = presented_pointer_runtime_render_readback(&harness);
     assert_eq!(restored, base, "runtime leave restores byte-identical base");
@@ -635,7 +631,6 @@ fn presented_pointer_integration_published_frame_drives_hover_press_leave_and_st
     );
     render.set_current_frame(
         Some(presented_pointer_integration_frame(70)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -713,7 +708,6 @@ fn presented_pointer_integration_published_frame_drives_hover_press_leave_and_st
     render.set_dirty(false);
     render.set_current_frame(
         Some(presented_pointer_integration_frame(71)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -737,7 +731,6 @@ fn presented_pointer_integration_damage_unions_old_and_new_paint_spans() {
     );
     render.set_current_frame(
         Some(presented_pointer_integration_frame(75)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -783,7 +776,6 @@ fn presented_pointer_integration_damage_unions_old_and_new_paint_spans() {
     render.finish_pointer_paint_render();
     render.set_current_frame(
         Some(presented_pointer_integration_frame(76)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -844,7 +836,7 @@ fn unchanged_pointer_appearance_skips_damage_inspection_in_a_ten_thousand_glyph_
         false,
         romacs_display_protocol::frame_time::observe_platform_now(),
     );
-    render.set_current_frame(Some(frame), None, Default::default(), Default::default());
+    render.set_current_frame(Some(frame), Default::default(), Default::default());
     assert!(render.update_presented_pointer_motion(Some((0x42, 9_999.5, 5.0))));
     render.finish_pointer_paint_render();
     let lookups = render.pointer_damage_appearance_lookups();
@@ -936,7 +928,7 @@ fn presented_pointer_integration_topmost_child_uses_local_coordinates_then_root_
         &[(110.0, 85.0, 20.0, 10.0), (10.0, 5.0, 20.0, 10.0)],
     );
     set_test_frame_placement(&mut root, 0x42, 0, 0.0, 0.0, 0);
-    render.set_current_frame(Some(root), None, Default::default(), Default::default());
+    render.set_current_frame(Some(root), Default::default(), Default::default());
     let mut lower_child =
         presented_pointer_integration_offset_frame(82, 60.0, 40.0, &[(10.0, 5.0, 20.0, 10.0)]);
     set_test_frame_placement(&mut lower_child, 0x98, 0x42, 100.0, 80.0, 5);
@@ -1074,7 +1066,6 @@ fn presented_pointer_integration_close_and_add_dispatch_distinct_interactions() 
     render.set_emacs_frame_id(0x42);
     render.set_current_frame(
         Some(presented_pointer_integration_frame(90)),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -1519,7 +1510,7 @@ fn topmost_child_blocks_root_chrome_ownership() {
     render.set_emacs_frame_id(0x42);
     let mut root = FrameGlyphBuffer::with_size(800.0, 600.0);
     set_test_frame_placement(&mut root, 0x42, 0, 0.0, 0.0, 0);
-    render.set_current_frame(Some(root), None, Default::default(), Default::default());
+    render.set_current_frame(Some(root), Default::default(), Default::default());
     let mut child = FrameGlyphBuffer::with_size(100.0, 100.0);
     set_test_frame_placement(&mut child, 0x99, 0x42, 0.0, 40.0, 0);
     render.update_child_frame(child);
@@ -1539,7 +1530,7 @@ fn nested_child_ime_cursor_area_uses_presented_root_relative_placement() {
 
     let mut root = FrameGlyphBuffer::with_size(800.0, 600.0);
     set_test_frame_placement(&mut root, 0x42, 0, 0.0, 0.0, 0);
-    render.set_current_frame(Some(root), None, Default::default(), Default::default());
+    render.set_current_frame(Some(root), Default::default(), Default::default());
 
     let mut parent = FrameGlyphBuffer::with_size(300.0, 200.0);
     set_test_frame_placement(&mut parent, 0x50, 0x42, 100.0, 80.0, 1);
@@ -1741,7 +1732,7 @@ fn chrome_hit_uses_absolute_semantic_hit_regions() {
     let Some(primary_frame) = ensure_primary_frame(&mut app) else {
         return;
     };
-    primary_frame.compositor.current_frame = Some(frame);
+    primary_frame.compositor.current_frame = Some(std::sync::Arc::new(frame));
     assert_eq!(app.toolbar_y_origin(), 18.0);
     assert_eq!(app.toolbar_hit_test(20.0, 30.0), Some(0));
     assert_eq!(app.tab_bar_hit_test(20.0, 56.0), Some((9, 12)));

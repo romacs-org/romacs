@@ -151,7 +151,6 @@ fn render_root(
         None,
         None,
         None,
-        None,
     );
     (texture, r.take_drawn_surfaces())
 }
@@ -171,7 +170,6 @@ fn render_child(
         atlas,
         mapping(&root),
         false,
-        None,
         None,
         None,
         None,

@@ -1016,7 +1016,7 @@ impl Vm {
             MakeHashTable => true,
             Gethash => (2..=3).contains(&n),
             Puthash | DefineHashTableTest => n == 3,
-            Remhash | Maphash | HashTableContainsP | HashNext | HashKeyAt | HashValueAt => n == 2,
+            Remhash | HashTableContainsP | HashNext | HashKeyAt | HashValueAt => n == 2,
             _ => n == 1,
         };
         if !arity {
@@ -1097,18 +1097,6 @@ impl Vm {
                     .collect();
                 items.reverse();
                 Ok(self.list_value(&items))
-            }
-            Maphash => {
-                // Direct calls are lowered to the slot walk in `expand`. A
-                // primitive cannot call Lisp: an indirect call that would have
-                // to invoke FUNCTION fails explicitly rather than skip entries.
-                if self.table(args[1])?.count() == 0 {
-                    return Ok(Value::NIL);
-                }
-                Err(HashFault::Error(
-                    "VM2 cannot call maphash indirectly on a non-empty table",
-                    Some(args[0]),
-                ))
             }
             DefineHashTableTest => {
                 let property = self.intern("hash-table-test");

@@ -850,7 +850,7 @@ fn install(
     frame.presentation_id = romacs_display_protocol::PresentationId::new(1);
     frame.window_infos = windows.to_vec();
     render.measure_pane_layout(Some(&frame), at);
-    render.compositor.current_frame = Some(frame);
+    render.compositor.current_frame = Some(std::sync::Arc::new(frame));
     // Composed, so the next install measures against this one. See the note on
     // `FrameCompositor::baseline`.
     render.begin_presentable_render();
