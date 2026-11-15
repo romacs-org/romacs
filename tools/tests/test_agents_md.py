@@ -18,7 +18,7 @@ class Named(unittest.TestCase):
         self.assertEqual(agents_md.named('make gate-small BASE=x'), [('make', 'gate-small')])
         self.assertEqual(agents_md.named('cargo test --profile gate -p romacs-vm --test quit_async'), [('test', 'romacs-vm', 'quit_async')])
         self.assertEqual(agents_md.named('scaling_live'), [('harness', 'scaling_live')])
-        self.assertEqual(agents_md.named('lisp/romacs/'), [('path', 'lisp/romacs/')])
+        self.assertEqual(agents_md.named('lisp/session/'), [('path', 'lisp/session/')])
 
     def test_a_make_commands_options_and_variables_are_no_targets(self):
         self.assertEqual(agents_md.named('make -j 2 check'), [('make', 'check')])
@@ -101,11 +101,11 @@ class Over(unittest.TestCase):
                          ['crates/a/src/gc/AGENTS.md', 'crates/a/AGENTS.md'])
 
     def test_the_roots_file_is_not_a_modules(self):
-        self.assertEqual(agents_md.over(['README.md', 'lisp/romacs/x.el'], self.MODULES), [])
+        self.assertEqual(agents_md.over(['README.md', 'lisp/session/x.el'], self.MODULES), [])
 
     def test_a_path_is_taken_from_the_root_whatever_way_it_was_given(self):
         root = Path('/somewhere/tree')
-        self.assertEqual(agents_md.relative(root, 'tools/../lisp/romacs/x.el'), 'lisp/romacs/x.el')
+        self.assertEqual(agents_md.relative(root, 'tools/../lisp/session/x.el'), 'lisp/session/x.el')
         self.assertEqual(agents_md.relative(root, '/somewhere/tree/tools/gate'), 'tools/gate')
         self.assertIsNone(agents_md.relative(root, '/elsewhere/tools/gate'))
         self.assertIsNone(agents_md.relative(root, '../tree2/x'))

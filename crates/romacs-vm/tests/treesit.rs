@@ -341,7 +341,7 @@ fn twin_parsers_parse_an_edit_once() {
         (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh '((1 . 12))))))"), "(nil t)");
 }
 
-/// While a visit's first parse runs on its thread (lisp/romacs/romacs-treesit.el),
+/// While a visit's first parse runs on its thread (lisp/romacs-treesit.el),
 /// a frame leaves the tree alone: `treesit--pre-redisplay' would wait for the
 /// parse, and the window shows its text plain meanwhile. The first frame after
 /// the parse lands runs it, and marks the whole text for its faces. The parse
