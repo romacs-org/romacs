@@ -660,7 +660,9 @@ def load_path() -> list[str]:
     subdirectories named by its generated subdirs.el (build-aux/update-subdirs):
     reverse name order, obsolete last, term and VCS/backup names omitted."""
     lisp = ROOT / 'lisp'
-    names = sorted(p.name for p in lisp.iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p)
+    # Which names are Romacs's own is this checkout's layout, whatever tree ROOT is.
+    own = lisp_layout.own_directories(HERE.parents[1])
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir() and p.name not in own
                    and p.name not in ('term', 'RCS', 'CVS', 'Old')
                    and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
     ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
