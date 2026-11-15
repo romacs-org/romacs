@@ -116,6 +116,13 @@ fn counter(line: &str) -> bool {
     line.contains("\"subtype\":\"thinking_tokens\"") && line.contains("\"type\":\"system\"")
 }
 
+/// WRITTEN, the result of appending to FILE from length START: on an error,
+/// FILE is cut back to START, whatever part of the line it took.
+fn undo_partial(file: &File, start: u64, written: std::io::Result<()>) -> std::io::Result<()> {
+    if written.is_err() { file.set_len(start)?; }
+    written
+}
+
 /// The records' tables, as lisp/romacs/romacs-agent-events.el makes them.
 const EVENTS_SCHEMA: &str = "create table if not exists events (
        session text not null, seq integer not null, t real, kind text, record text not null);
@@ -155,7 +162,11 @@ impl Store {
     fn keep(&mut self, seq: u64, text: &str, sync: bool) -> Result<(), String> {
         match self {
             Store::Journal { file, .. } => {
-                file.write_all(format!("{text}\n").as_bytes()).map_err(|e| e.to_string())?;
+                // A write that fails part way (a full disk) is undone, so its
+                // retry appends a whole line, never one after a fragment.
+                let start = file.metadata().map_err(|e| e.to_string())?.len();
+                let written = file.write_all(format!("{text}\n").as_bytes());
+                undo_partial(file, start, written).map_err(|e| e.to_string())?;
                 if sync { let _ = file.sync_data(); }
                 Ok(())
             }
@@ -659,6 +670,24 @@ mod tests {
         BufReader::new(&mut client).read_line(&mut line).unwrap();
         assert!(line.contains("\"seq\":1"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_journal_line_cut_short_is_undone() {
+        let path = std::env::temp_dir().join(format!("romacs-host-partial-{}.jsonl", std::process::id()));
+        std::fs::write(&path, "{\"seq\":1}\n").unwrap();
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        let start = file.metadata().unwrap().len();
+        // A write that took part of its line and then failed, as on a full disk.
+        file.write_all(b"{\"seq\":2,\"out").unwrap();
+        let failed: std::io::Result<()> = Err(std::io::Error::other("no space left"));
+        assert!(undo_partial(&file, start, failed).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n");
+        // Its retry appends a whole line after the last whole one.
+        let retried = file.write_all(b"{\"seq\":2}\n");
+        assert!(undo_partial(&file, start, retried).is_ok());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n{\"seq\":2}\n");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
