@@ -29,6 +29,7 @@
 
 (declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message))
 (declare-function romacs-agent-title "romacs-agent" (session))
+(declare-function romacs-agent-id "romacs-agent" (session))
 
 (defface romacs-agent-ask-option '((t :inherit romacs-popup-description))
   "An option of a question an agent asks.")
@@ -148,10 +149,14 @@ that it waits."
   "Answer an agent's questions: \\<romacs-agent-ask-mode-map>\\[romacs-agent-ask-next] and \\[romacs-agent-ask-previous] move, \\[romacs-agent-ask-pick] picks, a digit picks that option, \\[romacs-agent-ask-hide] puts it away.
 \\{romacs-agent-ask-mode-map}"
   :interactive nil
-  (setq-local truncate-lines t cursor-type nil mode-line-format nil))
+  (setq-local cursor-type nil mode-line-format nil)
+  ;; A question or an option longer than the layer is wide wraps: none
+  ;; is cut.
+  (romacs-layer-wrap-words))
 
-(defun romacs-agent-ask--buffer-name (id)
-  (format " *agent question %s*" id))
+(defun romacs-agent-ask--buffer-name (session id)
+  "The layer's buffer for SESSION's request ID: ids are a session's own."
+  (format " *agent question %s %s*" (romacs-agent-id session) id))
 
 (defun romacs-agent-ask--here ()
   "The choosing row at point: (INDEX . WHAT), or nil."
@@ -176,18 +181,26 @@ that it waits."
         (romacs-agent-ask--step t)))
     (romacs-agent-ask--follow)))
 
+(defun romacs-agent-ask-size (text most)
+  "TEXT's layer size, (COLUMNS . LINES): as wide as its longest line, at
+most MOST columns, and as tall as its lines wrapped at that width."
+  (let* ((widths (mapcar #'string-width (split-string (string-trim-right text "\n") "\n")))
+         (columns (min most (+ 2 (apply #'max 1 widths)))))
+    (cons columns (apply #'+ (mapcar (lambda (width) (max 1 (ceiling width (float columns)))) widths)))))
+
 (defun romacs-agent-ask--show (buffer)
-  "Show BUFFER's layer, sized to its text, taking keys."
-  (let ((lines (with-current-buffer buffer (count-lines (point-min) (point-max))))
-        (columns (with-current-buffer buffer
-                   (+ 4 (cl-loop for line in (split-string (buffer-string) "\n") maximize (string-width line))))))
-    (romacs-popup-show 'palette buffer :columns (min columns 100) :lines lines :max-lines (max lines 6))
+  "Show BUFFER's layer, sized to its text and the frame, taking keys."
+  (let* ((root (romacs-layer--root-frame))
+         (size (romacs-agent-ask-size (with-current-buffer buffer (buffer-string))
+                                      (min 100 (max 30 (- (frame-width root) 8)))))
+         (most (max 6 (- (frame-text-lines root) 6))))
+    (romacs-popup-show 'palette buffer :columns (car size) :lines (min most (cdr size)) :max-lines most)
     (romacs-popup-take-keys buffer)))
 
 (defun romacs-agent-ask-open (session id questions)
   "Show the layer asking SESSION's QUESTIONS, request ID, where they are
 answered, and return its buffer."
-  (let ((buffer (get-buffer-create (romacs-agent-ask--buffer-name id))))
+  (let ((buffer (get-buffer-create (romacs-agent-ask--buffer-name session id))))
     (with-current-buffer buffer
       (unless (derived-mode-p 'romacs-agent-ask-mode)
         (romacs-agent-ask-mode)
@@ -197,11 +210,19 @@ answered, and return its buffer."
     (when (display-graphic-p) (romacs-agent-ask--show buffer))
     buffer))
 
-(defun romacs-agent-ask-close (id)
-  "Put away and forget the layer of request ID, answered."
-  (when-let* ((buffer (get-buffer (romacs-agent-ask--buffer-name id))))
+(defun romacs-agent-ask-close (session id)
+  "Put away and forget the layer of SESSION's request ID, answered."
+  (when-let* ((buffer (get-buffer (romacs-agent-ask--buffer-name session id))))
     (romacs-popup-hide buffer)
     (kill-buffer buffer)))
+
+(defun romacs-agent-ask-close-all (session)
+  "Put away and forget every layer of SESSION's: its turn is over, or
+its chat gone, and nothing waits for their answers."
+  (dolist (buffer (buffer-list))
+    (when (eq (buffer-local-value 'romacs-agent-ask--session buffer) session)
+      (romacs-popup-hide buffer)
+      (kill-buffer buffer))))
 
 (defun romacs-agent-ask--step (forward)
   (let ((start (point)) (step (if forward 1 -1)))
@@ -239,7 +260,7 @@ them.")
     (unless chosen (user-error "Answer each question first"))
     (run-hook-with-args 'romacs-agent-ask-sent-functions session id chosen)
     (romacs-agent-respond session id (list :answers (romacs-agent-ask-answers chosen)))
-    (romacs-agent-ask-close id)))
+    (romacs-agent-ask-close session id)))
 
 (defun romacs-agent-ask--choose (index label)
   "Pick LABEL for question INDEX, and send when that answers it all."

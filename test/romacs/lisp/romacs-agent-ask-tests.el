@@ -119,4 +119,43 @@
     (romacs-agent-ask-tests--draw session :type 'answered :request-id "r5" :behavior "allow")
     (should (string-search "? Which way?  · answered" (buffer-string)))))
 
+(ert-deftest romacs-agent-ask-layers-are-each-sessions ()
+  ;; Two sessions may ask under the same request id: a layer each.
+  (let ((a (romacs-agent--make :id "aaaaaaaa-0000-4000-8000-000000000001" :harness 'codex :title "a"))
+        (b (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000002" :harness 'codex :title "b"))
+        (sent nil))
+    (cl-letf (((symbol-function 'romacs-agent-respond)
+               (lambda (session id allow &rest _) (setq sent (list (romacs-agent-title session) id allow)))))
+      (let ((first (romacs-agent-ask-open a "1:0" '(("A?" :options ("x")))))
+            (second (romacs-agent-ask-open b "1:0" '(("B?" :options ("y"))))))
+        (should-not (eq first second))
+        (with-current-buffer second (romacs-agent-ask-pick))
+        (should (equal sent '("b" "1:0" (:answers (("B?" . "y"))))))
+        (should (buffer-live-p first))
+        ;; Its turn over, a session's layers go.
+        (romacs-agent-ask-close-all a)
+        (should-not (buffer-live-p first))))))
+
+(ert-deftest romacs-agent-ask-row-after-unended-text ()
+  ;; A question right after words with no newline yet: its own row is
+  ;; rewritten, and keeps the transcript's keys.
+  (romacs-agent-ask-tests--with-chat session
+    (romacs-agent-ask-tests--draw session :type 'delta :text "Let me ask." :message "m1")
+    (romacs-agent-ask-tests--draw session :type 'approval :request-id "r6" :user t
+                                  :questions romacs-agent-ask-tests--questions)
+    (romacs-agent-ask-tests--draw session :type 'answered :request-id "r6" :behavior "allow")
+    (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+      (should (string-prefix-p "Let me ask.\n" text))
+      (should (string-search "\n? Which way?  · answered\n" text))
+      (should-not (string-search "waiting" text)))
+    (goto-char (point-min))
+    (search-forward "Which way")
+    (should (eq (get-text-property (point) 'keymap) romacs-agent-chat-transcript-map))))
+
+(ert-deftest romacs-agent-ask-size-wraps-long-text ()
+  ;; As wide as its longest line, at most the room it has; as tall as
+  ;; its lines wrapped there.
+  (should (equal (romacs-agent-ask-size "abc\nde\n" 40) '(5 . 2)))
+  (should (equal (romacs-agent-ask-size (concat (make-string 90 ?x) "\nshort\n") 40) '(40 . 4))))
+
 ;;; romacs-agent-ask-tests.el ends here

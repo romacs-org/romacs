@@ -1128,10 +1128,16 @@ or a repeat."
         ((and 'approval (guard (plist-get event :questions)))
          (let ((id (plist-get event :request-id)) (questions (plist-get event :questions)))
            (puthash id event (romacs-agent-ui--asks))
-           (romacs-agent-ui--line session event (romacs-agent-ask-record questions nil)
-                                  'face 'romacs-agent-approval 'romacs-agent-approval id 'romacs-agent-asked id
-                                  'keymap romacs-agent-ui--asked-map 'mouse-face 'highlight
-                                  'help-echo "Answer these questions")
+           (romacs-agent-ui--line session event "")
+           (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
+           ;; Its row alone, separator apart, for its answer to rewrite.
+           (let ((start (copy-marker romacs-agent-ui--end)))
+             (push start romacs-agent-ui--staying)
+             (unwind-protect
+                 (romacs-agent-ui--insert (concat (romacs-agent-ui--asked-row questions nil) "\n")
+                                          'romacs-agent-asked id 'romacs-agent-approval id)
+               (setq romacs-agent-ui--staying (delq start romacs-agent-ui--staying)))
+             (setf (alist-get id romacs-agent-ui--asked-rows nil nil #'equal) start))
            (when (romacs-agent-ui--seen-p) (romacs-agent-ask-open session id questions))))
         ('approval
          (puthash (plist-get event :request-id) event (romacs-agent-ui--asks))
@@ -1151,6 +1157,8 @@ or a repeat."
         ('done (when-let* ((reason (plist-get event :reason)))
                  (romacs-agent-ui--line session event (format "! %s" reason) 'face 'romacs-agent-error))
                (romacs-agent-ui--footer session event)
+               ;; Its turn over, nothing waits for its questions' answers.
+               (romacs-agent-ask-close-all session)
                (unless romacs-agent-ui--replaying (romacs-agent-ui--trim))
                (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ;; Its supervisor never came up: an end, failed, seen as `done' is.
@@ -1168,6 +1176,8 @@ or a repeat."
                                 (format "%s → %s" (romacs-agent-ui--selection-label (plist-get event :from))
                                         (romacs-agent-ui--selection-label (plist-get event :to)))))
         ('exit
+         ;; Its harness gone, so is what it asked.
+         (romacs-agent-ask-close-all session)
          ;; A per-turn harness ends every turn: only a failed run is news.
          (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
            (romacs-agent-ui--note session event (format "harness exited (%s)" (plist-get event :status)))))
@@ -1915,6 +1925,9 @@ The transcript is read-only, its keys its own:
   (add-hook 'completion-preview-inhibit-functions #'romacs-agent-ui--composer-empty-p nil t)
   (add-hook 'after-change-functions #'romacs-agent-ui--composer-plain nil t)
   (add-hook 'window-size-change-functions #'romacs-agent-ui--refit-rules nil t)
+  ;; Its questions' layers go with it.
+  (add-hook 'kill-buffer-hook (lambda () (when romacs-agent-ui--session (romacs-agent-ask-close-all romacs-agent-ui--session)))
+            nil t)
   ;; The composer moves as text arrives: the tray goes with it.
   (add-hook 'post-command-hook #'romacs-agent-ui--tray nil t)
   ;; Shown again while its turn runs: the live rule ticks again.
@@ -1956,7 +1969,7 @@ keeps every turn."
 (defconst romacs-agent-ui--drawn-state
   '(romacs-agent-ui--run romacs-agent-ui--runs
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
-    romacs-agent-ui--fills romacs-agent-ui--fitted)
+    romacs-agent-ui--fills romacs-agent-ui--fitted romacs-agent-ui--asked-rows)
   "A chat's variables that describe its transcript as drawn, besides its
 tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
 
@@ -2066,7 +2079,11 @@ the row at the start draws them again."
        (setq romacs-agent-ui--fills
              (seq-filter (lambda (marker)
                            (or (> marker (point-min)) (progn (set-marker marker nil) nil)))
-                         romacs-agent-ui--fills))
+                         romacs-agent-ui--fills)
+             romacs-agent-ui--asked-rows
+             (seq-filter (lambda (row)
+                           (or (> (cdr row) (point-min)) (progn (set-marker (cdr row) nil) nil)))
+                         romacs-agent-ui--asked-rows))
        (romacs-agent-ui--earlier-row)))))
 
 (defun romacs-agent-ui--unrecorded (function)
@@ -2432,6 +2449,18 @@ PROPERTY: the previous one is the run point is in, past its start."
       (user-error "These questions are answered"))
     (romacs-agent-ask-open romacs-agent-ui--session id questions)))
 
+(defvar-local romacs-agent-ui--asked-rows nil
+  "Where each questions' row starts, by request id.")
+
+(defun romacs-agent-ui--asked-row (questions chosen)
+  "The chat's row for QUESTIONS (`romacs-agent-ask-record'): while they
+wait, RET or y on it answers them; answered, it recedes."
+  (let ((text (romacs-agent-ask-record questions chosen)))
+    (if chosen
+        (progn (add-face-text-property 0 (length text) 'romacs-agent-dim t text) text)
+      (propertize text 'face 'romacs-agent-approval 'keymap romacs-agent-ui--asked-map
+                  'mouse-face 'highlight 'help-echo "Answer these questions"))))
+
 (defvar-local romacs-agent-ui--chosen nil
   "The labels this chat's questions were answered with, by request id.")
 
@@ -2446,29 +2475,20 @@ PROPERTY: the previous one is the run point is in, past its start."
 (defun romacs-agent-ui--answered (id)
   "Questions ID are answered: their row says with what, when this chat
 sent it, and their layer goes."
-  (romacs-agent-ask-close id)
+  (romacs-agent-ask-close romacs-agent-ui--session id)
   (let ((questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions))
-        (chosen (or (alist-get id romacs-agent-ui--chosen nil nil #'equal) t)))
-    (setq romacs-agent-ui--chosen (cl-remove id romacs-agent-ui--chosen :key #'car :test #'equal))
-    (when-let* ((found (save-excursion
-                         (goto-char (point-min))
-                         (text-property-search-forward 'romacs-agent-asked id #'equal)))
-                (start (prop-match-beginning found)))
+        (chosen (or (alist-get id romacs-agent-ui--chosen nil nil #'equal) t))
+        (start (alist-get id romacs-agent-ui--asked-rows nil nil #'equal)))
+    (setq romacs-agent-ui--chosen (cl-remove id romacs-agent-ui--chosen :key #'car :test #'equal)
+          romacs-agent-ui--asked-rows (cl-remove id romacs-agent-ui--asked-rows :key #'car :test #'equal))
+    ;; Its row, unless the chat let it go with its turn (`romacs-agent-ui--trim').
+    (when (and (markerp start) (equal (get-text-property start 'romacs-agent-asked) id))
       (save-excursion
         (goto-char start)
-        (let ((inhibit-read-only t) (end (line-end-position))
-              (properties (text-properties-at start)))
-          (delete-region start end)
-          (insert (apply #'propertize (romacs-agent-ask-record questions chosen)
-                         (cl-loop for (key value) on properties by #'cddr
-                                  unless (memq key '(keymap mouse-face help-echo romacs-agent-asked face))
-                                  append (list key value))))
-          ;; Its newline is the row's too.
-          (remove-text-properties (point) (min (1+ (point)) romacs-agent-ui--end)
-                                  '(romacs-agent-asked nil mouse-face nil help-echo nil))
-          (put-text-property (point) (min (1+ (point)) romacs-agent-ui--end) 'keymap romacs-agent-chat-transcript-map)
-          ;; Answered, it recedes.
-          (add-face-text-property start (line-end-position) 'romacs-agent-dim t))))))
+        (let ((inhibit-read-only t))
+          (delete-region start (min (1+ (line-end-position)) romacs-agent-ui--end))
+          (romacs-agent-ui--insert-at start (concat (romacs-agent-ui--asked-row questions chosen) "\n")))))
+    (when (markerp start) (set-marker start nil))))
 
 (defun romacs-agent-chat-allow-always ()
   "Allow the tool call the harness asks about, and its like for the rest
