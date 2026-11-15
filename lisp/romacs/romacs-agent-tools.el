@@ -1030,7 +1030,7 @@ besides."
                   (not (eq (romacs-agent-state child) 'starting)))
               (let ((value (funcall then)))
                 (if (eq (car-safe value) 'romacs-mcp--deferred)
-                    (funcall (setq next (cadr value)))
+                    (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
                   (list value)))))))))
 
 ;;; Going on under another instance
@@ -1310,7 +1310,7 @@ CELL's error as the call's."
                ((plist-get made :error) (user-error "%s" (plist-get made :error)))
                (t (let ((value (funcall answer (plist-get made :child))))
                     (if (eq (car-safe value) 'romacs-mcp--deferred)
-                        (funcall (setq next (cadr value)))
+                        (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
                       (list value))))))))))
 
 (defun romacs-agent-tools--cancel (arguments)

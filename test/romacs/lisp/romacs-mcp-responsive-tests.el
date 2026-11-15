@@ -350,5 +350,48 @@ however often, and at its deadline; no clock polls it meanwhile."
       (should-not romacs-mcp--deferred)
       (should-not (cl-some #'cadr timers)))))
 
+;; Sol, round 1: one clocked request must not drag woken ones back to
+;; the clock, nor silence their deadline.
+(ert-deftest romacs-mcp-responsive-clock-asks-only-clocked-requests ()
+  "The clock's pass asks only the requests with no deadline; the woken
+keep their deadline alarm beside it."
+  (let* ((romacs-mcp--generation 7) (romacs-mcp--peers '(a))
+         (romacs-mcp--deferred nil) (romacs-mcp--deferred-timer nil)
+         (romacs-mcp--deferred-alarm nil) (romacs-mcp--deferred-woken nil)
+         (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+         (timers nil) (clocked 0) (woken 0))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'run-at-time) (lambda (time repeat _fn) (push (list time repeat) timers) (list 'timer time)))
+              ((symbol-function 'cancel-timer) #'ignore)
+              ((symbol-function 'romacs-mcp--send) #'ignore))
+      (romacs-mcp--defer-request (romacs-mcp-test--request 'a 1) 1 (lambda () (cl-incf clocked) nil) nil nil)
+      (romacs-mcp--defer-request (romacs-mcp-test--request 'a 2) 2 (lambda () (cl-incf woken) nil) nil (+ (float-time) 600))
+      (should romacs-mcp--deferred-timer)
+      (should (> (cadr romacs-mcp--deferred-alarm) 500))
+      (romacs-mcp--poll-clocked)
+      (romacs-mcp--poll-clocked)
+      (should (equal (list clocked woken) '(2 0)))
+      (should (> (cadr romacs-mcp--deferred-alarm) 500)))))
+
+(ert-deftest romacs-mcp-responsive-chained-deferral-takes-the-inner-deadline ()
+  "A clocked poll that goes on as a woken one (a delegation's start, then
+its wait) leaves the clock for the deadline it took."
+  (let* ((romacs-mcp--generation 7) (romacs-mcp--peers '(a))
+         (romacs-mcp--deferred nil) (romacs-mcp--deferred-timer nil)
+         (romacs-mcp--deferred-alarm nil) (romacs-mcp--deferred-woken nil)
+         (romacs-mcp--deferred-index (make-hash-table :test #'equal))
+         (deadline (+ (float-time) 600)))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'run-at-time) (lambda (time _repeat _fn) (list 'timer time)))
+              ((symbol-function 'cancel-timer) #'ignore)
+              ((symbol-function 'romacs-mcp--send) #'ignore))
+      (romacs-mcp--defer-request (romacs-mcp-test--request 'a 1) 1
+                                 (lambda () (romacs-mcp-deferred-retime deadline) nil) nil nil)
+      (should romacs-mcp--deferred-timer)
+      (romacs-mcp--poll-clocked)
+      (should (equal (nth 4 (car romacs-mcp--deferred)) deadline))
+      (should-not romacs-mcp--deferred-timer)
+      (should romacs-mcp--deferred-alarm))))
+
 (provide 'romacs-mcp-responsive-tests)
 ;;; romacs-mcp-responsive-tests.el ends here
