@@ -1,9 +1,9 @@
 //! Echo area: the message a command left, and its clearing when the next
 //! command starts (keyboard.c command_loop_1). A command's error reaches
 //! the echo area as GNU's does, through `command-error-function' in the
-//! Lisp command loop (lisp/romacs/vm/keyboard.el). Each change runs
+//! Lisp command loop (lisp/vm/keyboard.el). Each change runs
 //! `romacs-echo-area-functions' with the message, or nil once cleared,
-//! where a layer shows messages (lisp/romacs/romacs-complete.el).
+//! where a layer shows messages (lisp/completion/romacs-complete.el).
 use romacs_vm::Vm;
 
 /// The echo area's Lisp, defined once per VM: by `install' when a session
@@ -208,11 +208,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(gnu_subr_keymap_body).unwrap().join().unwrap();
     }
     fn gnu_subr_keymap_body() {
-        let mut vm = Vm::new();
-        vm.set_collection_floor(1);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { floor: Some(1), ..crate::test_world::Boot::GNU_ONLY });
         crate::test_home::private_home(&mut vm, "echo-keymap");
-        let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let started = crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let loadup = started.loadup.as_ref().unwrap();
         assert!(loadup.rows.iter().any(|r| r.site.name == "emacs-lisp/backquote"
             && matches!(r.outcome, crate::loadup::Outcome::Complete { .. })), "{}", loadup.table());

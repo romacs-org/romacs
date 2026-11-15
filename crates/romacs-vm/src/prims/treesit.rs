@@ -2,12 +2,12 @@
 //! (`prim/leaf/treesit.rs`). Parsing is lazy, at GNU's two forcing calls
 //! (`treesit-parser-root-node', `treesit-parser-changed-regions') and what
 //! reaches them; a parse's notifiers, `#pred?' and function predicates
-//! cross the traced T2 boundary. The Lisp half (lisp/romacs/vm/treesit.el) is
+//! cross the traced T2 boundary. The Lisp half (lisp/vm/treesit.el) is
 //! installed the first time a primitive needs it.
 use super::*;
 use crate::prim::leaf::treesit::Next as TsNext;
 
-const LISP_HALF: &str = include_str!("../../../../lisp/romacs/vm/treesit.el");
+const LISP_HALF: &str = include_str!("../../../../lisp/vm/treesit.el");
 
 fn flag(b: bool) -> Value {
     if b { Value::TRUE } else { Value::NIL }
@@ -381,6 +381,13 @@ fn treesit_node_eq(cx, node1: Value, node2: Value) {
 defsubr! { name = "treesit-subtree-stat", gnu = "treesit.c:5172", effect = Reads,
 fn treesit_subtree_stat(cx, node: Value) {
     cx.ts_subtree_stat(node)
+}}
+
+// (romacs--treesit-subtree-exceeds NODE DEPTH WIDTH): whether NODE's subtree
+// is deeper than DEPTH or wider than WIDTH, stopping once it is.
+defsubr! { name = "romacs--treesit-subtree-exceeds", gnu = "romacs:treesit", effect = Reads,
+fn romacs_treesit_subtree_exceeds(cx, node: Value, depth: Value, width: Value) {
+    cx.ts_subtree_exceeds(node, depth, width)
 }}
 
 // Queries.

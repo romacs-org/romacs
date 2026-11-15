@@ -55,9 +55,15 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
     static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
-    static CONFINED: Cell<bool> = const { Cell::new(false) };
-    static FLAGS_READER: RefCell<Option<std::sync::mpsc::Sender<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>>> =
-        const { RefCell::new(None) };
+    /// A secret was asked for (`note_secret_asked`): in a build, by the form
+    /// loading, a secret reader or a credential file read; while the init's
+    /// plan is recorded, a credential file read by the init.
+    static CREDENTIAL_READ: Cell<bool> = const { Cell::new(false) };
+    /// How many secret reader calls a layer build deferred
+    /// (`romacs--world-secret-asked`).
+    static READER_ASKS: Cell<usize> = const { Cell::new(0) };
+    /// The init's plan is being recorded (`watch_credentials`).
+    static WATCH_CREDENTIALS: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn mode() -> Mode {
@@ -229,8 +235,6 @@ struct LayerState {
     /// An effect refused inside the definition form: the form is cut short
     /// and deferred whole to restore (`layer_form_cut`).
     cut: bool,
-    /// A re-seed form that starts a timer ran (`reseed_reads`).
-    timers: bool,
     rerun: bool,
     /// The entry loading is a library the init only declared
     /// (`layer::Entry::declared`): its re-seed forms may wait for their
@@ -348,22 +352,19 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
     let allowed = reseed_entry().is_some_and(|(reads, _)| reads == what);
     if allowed {
         record("reseed", json!({"reads": what}));
-        if what == "clock" {
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.timers = true; });
-        }
     }
     allowed
-}
-
-/// Whether a re-seed form that reads the clock ran since the last call:
-/// a timer the form left is restarted at restore, so the layer may keep it.
-pub(crate) fn layer_timers_allowed() -> bool {
-    LAYER.with(|l| l.borrow_mut().as_mut().is_some_and(|layer| std::mem::take(&mut layer.timers)))
 }
 
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
 pub(crate) fn at_baked_host() -> bool {
     with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
+}
+
+/// The variables the built-in re-seed forms set (`RESEED`), which restore
+/// sets again by evaluating those forms.
+pub(crate) fn reseed_variables() -> impl Iterator<Item = &'static str> {
+    RESEED.iter().filter_map(|r| r.3)
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
@@ -373,7 +374,7 @@ pub(crate) fn reseed_output() -> Option<&'static str> {
 
 /// The sites that may switch the startup phase, in order: the chain's batch
 /// steps, then an interactive session's, which supersede them.
-const STARTUP: [&str; 2] = ["/lisp/romacs/romacs-loadup-bootstrap.el", "/lisp/romacs/romacs-gui-loadup.el"];
+const STARTUP: [&str; 2] = ["/lisp/session/romacs-loadup-bootstrap.el", "/lisp/session/romacs-gui-loadup.el"];
 
 pub fn class(fact: Fact<'_>, site: Option<&Site>) -> Class {
     match fact {
@@ -483,12 +484,25 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>);
+pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
+
+/// A layer build's state of the top-level form loading: the definition it
+/// is, if one, and whether it read a per-process fact or an effect cut it.
+type LayerForm = (Option<(&'static str, String)>, bool, bool);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.0.take() {
             with_build(|b| b.site = previous);
+        }
+        // A file a form loads has forms of its own: once it is loaded, the
+        // form that loaded it goes on as it was, a definition still one.
+        if let Some((form, tainted, cut)) = self.1.take() {
+            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
+        }
+        // So is whether it asked for a secret: the file's forms kept theirs.
+        if let Some(asked) = self.2.take() {
+            CREDENTIAL_READ.with(|c| c.set(asked));
         }
     }
 }
@@ -504,24 +518,13 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None);
+        return SiteGuard(None, None, None);
     }
     let site = Rc::new(site());
+    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
+    let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
     layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
-}
-
-/// This thread is confined (`world::sandbox`): a read it is refused fails
-/// with EACCES, which the build lists as a refusal.
-pub(crate) fn note_confined() {
-    CONFINED.with(|c| c.set(true));
-}
-
-/// A read of PATH that failed with ERROR, listed when confinement refused it.
-fn confined(path: &Path, error: &io::Error) {
-    if error.raw_os_error() == Some(libc::EACCES) && CONFINED.with(Cell::get) {
-        refuse("confined", json!({"path": path_json(path)}));
-    }
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
@@ -702,10 +705,7 @@ fn file_read(path: &Path, result: &io::Result<impl AsRef<[u8]>>) {
     }
     let result = match result {
         Ok(data) => json!({"len": data.as_ref().len(), "sha256": sha256(data.as_ref())}),
-        Err(e) => {
-            confined(path, e);
-            errno(e)
-        }
+        Err(e) => errno(e),
     };
     if keyed_path(path, "read") {
         record("file-read", json!({"path": path_json(path), "result": result}));
@@ -741,6 +741,21 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// Whether this process runs one test alone, as nextest's process per test
+/// runs each (every check runs them so): a test's world may be mapped only
+/// then (`World::for_test`).
+#[must_use]
+pub fn one_test_process() -> bool {
+    std::env::var_os("NEXTEST_EXECUTION_MODE").is_some_and(|mode| mode == "process-per-test")
+}
+
+/// This process's arguments after its executable's name: what a builder of
+/// a test's world runs this executable with, to run the same test again.
+#[must_use]
+pub fn own_arguments() -> Vec<OsString> {
+    std::env::args_os().skip(1).collect()
+}
+
 /// The generation of runtime tree this executable was built for: the tree's own
 /// `etc/romacs-runtime-epoch`, read when the executable was compiled. It is
 /// raised when the tree's layout or its contract with the executable changes
@@ -752,7 +767,7 @@ const RUNTIME_EPOCH: &str = include_str!("../../../etc/romacs-runtime-epoch");
 /// own directory or absolute.
 pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 
-/// The runtime tree (lisp/gnu/, lisp/romacs/, etc/), found from where the
+/// The runtime tree (lisp/, etc/), found from where the
 /// executable is, never from where it was once built:
 ///   1. `ROMACS_RUNTIME_ROOT`, said outright (the Nix wrapper sets it);
 ///   2. `share/romacs` beside the executable's `bin/` (an installation, or an
@@ -798,7 +813,7 @@ fn located_runtime() -> Result<PathBuf, String> {
         (PathBuf::from(dir), "ROMACS_RUNTIME_ROOT")
     } else if let Some(root) = exe.as_deref().and_then(installed_root) {
         (root, "share/romacs beside the executable")
-    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp/gnu"))) {
+    } else if let Some(root) = exe.as_deref().and_then(Path::parent).filter(|dir| probe(Probe::IsDir, dir.join("lisp"))) {
         (root.to_path_buf(), "the executable's own directory")
     } else if let Some(root) = exe.as_deref().and_then(recorded_root) {
         (root, "named beside the executable")
@@ -813,10 +828,10 @@ fn located_runtime() -> Result<PathBuf, String> {
 }
 
 /// `PREFIX/share/romacs` for an executable `PREFIX/bin/NAME`, when it holds a
-/// `lisp/gnu/` directory.
+/// `lisp/` directory.
 pub(crate) fn installed_root(exe: &Path) -> Option<PathBuf> {
     let root = exe.parent()?.parent()?.join("share/romacs");
-    probe(Probe::IsDir, root.join("lisp/gnu")).then_some(root)
+    probe(Probe::IsDir, root.join("lisp")).then_some(root)
 }
 
 /// The tree [`RUNTIME_RECORD`] beside EXE names, when there is such a file.
@@ -859,8 +874,8 @@ fn in_build_target(exe: &Path, tree: &Path) -> bool {
 
 /// Whether ROOT is a runtime tree of this executable's generation, or why not.
 fn runtime_tree(root: &Path) -> Result<(), String> {
-    if !probe(Probe::IsDir, root.join("lisp/gnu")) || !probe(Probe::IsDir, root.join("etc")) {
-        return Err("is not a Romacs runtime tree (it has no lisp/gnu or no etc)".into());
+    if !probe(Probe::IsDir, root.join("lisp")) || !probe(Probe::IsDir, root.join("etc")) {
+        return Err("is not a Romacs runtime tree (it has no lisp or no etc)".into());
     }
     let wanted = RUNTIME_EPOCH.trim();
     match read_to_string(root.join("etc/romacs-runtime-epoch")) {
@@ -944,17 +959,23 @@ pub fn lisp_env(list: EnvList, name: &[u8]) {
 // Files.
 
 pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b)));
     if building() {
         file_read(path.as_ref(), &result);
+    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+        note_credential(path.as_ref());
     }
     result
 }
 
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read_to_string(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b.as_bytes())));
     if building() {
         file_read(path.as_ref(), &result);
+    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+        note_credential(path.as_ref());
     }
     result
 }
@@ -1055,8 +1076,12 @@ impl Captured {
 /// open(2) of PATH for reading, with FLAGS (`O_NONBLOCK`, `O_NOFOLLOW` …).
 pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     use std::os::unix::fs::OpenOptionsExt;
+    credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("open", || bytes(path.as_ref()), || OpenOptions::new().read(true).custom_flags(flags).open(&path), |r| crate::flight::outcome(r, |_| 0));
     if !building() {
+        if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
+            note_credential(path.as_ref());
+        }
         return result.map(|file| Input(file, None, None, Source::file(path.as_ref())));
     }
     let path = path.as_ref();
@@ -1077,13 +1102,93 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
             if reseed_reads("user-file") {
                 return Err(e);
             }
-            confined(path, &e);
             if keyed_path(path, "read") {
                 record("file-read", json!({"path": path_json(path), "result": errno(&e)}));
             }
             Err(e)
         }
     }
+}
+
+/// Whether PATH names a credential store, read only for its secrets: an
+/// authinfo or netrc file (auth-source's defaults and their variants, a
+/// `.gpg' one too), a file in a password-store tree, or in a GnuPG home.
+fn credential_path(path: &Path) -> bool {
+    let name = path.file_name().map_or(&b""[..], OsStr::as_bytes);
+    let bare = name.strip_prefix(b".").or_else(|| name.strip_prefix(b"_")).unwrap_or(name);
+    let file = [&b"authinfo"[..], b"netrc"].iter()
+        .any(|stem| bare.strip_prefix(*stem).is_some_and(|rest| rest.is_empty() || rest[0] == b'.'));
+    let tree = path.components().any(|c| matches!(c.as_os_str().as_bytes(), b".password-store" | b"password-store" | b".gnupg"));
+    // The GnuPG home a credential read is under: no Lisp value depends on it.
+    let gnupg = std::env::var_os("GNUPGHOME").is_some_and(|home| !home.is_empty() && path.starts_with(home));
+    file || tree || gnupg
+}
+
+/// A read of PATH's content: a credential file's is noted, in a build and
+/// while the init's plan is recorded (`take_credential_read`). True when
+/// PATH is one.
+fn note_credential(path: &Path) -> bool {
+    let credential = credential_path(path);
+    if credential {
+        note_secret_asked();
+    }
+    credential
+}
+
+/// A secret was asked for: by a reader in a build (`romacs--world-secret-asked`)
+/// or a credential file read. A definition form that asked is cut short and
+/// kept whole for restore, as one an effect cut is (`layer_form_cut`); any
+/// other top-level form is kept whole too (`Vm::layer_form_finished`).
+pub(crate) fn note_secret_asked() {
+    CREDENTIAL_READ.with(|c| c.set(true));
+    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() && layer.form.is_some() { layer.tainted = true; layer.cut = true; });
+}
+
+/// A secret reader's call deferred in a build (`romacs--world-secret-asked`).
+pub(crate) fn note_reader_asked() {
+    READER_ASKS.with(|n| n.set(n.get() + 1));
+    note_secret_asked();
+}
+
+/// How many secret reader calls this thread's builds deferred.
+pub(crate) fn reader_asks() -> usize {
+    READER_ASKS.with(Cell::get)
+}
+
+/// Whether the top-level form loading in a layer build is a definition.
+pub(crate) fn layer_form_is_definition() -> bool {
+    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.is_some()))
+}
+
+/// A build reads no credential file: it fails with EPERM, as an effect
+/// does, so no secret reaches a builder's heap, log or manifest, and the
+/// form that asked is kept, as code, for the session (`note_secret_asked`),
+/// where the read is made. Ok outside a build or for any other file.
+fn credential_in_build(path: &Path) -> io::Result<()> {
+    if !refusing() || !note_credential(path) {
+        return Ok(());
+    }
+    record("secret-read", json!({"path": path_json(path)}));
+    Err(io::Error::from_raw_os_error(libc::EPERM))
+}
+
+/// The init's plan is recorded from here (ON) or no longer: its reads of
+/// credential files are noted (`credential_read`). Either way, none is
+/// noted yet.
+pub(crate) fn watch_credentials(on: bool) {
+    WATCH_CREDENTIALS.with(|w| w.set(on));
+    CREDENTIAL_READ.with(|c| c.set(false));
+}
+
+/// Whether a secret was asked for since the last `take_secret_asked` or
+/// `watch_credentials`.
+pub(crate) fn secret_asked() -> bool {
+    CREDENTIAL_READ.with(Cell::get)
+}
+
+/// `secret_asked`, forgetting it.
+pub(crate) fn take_secret_asked() -> bool {
+    CREDENTIAL_READ.with(|c| c.replace(false))
 }
 
 /// The kernel's random source, `/dev/urandom`.
@@ -1219,7 +1324,6 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
         Ok(entries) if keyed_path(path, "listing") => Ok(ReadDir(entries, Some(Listing { path: path_json(path), names: Vec::new(), end: None }), named)),
         Ok(entries) => Ok(ReadDir(entries, None, named)),
         Err(e) => {
-            confined(path, &e);
             if keyed_path(path, "listing") {
                 record("dir-list", json!({"path": path_json(path), "open": errno(&e)}));
             }
@@ -1385,28 +1489,15 @@ pub fn filesystem_type(path: &Path) -> io::Result<u32> {
     let result = crate::flight::checked("fs-type", || bytes(path), || path_c_string(path).and_then(|name| rustix::fs::statfs(&*name).map_err(os).map(|s| s.f_type as u32)),
                                         |r| crate::flight::outcome(r, |&t| u64::from(t)));
     if building() {
-        if let Err(e) = &result { confined(path, e); }
         probed("fs-type", path, result.as_ref().map_or_else(errno, |t| json!(t)));
     }
     result
 }
 
 /// The inode flags of DIRECTORY, opened without following a symlink
-/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe. Landlock refuses a confined
-/// build a directory open outside its read roots, though the flags read
-/// nothing beneath it, so that thread asks the one `keep_flags_reader`
-/// started before it confined itself.
+/// (FS_IOC_GETFLAGS, linux/fs.h). A keyed probe.
 pub fn directory_flags(directory: &Path) -> io::Result<u32> {
-    let reader = FLAGS_READER.with(|r| r.borrow().clone());
-    let result = match reader {
-        Some(reader) => {
-            let (reply, answer) = std::sync::mpsc::channel();
-            reader.send((directory.to_owned(), reply)).map_err(|_| io::Error::other("flags reader gone"))
-                .and_then(|()| answer.recv().map_err(|_| io::Error::other("flags reader gone"))?)
-        }
-        None => read_directory_flags(directory),
-    };
-    let result = crate::flight::checked("dir-flags", || bytes(directory), || result, |r| crate::flight::outcome(r, |&f| u64::from(f)));
+    let result = crate::flight::checked("dir-flags", || bytes(directory), || read_directory_flags(directory), |r| crate::flight::outcome(r, |&f| u64::from(f)));
     if building() {
         probed("dir-flags", directory, result.as_ref().map_or_else(errno, |f| json!(f)));
     }
@@ -1436,7 +1527,6 @@ pub fn posix_acl(path: &Path) -> io::Result<Option<Vec<u8>>> {
         }
     })();
     if building() {
-        if let Err(e) = &result { confined(path, e); }
         let observed = match &result { Ok(Some(value)) => encoded(value), Ok(None) => json!(null), Err(e) => errno(e) };
         probed("acl", path, observed);
     }
@@ -1452,20 +1542,6 @@ fn read_directory_flags(directory: &Path) -> io::Result<u32> {
 
 fn path_c_string(path: &Path) -> io::Result<std::ffi::CString> {
     std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))
-}
-
-/// Start the thread that reads directory flags for this one
-/// (`directory_flags`), before this thread confines itself: it answers that
-/// one query and makes no other.
-pub(crate) fn keep_flags_reader() -> io::Result<()> {
-    let (reader, queries) = std::sync::mpsc::channel::<(PathBuf, std::sync::mpsc::Sender<io::Result<u32>>)>();
-    std::thread::Builder::new().name("romacs-flags-reader".into()).spawn(move || {
-        for (directory, reply) in queries {
-            let _ = reply.send(read_directory_flags(&directory));
-        }
-    })?;
-    FLAGS_READER.with(|r| *r.borrow_mut() = Some(reader));
-    Ok(())
 }
 
 /// Set the POSIX access ACL of the file PATH names to VALUE, in its
@@ -2187,6 +2263,13 @@ pub fn open_store_file(path: impl AsRef<Path>, how: StoreOpen) -> io::Result<Fil
     }
     let file = options.open(path.as_ref())?;
     regular_and_blocking(file, path.as_ref().display(), how)
+}
+
+/// Make the world store directory DIR private to its user again (0700),
+/// when it is the user's and others may read it: store maintenance, as
+/// opening it is, no effect of a build's recipe.
+pub fn make_store_private(dir: &OwnedFd) -> io::Result<()> {
+    rustix::fs::fchmod(dir, rustix::fs::Mode::from_raw_mode(0o700)).map_err(os)
 }
 
 /// A world store's directory at PATH, opened, and with CREATE made with
@@ -3010,6 +3093,15 @@ pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
     TcpStream::connect(addr)
 }
 
+/// `sqlite-open` of NAME is about to open it: the connection is a live
+/// resource of this process, which no image holds, and SQLite reads and
+/// writes the file itself, past this boundary. In a build the open is an
+/// effect, so it is not made: a definition form that opens one is deferred
+/// to restore, and any other form leaves its entry to load in the session.
+pub fn sqlite_open(name: &[u8]) -> io::Result<()> {
+    effect(|| format!("open sqlite database {}", String::from_utf8_lossy(name)))
+}
+
 /// A listening local (Unix domain) stream socket bound to PATH.
 pub fn listen_local(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
     effect(|| format!("listen {}", bytes(path)))?;
@@ -3112,7 +3204,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("romacs-runtime-tree-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(runtime_tree(&dir).unwrap_err().contains("not a Romacs runtime tree"));
-        std::fs::create_dir_all(dir.join("lisp/gnu")).unwrap();
+        std::fs::create_dir_all(dir.join("lisp")).unwrap();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         assert!(runtime_tree(&dir).unwrap_err().contains("from before generations"));
         std::fs::write(dir.join("etc/romacs-runtime-epoch"), "0\n").unwrap();
@@ -3128,7 +3220,7 @@ mod tests {
         let root = build_root();
         assert!(root.is_absolute(), "{}", root.display());
         assert!(!root.components().any(|c| matches!(c, std::path::Component::ParentDir)), "{}", root.display());
-        assert!(root.join("lisp/gnu").is_dir() && root.join("etc").is_dir(), "{}", root.display());
+        assert!(root.join("lisp").is_dir() && root.join("etc").is_dir(), "{}", root.display());
     }
     /// A world built from a checkout keys only the kinds of the tree's
     /// entries, never their times, so editing the tree leaves it valid.
@@ -3181,7 +3273,7 @@ mod tests {
         let prefix = std::env::temp_dir().join(format!("romacs-installed-root-{}", std::process::id()));
         let exe = prefix.join("bin/romacs-vm-gui");
         assert_eq!(installed_root(&exe), None);
-        std::fs::create_dir_all(prefix.join("share/romacs/lisp/gnu")).unwrap();
+        std::fs::create_dir_all(prefix.join("share/romacs/lisp")).unwrap();
         assert_eq!(installed_root(&exe), Some(prefix.join("share/romacs")));
         std::fs::remove_dir_all(&prefix).unwrap();
     }

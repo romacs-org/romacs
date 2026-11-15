@@ -9,8 +9,8 @@ face runs, block structure and table grids, and keeps a buffer's block index.
   `crates/romacs-vm/src/prim/leaf/markdown.rs`, the primitives to
   `crates/romacs-vm/src/prims/markdown.rs`.
 - Faces, and which kind of element gets which (`romacs-markdown-faces`),
-  belong to `lisp/romacs/romacs-markdown.el`; the editing mode is
-  `lisp/romacs/romacs-markdown-mode.el`.
+  belong to `lisp/textmodes/romacs-markdown.el`; the editing mode is
+  `lisp/textmodes/romacs-markdown-mode.el`.
 - A buffer's `Index` lives on its text (`crates/romacs-vm/src/text.rs`,
   `edit_derived`), empty until Markdown is asked of it; it holds no text.
 - The dialect is `spans::options()` alone.
@@ -37,7 +37,7 @@ face runs, block structure and table grids, and keeps a buffer's block index.
   test/romacs/lisp/romacs-markdown-mode-tests.el --file
   test/romacs/lisp/romacs-agent-markdown-tests.el`.
 - A new kind of element: a `Kind` variant in `Kind::ALL`, its default face
-  in `lisp/romacs/romacs-markdown.el`, and a test by kind.
+  in `lisp/textmodes/romacs-markdown.el`, and a test by kind.
 
 ## Traps
 - A partial line can turn the block it starts into the previous one's (a
