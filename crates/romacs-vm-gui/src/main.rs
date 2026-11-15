@@ -1420,7 +1420,7 @@ fn evaluate(
             if let Some(path) = user_init::path() {
                 // `load-path' before the packages and the init add to it: a
                 // directory they add may shadow a library loaded already
-                // (lisp/romacs/romacs-user-shadows.el).
+                // (lisp/session/romacs-user-shadows.el).
                 if let Err(error) = vm.eval_source("(setq romacs--load-path-at-start load-path)") {
                     eprintln!("romacs: user shadows: {error}");
                 }
