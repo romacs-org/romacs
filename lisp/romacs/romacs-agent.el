@@ -2027,6 +2027,7 @@ Retried for a while: a new supervisor takes a moment to listen.  Never a
 second time while it is attached (a retry come late, another caller): a
 second attachment is refused by its supervisor, and the first, no longer
 known, would go on unseen; STEAL takes it over, the first let go."
+  (romacs-agent--fold-now session)
   (if (and (not steal) (process-live-p (romacs-agent-connection session)))
       (romacs-agent-connection session)
     (romacs-agent--connect session tries steal)))
@@ -2834,6 +2835,7 @@ shows on a command line other users can read."
 manager answers, else detached.  INPUT is a file the supervisor gives the
 harness as its whole stdin, and IMAGES what the journal keeps as attached
 to it."
+  (romacs-agent--fold-now session)
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
   (romacs-agent--set-stopped session nil)
@@ -3090,6 +3092,7 @@ SESSION's last fork note, a new one says how far the fork now goes."
 (defun romacs-agent--continue (session)
   "SESSION, going on: attached to its supervisor when one runs, else
 resumed; a per-turn harness goes on with its next message."
+  (romacs-agent--fold-now session)
   (cond ((process-live-p (romacs-agent-connection session)))
         ((romacs-agent--per-turn-p session))
         ;; A selection's restart under way resumes it on the selection itself:
@@ -3222,6 +3225,7 @@ forked, or one a message was sent to."
   "Run SESSION's harness again on its conversation, after it ended, in the
 configuration directory its instance had when it started: the harness
 keeps the conversation there."
+  (romacs-agent--fold-now session)
   (when (process-live-p (romacs-agent-connection session))
     (user-error "Session %s is still attached" (romacs-agent-title session)))
   (when (romacs-agent--per-turn-p session)
@@ -3361,9 +3365,11 @@ its records left it (`romacs-agent--keep-soon')."
                (not (eql seq (gethash session romacs-agent--kept))))
       (when-let* ((text (romacs-agent--kept-text session state)))
         (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
-          (with-temp-file (concat file ".tmp") (insert text))
-          (set-file-modes (concat file ".tmp") #o600)
-          (rename-file (concat file ".tmp") file t))
+          ;; Its own: a worker folding it may write it too.
+          (let ((temp (format "%s.%d.tmp" file (emacs-pid))))
+            (with-temp-file temp (insert text))
+            (set-file-modes temp #o600)
+            (rename-file temp file t)))
         (puthash session seq romacs-agent--kept)))))
 
 (defvar romacs-agent--keeping nil
@@ -3694,7 +3700,8 @@ folds every journal in the editor."
   :group 'romacs-agent)
 
 (defvar romacs-agent--folding (make-hash-table :test #'equal)
-  "The ids of the sessions a worker VM folds now or will.")
+  "The id of each session a worker VM folds now or will, to (SESSION .
+MANIFEST).")
 
 (defvar romacs-agent--fold-queue nil
   "The folds waiting for a worker, each (SESSION . MANIFEST), in order.")
@@ -3722,7 +3729,7 @@ it is left to read."
 SESSION, made from MANIFEST, loads on from it once that is done
 \(`romacs-agent--folded').  Until then it is known, unattached, its
 journal unread here."
-  (puthash (romacs-agent-id session) t romacs-agent--folding)
+  (puthash (romacs-agent-id session) (cons session manifest) romacs-agent--folding)
   (setq romacs-agent--fold-queue (append romacs-agent--fold-queue (list (cons session manifest))))
   (romacs-agent--fold-next))
 
@@ -3732,12 +3739,22 @@ journal unread here."
     (pcase-let* ((`(,session . ,manifest) (pop romacs-agent--fold-queue))
                  (future (condition-case err
                              (isolate-spawn 'romacs-agent--fold-job (romacs-agent-dir session)
-                                            :name "romacs-agent fold" :require '(romacs-agent))
+                                            :name "romacs-agent fold" :require '(romacs-agent)
+                                            :bindings (romacs-agent--fold-bindings))
                            (error (list 'error err)))))
       (cl-incf romacs-agent--fold-running)
       (if (eq (car-safe future) 'error)
           (romacs-agent--folded session manifest future)
         (isolate-on-done future (lambda (done) (romacs-agent--folded session manifest done)))))))
+
+(defun romacs-agent--fold-bindings ()
+  "This editor's values of the agents' options, which a worker's fold reads
+as the editor's own would (an approval policy, its preambles); one no
+worker can be given, a function made here, is left out."
+  (cl-loop for (symbol kind) in (get 'romacs-agent 'custom-group)
+           when (and (eq kind 'custom-variable) (boundp symbol)
+                     (let ((value (symbol-value symbol))) (not (and (functionp value) (not (symbolp value))))))
+           collect (cons symbol (symbol-value symbol))))
 
 (defun romacs-agent--fold-job (dir)
   "In a worker VM: fold the journal of the session recorded in DIR and
@@ -3756,8 +3773,10 @@ write its kept state.  The seq it is kept at, or nil."
 ERR) when none started): SESSION, made from MANIFEST, loads on from the
 kept state it wrote; with none, from its journal's start here."
   (cl-decf romacs-agent--fold-running)
-  (remhash (romacs-agent-id session) romacs-agent--folding)
-  (when (eq (gethash (romacs-agent-id session) romacs-agent--sessions) session)
+  ;; One acted on meanwhile was folded here already (`romacs-agent--fold-now').
+  (when (and (eq (car (gethash (romacs-agent-id session) romacs-agent--folding)) session)
+             (eq (gethash (romacs-agent-id session) romacs-agent--sessions) session))
+    (remhash (romacs-agent-id session) romacs-agent--folding)
     (let ((from (romacs-agent--restore-kept session)))
       (if from
           (setf (romacs-agent-journal-start session) from)
@@ -3768,6 +3787,23 @@ kept state it wrote; with none, from its journal's start here."
     (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load-rest session manifest)))
   (romacs-agent--fold-next)
   (romacs-agent--restore-finish))
+
+(defun romacs-agent--fold-now (session)
+  "SESSION, when a worker folds it still, folded here at once: something
+acts on it (attaches, resumes, launches), which its folded state must
+come before.  What the worker answers later is let go."
+  (when-let* ((entry (gethash (romacs-agent-id session) romacs-agent--folding))
+              ((eq (car entry) session)))
+    (remhash (romacs-agent-id session) romacs-agent--folding)
+    (setq romacs-agent--fold-queue (cl-remove session romacs-agent--fold-queue :key #'car))
+    (when-let* ((from (romacs-agent--restore-kept session)))
+      (setf (romacs-agent-journal-start session) from))
+    (romacs-agent--load-rest session (cdr entry))
+    (romacs-agent--restore-finish)))
+
+(defun romacs-agent--fold-all-now ()
+  "Every session a worker folds still, folded here at once."
+  (dolist (entry (hash-table-values romacs-agent--folding)) (romacs-agent--fold-now (car entry))))
 
 ;;;###autoload
 (defvar romacs-agent-restored-hook nil
@@ -3800,10 +3836,14 @@ that is.  Non-nil when any was loaded."
 \(attached, swept) once in this process, then only those recorded since
 loaded, none attached again.  What a view of the sessions calls as it
 opens."
-  (if (not (eq romacs-agent--restored romacs-agent--sessions)) (romacs-agent-restore)
-    ;; A session recorded since is known as a restore knows one: its
-    ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
-    (when (romacs-agent--load-new) (run-hooks 'romacs-agent-restored-hook))))
+  (cond
+   ;; A restore under way: the sessions known so far, the rest as they load
+   ;; (a view refreshes as each changes).
+   (romacs-agent--restoring)
+   ((not (eq romacs-agent--restored romacs-agent--sessions)) (romacs-agent-restore))
+   ;; A session recorded since is known as a restore knows one: its
+   ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
+   ((let ((romacs-agent--fold-here t)) (romacs-agent--load-new)) (run-hooks 'romacs-agent-restored-hook))))
 
 (declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 
@@ -3833,6 +3873,7 @@ A server runs this at its start, so sessions survive it; a restore
   (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t))
     (setq romacs-agent--restore-pending nil romacs-agent--restoring nil)
     (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
+    (romacs-agent--fold-all-now)
     (romacs-agent--restore-tail)
     (when pending (romacs-agent--restore-progress 'done))))
 
@@ -3849,7 +3890,9 @@ start, so sessions survive it."
                      romacs-agent--restoring t)
                (romacs-agent--restore-progress 'running)
                (run-at-time 0 nil #'romacs-agent--restore-step))
-      (romacs-agent--restore-tail))))
+      ;; Its tail waits for sessions loaded earlier and folded aside still.
+      (setq romacs-agent--restoring t)
+      (romacs-agent--restore-finish))))
 
 (defun romacs-agent--restore-step ()
   "Load the next turn's sessions of a `romacs-agent-restore-soon'; the last
