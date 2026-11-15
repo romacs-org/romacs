@@ -388,7 +388,17 @@ unless CUT, then its turn's end."
        (let ((tail (romacs-agent--journal-tail session 12)))
          (should (car tail))
          (should (>= (car tail) (- (file-attribute-size (file-attributes journal)) 250000)))
-         (should (memq (cdr tail) '(2 3))))))))
+         (should (memq (cdr tail) '(2 3)))
+         ;; Asked for by hand, earlier turns are past it.
+         (should (equal (romacs-agent--journal-tail session 12 nil nil 'none) '(nil . 5))))
+       ;; In a chat: its first show keeps to it, its earlier row pages past.
+       (let* ((romacs-agent-chat-turns 12) (buffer (romacs-agent-tail-tests--open session)))
+         (unwind-protect
+             (with-current-buffer buffer
+               (should (memq (length (romacs-agent-tail-tests--questions buffer)) '(2 3)))
+               (romacs-agent-chat-earlier)
+               (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5))))
+           (kill-buffer buffer)))))))
 
 ;; What comes before a session's first prompt (its fork notes): only that.
 (ert-deftest romacs-agent-journal-head-is-before-the-first-prompt ()

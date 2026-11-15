@@ -3491,14 +3491,15 @@ sequence) would break that, and are read as raw bytes instead."
 last turns go further back starts at the earliest turn within it, so no
 first show reads or replays more.")
 
-(defun romacs-agent--journal-tail (session turns &optional end begin)
+(defun romacs-agent--journal-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
 between bytes BEGIN and END (its start and end by default): (FROM .
 PROMPTS), FROM the byte of a prompt that started its turn with none
 under way, at least TURNS back, or nil to replay all of it, which then
-holds PROMPTS prompts.  Within `romacs-agent-journal-tail-bytes' of
-END: further back, the earliest such prompt within them, fewer turns;
-none within them (one turn longer than that), all of it.
+holds PROMPTS prompts.  Within BUDGET bytes of END (by default
+`romacs-agent-journal-tail-bytes'; `none', no bound, for turns asked
+for by hand): further back, the earliest such prompt within them, fewer
+turns; none within them (one turn longer than that), all of it.
 A prompt's record is told from its line's end
 \(`romacs-agent--prompt-line-end'), looked for from END in growing
 spans, so a long journal is read only as far back as its last turns
@@ -3507,13 +3508,14 @@ go."
          (end (or end (file-attribute-size (file-attributes journal))))
          (probe (romacs-agent--scratch session))
          (begin (or begin 0))
+         (budget (cond ((eq budget 'none) most-positive-fixnum) (budget) (t romacs-agent-journal-tail-bytes)))
          (span 262144) (found nil))
     (if (not (and end (file-readable-p journal))) (cons nil 0)
       (with-temp-buffer
         (while (not found)
-          (let* ((reach (min span romacs-agent-journal-tail-bytes))
+          (let* ((reach (min span budget))
                  (start (romacs-agent--journal-span journal (max begin (- end reach)) end))
-                 (last (or (= start begin) (>= reach romacs-agent-journal-tail-bytes)))
+                 (last (or (= start begin) (>= reach budget)))
                  (seen 0) (cut nil) (at nil) (earliest nil))
             ;; Begun inside a record: its part is no line's start.
             (when (> start begin)

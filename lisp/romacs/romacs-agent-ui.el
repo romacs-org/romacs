@@ -1534,6 +1534,10 @@ keeps every turn."
 (defvar-local romacs-agent-ui--turns nil
   "How many of its last turns this chat draws, nil for all.")
 
+(defvar-local romacs-agent-ui--paged nil
+  "Non-nil once earlier turns were asked for by hand: the journal is read
+as far back as they go, past the bound a first show keeps to.")
+
 (defconst romacs-agent-ui--drawn-state
   '(romacs-agent-ui--thinkings romacs-agent-ui--thinking romacs-agent-ui--thinking-tail
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
@@ -1663,7 +1667,8 @@ recorded before it would land elsewhere."
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
   (let ((drawn (length (romacs-agent-ui--input-starts))))
-    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12)))
+    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12))
+          romacs-agent-ui--paged t)
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
     (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
@@ -1773,7 +1778,7 @@ harness's own transcript it was imported from, when it was: its last
 `romacs-agent-ui--turns' turns, under a row that draws earlier ones, when
 it has more."
   (let* ((turns romacs-agent-ui--turns)
-         (tail (and turns (romacs-agent--journal-tail session turns)))
+         (tail (and turns (romacs-agent--journal-tail session turns nil nil (and romacs-agent-ui--paged 'none))))
          (from (car tail))
          ;; A fork's own turns short of them: its sources draw the rest.
          (romacs-agent-ui--source-plan (and turns (not from) (romacs-agent-ui--plan-sources session (- turns (cdr tail))))))
