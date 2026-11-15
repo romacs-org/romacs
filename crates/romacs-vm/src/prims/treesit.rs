@@ -383,6 +383,13 @@ fn treesit_subtree_stat(cx, node: Value) {
     cx.ts_subtree_stat(node)
 }}
 
+// (romacs--treesit-subtree-exceeds NODE DEPTH WIDTH): whether NODE's subtree
+// is deeper than DEPTH or wider than WIDTH, stopping once it is.
+defsubr! { name = "romacs--treesit-subtree-exceeds", gnu = "romacs:treesit", effect = Reads,
+fn romacs_treesit_subtree_exceeds(cx, node: Value, depth: Value, width: Value) {
+    cx.ts_subtree_exceeds(node, depth, width)
+}}
+
 // Queries.
 
 defsubr! { name = "treesit-pattern-expand", gnu = "treesit.c:3533", effect = Global,
