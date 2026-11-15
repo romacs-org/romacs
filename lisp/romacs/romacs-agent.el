@@ -2033,6 +2033,9 @@ while it does not yet listen; the connection it replaces is let go."
             nil)
            (t (setf (romacs-agent-state session) 'detached)
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
+              ;; Tried again a while, as a lost attachment is, while its
+              ;; socket is there: no view's opening comes to retry it.
+              (romacs-agent--reattach-later session)
               nil)))))
 
 (defun romacs-agent--supervisor-listens-p (session)
@@ -3586,12 +3589,37 @@ untouched."
 hash table), once it is known: what is kept there besides the session's
 own fields is taken back.")
 
+(defvar romacs-agent--restored nil
+  "The session table (`romacs-agent--sessions') the recorded sessions were
+restored into (`romacs-agent-restore'), once: another table, as a test
+binds, is restored anew.")
+
+(defun romacs-agent--load-new ()
+  "Load each session recorded since this process knew the others: a
+directory named by no known session's id, its records not read for one
+that is.  Non-nil when any was loaded."
+  (let ((loaded nil))
+    (when (file-directory-p (romacs-agent--state-root))
+      (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
+        (unless (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+          (romacs-agent--load dir)
+          (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))))
+    loaded))
+
+(defun romacs-agent-know-sessions ()
+  "Know every recorded session, cheaply after the first time: restored
+\(attached, swept) once in this process, then only those recorded since
+loaded, none attached again.  What a view of the sessions calls as it
+opens."
+  (if (not (eq romacs-agent--restored romacs-agent--sessions)) (romacs-agent-restore)
+    ;; A session recorded since is known as a restore knows one: its
+    ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
+    (when (romacs-agent--load-new) (run-hooks 'romacs-agent-restored-hook))))
+
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
 A server runs this at its start, so sessions survive it."
-  (when (file-directory-p (romacs-agent--state-root))
-    (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
-      (romacs-agent--load dir)))
+  (romacs-agent--load-new)
   ;; Known and detached, its supervisor still listening: attached again.
   (dolist (session (hash-table-values romacs-agent--sessions))
     (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
@@ -3605,6 +3633,7 @@ A server runs this at its start, so sessions survive it."
                  (hash-table-values romacs-agent--sessions))
     (romacs-agent--endpoint))
   (romacs-agent--sweep)
+  (setq romacs-agent--restored romacs-agent--sessions)
   (run-hooks 'romacs-agent-restored-hook))
 
 ;; At startup, cheaply, without loading this library unless a supervisor

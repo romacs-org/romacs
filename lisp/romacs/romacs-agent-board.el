@@ -793,7 +793,7 @@ folded under it.  Its keys act on the thread at point;
 \\<romacs-agent-board-mode-map>\\[romacs-agent-board-quit] closes it.
 \\{romacs-agent-board-mode-map}"
   (interactive)
-  (romacs-agent-restore)
+  (romacs-agent-know-sessions)
   (romacs-agent-history-list)
   (let ((buffer (romacs-agent-board--buffer)))
     (romacs-agent-board--show buffer)
