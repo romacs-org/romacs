@@ -253,4 +253,26 @@ turns, and its journal's file; a state root of its own."
          ;; Compacted to its last record: not compacted again until it has more.
          (should-not (member (romacs-agent-id session) (romacs-agent-events--compactable))))))))
 
+(ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
+  ;; Its supervisor's socket there when compacting holds the write lock:
+  ;; nothing is removed.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--delta 2 "m1" "Hi")
+                             (romacs-agent-events-tests--line
+                              3 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content" []))))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (let ((socket (romacs-agent--host-socket (romacs-agent-id session))))
+         (make-directory (file-name-directory socket) t)
+         (write-region "" nil socket nil 'silent)
+         (should-error (romacs-agent-events-compact (romacs-agent-id session)))
+         (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
+         (delete-file socket))))))
+
 ;;; romacs-agent-events-tests.el ends here

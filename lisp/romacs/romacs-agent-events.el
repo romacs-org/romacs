@@ -166,11 +166,20 @@ them, which hold PROMPTS prompts."
 ;;; Writing, with no supervisor running
 
 (defun romacs-agent-events-append (session record)
-  "Add RECORD (a table with its seq and time) to SESSION's records."
+  "Add RECORD (a table with its seq and time) to SESSION's records, waiting
+a while for a database another writer holds (a compaction) rather than
+losing it."
   (when-let* ((db (romacs-agent-events--db)))
-    (sqlite-execute db "insert into events values (?, ?, ?, ?, ?)"
-                    (list (romacs-agent-id session) (gethash "seq" record) (gethash "t" record)
-                          (romacs-agent-events--kind record) (romacs-agent--json record)))))
+    (let ((tries 0) (done nil))
+      (while (not done)
+        (condition-case err
+            (progn (sqlite-execute db "insert into events values (?, ?, ?, ?, ?)"
+                                   (list (romacs-agent-id session) (gethash "seq" record) (gethash "t" record)
+                                         (romacs-agent-events--kind record) (romacs-agent--json record)))
+                   (setq done t))
+          (error (if (and (< (cl-incf tries) 50) (string-match-p "locked\\|busy" (error-message-string err)))
+                     (sleep-for 0.1)
+                   (signal (car err) (cdr err)))))))))
 
 ;;; Importing a journal
 
@@ -271,12 +280,18 @@ goes to the backup directory.  Non-nil when SESSION is imported."
 deltas of each message whose whole message came after them.  The last
 statement's count is the records removed.")
 
+(defconst romacs-agent-events--vacuum-limit (* 64 1024 1024)
+  "The largest database made to give back its freed pages by itself: making
+it so rewrites it once, holding every writer meanwhile.")
+
 (defun romacs-agent-events--compact-schema (db)
-  "Make DB's tables for compaction: what each session is compacted to, and
-the database's pages given back as they free (auto_vacuum incremental,
-set once, which rewrites it once)."
+  "Make DB's tables for compaction: what each session is compacted to, and,
+while it is still small (`romacs-agent-events--vacuum-limit'), its pages
+given back as they free (auto_vacuum incremental, set once, one rewrite)."
   (sqlite-execute db "create table if not exists compacted (session text primary key, seq integer) without rowid")
-  (unless (equal (caar (sqlite-select db "pragma auto_vacuum")) 2)
+  (unless (or (equal (caar (sqlite-select db "pragma auto_vacuum")) 2)
+              (> (* (caar (sqlite-select db "pragma page_count")) (caar (sqlite-select db "pragma page_size")))
+                 romacs-agent-events--vacuum-limit))
     (sqlite-pragma db "auto_vacuum = incremental")
     (sqlite-execute db "vacuum")))
 
@@ -290,6 +305,11 @@ transaction; the number of records removed."
       (sqlite-execute db "begin immediate")
       (condition-case err
           (progn
+            ;; Checked holding the write lock: a supervisor started after it
+            ;; writes nothing until this commits, and what this removes is
+            ;; from before it.
+            (when (file-exists-p (romacs-agent--host-socket id))
+              (error "Its supervisor runs"))
             (dolist (statement romacs-agent-events--compact-statements)
               (setq removed (sqlite-execute db statement
                                             (and (string-search "?" statement) (list id end)))))
