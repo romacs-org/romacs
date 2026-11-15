@@ -42,6 +42,10 @@ mod client;
 #[cfg(test)]
 #[path = "../tests/support/home.rs"]
 mod test_home;
+// The unit tests' loadup from a world: the library's module (lib.rs), for
+// this executable's tests too.
+#[cfg(test)]
+mod test_world;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
