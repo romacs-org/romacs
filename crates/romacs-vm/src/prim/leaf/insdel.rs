@@ -92,8 +92,10 @@ impl Leaf<'_> {
     pub(crate) fn update_search_regs(&mut self, oldstart: i64, oldend: i64, newend: i64) {
         self.vm.regexp_update_search_regs(oldstart, oldend, newend)
     }
-    /// Fwiden for erase-buffer.
+    /// The widening of `Ferase_buffer`: no labeled restriction stays
+    /// (buffer.c:2490), then `Fwiden`.
     pub(crate) fn widen_current(&mut self) -> std::result::Result<(), Fault> {
+        self.drop_labeled()?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => b.widen(),

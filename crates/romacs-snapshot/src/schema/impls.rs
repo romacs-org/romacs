@@ -3,7 +3,7 @@
 //! exact for sequences, text and boxes; for hash tables, B-trees, ropes,
 //! bignums and shared pointers they are estimates from their lengths and
 //! capacities, without node overhead or padding.
-use super::{EMPTY_HASH_TABLE, Schema, TAKEN, Walk};
+use super::{EMPTY_HASH_TABLE, Schema, Settle, TAKEN, Walk};
 use std::any::Any;
 use std::mem::{size_of, size_of_val};
 
@@ -17,6 +17,7 @@ macro_rules! leaves {
                 fn any(&self) -> Option<&dyn Any> {
                     Some(self)
                 }
+                fn settle(&mut self, _: &mut Settle) {}
             }
         )*
     };
@@ -25,7 +26,7 @@ leaves!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
         std::time::Duration, std::time::SystemTime, std::num::NonZeroU32, std::num::NonZeroU64, std::num::NonZeroUsize,
         std::hash::RandomState, std::sync::atomic::AtomicBool, std::sync::atomic::AtomicU8, std::sync::atomic::AtomicU32,
         std::sync::atomic::AtomicU64, std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicI64,
-        rustc_hash::FxBuildHasher, foldhash::fast::FixedState, serde_json::Number);
+        rustc_hash::FxBuildHasher, foldhash::fast::FixedState);
 
 /// Unsized text, met through a pointer that owns it.
 macro_rules! unsized_text {
@@ -37,6 +38,7 @@ macro_rules! unsized_text {
                 fn any(&self) -> Option<&dyn Any> {
                     None
                 }
+                fn settle(&mut self, _: &mut Settle) {}
             }
         )*
     };
@@ -54,6 +56,7 @@ macro_rules! owned_text {
                 fn any(&self) -> Option<&dyn Any> {
                     Some(self)
                 }
+                fn settle(&mut self, _: &mut Settle) {}
             }
         )*
     };
@@ -67,6 +70,7 @@ impl Schema for num_bigint::BigUint {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut Settle) {}
 }
 
 impl Schema for num_bigint::BigInt {
@@ -76,31 +80,7 @@ impl Schema for num_bigint::BigInt {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
-}
-
-impl Schema for serde_json::Value {
-    fn walk(&self, w: &mut Walk<'_>) {
-        match self {
-            serde_json::Value::String(text) => w.value(text),
-            serde_json::Value::Array(items) => w.value(items),
-            serde_json::Value::Object(map) => w.value(map),
-            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
-        }
-    }
-    fn any(&self) -> Option<&dyn Any> {
-        Some(self)
-    }
-}
-
-impl Schema for serde_json::Map<String, serde_json::Value> {
-    fn walk(&self, w: &mut Walk<'_>) {
-        w.own(self.len() * size_of::<(String, serde_json::Value)>());
-        w.elements(self.keys());
-        w.elements(self.values());
-    }
-    fn any(&self) -> Option<&dyn Any> {
-        Some(self)
-    }
+    fn settle(&mut self, _: &mut Settle) {}
 }
 
 impl<T: Schema> Schema for [T] {
@@ -110,6 +90,11 @@ impl<T: Schema> Schema for [T] {
     fn any(&self) -> Option<&dyn Any> {
         None
     }
+    fn settle(&mut self, s: &mut Settle) {
+        for item in self.iter_mut() {
+            item.settle(s);
+        }
+    }
 }
 
 impl<T: Schema, const N: usize> Schema for [T; N] {
@@ -118,6 +103,11 @@ impl<T: Schema, const N: usize> Schema for [T; N] {
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        for item in self.iter_mut() {
+            item.settle(s);
+        }
     }
 }
 
@@ -132,12 +122,34 @@ macro_rules! sequences {
             fn any(&self) -> Option<&dyn Any> {
                 Some(self)
             }
+            fn settle(&mut self, s: &mut Settle) {
+                for item in self.iter_mut() {
+                    item.settle(s);
+                }
+            }
         }
         sequences!($($rest)*);
     };
     () => {};
 }
-sequences!(Vec; std::collections::VecDeque; std::collections::BinaryHeap;);
+sequences!(Vec; std::collections::VecDeque;);
+
+/// A heap's elements are not reached mutably: making the heap again would
+/// run their comparison, which may change them, so they are checked.
+impl<T: Schema> Schema for std::collections::BinaryHeap<T> {
+    fn walk(&self, w: &mut Walk<'_>) {
+        w.own(self.capacity() * size_of::<T>());
+        w.elements(self.iter());
+    }
+    fn any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        for item in self.iter() {
+            s.unreachable(item);
+        }
+    }
+}
 
 impl<T: Schema> Schema for Option<T> {
     fn walk(&self, w: &mut Walk<'_>) {
@@ -147,6 +159,11 @@ impl<T: Schema> Schema for Option<T> {
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        if let Some(value) = self {
+            value.settle(s);
+        }
     }
 }
 
@@ -160,6 +177,12 @@ impl<T: Schema, E: Schema> Schema for Result<T, E> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        match self {
+            Ok(value) => value.settle(s),
+            Err(error) => error.settle(s),
+        }
+    }
 }
 
 impl<T: Schema> Schema for std::cell::OnceCell<T> {
@@ -170,6 +193,11 @@ impl<T: Schema> Schema for std::cell::OnceCell<T> {
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        if let Some(value) = self.get_mut() {
+            value.settle(s);
+        }
     }
 }
 
@@ -182,6 +210,11 @@ impl<T: Schema> Schema for std::sync::OnceLock<T> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        if let Some(value) = self.get_mut() {
+            value.settle(s);
+        }
+    }
 }
 
 impl<T: Schema> Schema for std::ops::Range<T> {
@@ -192,6 +225,10 @@ impl<T: Schema> Schema for std::ops::Range<T> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        self.start.settle(s);
+        self.end.settle(s);
+    }
 }
 
 impl<T: Schema> Schema for std::ops::RangeInclusive<T> {
@@ -201,6 +238,11 @@ impl<T: Schema> Schema for std::ops::RangeInclusive<T> {
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        // Its bounds are reached only by reading them.
+        s.unreachable(self.start());
+        s.unreachable(self.end());
     }
 }
 
@@ -214,24 +256,47 @@ fn hash_table<E>(w: &mut Walk<'_>, capacity: usize) {
     }
 }
 
-impl<K: Schema, V: Schema, S: 'static> Schema for std::collections::HashMap<K, V, S> {
+impl<K: Schema + Eq + std::hash::Hash, V: Schema, S: Schema + std::hash::BuildHasher> Schema for std::collections::HashMap<K, V, S> {
     fn walk(&self, w: &mut Walk<'_>) {
         hash_table::<(K, V)>(w, self.capacity());
+        w.value(self.hasher());
         w.elements(self.keys());
         w.elements(self.values());
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        if self.capacity() == 0 {
+            s.empty_table(|| self.reserve(1));
+        }
+        s.unreachable(self.hasher());
+        for key in self.keys() {
+            s.unreachable(key);
+        }
+        for value in self.values_mut() {
+            value.settle(s);
+        }
+    }
 }
 
-impl<K: Schema, S: 'static> Schema for std::collections::HashSet<K, S> {
+impl<K: Schema + Eq + std::hash::Hash, S: Schema + std::hash::BuildHasher> Schema for std::collections::HashSet<K, S> {
     fn walk(&self, w: &mut Walk<'_>) {
         hash_table::<K>(w, self.capacity());
+        w.value(self.hasher());
         w.elements(self.iter());
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        if self.capacity() == 0 {
+            s.empty_table(|| self.reserve(1));
+        }
+        s.unreachable(self.hasher());
+        for key in self.iter() {
+            s.unreachable(key);
+        }
     }
 }
 
@@ -245,6 +310,14 @@ impl<K: Schema, V: Schema> Schema for std::collections::BTreeMap<K, V> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        for key in self.keys() {
+            s.unreachable(key);
+        }
+        for value in self.values_mut() {
+            value.settle(s);
+        }
+    }
 }
 
 impl<K: Schema> Schema for std::collections::BTreeSet<K> {
@@ -255,6 +328,11 @@ impl<K: Schema> Schema for std::collections::BTreeSet<K> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, s: &mut Settle) {
+        for key in self.iter() {
+            s.unreachable(key);
+        }
+    }
 }
 
 impl<T: Schema + ?Sized> Schema for Box<T> {
@@ -264,6 +342,9 @@ impl<T: Schema + ?Sized> Schema for Box<T> {
     }
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        (**self).settle(s);
     }
 }
 
@@ -281,6 +362,13 @@ macro_rules! shared {
             fn any(&self) -> Option<&dyn Any> {
                 Some(self)
             }
+            fn settle(&mut self, s: &mut Settle) {
+                let address = $($t)::+::as_ptr(self).cast::<u8>() as usize;
+                match $($t)::+::get_mut(self) {
+                    Some(value) => value.settle(s),
+                    None => s.shared(address, &**self),
+                }
+            }
         }
         shared!($($rest)*);
     };
@@ -296,6 +384,7 @@ macro_rules! weak {
             fn any(&self) -> Option<&dyn Any> {
                 Some(self)
             }
+            fn settle(&mut self, _: &mut Settle) {}
         }
         weak!($($rest)*);
     };
@@ -310,17 +399,23 @@ impl<T: Schema + Copy> Schema for std::cell::Cell<T> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut Settle) {}
 }
 
 impl<T: Schema + ?Sized> Schema for std::cell::RefCell<T> {
     fn walk(&self, w: &mut Walk<'_>) {
-        match self.try_borrow() {
+        // Mutably, so that a borrow of any kind held now is seen: a restored
+        // process would find its count still held.
+        match self.try_borrow_mut() {
             Ok(value) => w.value(&*value),
             Err(_) => w.note(TAKEN),
         }
     }
     fn any(&self) -> Option<&dyn Any> {
         None
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        self.get_mut().settle(s);
     }
 }
 
@@ -328,23 +423,34 @@ impl<T: Schema + ?Sized> Schema for std::sync::Mutex<T> {
     fn walk(&self, w: &mut Walk<'_>) {
         match self.try_lock() {
             Ok(value) => w.value(&*value),
-            Err(_) => w.note(TAKEN),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => w.value(&*poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => w.note(TAKEN),
         }
     }
     fn any(&self) -> Option<&dyn Any> {
         None
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        // A poisoned lock's value is as settled as any other.
+        self.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).settle(s);
     }
 }
 
 impl<T: Schema + ?Sized> Schema for std::sync::RwLock<T> {
     fn walk(&self, w: &mut Walk<'_>) {
-        match self.try_read() {
+        // For writing, so that a reader holding it now is seen.
+        match self.try_write() {
             Ok(value) => w.value(&*value),
-            Err(_) => w.note(TAKEN),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => w.value(&*poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => w.note(TAKEN),
         }
     }
     fn any(&self) -> Option<&dyn Any> {
         None
+    }
+    fn settle(&mut self, s: &mut Settle) {
+        // A poisoned lock's value is as settled as any other.
+        self.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).settle(s);
     }
 }
 
@@ -354,6 +460,7 @@ impl<T: ?Sized + 'static> Schema for std::marker::PhantomData<T> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut Settle) {}
 }
 
 impl<H: 'static> Schema for std::hash::BuildHasherDefault<H> {
@@ -362,4 +469,5 @@ impl<H: 'static> Schema for std::hash::BuildHasherDefault<H> {
     fn any(&self) -> Option<&dyn Any> {
         Some(self)
     }
+    fn settle(&mut self, _: &mut Settle) {}
 }

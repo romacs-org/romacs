@@ -1,6 +1,6 @@
 //! A walk of listed values (`Walk`): what it counts, and the layouts it
 //! records, against what the compiler says.
-use romacs_snapshot::{EMPTY_HASH_TABLE, Notes, Walk, snapshot_enum, snapshot_struct, snapshot_tuple};
+use romacs_snapshot::{EMPTY_HASH_TABLE, Notes, Walk, snapshot_enum, snapshot_fields, snapshot_struct, snapshot_tuple};
 use serde_json::Value as Json;
 use std::any::Any;
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ pub struct Scene {
     index: HashMap<u32, u32>,
     seen: u8,
 }
-snapshot_struct!(Scene { name, shapes, shared, index } at_rest { seen });
+snapshot_fields!(Scene { name, shapes, shared, index } at_rest { seen });
 
 fn scene() -> Scene {
     let point = Rc::new(Point(1, 2));
@@ -123,4 +123,120 @@ fn a_value_inside_its_own_variant_describes_it_once_and_a_taken_cell_is_noted() 
     drop(borrowed);
     assert_eq!(census["notes"][romacs_snapshot::TAKEN], 1);
     assert_eq!(kind(&census, "alloc::boxed::Box<[u64; 4]>")["owned_bytes"], 32);
+}
+
+/// A table of tables.
+type Nested = HashMap<u32, Vec<HashMap<u32, u32>>>;
+
+pub struct Tables {
+    plain: HashMap<u32, u32>,
+    nested: Vec<std::collections::HashSet<u32>>,
+    owned: Rc<HashMap<u32, u32>>,
+    boxed: Box<[Nested; 1]>,
+}
+snapshot_struct!(Tables { plain, nested, owned, boxed });
+
+fn empty_tables(value: &Tables) -> u64 {
+    let mut observe = |_: &dyn Any, _: &mut Notes| {};
+    let mut walk = Walk::new(&mut observe);
+    walk.value(value);
+    walk.noted(EMPTY_HASH_TABLE)
+}
+
+#[test]
+fn settling_gives_each_empty_table_in_reach_its_own_allocation() {
+    use romacs_snapshot::{Schema, Settle};
+    let mut boxed = HashMap::new();
+    boxed.insert(1, vec![HashMap::new()]);
+    let mut tables = Tables { plain: HashMap::new(), nested: vec![std::collections::HashSet::new(); 2], owned: Rc::new(HashMap::new()),
+                              boxed: Box::new([boxed]) };
+    assert_eq!(empty_tables(&tables), 5);
+    let mut settle = Settle::default();
+    tables.settle(&mut settle);
+    assert_eq!((settle.settled(), settle.unsettled()), (5, &[][..]));
+    // Each is empty still, and no longer points into the executable.
+    assert!(tables.plain.is_empty() && tables.plain.capacity() > 0);
+    assert!(tables.nested.iter().all(|set| set.is_empty() && set.capacity() > 0));
+    assert_eq!(empty_tables(&tables), 0);
+}
+
+#[test]
+fn an_empty_table_another_owner_shares_is_named_not_changed() {
+    use romacs_snapshot::{Schema, Settle};
+    let shared = Rc::new(HashMap::new());
+    let mut tables = Tables { plain: HashMap::from([(1, 1)]), nested: vec![], owned: shared.clone(), boxed: Box::new([HashMap::from([(1, vec![])])]) };
+    let mut settle = Settle::default();
+    tables.settle(&mut settle);
+    assert_eq!(settle.unsettled(), ["std::collections::hash::map::HashMap<u32, u32>"]);
+    assert_eq!(shared.capacity(), 0);
+}
+
+/// A hasher that holds a table of its own.
+#[derive(Default)]
+pub struct TableHasher {
+    seen: HashMap<u32, u32>,
+}
+snapshot_struct!(TableHasher { seen });
+impl std::hash::BuildHasher for TableHasher {
+    type Hasher = std::collections::hash_map::DefaultHasher;
+    fn build_hasher(&self) -> Self::Hasher {
+        std::collections::hash_map::DefaultHasher::new()
+    }
+}
+
+/// An element whose ordering ignores the table it holds.
+pub struct Ranked {
+    rank: u32,
+    cache: std::cell::RefCell<HashMap<u32, u32>>,
+}
+snapshot_struct!(Ranked { rank, cache });
+impl PartialEq for Ranked {
+    fn eq(&self, other: &Self) -> bool {
+        self.rank == other.rank
+    }
+}
+impl Eq for Ranked {}
+impl PartialOrd for Ranked {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Ranked {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.rank.cmp(&other.rank)
+    }
+}
+
+pub struct Unreachable {
+    hashed: HashMap<u32, u32, TableHasher>,
+    heap: std::collections::BinaryHeap<Ranked>,
+    locked: std::sync::Mutex<HashMap<u32, u32>>,
+    borrowed: Rc<std::cell::RefCell<HashMap<u32, u32>>>,
+}
+snapshot_struct!(Unreachable { hashed, heap, locked, borrowed });
+
+/// What settling cannot reach is checked: a hasher's table, a heap element's,
+/// and a shared cell that is borrowed are named. A poisoned lock's table is
+/// reached all the same.
+#[test]
+fn settling_names_what_it_cannot_reach_and_recovers_a_poisoned_lock() {
+    use romacs_snapshot::{Schema, Settle};
+    let mut hashed = HashMap::with_hasher(TableHasher::default());
+    hashed.insert(1, 1);
+    let heap = std::collections::BinaryHeap::from([Ranked { rank: 1, cache: std::cell::RefCell::new(HashMap::new()) }]);
+    let locked = std::sync::Mutex::new(HashMap::new());
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _held = locked.lock().unwrap();
+        panic!("poison the lock");
+    }));
+    assert!(locked.is_poisoned());
+    let borrowed = Rc::new(std::cell::RefCell::new(HashMap::from([(1, 1)])));
+    let mut value = Unreachable { hashed, heap, locked, borrowed: borrowed.clone() };
+    let held = borrowed.borrow_mut();
+    let mut settle = Settle::default();
+    value.settle(&mut settle);
+    drop(held);
+    assert_eq!(settle.unsettled(), ["walk::TableHasher", "walk::Ranked", "core::cell::RefCell<std::collections::hash::map::HashMap<u32, u32>>"]);
+    assert_eq!(settle.settled(), 1, "the poisoned lock's table");
+    assert!(value.locked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).capacity() > 0);
 }

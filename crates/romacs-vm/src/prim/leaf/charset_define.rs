@@ -105,7 +105,7 @@ impl Leaf<'_> {
                 _ => unreachable!(),
             },
             Kind::CharTable => self.char_table_element(v, i),
-            Kind::String | Kind::Bytes => self.string_view(v)?.chars().nth(i).map(|c| int(c as i64)).ok_or(Fault::Range(v, int(i as i64))),
+            Kind::String | Kind::Bytes => self.string_char(v, i)?.map(|c| int(c as i64)).ok_or(Fault::Range(v, int(i as i64))),
             _ => Err(Fault::Wrong("arrayp", v)),
         }
     }

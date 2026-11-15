@@ -257,7 +257,7 @@ impl GuiHost {
     fn settle_drawn(&self) -> bool {
         let mut shared = self.shared.borrow_mut();
         let Some((presentation, _)) = shared.in_flight else { return false };
-        if self.sender.wait_for_render(presentation, Duration::ZERO).is_err() { return true; }
+        if self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_err() { return true; }
         shared.in_flight = None;
         let now = std::time::Instant::now();
         shared.settled = Some((presentation, now));
@@ -284,7 +284,8 @@ impl HostInput for GuiHost {
     }
 
     fn pointer(&mut self) -> Option<(i32, i32)> {
-        self.sender.pointer()
+        // The evaluator's host reads the pointer over the one frame it shows.
+        self.sender.pointer().and_then(|(frame, at)| (frame == romacs_display_runtime::paint_host::INITIAL_FRAME).then_some(at))
     }
 
     fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
@@ -295,16 +296,16 @@ impl HostInput for GuiHost {
         let mut shared = self.shared.borrow_mut();
         let Some(server) = shared.server.as_mut() else {
             // A session that is its window shows it while it runs.
-            if action == romacs_vm::NativeWindow::Show { let _ = self.sender.raise_primary(); }
+            if action == romacs_vm::NativeWindow::Show { let _ = self.sender.raise(romacs_display_runtime::paint_host::INITIAL_FRAME); }
             return Some(true);
         };
         let shown = server.shown;
         match action {
             romacs_vm::NativeWindow::Query => {}
-            romacs_vm::NativeWindow::Show if shown => { let _ = self.sender.raise_primary(); }
+            romacs_vm::NativeWindow::Show if shown => { let _ = self.sender.raise(romacs_display_runtime::paint_host::INITIAL_FRAME); }
             romacs_vm::NativeWindow::Show => {
                 let (width, height) = server.size;
-                let made = self.sender.show_primary(width, height, server.title.clone())
+                let made = self.sender.realize(romacs_display_runtime::paint_host::INITIAL_FRAME, width, height, server.title.clone())
                     .and_then(|ready| ready.recv_timeout(Duration::from_secs(30)).map_err(|e| e.to_string())?);
                 match made {
                     Ok(()) => {
@@ -317,7 +318,7 @@ impl HostInput for GuiHost {
             }
             romacs_vm::NativeWindow::Hide if !shown => {}
             romacs_vm::NativeWindow::Hide => {
-                if let Err(error) = self.sender.hide_primary() { eprintln!("romacs: server window: {error}"); }
+                if let Err(error) = self.sender.hide(romacs_display_runtime::paint_host::INITIAL_FRAME) { eprintln!("romacs: server window: {error}"); }
                 server.shown = false;
                 forget_window(&mut shared);
             }
@@ -378,7 +379,7 @@ impl HostInput for GuiHost {
             self.settle_drawn();
             let mut shared = self.shared.borrow_mut();
             let since = shared.in_flight.map_or(submitted, |(_, since)| since);
-            let drawn = self.sender.wait_for_render(presentation, Duration::ZERO).is_ok();
+            let drawn = self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));

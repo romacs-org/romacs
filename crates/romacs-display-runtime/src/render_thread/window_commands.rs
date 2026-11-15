@@ -47,7 +47,9 @@ impl RenderApp {
         // frame lifecycle still retains CPU state. Replay only native-state
         // commands targeting that identity, never stale Lisp size requests.
         let replay_primary = match &cmd {
-            WindowCommand::SetWindowTitle { .. } => true,
+            WindowCommand::SetWindowTitle { frame, .. } => {
+                self.frame_windows.is_primary_frame_id(frame.raw_id())
+            }
             WindowCommand::SetFrameGeometryHints { frame, .. } => {
                 self.frame_windows.is_primary_frame_id(frame.raw_id())
             }
@@ -58,12 +60,12 @@ impl RenderApp {
                 self.frame_opacity.accept(frame, alpha, limit);
                 self.refresh_frame_opacity();
             }
-            WindowCommand::SetWindowTitle { title } => {
-                if let Some(primary_state) = self.frame_windows.primary_window_mut() {
-                    primary_state.chrome_mut().title = title.clone();
-                    primary_state.set_title(title);
-                    if !primary_state.chrome().decorations_enabled {
-                        primary_state.render.mark_dirty();
+            WindowCommand::SetWindowTitle { frame, title } => {
+                if let Some(window_state) = self.frame_windows.get_mut(frame.raw_id()) {
+                    window_state.chrome_mut().title = title.clone();
+                    window_state.set_title(title);
+                    if !window_state.chrome().decorations_enabled {
+                        window_state.render.mark_dirty();
                     }
                 }
             }
@@ -93,10 +95,10 @@ impl RenderApp {
                     );
                 }
             }
-            WindowCommand::RequestAttention { urgent } => {
+            WindowCommand::RequestAttention { frame, urgent } => {
                 if let Some(window) = self
                     .frame_windows
-                    .primary_window()
+                    .get(frame.raw_id())
                     .and_then(|ws| ws.window())
                 {
                     let attention = if urgent {
@@ -131,7 +133,10 @@ impl RenderApp {
                     self.frame_windows.primary_emacs_frame_id = Some(id);
                 }
                 if adopt_primary && self.frame_windows.primary_window().is_some() {
-                    self.handle_window(WindowCommand::SetWindowTitle { title });
+                    self.handle_window(WindowCommand::SetWindowTitle {
+                        frame: crate::thread_comm::FrameRef::Primary,
+                        title,
+                    });
                     self.handle_window(WindowCommand::SetFrameGeometryHints {
                         frame: crate::thread_comm::FrameRef::Primary,
                         geometry_hints,
@@ -191,7 +196,8 @@ impl RenderApp {
                 let emacs_frame_id = frame.raw_id();
                 tracing::info!("DestroyWindow request: frame_id=0x{:x}", emacs_frame_id);
                 // A retired window's PointerLeft is discarded.
-                if self.frame_windows.is_primary_frame_id(emacs_frame_id) { self.comms.tell(crate::thread_comm::Fact::PointerOver { at: None }); }
+                let pointer_frame = if emacs_frame_id == 0 { self.frame_windows.primary_event_frame_id() } else { emacs_frame_id };
+                self.comms.tell(crate::thread_comm::Fact::PointerOver { frame: pointer_frame, at: None });
                 // Cancel CPU preparation immediately, not after GPU readiness.
                 self.frame_windows.pending_creates.retain(|request| {
                     request.emacs_frame_id != emacs_frame_id

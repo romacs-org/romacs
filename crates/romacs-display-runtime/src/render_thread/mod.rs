@@ -15,6 +15,7 @@ mod cursor_runtime;
 mod deferred_gui_native_test;
 mod device_loss;
 mod frame_compositor;
+mod frame_cost;
 mod frame_ingest;
 mod frame_sched;
 mod frame_state;

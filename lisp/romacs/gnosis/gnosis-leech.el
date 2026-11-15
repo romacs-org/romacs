@@ -555,7 +555,7 @@ sources in Parathema where you add facts.
 Output: an Org file of level-1 native themata.  Start from each card's
 :draft, which already carries GNOSIS_PROPOSAL, GNOSIS_SOURCE, GNOSIS_TARGET
 and GNOSIS_TARGET_REVISION.  Set GNOSIS_PROPOSAL to your kind, add
-GNOSIS_AGENT (for example hermes/tutor) and GNOSIS_REASON (one line), and
+GNOSIS_AGENT (for example claude/tutor) and GNOSIS_REASON (one line), and
 keep GNOSIS_ID NEW.  For a split, copy the drafted heading once per new
 card.  Queue it with:
   GNOSIS_DIR=DIR emacs -Q --batch -L lisp -L keymap-popup -l gnosis-leech \\

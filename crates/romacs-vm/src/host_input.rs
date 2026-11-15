@@ -665,7 +665,8 @@ mod tests {
         let mut vm = waiting(vec![HostEvent::Resize { width: 1000, height: 700 }, HostEvent::Key(CommandEvent::Character(120))]);
         vm.set_gc_stress(0);
         assert_eq!(shown(&mut vm, "(romacs--read-host-event)"), "120");
-        assert_eq!((vm.window_state.width, vm.window_state.height), (1000, 700));
+        let native = vm.top_geometry(vm.selected_top_frame()).unwrap();
+        assert_eq!((native.width, native.height), (1000, 700));
     }
 
     /// A closed frame ends the wait with `quit`, its data telling it from a

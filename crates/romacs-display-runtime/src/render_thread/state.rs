@@ -437,10 +437,6 @@ impl PendingPointerDamage {
         Self { key, rect }
     }
 
-    pub(super) const fn key(self) -> PresentedAppearanceKey {
-        self.key
-    }
-
     #[cfg(test)]
     pub(super) const fn rect(self) -> FrameRect {
         self.rect
