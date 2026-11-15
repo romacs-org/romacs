@@ -1376,7 +1376,8 @@ impl Vm {
             if before_sweep {
                 let _ = self.alloc_cons(Value::NIL, Value::NIL);
             }
-            self.sweep_in_place(&marking, own, &dead);
+            // What the full freed needs no account: its books start again.
+            let _ = self.sweep_in_place(&marking, own, &dead);
             lap.lap(&mut self.gc_times, Phase::Sweep);
             self.shrink_tables();
             lap.lap(&mut self.gc_times, Phase::Shrink);
@@ -1663,7 +1664,8 @@ impl Vm {
     }
     /// Free in place what MARKING left unmarked, DEAD being its dead
     /// objects: every survivor is left old and clean, and the logs empty.
-    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker, dead: &[u32]) {
+    /// The payload the freed objects held.
+    fn sweep_in_place(&mut self, marking: &gc_mark::Marking, mut own: gc_mark::Worker, dead: &[u32]) -> usize {
         let cells = &self.cells;
         self.cell_pairs.retain(|&i, _| cells.marked(i));
         if let Some(referrers) = &mut self.referrers { referrers.forget(dead, &self.objects); }
@@ -1671,7 +1673,7 @@ impl Vm {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
         let verify = self.gc_stress.verify;
-        let swept = marking.sweep(self, &mut own);
+        let gc_mark::Swept { tables: swept, payload } = marking.sweep(self, &mut own);
         self.conses.swept(swept[0].0, swept[0].1, verify);
         self.closures.swept(swept[1].0, swept[1].1, verify);
         self.cells.swept(swept[2].0, swept[2].1, verify);
@@ -1680,6 +1682,7 @@ impl Vm {
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
         self.local_owners = None;
+        payload
     }
     /// A minor collection: what was made since the last collection and is
     /// no longer reached is freed, and nothing old is read but what may name
@@ -1773,7 +1776,10 @@ impl Vm {
         self.empty_dead_caches(&symbols, &regions);
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.gc_times.entries = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
-        self.sweep_in_place(&marking, own, &dead);
+        // The payload the young dead held was charged to the next full, which
+        // the old generation's growth alone should pace: give it back.
+        let freed = self.sweep_in_place(&marking, own, &dead);
+        self.gc_payload_bytes = self.gc_payload_bytes.saturating_sub(freed);
         lap.lap(&mut self.gc_times, Phase::Sweep);
         self.gc_times.marked = [self.conses.live(), self.closures.live(), self.cells.live(), self.objects.live()];
         if self.gc_stress.verify { self.check_settled(); }
@@ -2287,6 +2293,25 @@ mod tests {
         assert!(vm.conses.live() < before + 400_000, "the garbage went: {before} to {}", vm.conses.live());
         let kept = vm.eval_source_raw("(equal (list (length minor-keep) (car (car minor-keep)) (car (nth 599 minor-keep))) '(600 1198000 0))").unwrap();
         assert_eq!(kept, Value::TRUE, "what the variable holds survives every minor");
+    }
+
+    /// Payload made and dropped between collections is the young's: the
+    /// minors that free it give it back, so `gc-cons-threshold`, which paces
+    /// fulls, sees only what the old generation grew by. Strings that die at
+    /// once, eight thresholds of them, bring minors and no full.
+    #[test]
+    fn a_minor_gives_back_the_payload_it_frees() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_gc_minor(true);
+        vm.set_gc_verify(true);
+        vm.eval_source_raw("(setq gc-cons-threshold (* 64 1024 1024))").unwrap();
+        vm.collect(&mut []);
+        vm.collection_log = CollectionLog::default();
+        vm.eval_source_raw("(dotimes (_ 8192) (make-string 65536 ?x))").unwrap();
+        let minors = vm.collection_log.records.iter().filter(|record| record.minor).count();
+        assert!(minors >= 64, "512 MiB of strings, a minor each 4 MiB: {minors}");
+        assert_eq!(vm.collection_log.records.len(), minors, "and no full");
     }
 
     /// A minor inside a request, its engine suspended with code and entry

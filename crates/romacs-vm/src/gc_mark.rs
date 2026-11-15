@@ -273,6 +273,14 @@ pub(super) struct Worker {
     graves: Vec<Grave>,
 }
 
+/// What a sweep did: each table's freed count and the end of its last entry
+/// in use, and the payload of the objects it freed.
+#[derive(Default)]
+pub(super) struct Swept {
+    pub(super) tables: [(usize, usize); 4],
+    pub(super) payload: usize,
+}
+
 /// What a collection's threads share, but for the `MarkView' of a mark.
 pub(super) struct Marking {
     pub(super) conses: RawTable<(Value, Value)>,
@@ -655,8 +663,9 @@ impl Marking {
         });
         dead.into_inner().unwrap()
     }
-    /// Sweep VM's tables: their freed counts and ends.
-    pub(super) fn sweep(&self, vm: &Vm, own: &mut Worker) -> [(usize, usize); 4] {
+    /// Sweep VM's tables: their freed counts and ends, and the payload the
+    /// freed objects held (`data::payload_bytes`), as allocation charged it.
+    pub(super) fn sweep(&self, vm: &Vm, own: &mut Worker) -> Swept {
         assert!(self.holds(vm), "a table changed between its mark and its sweep");
         // One batch waits at a time (`DROPPING'); on one thread there is none.
         let defer = self.n > 1 && !DROPPING.load(Ordering::Acquire);
@@ -664,34 +673,39 @@ impl Marking {
         let chunks: Vec<(usize, Range<usize>)> = lens.iter().enumerate()
             .flat_map(|(table, &len)| (0..len).step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(len))))
             .collect();
-        let swept = Mutex::new([(0, 0); 4]);
+        let swept = Mutex::new(Swept::default());
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last) = self.sweep_range(w, table, range, defer);
+            let (freed, last, payload) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
-            swept[table] = (swept[table].0 + freed, swept[table].1.max(last));
+            swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
+            swept.payload += payload;
         });
         swept.into_inner().unwrap()
     }
-    /// One range of a sweep: its freed count and the end of its last entry in
-    /// use. Conses and cells own nothing; a closure's vectors are small and
-    /// few; what an object owns goes to W's graves when DEFER, or is dropped
-    /// here (one thread, or the dropper busy).
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize) {
+    /// One range of a sweep: its freed count, the end of its last entry in
+    /// use, and the payload its freed objects held. Conses and cells own
+    /// nothing; a closure's vectors are small and few; what an object owns
+    /// goes to W's graves when DEFER, or is dropped here (one thread, or the
+    /// dropper busy).
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, usize) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
+        let mut payload = 0;
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
-        unsafe {
+        let (freed, last) = unsafe {
             match table {
                 0 => self.conses.sweep_range(range, self.verify, |pair| *pair = (dead, dead)),
                 1 => self.closures.sweep_range(range, self.verify, |c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
                 2 => self.cells.sweep_range(range, self.verify, |cell| *cell = dead),
                 _ => self.objects.sweep_range(range, self.verify, |object| {
+                    payload += data::payload_bytes(object);
                     if let Some(grave) = Grave::of(std::mem::replace(object, data::Object::Free)) && defer {
                         w.graves.push(grave);
                     }
                 }),
             }
-        }
+        };
+        (freed, last, payload)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.
