@@ -174,11 +174,6 @@ impl Store {
         }
     }
 
-    /// Whether ERROR, from `keep`, is the database being busy: worth waiting for.
-    fn busy(&self, error: &str) -> bool {
-        matches!(self, Store::Sqlite { .. }) && (error.contains("locked") || error.contains("busy"))
-    }
-
     /// The seq of the last record kept, 0 for none.
     fn last_seq(&self) -> u64 {
         match self {
@@ -223,13 +218,12 @@ impl Shared {
             let seq = self.seq;
             let mut waited = std::time::Duration::ZERO;
             let mut told = false;
-            // Kept before it is sent: a busy database holds up the harness's
-            // output (its pipe fills), never loses a record.
+            // Kept before it is sent, whatever fails: a busy database, a full
+            // disk or an I/O error holds up the harness's output (its pipe
+            // fills) until the record is kept, never sends one it could not
+            // replay.
             while let Err(error) = self.store.keep(seq, text, sync) {
-                if !self.store.busy(&error) {
-                    eprintln!("romacs-agent-host: store: {error}");
-                    break;
-                }
+                if waited.is_zero() { eprintln!("romacs-agent-host: store: {error}"); }
                 std::thread::sleep(STORE_RETRY);
                 waited += STORE_RETRY;
                 if waited >= STORE_FAILING && !told {
@@ -635,6 +629,35 @@ mod tests {
             .prepare("select kind from events order by seq").unwrap()
             .query_map([], |row| row.get(0)).unwrap().map_while(Result::ok).collect();
         assert_eq!(kinds, ["out", "out"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_kept_is_not_sent_until_it_is() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-unkept-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000002");
+        std::fs::create_dir_all(&session).unwrap();
+        let database = dir.join("sessions.sqlite");
+        let store = Store::open(&session, Some(&database)).unwrap();
+        // The table gone: every insert fails until it is made again.
+        rusqlite::Connection::open(&database).unwrap().execute_batch("drop table events").unwrap();
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let mut shared = Shared { seq: 0, store, attached: Some((1, server)), next_attachment: 1,
+                                  stdin: Arc::new(Mutex::new(None)) };
+        let started = std::time::Instant::now();
+        let fixer = { let database = database.clone(); std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            rusqlite::Connection::open(&database).unwrap().execute_batch(EVENTS_SCHEMA).unwrap();
+        }) };
+        shared.output(r#"{"type":"assistant"}"#);
+        fixer.join().unwrap();
+        // Sent only once kept.
+        assert!(started.elapsed() >= std::time::Duration::from_millis(400));
+        assert_eq!(shared.store.last_seq(), 1);
+        client.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut client).read_line(&mut line).unwrap();
+        assert!(line.contains("\"seq\":1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

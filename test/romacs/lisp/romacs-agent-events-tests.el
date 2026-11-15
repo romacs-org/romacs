@@ -175,4 +175,39 @@ turns, and its journal's file; a state root of its own."
          (funcall (cdr pager))
          (should (= (length seen) 6)))))))
 
+(ert-deftest romacs-agent-events-a-per-turn-start-is-where-records-go ()
+  ;; A per-turn harness's turn, the store on: imported first, so where its
+  ;; run's records start is a place of SQLite's, after its last record.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events-store t))
+    (romacs-agent-events-tests--with-session
+     2
+     (lambda (session _journal)
+       (cl-letf (((symbol-function 'romacs-agent--launch) #'ignore)
+                 ((symbol-function 'romacs-agent--attach) #'ignore)
+                 ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+                 ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness"))))
+         (romacs-agent--turn session "next"))
+       (should (romacs-agent-events-p session))
+       (should (equal (romacs-agent-journal-start session) (romacs-agent-events-end session)))
+       (should (= (romacs-agent-journal-start session) 8))))))
+
+(ert-deftest romacs-agent-events-a-failed-replay-lets-its-pages-go ()
+  ;; A replay that fails in a step lets go of its snapshot; one that is done
+  ;; lets go of it too, once.
+  (let ((closed 0))
+    (cl-letf (((symbol-function 'romacs-agent--journal-pager)
+               (lambda (_s) (cons (lambda (_from) (cons (list "{\"seq\":1,\"t\":1.0,\"in\":{\"prompt\":\"p\"}}") nil))
+                                  (lambda () (cl-incf closed)))))
+              ((symbol-function 'run-at-time) (lambda (_t _r f &rest args) (apply f args))))
+      (let ((session (romacs-agent--make :id "f" :harness 'claude :tools (make-hash-table :test #'equal)
+                                         :streamed (make-hash-table :test #'equal))))
+        (romacs-agent-events-async session #'ignore)
+        (should (= closed 1))
+        (cl-letf (((symbol-function 'romacs-agent--record) (lambda (&rest _) (error "Broken"))))
+          (should-error (romacs-agent-events-async session #'ignore)))
+        (should (= closed 2))))))
+
 ;;; romacs-agent-events-tests.el ends here

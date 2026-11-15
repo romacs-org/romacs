@@ -1347,6 +1347,9 @@ itself, so the turn goes on whatever becomes of this server."
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
+    ;; Moved to SQLite first, if it is to be: the start is a place of
+    ;; where its records will be.
+    (romacs-agent-events-own session)
     (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
     (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
                           input images))
@@ -1788,19 +1791,26 @@ and is read a slice at a time, never whole."
          (pager (romacs-agent--journal-pager session))
          (offset 0) (lines nil) (step nil))
     (setq step (lambda ()
-                 (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-                   (dotimes (_ (or batch 200))
-                     (when (and (null lines) offset)
-                       (pcase (funcall (car pager) offset)
-                         (`(,read . ,next) (setq lines read offset next))
-                         (_ (setq offset nil))))
-                     (when lines
-                       (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
-                                                                       :null-object :null :false-object :false))))
-                         (when (hash-table-p record) (romacs-agent--record scratch record))))))
-                 (if (or lines offset) (run-at-time 0 nil step)
-                   (funcall (cdr pager))
-                   (funcall then (nreverse events)))))
+                 (let ((scheduled nil))
+                   ;; Its pages let go of unless another step is to read them:
+                   ;; done, or a quit or an error in this one.
+                   (unwind-protect
+                       (progn
+                         (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
+                           (dotimes (_ (or batch 200))
+                             (when (and (null lines) offset)
+                               (pcase (funcall (car pager) offset)
+                                 (`(,read . ,next) (setq lines read offset next))
+                                 (_ (setq offset nil))))
+                             (when lines
+                               (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
+                                                                               :null-object :null :false-object :false))))
+                                 (when (hash-table-p record) (romacs-agent--record scratch record))))))
+                         (when (or lines offset)
+                           (run-at-time 0 nil step)
+                           (setq scheduled t)))
+                     (unless scheduled (funcall (cdr pager))))
+                   (unless scheduled (funcall then (nreverse events))))))
     (funcall step)))
 
 (defun romacs-agent--journal-pager (session)
