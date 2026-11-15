@@ -195,6 +195,40 @@ fn a_form_that_meets_a_fence_leaves_its_entry_to_the_session() {
     assert_eq!(eval(&mut vm, "romacs--world-reseed-forms"), "nil", "no form is kept as code");
 }
 
+/// A timer an entry starts is the image's only when restore makes it
+/// again: org-persist's lock refresh, which its re-seed form keeps in its
+/// variable. Any other, beside a re-seed form that read the clock for its
+/// own variable (cl-extra's random state), leaves its entry to the session.
+#[test]
+fn a_timer_restore_does_not_make_again_leaves_its_entry_to_the_session() {
+    let dir = scratch("timers");
+    let (extra, org) = (dir.join("lisp/emacs-lisp"), dir.join("lisp/org"));
+    std::fs::create_dir_all(&extra).unwrap();
+    std::fs::create_dir_all(&org).unwrap();
+    std::fs::write(extra.join("cl-extra.el"), "(defvar cl--random-state (list 'state (current-time)))\n\
+        (setq timer-list (cons (list 'unrelated) timer-list))\n(provide 'cl-extra)\n").unwrap();
+    std::fs::write(org.join("org-persist.el"), "(defvar org-persist--disable-when-emacs-Q nil)\n\
+        (defvar org-persist--refresh-gc-lock-timer nil)\n\
+        (unless (and org-persist--disable-when-emacs-Q nil)\n  \
+        (setq org-persist--refresh-gc-lock-timer (car (setq timer-list (cons (list 'lock (current-time)) timer-list)))))\n\
+        (provide 'org-persist)\n").unwrap();
+    std::fs::write(dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), BOOTSTRAP).unwrap();
+    let require = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: false, forms: Vec::new() };
+    let paths = vec![vec![extra.display().to_string(), org.display().to_string()]];
+    let plan = Plan::new(&dir.join("init.el"), vec![require("cl-extra"), require("org-persist")], paths).unwrap();
+    host::enter_build(PINNED);
+    let mut vm = Vm::new();
+    vm.world_begin();
+    vm.install_lisp_prelude().expect("prelude");
+    vm.load_file(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el")).expect("bootstrap");
+    let refused = vm.world_layer_load(&plan, &[]);
+    let trace = host::leave_build().unwrap();
+    let refused: Vec<(usize, &str)> = refused.iter().map(|(at, why)| (*at, why.as_str())).collect();
+    assert_eq!(refused, [(0, "timer")], "{}", trace["refusals"]);
+    assert!(trace["refusals"].as_array().unwrap().iter().all(|r| r["kind"] == "init-layer"), "{}", trace["refusals"]);
+    assert_eq!(eval(&mut vm, "timer-list"), "nil", "no image holds a timer of the builder's");
+}
+
 /// A source session runs startup before its libraries and keeps what they
 /// set; a restored one runs it after them. A library whose value the
 /// startup run after the libraries sets again is refused, and the session

@@ -175,7 +175,7 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 watchers.rs write_from_native perform_write 1 held  # at once: nothing hears it, or no engine will complete it and its watchers hold collection (rooted_write unset)
 window.rs frame_window_snapshots resize_root_window 1 clean  # its size is plain; the root window is read again from the frame after it
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
-world/layer.rs cancel_entry_timers eval_source_raw 1 clean  # no Values before the call; the timers it keeps are a Lisp variable's, and its value is a fixnum, read at once
+world/layer.rs cancel_entry_timers eval_source_raw 2 clean  # no Values before either call: the timers it keeps and those restore makes again are Lisp variables', and its value is a fixnum, read at once
 world/layer.rs world_layer_load eval_source_raw 6 boundary  # a layer build's top-level requests (secret-reader advice on, session variables, each entry, a collection when an entry leaves a resource, advice off, startup rerun): the builder holds Rust strings, symbol slots and digests only; across an entry or the collection the `features' head sits in a RootFrame and is read back; each result is dropped or only matched
 world/pending.rs force_pending safe_call 1 held  # gc_holds is raised across the call; INDEX is a fixnum and nothing heap is used after it
 world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds
