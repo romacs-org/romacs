@@ -50,4 +50,45 @@
             (should (equal lines '("{\"a\":\"ééé\"}" "{\"b\":\"a much longer line than a slice\"}" "{\"c\":1}")))))
       (delete-file file))))
 
+(ert-deftest romacs-agent-stream-output-while-handling-waits ()
+  ;; Output that comes while a record is handled (its handler waited on a
+  ;; process) is handled after the records before it, once each.
+  (let* ((session (romacs-agent--make :id "s" :harness 'claude))
+         (process (make-process :name "romacs-stream-fixture" :command '("cat") :noquery t))
+         (seen nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--kept) #'ignore)
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_s record)
+                     (let ((seq (gethash "seq" record)))
+                       (push seq seen)
+                       (when (eql seq 1) (romacs-agent--filter process "q\":3}\n{\"seq\":4}\n"))))))
+          (process-put process 'romacs-agent session)
+          (romacs-agent--filter process "{\"seq\":1}\n{\"seq\":2}\n{\"se")
+          (should (equal (reverse seen) '(1 2 3 4)))
+          (should-not (process-get process 'pending)))
+      (delete-process process))))
+
+(ert-deftest romacs-agent-stream-replay-ends-though-the-journal-grows ()
+  ;; A replay reads what the journal held when it began: a record written
+  ;; meanwhile does not keep it going.
+  (let* ((dir (make-temp-file "romacs-stream-" t))
+         (journal (expand-file-name "journal.jsonl" dir))
+         (session (romacs-agent--make :id "g" :harness 'claude :dir dir :tools (make-hash-table :test #'equal)
+                                      :streamed (make-hash-table :test #'equal)))
+         (steps 0) (result :none) (romacs-agent--journal-slice 16))
+    (unwind-protect
+        (progn
+          (with-temp-file journal
+            (dotimes (i 3) (insert (json-serialize (romacs-mcp--object "seq" (1+ i) "in" (romacs-mcp--object "prompt" "p"))) "\n")))
+          (cl-letf (((symbol-function 'run-at-time)
+                     (lambda (_time _repeat f &rest args)
+                       (when (< (cl-incf steps) 50)
+                         (write-region "{\"seq\":99,\"in\":{\"prompt\":\"late\"}}\n" nil journal t 'silent)
+                         (apply f args)))))
+            (romacs-agent-events-async session (lambda (events) (setq result events)) 1))
+          (should (listp result))
+          (should (< steps 10)))
+      (delete-directory dir t))))
+
 ;;; romacs-agent-stream-tests.el ends here

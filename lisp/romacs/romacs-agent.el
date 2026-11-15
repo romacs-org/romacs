@@ -1744,13 +1744,14 @@ copy (`romacs-agent--scratch'): SESSION is left as it is."
 (defconst romacs-agent--journal-slice (* 1024 1024)
   "The bytes of a journal read at a time by `romacs-agent--journal-lines'.")
 
-(defun romacs-agent--journal-lines (file offset)
+(defun romacs-agent--journal-lines (file offset &optional end)
   "FILE's whole lines from byte OFFSET, about `romacs-agent--journal-slice'
 bytes of them (more when one line is longer), as (LINES . NEXT): LINES
 decoded, NEXT the byte after the last, or nil when none follows; nil when
-no whole line is left.  Its bytes are read
-as they are and each line is decoded, so offsets are the file's own."
-  (let ((size (or (file-attribute-size (file-attributes file)) 0))
+no whole line is left.  Bytes from END on, when given, are not read: what
+was written since a reading began.  Its bytes are read as they are and
+each line is decoded, so offsets are the file's own."
+  (let ((size (min (or end most-positive-fixnum) (or (file-attribute-size (file-attributes file)) 0)))
         (slice romacs-agent--journal-slice) (found nil))
     (when (< offset size)
       (with-temp-buffer
@@ -1775,12 +1776,14 @@ at a time between the editor's other work: a long journal never holds it,
 and is read a slice at a time, never whole."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
          (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         ;; Read up to its end now: what it gains meanwhile is not waited for.
+         (end (file-attribute-size (file-attributes journal)))
          (offset 0) (lines nil) (step nil))
     (setq step (lambda ()
                  (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
                    (dotimes (_ (or batch 200))
                      (when (and (null lines) offset)
-                       (pcase (and (file-readable-p journal) (romacs-agent--journal-lines journal offset))
+                       (pcase (and end (file-readable-p journal) (romacs-agent--journal-lines journal offset end))
                          (`(,read . ,next) (setq lines read offset next))
                          (_ (setq offset nil))))
                      (when lines
@@ -1844,20 +1847,30 @@ byte FROM (a record's start) when given."
 
 (defun romacs-agent--filter (process chunk)
   "Handle the records PROCESS's supervisor sent, CHUNK the latest output.
-A line's earlier chunks wait as a list, newest first, and are joined once,
-when its end comes: a long line costs its length, not its length times
-its chunks."
-  (if (not (string-search "\n" chunk))
-      (process-put process 'pending (cons chunk (process-get process 'pending)))
-    (let ((text (apply #'concat (nreverse (cons chunk (process-get process 'pending))))))
-      (process-put process 'pending nil)
-      (romacs-agent--filter-lines process text))))
+Chunks wait as a list, newest first, and are joined once a line's end is
+among them: a long line costs its length, not its length times its
+chunks.  Output that comes while records are handled (a handler waiting
+on a process) waits for them, so records are handled once each, in the
+order they were sent."
+  (process-put process 'pending (cons chunk (process-get process 'pending)))
+  (when (string-search "\n" chunk) (process-put process 'ready t))
+  (unless (process-get process 'draining)
+    (process-put process 'draining t)
+    (unwind-protect
+        (while (process-get process 'ready)
+          (process-put process 'ready nil)
+          (let ((text (apply #'concat (nreverse (process-get process 'pending)))))
+            (process-put process 'pending nil)
+            (romacs-agent--filter-lines process text)))
+      (process-put process 'draining nil))))
 
 (defun romacs-agent--filter-lines (process text)
   "Handle each whole line of TEXT, PROCESS's output; what follows its last
-newline waits for the next chunk."
+newline, or the lines left when a handler exits nonlocally, waits before
+what came meanwhile."
   (let ((session (process-get process 'romacs-agent))
         (start 0))
+    (unwind-protect
     (while (string-match "\n" text start)
       (let ((line (substring text start (match-beginning 0))))
         (setq start (match-end 0))
@@ -1894,9 +1907,10 @@ newline waits for the next chunk."
                 (t (romacs-agent--kept session process)
                    (condition-case err (romacs-agent--record session record)
                      (error (message "romacs-agent: %s" (error-message-string err)))))))))
-    ;; Its rest goes before what came while its lines were handled.
-    (when (< start (length text))
-      (process-put process 'pending (append (process-get process 'pending) (list (substring text start)))))))
+      ;; Its rest goes before what came while its lines were handled.
+      (when (< start (length text))
+        (process-put process 'pending (append (process-get process 'pending) (list (substring text start))))
+        (when (string-search "\n" text start) (process-put process 'ready t))))))
 
 (defun romacs-agent--sentinel (process _event)
   (unless (process-live-p process)
