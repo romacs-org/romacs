@@ -993,9 +993,9 @@ impl Leaf<'_> {
         let stat = subtree_stat(n.node, None);
         Ok(self.ts_list(&[fixnum(stat.depth), fixnum(stat.width), fixnum(stat.count)]))
     }
-    /// `romacs--treesit-subtree-exceeds': whether NODE's subtree is deeper
+    /// `romacs--treesit-subtree-exceeds`: whether NODE's subtree is deeper
     /// than DEPTH or has a node with more than WIDTH children, as
-    /// `treesit-subtree-stat' would tell, without walking the rest of it
+    /// `treesit-subtree-stat` would tell, without walking the rest of it
     /// once it is.
     pub(crate) fn ts_subtree_exceeds(&mut self, node: Value, depth: Value, width: Value) -> Out {
         let n = self.ts_node(node)?.clone();
@@ -1005,7 +1005,7 @@ impl Leaf<'_> {
     }
 }
 
-/// What `treesit-subtree-stat' tells of a subtree.
+/// What `treesit-subtree-stat` tells of a subtree.
 struct Stat { depth: i64, width: i64, count: i64 }
 
 /// NODE's subtree's greatest depth and width and its node count, walked
