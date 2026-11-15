@@ -16,7 +16,7 @@
 //!
 //! The world ends after the chain and Romacs's definitions
 //! (`startup::install_session_definitions`), before the session's own
-//! startup steps (lisp/romacs/romacs-gui-loadup.el): those read and write the
+//! startup steps (lisp/session/romacs-gui-loadup.el): those read and write the
 //! delayed variables and the inputs of this process, which a world build
 //! refuses, so a restored launch takes them itself.
 //!
@@ -257,11 +257,14 @@ fn keep_last(layer: &Layer) {
 
 /// FULL's layer over BASE less the entries standing refusals name: each
 /// refused layer's entries are left out and the rest keyed again, until a
-/// key has no standing refusal. None when nothing is left, or a refusal
-/// names no entry (the build refused for another reason on these inputs).
+/// key has no standing refusal. A library the init loads at startup that is
+/// left out takes every later entry with it, so the init keeps its order. A refusal that names no entry (the startup
+/// run after the libraries, the capture) leaves out the later half of the
+/// entries kept: capture ends earlier, and those load in the session as
+/// from source. None only when nothing is left.
 pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
     let mut excluded: Vec<usize> = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..16 {
         let plan = full.without(&excluded);
         if plan.entries.is_empty() {
             return None;
@@ -274,10 +277,26 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
         let named: Vec<usize> = refusals.iter().filter(|r| r["kind"] == REFUSAL)
             .filter_map(|r| r["entry"].as_u64()).filter_map(|j| kept.get(j as usize).copied()).collect();
         if named.is_empty() {
-            eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": {"refused": refusals}}));
-            return None;
+            let later = kept.get(kept.len().div_ceil(2)..).unwrap_or_default();
+            eprintln!("romacs-world: {}", json!({"event": "layer", "shortened": later.len(), "reason": {"refused": refusals}}));
+            if later.is_empty() {
+                return None;
+            }
+            excluded.extend(later);
+        } else {
+            // A library the init loads at startup that the layer cannot hold
+            // ends capture there: it and every later entry load in the
+            // session in the init's order, as from source, and so does a
+            // library declared before it that one of those names.
+            if let Some(cut) = named.iter().copied().filter(|&at| !full.entries[at].declared).min() {
+                let later: Vec<usize> = kept.iter().copied().filter(|&at| at > cut).collect();
+                let names: std::collections::HashSet<&str> = std::iter::once(cut).chain(later.iter().copied())
+                    .map(|at| full.entries[at].name.as_str()).collect();
+                let declared = kept.iter().copied().filter(|&at| at < cut && full.entries[at].declared && names.contains(full.entries[at].name.as_str()));
+                excluded.extend(later.iter().copied().chain(declared.collect::<Vec<_>>()));
+            }
+            excluded.extend(named);
         }
-        excluded.extend(named);
         excluded.sort_unstable();
         excluded.dedup();
     }
@@ -313,8 +332,8 @@ pub struct Worlds {
 /// The user's init has run and PLAN is what it loaded (None: nothing was
 /// recorded). Keep the plan when it differs from the store's in loads or
 /// in the init's content, and unless this launch restored the layer of
-/// these very loads, build that layer ahead of the next launch, on a
-/// thread of its own.
+/// these very loads, build that layer ahead of the next launch, in a
+/// process of its own (`build_ahead_apart`).
 pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     let Some(recorded) = plan else { return };
     // An init that loads nothing has no layer.
@@ -345,15 +364,37 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan) || layer.resolved_from.as_ref() == Some(&plan.digest())) {
         return;
     }
-    let (base, width, height, floor) = (worlds.base.clone(), worlds.width, worlds.height, worlds.floor);
-    std::thread::spawn(move || build_ahead(&base, plan, width, height, floor));
+    build_ahead_apart(worlds, &plan.init);
+}
+
+/// INIT's layer built ahead of the next launch by a process apart from
+/// this one (`--world-build-layer`), from the plan the store keeps: a
+/// build that refuses entries needs another without them, and a session
+/// that ends sooner than its rounds would leave the next launch to boot
+/// from the base and build them. The process logs in the store.
+fn build_ahead_apart(worlds: &Worlds, init: &Path) {
+    use std::os::unix::process::CommandExt;
+    let mut args = builder_args(&worlds.base, worlds.width, worlds.height, worlds.floor, None);
+    args.extend(["--world-build-layer".into(), init.as_os_str().to_owned()]);
+    let started = std::env::current_exe().and_then(|exe| {
+        let log = romacs_vm::host::open_store_file(worlds.base.store.join("layer-ahead.log"), romacs_vm::host::StoreOpen::Write { create: true, truncate: true })?;
+        std::process::Command::new(exe).args(args).stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?).stderr(log).process_group(0).spawn()
+    });
+    match started {
+        Ok(mut child) => {
+            eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "pid": child.id()}));
+            std::thread::spawn(move || child.wait());
+        }
+        Err(error) => eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "error": error.to_string()})),
+    }
 }
 
 /// The layer of FULL over BASE made usable: built here, or waited for,
-/// and after a build that refused entries, built again without them, a
-/// few times over. Whether a layer is usable at the end.
+/// and after a build that refused entries, or a shortened one, built again
+/// without them, a few times over. Whether a layer is usable at the end.
 fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<usize>) -> bool {
-    for _ in 0..4 {
+    for _ in 0..8 {
         let Some(layer) = resolve(base, full.clone()) else { return false };
         if layer.world.ready() {
             keep_last(&layer);
@@ -432,30 +473,16 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
     args
 }
 
-/// The read roots of a build beside the store's own: the Lisp trees and
-/// the fonts the layout engine measures with (a batch world's too,
-/// `batch::boot`, which measures none).
-pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
-    let mut roots = startup::lisp_roots(dir);
-    roots.extend(crate::fonts::icon_font_dirs());
-    roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
-    if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
-        roots.extend([home.join(".local/share/fonts"), home.join(".fonts"), home.join(".cache/fontconfig")]);
-    }
-    roots
-}
-
 /// The builder: the launch's steps up to the world's end, with PLAN's
 /// libraries for a layer, headless, on the evaluator's stack, then publish.
 fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<(Plan, Vec<Entry>)>) -> Result<(), String> {
     let world = world.clone();
     crate::spawn_evaluator(move || -> Result<(), String> {
-        // The fonts load before the build is confined.
+        // The fonts load before the build records: the files they came from
+        // are keyed at its end (`build_world`).
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
-        let mut roots = build_roots(&dir);
-        roots.extend(plan.iter().flat_map(|(plan, _)| plan.directories()));
-        world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())?;
+        world.begin_build().map_err(|e| e.to_string())?;
         let len = world.build(|| build_world(width, height, floor, &dir, engine, plan.as_ref()))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
@@ -536,16 +563,6 @@ mod tests {
             "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
         assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
         let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    /// The bundled autoloads' scan reads the layout beside lisp/romacs, which a
-    /// confined build reads only inside its roots.
-    #[test]
-    fn a_build_reads_the_bundled_trees_and_their_layout() {
-        let roots = build_roots(std::path::Path::new("/r/lisp/gnu"));
-        for path in ["/r/lisp/gnu", "/r/lisp/romacs", "/r/lisp/bundled.json"] {
-            assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
-        }
     }
 
     #[test]

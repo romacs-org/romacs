@@ -1,0 +1,7 @@
+{
+  "what": "The GNU Emacs commit whose lisp/ changes we have read up to (tools/lisp-upstream digest lists the ones after it; mark moves it). Our lisp/ began from 45b0f7699df, four local commits on top of this one; those are in our tree already.",
+  "repository": "https://git.savannah.gnu.org/git/emacs.git",
+  "fetch": "https://github.com/emacs-mirror/emacs",
+  "branch": "master",
+  "reviewed_through": "d12a1f9ff0f7e51b8984dc649951a0fa7fecc798"
+}

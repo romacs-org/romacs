@@ -1,4 +1,4 @@
-//! GNU inotify.c from Lisp (lisp/romacs/vm/inotify.el, prims/inotify.rs): watch
+//! GNU inotify.c from Lisp (lisp/vm/inotify.el, prims/inotify.rs): watch
 //! descriptors shared by one file's watches and told apart by id, aspect
 //! and descriptor errors, events read by batch `read-event' (create,
 //! a rename's moved-from and moved-to with one cookie, delete, and the

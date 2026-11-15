@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Generate lisp/'s loaddefs files from the tree, as GNU's build does for its own.
+
+    lisp-loaddefs [--binary EMACS] [--check]
+
+Runs lisp/emacs-lisp/loaddefs-gen.el's `loaddefs-generate` from our tree over the directories
+lisp_layout.loaddefs_directories names (GNU's SUBDIRS_ALMOST rule, packages/ and vm/ left out),
+leaving out the files GNU's build leaves out (the preloaded ones) and the files the bundled-autoloads
+scan holds (lisp_layout.scanned_files: Romacs's runtime files, whose cookies run after loadup).
+Always in full, into lisp/loaddefs.el, the *-loaddefs.el files sources name, and theme-loaddefs.el
+from etc/themes. The files are committed, since loadup loads them before anything could make them;
+`--check` generates into a scratch copy of lisp/ and etc/themes and exits 1 naming each file that
+differs from the tree's.
+
+The pinned GNU binary runs it (tools/lib/gnu_oracle.py, which refuses a binary that is not the
+recorded oracle), as a build tool over our sources, until Romacs runs loaddefs-gen.el; --binary
+overrides it. The locale is fixed, so the bytes do not depend on the caller's.
+"""
+import argparse
+import filecmp
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import lisp_layout  # noqa: E402
+
+GENERATE = '''(let* ((lisp-directory (file-name-as-directory {lisp}))
+       (default-directory lisp-directory))
+  (require 'loaddefs-gen)
+  (loaddefs-generate (list {dirs}) (expand-file-name "loaddefs.el")
+                     (append (loaddefs-generate--excluded-files) (list {scanned})) nil t t)
+  (let ((lisp-mode-autoload-regexp "^;;;###\\\\(\\\\(noexist\\\\)-\\\\)?\\\\(theme-autoload\\\\)"))
+    (loaddefs-generate (expand-file-name "../etc/themes/") (expand-file-name "theme-loaddefs.el") nil nil nil t)))'''
+
+
+def generated(lisp: Path) -> list[Path]:
+    """The loaddefs files under LISP, relative to it."""
+    return sorted(p.relative_to(lisp) for p in lisp.rglob('*loaddefs.el'))
+
+
+def run(binary: str, root: Path) -> None:
+    """Generate under ROOT (a checkout or a copy of one) with a private HOME and XDG."""
+    lisp = root / 'lisp'
+    dirs = ' '.join(json.dumps(str(d)) for d in lisp_layout.loaddefs_directories(root))
+    # Romacs's own runtime files keep their autoloads in the bundled scan, which runs after loadup.
+    scanned = ' '.join(json.dumps(str(p)) for p in lisp_layout.scanned_files(root))
+    with tempfile.TemporaryDirectory(prefix='lisp-loaddefs-') as home:
+        env = {k: os.environ[k] for k in ('PATH',) if k in os.environ}
+        env.update(HOME=home, TMPDIR=home, LANG='C.UTF-8', LC_ALL='C.UTF-8',
+                   **{k: str(Path(home) / k.lower()) for k in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME',
+                                                                'XDG_STATE_HOME', 'XDG_RUNTIME_DIR')})
+        source = GENERATE.format(lisp=json.dumps(str(lisp)), dirs=dirs, scanned=scanned)
+        done = subprocess.run([binary, '-Q', '--batch', '--eval', source], env=env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True)
+    if done.returncode:
+        raise SystemExit(f'lisp-loaddefs: {binary} exited {done.returncode}:\n{done.stderr[-2000:]}')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--binary')
+    parser.add_argument('--check', action='store_true')
+    args = parser.parse_args()
+    if not args.binary:
+        import gnu_oracle
+        args.binary = gnu_oracle.require()['path']
+    if not args.check:
+        run(args.binary, ROOT)
+        print('\n'.join(map(str, generated(ROOT / 'lisp'))))
+        return 0
+    with tempfile.TemporaryDirectory(prefix='lisp-loaddefs-check-') as tmp:
+        copy = Path(tmp)
+        shutil.copytree(ROOT / 'lisp', copy / 'lisp', symlinks=True)
+        shutil.copytree(ROOT / 'etc/themes', copy / 'etc/themes', symlinks=True)
+        shutil.copy(ROOT / 'etc/romacs-runtime-epoch', copy / 'etc/romacs-runtime-epoch')
+        run(args.binary, copy)
+        names = sorted(set(generated(ROOT / 'lisp')) | set(generated(copy / 'lisp')))
+        stale = [n for n in names if not ((ROOT / 'lisp' / n).is_file() and (copy / 'lisp' / n).is_file()
+                                          and filecmp.cmp(ROOT / 'lisp' / n, copy / 'lisp' / n, shallow=False))]
+    for name in stale:
+        print(f'lisp/{name}: not what tools/lisp-loaddefs makes of the tree; fix: run tools/lisp-loaddefs')
+    return 1 if stale else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
