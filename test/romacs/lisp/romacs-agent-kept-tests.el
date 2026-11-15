@@ -594,6 +594,25 @@ contents, so two equal states print the same."
             (should-not read))
           (should (= romacs-agent--fold-running 0)))))))
 
+(ert-deftest romacs-agent-kept-a-message-to-a-folding-session-folds-it-first ()
+  ;; A message sent while a worker folds the session: what it is sent as
+  ;; is decided on its folded state, not the stub's.
+  (romacs-agent-kept-tests--with
+    (let ((records (romacs-agent-kept-tests--claude)) (seen nil))
+      (romacs-agent-kept-tests--write dir records)
+      (romacs-agent-kept-tests--with-workers
+        (clrhash romacs-agent--sessions)
+        (let ((session (romacs-agent--load dir)))
+          (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+          (cl-letf (((symbol-function 'romacs-agent--input)
+                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
+                    ((symbol-function 'romacs-agent--enqueue)
+                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
+                    ((symbol-function 'romacs-agent--continue) #'ignore))
+            (ignore-errors (romacs-agent-send session "again")))
+          (should (eql seen (length records)))
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding)))))))
+
 (ert-deftest romacs-agent-kept-a-whole-restore-folds-what-folds-aside ()
   ;; A restore that ends at once (a view's first look) folds here what a
   ;; worker folds still, before its tail; one under way stepwise is left to

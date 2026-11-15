@@ -1221,6 +1221,7 @@ brief."
 what the journal keeps of it.  A detached session whose supervisor still
 runs is attached first; one whose supervisor ended says so: it resumes with
 `romacs-agent-resume'."
+  (romacs-agent--fold-now session)
   (let ((connection (romacs-agent-connection session))
         ;; The harness's line is text inside the envelope: serialized once.
         (line (concat (json-serialize
@@ -1295,6 +1296,7 @@ message's text, which a child's result or a quote can fill.")
 the attached IMAGES.  The journal keeps the message as it would be without
 them, and their files: a replay reads every record, and no image's bytes.
 Both are made with one request id: the journal's is the one written."
+  (romacs-agent--fold-now session)
   (let* ((input (romacs-agent--harness-get session :input))
          (images (romacs-agent--sendable-images images))
          (id (romacs-agent-request-id session))
@@ -3118,6 +3120,8 @@ DELIVERED, when given.  A per-turn harness's message waits while a turn
 runs (DELIVERED waits with it), then starts the next unless VALID, when
 given, then says it is no longer wanted.  IMAGES are the files the user
 attached to it."
+  ;; What it is sent as (a new turn, a steer) is told by its folded state.
+  (romacs-agent--fold-now session)
   (cond ((or (romacs-agent-pending-selection session)
              ;; A rollback holds it: the message goes to the conversation
              ;; as the rollback leaves it.
@@ -3157,6 +3161,7 @@ attached to it."
   "Interrupt SESSION's turn; queued messages stay.  A per-turn harness's
 run ends (its supervisor journals the exit): the next message continues
 its thread."
+  (romacs-agent--fold-now session)
   (let ((how (funcall (romacs-agent--harness-get session :interrupt) session)))
     (pcase how
       ;; The harness alone: the supervisor goes on to journal its exit.
