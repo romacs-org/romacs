@@ -600,6 +600,8 @@ pub struct WgpuGlyphAtlas {
     pub(crate) cache_hits_this_frame: usize,
     pub(crate) cache_misses_this_frame: usize,
     pub(crate) page_evictions_this_frame: usize,
+    /// Font identities hashed since the last `count_font_identities`.
+    font_identities: std::cell::Cell<usize>,
     /// Monotonic count of UV-invalidating events (page eviction/reset and
     /// whole-atlas clears). Cached vertices embed atlas UVs, so any consumer
     /// caching tessellated output MUST key on this and drop its cache when it
@@ -764,6 +766,7 @@ impl WgpuGlyphAtlas {
             cache_hits_this_frame: 0,
             cache_misses_this_frame: 0,
             page_evictions_this_frame: 0,
+            font_identities: std::cell::Cell::new(0),
             eviction_generation: 0,
             pin_epoch: 0,
         }
@@ -1794,6 +1797,7 @@ impl WgpuGlyphAtlas {
     /// font/glyph answer participates directly, so row reuse and atlas lookup
     /// cannot hit a mask produced for an older fallback binding.
     pub(crate) fn glyph_font_identity_for_char(&self, face: Option<&Face>, c: char) -> u64 {
+        self.font_identities.set(self.font_identities.get() + 1);
         let mut hasher = DefaultHasher::new();
         glyph_font_identity(face).hash(&mut hasher);
         if let Some(face) = face
@@ -1814,6 +1818,12 @@ impl WgpuGlyphAtlas {
             hash_foreground(face.foreground).hash(&mut hasher);
         }
         hasher.finish()
+    }
+
+    /// Add the font identities hashed since the last call to the thread's
+    /// count (`cost::FONT_IDENTITIES`): a glyph pass calls it as it ends.
+    pub(crate) fn count_font_identities(&self) {
+        crate::cost::add(crate::cost::FONT_IDENTITIES, self.font_identities.take());
     }
 
     pub(crate) fn glyph_stream_identity_for_composed(
@@ -2394,6 +2404,7 @@ impl WgpuGlyphAtlas {
         glyph_h: u32,
         bytes_per_pixel: u32,
     ) {
+        crate::cost::add(crate::cost::BYTES_UPLOADED, pixel_data.len());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,

@@ -10,6 +10,8 @@ mod pinned_lifecycle;
 mod retained_owner;
 #[path = "frame_submission_test.rs"]
 mod frame_submission;
+#[path = "root_picture_reset_test.rs"]
+mod root_picture_reset;
 
 fn target(renderer: &WgpuRenderer) -> wgpu::Texture {
     renderer.device().create_texture(&wgpu::TextureDescriptor {

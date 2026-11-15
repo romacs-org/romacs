@@ -1554,7 +1554,7 @@ impl WgpuRenderer {
     // boundary; a local alias would only hide this one site.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
-    fn render_frame_glyphs_impl(
+    pub(super) fn render_frame_glyphs_impl(
         &mut self,
         view: &wgpu::TextureView,
         frame_glyphs: &FrameGlyphBuffer,
@@ -1694,6 +1694,7 @@ impl WgpuRenderer {
 
         let mut stats = GlyphRenderStats::new();
         stats.total_frame_glyphs = frame_glyphs.glyphs.len();
+        crate::cost::add(crate::cost::GLYPHS_WALKED, frame_glyphs.glyphs.len());
         for glyph in &frame_glyphs.glyphs {
             if let FrameGlyph::Char { composed, .. } = glyph {
                 stats.text_glyphs += 1;
@@ -1854,6 +1855,7 @@ impl WgpuRenderer {
         stats.cache_misses = glyph_atlas.cache_misses_this_frame;
         stats.glyph_texture_uploads = glyph_atlas.cache_misses_this_frame;
         stats.buffers_created = self.arenas.buffers_created_since_snapshot() as usize;
+        glyph_atlas.count_font_identities();
         self.glyph_stats = stats.clone();
         stats.log_if_enabled();
 

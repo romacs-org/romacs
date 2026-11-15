@@ -856,6 +856,25 @@ fn reused_damage_with_empty_cache_tessellates_and_counts_bail() {
 }
 
 #[test]
+fn a_row_no_damage_record_names_is_tessellated_unmarked_and_never_captured() {
+    // What the paint host hands every frame: a summary that names no row.
+    // A warm cache spares nothing, no key is tested, and nothing is staged.
+    let glyphs = two_window_glyphs(0.0);
+    let origins = origins();
+    let cache = warm_cache(&glyphs, &origins);
+    let empty = FrameRowDamage::default();
+    for damage in [None, Some(&empty)] {
+        let ran = run_pass(&glyphs, &base_ctx(damage, &origins), &cache, false);
+        assert_eq!(
+            (ran.stats.rows_tessellated, ran.stats.rows_unmarked, ran.stats.reuse_bails),
+            (4, 4, 0)
+        );
+        assert_eq!(ran.stats.rows_reused_verbatim + ran.stats.rows_reused_shifted, 0);
+        assert!(ran.captures.is_empty());
+    }
+}
+
+#[test]
 fn cursor_row_never_spliced_and_never_captured() {
     let glyphs = two_window_glyphs(0.0);
     let origins = origins();
