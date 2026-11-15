@@ -4032,9 +4032,10 @@ opens."
 
 (declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 
-(defconst romacs-agent--restore-turn 0.2
+(defconst romacs-agent--restore-turn 0.05
   "Seconds of loading `romacs-agent-restore-soon' does in one turn of the
-command loop, past the turn's first session.")
+command loop, past the turn's first session: short enough that a key
+waits for no step.")
 
 (defvar romacs-agent--restore-pending nil
   "The session directories `romacs-agent-restore-soon' has still to load.")
