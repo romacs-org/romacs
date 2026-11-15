@@ -1,4 +1,4 @@
-//! lisp/romacs/romacs-fzf.el's completion semantics against pinned GNU.  GNU has
+//! lisp/completion/romacs-fzf.el's completion semantics against pinned GNU.  GNU has
 //! no fzf style, so each case is answered there by GNU's own machinery:
 //! a single fuzzy term by GNU's `flex' style, which matches the same
 //! subsequences, and an extended query by its terms' meaning over the
@@ -194,7 +194,7 @@ fn run_gnu(binary: &str, program: &str) -> String {
 
 fn run_romacs(program: String) -> String {
     std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = gnu_lisp(&["lisp/romacs/romacs-fzf.el"]);
+        let mut vm = gnu_lisp(&["lisp/completion/romacs-fzf.el"]);
         vm.eval_source(&program).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap().unwrap()
