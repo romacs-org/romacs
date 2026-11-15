@@ -123,7 +123,25 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
 ;; (the Rum palette, the launch font) keeps its own spec.
 (frame-set-background-mode (selected-frame))
 
-(declare-function romacs-startup-progress "animate.rs" (stage &optional label))
+(declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
+
+(defvar romacs-progress-state nil
+  "Each startup stage's latest state, as (STAGE :label LABEL . STATE), kept
+by `romacs-startup-progress': STATE a plist of :status (`running', `done'
+or `failed'), :done, :of, :name, :error and :seconds.  A restart's
+supervisor reads it over the server's socket.")
+
+;; A start's long steps (a restore's buffers, the agent sessions) show on
+;; the launch screen, or after it in a card (romacs-progress-view.el), which
+;; loads when the first step with a state reports.
+(autoload 'romacs-progress-view-update "romacs-progress-view")
+
+(defun romacs-gui-loadup--progress-view (on-screen)
+  "Show the start's steps (`romacs-progress-view-update', ON-SCREEN as
+there); `romacs-startup-progress' calls this.  A failure to show them is
+said, and the step that reported goes on."
+  (with-demoted-errors "Startup progress view: %S"
+    (romacs-progress-view-update on-screen)))
 
 (defun romacs-gui-loadup--init-loaded (file)
   "Tell the launch screen the init loaded FILE (`after-load-functions')."
@@ -134,6 +152,10 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
 is a step of the launch screen's progress, until
 `romacs-gui-loadup-after-init'."
   (add-hook 'after-load-functions #'romacs-gui-loadup--init-loaded))
+
+;; The user's init is loaded, and an error that stops it said, by
+;; lisp/session/romacs-init-load.el.
+(require 'romacs-init-load)
 
 (defun romacs-gui-loadup-after-init ()
   "What GNU's startup does once the init file has loaded, up to the files.

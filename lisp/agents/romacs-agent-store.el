@@ -234,6 +234,8 @@ manifest."
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
 
+(defvar romacs-agent-store--filled nil "Non-nil once a batch process has filled the database.")
+
 (defvar romacs-agent-store-filled-hook nil
   "Run once a batch process has filled the database.")
 
@@ -250,14 +252,38 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
            :sentinel (lambda (process _event)
                        (unless (process-live-p process)
                          (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process)))
+                         (setq romacs-agent-store--filled t)
+                         (romacs-agent-store--load-missing)
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
+
+(defun romacs-agent-store--load-missing ()
+  "Load, a turn at a time as a start's restore does, each recorded session
+this process does not know that still has no row once a fill has run: a
+start left it to the fill (`romacs-agent-store-listed-p'), and with no
+row it is shown only once loaded."
+  (let ((idle (null romacs-agent--restore-pending)))
+    (dolist (dir (romacs-agent-store--missing))
+      (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                  (member dir romacs-agent--restore-pending))
+        (setq romacs-agent--restore-pending (append romacs-agent--restore-pending (list dir)))))
+    (when (and idle romacs-agent--restore-pending)
+      (run-at-time 0 nil #'romacs-agent--restore-step))))
 
 ;;; Listing
 
 (defun romacs-agent-store-listed-p (dir)
-  "Whether the session recorded in DIR has a row."
+  "Whether the session recorded in DIR is listed from its row: it has one,
+or, as an editor's start restores (`romacs-agent-restore-soon'), one is
+coming, a batch fill running (`romacs-agent-store-fill-soon', started
+here the first time a row is missing).  A start with no rows then loads
+only the live and waiting sessions, the others shown as their rows land;
+one still missing a row after a fill is loaded as it is."
   (when-let* ((db (romacs-agent-store--open)))
-    (and (sqlite-select db "select 1 from sessions where id = ?" (list (file-name-nondirectory dir))) t)))
+    (or (and (sqlite-select db "select 1 from sessions where id = ?" (list (file-name-nondirectory dir))) t)
+        (and romacs-agent--restoring (not noninteractive)
+             (progn (unless (or romacs-agent-store--filled (process-live-p romacs-agent-store--filling))
+                      (with-demoted-errors "romacs-agent-store: filling: %S" (romacs-agent-store-fill-soon)))
+                    (process-live-p romacs-agent-store--filling))))))
 
 (defun romacs-agent-store-unloaded ()
   "The sessions that have a row but are not loaded, newest first, each a

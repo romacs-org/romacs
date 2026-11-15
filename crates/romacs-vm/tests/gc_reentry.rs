@@ -202,7 +202,7 @@ fn lambda_list_bindings_collect_across_moving_collections() {
         ("(progn (defvar gr-lc 0) (defvar gr-ld 0) (add-variable-watcher 'gr-lc W) (add-variable-watcher 'gr-ld W) (list (condition-case e (funcall '(lambda (gr-lc gr-ld t) 'body) (list 'c (copy-sequence \"cc\")) (list 'd (copy-sequence \"dd\")) 3) (error e)) gr-lc (nreverse log)))",
          r#"((setting-constant t) 0 ((let "(c \"cc\")") (let "(d \"dd\")") (unlet "0") (unlet "0")))"#),
         ("(progn (add-variable-watcher 'gc-cons-threshold W) (list (condition-case e (let ((gc-cons-threshold (copy-sequence \"bad\"))) 'body) (error e)) (integerp gc-cons-threshold) (nreverse log)))",
-         r#"((wrong-type-argument integerp "bad") t ((let "\"bad\"") (set "800000") (unlet "800000")))"#),
+         r#"((wrong-type-argument integerp "bad") t ((let "\"bad\"") (set "134217728") (unlet "134217728")))"#),
     ];
     for (source, expected) in cases {
         let source = source.replace("W", W);

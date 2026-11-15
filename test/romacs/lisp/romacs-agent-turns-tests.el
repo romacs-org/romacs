@@ -81,9 +81,16 @@ call and result, an answer and a result a turn."
             (let ((from-rows (romacs-agent--turns-tail session 3))
                   (scanned (romacs-agent--journal-file-tail session 3)))
               (should from-rows)
-              (should (equal (car from-rows) (car scanned))))
+              (should (equal (car from-rows) (car scanned)))
+              ;; With no bound, the same place; within too few bytes, none.
+              (should (equal (romacs-agent--turns-tail session 3 'none) from-rows))
+              (should-not (romacs-agent--turns-tail session 3 10)))
             ;; Fewer turns than asked, or none earlier: no cut.
             (should-not (romacs-agent--turns-tail session 12))
+            ;; A journal's own tail is read from its end, its rows not asked.
+            (let ((scanned (romacs-agent--journal-file-tail session 3)))
+              (cl-letf (((symbol-function 'romacs-agent--turns-tail) (lambda (&rest _) (error "Rows asked"))))
+                (should (equal (romacs-agent--journal-tail session 3) scanned))))
             (should (equal (sort (mapcar #'cadr (romacs-agent-turns-search "zebras" 50)) #'<) (number-sequence 2 57 5)))
             ;; Turns that came with no editor there (records with no rows):
             ;; caught up from where the rows end, the others not written again.
