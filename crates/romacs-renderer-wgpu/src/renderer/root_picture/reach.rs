@@ -4,9 +4,10 @@
 //! set tighter than its font, a descender below, an italic's overhang. A
 //! patch of the picture must then repaint where a changed glyph's ink was
 //! and is, and draw every glyph whose ink enters the patch. The text pass
-//! notes each quad it builds against its cell (`note`); a picture keeps the
-//! largest reach its passes have seen and grows each patch by it.
-use std::cell::{Cell, RefCell};
+//! notes each quad it builds against its cell (`note`) while a picture
+//! draws (`seen`); the picture keeps what its passes noted and grows each
+//! patch by it. A draw outside a picture notes nothing.
+use std::cell::RefCell;
 
 use rustc_hash::FxHashMap;
 
@@ -170,8 +171,9 @@ impl Inks<'_> {
 }
 
 thread_local! {
-    static SEEN: Cell<Reach> = const { Cell::new(Reach { up: 0.0, down: 0.0, left: 0.0, right: 0.0 }) };
-    static SEEN_ROWS: RefCell<Rows> = RefCell::new(Rows::default());
+    /// What the draw `seen` runs has noted so far, the farthest reach and
+    /// by cell; none outside one.
+    static SEEN: RefCell<Option<(Reach, Rows)>> = const { RefCell::new(None) };
 }
 
 /// Note a glyph of WINDOW drawn as INK in its CELL.
@@ -182,8 +184,12 @@ pub(crate) fn note(window: i64, cell: Rect, ink: Rect) {
         left: (cell.x - ink.x).max(0.0),
         right: (ink.x + ink.width - cell.x - cell.width).max(0.0),
     };
-    SEEN.set(SEEN.get().max(reach));
-    SEEN_ROWS.with_borrow_mut(|rows| rows.add(window, cell, reach));
+    SEEN.with_borrow_mut(|seen| {
+        if let Some((all, rows)) = seen {
+            *all = all.max(reach);
+            rows.add(window, cell, reach);
+        }
+    });
 }
 
 /// Note POINTS, the corners of what was drawn for a glyph of WINDOW in CELL.
@@ -195,14 +201,13 @@ pub(crate) fn note_points(window: i64, cell: Rect, points: impl Iterator<Item = 
     note(window, cell, Rect::new(x0, y0, x1 - x0, y1 - y0));
 }
 
-/// The reach noted on this thread since the last take.
-pub(crate) fn take() -> Reach {
-    SEEN.take()
-}
-
-/// The reach noted on this thread since the last take of rows, by cell.
-pub(crate) fn take_rows() -> Rows {
-    SEEN_ROWS.take()
+/// What DRAW returns, and how far the ink it drew reached past its cells:
+/// the farthest, and by cell.
+pub(crate) fn seen<T>(draw: impl FnOnce() -> T) -> (T, Reach, Rows) {
+    let outer = SEEN.replace(Some((Reach::default(), Rows::default())));
+    let out = draw();
+    let (reach, rows) = SEEN.replace(outer).unwrap_or_default();
+    (out, reach, rows)
 }
 
 #[cfg(test)]
@@ -210,12 +215,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_quad_past_its_cell_reaches_by_the_overflow_and_a_take_starts_over() {
-        take();
-        note(1, Rect::new(10.0, 10.0, 7.0, 12.0), Rect::new(11.0, 8.0, 5.0, 16.0));
-        note(1, Rect::new(10.0, 10.0, 7.0, 12.0), Rect::new(9.5, 12.0, 9.0, 4.0));
+    fn a_quad_past_its_cell_reaches_by_the_overflow_and_only_while_seen() {
+        note(1, Rect::new(0.0, 0.0, 1.0, 1.0), Rect::new(0.0, 0.0, 9.0, 9.0));
+        assert!(SEEN.with_borrow(Option::is_none), "a draw outside `seen` keeps nothing");
+        let ((), reach, rows) = seen(|| {
+            note(1, Rect::new(10.0, 10.0, 7.0, 12.0), Rect::new(11.0, 8.0, 5.0, 16.0));
+            note(1, Rect::new(10.0, 10.0, 7.0, 12.0), Rect::new(9.5, 12.0, 9.0, 4.0));
+        });
         assert_eq!(
-            take(),
+            reach,
             Reach {
                 up: 2.0,
                 down: 2.0,
@@ -223,7 +231,8 @@ mod tests {
                 right: 1.5
             }
         );
-        assert_eq!(take(), Reach::default());
+        assert_eq!(rows.cells().count(), 1, "the note outside `seen` is not kept");
+        assert_eq!(seen(|| ()).1, Reach::default());
         let reach = Reach {
             up: 1.0,
             down: 2.0,
@@ -243,15 +252,12 @@ mod tests {
                 ..Reach::default()
             })
         );
-        take_rows();
         // A wave two pixels under its cell.
-        note_points(
-            1,
-            Rect::new(0.0, 0.0, 10.0, 20.0),
-            [[0.0, 18.0], [10.0, 22.0]].into_iter(),
-        );
+        let ((), reach, _) = seen(|| {
+            note_points(1, Rect::new(0.0, 0.0, 10.0, 20.0), [[0.0, 18.0], [10.0, 22.0]].into_iter());
+        });
         assert_eq!(
-            take(),
+            reach,
             Reach {
                 down: 2.0,
                 ..Reach::default()
@@ -261,16 +267,16 @@ mod tests {
 
     #[test]
     fn cells_keep_their_reach_until_a_copy_covers_their_ink() {
-        take_rows();
-        // Window 1: a row at 0 reaching 3 right, a row at 30 reaching 2
-        // left from x 10, and a cell at x 90 of that row reaching 16 right.
-        note(1, Rect::new(0.0, 0.0, 7.0, 10.0), Rect::new(0.0, 0.0, 10.0, 10.0));
-        note(1, Rect::new(10.0, 30.0, 7.0, 10.0), Rect::new(8.0, 30.0, 9.0, 10.0));
-        note(1, Rect::new(90.0, 30.0, 2.0, 10.0), Rect::new(90.0, 30.0, 18.0, 10.0));
-        // Window 2, beside: a row at 30 reaching 2 left; none past its cell.
-        note(2, Rect::new(120.0, 30.0, 7.0, 10.0), Rect::new(118.0, 30.0, 9.0, 10.0));
-        note(2, Rect::new(130.0, 0.0, 7.0, 10.0), Rect::new(130.0, 0.0, 7.0, 10.0));
-        let mut rows = take_rows();
+        let ((), _, mut rows) = seen(|| {
+            // Window 1: a row at 0 reaching 3 right, a row at 30 reaching 2
+            // left from x 10, and a cell at x 90 of that row reaching 16 right.
+            note(1, Rect::new(0.0, 0.0, 7.0, 10.0), Rect::new(0.0, 0.0, 10.0, 10.0));
+            note(1, Rect::new(10.0, 30.0, 7.0, 10.0), Rect::new(8.0, 30.0, 9.0, 10.0));
+            note(1, Rect::new(90.0, 30.0, 2.0, 10.0), Rect::new(90.0, 30.0, 18.0, 10.0));
+            // Window 2, beside: a row at 30 reaching 2 left; none past its cell.
+            note(2, Rect::new(120.0, 30.0, 7.0, 10.0), Rect::new(118.0, 30.0, 9.0, 10.0));
+            note(2, Rect::new(130.0, 0.0, 7.0, 10.0), Rect::new(130.0, 0.0, 7.0, 10.0));
+        });
         let right = Reach { right: 3.0, ..Reach::default() };
         let left = Reach { left: 2.0, ..Reach::default() };
         let far = Reach { right: 16.0, ..Reach::default() };

@@ -381,23 +381,12 @@ impl RootPicture {
         mapping: romacs_display_protocol::PresentMapping,
     ) -> Shown {
         let picture = self.texture.view().clone();
-        reach::take();
-        reach::take_rows();
         let cursors = std::mem::take(&mut shown.indexed.frame.window_cursors);
-        renderer.render_frame_glyphs(
-            &picture,
-            &shown.indexed.frame,
-            atlas,
-            mapping,
-            false,
-            None,
-            None,
-            None,
-            None,
-        );
+        let frame = &shown.indexed.frame;
+        ((), self.reach, self.rows) = reach::seen(|| {
+            renderer.render_frame_glyphs(&picture, frame, atlas, mapping, false, None, None, None, None);
+        });
         shown.indexed.frame.window_cursors = cursors;
-        self.reach = reach::take();
-        self.rows = reach::take_rows();
         shown.pictured = true;
         shown
     }
@@ -486,12 +475,9 @@ impl RootPicture {
 /// how far by row the last drawing reached.
 fn patched(mut reach: Reach, mut patch: impl FnMut(Reach)) -> (Reach, reach::Rows) {
     loop {
-        reach::take();
-        reach::take_rows();
-        patch(reach);
-        let seen = reach::take();
+        let ((), seen, rows) = reach::seen(|| patch(reach));
         if reach.covers(seen) {
-            return (reach, reach::take_rows());
+            return (reach, rows);
         }
         reach = reach.max(seen);
     }
