@@ -1966,6 +1966,9 @@ while it does not yet listen; the connection it replaces is let go."
             nil)
            (t (setf (romacs-agent-state session) 'detached)
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
+              ;; Tried again a while, as a lost attachment is, while its
+              ;; socket is there: no view's opening comes to retry it.
+              (romacs-agent--reattach-later session)
               nil)))))
 
 (defun romacs-agent--caught-up-p (session)
@@ -3422,12 +3425,16 @@ neither its kept state nor its supervisor's socket."
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
-that is, and none left unloaded (`romacs-agent--unloaded-p')."
-  (when (file-directory-p (romacs-agent--state-root))
-    (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
-      (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
-                  (romacs-agent--unloaded-p dir))
-        (romacs-agent--load dir)))))
+that is, and none left unloaded (`romacs-agent--unloaded-p').  Non-nil
+when any was loaded."
+  (let ((loaded nil))
+    (when (file-directory-p (romacs-agent--state-root))
+      (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
+        (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                    (romacs-agent--unloaded-p dir))
+          (romacs-agent--load dir)
+          (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))))
+    loaded))
 
 (defun romacs-agent-find (id)
   "The session ID names, loaded from its record when it was left unloaded;
@@ -3444,7 +3451,10 @@ nil when none is recorded."
 \(attached, swept) once in this process, then only those recorded since
 loaded, none attached again.  What a view of the sessions calls as it
 opens."
-  (if (eq romacs-agent--restored romacs-agent--sessions) (romacs-agent--load-new) (romacs-agent-restore)))
+  (if (not (eq romacs-agent--restored romacs-agent--sessions)) (romacs-agent-restore)
+    ;; A session recorded since is known as a restore knows one: its
+    ;; watches, missed wakes and the rest (`romacs-agent-restored-hook').
+    (when (romacs-agent--load-new) (run-hooks 'romacs-agent-restored-hook))))
 
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
