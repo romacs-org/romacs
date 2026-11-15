@@ -234,8 +234,10 @@ looked, and remember what is there now (an entry gone and back is new)."
                  ((memq watch (gethash id romacs-agent-watch--watches))))
        (romacs-agent-watch--forget id watch)
        (unless (romacs-agent-cancelled task)
-         (romacs-agent-tools--tell
-          task (romacs-agent-watch--message watch (romacs-agent-watch--status journal))))))))
+         (let ((status (romacs-agent-watch--status journal)))
+           (when (string-prefix-p "unknown" status)
+             (romacs-agent-issues-record 'watch-unknown task :unit (plist-get watch :unit) :status status))
+           (romacs-agent-tools--tell task (romacs-agent-watch--message watch status))))))))
 
 (defun romacs-agent-watch--tick ()
   "Look at every watched file, and ask systemd about every watched unit

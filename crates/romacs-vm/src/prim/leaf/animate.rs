@@ -16,6 +16,17 @@ impl Leaf<'_> {
 }
 
 impl Leaf<'_> {
+    /// `romacs-startup-progress': STAGE (a symbol or string) and LABEL told
+    /// to the display, for its launch screen.
+    pub(crate) fn startup_progress(&mut self, stage: Value, label: Value) -> Out {
+        let text = |leaf: &mut Self, v: Value| if leaf.kind(v) == Kind::Symbol { leaf.symbol_name(v) } else { leaf.string_text(v) };
+        let (stage, label) = (text(self, stage)?, if label == Value::NIL { String::new() } else { text(self, label)? });
+        if let Some(host) = self.vm.window_system_host() { host.startup_progress(&stage, &label); }
+        Ok(Value::NIL)
+    }
+}
+
+impl Leaf<'_> {
     /// `romacs--debug-lose-device': t when the open display took the request.
     pub(crate) fn debug_lose_device(&mut self) -> Out {
         let lost = self.vm.window_system_host().is_some_and(|host| host.lose_device());

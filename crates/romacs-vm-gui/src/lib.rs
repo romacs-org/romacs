@@ -7,6 +7,7 @@ pub mod eval_last_sexp;
 pub mod fonts;
 pub mod grammars;
 pub mod lisp_layout;
+pub mod loading;
 pub mod loadup;
 pub mod measure;
 pub mod native;
