@@ -101,7 +101,7 @@ fn world_build_prepares_the_init_layer_and_rebuilds_it_only_for_its_inputs() {
     // The init changed since its plan: no layer is prepared from the old plan.
     std::fs::write(&home.init, "(require 'layer-lib)\n").unwrap();
     let said = home.build();
-    assert!(said.contains("the init changed since its plan"), "{said}");
+    assert!(said.contains("the init, or what lies beside its load-path directories, changed since its plan"), "{said}");
     assert_eq!(home.images(), second);
     // A reset forgets the plans with the worlds.
     let (ok, _) = home.command(&["--world-reset=all"]);
@@ -122,7 +122,7 @@ fn an_init_layer_loads_cus_start_in_full() {
     home.plan_requiring("cus-start", &gnu_lisp);
     let said = home.build();
     assert!(said.contains(r#""event":"layer-built""#) && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
-    assert!(!said.contains("refused"), "{said}");
+    assert!(!said.contains("live"), "{said}");
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
@@ -140,7 +140,7 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
 
 /// `--world-build-layer`, what a session starts once its init has run,
 /// builds the init's layer from the store's plan over the ready base world,
-/// with the round a refusal needs: the layer is usable when it exits, so a
+/// with the round a note needs: the layer is usable when it exits, so a
 /// session that ends first leaves the next launch nothing to build.
 #[test]
 fn a_layer_built_apart_takes_every_round_it_needs() {
@@ -153,7 +153,7 @@ fn a_layer_built_apart_takes_every_round_it_needs() {
     plan.write(&home.store).unwrap();
     let (ok, said) = home.command(&["--loadup", "--world-build-layer", home.init.to_str().unwrap()]);
     assert!(ok && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
-    assert_eq!(said.matches(r#""event":"layer-build""#).count(), 2, "a refused round, then one without it: {said}");
+    assert_eq!(said.matches(r#""event":"layer-build""#).count(), 2, "a live round, then one without it: {said}");
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
@@ -176,7 +176,7 @@ fn a_startup_library_left_out_ends_capture_there() {
         let path = e.unwrap().path();
         let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
         let entries = manifest["events"]["init-layer"]["entries"].as_array()?.clone();
-        manifest["refusals"].as_array().is_none_or(|r| r.is_empty())
+        manifest["uncaptured"].as_array().is_none_or(|r| r.is_empty())
             .then(|| entries.iter().map(|e| e["name"].as_str().unwrap().to_owned()).collect())
     }).collect();
     assert_eq!(built, [vec!["layer-lib".to_owned()]], "{said}");
@@ -254,13 +254,13 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
     plan.write(&home.store).unwrap();
     let said = home.build();
     assert!(said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
-    // The refusals name the reasons; the layer built holds the other three.
+    // The notes name the reasons; the layer built holds the other three.
     let manifests: Vec<String> = std::fs::read_dir(&home.store).unwrap().filter_map(|e| {
         let path = e.unwrap().path();
         (path.extension().is_some_and(|x| x == "json")).then(|| std::fs::read_to_string(path).unwrap())
     }).collect();
     let why: Vec<(String, String)> = manifests.iter().filter_map(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-        .flat_map(|m| m["refusals"].as_array().cloned().unwrap_or_default())
+        .flat_map(|m| m["uncaptured"].as_array().cloned().unwrap_or_default())
         .filter(|r| r["kind"] == "init-layer")
         .map(|r| (r["name"].as_str().unwrap().to_owned(), r["why"].as_str().unwrap().to_owned())).collect();
     assert!(why.iter().any(|(name, why)| name == "layer-fn" && why.contains("the function was called")), "{why:?}");
@@ -273,7 +273,7 @@ fn an_init_layer_holds_declared_libraries_and_never_a_secret() {
         assert!(why.iter().any(|(n, why)| n == name && why.contains("a form a layer cannot replay")), "{why:?}");
     }
     let built: Vec<serde_json::Value> = manifests.iter().filter_map(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-        .filter(|m| m["events"]["init-layer"].is_object() && m["refusals"].as_array().is_none_or(|r| r.is_empty()))
+        .filter(|m| m["events"]["init-layer"].is_object() && m["uncaptured"].as_array().is_none_or(|r| r.is_empty()))
         .map(|m| m["events"]["init-layer"]["entries"].clone()).collect();
     let names: Vec<Vec<&str>> = built.iter().map(|entries| entries.as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect()).collect();
     assert!(names.contains(&vec!["layer-lib", "layer-cfg", "layer-cmd", "layer-secret", "layer-reader", "layer-if", "layer-netrc"]), "{names:?}");

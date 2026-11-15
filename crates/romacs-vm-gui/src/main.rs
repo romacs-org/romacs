@@ -630,13 +630,14 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         batch world alone (an installation's, in
                         --world-store EXECUTABLE.worlds)
   --world-build-layer INIT
-                        build INIT's layer from the plan the store keeps, with
-                        each round a refusal needs, over the ready base world,
-                        and exit (what a session starts after its init)
+                        build INIT's layer from the plan the store keeps,
+                        again without what a round left to the session, over
+                        the ready base world, and exit (what a session starts
+                        after its init)
   --world-census        print what the base world of a live --loadup launch
                         holds, kind by kind (JSON), reading the store only
-  --world-reset         forget the store's failed and refused builds, so the next
-                        launch builds again
+  --world-reset         forget the store's failed builds and what builds could
+                        not capture, so the next launch builds again
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
   -Q, -q, --no-init     do not load the user's init file
@@ -947,10 +948,14 @@ fn run() -> Result<Option<exit::Exit>, String> {
             if started.is_err() { first_presentation = 2; }
             started.ok()
         } else { None };
+        // A store that cannot be used boots from source, and says so once
+        // the session is up (`world::store_warning_form`).
+        let mut store_problem = None;
         let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
             Ok(world) => Some(world),
             Err(reason) => {
                 eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+                store_problem = Some(reason);
                 None
             }
         });
@@ -981,7 +986,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, loading, quit, prune, serve, serve_landing, early_window)
+                     isolate_world, worlds, store_problem, first_presentation, loading, quit, prune, serve, serve_landing, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1306,6 +1311,9 @@ fn evaluate(
     restored: Option<(Box<Vm>, world::Carry)>,
     isolate_world: Option<(std::path::PathBuf, String)>,
     worlds: Option<world::Worlds>,
+    // Why the world store could not be used, when it could not: said once
+    // the session is up.
+    store_problem: Option<String>,
     first_presentation: u64,
     loading: Option<loading::Loading>,
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
@@ -1445,6 +1453,9 @@ fn evaluate(
             }
         }
         startup::mark_phase("user-init");
+        if let Some(reason) = &store_problem && let Err(error) = vm.eval_source(&world::store_warning_form(reason)) {
+            eprintln!("romacs: world store warning: {error}");
+        }
         let finished = match launch {
             startup::Launch::Loadup => startup::finish_loadup(&mut vm, &started),
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),

@@ -1,30 +1,30 @@
 //! World builds, the VM's side (DESIGN-M1 §5, §6): the recipe runs with
 //! `host::Mode::Build`, and the VM marks where it is in the build and keeps
-//! the P fence.
+//! the P tracking.
 //!
-//! The fence keeps the builder from computing anything from the values that
+//! The tracking keeps the builder from computing anything from the values that
 //! restore rebuilds (§6.2): the environment lists, `default-directory`, the
 //! variables on the delayed list once startup has set them, and the random
-//! state. Outside startup, a read or write of a fenced binding refuses the
-//! build, naming the root and the site. A `let` is exempt: it moves the
-//! fenced value aside and back unread, and a binding it makes after the fence
+//! state. Outside startup, a read or write of a tracked binding is noted as
+//! not captured, naming the root and the site: what made it runs live. A `let` is exempt: it moves the
+//! tracked value aside and back unread, and a binding it makes after the tracking
 //! is the `let`'s own; the value it saved is still the root's (F2). So is
 //! `boundp` of a bound root: that it is bound is no per-process fact.
 //!
 //! Root 6 keeps the startup re-run reading what the first run read (F1):
 //! while startup runs, every variable it reads, every property it reads and
 //! every function cell it calls through is recorded as an input, and after
-//! it a write to an input refuses, whatever value it stores, except a
+//! it a write to an input is not captured, whatever value it stores, except a
 //! layer's library's `put` of the content startup read (`layer`). Reads
 //! pass.
 //! An in-place mutation has no write site, so the content of each input is
 //! digested as startup ends and compared at the end of the recipe.
 //!
-//! A fenced variable's redirect becomes `Forwarded(Fwd::Fence(slot))`, so
-//! every access already takes the forwarded paths, whose `Fence` arms check
-//! the fence and act through the redirect the fence keeps. While startup
+//! A tracked variable's redirect becomes `Forwarded(Fwd::Tracked(slot))`, so
+//! every access already takes the forwarded paths, whose `Tracking` arms check
+//! the tracking and act through the redirect the tracking keeps. While startup
 //! runs every variable is wrapped so, to observe its reads. No path of an
-//! unfenced variable changes. Calls are observed through the backtrace's
+//! untracked variable changes. Calls are observed through the backtrace's
 //! token counter (`Backtrace::observe`).
 pub mod arena;
 pub mod image;
@@ -38,7 +38,7 @@ use crate::forwarded::Fwd;
 use crate::{Value, VariableRedirect, Vm, host};
 use serde_json::json;
 
-/// A fenced value's root (§6.2). `Observed` is no root: a variable startup
+/// A tracked value's root (§6.2). `Observed` is no root: a variable startup
 /// may read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Root {
@@ -51,7 +51,7 @@ pub(crate) enum Root {
     Input = 6,
     /// A variable a layer's re-seed form set from a per-process fact: a
     /// definition form that reads it is re-seeded too; any other form
-    /// refuses (`layer`).
+    /// is not captured (`layer`).
     Tainted = 7,
 }
 
@@ -75,12 +75,12 @@ enum Input {
     Function(usize),
 }
 
-/// The P fence of a build.
+/// The P tracking of a build.
 #[derive(Default)]
-pub(crate) struct Fence {
+pub(crate) struct Tracking {
     cells: rustc_hash::FxHashMap<usize, Cell>,
     random: bool,
-    /// The roots not interned when the build began, fenced as they are.
+    /// The roots not interned when the build began, tracked as they are.
     pending: Vec<(&'static str, Root)>,
     /// The delayed list as startup began.
     delayed: Vec<usize>,
@@ -104,9 +104,9 @@ pub(crate) struct Fence {
     pub(super) previous_outputs: Vec<(usize, Result<String, &'static str>, Result<String, &'static str>)>,
 }
 
-/// A fenced variable: its root, the redirect the fence keeps, and the
-/// dynamic entries that bound it when it was fenced and are still bound. A
-/// `let` of any other entry is newer than the fence.
+/// A tracked variable: its root, the redirect the tracking keeps, and the
+/// dynamic entries that bound it when it was tracked and are still bound. A
+/// `let` of any other entry is newer than the tracking.
 struct Cell {
     root: Root,
     redirect: Option<VariableRedirect>,
@@ -116,37 +116,37 @@ struct Cell {
 impl Vm {
     /// The VM is made: the recipe starts, and per-process host facts may no
     /// longer be read outside startup. In build mode the environment lists,
-    /// `default-directory` and the random state are fenced. A no-op outside
+    /// `default-directory` and the random state are tracked. A no-op outside
     /// build mode.
     pub fn world_begin(&mut self) {
         if host::mode() == host::Mode::Build {
-            self.fence = Some(Box::default());
-            // HOST(slot:initial-environment, slot:process-environment): fences the environment
+            self.tracking = Some(Box::default());
+            // HOST(slot:initial-environment, slot:process-environment): tracks the environment
             // lists by name; reads no slot
             let roots = [("process-environment", Root::Environment), ("initial-environment", Root::Environment),
-                         // HOST(slot:exec-path): fences the environment lists by name; reads no
+                         // HOST(slot:exec-path): tracks the environment lists by name; reads no
                          // slot
                          ("exec-path", Root::Environment), ("default-directory", Root::Directory)];
             for (name, root) in roots {
                 // A build interns nothing a source boot does not, or symbols
                 // would number differently: a root not interned yet is
-                // fenced as it is (`observe_new_variable`).
+                // tracked as it is (`observe_new_variable`).
                 match self.names.get(name) {
-                    Some(&slot) => self.fence_variable(slot, root),
-                    None => self.fence_mut().pending.push((name, root)),
+                    Some(&slot) => self.track_variable(slot, root),
+                    None => self.tracking_mut().pending.push((name, root)),
                 }
             }
-            self.fence_mut().random = true;
+            self.tracking_mut().random = true;
         }
         host::begin_recipe();
     }
 
-    /// Lift the fence once the build has checked it (§5 step 4): every
-    /// fenced variable gets back the redirect the fence kept, so no build
+    /// Lift the tracking once the build has checked it (§5 step 4): every
+    /// tracked variable gets back the redirect the tracking kept, so no build
     /// redirect is ever captured.
     pub fn world_lift(&mut self) {
-        let Some(fence) = self.fence.take() else { return };
-        for (slot, cell) in fence.cells {
+        let Some(tracking) = self.tracking.take() else { return };
+        for (slot, cell) in tracking.cells {
             self.variable_redirects[slot] = cell.redirect;
         }
     }
@@ -179,17 +179,17 @@ impl Vm {
     }
 
     /// A top-level FORM of a loaded file ends: a re-seed form's variable is
-    /// fenced from here (root 4); the build host's form leaves `system-name`
+    /// tracked from here (root 4); the build host's form leaves `system-name`
     /// to be read again; in a layer, a definition that read a
     /// per-process fact is kept for restore to evaluate again
-    /// (`romacs--world-reseed-forms`), and its variable fenced (root 7).
+    /// (`romacs--world-reseed-forms`), and its variable tracked (root 7).
     pub(crate) fn world_form_done(&mut self, form: &crate::Form) {
-        if self.fence.is_none() {
+        if self.tracking.is_none() {
             return;
         }
         if let Some(name) = host::reseed_output() {
             let slot = self.slot(name);
-            self.fence_variable(slot, Root::Reseed);
+            self.track_variable(slot, Root::Reseed);
         }
         // The build host is baked, unrecorded, into `emacs-build-system'
         // only: `system-name' does not keep it, so a later reader in the
@@ -204,18 +204,18 @@ impl Vm {
 
     /// Keep the definition FORM of KIND, defining NAME, for restore: pushed
     /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT DECLARED),
-    /// CUT when a refused effect or a secret asked for cut the form short
+    /// CUT when an effect the build did not perform or a secret asked for cut the form short
     /// and restore evaluates it whole, DECLARED when a library the init only
     /// declared defined it, so restore may leave it pending until its first
-    /// read. NAME's variable is fenced as tainted.
+    /// read. NAME's variable is tracked as tainted.
     fn record_reseed_form(&mut self, kind: &str, name: &str, form: &crate::Form, cut: bool) {
         let slot = self.slot(name);
         // Defined again by a file loaded again: the first form is kept.
-        if self.fence_cell(slot).is_some_and(|cell| cell.root == Root::Tainted) {
+        if self.tracked_cell(slot).is_some_and(|cell| cell.root == Root::Tainted) {
             return;
         }
         self.push_reseed_form(kind, Some(name), form, cut);
-        self.fence_variable(slot, Root::Tainted);
+        self.track_variable(slot, Root::Tainted);
     }
 
     /// Keep a layer library's top-level FORM that is no definition and asked
@@ -246,8 +246,8 @@ impl Vm {
     /// it, as this run began and as it ended (`supersede_startup`), for the
     /// layer to judge (`world_layer_load`).
     pub(crate) fn world_startup_output_states(&mut self) -> Vec<(usize, String, String, String)> {
-        let Some(fence) = self.fence.as_ref() else { return Vec::new() };
-        let previous: Vec<(usize, String, String)> = fence.previous_outputs.iter()
+        let Some(tracking) = self.tracking.as_ref() else { return Vec::new() };
+        let previous: Vec<(usize, String, String)> = tracking.previous_outputs.iter()
             .filter_map(|(slot, first, before)| Some((*slot, first.clone().ok()?, before.clone().ok()?))).collect();
         previous.into_iter()
             .filter_map(|(slot, first, before)| Some((slot, first, before, self.input_digest(Input::Variable(slot)).ok()?)))
@@ -257,17 +257,17 @@ impl Vm {
     /// The variables the startup run wrote (before a later run supersedes
     /// it): what a layer's libraries may change and the next run set back.
     pub(crate) fn world_startup_outputs(&self) -> Vec<usize> {
-        self.fence.as_ref().map(|fence| fence.output_digests.iter().map(|(slot, _)| *slot).collect()).unwrap_or_default()
+        self.tracking.as_ref().map(|tracking| tracking.output_digests.iter().map(|(slot, _)| *slot).collect()).unwrap_or_default()
     }
 
-    /// The content digest of the variable at SLOT, as the fence compares it.
+    /// The content digest of the variable at SLOT, as the tracking compares it.
     pub(crate) fn world_variable_digest(&mut self, slot: usize) -> Result<String, &'static str> {
         self.input_digest(Input::Variable(slot))
     }
 
     /// `romacs--startup-phase`: the startup function's run begins (ON) or
     /// ends. While it runs, its reads are observed. At its end the variables
-    /// then on the delayed list are fenced, and writes to its inputs refuse.
+    /// then on the delayed list are tracked, and writes to its inputs are not captured.
     /// A no-op outside build mode.
     pub(crate) fn startup_phase(&mut self, on: bool) {
         if host::mode() != host::Mode::Build || !host::switch_startup(on) {
@@ -292,13 +292,13 @@ impl Vm {
             // Once the first run ends the list is t: a later run computes
             // the first run's variables.
             if delayed.is_empty() {
-                delayed = self.fence_mut().superseded.clone();
+                delayed = self.tracking_mut().superseded.clone();
             }
-            self.fence_mut().delayed = delayed;
-            self.fence_mut().observing = true;
+            self.tracking_mut().delayed = delayed;
+            self.tracking_mut().observing = true;
             for slot in 0..self.variable_redirects.len() {
                 if self.variable_redirects[slot].is_some() {
-                    self.fence_variable(slot, Root::Observed);
+                    self.track_variable(slot, Root::Observed);
                 }
             }
             self.backtrace.observe();
@@ -308,20 +308,20 @@ impl Vm {
     }
 
     /// A later startup run begins: the earlier run's delayed variables and
-    /// inputs leave the fence, which the later run fences again as it ends.
+    /// inputs leave the tracking, which the later run tracks again as it ends.
     fn supersede_startup(&mut self) {
-        let fence = self.fence_mut();
-        let earlier: Vec<usize> = fence.cells.iter()
+        let tracking = self.tracking_mut();
+        let earlier: Vec<usize> = tracking.cells.iter()
             .filter(|(_, cell)| matches!(cell.root, Root::Delayed | Root::Input)).map(|(&slot, _)| slot).collect();
-        fence.inputs.clear();
-        fence.seen.clear();
-        fence.digests.clear();
-        fence.outputs.clear();
-        let previous = std::mem::take(&mut fence.output_digests);
+        tracking.inputs.clear();
+        tracking.seen.clear();
+        tracking.digests.clear();
+        tracking.outputs.clear();
+        let previous = std::mem::take(&mut tracking.output_digests);
         let previous = previous.into_iter().map(|(slot, first)| (slot, first, self.input_digest(Input::Variable(slot)))).collect();
-        self.fence_mut().previous_outputs = previous;
+        self.tracking_mut().previous_outputs = previous;
         for slot in earlier {
-            if let Some(cell) = self.fence_mut().cells.remove(&slot) {
+            if let Some(cell) = self.tracking_mut().cells.remove(&slot) {
                 self.variable_redirects[slot] = cell.redirect;
             }
         }
@@ -329,27 +329,27 @@ impl Vm {
 
     fn end_startup(&mut self) {
         let calls = self.backtrace.observed();
-        let fence = self.fence_mut();
-        fence.observing = false;
-        let observed: Vec<usize> = fence.cells.iter().filter(|(_, cell)| cell.root == Root::Observed).map(|(&slot, _)| slot).collect();
+        let tracking = self.tracking_mut();
+        tracking.observing = false;
+        let observed: Vec<usize> = tracking.cells.iter().filter(|(_, cell)| cell.root == Root::Observed).map(|(&slot, _)| slot).collect();
         for slot in observed {
-            let cell = self.fence_mut().cells.remove(&slot).expect("an observed cell");
+            let cell = self.tracking_mut().cells.remove(&slot).expect("an observed cell");
             self.variable_redirects[slot] = cell.redirect;
         }
         for slot in calls {
             self.observe_function(slot);
         }
-        let delayed = std::mem::take(&mut self.fence_mut().delayed);
-        self.fence_mut().superseded = delayed.clone();
+        let delayed = std::mem::take(&mut self.tracking_mut().delayed);
+        self.tracking_mut().superseded = delayed.clone();
         let names: Vec<&str> = delayed.iter().map(|&slot| self.symbol_names[slot].as_str()).collect();
         host::record("delayed", json!({"symbols": names}));
         for slot in delayed {
-            self.fence_variable(slot, Root::Delayed);
+            self.track_variable(slot, Root::Delayed);
         }
-        let inputs = self.fence_mut().inputs.clone();
+        let inputs = self.tracking_mut().inputs.clone();
         for &input in &inputs {
             if let Input::Variable(slot) = input {
-                self.fence_variable(slot, Root::Input);
+                self.track_variable(slot, Root::Input);
             }
         }
         let digests: Vec<_> = inputs.iter().map(|&input| self.input_digest(input)).collect();
@@ -363,51 +363,51 @@ impl Vm {
                 // Its later changes could not be found.
                 Err(kind) => {
                     item["object"] = json!(kind);
-                    host::refuse("undigestable", item);
+                    host::note_uncaptured("undigestable", item);
                 }
             }
         }
-        self.fence_mut().digests = digests;
-        let outputs = std::mem::take(&mut self.fence_mut().outputs);
+        self.tracking_mut().digests = digests;
+        let outputs = std::mem::take(&mut self.tracking_mut().outputs);
         let output_digests = outputs.into_iter().map(|slot| (slot, self.input_digest(Input::Variable(slot)))).collect();
-        self.fence_mut().output_digests = output_digests;
+        self.tracking_mut().output_digests = output_digests;
     }
 
-    fn fence_mut(&mut self) -> &mut Fence {
-        self.fence.as_mut().expect("a build's fence")
+    fn tracking_mut(&mut self) -> &mut Tracking {
+        self.tracking.as_mut().expect("a build's tracking")
     }
 
-    /// Put the variable at SLOT behind the fence as ROOT; a fenced one keeps
-    /// its root. A buffer-local variable cannot be fenced and refuses the
-    /// build; one is not observed.
-    pub(crate) fn fence_variable(&mut self, slot: usize, root: Root) {
+    /// Put the variable at SLOT behind the tracking as ROOT; a tracked one keeps
+    /// its root. A buffer-local variable cannot be tracked, which is noted
+    /// as not captured; one is not observed.
+    pub(crate) fn track_variable(&mut self, slot: usize, root: Root) {
         self.forwarding(slot);
         let redirect = self.variable_redirects.get(slot).copied().flatten();
         match redirect {
-            Some(VariableRedirect::Forwarded(Fwd::Fence(_))) => {}
+            Some(VariableRedirect::Forwarded(Fwd::Tracked(_))) => {}
             // A tainted variable may be buffer-local already (`defvar-local`):
-            // its reads and writes go through the fence like any other's.
+            // its reads and writes go through the tracking like any other's.
             Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_))
             | Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) if root == Root::Tainted || !matches!(redirect, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => {
                 // HOST(dynamic:saved): reads the bound variable, not the saved value
                 let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
-                self.fence_mut().cells.insert(slot, Cell { root, redirect, older });
-                self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
+                self.tracking_mut().cells.insert(slot, Cell { root, redirect, older });
+                self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Tracked(slot as u32)));
             }
             _ if root == Root::Observed => {}
-            _ => host::refuse("unfenceable", json!({"root": root as u8, "symbol": self.symbol_names[slot]})),
+            _ => host::note_uncaptured("untrackable", json!({"root": root as u8, "symbol": self.symbol_names[slot]})),
         }
     }
 
     /// While startup runs, a variable whose redirect is first resolved is
     /// observed too.
     pub(crate) fn observe_new_variable(&mut self, slot: usize) {
-        let pending = self.fence.as_ref().and_then(|fence| fence.pending.iter().position(|(name, _)| *name == self.symbol_names[slot]));
+        let pending = self.tracking.as_ref().and_then(|tracking| tracking.pending.iter().position(|(name, _)| *name == self.symbol_names[slot]));
         if let Some(at) = pending {
-            let (_, root) = self.fence_mut().pending.swap_remove(at);
-            self.fence_variable(slot, root);
-        } else if self.fence.as_ref().is_some_and(|fence| fence.observing) {
-            self.fence_variable(slot, Root::Observed);
+            let (_, root) = self.tracking_mut().pending.swap_remove(at);
+            self.track_variable(slot, root);
+        } else if self.tracking.as_ref().is_some_and(|tracking| tracking.observing) {
+            self.track_variable(slot, Root::Observed);
         }
     }
 }
@@ -421,49 +421,49 @@ fn access_name(access: Access) -> &'static str {
 }
 
 impl Vm {
-    fn fence_cell(&self, slot: usize) -> Option<&Cell> {
-        self.fence.as_ref()?.cells.get(&slot)
+    fn tracked_cell(&self, slot: usize) -> Option<&Cell> {
+        self.tracking.as_ref()?.cells.get(&slot)
     }
 
-    /// SLOT's own redirect: the one the fence keeps while it is fenced, else
-    /// the one it has. The localness inspections ask this, so a fenced
+    /// SLOT's own redirect: the one the tracking keeps while it is tracked, else
+    /// the one it has. The localness inspections ask this, so a tracked
     /// buffer-local variable (a tainted `defvar-local`) stays buffer-local
     /// to them.
     pub(crate) fn kept_redirect(&self, slot: usize) -> Option<VariableRedirect> {
-        match self.fence_cell(slot) {
+        match self.tracked_cell(slot) {
             Some(cell) => cell.redirect,
             None => self.variable_redirects.get(slot).copied().flatten(),
         }
     }
 
-    /// The forwarding the fence keeps for SLOT, for the kind queries.
-    pub(crate) fn fenced_forwarding(&self, slot: usize) -> Option<Fwd> {
-        match self.fence_cell(slot)?.redirect {
+    /// The forwarding the tracking keeps for SLOT, for the kind queries.
+    pub(crate) fn tracked_forwarding(&self, slot: usize) -> Option<Fwd> {
+        match self.tracked_cell(slot)?.redirect {
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             _ => None,
         }
     }
 
     /// F on the variable at SLOT as its own redirect has it, unchecked. The
-    /// redirect F leaves is the one the fence keeps; one F made buffer-local
-    /// (`make-local-variable`, already refused) leaves the fence. Any other
+    /// redirect F leaves is the one the tracking keeps; one F made buffer-local
+    /// (`make-local-variable`, already noted) leaves the tracking. Any other
     /// variable is F's as it is.
-    pub(crate) fn unfenced<T>(&mut self, slot: usize, f: impl FnOnce(&mut Vm) -> T) -> T {
-        let Some(own) = self.fence_cell(slot).map(|cell| cell.redirect) else {
+    pub(crate) fn untracked<T>(&mut self, slot: usize, f: impl FnOnce(&mut Vm) -> T) -> T {
+        let Some(own) = self.tracked_cell(slot).map(|cell| cell.redirect) else {
             self.force_pending(slot);
             return f(self);
         };
-        let fenced = std::mem::replace(&mut self.variable_redirects[slot], own);
+        let tracked = std::mem::replace(&mut self.variable_redirects[slot], own);
         let result = f(self);
         let before = own;
         let own = self.variable_redirects[slot];
-        // Made buffer-local by F: leaves the fence. One fenced while
+        // Made buffer-local by F: leaves the tracking. One tracked while
         // buffer-local already (a tainted `defvar-local`) stays.
         if own != before && matches!(own, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) {
-            self.fence_mut().cells.remove(&slot);
+            self.tracking_mut().cells.remove(&slot);
         } else {
-            self.variable_redirects[slot] = fenced;
-            if let Some(cell) = self.fence.as_mut().and_then(|fence| fence.cells.get_mut(&slot)) {
+            self.variable_redirects[slot] = tracked;
+            if let Some(cell) = self.tracking.as_mut().and_then(|tracking| tracking.cells.get_mut(&slot)) {
                 cell.redirect = own;
             }
         }
@@ -471,29 +471,29 @@ impl Vm {
     }
 
     /// Whether `boundp` of SLOT answers t without a read: its value is
-    /// fenced, as the process's, but that it is bound is not. An unbound
-    /// root is read through the fence, and a read startup observes stays
+    /// tracked, as the process's, but that it is bound is not. An unbound
+    /// root is read through the tracking, and a read startup observes stays
     /// its input.
-    pub(crate) fn fenced_and_bound(&mut self, slot: usize) -> bool {
-        self.fence_cell(slot).is_some_and(|cell| cell.root != Root::Observed)
-            && self.unfenced(slot, |vm| vm.variable_value(slot)).is_ok_and(|value| value != Value::UNBOUND)
+    pub(crate) fn tracked_and_bound(&mut self, slot: usize) -> bool {
+        self.tracked_cell(slot).is_some_and(|cell| cell.root != Root::Observed)
+            && self.untracked(slot, |vm| vm.variable_value(slot)).is_ok_and(|value| value != Value::UNBOUND)
     }
 
-    /// An ACCESS to the fenced variable at SLOT, then F through its own
+    /// An ACCESS to the tracked variable at SLOT, then F through its own
     /// redirect.
-    pub(crate) fn fenced<T>(&mut self, slot: usize, access: Access, f: impl FnOnce(&mut Vm) -> T) -> T {
+    pub(crate) fn tracked<T>(&mut self, slot: usize, access: Access, f: impl FnOnce(&mut Vm) -> T) -> T {
         let buffer = self.slots[self.buffer_slot].value;
-        self.fence_access(slot, access, buffer);
-        self.unfenced(slot, f)
+        self.tracked_access(slot, access, buffer);
+        self.untracked(slot, f)
     }
 
-    /// Refuse ACCESS to the fenced variable at SLOT in BUFFER, unless
-    /// startup is running or a `let` newer than the fence holds the binding
+    /// Note ACCESS to the tracked variable at SLOT in BUFFER as not captured, unless
+    /// startup is running or a `let` newer than the tracking holds the binding
     /// (`default-directory`'s in BUFFER). A saved value is always the root's.
-    /// An input refuses writes only. While startup runs, a read of an
+    /// An input notes writes only. While startup runs, a read of an
     /// observed variable makes it an input.
-    pub(crate) fn fence_access(&mut self, slot: usize, access: Access, buffer: Value) {
-        let Some(cell) = self.fence_cell(slot) else { return self.force_pending(slot) };
+    pub(crate) fn tracked_access(&mut self, slot: usize, access: Access, buffer: Value) {
+        let Some(cell) = self.tracked_cell(slot) else { return self.force_pending(slot) };
         let read = matches!(access, Access::Read | Access::SavedRead);
         if host::in_startup() {
             if cell.root == Root::Observed {
@@ -519,66 +519,66 @@ impl Vm {
             bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
         if !shadowed {
             let within = self.innermost_function();
-            host::refuse("fence", json!({"root": cell.root as u8, "access": access_name(access),
+            host::note_uncaptured("per-process", json!({"root": cell.root as u8, "access": access_name(access),
                                          "symbol": self.symbol_names[slot], "in": within, "calls": self.innermost_calls(8)}));
         }
     }
 
     /// The functions of the innermost COUNT Lisp calls, innermost first,
-    /// for a refusal's reader to find the code that made it.
+    /// for a reader of what was not captured to find the code that made it.
     pub(super) fn innermost_calls(&self, count: usize) -> Vec<String> {
         self.backtrace.frames.iter().rev().take(count).filter_map(|frame| self.symbol_name_of(frame.function)).collect()
     }
 
-    /// The function the innermost Lisp call is in, for a refusal's
-    /// reader: the site names the top-level form, this the code under it.
+    /// The function the innermost Lisp call is in, for the reader of what
+    /// was not captured: the site names the top-level form, this the code under it.
     pub(super) fn innermost_function(&self) -> Option<String> {
         self.backtrace.frames.last().and_then(|frame| self.symbol_name_of(frame.function))
     }
 
     /// ACCESS to the value a `let` saved in dynamic entry AT, by
     /// `default-toplevel-value` and its kin. The oldest entry newer than the
-    /// fence saved the root's value.
-    pub(crate) fn fence_saved(&mut self, slot: usize, at: usize, access: Access) {
-        if self.fence_cell(slot).is_some_and(|cell| !cell.older.contains(&at)) {
-            self.fence_access(slot, access, Value::NIL);
+    /// tracking saved the root's value.
+    pub(crate) fn tracked_saved(&mut self, slot: usize, at: usize, access: Access) {
+        if self.tracked_cell(slot).is_some_and(|cell| !cell.older.contains(&at)) {
+            self.tracked_access(slot, access, Value::NIL);
         }
     }
 
-    /// The fenced variable at SLOT lost its innermost binding, the dynamic
+    /// The tracked variable at SLOT lost its innermost binding, the dynamic
     /// entry past the stack's end.
-    pub(crate) fn fence_unbound(&mut self, slot: usize) {
+    pub(crate) fn tracked_unbound(&mut self, slot: usize) {
         let at = self.dynamic.len();
-        if let Some(cell) = self.fence.as_mut().and_then(|fence| fence.cells.get_mut(&slot)) {
+        if let Some(cell) = self.tracking.as_mut().and_then(|tracking| tracking.cells.get_mut(&slot)) {
             cell.older.retain(|&older| older != at);
         }
     }
 
-    /// A `let` of the fenced variable at SLOT is made or ends: its watchers
-    /// would be handed the root's value, so outside startup a build refuses
-    /// a watched root. An input's value may be read.
-    pub(crate) fn fence_watched(&mut self, slot: usize) {
+    /// A `let` of the tracked variable at SLOT is made or ends: its watchers
+    /// would be handed the root's value, so outside startup a build does not
+    /// capture a watched root. An input's value may be read.
+    pub(crate) fn tracked_watched(&mut self, slot: usize) {
         if self.variable_trapped(slot) && !host::in_startup()
-            && self.fence_cell(slot).is_some_and(|cell| !matches!(cell.root, Root::Observed | Root::Input))
+            && self.tracked_cell(slot).is_some_and(|cell| !matches!(cell.root, Root::Observed | Root::Input))
         {
-            host::refuse("fence", json!({"root": self.fence_cell(slot).unwrap().root as u8, "access": "watched",
+            host::note_uncaptured("per-process", json!({"root": self.tracked_cell(slot).unwrap().root as u8, "access": "watched",
                                          "symbol": self.symbol_names[slot]}));
         }
     }
 
     /// A backtrace's read of the binding of SLOT in dynamic entry AT,
     /// OWNER's, whether it is current or a newer `let` saved it. A binding
-    /// older than the fence holds the root's value.
-    pub(crate) fn fence_binding(&mut self, slot: usize, at: usize, owner: Value) {
-        if self.fence_cell(slot).is_some_and(|cell| cell.older.contains(&at)) {
-            self.fence_access(slot, Access::SavedRead, owner);
+    /// older than the tracking holds the root's value.
+    pub(crate) fn tracked_binding(&mut self, slot: usize, at: usize, owner: Value) {
+        if self.tracked_cell(slot).is_some_and(|cell| cell.older.contains(&at)) {
+            self.tracked_access(slot, Access::SavedRead, owner);
         }
     }
 
     fn observe(&mut self, input: Input) {
-        let fence = self.fence_mut();
-        if fence.seen.insert(input) {
-            fence.inputs.push(input);
+        let tracking = self.tracking_mut();
+        if tracking.seen.insert(input) {
+            tracking.inputs.push(input);
         }
     }
 
@@ -592,57 +592,57 @@ impl Vm {
         if REPORTS.contains(&self.symbol_names[slot].as_str()) {
             return;
         }
-        let fence = self.fence_mut();
-        if !fence.outputs.contains(&slot) {
-            fence.outputs.push(slot);
+        let tracking = self.tracking_mut();
+        if !tracking.outputs.contains(&slot) {
+            tracking.outputs.push(slot);
         }
     }
 
     /// While startup runs, `get` of SYMBOL's property KEY (None: its whole
-    /// plist) is an input. After it, a write of one refuses, except a
+    /// plist) is an input. After it, a write of one is not captured, except a
     /// layer's library's `put` of STORED holding what startup read there:
     /// startup reads the same when it runs again after the libraries, as
     /// cus-start puts `custom-set' again.
-    pub(crate) fn fence_property(&mut self, symbol: Value, key: Option<Value>, access: Access, stored: Option<Value>) {
-        let Some(fence) = self.fence.as_ref() else { return };
+    pub(crate) fn tracked_property(&mut self, symbol: Value, key: Option<Value>, access: Access, stored: Option<Value>) {
+        let Some(tracking) = self.tracking.as_ref() else { return };
         let (Some(slot), key) = (symbol.index_if(7).and_then(|i| i.checked_sub(1)), key.and_then(|k| k.index_if(7)).map(|i| i - 1)) else { return };
-        if fence.observing {
+        if tracking.observing {
             if access == Access::Read {
                 self.observe(key.map_or(Input::Plist(slot), |key| Input::Property(slot, key)));
             }
             return;
         }
-        let written = fence.seen.contains(&Input::Plist(slot)) || match key {
-            Some(key) => fence.seen.contains(&Input::Property(slot, key)),
-            None => fence.inputs.iter().any(|&input| matches!(input, Input::Property(s, _) if s == slot)),
+        let written = tracking.seen.contains(&Input::Plist(slot)) || match key {
+            Some(key) => tracking.seen.contains(&Input::Property(slot, key)),
+            None => tracking.inputs.iter().any(|&input| matches!(input, Input::Property(s, _) if s == slot)),
         };
         let again = || matches!(key.zip(stored), Some((key, stored)) if host::layer_active() && self.stores_input(slot, key, stored));
         if access == Access::Write && written && !again() {
             let property = key.map(|key| self.symbol_names[key].clone());
-            host::refuse("fence", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "property": property}));
+            host::note_uncaptured("per-process", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "property": property}));
         }
     }
 
     /// Whether STORED, as SLOT's property KEY, has the content startup read,
     /// and startup read no more of SLOT's plist.
     fn stores_input(&self, slot: usize, key: usize, stored: Value) -> bool {
-        let Some(fence) = self.fence.as_ref() else { return false };
-        if fence.seen.contains(&Input::Plist(slot)) { return false }
-        let Some(at) = fence.inputs.iter().position(|&input| input == Input::Property(slot, key)) else { return false };
-        matches!((&fence.digests[at], self.content_digest(stored)), (Ok(read), Ok(put)) if *read == put)
+        let Some(tracking) = self.tracking.as_ref() else { return false };
+        if tracking.seen.contains(&Input::Plist(slot)) { return false }
+        let Some(at) = tracking.inputs.iter().position(|&input| input == Input::Property(slot, key)) else { return false };
+        matches!((&tracking.digests[at], self.content_digest(stored)), (Ok(read), Ok(put)) if *read == put)
     }
 
-    /// A write of SLOT's function cell: an input's refuses.
-    pub(crate) fn fence_function(&mut self, slot: usize) {
-        if self.fence.as_ref().is_some_and(|fence| !fence.observing && fence.seen.contains(&Input::Function(slot))) {
-            host::refuse("fence", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "function": true}));
+    /// A write of SLOT's function cell: an input's is not captured.
+    pub(crate) fn tracked_function(&mut self, slot: usize) {
+        if self.tracking.as_ref().is_some_and(|tracking| !tracking.observing && tracking.seen.contains(&Input::Function(slot))) {
+            host::note_uncaptured("per-process", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "function": true}));
         }
     }
 
     /// A call through SLOT, and every symbol its function cell names in turn.
     fn observe_function(&mut self, mut slot: usize) {
         for _ in 0..self.slots.len() {
-            if self.fence_mut().seen.contains(&Input::Function(slot)) {
+            if self.tracking_mut().seen.contains(&Input::Function(slot)) {
                 return;
             }
             self.observe(Input::Function(slot));
@@ -654,18 +654,18 @@ impl Vm {
     }
 
     /// The content check that canonicalize will make: each input whose
-    /// content changed since startup ended refuses, naming it. A mutation in
+    /// content changed since startup ended is noted as not captured, naming it. A mutation in
     /// place (`setcar`, `puthash`) has no write site; this finds it.
     pub fn world_check_inputs(&mut self) {
-        let Some(fence) = self.fence.as_ref() else { return };
-        let checks: Vec<(Input, String)> = fence.inputs.iter().copied().zip(fence.digests.iter().cloned())
+        let Some(tracking) = self.tracking.as_ref() else { return };
+        let checks: Vec<(Input, String)> = tracking.inputs.iter().copied().zip(tracking.digests.iter().cloned())
             .filter_map(|(input, digest)| Some((input, digest.ok()?))).collect();
         for (input, digest) in checks {
             if self.input_digest(input).as_ref() != Ok(&digest) {
                 let mut item = self.input_json(input);
                 item["access"] = json!("changed");
                 item["root"] = json!(Root::Input as u8);
-                host::refuse("fence", item);
+                host::note_uncaptured("per-process", item);
             }
         }
     }
@@ -682,7 +682,7 @@ impl Vm {
 
     fn input_digest(&mut self, input: Input) -> Result<String, &'static str> {
         let value = match input {
-            Input::Variable(slot) => self.unfenced(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND),
+            Input::Variable(slot) => self.untracked(slot, |vm| vm.default_value(slot)).unwrap_or(Value::UNBOUND),
             Input::Property(slot, key) => self.plist_lookup(self.slots[slot].plist, Value::reference(key + 1, 7)),
             Input::Plist(slot) => self.slots[slot].plist,
             Input::Function(slot) => self.slots[slot].function,
@@ -806,15 +806,15 @@ impl Vm {
     }
 
     /// A use of the random state (root 5).
-    pub(crate) fn fence_random(&self) {
-        if self.random_fenced() {
-            host::refuse("fence", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
+    pub(crate) fn track_random(&self) {
+        if self.random_tracked() {
+            host::note_uncaptured("per-process", json!({"root": Root::Random as u8, "access": "read", "symbol": "random state"}));
         }
     }
 
-    /// Whether a use of the random state now refuses the build (root 5).
-    pub(crate) fn random_fenced(&self) -> bool {
-        self.fence.as_ref().is_some_and(|fence| fence.random) && !host::in_startup() && !host::layer_taint()
+    /// Whether a use of the random state now is not captured (root 5).
+    pub(crate) fn random_tracked(&self) -> bool {
+        self.tracking.as_ref().is_some_and(|tracking| tracking.random) && !host::in_startup() && !host::layer_taint()
     }
 }
 
