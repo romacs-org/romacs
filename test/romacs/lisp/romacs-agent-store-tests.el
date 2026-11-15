@@ -127,6 +127,43 @@ journal one turn long."
         (should-not (romacs-agent-get old))
         (should (romacs-agent-get live))))))
 
+;; A first start, no rows yet: their fill runs aside, only the live
+;; session is loaded; once the fill has run, one still with no row is
+;; loaded as it is.
+(ert-deftest romacs-agent-store-no-rows-yet-loads-the-live-alone ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((old "aaaaaaaa-0000-4000-8000-000000000001") (live "aaaaaaaa-0000-4000-8000-000000000002")
+          (romacs-agent-store--filling nil) (romacs-agent-store--filled nil) (fills 0)
+          (romacs-agent--restore-pending nil) (romacs-agent--restoring nil)
+          (romacs-agent--restored nil) (romacs-agent--restore-count 0)
+          ;; An editor's start, not a batch run's.
+          (noninteractive nil))
+      (record old "old")
+      (record live "live" t)
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore)
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
+                ((symbol-function 'romacs-agent-store-fill-soon)
+                 (lambda () (cl-incf fills)
+                   (unless (process-live-p romacs-agent-store--filling)
+                     (setq romacs-agent-store--filling (make-process :name "fill" :command '("sleep" "30") :noquery t))))))
+        (unwind-protect
+            (progn
+              (romacs-agent-restore-soon)
+              (should (> fills 0))
+              (should-not (romacs-agent-get old))
+              (should (romacs-agent-get live)))
+          (delete-process romacs-agent-store--filling))
+        ;; Filled, or no start restoring: loaded as it is.
+        (setq fills 0 romacs-agent-store--filled t romacs-agent--restoring t)
+        (should-not (romacs-agent--unloaded-p (expand-file-name old root)))
+        (setq romacs-agent-store--filled nil romacs-agent--restoring nil)
+        (should-not (romacs-agent--unloaded-p (expand-file-name old root)))
+        (should (= fills 0))))))
+
 (ert-deftest romacs-agent-store-what-waits-is-loaded ()
   ;; A session with watches kept, or a resume due, is loaded as a restore
   ;; runs, though listed with no kept state and no supervisor.
