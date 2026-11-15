@@ -123,7 +123,7 @@ pub(crate) struct CollectionRecord {
     pub(crate) objects: usize,
     pub(crate) bytes: usize,
     /// Objects past the trigger when it began, at the collector's charge
-    /// (`collection_budget`): mostly what allocation ran on between falling
+    /// (`collection_budget`, or a minor's `MINOR_BYTES`): mostly what allocation ran on between falling
     /// due and the poll that took it. A trigger that moved down (a lowered
     /// threshold or percentage, a lifted floor) or a hold that just ended
     /// gives a large value with a prompt poll, so a consumer sizing a
@@ -820,8 +820,13 @@ impl Vm {
         let code = self.request_code.since_collection as f64 / self.code_collection_threshold() as f64;
         (allocated / budget).max(code)
     }
-    /// Objects past the automatic trigger now (`CollectionRecord::late`).
-    pub(crate) fn collection_late(&self) -> f64 {
+    /// Objects past the automatic trigger now (`CollectionRecord::late`):
+    /// a minor's, `MINOR_BYTES` since the last collection, or a full's.
+    pub(crate) fn collection_late(&self, minor: bool) -> f64 {
+        if minor {
+            let since = self.allocation.allocated - self.allocation.collected_at;
+            return since.saturating_sub(MINOR_BYTES) as f64 / CONS_BYTES as f64;
+        }
         let (allocated, budget) = self.collection_budget();
         (allocated - budget).max(0.0)
     }
@@ -1259,8 +1264,8 @@ impl Vm {
         Some(binding.index(7).ok().and_then(|i| self.symbol_names.get(i.saturating_sub(1)).cloned()).unwrap_or_else(|| "anonymous".into()))
     }
     /// The records since the last call, emptied: (DROPPED RECORD...), each
-    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES LATE), KIND `idle`, `explicit`
-    /// or `automatic`, MS a float, the pause in milliseconds to the microsecond,
+    /// RECORD (KIND MS MET COMMAND T OBJECTS BYTES LATE), KIND `minor`, `idle`,
+    /// `explicit` or `automatic`, MS a float, the pause in milliseconds to the microsecond,
     /// MET `command`, `key`, `redisplay` or nil, COMMAND a string or nil,
     /// T when it ended as `float-time` reads, or nil if nothing timed it,
     /// OBJECTS and BYTES what it left live (BYTES an estimate that does not walk),
