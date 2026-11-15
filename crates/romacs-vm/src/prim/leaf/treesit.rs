@@ -587,7 +587,10 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
         let base = self.ts_base(buffer);
-        Ok(flag(self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending())))
+        if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
+            return Ok(Value::TRUE);
+        }
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
@@ -627,9 +630,19 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
+        // A reparse a frame started on a thread: its tree, waited for, is
+        // this parse's if the text has not changed since it began, and the
+        // nearest old tree if it has.
+        let ahead = core.borrow_mut().ahead.take();
+        let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
+            .filter(|(_, region, ..)| *region == visible);
+        let (ahead, ahead_changed) = match ahead {
+            Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
+            None => (None, None),
+        };
         let twin = self.ts_twin_tree(parser, old.is_none());
         let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
-        let (done, behind) = match early {
+        let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
             Some((tree, true)) => (None, Some(tree)),
             None => (twin, None),
@@ -637,13 +650,15 @@ impl Leaf<'_> {
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &reader)
+            // A thread's tree that fell behind the text is newer than the old one.
+            native.borrow_mut().parse(behind.as_ref().or(old.as_deref()), &reader)
         });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
         };
         let new = Rc::new(new);
-        let changed = old.as_ref().map(|old| new.changed_since(old));
+        // The thread compared the same two trees, when it parsed this one.
+        let changed = old.as_ref().map(|old| ahead_changed.unwrap_or_else(|| new.changed_since(old)));
         {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
@@ -700,7 +715,10 @@ impl Leaf<'_> {
         if !self.ts_parser(parser)?.native.borrow_mut().set_included_ranges(&bytes) {
             return Err(self.ts_message("treesit-range-invalid", "Something went wrong when setting ranges", &[ranges]));
         }
-        self.ts_parser(parser)?.core.borrow_mut().need_reparse = true;
+        let mut core = self.ts_parser(parser)?.core.borrow_mut();
+        core.need_reparse = true;
+        // A reparse on its thread read the old ranges.
+        core.ahead = None;
         Ok(Value::NIL)
     }
     /// treesit_check_range_argument, in the current buffer.

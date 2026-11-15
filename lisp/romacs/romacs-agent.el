@@ -176,6 +176,10 @@ own session)."
           (when (consp local) (funcall keep (cdr local)))))
       records))
 
+  (defun romacs-agent--load-warning (format-string &rest args)
+    "Warn of a live load's hazard, FORMAT-STRING with ARGS: the load goes on."
+    (display-warning 'romacs-agent (apply #'format-message format-string args) :warning))
+
   (defun romacs-agent--defstruct-slots (doc-and-slots)
     "The field names of a record definition's DOC-AND-SLOTS."
     (mapcar (lambda (slot) (if (consp slot) (car slot) slot))
@@ -185,19 +189,25 @@ own session)."
     "The fields of record TYPE as defined now, or nil when it is none."
     (ignore-errors (mapcar #'car (cdr (cl-struct-slot-info type)))))
 
+  (defvar romacs-agent--layout-warned nil
+    "The (TYPE . SLOTS) `romacs-agent--layout-check' warned of last.")
+
   (defun romacs-agent--layout-check (type slots old)
-    "Refuse, with an error naming the change, to define record TYPE with
-SLOTS while records of it alive now hold another layout: OLD, the layout
+    "Warn, naming the change, when record TYPE is defined with SLOTS
+while records of it alive now hold another layout: OLD, the layout
 defined until now, differs from SLOTS in any way (a field added, removed
 or moved), or a record's length does.  Every accessor would fail on such
 a record, or read another field.  A record cannot grow in place, and its
 references (closures among them) cannot all be found to swap a new one
-in: such a change takes a restart, which carries the sessions over."
+in: a restart carries the sessions over.  The definition goes on: loading
+it is the user's call."
     (let ((held (cl-count-if (lambda (record) (or (and old (not (equal old slots)))
                                                   (/= (length record) (1+ (length slots)))))
                              (romacs-agent--records-of type))))
-      (when (> held 0)
-        (error "Loading this changes the fields of `%s' (%s) while %d live records hold the old layout, which would \
+      (when (and (> held 0) (not (equal romacs-agent--layout-warned (cons type slots))))
+        ;; Expansion and run check the same definition: one warning.
+        (setq romacs-agent--layout-warned (cons type slots))
+        (romacs-agent--load-warning "Loading this changes the fields of `%s' (%s) while %d live records hold the old layout, which would \
 break them: restart Romacs to load it (romacs_restart_request; sessions carry over)"
                type (let ((added (cl-set-difference slots old)) (removed (cl-set-difference old slots)))
                       (cond ((or added removed)
@@ -208,11 +218,11 @@ break them: restart Romacs to load it (romacs_restart_request; sessions carry ov
                held)))))
 
 (defmacro romacs-agent--defstruct (name &rest doc-and-slots)
-  "`cl-defstruct' NAME, DOC-AND-SLOTS, loadable into a live editor only
-with its records' layout (`romacs-agent--layout-check'): checked as it is
-expanded, against the class defined until then, and as it runs (a compiled
-load), against the layout its last definition recorded (the class is
-registered anew while its definition is expanded)."
+  "`cl-defstruct' NAME, DOC-AND-SLOTS, warning when it changes the layout
+of records alive in the editor (`romacs-agent--layout-check'): checked as
+it is expanded, against the class defined until then, and as it runs (a
+compiled load), against the layout its last definition recorded (the class
+is registered anew while its definition is expanded)."
   (declare (indent 1) (doc-string 2))
   (let ((type (if (consp name) (car name) name))
         (names (romacs-agent--defstruct-slots doc-and-slots)))
@@ -228,8 +238,8 @@ registered anew while its definition is expanded)."
 ;; whose connection dropped stayed detached).
 
 (defvar romacs-agent-load-unchecked nil
-  "Non-nil: load a romacs-agent.el over the live one without
-`romacs-agent--load-check'.  For a person who knows what it replaces.")
+  "Non-nil: load a romacs-agent.el over the live one without the warnings
+of `romacs-agent--load-check'.")
 
 (defun romacs-agent--checkout-commit (file)
   "The commit checked out where FILE lies, or nil: outside a Git
@@ -268,10 +278,10 @@ when through `romacs-agent--defstruct'; nil when it defines none."
 
 (defun romacs-agent--load-check (file &optional _noerror _nomessage nosuffix must-suffix)
   "Before `load' reads FILE, another romacs-agent.el over the live one:
-refuse one from a checkout without the commit the live one came from (it
-would undo changes), and, while sessions are alive, one whose session
+warn of one from a checkout without the commit the live one came from (it
+would undo changes), and, while sessions are alive, of one whose session
 record is not the live one's or that predates this check (it would break
-them).  `romacs-agent-load-unchecked' skips it."
+them).  The load goes on.  `romacs-agent-load-unchecked' silences it."
   (when-let* (((not romacs-agent-load-unchecked))
               ((featurep 'romacs-agent))
               ((stringp file))
@@ -288,20 +298,20 @@ them).  `romacs-agent-load-unchecked' skips it."
     (when (romacs-agent--records-of 'romacs-agent)
       (let ((layout (romacs-agent--file-layout path)))
         (cond ((not (car layout))
-               (user-error "%s predates the session layout guard: loading it over live sessions can break them; \
+               (romacs-agent--load-warning "%s predates the session layout guard: loading it over live sessions can break them; \
 restart Romacs on a build with it instead" path))
               ((not (equal (cdr layout) (romacs-agent--slot-names 'romacs-agent)))
-               (user-error "%s defines another session record than the live one (%d fields, live %d): restart \
+               (romacs-agent--load-warning "%s defines another session record than the live one (%d fields, live %d): restart \
 Romacs to load it (romacs_restart_request; sessions carry over)"
                            path (length (cdr layout)) (length (romacs-agent--slot-names 'romacs-agent)))))))
     (when-let* ((loaded romacs-agent--loaded-from)
                 (commit (romacs-agent--checkout-commit path))
                 ((not (equal commit loaded)))
-                ;; Lacking it, or Git cannot tell: either refuses.
+                ;; Lacking it, or Git cannot tell: either warns.
                 (doubt (pcase (romacs-agent--descends-p path loaded) ('t nil) ('unknown 'unknown) (_ 'lacking))))
-      (user-error (if (eq doubt 'unknown)
+      (romacs-agent--load-warning (if (eq doubt 'unknown)
                       "%s comes from a checkout where Git cannot tell whether it holds commit %s, which the live \
-romacs-agent.el was loaded from: refused, as it might undo that one's changes"
+romacs-agent.el was loaded from: it might undo that one's changes"
                     "%s comes from a checkout without commit %s, which the live romacs-agent.el was loaded from: \
 loading it would undo that one's changes; merge it first")
                   path (substring loaded 0 (min 12 (length loaded)))))))
@@ -1785,30 +1795,63 @@ copy (`romacs-agent--scratch'): SESSION is left as it is."
     (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
     (nreverse events)))
 
+(defconst romacs-agent--journal-slice (* 1024 1024)
+  "The bytes of a journal read at a time by `romacs-agent--journal-lines'.")
+
+(defun romacs-agent--journal-lines (file offset &optional end)
+  "FILE's whole lines from byte OFFSET, about `romacs-agent--journal-slice'
+bytes of them (more when one line is longer), as (LINES . NEXT): LINES
+decoded, NEXT the byte after the last, or nil when none follows; nil when
+no whole line is left.  Bytes from END on, when given, are not read: what
+was written since a reading began.  Its bytes are read as they are and
+each line is decoded, so offsets are the file's own."
+  (let ((size (min (or end most-positive-fixnum) (or (file-attribute-size (file-attributes file)) 0)))
+        (slice romacs-agent--journal-slice) (found nil))
+    (when (< offset size)
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (while (not found)
+          (erase-buffer)
+          (insert-file-contents-literally file nil offset (min size (+ offset slice)))
+          (goto-char (point-max))
+          (cond ((search-backward "\n" nil t) (setq found (point)))
+                ;; The file's last line, unended: it waits for its end.
+                ((>= (+ offset slice) size) (setq found 'none))
+                (t (setq slice (* 2 slice)))))
+        (unless (eq found 'none)
+          (cons (mapcar (lambda (line) (decode-coding-string line 'utf-8))
+                        (split-string (buffer-substring-no-properties (point-min) found) "\n" t))
+                (and (< (+ offset found) size) (+ offset found))))))))
+
 (defun romacs-agent-events-async (session then &optional batch fail)
   "Call THEN with SESSION's journal as the events it raised (as
 `romacs-agent-events' gives them), replayed BATCH records (200 by default)
-at a time between the editor's other work: a long journal never holds it.
-FAIL, when given, is called with the error's message instead should
-reading it fail, its file or any batch; else the error is signalled."
+at a time between the editor's other work: a long journal never holds it,
+and is read a slice at a time, never whole, up to where it ended when the
+replay began.  FAIL, when given, is called with the error's message
+instead should reading it fail, a slice or any batch; else the error is
+signalled."
   (let* ((scratch (romacs-agent--scratch session)) (events (list nil))
          (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-         (lines nil) (step nil)
+         ;; Read up to its end now: what it gains meanwhile is not waited for.
+         (end (file-attribute-size (file-attributes journal)))
+         (offset 0) (lines nil) (step nil)
          (guarded (lambda (function)
                     (if (not fail) (progn (funcall function) t)
                       (condition-case err (progn (funcall function) t)
                         (error (funcall fail (error-message-string err)) nil))))))
     (setq step (lambda ()
-                 (when (funcall guarded (lambda () (romacs-agent--events-step scratch lines events batch)))
-                   (setq lines (nthcdr (or batch 200) lines))
-                   (if lines (run-at-time 0 nil step) (funcall then (nreverse (car events)))))))
-    (when (funcall guarded
-                   (lambda ()
-                     (setq lines (and (file-readable-p journal)
-                                      (with-temp-buffer
-                                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
-                                        (split-string (buffer-string) "\n" t))))))
-      (funcall step))))
+                 (when (funcall guarded
+                                (lambda ()
+                                  (dotimes (_ (or batch 200))
+                                    (when (and (null lines) offset)
+                                      (pcase (and end (file-readable-p journal)
+                                                  (romacs-agent--journal-lines journal offset end))
+                                        (`(,read . ,next) (setq lines read offset next))
+                                        (_ (setq offset nil))))
+                                    (when lines (romacs-agent--events-step scratch (list (pop lines)) events 1)))))
+                   (if (or lines offset) (run-at-time 0 nil step) (funcall then (nreverse (car events)))))))
+    (funcall step)))
 
 (defun romacs-agent--events-step (scratch lines events batch)
   "Replay the first BATCH (200) of LINES, journal records, into SCRATCH,
@@ -1862,13 +1905,14 @@ begins there.  The journal itself keeps them all."
           (setq kept (cdr cell))))
       (push record kept))))
 
-(defun romacs-agent--read-journal (session function &optional from)
+(defun romacs-agent--read-journal (session function &optional from end)
   "Call FUNCTION with each record of SESSION's journal, in order, from
-byte FROM (a record's start) when given."
+byte FROM (a record's start) when given, to byte END (a record's end)
+when given."
   (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
     (when (file-readable-p journal)
       (with-temp-buffer
-        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from))
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal nil from end))
         (goto-char (point-min))
         (while (not (eobp))
           (let ((record (ignore-errors
@@ -1878,9 +1922,31 @@ byte FROM (a record's start) when given."
           (forward-line 1))))))
 
 (defun romacs-agent--filter (process chunk)
-  (let* ((session (process-get process 'romacs-agent))
-         (text (concat (process-get process 'pending) chunk))
-         (start 0))
+  "Handle the records PROCESS's supervisor sent, CHUNK the latest output.
+Chunks wait as a list, newest first, and are joined once a line's end is
+among them: a long line costs its length, not its length times its
+chunks.  Output that comes while records are handled (a handler waiting
+on a process) waits for them, so records are handled once each, in the
+order they were sent."
+  (process-put process 'pending (cons chunk (process-get process 'pending)))
+  (when (string-search "\n" chunk) (process-put process 'ready t))
+  (unless (process-get process 'draining)
+    (process-put process 'draining t)
+    (unwind-protect
+        (while (process-get process 'ready)
+          (process-put process 'ready nil)
+          (let ((text (apply #'concat (nreverse (process-get process 'pending)))))
+            (process-put process 'pending nil)
+            (romacs-agent--filter-lines process text)))
+      (process-put process 'draining nil))))
+
+(defun romacs-agent--filter-lines (process text)
+  "Handle each whole line of TEXT, PROCESS's output; what follows its last
+newline, or the lines left when a handler exits nonlocally, waits before
+what came meanwhile."
+  (let ((session (process-get process 'romacs-agent))
+        (start 0))
+    (unwind-protect
     (while (string-match "\n" text start)
       (let ((line (substring text start (match-beginning 0))))
         (setq start (match-end 0))
@@ -1918,7 +1984,10 @@ byte FROM (a record's start) when given."
                 (t (romacs-agent--kept session process)
                    (condition-case err (romacs-agent--record session record)
                      (error (message "romacs-agent: %s" (error-message-string err)))))))))
-    (process-put process 'pending (substring text start))))
+      ;; Its rest goes before what came while its lines were handled.
+      (when (< start (length text))
+        (process-put process 'pending (append (process-get process 'pending) (list (substring text start))))
+        (when (string-search "\n" text start) (process-put process 'ready t))))))
 
 (defun romacs-agent--sentinel (process _event)
   (unless (process-live-p process)
@@ -3398,6 +3467,109 @@ record SEQ (`romacs-agent--record-line-end')."
                                 ((= start 0) 'none))))
             (setq span (* 4 span))))))
     (and (integerp found) found)))
+
+(defconst romacs-agent--prompt-line-end
+  "\"romacsRequest\":[0-9]+\\(?:,\"[A-Za-z]+\":\"[^\"\\\\]*\"\\)*},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
+  "How a prompt's record line ends, whatever its harness: the request id
+Romacs sent it under, the `in' object's last key but for plain words
+after it (the supervisor writes keys sorted).  No string in a record can
+hold it, as its quotes would be escaped there.")
+
+(defconst romacs-agent--turn-free-reach 400
+  "How many records before a prompt are looked at to tell whether a turn
+was under way when it came.")
+
+(defun romacs-agent--turn-free-p (session probe from-start)
+  "Whether the records before point (a line's start in a buffer of
+SESSION's journal bytes) leave no turn under way: the last one telling
+either ends a turn or its harness, or there is none and FROM-START says
+the buffer starts at the journal's start.  PROBE, a scratch copy of
+SESSION (`romacs-agent--scratch'), is what the harness parses them in."
+  (save-excursion
+    (let ((verdict nil) (steps 0) (events (romacs-agent--harness-get session :events)))
+      (while (not verdict)
+        (if (or (bobp) (>= steps romacs-agent--turn-free-reach))
+            (setq verdict (if (and (bobp) from-start) 'free 'busy))
+          (forward-line -1)
+          (setq steps (1+ steps))
+          (let ((record (ignore-errors
+                          (json-parse-string (decode-coding-string (buffer-substring (point) (line-end-position)) 'utf-8)
+                                             :object-type 'hash-table :null-object :null :false-object :false))))
+            (when (hash-table-p record)
+              (let ((out (gethash "out" record)) (in (gethash "in" record)))
+                (cond ((gethash "exit" record) (setq verdict 'free))
+                      ;; Another prompt and no end between: this one came into its turn.
+                      ((and (hash-table-p in) (gethash "romacsRequest" in)) (setq verdict 'busy))
+                      ((hash-table-p out)
+                       (let ((types (mapcar (lambda (event) (plist-get event :type))
+                                            (ignore-errors (funcall events probe out)))))
+                         (cond ((memq 'done types) (setq verdict 'free))
+                               ((seq-intersection types '(delta thinking tool message-end approval))
+                                (setq verdict 'busy)))))))))))
+      (eq verdict 'free))))
+
+(defun romacs-agent--journal-tail (session turns &optional end begin)
+  "Where to replay SESSION's journal from to draw its last TURNS prompts
+between bytes BEGIN and END (its start and end by default): (FROM .
+PROMPTS), FROM the byte of a prompt that started its turn with none
+under way, at least TURNS back, or nil to replay all of it, which then
+holds PROMPTS prompts.
+A prompt's record is told from its line's end
+\(`romacs-agent--prompt-line-end'), looked for from END in growing
+spans, so a long journal is read only as far back as its last turns
+go."
+  (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+         (end (or end (file-attribute-size (file-attributes journal))))
+         (probe (romacs-agent--scratch session))
+         (begin (or begin 0))
+         (span 262144) (found nil))
+    (if (not (and end (file-readable-p journal))) (cons nil 0)
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (while (not found)
+          (let ((start (max begin (- end span))) (seen 0) (cut nil) (at nil))
+            (widen)
+            (erase-buffer)
+            (insert-file-contents-literally journal nil start end)
+            ;; Begun inside a record: its part is no line's start.
+            (when (> start begin)
+              (goto-char (point-min))
+              (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
+            (goto-char (point-max))
+            ;; Back to the TURNSth prompt, then on to one that came with
+            ;; no turn under way: a replay from it parses nothing begun
+            ;; before it.  With no prompt before it, it is no cut.
+            (while (and (not (and cut (> seen cut)))
+                        (re-search-backward romacs-agent--prompt-line-end nil t))
+              (beginning-of-line)
+              (when (looking-at-p "{\"in\":")
+                (setq seen (1+ seen))
+                (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start begin)))
+                  (setq cut seen at (+ start (1- (point)))))))
+            (setq found (cond ((and cut (> seen cut)) (cons at cut))
+                              ((= start begin) (cons nil seen))))
+            (setq span (* 4 span))))
+        found))))
+
+(defun romacs-agent--journal-notes (session type &optional end)
+  "SESSION's journal's notes of TYPE (a string) before byte END, oldest
+first, each a hash table: their lines are found by the type's text, which
+no string in a record can hold, and only those are parsed."
+  (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+        (key (format "\"type\":%s" (json-serialize type))) (notes nil))
+    (when (file-readable-p journal)
+      (with-temp-buffer
+        (set-buffer-multibyte nil)
+        (insert-file-contents-literally journal nil 0 end)
+        (goto-char (point-min))
+        (while (search-forward key nil t)
+          (let* ((line (decode-coding-string (buffer-substring (line-beginning-position) (line-end-position)) 'utf-8))
+                 (record (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                           :null-object :null :false-object :false)))
+                 (note (and (hash-table-p record) (gethash "note" record))))
+            (when (and (hash-table-p note) (equal (gethash "type" note) type)) (push note notes)))
+          (forward-line 1))))
+    (nreverse notes)))
 
 (defun romacs-agent--read-kept (session)
   "SESSION's kept state as written, or nil when there is none it can read."
