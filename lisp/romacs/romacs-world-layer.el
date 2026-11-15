@@ -19,11 +19,48 @@
 
 ;;; Code:
 
+;;;; What a world build leaves to the session, as code.
+
+;; A world build reads no secret.  A secret reader asked in one
+;; (`romacs-world-building-p') does not run: it signals
+;; `romacs-secret-deferred', and the code that asked is kept, as code, for
+;; the session to evaluate where the source boot would have: a library's
+;; top-level form at restore, in load order, among the re-seed forms; one
+;; form of the init's configuration for a library at the init's own call
+;; for it (`romacs--layer-deferred-after-loads').  The image holds the code
+;; that fetches a secret, never the secret.  The condition is no `error',
+;; as `quit' is none, so no handler a library or `use-package' wraps around
+;; its configuration takes it for a failure; its data holds no secret.
+(declare-function romacs--world-secret-asked "world.rs" ())
+(declare-function romacs--world-take-secret "world.rs" ())
+(declare-function romacs--world-refusals "world.rs" ())
+(declare-function romacs--world-forget-refusals "world.rs" (mark))
+(declare-function romacs--world-loads "world.rs" ())
+
+(put 'romacs-world-deferred 'error-conditions '(romacs-world-deferred))
+(put 'romacs-world-deferred 'error-message "Left to the session")
+(put 'romacs-secret-deferred 'error-conditions '(romacs-secret-deferred romacs-world-deferred))
+(put 'romacs-secret-deferred 'error-message "Left to the session: a world build reads no secret")
+
+(defun romacs--world-defer-secret (&rest _)
+  "A secret reader asked in a world build: it notes that the form running
+asked (`romacs--world-secret-asked') and signals `romacs-secret-deferred'."
+  (romacs--world-secret-asked)
+  (signal 'romacs-secret-deferred nil))
+
+(defun romacs--world-defer-secrets (readers on)
+  "Make each of READERS, function symbols, defer in this world build (ON),
+or run again.  A reader not defined yet is advised as it is defined."
+  (dolist (reader readers)
+    (if on (advice-add reader :override #'romacs--world-defer-secret)
+      (advice-remove reader #'romacs--world-defer-secret))))
+
 (defvar romacs--world-reseed-forms nil
-  "Definitions of an init layer's libraries that read a per-process fact.
+  "Definitions of an init layer's libraries that read a per-process fact,
+and the libraries' top-level forms that asked for a secret.
 Each is (KIND SYMBOL FORM CUT DECLARED), innermost first: KIND is
-`defcustom', `defvar', `defconst', `defvar-local' or `defimage', FORM the definition
-as loaded, CUT non-nil when an effect the build refused cut the definition
+`defcustom', `defvar', `defconst', `defvar-local' or `defimage', or `form'
+for another top-level form (SYMBOL nil), FORM the form as loaded, CUT non-nil when an effect the build refused cut the definition
 short, so SYMBOL was defined as nil, and DECLARED non-nil when a library
 the init only declared defined it.  A world build keeps them
 \(`world_form_done'); `romacs-world-restart' evaluates each again in this
@@ -38,11 +75,13 @@ A pending variable (`romacs--world-pend') names its entry by index.")
 (defun romacs--world-reseed-form (entry)
   "Evaluate ENTRY, a `romacs--world-reseed-forms' element, in this process.
 A definition cut short, or a `defimage', is evaluated whole, its symbol
-unbound first, so the definition declares as it would have.  Otherwise a `defcustom' takes
+unbound first, so the definition declares as it would have; a `form' entry,
+a library's top-level form the build left to the session (a secret it
+asked), is evaluated whole.  Otherwise a `defcustom' takes
 its standard (or saved) value again through its :set function, and the
 others set their default from the definition's value form."
   (let ((kind (nth 0 entry)) (symbol (nth 1 entry)) (form (nth 2 entry)))
-    (cond ((or (nth 3 entry) (eq kind 'defimage)) (makunbound symbol) (eval form t))
+    (cond ((or (nth 3 entry) (memq kind '(defimage form))) (when symbol (makunbound symbol)) (eval form t))
           ((eq kind 'defcustom) (custom-reevaluate-setting symbol))
           (t (set-default symbol (eval (nth 2 form) t))))))
 
@@ -107,6 +146,78 @@ layer is restored only for the init content its plan was recorded from.")
   (unless (load-history-filename-element (load-history-regexp file))
     (load file nil t)))
 
+(defvar romacs--layer-deferred-after-loads (make-hash-table :test #'equal)
+  "The init's configuration forms a layer build left to the session.
+Each key is (LIBRARY . N), as in `romacs--layer-baked-after-loads'; its
+value the forms of that call that asked for a secret, each (LEXICAL . FORM)
+in order, FORM within the handlers that enclosed it.  The init's call
+evaluates them, where GNU evaluates the whole call
+\(`romacs--init-eval-after-load').")
+
+(defun romacs--layer-walk (library n lexical form wrap)
+  "Evaluate FORM, part of the init's Nth configuration form for LIBRARY,
+one smallest whole form at a time: a `progn''s forms in turn, the body of a
+`condition-case' or `condition-case-unless-debug' within its handlers, the
+branch an `if' takes.  A form that asks for a secret, or meets what the
+build cannot hold (`romacs--layer-try'), is kept, WRAP applied (the handlers
+around it), for the session to run whole
+\(`romacs--layer-deferred-after-loads'), and the next goes on."
+  (pcase form
+    (`(progn . ,body)
+     (dolist (each body) (romacs--layer-walk library n lexical each wrap)))
+    (`(,(and head (or 'condition-case 'condition-case-unless-debug)) ,var ,body . ,handlers)
+     (let ((inner (lambda (each) (funcall wrap `(,head ,var ,each ,@handlers)))))
+       (eval `(,head ,var (romacs--layer-walk ',library ,n ,lexical ',body ',inner) ,@handlers) lexical)))
+    (`(if ,test ,then . ,else)
+     (let ((tried (romacs--layer-try test lexical)))
+       (if tried
+           (romacs--layer-walk library n lexical (if (cdr tried) then `(progn ,@else)) wrap)
+         ;; The test is the session's to run: the whole `if' with it.
+         (romacs--layer-defer library n lexical (funcall wrap form)))))
+    (_ (unless (romacs--layer-try form lexical)
+         (romacs--layer-defer library n lexical (funcall wrap form))))))
+
+(defun romacs--layer-try (form lexical)
+  "Evaluate FORM, LEXICAL, in a layer build: (t . VALUE), or nil when it
+is the session's to run.  It is when it asked for a secret, or met, itself
+and not in a library it loaded (whose forms answer for theirs), a fact or
+an effect the build refused or a timer it started: the build then answers
+for nothing it met, and none of its timers runs.  An error after it met
+what the build cannot hold (a credential file's read fails there) is the
+build's, not the form's."
+  (romacs--world-take-secret)
+  (let ((refusals (romacs--world-refusals))
+        (timers (append timer-list timer-idle-list))
+        (loads (romacs--world-loads))
+        (deferred nil) (value nil))
+    (condition-case err (setq value (eval form lexical))
+      (romacs-world-deferred (setq deferred t))
+      (error (if (or (romacs--world-take-secret)
+                     (and (> (romacs--world-refusals) refusals) (= (romacs--world-loads) loads)))
+                 (setq deferred t)
+               (signal (car err) (cdr err)))))
+    (let ((started (romacs--layer-new-timers timers))
+          (own (= (romacs--world-loads) loads)))
+      (if (not (or (romacs--world-take-secret) deferred
+                   (and own (or started (> (romacs--world-refusals) refusals)))))
+          (cons t value)
+        (when own
+          (romacs--world-forget-refusals refusals)
+          (mapc #'cancel-timer started))
+        nil))))
+
+(defun romacs--layer-defer (library n lexical form)
+  "Keep FORM, LEXICAL, for the init's Nth configuration call for LIBRARY."
+  (let ((key (cons library n)))
+    (puthash key (append (gethash key romacs--layer-deferred-after-loads) (list (cons lexical form)))
+             romacs--layer-deferred-after-loads)))
+
+(defun romacs--layer-new-timers (before)
+  "The timers started since BEFORE, the timer lists as they were."
+  (let ((new nil))
+    (dolist (timer (append timer-list timer-idle-list) new)
+      (unless (memq timer before) (push timer new)))))
+
 (defun romacs--layer-load-configured (library forms)
   "Load LIBRARY, a feature or a file the init configured, after FORMS.
 Each of FORMS is a printed (LEXICAL . FORM) the init gave
@@ -115,12 +226,22 @@ GNU runs it, and kept as made by its position (`romacs--layer-baked-after-loads'
 A form that does not read back (a closure, which prints as an object, or
 one the recording withheld after a secret reader ran) refuses LIBRARY,
 which then loads at its first use."
-  (dolist (printed forms)
-    (let* ((entry (condition-case nil (car (read-from-string printed))
-                    (error (error "%s: the init gave a form a layer cannot replay (a closure, or one given after a secret reader ran)"
-                                  library))))
-           (lexical-binding (car entry)))
-      (eval-after-load library (cdr entry))))
+  (let ((n 0))
+    (dolist (printed forms)
+      (let* ((entry (condition-case nil (car (read-from-string printed))
+                      (error (error "%s: the init gave a form a layer cannot replay (a closure, or one given after a secret reader ran)"
+                                    library))))
+             (lexical (car entry)) (form (cdr entry)) (at n))
+        ;; A plan may hold one call twice (merged from sessions whose
+        ;; `load-path' differed): it is registered once.  A function the
+        ;; init gave is called, as `eval-after-load' calls it.  Each run
+        ;; of it (the library loaded again) keeps what it left anew.
+        (unless (gethash (cons library at) romacs--layer-baked-after-loads)
+          (eval-after-load library
+            (lambda ()
+              (remhash (cons library at) romacs--layer-deferred-after-loads)
+              (romacs--layer-walk library at lexical (if (functionp form) `(funcall ',form) form) #'identity)))))
+      (setq n (1+ n))))
   (if (symbolp library) (require library nil t) (load library t t))
   (unless (if (symbolp library) (featurep library)
             (load-history-filename-element (load-history-regexp library)))
@@ -141,7 +262,16 @@ noted as its library's, wherever that library was loaded."
                    (featurep file))))
     (when (and ordinal (or made (not loaded)))
       (romacs--note-init-after-load file (romacs--layer-printed form)))
-    (cond (made nil)
+    (cond (made
+           ;; What of it asked for a secret runs now, as the whole call ran
+           ;; in GNU; the rest the layer made.
+           (let ((deferred (gethash (cons file ordinal) romacs--layer-deferred-after-loads)))
+             (when deferred
+               (romacs--init-recording-hold t)
+               (unwind-protect
+                   (dolist (each deferred)
+                     (let ((lexical-binding (car each))) (eval (cdr each) (car each))))
+                 (romacs--init-recording-hold nil)))))
           ;; It runs now: what it loads is its library's configuration's.
           (loaded (romacs--init-recording-hold t)
                   (unwind-protect (funcall eval-after-load file form)
