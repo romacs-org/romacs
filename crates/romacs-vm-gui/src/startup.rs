@@ -597,19 +597,6 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
     Ok(loadup)
 }
 
-/// The Lisp a launch's chain reads under DIR, the Lisp tree: that
-/// directory, the bundled layout, and Romacs's directories and packages
-/// in it. What a world's builder may read of Lisp (`world::build_roots`,
-/// `test_world`).
-#[must_use]
-pub fn lisp_roots(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut roots = vec![dir.to_owned()];
-    // The bundled layout, which the bundled autoloads' scan reads.
-    roots.extend(runtime_of(dir).map(|root| root.join("lisp/bundled.json")));
-    roots.extend(bundled_load_path(dir).unwrap_or_default());
-    roots
-}
-
 /// A launch restored from its world (`world::Carry`) from the chain's end on.
 pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup) -> Result<Started, String> {
     let files = take_queued();

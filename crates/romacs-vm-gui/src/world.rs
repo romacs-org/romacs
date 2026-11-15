@@ -257,11 +257,13 @@ fn keep_last(layer: &Layer) {
 
 /// FULL's layer over BASE less the entries standing refusals name: each
 /// refused layer's entries are left out and the rest keyed again, until a
-/// key has no standing refusal. None when nothing is left, or a refusal
-/// names no entry (the build refused for another reason on these inputs).
+/// key has no standing refusal. A refusal that names no entry (the startup
+/// run after the libraries, the capture) leaves out the later half of the
+/// entries kept: capture ends earlier, and those load in the session as
+/// from source. None only when nothing is left.
 pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
     let mut excluded: Vec<usize> = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..16 {
         let plan = full.without(&excluded);
         if plan.entries.is_empty() {
             return None;
@@ -274,10 +276,15 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
         let named: Vec<usize> = refusals.iter().filter(|r| r["kind"] == REFUSAL)
             .filter_map(|r| r["entry"].as_u64()).filter_map(|j| kept.get(j as usize).copied()).collect();
         if named.is_empty() {
-            eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": {"refused": refusals}}));
-            return None;
+            let later = kept.get(kept.len().div_ceil(2)..).unwrap_or_default();
+            eprintln!("romacs-world: {}", json!({"event": "layer", "shortened": later.len(), "reason": {"refused": refusals}}));
+            if later.is_empty() {
+                return None;
+            }
+            excluded.extend(later);
+        } else {
+            excluded.extend(named);
         }
-        excluded.extend(named);
         excluded.sort_unstable();
         excluded.dedup();
     }
@@ -350,10 +357,10 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
 }
 
 /// The layer of FULL over BASE made usable: built here, or waited for,
-/// and after a build that refused entries, built again without them, a
-/// few times over. Whether a layer is usable at the end.
+/// and after a build that refused entries, or a shortened one, built again
+/// without them, a few times over. Whether a layer is usable at the end.
 fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<usize>) -> bool {
-    for _ in 0..4 {
+    for _ in 0..8 {
         let Some(layer) = resolve(base, full.clone()) else { return false };
         if layer.world.ready() {
             keep_last(&layer);
@@ -432,30 +439,16 @@ fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>, la
     args
 }
 
-/// The read roots of a build beside the store's own: the Lisp trees and
-/// the fonts the layout engine measures with (a batch world's too,
-/// `batch::boot`, which measures none).
-pub fn build_roots(dir: &std::path::Path) -> Vec<PathBuf> {
-    let mut roots = startup::lisp_roots(dir);
-    roots.extend(crate::fonts::icon_font_dirs());
-    roots.extend(["/usr/share/fonts", "/etc/fonts", "/nix/store"].map(PathBuf::from));
-    if let Some(home) = romacs_vm::host::getenv("HOME").map(PathBuf::from) {
-        roots.extend([home.join(".local/share/fonts"), home.join(".fonts"), home.join(".cache/fontconfig")]);
-    }
-    roots
-}
-
 /// The builder: the launch's steps up to the world's end, with PLAN's
 /// libraries for a layer, headless, on the evaluator's stack, then publish.
 fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Option<(Plan, Vec<Entry>)>) -> Result<(), String> {
     let world = world.clone();
     crate::spawn_evaluator(move || -> Result<(), String> {
-        // The fonts load before the build is confined.
+        // The fonts load before the build records: the files they came from
+        // are keyed at its end (`build_world`).
         let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
-        let mut roots = build_roots(&dir);
-        roots.extend(plan.iter().flat_map(|(plan, _)| plan.directories()));
-        world.begin_build(&world.build_roots(roots)).map_err(|e| e.to_string())?;
+        world.begin_build().map_err(|e| e.to_string())?;
         let len = world.build(|| build_world(width, height, floor, &dir, engine, plan.as_ref()))?;
         eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
@@ -536,16 +529,6 @@ mod tests {
             "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
         assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
         let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    /// The bundled autoloads' scan reads the layout in lisp/, which a
-    /// confined build reads only inside its roots.
-    #[test]
-    fn a_build_reads_the_bundled_trees_and_their_layout() {
-        let roots = build_roots(std::path::Path::new("/r/lisp"));
-        for path in ["/r/lisp", "/r/lisp/bundled.json"] {
-            assert!(roots.contains(&PathBuf::from(path)), "{path}: {roots:?}");
-        }
     }
 
     #[test]

@@ -1,5 +1,5 @@
-//! A batch run with `--world-store' builds the runner's world once, confined
-//! to what the bootstrap and Lisp startup read, and a later run restores it,
+//! A batch run with `--world-store' builds the runner's world once, from
+//! what the bootstrap and Lisp startup read, and a later run restores it,
 //! even when its test sits in another directory, as run.py extracts each
 //! run's test tree afresh; the restored run's `load-path' has that
 //! directory, so its target finds a library beside it by name.
