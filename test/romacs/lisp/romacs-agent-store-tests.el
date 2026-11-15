@@ -106,6 +106,27 @@ journal one turn long."
           (should (equal (romacs-agent-title found) "old"))
           (should (eq (romacs-agent-get old) found)))))))
 
+;; Restored a turn at a time from the command loop: the same.
+(ert-deftest romacs-agent-store-leaves-the-listed-unloaded-in-steps ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((old "aaaaaaaa-0000-4000-8000-000000000001") (live "aaaaaaaa-0000-4000-8000-000000000002")
+          (romacs-agent--restore-pending nil) (romacs-agent--restoring nil)
+          (romacs-agent--restored nil) (romacs-agent--restore-count 0))
+      (record old "old")
+      (record live "live" t)
+      (romacs-agent-store-fill)
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore)
+                ((symbol-function 'romacs-agent-store-fill-soon) #'ignore)
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (romacs-agent-restore-soon)
+        (should-not romacs-agent--restoring)
+        (should-not (romacs-agent-get old))
+        (should (romacs-agent-get live))))))
+
 (ert-deftest romacs-agent-store-what-waits-is-loaded ()
   ;; A session with watches kept, or a resume due, is loaded as a restore
   ;; runs, though listed with no kept state and no supervisor.
