@@ -138,6 +138,25 @@ fn a_plan_is_kept_by_its_init_and_read_back_whole() {
     let _ = std::fs::remove_dir_all(&home.home);
 }
 
+/// `--world-build-layer`, what a session starts once its init has run,
+/// builds the init's layer from the store's plan over the ready base world,
+/// with the round a refusal needs: the layer is usable when it exits, so a
+/// session that ends first leaves the next launch nothing to build.
+#[test]
+fn a_layer_built_apart_takes_every_round_it_needs() {
+    let home = Home::new("apart");
+    let lisp = home.home.join("lisp");
+    std::fs::write(lisp.join("layer-late.el"), "(defvar layer-late-dir (car exec-path))\n(setq layer-late-seen (car exec-path))\n(provide 'layer-late)\n").unwrap();
+    home.build();
+    let declared = |name: &str| Entry { kind: Kind::Require, name: name.into(), file: None, noerror: false, load_path: 0, declared: true, forms: Vec::new() };
+    let plan = Plan::new(&home.init, vec![declared("layer-lib"), declared("layer-late")], vec![vec![lisp.display().to_string()]]).unwrap();
+    plan.write(&home.store).unwrap();
+    let (ok, said) = home.command(&["--loadup", "--world-build-layer", home.init.to_str().unwrap()]);
+    assert!(ok && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
+    assert_eq!(said.matches(r#""event":"layer-build""#).count(), 2, "a refused round, then one without it: {said}");
+    let _ = std::fs::remove_dir_all(&home.home);
+}
+
 /// A library the init loads at startup that the layer cannot hold (here
 /// it signals) takes every later entry with it: the layer holds the entries
 /// before it, and the init loads it and the rest in its own order.

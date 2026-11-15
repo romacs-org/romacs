@@ -332,8 +332,8 @@ pub struct Worlds {
 /// The user's init has run and PLAN is what it loaded (None: nothing was
 /// recorded). Keep the plan when it differs from the store's in loads or
 /// in the init's content, and unless this launch restored the layer of
-/// these very loads, build that layer ahead of the next launch, on a
-/// thread of its own.
+/// these very loads, build that layer ahead of the next launch, in a
+/// process of its own (`build_ahead_apart`).
 pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     let Some(recorded) = plan else { return };
     // An init that loads nothing has no layer.
@@ -364,8 +364,30 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
     if worlds.from_layer && worlds.layer.as_ref().is_some_and(|layer| layer.plan.same_loads(&plan) || layer.resolved_from.as_ref() == Some(&plan.digest())) {
         return;
     }
-    let (base, width, height, floor) = (worlds.base.clone(), worlds.width, worlds.height, worlds.floor);
-    std::thread::spawn(move || build_ahead(&base, plan, width, height, floor));
+    build_ahead_apart(worlds, &plan.init);
+}
+
+/// INIT's layer built ahead of the next launch by a process apart from
+/// this one (`--world-build-layer`), from the plan the store keeps: a
+/// build that refuses entries needs another without them, and a session
+/// that ends sooner than its rounds would leave the next launch to boot
+/// from the base and build them. The process logs in the store.
+fn build_ahead_apart(worlds: &Worlds, init: &Path) {
+    use std::os::unix::process::CommandExt;
+    let mut args = builder_args(&worlds.base, worlds.width, worlds.height, worlds.floor, None);
+    args.extend(["--world-build-layer".into(), init.as_os_str().to_owned()]);
+    let started = std::env::current_exe().and_then(|exe| {
+        let log = romacs_vm::host::open_store_file(worlds.base.store.join("layer-ahead.log"), romacs_vm::host::StoreOpen::Write { create: true, truncate: true })?;
+        std::process::Command::new(exe).args(args).stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?).stderr(log).process_group(0).spawn()
+    });
+    match started {
+        Ok(mut child) => {
+            eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "pid": child.id()}));
+            std::thread::spawn(move || child.wait());
+        }
+        Err(error) => eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "error": error.to_string()})),
+    }
 }
 
 /// The layer of FULL over BASE made usable: built here, or waited for,
