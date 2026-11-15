@@ -249,9 +249,22 @@ checkout (an installed build), or unknown."
                                              process-environment)))
       (car (ignore-errors (process-lines "git" "-C" (expand-file-name root) "rev-parse" "HEAD"))))))
 
-(defvar romacs-agent--loaded-from nil
-  "The commit of the checkout the live romacs-agent.el was loaded from,
-or nil (`romacs-agent--checkout-commit').")
+(defvar romacs-agent--loaded-file nil
+  "The file the live romacs-agent.el was loaded from.")
+
+(defvar romacs-agent--loaded-from 'unknown
+  "The commit of the checkout the live romacs-agent.el was loaded from, or
+nil (`romacs-agent--checkout-commit'); `unknown' until it is first asked
+\(`romacs-agent--loaded-commit').")
+
+(defun romacs-agent--loaded-commit ()
+  "The commit of the checkout the live romacs-agent.el was loaded from:
+asked of Git the first time it is needed, never while it loads, so a
+load runs nothing."
+  (when (eq romacs-agent--loaded-from 'unknown)
+    (setq romacs-agent--loaded-from
+          (and romacs-agent--loaded-file (romacs-agent--checkout-commit romacs-agent--loaded-file))))
+  romacs-agent--loaded-from)
 
 (defun romacs-agent--descends-p (file commit)
   "Whether the checkout FILE lies in holds COMMIT: t, nil, or `unknown'
@@ -304,7 +317,7 @@ restart Romacs on a build with it instead" path))
                (romacs-agent--load-warning "%s defines another session record than the live one (%d fields, live %d): restart \
 Romacs to load it (romacs_restart_request; sessions carry over)"
                            path (length (cdr layout)) (length (romacs-agent--slot-names 'romacs-agent)))))))
-    (when-let* ((loaded romacs-agent--loaded-from)
+    (when-let* ((loaded (romacs-agent--loaded-commit))
                 (commit (romacs-agent--checkout-commit path))
                 ((not (equal commit loaded)))
                 ;; Lacking it, or Git cannot tell: either warns.
@@ -317,7 +330,7 @@ loading it would undo that one's changes; merge it first")
                   path (substring loaded 0 (min 12 (length loaded)))))))
 
 (advice-add 'load :before #'romacs-agent--load-check)
-(setq romacs-agent--loaded-from (and load-file-name (romacs-agent--checkout-commit load-file-name)))
+(setq romacs-agent--loaded-file load-file-name romacs-agent--loaded-from 'unknown)
 
 (romacs-agent--defstruct (romacs-agent (:constructor romacs-agent--make))
   "One agent session."
