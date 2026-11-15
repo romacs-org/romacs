@@ -1418,6 +1418,12 @@ fn evaluate(
         startup::before_init(&mut vm, launch, quick)?;
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
+                // `load-path' before the packages and the init add to it: a
+                // directory they add may shadow a library loaded already
+                // (lisp/session/romacs-user-shadows.el).
+                if let Err(error) = vm.eval_source("(setq romacs--load-path-at-start load-path)") {
+                    eprintln!("romacs: user shadows: {error}");
+                }
                 if let Err(error) = user_init::start_saved_settings(&mut vm, &path) {
                     eprintln!("romacs: saved settings: {error}");
                 }
@@ -1444,6 +1450,11 @@ fn evaluate(
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
+                // A user's copy of a library loaded before the init wins, as
+                // in a session that first loaded it now.
+                if let Err(error) = vm.eval_source("(progn (require 'romacs-user-shadows) (romacs--load-user-shadows romacs--load-path-at-start))") {
+                    eprintln!("romacs: user shadows: {error}");
+                }
                 if let Some(worlds) = &worlds {
                     world::after_init(worlds, plan);
                     if let Some(form) = world::preload_form(worlds) && let Err(error) = vm.eval_source(&form) {
