@@ -1611,3 +1611,31 @@ fn a_frame_without_hit_regions_answers_no_hit_at_its_presentation() {
     assert!(frame.resolve_presented_hit(query).unwrap().is_none());
     assert!(frame.presented_hit_index().resolve(query).unwrap().is_none());
 }
+
+#[test]
+fn compacted_glyphs_keep_their_paint_spans() {
+    // Glyphs 0..6 lose 2 and 3; a span over 1..5 keeps 1 and 4, now 1 and 2,
+    // still one run; a span over the lost ones alone goes.
+    let face_id = FaceId::new(7);
+    let mut map = PresentedPointerMap::from_parts(
+        vec![],
+        vec![
+            PresentedPointerAppearance::new(
+                vec![PresentedPaintSpan::new(PresentedPrimitiveKind::Glyph, 1, 4, rect(0.0, 0.0, 60.0, 20.0))],
+                PointerDrawMode::Face(face_id),
+                PointerDrawMode::Face(face_id),
+            ),
+            PresentedPointerAppearance::new(
+                vec![PresentedPaintSpan::new(PresentedPrimitiveKind::Glyph, 2, 2, rect(0.0, 0.0, 60.0, 20.0))],
+                PointerDrawMode::Face(face_id),
+                PointerDrawMode::Face(face_id),
+            ),
+        ],
+    )
+    .unwrap();
+    map.remap_glyphs(&[Some(0), Some(1), None, None, Some(2), Some(3)]);
+    let spans: Vec<Vec<(u32, u32)>> = map.appearances.iter()
+        .map(|a| a.paint_spans().iter().map(|s| (s.first(), s.len())).collect())
+        .collect();
+    assert_eq!(spans, [vec![(1, 2)], vec![]]);
+}

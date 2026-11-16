@@ -158,12 +158,12 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce(&serde_json::Value)) -> Option<(Box<Vm>, Carry)> {
     match world.launch::<Carry>(|| builder_args(world, width, height, floor, None), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
-            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"], "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "restored", "key": manifest["key"], "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some((vm, carry))
         }
         Launch::Build => build_and_exit(world, width, height, floor, None),
         Launch::Chain { reason } => {
-            eprintln!("romacs-world: {}", json!({"mode": "source", "reason": reason}));
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "source", "reason": reason}));
             None
         }
     }
@@ -271,7 +271,7 @@ impl Layer {
 pub fn layer(base: &World, init: &Path) -> Option<Layer> {
     let plan = Plan::read(&base.store, init)?;
     if !plan.current() {
-        eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": "the init, or what lies beside its load-path directories, changed since its plan"}));
+        romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "boot": "base", "reason": "the init, or what lies beside its load-path directories, changed since its plan"}));
         return None;
     }
     let last = Plan::read_last(&base.store, init).filter(|(last, _, _)| last.init_digest == plan.init_digest && last.within(&plan));
@@ -288,7 +288,7 @@ pub fn layer(base: &World, init: &Path) -> Option<Layer> {
     }
     match last.and_then(|(last, from, preload)| usable(last, from, preload)) {
         Some(previous) => {
-            eprintln!("romacs-world: {}", json!({"event": "layer", "previous": true, "entries": previous.plan.entries.len()}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "previous": true, "entries": previous.plan.entries.len()}));
             Some(previous)
         }
         None => Some(layer),
@@ -299,7 +299,7 @@ pub fn layer(base: &World, init: &Path) -> Option<Layer> {
 /// usable layer was made so here (`build_ahead`), so a launch writes nothing.
 fn keep_last(layer: &Layer) {
     if let Err(error) = layer.plan.write_last(&layer.world.store, &layer.full.digest(), &layer.preload) {
-        eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the last layer's plan cannot be kept: {error}")}));
+        romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "error": format!("the last layer's plan cannot be kept: {error}")}));
     }
 }
 
@@ -332,7 +332,7 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
             .filter_map(|r| r["entry"].as_u64()).filter_map(|j| kept.get(j as usize).copied()).collect();
         if named.is_empty() {
             let later = kept.get(kept.len().div_ceil(2)..).unwrap_or_default();
-            eprintln!("romacs-world: {}", json!({"event": "layer", "shortened": later.len(), "reason": {"uncaptured": uncaptured}}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "shortened": later.len(), "reason": {"uncaptured": uncaptured}}));
             if later.is_empty() {
                 return None;
             }
@@ -362,11 +362,11 @@ pub fn restore_layer(layer: &Layer) -> Option<(Box<Vm>, Carry)> {
     match layer.world.restore_only::<Carry>() {
         Ok(restored) => {
             let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
-            eprintln!("romacs-world: {}", json!({"mode": "restored", "key": key, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard()), "layer": {"entries": layer.plan.entries.len(), "excluded": layer.excluded}}));
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "restored", "key": key, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard()), "layer": {"entries": layer.plan.entries.len(), "excluded": layer.excluded}}));
             Some(restored)
         }
         Err(reason) => {
-            eprintln!("romacs-world: {}", json!({"event": "layer", "boot": "base", "reason": reason}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "boot": "base", "reason": reason}));
             None
         }
     }
@@ -407,10 +407,10 @@ pub fn after_init(worlds: &Worlds, plan: Option<Plan>) {
         Some(kept) if !plan.supersedes(Some(&kept)) => kept,
         _ => {
             if let Err(error) = plan.write(&worlds.base.store) {
-                eprintln!("romacs-world: {}", json!({"event": "layer", "error": format!("the plan cannot be kept: {error}")}));
+                romacs_vm::host::event_line("romacs-world", &json!({"event": "layer", "error": format!("the plan cannot be kept: {error}")}));
                 return;
             }
-            eprintln!("romacs-world: {}", json!({"event": "layer-plan", "entries": plan.entries.len()}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-plan", "entries": plan.entries.len()}));
             plan
         }
     };
@@ -464,10 +464,10 @@ fn build_ahead_apart(worlds: &Worlds, init: &Path) {
     });
     match started {
         Ok(mut child) => {
-            eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "pid": child.id()}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-ahead", "pid": child.id()}));
             std::thread::spawn(move || child.wait());
         }
-        Err(error) => eprintln!("romacs-world: {}", json!({"event": "layer-ahead", "error": error.to_string()})),
+        Err(error) => romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-ahead", "error": error.to_string()})),
     }
 }
 
@@ -482,15 +482,15 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
             return true;
         }
         let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
-        eprintln!("romacs-world: {}", json!({"event": "layer-build", "key": key, "entries": layer.plan.entries.len()}));
+        romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-build", "key": key, "entries": layer.plan.entries.len()}));
         match layer.world.prepare(|| builder_args(&layer.world, width, height, floor, Some(&layer.args())), |_| {}) {
             Ok(_) => {
-                eprintln!("romacs-world: {}", json!({"event": "layer-built", "key": key}));
+                romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-built", "key": key}));
                 keep_last(&layer);
                 return true;
             }
             Err(reason) => {
-                eprintln!("romacs-world: {}", json!({"event": "layer-build-failed", "key": key, "reason": reason}));
+                romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-build-failed", "key": key, "reason": reason}));
                 if layer.world.standing_uncaptured().is_none() {
                     return false;
                 }
@@ -518,10 +518,10 @@ pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: 
     match Plan::read(&base.store, init) {
         Some(plan) if plan.current() => {
             let built = build_ahead(base, plan, width, height, floor);
-            eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": built}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-prepared", "ok": built}));
         }
-        Some(_) => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "the init, or what lies beside its load-path directories, changed since its plan"})),
-        None => eprintln!("romacs-world: {}", json!({"event": "layer-prepared", "ok": false, "reason": "no plan: the init has not run"})),
+        Some(_) => romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-prepared", "ok": false, "reason": "the init, or what lies beside its load-path directories, changed since its plan"})),
+        None => romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-prepared", "ok": false, "reason": "no plan: the init has not run"})),
     }
 }
 
@@ -530,10 +530,10 @@ pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: 
 /// stderr why it builds, and how it ended with the key and the recipe, as
 /// a launch says how it booted.
 pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
-    let building = |reason: &serde_json::Value| eprintln!("romacs-world: {}", json!({"event": "world-build", "reason": reason}));
+    let building = |reason: &serde_json::Value| romacs_vm::host::event_line("romacs-world", &json!({"event": "world-build", "reason": reason}));
     match world.prepare(|| builder_args(world, width, height, floor, None), building) {
         Ok(manifest) => {
-            eprintln!("romacs-world: {}", json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe}));
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe}));
             Ok(())
         }
         Err(reason) => Err(format!("world not prepared: {reason}")),
@@ -567,7 +567,7 @@ fn build(world: &World, width: u32, height: u32, floor: Option<usize>, plan: Opt
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         world.begin_build().map_err(|e| e.to_string())?;
         let len = world.build(|| build_world(width, height, floor, &dir, engine, plan.as_ref()))?;
-        eprintln!("romacs-world: {}", json!({"event": "world-build", "ok": true, "image_bytes": len}));
+        romacs_vm::host::event_line("romacs-world", &json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
     })?.join().map_err(|_| "world builder panicked".to_owned())?
 }
@@ -596,7 +596,7 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     let events = match plan {
         Some((plan, deferred)) => {
             let live = vm.world_layer_load(plan, deferred);
-            eprintln!("romacs-world: {}", json!({"event": "layer-load", "entries": plan.entries.len(), "live": live}));
+            romacs_vm::host::event_line("romacs-world", &json!({"event": "layer-load", "entries": plan.entries.len(), "live": live}));
             json!({"init-layer": plan.json(), "live": live})
         }
         None => json!({}),

@@ -260,7 +260,7 @@ fn beside_executable(suffix: &str) -> Option<PathBuf> {
 /// (`ROMACS_DIAGNOSTICS=1`): otherwise a batch session is as quiet as GNU's.
 fn diagnose(what: &serde_json::Value) {
     if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
-        eprintln!("romacs-world: {what}");
+        romacs_vm::host::event_line("romacs-world", what);
     }
 }
 
@@ -299,12 +299,12 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
             // family's world goes.
             match world.prune_family() {
                 Ok(deleted) if deleted.is_empty() => {}
-                Ok(deleted) => eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted})),
+                Ok(deleted) => romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "pruned", "worlds": deleted})),
                 Err(error) => eprintln!("romacs-world: prune failed: {error}"),
             }
             let result = build(&world, &dir);
             match &result {
-                Ok(len) => eprintln!("romacs-world: {}", serde_json::json!({"event": "world-build", "ok": true, "image_bytes": len})),
+                Ok(len) => romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "world-build", "ok": true, "image_bytes": len})),
                 Err(error) => eprintln!("romacs-world: build failed: {error}"),
             }
             std::process::exit(if result.is_ok() { 0 } else { 1 })
@@ -342,9 +342,9 @@ pub fn prepare_beside(store: PathBuf) {
         .zip(beside_executable("worlds").filter(|store| store.is_dir()))
         .is_some_and(|(dir, installed)| World::ready_read_only(&installed, recipe(&dir)));
     if installed {
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "skipped": "the installation's serves"}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "batch-world", "skipped": "the installation's serves"}));
     } else if let Err(reason) = prepare(store) {
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "ok": false, "warning": reason}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "batch-world", "ok": false, "warning": reason}));
     }
 }
 
@@ -356,7 +356,7 @@ pub fn prepare(store: PathBuf) -> Result<(), String> {
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
     match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
-            eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
             Ok(())
         }
         Err(reason) => Err(format!("batch world not prepared: {reason}")),
@@ -375,7 +375,7 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
         Ok(world) => Some(world),
         // The default store's session stays as quiet as GNU's.
         Err(reason) => {
-            if named { eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
+            if named { romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
             None
         }
     }

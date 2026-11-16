@@ -332,7 +332,7 @@ fn sequence() -> Vec<(&'static str, Scene, bool)> {
     steps
 }
 
-fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
+fn through_picture_equals_whole(scale: f32, shared_slots: bool, alpha: f32) {
     let Some(mut h) = try_harness() else {
         eprintln!("SKIP: no GPU adapter");
         return;
@@ -342,7 +342,8 @@ fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
     let mut picture = RootPicture::new(&h.renderer, SnapshotSize::new(W, H).unwrap());
     let mut order = Vec::new();
     for (name, scene, visible) in sequence() {
-        let frame = scene_frame(&scene, scale, shared_slots);
+        let mut frame = scene_frame(&scene, scale, shared_slots);
+        frame.background_alpha = alpha;
         h.renderer.effects.scroll_bar.track_opacity = scene.track_opacity;
         let mapping = mapping_for_scale(&frame, W, H, scale);
         h.atlas.set_current_frame_fonts(frame.font_bindings());
@@ -435,17 +436,23 @@ fn through_picture_equals_whole(scale: f32, shared_slots: bool) {
 
 #[test]
 fn a_frame_through_the_root_picture_equals_it_drawn_whole() {
-    through_picture_equals_whole(1.0, false);
+    through_picture_equals_whole(1.0, false, 1.0);
+}
+
+#[test]
+fn a_translucent_frame_through_the_root_picture_equals_it_drawn_whole() {
+    // A frame whose background lets the desktop through (`alpha-background').
+    through_picture_equals_whole(1.0, false, 0.9);
 }
 
 #[test]
 fn a_frame_through_the_root_picture_equals_it_drawn_whole_where_rows_share_slots() {
     // The whole pass draws every glyph in the cursor's slot inverse: so must
     // the cursor's patch.
-    through_picture_equals_whole(1.0, true);
+    through_picture_equals_whole(1.0, true, 1.0);
 }
 
 #[test]
 fn a_frame_through_the_root_picture_equals_it_drawn_whole_at_a_fractional_scale() {
-    through_picture_equals_whole(1.5, false);
+    through_picture_equals_whole(1.5, false, 1.0);
 }

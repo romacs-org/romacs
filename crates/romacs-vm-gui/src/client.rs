@@ -329,7 +329,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
         call(&mut stream, &mut reader, next(), "romacs/stop", json!({"save": save}))?;
     }
     if std::env::var_os("ROMACS_CLIENT_TIMING").is_some() {
-        eprintln!("romacs-client: {}", json!({"started": started, "connect_ms": connected.as_secs_f64() * 1e3,
+        romacs_vm::host::event_line("romacs-client", &json!({"started": started, "connect_ms": connected.as_secs_f64() * 1e3,
                                               "reply_ms": begun.elapsed().as_secs_f64() * 1e3}));
     }
     Ok(0)

@@ -836,7 +836,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if let Some(everything) = world_reset {
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store to reset")?;
         let removed = romacs_vm::world::store::reset(&store, everything).map_err(|e| e.to_string())?;
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
         return Ok(None);
     }
     use_collector_threads();
@@ -895,7 +895,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
         (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
         (true, true) => {
-            eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
             None
         }
         (false, _) => None,
@@ -944,7 +944,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // window a client asked for at its start.
         let loading = if live && (!serving || serve_frame) {
             let started = loading::start(sender.clone(), width, height, loading::profile_path());
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "loading-frame", "painted": started.is_ok(),
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "loading-frame", "painted": started.is_ok(),
                                                                "error": started.as_ref().err()}));
             // A first frame that failed may still have been submitted.
             if started.is_err() { first_presentation = 2; }
@@ -956,7 +956,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
             Ok(world) => Some(world),
             Err(reason) => {
-                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+                romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason}));
                 store_problem = Some(reason);
                 None
             }
@@ -971,7 +971,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, |reason| {
             // Said on stderr too, so a launcher sees it whether or not a
             // window can, with why the world was not usable.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
             loading::step("world-build", loading::FIRST_START);
         })));
         // The world this launch booted from, which its worker isolates adopt.
@@ -981,7 +981,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // own; a launch from the layer keeps the base it boots beside.
         let prune = booted.cloned().map(|current| move || { std::thread::spawn(move || {
             if let Ok(deleted) = current.prune() && !deleted.is_empty() {
-                eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
+                romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
         if from_layer && let Some(base) = &world { base.keep(); }
