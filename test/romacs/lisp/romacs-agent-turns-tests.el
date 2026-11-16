@@ -181,6 +181,22 @@ call and result, an answer and a result a turn."
               (should (equal (mapcar #'car (forms)) '(2 7 12)))
               (should (cl-every (lambda (row) (eql (cadr row) romacs-agent-drawn-version)) (forms)))
               (should (= (romacs-agent-turns-redraw (session)) 0)))
+            ;; The batch process draws what has none and says so; the
+            ;; editor tells the chat, which asked for them.
+            (sqlite-execute (romacs-agent-turns--db) "delete from turn_drawn where first_seq > 2")
+            (let ((out nil) (ready nil) (asked nil))
+              (cl-letf (((symbol-function 'princ) (lambda (x &rest _) (push x out)))
+                        ((symbol-function 'romacs-agent--load)
+                         (lambda (_dir) (puthash id (session) romacs-agent--sessions))))
+                (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
+              (setq out (apply #'concat (nreverse out)))
+              (should (string-search (format "(romacs-agent-turns-drawn %S (7 12))" id) out))
+              (cl-letf (((symbol-function 'romacs-agent-ui-drawn-ready) (lambda (i seqs) (push (cons i seqs) ready)))
+                        ((symbol-function 'romacs-agent-turns-fill-soon) (lambda (ids) (setq asked ids))))
+                (romacs-agent-turns--drawn-told (concat "romacs-agent-turns: noise\n" out))
+                (should (equal ready `((,id 7 12))))
+                (run-hook-with-args 'romacs-agent-drawn-wanted-functions id '(7))
+                (should (equal asked (list id)))))
             ;; A drawing that fails leaves its row, with no form.
             (sqlite-execute (romacs-agent-turns--db) "delete from turn_drawn")
             (let ((romacs-agent-turns-draw-function (lambda (&rest _) (error "Broken"))))
