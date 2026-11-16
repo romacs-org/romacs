@@ -224,7 +224,8 @@ records alone with RECORDS-ONLY, and the buffer."
     (let ((form (car (romacs-agent-drawn-tests--forms session 1))))
       (romacs-agent-drawn-tests--chat session
         (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () 40)))
-          (romacs-agent-ui--insert-drawn form))
+          (romacs-agent-ui--insert-drawn form)
+          (romacs-agent-ui--fit-inserted))
         (goto-char (point-min))
         (search-forward "▸")
         (beginning-of-line)
@@ -274,5 +275,34 @@ records alone with RECORDS-ONLY, and the buffer."
       (search-forward "↩")
       (romacs-agent-chat-goto-reply)
       (should (looking-at-p "✓ ✉ reply")))))
+
+(ert-deftest romacs-agent-drawn-older-forms-are-wanted-and-fit-once ()
+  ;; A form an older drawing made is shown, and wanted drawn again; the
+  ;; turns opened are fitted to the window once, however many.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 12
+    (should (= (romacs-agent-turns-fill session) 12))
+    (dolist (row (plist-get (romacs-agent-turns-page session nil 12) :rows))
+      (romacs-agent-drawn-put (romacs-agent-turns--db) id (plist-get row :first-seq) (romacs-agent-ui-draw-turn session row)))
+    (sqlite-execute (romacs-agent-turns--db) "update turn_drawn set version = 1 where first_seq = 2")
+    (let* ((wanted nil) (refits 0)
+           (romacs-agent-drawn-wanted-functions (list (lambda (_ seqs) (setq wanted seqs)))))
+      (cl-letf* ((refit (symbol-function 'romacs-agent-ui--refit-rules))
+                 ((symbol-function 'romacs-agent-ui--refit-rules) (lambda (&rest args) (cl-incf refits) (apply refit args))))
+        (let ((drawn (romacs-agent-drawn-tests--drawn-all session)))
+          (should (equal wanted '(2)))
+          (should (string-search "question 1\n" (car drawn)))
+          (should-not (string-search "⋯" (car drawn)))
+          (kill-buffer (cdr drawn))))
+      (should (<= refits 2)))))
+
+(defun romacs-agent-drawn-tests--drawn-all (session)
+  "SESSION's chat as a first show draws all its turns, and the buffer."
+  (let ((buffer (romacs-agent-ui--make-chat session)))
+    (with-current-buffer buffer
+      (setq romacs-agent-ui--turns nil)
+      (romacs-agent-ui--fill buffer)
+      (setf (romacs-agent-buffer session) nil)
+      (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
 
 ;;; romacs-agent-drawn-tests.el ends here

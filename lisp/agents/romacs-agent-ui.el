@@ -2552,6 +2552,7 @@ saying so until its form comes."
       (let* ((first (plist-get row :first-seq)) (kept (gethash first forms)))
         (if kept (romacs-agent-ui--insert-drawn (cdr kept)) (romacs-agent-ui--placeholder first))
         (unless (and kept (>= (car kept) romacs-agent-drawn-version)) (push first wanted))))
+    (when (> (hash-table-count forms) 0) (romacs-agent-ui--fit-inserted))
     (when wanted (run-hook-with-args 'romacs-agent-drawn-wanted-functions id (nreverse wanted)))))
 
 (defun romacs-agent-ui-drawn-ready (id first-seqs)
@@ -2577,7 +2578,8 @@ shows a row waiting for one, it shows the turn.  An edit to no undo."
                    (goto-char start)
                    (romacs-agent-drawn-insert (cdr kept))
                    (delete-region (point) (+ (point) length))
-                   (romacs-agent-ui--note-fills start (point))))))))))))
+                   (romacs-agent-ui--note-fills start (point)))))
+             (romacs-agent-ui--fit-inserted))))))))
 
 (defun romacs-agent-ui--drawn-form (start end)
   "The transcript from START to END as a drawn form, the outputs opened
@@ -2699,11 +2701,16 @@ end: its text and properties as drawn, the composer after them."
 
 (defun romacs-agent-ui--note-fills (start end)
   "The rules between START and END fit the window as the others do
-\(`romacs-agent-ui--refit-rules'), now: drawn elsewhere, at its width."
+\(`romacs-agent-ui--refit-rules'), once the turns inserted with them are
+in (`romacs-agent-ui--fit-inserted')."
   (let ((at start))
     (while (setq at (text-property-any at end 'romacs-agent-rule-fill t))
       (push (copy-marker at) romacs-agent-ui--fills)
-      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end))))
+      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))))
+
+(defun romacs-agent-ui--fit-inserted ()
+  "Fit the current chat's rules to its window once, turns drawn elsewhere
+inserted: they came at the width they were drawn at."
   (setq romacs-agent-ui--fitted nil)
   (romacs-agent-ui--refit-rules))
 

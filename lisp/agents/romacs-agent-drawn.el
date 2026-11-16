@@ -24,7 +24,7 @@
 
 (require 'cl-lib)
 
-(defconst romacs-agent-drawn-version 1
+(defconst romacs-agent-drawn-version 2
   "The version of what a finished turn draws: raised with any change to
 it (a renderer, the chat's drawing, a face's name), so older forms are
 drawn again.")
