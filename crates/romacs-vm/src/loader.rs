@@ -474,14 +474,6 @@ impl Vm {
         let slot = symbol.index_if(7).and_then(|i| i.checked_sub(1))?;
         self.symbol_names.get(slot).cloned()
     }
-    /// `load-path` as strings; nil, the working directory, as ".".
-    pub(crate) fn load_path_strings(&mut self) -> Result<Vec<String>> {
-        let slot = self.slot("load-path");
-        let value = self.variable_value(slot)?;
-        self.list_values(value)?.into_iter()
-            .map(|v| if v == Value::NIL { Ok(".".to_owned()) } else { self.source_string(v).map(str::to_owned) })
-            .collect()
-    }
     /// macroexp.el internal-macroexpand-for-load: an error that expanding a
     /// top-level form signals reaches the loader's caller as (error "Eager
     /// macro-expansion failure: ERR"), ERR printed as `%S' prints it. A quit
