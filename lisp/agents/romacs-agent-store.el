@@ -331,10 +331,30 @@ when the database cannot be written."
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
 (defun romacs-agent-store-requested (parent request)
-  "The id of the session PARENT started with client request id REQUEST,
-from the rows: one a start left a row is known by it too."
-  (when-let* ((db (romacs-agent-store--open)))
-    (caar (sqlite-select db "select id from sessions where parent = ? and request = ? limit 1" (list parent request)))))
+  "The id of the session PARENT (nil: no session) started with client
+request id REQUEST: from its row; while a fill still writes the rows (a
+start just after the table was made again), from the manifests of the
+sessions not loaded, which a start may have left as rows to come."
+  (or (when-let* ((db (romacs-agent-store--open)))
+        (caar (sqlite-select db "select id from sessions where parent is ? and request = ? limit 1" (list parent request))))
+      (and (process-live-p romacs-agent-store--filling)
+           (romacs-agent-store--requested-recorded parent request))))
+
+(defun romacs-agent-store--requested-recorded (parent request)
+  "The id of the session not loaded whose manifest says PARENT started it
+with REQUEST, or nil."
+  (catch 'found
+    (dolist (dir (and (file-directory-p (romacs-agent--state-root))
+                      (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
+      (let ((id (file-name-nondirectory dir)))
+        (unless (romacs-agent-loaded id)
+          (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir)))
+                      (options (gethash "options" manifest))
+                      ((hash-table-p options))
+                      ((equal (romacs-agent--value (gethash "request" options)) request))
+                      ((equal (romacs-agent--value (gethash "parent" options)) parent)))
+            (throw 'found id)))))
+    nil))
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 (add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
