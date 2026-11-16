@@ -228,7 +228,9 @@ looked, and remember what is there now (an entry gone and back is new)."
   "Tell task ID that WATCH's unit ended, with its status from the journal."
   (romacs-agent-watch--output
    "journalctl" (list "--user" "-u" (plist-get watch :unit) "-o" "cat" "--no-pager"
-                      "--since" (format "@%d" (floor (plist-get watch :since))))
+                      ;; To the microsecond: a unit started again at once
+                      ;; (one check of a tree after another) ends after this.
+                      "--since" (format "@%.6f" (plist-get watch :since)))
    (lambda (journal)
      (when-let* ((task (romacs-agent-get id))
                  ((memq watch (gethash id romacs-agent-watch--watches))))

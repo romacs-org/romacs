@@ -152,16 +152,17 @@
                   "◈ ↻ restart after this turn"))
    (let ((input (romacs-agent-rows-tests--table "worktree" "/w/agent-chat-ui/")))
      (should (equal (romacs-agent-rows-tests--draw "romacs_dev_check" :row input) "◈ ⚑ dev-check · agent-chat-ui"))
+     ;; The check is started, its end told the task or left in its report.
      (should (equal (romacs-agent-rows-tests--draw
                      "romacs_dev_check" :ended input
                      (json-serialize (romacs-agent-rows-tests--table
-                                      "verdict" "ok" "report" "forecast: ok merges\ngenerated: ok none\nlint: ok 2 files\ndev-check: ok")))
-                    "◈ ⚑ dev-check ok · 3/3 stages"))
+                                      "unit" "romacs-dev-check-x" "report" "/r/x.txt" "watched" t)))
+                    "◈ ⚑ dev-check started · told at its end"))
      (should (equal (romacs-agent-rows-tests--draw
                      "romacs_dev_check" :ended input
                      (json-serialize (romacs-agent-rows-tests--table
-                                      "verdict" "fail" "report" "forecast: ok merges\nlint: FAIL 1 warning\ndev-check: FAIL (lint)")))
-                    "◈ ⚑ dev-check fail · lint")))))
+                                      "unit" "romacs-dev-check-x" "report" "/r/x.txt" "watched" :false)))
+                    "◈ ⚑ dev-check started · report /r/x.txt")))))
 
 (ert-deftest romacs-agent-rows-a-new-tool-adds-a-renderer ()
   (unwind-protect

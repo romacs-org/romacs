@@ -194,5 +194,17 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
     (setq caller nil)
     (should-not (funcall romacs-mcp-dev-watch-function "romacs-dev-check-y" "/r/y.txt" 100.0))))
 
+(ert-deftest romacs-agent-watch-reads-the-journal-from-its-start ()
+  ;; A unit started again at once (a tree's check after one that failed)
+  ;; is not told by the earlier run's end in the same second: the journal
+  ;; is read from the watch's start, to the microsecond.
+  (romacs-agent-watch-tests--with
+    (let ((watch (list :unit "check.service" :since 100.25)) (asked nil))
+      (puthash "child" (list watch) romacs-agent-watch--watches)
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (program args _then) (push (cons program args) asked) nil)))
+        (romacs-agent-watch--report "child" watch))
+      (should (member "@100.250000" (cdr (assoc "journalctl" asked)))))))
+
 (provide 'romacs-agent-watch-tests)
 ;;; romacs-agent-watch-tests.el ends here
