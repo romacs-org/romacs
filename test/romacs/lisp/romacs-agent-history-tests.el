@@ -88,3 +88,56 @@
 
 (provide 'romacs-agent-history-tests)
 ;;; romacs-agent-history-tests.el ends here
+
+(ert-deftest romacs-agent-history-an-import-without-its-transcript-makes-nothing ()
+  ;; An import given no transcript, or one not there (a listing read before
+  ;; its scan, an item gone since): refused before anything is made.
+  (let* ((root (make-temp-file "romacs-import-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment)))
+    (unwind-protect
+        (progn
+          (should-error (romacs-agent-import 'claude "aaaaaaaa-0000-4000-8000-000000000001" nil root "t" "claude" nil)
+                        :type 'user-error)
+          (should-error (romacs-agent-import 'claude "aaaaaaaa-0000-4000-8000-000000000001"
+                                             (expand-file-name "gone.jsonl" root) root "t" "claude" nil)
+                        :type 'user-error)
+          (should-not (file-exists-p (romacs-agent--state-root))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-agent-history-a-harness-defined-in-a-file-is-scanned-from-it ()
+  ;; A harness an init or a package defines: its file is kept, and the
+  ;; process that writes the transcripts' rows loads it, so its
+  ;; transcripts are listed too.
+  (let* ((file (make-temp-file "romacs-driver-" nil ".el"
+                               "(romacs-agent-define-harness 'romacs-history-test-driver :display \"T\")\n"))
+         (romacs-agent--drivers (copy-sequence romacs-agent--drivers))
+         (romacs-agent--driver-table (copy-hash-table romacs-agent--driver-table)))
+    (unwind-protect
+        (progn
+          (load file nil t)
+          (should (equal (plist-get (romacs-agent--driver-of 'romacs-history-test-driver) :file) file))
+          (should (member file (romacs-agent-history--driver-files))))
+      (delete-file file))))
+
+(ert-deftest romacs-agent-history-a-scan-loads-harnesses-with-what-they-require ()
+  ;; The scan's process loads each harness's file with this editor's
+  ;; `load-path', so a library it requires from elsewhere is found; one
+  ;; that fails to load leaves the others.
+  (let* ((root (make-temp-file "romacs-drivers-" t))
+         (helpers (expand-file-name "helpers" root))
+         (good (expand-file-name "good-driver.el" root))
+         (bad (expand-file-name "bad-driver.el" root))
+         (load-path (cons helpers load-path))
+         (romacs-agent--drivers (list (list 'bad :file bad) (list 'good :file good))))
+    (unwind-protect
+        (progn
+          (make-directory helpers)
+          (write-region "(provide 'romacs-history-test-helper)\n" nil (expand-file-name "romacs-history-test-helper.el" helpers))
+          (write-region "(require 'romacs-history-test-helper)\n(provide 'romacs-history-test-good)\n" nil good)
+          (write-region "(error \"Broken driver\")\n" nil bad)
+          (with-temp-buffer
+            (call-process (expand-file-name invocation-name invocation-directory) nil t nil "--batch"
+                          "--eval" (romacs-agent-history--drivers-form)
+                          "--eval" "(princ (list (featurep 'romacs-history-test-helper) (featurep 'romacs-history-test-good)))")
+            (should (string-search "(t t)" (buffer-string)))))
+      (delete-directory root t))))
