@@ -67,3 +67,10 @@ impl Leaf<'_> {
         Ok(Value::TRUE)
     }
 }
+
+impl Leaf<'_> {
+    /// keyboard.c parse_modifiers' cache of SYMBOL's elements (keymap.rs).
+    pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
+        self.vm.cache_event_symbol_elements(symbol).map_err(Fault::Error)
+    }
+}
