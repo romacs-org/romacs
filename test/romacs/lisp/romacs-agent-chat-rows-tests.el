@@ -206,7 +206,18 @@ records alone with RECORDS-ONLY, and the buffer."
                    '(("Which?" "Research, then implement" "B"))))
     (puthash "Which?" "my own words" answers)
     (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("A"))) answers)
-                   '(("Which?" "my own words"))))))
+                   '(("Which?" "my own words"))))
+    ;; A label inside another is not picked with it; words of one's own
+    ;; that name a label are kept as they came.
+    (puthash "Which?" "Read all, Test" answers)
+    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Read all" "Test"))) answers)
+                   '(("Which?" "Read all" "Test"))))
+    (puthash "Which?" "Please Test only after lunch" answers)
+    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Test"))) answers)
+                   '(("Which?" "Please Test only after lunch"))))
+    (puthash "Which?" "Read, Read all" answers)
+    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Read all"))) answers)
+                   '(("Which?" "Read" "Read all"))))))
 
 (ert-deftest romacs-agent-chat-row-call-opens-whole ()
   ;; A row's call opened draws its body from the whole input its turn's

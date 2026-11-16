@@ -2843,20 +2843,35 @@ wait, RET or y on it answers them; answered, it recedes."
 
 (add-hook 'romacs-agent-ask-sent-functions #'romacs-agent-ui--note-chosen)
 
+(defun romacs-agent-ui--option-run (answer options)
+  "ANSWER, the labels picked of OPTIONS joined by \", \", as those labels
+in order, each a whole run of its parts between separators, the longest
+first; nil unless ANSWER is wholly such labels."
+  (let ((parts (split-string answer ", ")))
+    (cl-labels ((from (rest)
+                  (if (null rest) (list nil)
+                    (cl-some (lambda (option)
+                               (let ((own (split-string option ", ")))
+                                 (and (<= (length own) (length rest))
+                                      (equal own (seq-take rest (length own)))
+                                      (when-let* ((after (from (nthcdr (length own) rest))))
+                                        (list (cons option (car after)))))))
+                             (sort (copy-sequence options) (lambda (a b) (> (length a) (length b))))))))
+      (car (from parts)))))
+
 (defun romacs-agent-ui--answer-labels (questions answers)
   "ANSWERS, a table from each of QUESTIONS' text to its answer as the
 harness got it (labels joined by \", \"), as chosen labels: ((QUESTION
-LABEL...)...), each answer's labels by its question's options, whole
-when they hold the separator; nil when ANSWERS is not a table."
+LABEL...)...), the labels of its question's options when the answer is
+wholly those (`romacs-agent-ui--option-run'), else the answer as it came,
+words of the user's own; nil when ANSWERS is not a table."
   (when (hash-table-p answers)
     (delq nil
           (mapcar (lambda (question)
                     (when-let* ((answer (gethash (car question) answers)))
-                      (let* ((options (plist-get (cdr question) :options))
-                             (labels (if (member answer options) (list answer)
-                                       (or (seq-filter (lambda (option) (string-search option answer)) options)
-                                           (list answer)))))
-                        (cons (car question) labels))))
+                      (cons (car question)
+                            (or (romacs-agent-ui--option-run answer (plist-get (cdr question) :options))
+                                (list answer)))))
                   questions))))
 
 (defun romacs-agent-ui--answered (id &optional answers)
