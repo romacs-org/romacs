@@ -41,9 +41,24 @@ fn char_tables_are_equal_by_what_they_hold() {
   (= (sxhash-equal (make-char-table 'x)) (sxhash-equal (make-char-table 'x)))
   (let ((h (make-hash-table :test 'equal)) (k (make-char-table 'x)))
     (aset k ?a 1) (puthash k 'found h)
-    (let ((other (make-char-table 'x))) (aset other ?a 1) (gethash other h))))"#;
+    (let ((other (make-char-table 'x))) (aset other ?a 1) (gethash other h)))
+  ;; A compressed Unicode property block equals the same values expanded.
+  (let* ((a (unicode-property-table-internal 'general-category)) (b (copy-sequence a)))
+    (list (equal a b)
+          (progn (put-unicode-property-internal b 128 (get-unicode-property-internal b 128)) (equal a b)))))"#;
     let expected = batch(&gnu, &dir, form);
-    assert_eq!(expected, "(t t t nil t nil t t nil nil nil nil t (t nil) t t found)");
+    assert_eq!(expected, "(t t t nil t nil t t nil nil nil nil t (t nil) t t found (t t))");
     assert_eq!(batch(romacs, &dir, form), expected);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Two tables that hold themselves are equal, and comparing them is one
+/// walk: GNU's comparison of them does not finish, so Romacs alone is run.
+#[test]
+fn tables_that_hold_themselves_compare_once() {
+    let dir = std::env::temp_dir().join(format!("romacs-char-table-self-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let form = "(let ((a (make-char-table 'x)) (b (make-char-table 'x))) (set-char-table-range a t a) (set-char-table-range b t b) (aset a ?q a) (aset b ?q b) (equal a b))";
+    assert_eq!(batch(installed::romacs(), &dir, form), "t");
     std::fs::remove_dir_all(&dir).unwrap();
 }
