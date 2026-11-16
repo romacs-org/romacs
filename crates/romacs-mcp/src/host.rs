@@ -313,7 +313,10 @@ fn last_seq(path: &Path) -> u64 {
 
 /// Attach STREAM: replay the journal from FROM, then make it the attached
 /// server. Done under the lock, so no record is lost or sent twice.
-fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -> Option<u64> {
+/// Attach a server to the session on STREAM, after replaying what it has
+/// not seen; a notes-only host (no HARNESS) says so in its acknowledgement,
+/// so a server that wants a supervisor lets it go and looks again.
+fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json, harness: bool) -> Option<u64> {
     let from = request.pointer("/attach/from").and_then(Json::as_u64).unwrap_or(0);
     let steal = request.pointer("/attach/steal").and_then(Json::as_bool).unwrap_or(false);
     let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
@@ -327,7 +330,8 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
     // Kept: the server may now act as this session's (its relays' route).
     // Told first, then published: a server gone before it hears this is
     // never the attached one.
-    if writeln!(stream, "{}", json!({"attached": id})).is_err() { return None; }
+    let acknowledgement = if harness { json!({"attached": id}) } else { json!({"attached": id, "notesOnly": true}) };
+    if writeln!(stream, "{acknowledgement}").is_err() { return None; }
     let clone = stream.try_clone().ok()?;
     shared.next_attachment = id;
     // A stolen attachment is closed: its server hears it ended, lets its
@@ -364,7 +368,7 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream, harness: bool) {
     let Ok(reading) = stream.try_clone() else { return };
     let mut lines = BufReader::new(reading).lines();
     let Some(Ok(first)) = lines.next() else { return };
-    let Some(id) = serde_json::from_str::<Json>(&first).ok().and_then(|r| attach(&shared, stream, &r)) else { return };
+    let Some(id) = serde_json::from_str::<Json>(&first).ok().and_then(|r| attach(&shared, stream, &r, harness)) else { return };
     for line in lines.map_while(Result::ok) {
         let Ok(request) = serde_json::from_str::<Json>(&line) else { continue };
         if let Some(note) = request.get("note") {
@@ -585,14 +589,14 @@ mod tests {
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
-        assert_eq!(attach(&shared, server, &request), Some(1));
+        assert_eq!(attach(&shared, server, &request, true), Some(1));
         let mut lines = BufReader::new(ours.try_clone().unwrap()).lines();
         let replayed: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
         assert_eq!(replayed["seq"], 1);
         let kept: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
         assert_eq!(kept["attached"], 1);
         let (other, theirs) = UnixStream::pair().unwrap();
-        assert_eq!(attach(&shared, other, &request), None);
+        assert_eq!(attach(&shared, other, &request, true), None);
         let refused: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
         assert_eq!(refused["refused"], "attached");
         let _ = std::fs::remove_file(&path);
@@ -615,6 +619,10 @@ mod tests {
         writeln!(ours, r#"{{"note":{{"type":"plan"}}}}"#).unwrap();
         ours.shutdown(std::net::Shutdown::Write).unwrap();
         serving.join().unwrap();
+        // Its acknowledgement says what it is.
+        let acknowledged: Json = BufReader::new(ours).lines().map_while(Result::ok)
+            .filter_map(|l| serde_json::from_str::<Json>(&l).ok()).find(|r| r.get("attached").is_some()).unwrap();
+        assert_eq!(acknowledged["notesOnly"], true);
         let journaled = std::fs::read_to_string(&path).unwrap();
         let records: Vec<Json> = journaled.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(records.len(), 1, "{journaled}");
@@ -635,9 +643,9 @@ mod tests {
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
         let (first, ours) = UnixStream::pair().unwrap();
-        assert_eq!(attach(&shared, first, &attach_request), Some(1));
+        assert_eq!(attach(&shared, first, &attach_request, true), Some(1));
         let (second, theirs) = UnixStream::pair().unwrap();
-        assert_eq!(attach(&shared, second, &steal_request), Some(2));
+        assert_eq!(attach(&shared, second, &steal_request, true), Some(2));
         // The first server reads its acknowledgement, then the end (not a
         // connection left open: the read would time out).
         ours.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
@@ -663,10 +671,10 @@ mod tests {
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
         drop(ours);
-        assert_eq!(attach(&shared, server, &request), None);
+        assert_eq!(attach(&shared, server, &request, true), None);
         assert!(shared.lock().unwrap().attached.is_none());
         let (next, theirs) = UnixStream::pair().unwrap();
-        assert!(attach(&shared, next, &request).is_some());
+        assert!(attach(&shared, next, &request, true).is_some());
         let kept: Json = serde_json::from_str(&BufReader::new(theirs).lines().next().unwrap().unwrap()).unwrap();
         assert!(kept["attached"].is_u64());
         let _ = std::fs::remove_file(&path);

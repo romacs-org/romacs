@@ -590,3 +590,22 @@ connection of its own, as the writer's process has."
           (should (sqlite-select db "select 1 from imported where session = 'm'")))
       (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-writer-a-notes-host-met-for-a-supervisor-is-let-go ()
+  ;; An attachment that meets a notes-only host where a supervisor is
+  ;; looked for (one launched while that host ends): let go, so it ends and
+  ;; frees the lock, and the supervisor looked for again.
+  (let* ((romacs-agent--note-hosts (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "w" :harness 'claude :dir "/nonexistent/w" :seq 3 :state 'starting))
+         (process (make-pipe-process :name "w" :noquery t)) (deleted nil) (again nil))
+    (process-put process 'romacs-agent session)
+    (setf (romacs-agent-connection session) process)
+    (unwind-protect
+        (cl-letf (((symbol-function 'delete-process) (lambda (p) (push p deleted)))
+                  ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (push (cons f args) again))))
+          (romacs-agent--filter-lines process (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (should-not (romacs-agent-connection session))
+          (should (equal deleted (list process)))
+          (should (eq (caar again) #'romacs-agent--attach))
+          (should (eq (romacs-agent-state session) 'starting)))
+      (delete-process process))))

@@ -2256,12 +2256,22 @@ what came meanwhile."
           (cond ((not (hash-table-p record)))
                 ((gethash "refused" record)
                  (romacs-agent--raise session (list :type 'error :text "another server is attached")))
-                ((and (gethash "attached" record) (gethash (romacs-agent-id session) romacs-agent--note-hosts))
-                 ;; A notes-only host: it takes the held notes and nothing
-                 ;; else, and the session stays as it was.
-                 (romacs-agent--send-held session process)
-                 (romacs-agent--notes-written session))
+                ((and (gethash "attached" record) (eq (gethash "notesOnly" record) t))
+                 (if (gethash (romacs-agent-id session) romacs-agent--note-hosts)
+                     ;; The notes-only host started for it: it takes the
+                     ;; held notes and nothing else; the session stays as
+                     ;; it was.
+                     (progn (romacs-agent--send-held session process)
+                            (romacs-agent--notes-written session))
+                   ;; One met where a supervisor was looked for: let go, so
+                   ;; it ends and frees the lock, and looked for again.
+                   (when (eq (romacs-agent-connection session) process)
+                     (setf (romacs-agent-connection session) nil))
+                   (delete-process process)
+                   (run-at-time 0.1 nil #'romacs-agent--attach session romacs-agent--launch-tries)))
                 ((gethash "attached" record)
+                 ;; A supervisor, whatever was looked for.
+                 (remhash (romacs-agent-id session) romacs-agent--note-hosts)
                  (romacs-agent--kept session process)
                  ;; The notes held for it, numbered by it, now it is ours.
                  (romacs-agent--send-held session process)
@@ -3060,21 +3070,16 @@ it writes the notes held for SESSION and ends as this server lets go."
                   :sentinel #'ignore)
     (romacs-agent--attach session romacs-agent--launch-tries)))
 
-(defconst romacs-agent--notes-host-end 2
-  "Seconds a launch waits for a notes-only host let go to end.")
-
 (defun romacs-agent--end-notes-host (session)
-  "Let SESSION's notes-only host go, if one is attached, and wait, up to
-`romacs-agent--notes-host-end' seconds, for its socket to go: it ends
-within a moment of being let go.  Notes it did not echo stay held."
-  (when-let* (((gethash (romacs-agent-id session) romacs-agent--note-hosts))
-              (connection (romacs-agent-connection session))
-              ((process-live-p connection)))
-    (delete-process connection)
-    (let ((socket (romacs-agent-host-socket session))
-          (end (+ (float-time) romacs-agent--notes-host-end)))
-      (while (and (file-exists-p socket) (< (float-time) end))
-        (sleep-for 0.01)))))
+  "Let SESSION's notes-only host go, starting or attached: it ends, and
+frees the session's lock, once let go (or, never attached, a moment
+later).  An attachment that meets it where a supervisor is looked for
+lets it go and looks again; notes it did not echo stay held."
+  (when (gethash (romacs-agent-id session) romacs-agent--note-hosts)
+    (remhash (romacs-agent-id session) romacs-agent--note-hosts)
+    (when-let* ((connection (romacs-agent-connection session)))
+      (setf (romacs-agent-connection session) nil)
+      (when (process-live-p connection) (delete-process connection)))))
 
 (defun romacs-agent--notes-written (session)
   "SESSION's notes-only host has written every note held: let it go, so it
@@ -3370,8 +3375,8 @@ manager answers, else detached.  INPUT is a file the supervisor gives the
 harness as its whole stdin, and IMAGES what the journal keeps as attached
 to it."
   (romacs-agent--fold-now session)
-  ;; A notes-only host of it is let go and gone before this supervisor
-  ;; starts: none attaches to it in its place, and the lock is free.
+  ;; A notes-only host of it is let go: this supervisor takes the lock as
+  ;; it ends, and is the one attached.
   (romacs-agent--end-notes-host session)
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
