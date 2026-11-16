@@ -1165,6 +1165,8 @@ mod tests {
                  (prog1 (if (eq mode-line-format 'romacs-test-probe) 'GLOBAL mode-line-format) \
                    (set-default 'mode-line-format old))))", lisp_string(name))
     }
+    /// The default face's size (lisp/session/romacs-startup.el), in pixels.
+    const FOURTEEN_POINTS: f32 = 14.0 * 96.0 / 72.0;
     fn workspace(floor: usize) -> Vm {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
@@ -1177,7 +1179,8 @@ mod tests {
         let vm = workspace(1);
         let face = vm.display_default_face().unwrap();
         assert_eq!(face.family, "Iosevka", "WORKSPACE_DEFAULT_MUST_BE_IOSEVKA");
-        assert_eq!(face.pixel_size, 20.0);
+        // Romacs's own size, 14 points, not the frame's 20-pixel cell.
+        assert!((face.pixel_size - FOURTEEN_POINTS).abs() < 0.01, "{face:?}");
         assert_eq!(face.foreground, [212, 197, 160]);
         assert_eq!(face.background, [0, 0, 0]);
     }
@@ -2499,12 +2502,13 @@ mod tests {
         assert_eq!(answer, "(t 10 25 10 nil 10 25 \"tty\" 10)");
     }
 
-    /// `--loadup` with no launch font: the default face keeps the frame's
-    /// own size through the chain's headless faces and the graphical session,
-    /// and the delayed settings are an interactive session's, under its user
-    /// directory, as GNU's startup computes them.
+    /// `--loadup` with no launch font: the default face is Romacs's own
+    /// size, 14 points, through the chain's headless faces and the graphical
+    /// session, whatever the frame's cell was, and the delayed settings are an
+    /// interactive session's, under its user directory, as GNU's startup
+    /// computes them.
     #[test]
-    fn loadup_session_keeps_the_frame_font_and_takes_interactive_settings() {
+    fn loadup_session_keeps_the_default_font_and_takes_interactive_settings() {
         let (launch, session, settings, values) = on_evaluator(|| {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
@@ -2521,8 +2525,7 @@ mod tests {
             let values = printed(&mut vm, "(format \"%s %s\" abbrev-file-name auto-save-list-file-prefix)");
             (launch, session, settings, values)
         });
-        assert_eq!(session.pixel_size, launch.pixel_size, "{launch:?} at launch, {session:?} in the session");
-        assert!(session.pixel_size >= 10.0, "{session:?}");
+        assert!((session.pixel_size - FOURTEEN_POINTS).abs() < 0.01, "{launch:?} at launch, {session:?} in the session");
         assert_eq!(settings, "(t t t t)", "{values}");
     }
 

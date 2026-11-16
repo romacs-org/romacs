@@ -44,12 +44,23 @@ pub struct LaunchFont {
     pub points: u32,
 }
 
+/// The default face's font (lisp/session/romacs-startup.el), which a launch
+/// font naming only a family or only a size keeps the rest of.
+const DEFAULT_FAMILY: &str = "Iosevka";
+const DEFAULT_POINTS: u32 = 14;
+
 impl LaunchFont {
     pub fn from_env() -> Result<Option<LaunchFont>, String> {
-        let Ok(family) = std::env::var("ROMACS_GUI_FONT") else { return Ok(None) };
+        Self::from_values(std::env::var("ROMACS_GUI_FONT").ok(), std::env::var("ROMACS_GUI_FONT_SIZE").ok())
+    }
+
+    /// The launch font a FAMILY and a SIZE name, either of them alone
+    /// keeping the default face's other half; none without either.
+    fn from_values(family: Option<String>, size: Option<String>) -> Result<Option<LaunchFont>, String> {
+        if family.is_none() && size.is_none() { return Ok(None) }
+        let family = family.unwrap_or_else(|| DEFAULT_FAMILY.into());
         if family.chars().any(char::is_control) { return Err("font family contains a control character".into()); }
-        let points = std::env::var("ROMACS_GUI_FONT_SIZE").unwrap_or_else(|_| "14".into())
-            .parse::<u32>().map_err(|e| e.to_string())?;
+        let points = size.map_or(Ok(DEFAULT_POINTS), |size| size.parse::<u32>().map_err(|e| e.to_string()))?;
         if !(6..=72).contains(&points) { return Err("font size must be 6..72 points".into()); }
         Ok(Some(LaunchFont { family, points }))
     }
@@ -277,6 +288,20 @@ fn build_world(dir: &std::path::Path) -> Result<(Vm, Carry, serde_json::Value), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Either half of a launch font alone keeps the default face's other.
+    #[test]
+    fn a_launch_font_naming_one_half_keeps_the_default_other() {
+        let font = |family: Option<&str>, size: Option<&str>| {
+            LaunchFont::from_values(family.map(str::to_owned), size.map(str::to_owned))
+                .map(|font| font.map(|font| (font.family, font.points)))
+        };
+        assert_eq!(font(None, None), Ok(None));
+        assert_eq!(font(None, Some("18")), Ok(Some(("Iosevka".to_owned(), 18))));
+        assert_eq!(font(Some("Monospace"), None), Ok(Some(("Monospace".to_owned(), 14))));
+        assert_eq!(font(Some("Monospace"), Some("15")), Ok(Some(("Monospace".to_owned(), 15))));
+        assert!(font(None, Some("90")).is_err());
+    }
 
     #[test]
     fn an_unusable_store_says_why_and_how_to_fix_it() {
