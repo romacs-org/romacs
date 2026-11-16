@@ -2746,7 +2746,8 @@ strings, compared by value."
          (at (if (get-text-property start 'romacs-agent-task) start
                (next-single-property-change start 'romacs-agent-task nil (line-end-position))))
          (id (get-text-property at 'romacs-agent-task))
-         (session (and id (romacs-agent-get id))))
+         ;; A task only listed (its row) is loaded as it opens.
+         (session (and id (romacs-agent-load-session id))))
     (cond (session (romacs-agent-show session))
           (id (user-error "Task %s is gone" id))
           (t (user-error "No delegated task on this row")))))
