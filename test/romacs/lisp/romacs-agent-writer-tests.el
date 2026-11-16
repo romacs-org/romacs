@@ -536,3 +536,57 @@ connection of its own, as the writer's process has."
 
 (provide 'romacs-agent-writer-tests)
 ;;; romacs-agent-writer-tests.el ends here
+
+(ert-deftest romacs-agent-writer-a-handover-with-records-left-is-cancelled ()
+  ;; A restart's drain that leaves records not saved: the restart is
+  ;; cancelled, the records queued again, made in the background.
+  (let ((requeued 0))
+    (cl-letf (((symbol-function 'romacs-agent-writer-drain) (lambda (&rest _) 3))
+              ((symbol-function 'romacs-agent-writer--requeue) (lambda () (cl-incf requeued))))
+      (should (equal (should-error (romacs-agent-writer--before-handover) :type 'user-error)
+                     '(user-error "Restart cancelled: 3 agent records not yet written")))
+      (should (= requeued 1)))
+    (cl-letf (((symbol-function 'romacs-agent-writer-drain) (lambda (&rest _) 0))
+              ((symbol-function 'romacs-agent-writer--requeue) (lambda () (cl-incf requeued))))
+      (romacs-agent-writer--before-handover)
+      (should (= requeued 1)))))
+
+(ert-deftest romacs-agent-writer-a-note-through-an-attachment-is-held-until-written ()
+  ;; Sent through an attached host, a note is held until its record comes
+  ;; back: an attachment stolen first sends it again with the next; its
+  ;; record read again later (a replay, folded already) lets it go.
+  (let ((romacs-agent--held-notes (make-hash-table :test #'equal))
+        (session (romacs-agent--make :id "a" :harness 'claude :dir "/nonexistent/a" :seq 7 :state 'idle
+                                     :connection 'connection))
+        (sent nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'connection)))
+              ((symbol-function 'process-send-string) (lambda (_p text) (push text sent))))
+      (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+      (should (string-search "romacsNote" (car sent)))
+      (should (= (romacs-agent-held-notes-count) 1))
+      ;; Stolen before it was written: the next attachment sends it again.
+      (romacs-agent--send-held session 'connection)
+      (should (= (length sent) 2))
+      ;; Its record, read again where it was folded already: let go.
+      (setf (romacs-agent-seq session) 8)
+      (romacs-agent--record session (romacs-mcp--object "seq" 8 "note" (car (gethash "a" romacs-agent--held-notes))))
+      (should (zerop (romacs-agent-held-notes-count))))))
+
+(ert-deftest romacs-agent-writer-an-empty-session-s-mark-keeps-its-records ()
+  ;; A session with no journal is marked imported, never staged: records a
+  ;; host wrote before the mark stay.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let* ((root (make-temp-file "romacs-mark-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+         ;; As the writer: it opens the store to write.
+         (romacs-agent-writer-queued nil) (romacs-agent-store--readonly nil)
+         (romacs-agent-store--db nil) (romacs-agent-events--made nil))
+    (unwind-protect
+        (let ((db (progn (make-directory (romacs-agent--state-root) t) (romacs-agent-events--db))))
+          (sqlite-execute db "insert into events (session, seq, t, kind, record) values ('m', 1, 0, 'note', '{}')")
+          (should (romacs-agent-events--mark "m"))
+          (should (romacs-agent-events--mark "m"))
+          (should (equal (sqlite-select db "select seq from events where session = 'm'") '((1))))
+          (should (sqlite-select db "select 1 from imported where session = 'm'")))
+      (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
+      (delete-directory root t))))

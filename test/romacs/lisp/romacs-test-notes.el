@@ -22,7 +22,6 @@
         (let ((coding-system-for-write 'utf-8-unix))
           (write-region (concat (romacs-agent--json record) "\n") nil
                         (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))
-      (romacs-agent--held-echoed session record)
       (romacs-agent--record session record))))
 
 (setq romacs-agent--notes-host #'romacs-test-notes-host)

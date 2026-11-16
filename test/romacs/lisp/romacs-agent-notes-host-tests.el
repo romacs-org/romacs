@@ -116,8 +116,9 @@ state and runtime directories its own."
 
 (ert-deftest romacs-agent-notes-host-a-launch-waits-for-it ()
   ;; A supervisor launched while a notes-only host writes: it numbers
-  ;; after that host's records, and a note that host did not echo goes
-  ;; once, through it.
+  ;; after that host's records, a note that host did not echo goes once,
+  ;; through it, and what is written to the harness reaches the harness,
+  ;; not the notes-only host.
   (skip-unless (romacs-agent-notes-host-tests--host))
   (romacs-agent-notes-host-tests--with
    (lambda (session)
@@ -126,11 +127,21 @@ state and runtime directories its own."
                   ;; No user manager: detached, as in a session without one.
                   (lambda (program &rest args) (if (equal program "systemd-run") 1 (apply real program args)))))
          (romacs-agent--note session (romacs-mcp--object "type" "plan"))
-         (romacs-agent--launch session (list "true"))
+         ;; Its harness echoes two lines: the driver's first, then ours.
+         (romacs-agent--launch session (list "head" "-n" "2"))
+         (romacs-agent--attach session romacs-agent--launch-tries)
+         (should (romacs-agent-notes-host-tests--until
+                  (lambda () (and (process-live-p (romacs-agent-connection session))
+                                  (romacs-agent-caught-up session)
+                                  (not (gethash (romacs-agent-id session) romacs-agent--note-hosts))))))
+         (process-send-string (romacs-agent-connection session)
+                              (concat (json-serialize (romacs-mcp--object "write" "hello")) "\n"))
          (should (romacs-agent-notes-host-tests--until
                   (lambda () (and (null (gethash (romacs-agent-id session) romacs-agent--held-notes))
                                   (cl-some (lambda (r) (gethash "exit" r))
                                            (romacs-agent-notes-host-tests--records session))))))
+         (should (cl-some (lambda (r) (equal (gethash "out" r) "hello"))
+                          (romacs-agent-notes-host-tests--records session)))
          (romacs-agent-notes-host-tests--check session '("plan")))))))
 
 (ert-deftest romacs-agent-notes-host-an-ending-editor-waits-for-it ()

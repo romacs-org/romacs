@@ -398,7 +398,8 @@ cancels it; the writes stay queued, made in the background."
           (when (zerop (romacs-agent-writer--here)) (setq rounds 5))))
       (let ((left (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))))
         (message (if (> left 0) "Saving %d agent records...failed: %d not saved" "Saving %d agent records...done")
-                 count left)))))
+                 count left)
+        left))))
 
 (defun romacs-agent-writer--at-exit ()
   "The editor is ending: every queued write is made, uninterrupted, since
@@ -409,13 +410,19 @@ quitting now would lose them."
   "A restart begins: every queued write is made before its image and its
 successor, which reads them; \[keyboard-quit] cancels the restart, and
 the session goes on with its writes still queued."
-  (condition-case err (let ((inhibit-quit nil)) (romacs-agent-writer-drain t))
-    (quit
-     ;; Cancelled: what is still to be made is queued again, in order, and
-     ;; sent as soon as a writer can be had.
-     (romacs-agent-writer--unsend)
-     (run-with-timer 0 nil #'romacs-agent-writer--flush)
-     (signal (car err) (cdr err)))))
+  (let ((left (condition-case err (let ((inhibit-quit nil)) (romacs-agent-writer-drain t))
+                (quit (romacs-agent-writer--requeue) (signal (car err) (cdr err))))))
+    ;; Some not saved: the successor would not read them.  The restart is
+    ;; cancelled and they are made in the background, as a quit leaves them.
+    (when (and left (> left 0))
+      (romacs-agent-writer--requeue)
+      (user-error "Restart cancelled: %d agent records not yet written" left))))
+
+(defun romacs-agent-writer--requeue ()
+  "What is still to be made, queued again in order and sent as soon as a
+writer can be had."
+  (romacs-agent-writer--unsend)
+  (run-with-timer 0 nil #'romacs-agent-writer--flush))
 
 (defun romacs-agent-writer--obstacle ()
   "Why a requested restart waits (`warm-restart-obstacle-functions'): the

@@ -288,13 +288,14 @@ once it is done."
 
 (defun romacs-agent-events--import-queued (session)
   "Ask the writer to import SESSION; `queued'.  One with no records is
-known imported at once: nothing of it is read meanwhile.  Its journal
-goes to the backup directory here, once imported, so no reader here
-finds it gone before it reads SQLite."
+known imported at once, and only marked so (`romacs-agent-events--mark'):
+nothing of it is read meanwhile, and the mark clears nothing a host
+writes.  Its journal goes to the backup directory here, once imported,
+so no reader here finds it gone before it reads SQLite."
   (let ((id (romacs-agent-id session)) (dir (romacs-agent-dir session)))
     (if (not (file-exists-p (expand-file-name "journal.jsonl" dir)))
         (progn (puthash id t romacs-agent-events--imported)
-               (romacs-agent-write 'romacs-agent-events--import-dir (list id dir))
+               (romacs-agent-write 'romacs-agent-events--mark (list id))
                t)
       (unless (gethash id romacs-agent-events--importing)
         (puthash id t romacs-agent-events--importing)
@@ -307,6 +308,12 @@ finds it gone before it reads SQLite."
              (with-demoted-errors "romacs-agent-events: backing up: %S" (romacs-agent-events--back-up session)))
            (romacs-agent-events--waited id))))
       'queued)))
+
+(defun romacs-agent-events--mark (id)
+  "The writer's: mark the session ID, which has no journal, imported: its
+records are SQLite's from the first, and none is removed."
+  (sqlite-execute (romacs-agent-events--db) "insert or ignore into imported values (?, ?)" (list id (float-time)))
+  t)
 
 (defun romacs-agent-events--import-dir (id dir)
   "The writer's: import the session ID recorded in DIR, its journal kept
