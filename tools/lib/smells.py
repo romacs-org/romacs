@@ -336,7 +336,10 @@ def says_generated(root, name):
     if name.startswith((*GNU_TREES, unsafe_census.VENDOR)) or name in kept_generated(str(root)) \
             or Path(name).name == LOCKFILE or (Path(root) / name).is_symlink():
         return False
-    lines = head(root, name)
+    try:
+        lines = head(root, name)
+    except FileNotFoundError:
+        return False                                 # gone since it was listed (another run's scratch): none
     return any(GENERATED.search(line) for line in lines) and not smell_marks('\n'.join(lines), 'generated')
 
 

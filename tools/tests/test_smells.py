@@ -147,6 +147,8 @@ class GeneratedTest(unittest.TestCase):
             # lisp/d.el is a generated file lisp/ keeps (listed); lisp/f.el is not.
             (Path(root) / 'lisp/GENERATED').write_text('# how\nlisp/d.el\n')
             self.assertEqual([n for n in heads if smells.says_generated(root, n)], ['a.rs', 'b.el', 'lisp/f.el'])
+            # Listed, then gone before it was read (another run's scratch): not generated, no error.
+            self.assertFalse(smells.says_generated(root, 'vanished.json.pending'))
 
 
 def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outside=(), legacy=5,

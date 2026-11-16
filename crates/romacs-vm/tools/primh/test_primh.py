@@ -131,7 +131,7 @@ class IntegrityTests(unittest.TestCase):
         import json
         import tempfile
         from pathlib import Path
-        with tempfile.TemporaryDirectory(dir=primh.HERE) as root:
+        with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'evidence.json'
             primh.atomic_json(path, {'value': 1})
             primh.atomic_json(path, {'value': 2})
@@ -146,7 +146,7 @@ class IntegrityTests(unittest.TestCase):
         spec = primh.load_spec(primh.HERE / 'specs/cdr-safe.json')
         original = json.loads((primh.EVID / 'cdr-safe.json').read_text())
         for key in ('spec_sha256', 'generator_sha256', 'domains_sha256', 'driver_sha256', 'replay_sha256'):
-            with self.subTest(key=key), tempfile.TemporaryDirectory(dir=primh.HERE) as root:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as root:
                 changed = copy.deepcopy(original); changed[key] = '0' * 64
                 primh.atomic_json(Path(root) / 'cdr-safe.json', changed)
                 with patch.object(primh, 'EVID', Path(root)):
@@ -161,7 +161,7 @@ class IntegrityTests(unittest.TestCase):
         spec = primh.load_spec(primh.HERE / 'specs/cdr-safe.json')
         original = json.loads((primh.EVID / 'cdr-safe.json').read_text())
         original['cases'][0]['source'] = 'nil'
-        with tempfile.TemporaryDirectory(dir=primh.HERE) as root:
+        with tempfile.TemporaryDirectory() as root:
             primh.atomic_json(Path(root) / 'cdr-safe.json', original)
             with patch.object(primh, 'EVID', Path(root)):
                 with self.assertRaisesRegex(ValueError, 'deterministic generation'):
@@ -179,7 +179,7 @@ class ManifestTests(unittest.TestCase):
                      gnu='data.c:688', rust='src/prims/fns.rs:87'),
                 dict(name='romacs--t2-assoc', min=3, max=3, effect='Global',
                      gnu='fns.c:2006', rust='src/prims/callback.rs:14')]
-        with tempfile.TemporaryDirectory(dir=primh.HERE) as root:
+        with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'manifest.json'
             path.write_text(json.dumps(rows))
             def reply(*args, **kwargs):
