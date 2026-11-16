@@ -1412,15 +1412,17 @@ itself, so the turn goes on whatever becomes of this server."
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
-    ;; Moved to SQLite first, if it is to be: the start is a place of
-    ;; where its records will be.
-    (romacs-agent-events-own session)
-    (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
-    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
-                          input images))
-  (setf (romacs-agent-state session) 'starting)
-  (romacs-agent--changed session)
-  (romacs-agent--attach session romacs-agent--launch-tries))
+    (setf (romacs-agent-state session) 'starting)
+    (romacs-agent--changed session)
+    ;; Moved to SQLite first, in a worker when it is long: the start is a
+    ;; place of where its records will be.
+    (romacs-agent-events-then
+     session
+     (lambda ()
+       (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
+       (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
+                             input images)
+       (romacs-agent--attach session romacs-agent--launch-tries)))))
 
 ;;; Journal records
 
@@ -2785,18 +2787,21 @@ effect or did not; when it did, a turn stopped at its limit goes on."
       (run-hook-with-args 'romacs-agent-moved-functions session (car moving) to))))
 
 (defun romacs-agent--note (session note)
-  "Journal NOTE in SESSION's journal, in its place: through its supervisor
-when one runs; with none, the journal is the server's to add to."
+  "Record NOTE in SESSION's records, in its place: through its supervisor
+when one runs; with none, the records are the server's to add to.  One
+still in its journal is moved to SQLite first (`romacs-agent-events-then'):
+the note is folded here at once and written once it is moved."
   (let ((connection (romacs-agent-connection session)))
     (if (romacs-agent--harness-live-p session)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
-      (romacs-agent-events-own session)
-      (let* ((seq (1+ (romacs-agent-seq session)))
-             (record (romacs-mcp--object "seq" seq "t" (float-time) "note" note))
-             (coding-system-for-write 'utf-8-unix))
-        (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
-          (write-region (concat (romacs-agent--json record) "\n") nil
-                        (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))
+      (let ((record (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" (float-time) "note" note)))
+        (romacs-agent-events-then
+         session
+         (lambda ()
+           (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
+             (let ((coding-system-for-write 'utf-8-unix))
+               (write-region (concat (romacs-agent--json record) "\n") nil
+                             (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))))
         (romacs-agent--record session record)))))
 
 (defun romacs-agent--restart (session)
@@ -3425,21 +3430,26 @@ keeps the conversation there."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (romacs-agent--check-companions)
   (romacs-agent--refork session)
-  ;; A turn the harness's end cut short goes on (Claude Code's own switch).
-  (let ((process-environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
-    ;; A conversation that never began (its first run never started) is
-    ;; begun, under its own id: there is none to resume.
-    (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
   (romacs-agent--changed session)
-  (romacs-agent--attach session romacs-agent--launch-tries)
-  ;; What waited for its turn's end when the harness went goes now, unless
-  ;; the harness ended in the middle of a turn: the resumed harness takes
-  ;; that turn up again, and the queue goes at its end (a done), as known
-  ;; from how the last run ended, not from when attaching completes.
-  (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
-    (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t)))))
+  ;; A turn the harness's end cut short goes on (Claude Code's own switch).
+  (let ((environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
+    ;; Moved to SQLite first, in a worker when it is long.
+    (romacs-agent-events-then
+     session
+     (lambda ()
+       (let ((process-environment environment))
+         ;; A conversation that never began (its first run never started) is
+         ;; begun, under its own id: there is none to resume.
+         (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
+       (romacs-agent--attach session romacs-agent--launch-tries)
+       ;; What waited for its turn's end when the harness went goes now, unless
+       ;; the harness ended in the middle of a turn: the resumed harness takes
+       ;; that turn up again, and the queue goes at its end (a done), as known
+       ;; from how the last run ended, not from when attaching completes.
+       (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
+         (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t))))))))
 
 ;;; One question
 

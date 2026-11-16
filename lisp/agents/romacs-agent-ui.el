@@ -3611,5 +3611,13 @@ HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
 ;; an older version's form names functions this one has changed.
 (romacs-agent-ui--headers-remake)
 
+;; A chat's replays and pages keep places in its session's journal while
+;; it is still in one: the session is not moved to SQLite under it.
+(defun romacs-agent-ui--holds-journal-p (session)
+  "Whether a chat shows SESSION, which is still in its journal."
+  (buffer-live-p (romacs-agent-buffer session)))
+
+(add-hook 'romacs-agent-events-held-functions #'romacs-agent-ui--holds-journal-p)
+
 (provide 'romacs-agent-ui)
 ;;; romacs-agent-ui.el ends here
