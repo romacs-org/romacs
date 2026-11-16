@@ -3042,6 +3042,10 @@ attaches."
           ((gethash id romacs-agent--launched))
           ((romacs-agent--supervisor-may-run-p session)
            (romacs-agent--attach session romacs-agent--launch-tries))
+          ;; Its directory removed: the session is gone, and its notes
+          ;; with it; no host makes it again.
+          ((not (file-directory-p (romacs-agent-dir session)))
+           (remhash id romacs-agent--held-notes))
           (t (romacs-agent-events-then
               session
               (lambda ()

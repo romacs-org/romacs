@@ -392,7 +392,7 @@ connection of its own, as the writer's process has."
   (let ((romacs-agent--launched (make-hash-table :test #'equal))
         (romacs-agent--held-notes (make-hash-table :test #'equal))
         (romacs-agent-events--waiting (make-hash-table :test #'equal))
-        (session (romacs-agent--make :id "h" :harness 'claude :dir "/nonexistent/h" :seq 7 :state 'starting))
+        (session (romacs-agent--make :id "h" :harness 'claude :dir temporary-file-directory :seq 7 :state 'starting))
         (sent nil) (hosts 0))
     (puthash "h" t romacs-agent--launched)
     (cl-letf (((symbol-function 'romacs-agent-host-socket) (lambda (_) "/nonexistent/h.sock"))
@@ -609,3 +609,16 @@ connection of its own, as the writer's process has."
           (should (eq (caar again) #'romacs-agent--attach))
           (should (eq (romacs-agent-state session) 'starting)))
       (delete-process process))))
+
+(ert-deftest romacs-agent-writer-a-note-for-a-removed-session-starts-no-host ()
+  ;; A session whose directory was removed is gone: a note for it starts
+  ;; no host, which would make its directory again, and is let go.
+  (let ((romacs-agent--held-notes (make-hash-table :test #'equal))
+        (romacs-agent--launched (make-hash-table :test #'equal))
+        (session (romacs-agent--make :id "r" :harness 'claude :dir "/nonexistent/removed" :seq 4 :state 'ended))
+        (hosts 0))
+    (cl-letf (((symbol-function 'romacs-agent-host-socket) (lambda (_) "/nonexistent/removed.sock"))
+              (romacs-agent--notes-host (lambda (_s) (cl-incf hosts))))
+      (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+      (should (zerop hosts))
+      (should (zerop (romacs-agent-held-notes-count))))))

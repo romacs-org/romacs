@@ -447,6 +447,11 @@ fn lock_session(dir: &Path) -> Result<File, String> {
 const NOTES_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn run(config: Config) -> Result<i32, String> {
+    // A notes-only host writes to a session that is there: one whose
+    // directory was removed is gone, and is not made again for a note.
+    if config.notes_only && !config.dir.is_dir() {
+        return Err(format!("{}: the session is gone", config.dir.display()));
+    }
     create_private(&config.dir)?;
     // Before the socket and the store: a second host of the session waits
     // here, and never answers for it or numbers its records meanwhile.
@@ -667,6 +672,16 @@ mod tests {
         assert_eq!(records[0]["note"]["type"], "plan");
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn a_notes_only_host_never_makes_a_removed_session_again() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-gone-session-{}", std::process::id()));
+        let socket = std::env::temp_dir().join(format!("romacs-agent-host-gone-{}.sock", std::process::id()));
+        let config = parse(["--dir", dir.to_str().unwrap(), "--socket", socket.to_str().unwrap(), "--notes-only"]
+            .map(String::from).to_vec()).unwrap();
+        assert!(run(config).unwrap_err().contains("the session is gone"));
+        assert!(!dir.exists());
     }
 
     #[test]
