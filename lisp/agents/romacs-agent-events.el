@@ -202,6 +202,15 @@ prompt before END, or END (its end by default) when it has none."
                                (list (romacs-agent-id session) end))))
         end)))
 
+(defun romacs-agent-events-ends (ids)
+  "How far the records of the sessions IDS names go, in one query: each
+\(ID . PLACE), PLACE the seq after its last (as `romacs-agent-events-end')."
+  (when-let* ((db (romacs-agent-events--db)))
+    (mapcar (lambda (row) (cons (car row) (1+ (cadr row))))
+            (sqlite-select db (format "select session, max(seq) from events where session in (%s) group by session"
+                                      (mapconcat (lambda (_) "?") ids ","))
+                           ids))))
+
 (defun romacs-agent-events-over-p (session from limit)
   "Whether SESSION's records from seq FROM on hold more than LIMIT bytes
 of UTF-8, as a journal's size says for a journal: added up a record at a
