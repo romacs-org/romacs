@@ -660,24 +660,29 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    static FOUND: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
-    let (root, truename) = FOUND.get_or_init(|| {
-        let root = located_runtime().unwrap_or_else(|why| {
-            eprintln!("romacs: no usable runtime tree: {why}\n  \
-                       Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
-                       or name one in a file `{RUNTIME_RECORD}' beside the executable.");
-            std::process::exit(2)
-        });
+    found_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    })
+}
+
+/// [`runtime_root`], or why there is none, for a lookup that has a
+/// fallback: a process with no runtime tree goes on.  Found once.
+fn found_runtime() -> Result<PathBuf, String> {
+    static FOUND: std::sync::OnceLock<Result<(PathBuf, PathBuf), String>> = std::sync::OnceLock::new();
+    let (root, truename) = FOUND.get_or_init(|| located_runtime().map(|root| {
         let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
         (root, truename)
-    });
+    })).as_ref().map_err(String::clone)?;
     if building() {
         host_fact("runtime-root", path_json(truename));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
-    root.clone()
+    Ok(root.clone())
 }
 
 /// [`runtime_root`], or why there is none.
@@ -773,20 +778,21 @@ pub const SOURCE_LINK: &str = "source";
 /// of entry, not stats: a world built while the tree is edited stays valid
 /// when a file under it is added or renamed, or a commit touches `.git`.
 pub fn source_directory() -> Option<PathBuf> {
-    source_directory_from(getenv("ROMACS_SOURCE_DIRECTORY"), runtime_root, &build_root())
+    source_directory_from(getenv("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
 }
 
 /// [`source_directory`] from the variable's VALUE, the runtime tree RUNTIME
-/// gives, and the build's ROOT.
-fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> PathBuf, root: &Path) -> Option<PathBuf> {
+/// gives if there is one, and the build's ROOT.
+fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Option<PathBuf>, root: &Path) -> Option<PathBuf> {
     let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
     if let Some(dir) = value.filter(|d| !d.is_empty()).map(PathBuf::from) {
         // Absolute, so a buffer's own directory never resolves it.
         return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
     }
     // The tree itself, so its files are visited under their own names.
-    let linked = runtime().join(SOURCE_LINK);
-    if tree(&linked) { return canonicalize(&linked).ok(); }
+    if let Some(linked) = runtime().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
+        return canonicalize(&linked).ok();
+    }
     (tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
 }
 
@@ -3082,11 +3088,12 @@ mod tests {
         std::fs::create_dir(&runtime).unwrap();
         std::os::unix::fs::symlink(&checkout, runtime.join(SOURCE_LINK)).unwrap();
         let found = |value: Option<&Path>, runtime: &Path| {
-            source_directory_from(value.map(|v| v.as_os_str().to_owned()), || runtime.to_path_buf(), &build)
+            source_directory_from(value.map(|v| v.as_os_str().to_owned()), || Some(runtime.to_path_buf()), &build)
         };
         assert_eq!(found(None, &runtime), Some(checkout.clone()), "the link before the build's checkout");
         assert_eq!(found(Some(&named), &runtime), Some(named.clone()), "the variable before the link");
         assert_eq!(found(None, &dir.join("unlinked")), Some(build.clone()), "no link: the build's checkout");
+        assert_eq!(source_directory_from(None, || None, &build), Some(build.clone()), "no runtime tree: the build's checkout");
         std::fs::remove_dir_all(&checkout).unwrap();
         assert_eq!(found(None, &runtime), Some(build.clone()), "a link to no tree: the build's checkout");
         let _ = std::fs::remove_dir_all(&dir);
