@@ -480,13 +480,13 @@ contents, so two equal states print the same."
       (romacs-agent--kept-put session nil)
       (write-region "(:a 3)" nil (romacs-agent--kept-file session) nil 'silent)
       ;; The editor reads it as it is, writing nothing.
-      (let ((noninteractive nil))
+      (let ((noninteractive nil) (romacs-agent-writer-queued nil))
         (cl-letf (((symbol-function 'isolate-main-p) (lambda () t)))
           (should (equal (romacs-agent--kept-get session) "(:a 3)"))))
       (should (file-exists-p (romacs-agent--kept-file session)))
       (should-not (romacs-agent-turns-fold id))
       ;; Moved in by another process between the look and the read: from the rows.
-      (let ((noninteractive nil) (moved nil))
+      (let ((noninteractive nil) (romacs-agent-writer-queued nil) (moved nil))
         (cl-letf* ((read (symbol-function 'insert-file-contents))
                    ((symbol-function 'isolate-main-p) (lambda () t))
                    ((symbol-function 'insert-file-contents)

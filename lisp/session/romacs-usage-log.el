@@ -173,6 +173,13 @@ command starts.")
   "Queue PLIST's line."
   (push (json-serialize plist) romacs-usage-log--pending))
 
+(defun romacs-usage-log-note (kind &rest plist)
+  "Put on record a line of KIND (a string) with PLIST's fields, for what is
+neither a command, an error nor a stall (records given up as the editor
+ends): written with the next flush, the last at its end."
+  (when romacs-usage-log-file
+    (apply #'romacs-usage-log--push :kind kind plist)))
+
 (defun romacs-usage-log--gap (ms)
   "Count a gap of MS milliseconds between two commands."
   (let ((bounds romacs-usage-log--gap-bounds) (bucket 0))

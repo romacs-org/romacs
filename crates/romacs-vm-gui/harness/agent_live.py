@@ -92,6 +92,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import signal
 import subprocess
 import sys
@@ -2684,10 +2685,13 @@ def board_keys(args, base):
                                 ['t', 't', 'nil'])
         # The newest thread gone after the board was drawn: its records too
         # (a session still recorded is listed from its row and loaded when asked).
+        # Removed from outside the editor, whose own connection only reads.
         a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
-               '(remhash id romacs-agent--sessions) '
-               '(when (fboundp (quote romacs-agent-store--open)) '
-               '(sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list id))) t)')
+               '(remhash id romacs-agent--sessions) t)')
+        store = a.home / '.local/state/romacs/agents/sessions.sqlite'
+        if store.exists():
+            with sqlite3.connect(store, timeout=30) as db:
+                db.execute('delete from sessions where id = ?', (sids[1],))
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])

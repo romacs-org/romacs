@@ -402,10 +402,12 @@ ran it: its first prompt is then T3's preamble."
 (defun romacs-agent-history--db ()
   "The database, its transcripts' table made; nil without SQLite."
   (when-let* ((db (and (fboundp 'romacs-agent-store--open) (romacs-agent-store--open))))
-    (unless (eq romacs-agent-history--made db)
+    (unless (or (eq romacs-agent-history--made db) (romacs-agent-store-readonly-p))
       (dolist (statement romacs-agent-history--schema) (sqlite-execute db statement))
       (setq romacs-agent-history--made db))
     db))
+
+(add-hook 'romacs-agent-store-made-functions #'romacs-agent-history--db)
 
 (defun romacs-agent-history-index ()
   "Scan the transcripts (`romacs-agent-history--scan') and make the rows

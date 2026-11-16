@@ -67,6 +67,11 @@ Handlers that would attach live resources then add a function to
 (defvar warm-restart-activate-functions nil
   "Functions called with no arguments once a restored session's buffers exist.")
 
+(defvar warm-restart-before-handover-functions nil
+  "Functions called with no arguments as a restart begins, before its
+image is written and its successor started: what must be on disk for the
+successor (a queue of writes) is put there, however long it takes.")
+
 (defvar warm-restart-blocker-functions nil
   "Abnormal hook naming why the current buffer cannot be handed over now.
 Each function runs in a buffer and returns nil or a string.  May be set
@@ -1608,6 +1613,9 @@ for running a newer build."
                (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? "
                                          (mapconcat (lambda (p) (plist-get p :process)) asking ", ")))))
       (user-error "Restart cancelled"))
+    ;; What the successor reads is on disk before it starts, and before
+    ;; its supervisor's deadline runs.
+    (run-hooks 'warm-restart-before-handover-functions)
     (let ((image (warm-restart-write plan))
           (server (bound-and-true-p romacs-server-name)))
       ;; Before anything closes the endpoint: whoever starts this server
