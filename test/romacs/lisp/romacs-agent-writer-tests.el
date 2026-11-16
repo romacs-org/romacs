@@ -102,13 +102,26 @@ connection of its own, as the writer's process has."
         (setq romacs-agent-writer-tests--made nil)
         (romacs-agent-write 'romacs-agent-writer-tests--make '(c)
                             (lambda (_) (romacs-agent-write 'romacs-agent-writer-tests--make '(d))))
-        (cl-letf (((symbol-function 'isolate-await)
-                   (lambda (&rest _)
-                     ;; Served as answers come; the stop, last, ends it.
-                     (unless (member '(romacs-agent-writer-stop) sent) (serve-only))
-                     t)))
+        ;; The writer makes what it was sent, up to a stop, as it comes.
+        (cl-letf (((symbol-function 'isolate-await) (lambda (&rest _) (serve-only) t)))
           (romacs-agent-writer-drain))
         (should (equal (reverse romacs-agent-writer-tests--made) '(c d)))
+        (should (zerop (romacs-agent-writer-pending-count)))
+        ;; A write queued while the writer stops (a timer's): made by a
+        ;; new writer before the drain returns.
+        (setq romacs-agent-writer-tests--made nil)
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(e))
+        (let ((once nil))
+          (cl-letf (((symbol-function 'isolate-await)
+                     (lambda (&rest _)
+                       (let ((stopping (member '(romacs-agent-writer-stop) sent)))
+                         (serve-only)
+                         (when (and stopping (not once))
+                           (setq once t)
+                           (romacs-agent-write 'romacs-agent-writer-tests--make '(f))))
+                       t)))
+            (romacs-agent-writer-drain)))
+        (should (equal (reverse romacs-agent-writer-tests--made) '(e f)))
         (should (zerop (romacs-agent-writer-pending-count)))))))
 
 (ert-deftest romacs-agent-writer-a-burst-waits-for-room-never-errs ()
@@ -137,8 +150,25 @@ connection of its own, as the writer's process has."
                romacs-agent-events--waiting)
       (romacs-agent-events--waited "s")
       (should-not launched)
+      ;; A launch that comes before the notes are made waits behind them.
+      (let ((late nil) (session (romacs-agent--make :id "s" :dir "/nonexistent/s")))
+        (cl-letf (((symbol-function 'romacs-agent-events-own) #'ignore)
+                  ((symbol-function 'romacs-agent-events-p) (lambda (_) t)))
+          (romacs-agent-events-then session (lambda () (setq late (reverse romacs-agent-writer-tests--made)))))
+        (should-not late)
+        (serve)
+        (should (equal launched '(note)))
+        (should (equal late '(note))))
+      (should-not (gethash "s" romacs-agent-events--waiting))
+      ;; Notes alone: the session waits until they are made, then is let go.
+      (setq romacs-agent-writer-tests--made nil)
+      (puthash "s" (list (cons t (lambda () (romacs-agent-write 'romacs-agent-writer-tests--make '(alone)))))
+               romacs-agent-events--waiting)
+      (romacs-agent-events--waited "s")
+      (should (gethash "s" romacs-agent-events--waiting))
       (serve)
-      (should (equal launched '(note))))))
+      (should (equal romacs-agent-writer-tests--made '(alone)))
+      (should-not (gethash "s" romacs-agent-events--waiting)))))
 
 (ert-deftest romacs-agent-writer-a-flip-made-before-a-writer-ended-is-moved ()
   ;; A flip the writer made before it ended, sent again, answers nil: the

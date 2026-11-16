@@ -212,21 +212,28 @@ answer.  The writer then stops; a later write starts another."
     (let ((count (romacs-agent-writer-pending-count)) (tries 0) (romacs-agent-writer--draining t))
       (message "Saving %d agent records..." count)
       (redisplay t)
-      (while (and (> (romacs-agent-writer-pending-count) 0) (< tries 4))
-        (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
-          ;; Gone: a new writer, sent what is still unanswered.
-          (cl-incf tries)
-          (setq romacs-agent-writer--job nil)
-          (romacs-agent-writer--unsend))
-        (romacs-agent-writer--flush)
-        (condition-case nil (isolate-await romacs-agent-writer--job 0.1)
-          (isolate-timeout nil)
-          ;; A writer that cannot be waited on counts as gone.
-          (error (cl-incf tries))))
-      (when-let* ((job romacs-agent-writer--job))
-        (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
-        (ignore-errors (isolate-await job))
-        (when (eq job romacs-agent-writer--job) (setq romacs-agent-writer--job nil)))
+      ;; Until nothing is queued and no writer runs: writes the answers'
+      ;; callbacks queue, even while the writer stops, are made too.
+      (while (and (or (> (romacs-agent-writer-pending-count) 0) romacs-agent-writer--job) (< tries 4))
+        (if (> (romacs-agent-writer-pending-count) 0)
+            (progn
+              (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
+                ;; Gone: a new writer, sent what is still unanswered.
+                (cl-incf tries)
+                (setq romacs-agent-writer--job nil)
+                (romacs-agent-writer--unsend))
+              (romacs-agent-writer--flush)
+              (condition-case nil (isolate-await romacs-agent-writer--job 0.1)
+                (isolate-timeout nil)
+                ;; A writer that cannot be waited on counts as gone.
+                (error (cl-incf tries))))
+          ;; All answered: the writer stops, forgotten at once, so what is
+          ;; queued while it stops goes to a new one; then look again.
+          (let ((job romacs-agent-writer--job))
+            (setq romacs-agent-writer--job nil)
+            (unless (isolate-future-done-p job)
+              (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
+              (ignore-errors (isolate-await job))))))
       (message (if (> (romacs-agent-writer-pending-count) 0) "Saving %d agent records...failed: %d not saved"
                  "Saving %d agent records...done")
                count (romacs-agent-writer-pending-count)))))

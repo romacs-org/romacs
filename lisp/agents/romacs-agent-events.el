@@ -854,8 +854,10 @@ launched after them numbers its records after theirs."
                romacs-agent-events--waiting)
       (let ((dir (romacs-agent-dir session)))
         ;; A job moving it already: it is flipped as that job ends; the
-        ;; writer importing it: it is done as that import is.
-        (unless (or (gethash id romacs-agent-events--migrating) (gethash id romacs-agent-events--importing))
+        ;; writer importing it: it is done as that import is; moved, its
+        ;; waiters are let go behind the writes before them.
+        (unless (or (gethash id romacs-agent-events--migrating) (gethash id romacs-agent-events--importing)
+                    (romacs-agent-events-p session))
           (setq romacs-agent-events--migrate-queue (cons dir (delete dir romacs-agent-events--migrate-queue)))))
       (romacs-agent-events--migrate-next))))
 
@@ -876,15 +878,22 @@ notes' writes first, then, once the writer has made them (a write
 behind them answered), the rest, so a supervisor launched then numbers
 its records after them and reads where they end."
   (when-let* ((thens (gethash id romacs-agent-events--waiting)))
-    (remhash id romacs-agent-events--waiting)
     (let ((firsts (seq-take-while #'car thens)) (rest (seq-drop-while #'car thens)))
+      ;; Waiting still, until the notes are made: what comes meanwhile
+      ;; queues behind them (`romacs-agent-events-then').
+      (puthash id (or rest (list (cons nil #'ignore))) romacs-agent-events--waiting)
       (pcase-dolist (`(,_ . ,then) firsts)
         (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))
-      (when rest
-        (romacs-agent-write 'ignore nil
-                            (lambda (_answer)
-                              (pcase-dolist (`(,_ . ,then) rest)
-                                (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))))))
+      (romacs-agent-write
+       'ignore nil
+       (lambda (_answer)
+         (let ((now (gethash id romacs-agent-events--waiting)))
+           (if (seq-some #'car now)
+               ;; Notes came meanwhile: they are made first, the same way.
+               (romacs-agent-events--waited id)
+             (remhash id romacs-agent-events--waiting)
+             (pcase-dolist (`(,_ . ,then) now)
+               (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then))))))))))
 
 (defun romacs-agent-events--imported-row-p (id)
   "Whether the store says the session ID names is imported, read now."
