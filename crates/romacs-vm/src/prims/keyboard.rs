@@ -525,6 +525,15 @@ fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
     cx.symbol_property(symbol, elements_key)
 }}
 
+// keyboard.c Fevent_convert_list: (MODIFIER... BASE) as the event it
+// denotes, `(control a)' as C-a and `(down click mouse-1)' as down-mouse-1;
+// keymaps read list keys the same way (keymap.rs `key_event_from_list').
+// mouse.el's `mouse--click-1-maybe-follows-link' calls it on every mouse-1.
+defsubr! { name = "event-convert-list", gnu = "keyboard.c:7832", effect = Global,
+fn event_convert_list(cx, event_desc: Value) {
+    cx.event_convert_list(event_desc)
+}}
+
 // A deadline on one call the host admits, an agent's evaluation
 // (lisp/agents/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
 // quit at its next safepoint, as by C-g, unless it ended first. GENERATION

@@ -73,4 +73,8 @@ impl Leaf<'_> {
     pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
         self.vm.cache_event_symbol_elements(symbol).map_err(Fault::Error)
     }
+    /// keyboard.c Fevent_convert_list over keymap.rs's port of it.
+    pub(crate) fn event_convert_list(&mut self, event_desc: Value) -> crate::prim::Out {
+        self.vm.key_event_from_list(event_desc).map_err(Fault::Error)
+    }
 }
