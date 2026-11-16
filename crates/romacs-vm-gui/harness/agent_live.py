@@ -852,8 +852,9 @@ def reap(args, base):
         a.send(parent, 'call romacs_delegate_task ' + json.dumps({'task': 'say first', 'mode': 'wait', 'clientRequestId': 'r1'}))
         # The answer that started it: a call refused while the editor was
         # not yet reachable is retried by the harness.
-        answer = until(lambda: next((text for tool, text, error in a.tool_results()
-                                     if tool == 'romacs_delegate_task' and not error), None), 60, 'task delegated')
+        answer = until(lambda: next((e['text'] for e in a.logged()
+                                     if e.get('tool') == 'romacs_delegate_task' and not e.get('error')), None),
+                       60, 'task delegated')
         a.idle(parent, 60)
         child = json.loads(answer)['taskId']
 
