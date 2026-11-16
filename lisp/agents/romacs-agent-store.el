@@ -29,7 +29,8 @@
 
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
-       input_seq done_seq seen_seq settled_seq attention)
+       input_seq done_seq seen_seq settled_seq attention
+       effort plan permission_mode context_used context_window resume_time)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
@@ -37,7 +38,8 @@
        id text primary key, dir text not null, harness text, provider text, model text,
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
        input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
-       attention integer)"
+       attention integer, effort text, plan integer, permission_mode text, context_used integer,
+       context_window integer, resume_time real)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
@@ -143,7 +145,13 @@ moment later, unless AGAIN says this is that try."
          ;; holding ends its parent may not have had yet.
          :attention (if (or (romacs-agent-failed session)
                             (and (plist-get (romacs-agent-options session) :parent) (romacs-agent-ends session)))
-                        1 0))))
+                        1 0)
+         ;; What its chat's header says of it, from its row alone.
+         :effort (plist-get (romacs-agent-options session) :effort)
+         :plan (if (plist-get (romacs-agent-options session) :plan) 1 0)
+         :permission_mode (and (romacs-agent-permission-mode session) (format "%s" (romacs-agent-permission-mode session)))
+         :context_used (romacs-agent-context-used session) :context_window (romacs-agent-context-window session)
+         :resume_time (and (fboundp 'romacs-agent-resume-time) (romacs-agent-resume-time session)))))
 
 ;;; Filling it
 
@@ -208,7 +216,12 @@ manifest."
             :attention (if (or (funcall field 'failed)
                                (and (hash-table-p options) (romacs-agent--value (gethash "parent" options))
                                     (or (not kept) (funcall field 'ends))))
-                           1 0)))))
+                           1 0)
+            :effort (and (hash-table-p options) (romacs-agent--value (gethash "effort" options)))
+            :plan (if (and (hash-table-p options) (eq (gethash "plan" options) t)) 1 0)
+            :permission_mode (let ((mode (funcall field 'permission-mode))) (and mode (format "%s" mode)))
+            :context_used (funcall field 'context-used) :context_window (funcall field 'context-window)
+            :resume_time (let ((at (gethash "resumeAt" manifest))) (and (numberp at) at))))))
 
 (defun romacs-agent-store--missing ()
   "The directories of recorded sessions that have no row."
@@ -311,6 +324,28 @@ error nor anything owed to its parent (`romacs-agent-quiet-p')."
   (when-let* ((db (romacs-agent-store--open))
               (row (car (sqlite-select db "select state, attention from sessions where id = ?" (list (file-name-nondirectory dir))))))
     (and (member (car row) romacs-agent-store--quiet-states) (eql (cadr row) 0))))
+
+(defun romacs-agent-store-row-session (id)
+  "The session ID names, made from its row alone (none of its kept state
+read, nor its records): what a chat shows of it before it is used, its
+header's facts too.  Nil with no row.  Acting on it loads it
+\(`romacs-agent-load-session')."
+  (when-let* ((db (romacs-agent-store--open))
+              (row (car (sqlite-select db (concat "select dir, harness, provider, model, title, cwd, parent, state,"
+                                                  " last_time, cost, input_seq, done_seq, seen_seq, settled_seq,"
+                                                  " effort, plan, permission_mode, context_used, context_window, resume_time"
+                                                  " from sessions where id = ?")
+                                       (list id)))))
+    (pcase-let ((`(,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost ,input ,done ,seen ,settled
+                   ,effort ,plan ,mode ,used ,window ,resume)
+                 row))
+      (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
+                          :title title :cwd cwd
+                          :options (append (and parent (list :parent parent)) (and effort (list :effort effort))
+                                           (and (eql plan 1) (list :plan t)) (and resume (list :resume-at resume)))
+                          :state (intern (or state "detached")) :last-time last :cost cost
+                          :input-seq input :done-seq (or done 0) :seen-seq seen :settled-seq settled
+                          :permission-mode mode :context-used used :context-window window))))
 
 (defun romacs-agent-store-unloaded ()
   "The sessions that have a row but are not loaded, newest first, each a

@@ -217,6 +217,33 @@ journal one turn long."
         (should-not romacs-agent--quiet-timer)))
     (when (timerp romacs-agent--quiet-timer) (cancel-timer romacs-agent--quiet-timer))))
 
+(ert-deftest romacs-agent-store-a-row-session-has-its-headers-facts ()
+  ;; Kept, a session's row has what its chat's header says; the session
+  ;; made from the row alone says the same, nothing else read.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000009" :harness 'claude :provider "claude"
+                                       :title "header" :cwd "/p/two/" :dir (expand-file-name "b9" root) :seq 3
+                                       :model "claude-x" :options (list :parent "p" :effort "high" :plan t)
+                                       :permission-mode "acceptEdits" :context-used 1200 :context-window 200000)))
+      (make-directory (romacs-agent-dir session))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
+      (romacs-agent--keep session 'idle)
+      (cl-letf (((symbol-function 'romacs-agent--read-kept) (lambda (&rest _) (error "Kept state read")))
+                ((symbol-function 'romacs-agent--read-journal) (lambda (&rest _) (error "Records read"))))
+        (let ((row (romacs-agent-store-row-session (romacs-agent-id session))))
+          (should (equal (romacs-agent-model row) "claude-x"))
+          (should (equal (plist-get (romacs-agent-options row) :effort) "high"))
+          (should (eq (plist-get (romacs-agent-options row) :plan) t))
+          (should (equal (plist-get (romacs-agent-options row) :parent) "p"))
+          (should (equal (romacs-agent-permission-mode row) "acceptEdits"))
+          (should (= (romacs-agent-context-used row) 1200))
+          (should (= (romacs-agent-context-window row) 200000))
+          (should (eq (romacs-agent-state row) 'idle))
+          (should-not (romacs-agent-pending-selection row))))
+      (should-not (romacs-agent-store-row-session "nothing")))))
+
 (ert-deftest romacs-agent-store-what-waits-is-loaded ()
   ;; A session with watches kept, or a resume due, is loaded as a restore
   ;; runs, though listed with no kept state and no supervisor.

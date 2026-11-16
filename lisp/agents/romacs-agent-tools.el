@@ -1132,8 +1132,11 @@ left with room, goes on by itself once the first of their limits resets
 needs a newer one reported, so a limit that stays never schedules again.")
 
 (defun romacs-agent-resume-time (session)
-  "When SESSION resumes by itself at its limit's reset, or nil."
-  (car (gethash session romacs-agent-tools--resumes)))
+  "When SESSION resumes by itself at its limit's reset, or nil; for a
+session made from its row (`romacs-agent-store-row-session'), as the row
+says."
+  (or (car (gethash session romacs-agent-tools--resumes))
+      (plist-get (romacs-agent-options session) :resume-at)))
 
 (defun romacs-agent-tools--keep-resume (session time)
   "Record in SESSION's manifest that it resumes at TIME (nil: no longer):
