@@ -697,6 +697,46 @@ mod tests {
         assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
     }
 
+    /// `recenter` in a window not painted in the current faces (an agent
+    /// chat shown in a reused window) chooses from the rows the
+    /// coming paint lays out, as in a window painted now: over rows of
+    /// mixed heights, for each form of its argument, both start alike, the
+    /// paint keeps that start and shows point's row whole. A point row too
+    /// tall for the rows that must fit below it keeps the start, as GNU.
+    #[test]
+    fn recentring_a_window_not_painted_in_these_faces_uses_the_rows_it_paints() {
+        let mut h = hosted();
+        let text = r#"(progn (defface rp-big '((t :height 1.8)) "") (defvar rp-n 0) (erase-buffer)
+            (dotimes (i 120) (insert (if (= (% i 7) 0) (propertize (format "%03d heading\n" i) 'face 'rp-big)
+                                       (format "%03d line %s\n" i (make-string (* 13 (% i 9)) ?x))))))"#;
+        h.eval(text);
+        // A new face: what faces realize may change, and no window is painted in them.
+        let flip = "(eval (list 'defface (intern (format \"rp-flip-%d\" (setq rp-n (1+ rp-n)))) ''((t :foreground \"red\")) \"\"))";
+        for (point, arg) in [("(point-max)", "-1"), ("(point-max)", "nil"), ("2000", "-3"), ("2000", "3"), ("2000", "0"), ("2000", "'(4)"), ("1500", "-1")] {
+            let recentred = format!("(progn (goto-char {point}) (recenter {arg}) (window-start))");
+            h.eval("(progn (set-window-start nil 1) (goto-char 1))");
+            h.paint();
+            let painted = h.eval(&recentred);
+            h.eval("(progn (set-window-start nil 1) (goto-char 1))");
+            h.paint();
+            h.eval(flip);
+            let refaced = h.eval(&recentred);
+            assert_eq!(refaced, painted, "{point} {arg}: the rows before a paint are the paint's");
+            h.paint();
+            assert_eq!(h.eval("(window-start)"), refaced, "{point} {arg}: the paint keeps the start");
+            assert_eq!(h.eval("(length (pos-visible-in-window-p (point) nil t))"), "2", "{point} {arg}: point's row whole");
+        }
+        // Two lines tall, point on a heading 1.8 lines tall: the rows below it
+        // do not fit, and the start stays.
+        let (line, column) = (h.eval("(frame-char-height)").parse::<u32>().unwrap(), h.eval("(frame-char-width)").parse::<u32>().unwrap());
+        let lines = 2 + h.eval("(- (window-total-height) (window-body-height))").parse::<u32>().unwrap() + h.eval("(window-total-height (minibuffer-window))").parse::<u32>().unwrap();
+        let mut small = hosted_with(Some((column * 60, line * lines)));
+        small.eval(text);
+        small.paint();
+        small.eval(flip);
+        assert_eq!(small.eval("(progn (goto-char (point-min)) (search-forward \"070 heading\") (let ((start (window-start))) (recenter -2) (list (eq start (window-start)) (window-body-height))))"), "(t 2)");
+    }
+
     /// The display elements GNU's iterator delivers, as the host paints
     /// them: each row's glyphs and stretches, and the VM's answers over
     /// them. ROWS is each painted row's text, a stretch as a TAB; each

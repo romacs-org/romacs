@@ -452,39 +452,39 @@ impl Vm {
         }
     }
 
-    /// Frecenter on a window a host lays out, for its pixel branches: ARG
-    /// none centres point, a negative ARG puts it that many rows from the
-    /// bottom (MARGIN and HT its scroll margin and height in lines). The
-    /// new start's character position; None where lines serve (no layout)
-    /// or, as GNU, when nothing fits.
-    pub(crate) fn recenter_start(&mut self, window: Value, arg: Option<i64>, (margin, ht): (i64, i64)) -> Result<Option<i64>> {
-        if self.window(window)?.vscroll_px != 0 { return Ok(None); }
-        let Some(laid) = self.window_layout(window)? else { return Ok(None) };
-        let (body, line) = (laid.body_height, self.window_state.line.max(1) as f32);
+    /// Frecenter's display branches (window.c:7296-7420) for WINDOW over
+    /// the rows painting lays out: ARG none centres point's row
+    /// (`move_it_vertically_backward` by half the text area), a negative ARG
+    /// puts it that many rows from the bottom by pixels, and ARG zero or
+    /// more that many rows from the top (`move_it_by_lines`); MARGIN and HT
+    /// are the window's scroll margin and height in lines. Each measures
+    /// from point's row, so a vertical scroll plays no part (the caller
+    /// zeroes it, as GNU).
+    pub(crate) fn recenter_start(&mut self, window: Value, arg: Option<i64>, (margin, ht): (i64, i64)) -> Result<Recentred> {
+        let Some(body) = self.window_text_area_height(window)? else { return Ok(Recentred::Unlaid) };
+        let line = self.window_state.line.max(1) as f32;
         let point = self.window_point_value(window)?.as_integer()?;
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(Recentred::Unlaid) };
         let (begv, point) = (b.accessible().start.0, b.byte_of_char(CharOffset((point - 1).max(0) as usize))?.0);
-        let Some(rows) = self.rows_above(window, point, (body, 0), begv)? else { return Ok(None) };
+        let up = arg.filter(|&arg| arg >= 0).map(|arg| usize::try_from(clip(margin, arg, ht - margin - 1)).unwrap_or(0));
+        let Some(rows) = self.rows_above(window, point, up.map_or((body, 0), |up| (0.0, up)), begv)? else { return Ok(Recentred::Unlaid) };
         let rows = self.rows_with_line_starts(window, &rows, begv)?;
-        let Some(at) = rows.iter().rposition(|r| r.0 <= point) else { return Ok(None) };
-        // Rows a line tall make pixels lines: the iterator's motion serves.
-        let uniform = rows.iter().all(|r| r.1 == line);
-        let top = match arg {
-            None if uniform => return Ok(None),
-            None => recenter_row(&rows, at, point, (body, (body / 2.0).floor()), line),
-            Some(arg) => {
-                let lines = (-arg).clamp(margin + 1, (ht - margin).max(margin + 1)) as usize;
-                let Some((below, from)) = self.rows_down(window, point, lines as f32 * line * 2.0)? else { return Ok(None) };
-                if uniform && below[from..].iter().take(lines + 1).all(|r| r.1 == line) { return Ok(None); }
+        let Some(at) = rows.iter().rposition(|r| r.0 <= point) else { return Ok(Recentred::Unlaid) };
+        let top = match (arg, up) {
+            (_, Some(up)) => at.saturating_sub(up),
+            (None, None) => recenter_row(&rows, at, point, (body, (body / 2.0).floor()), line),
+            (Some(arg), None) => {
+                let lines = usize::try_from(clip(margin + 1, arg.saturating_neg(), ht - margin)).unwrap_or(0);
+                let Some((below, from)) = self.rows_down(window, point, lines as f32 * line * 2.0)? else { return Ok(Recentred::Unlaid) };
                 let height = recenter_height(&below[from..], lines, body, line);
-                if height <= 0.0 { return Ok(None); }
+                if height <= 0.0 { return Ok(Recentred::Kept); }
                 let mut top = recenter_row(&rows, at, point, (body, height), line);
                 while top < at && rows[top..at].iter().map(|r| r.1).sum::<f32>() > height { top += 1; }
                 top
             }
         };
-        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
-        Ok(Some(b.char_of_byte(ByteOffset(rows[top].0))?.0 as i64 + 1))
+        let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(Recentred::Unlaid) };
+        Ok(Recentred::Start(b.char_of_byte(ByteOffset(rows[top].0))?.0 as i64 + 1))
     }
 
     /// window_scroll_pixel_based's new start for a whole screen from
@@ -492,21 +492,19 @@ impl Vm {
     /// CONTEXT lines stay. None without a layout.
     pub(crate) fn scroll_start(&mut self, window: Value, start: i64, forward: bool, context: i64) -> Result<Option<i64>> {
         if self.window(window)?.vscroll_px != 0 { return Ok(None); }
-        let Some(laid) = self.window_layout(window)? else { return Ok(None) };
-        let (body, line) = (laid.body_height, self.window_state.line.max(1) as f32);
+        let Some(body) = self.window_text_area_height(window)? else { return Ok(None) };
+        let line = self.window_state.line.max(1) as f32;
         let dy = line.max(((body / line).floor() - context as f32) * line);
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let accessible = b.accessible();
         let (begv, zv, from) = (accessible.start.0, accessible.end.0, b.byte_of_char(CharOffset((start - 1).max(0) as usize))?.0);
         let byte = if forward {
             let Some((rows, at)) = self.rows_down(window, from, dy)? else { return Ok(None) };
-            if rows.iter().all(|r| r.1 == line) { return Ok(None); }
             let (mut i, mut y) = (at, 0.0);
             while i < rows.len() && y + rows[i].1 <= dy { y += rows[i].1; i += 1; }
             match rows.get(i.max(at + 1)) { Some(row) => row.2, None => zv }
         } else {
             let Some(rows) = self.rows_above(window, from, (dy, 0), begv)? else { return Ok(None) };
-            if rows.iter().all(|r| r.1 == line) { return Ok(None); }
             let rows = self.rows_with_line_starts(window, &rows, begv)?;
             let Some(at) = rows.iter().rposition(|r| r.0 <= from) else { return Ok(None) };
             let top = recenter_row(&rows, at, from, (body, dy), line);
@@ -519,13 +517,13 @@ impl Vm {
     /// The whole rows WINDOW's text area shows from character position
     /// START. None without a layout.
     pub(crate) fn rows_shown_from(&mut self, window: Value, start: i64) -> Result<Option<i64>> {
-        let Some(laid) = self.window_layout(window)? else { return Ok(None) };
+        let Some(body) = self.window_text_area_height(window)? else { return Ok(None) };
         let Object::Buffer(b) = self.object(self.window(window)?.buffer)? else { return Ok(None) };
         let from = b.byte_of_char(CharOffset((start - 1).max(0) as usize))?.0;
-        let Some((rows, at)) = self.rows_down(window, from, laid.body_height)? else { return Ok(None) };
+        let Some((rows, at)) = self.rows_down(window, from, body)? else { return Ok(None) };
         let (mut y, mut count) = (0.0, 0);
         for row in &rows[at..] {
-            if y + row.1 > laid.body_height { break; }
+            if y + row.1 > body { break; }
             y += row.1;
             count += 1;
         }
@@ -721,6 +719,23 @@ fn conservative_row(rows: &[(usize, f32, usize)], body: f32, margin: f32, line: 
         if k + 1 == rows.len() || rows[k..].iter().map(|r| r.1).sum::<f32>() <= body { return Some(k); }
         extra += 1.0;
     }
+}
+
+/// What `recenter` does to a window's start (`Vm::recenter_start`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Recentred {
+    /// It starts at this character position.
+    Start(i64),
+    /// It keeps its start and vertical scroll: GNU returns at once when
+    /// the rows below point fill the window.
+    Kept,
+    /// No host lays it out: the caller's lines serve.
+    Unlaid,
+}
+
+/// GNU's `clip_to_bounds`: N within LOWER and UPPER, UPPER when they cross.
+fn clip(lower: i64, n: i64, upper: i64) -> i64 {
+    if n < lower { lower } else if n <= upper { n } else { upper }
 }
 
 /// How far back Frecenter moves for a negative ARG, LINES rows from the
