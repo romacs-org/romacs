@@ -106,6 +106,27 @@ one of its records is read, which this checks."
              (romacs-agent--load twin))
       (cl-assert (= read records) t "the twin read %d of its %d records" read records))))
 
+(defvar romacs-agent-kept-tests--due nil
+  "The timers set within `romacs-agent-kept-tests--stepping', held, the
+earliest first.")
+
+(defmacro romacs-agent-kept-tests--stepping (&rest body)
+  "BODY with the timers it sets held, not run (`romacs-agent-kept-tests--due'):
+the restore's steps are taken as the command loop would take them
+\(`romacs-agent-kept-tests--step-all'), with no wait on the clock."
+  (declare (indent 0))
+  `(let ((romacs-agent-kept-tests--due nil))
+     (cl-letf (((symbol-function 'run-at-time)
+                (lambda (_time _repeat function &rest args)
+                  (setq romacs-agent-kept-tests--due (append romacs-agent-kept-tests--due (list (cons function args))))
+                  nil)))
+       ,@body)))
+
+(defun romacs-agent-kept-tests--step-all ()
+  "Run the held timers, the ones they set too, in order, until none is left."
+  (while romacs-agent-kept-tests--due
+    (let ((timer (pop romacs-agent-kept-tests--due))) (apply (car timer) (cdr timer)))))
+
 (defun romacs-agent-kept-tests--load (dir)
   "The session recorded in DIR, loaded by a server knowing no session,
 which then goes idle: what it keeps is written."
@@ -498,11 +519,12 @@ contents, so two equal states print the same."
         (should (romacs-agent-load-session romacs-agent-kept-tests--id))
         (should (= restored 0))
         (clrhash romacs-agent--sessions)
-        (romacs-agent-restore-soon)
-        (should romacs-agent--restore-pending)
-        (should-not (gethash romacs-agent-kept-tests--id romacs-agent--sessions))
-        (with-timeout (10 (ert-fail "the restore did not end"))
-          (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+        (romacs-agent-kept-tests--stepping
+          (romacs-agent-restore-soon)
+          (should romacs-agent--restore-pending)
+          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--sessions))
+          (romacs-agent-kept-tests--step-all))
+        (should-not romacs-agent--restore-pending)
         (should (romacs-agent-get romacs-agent-kept-tests--id))
         (should (= restored 1))
         (let ((agents (alist-get 'agents romacs-progress-state)))
@@ -666,9 +688,10 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--with-workers
         (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
                   ((symbol-function 'romacs-agent--sweep) #'ignore))
-          (romacs-agent-restore-soon)
-          (with-timeout (10 (ert-fail "the restore did not step"))
-            (while romacs-agent--restore-pending (accept-process-output nil 0.05)))
+          (romacs-agent-kept-tests--stepping
+            (romacs-agent-restore-soon)
+            (romacs-agent-kept-tests--step-all))
+          (should-not romacs-agent--restore-pending)
           (should (= restored 0))
           (should (eq (plist-get (alist-get 'agents romacs-progress-state) :status) 'running))
           (romacs-agent-kept-tests--work (car jobs))
