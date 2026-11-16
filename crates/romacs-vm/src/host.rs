@@ -769,16 +769,18 @@ fn runtime_tree(root: &Path) -> Result<(), String> {
 pub const SOURCE_LINK: &str = "source";
 
 /// The Romacs source tree this build came from, `source-directory':
-/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
-/// tree the runtime tree's [`SOURCE_LINK`] names, else the build's own root
-/// while it is a git checkout of one, else none.  A gate's build slot
+/// `ROMACS_SOURCE_DIRECTORY` when set, read as each process's own as SHELL
+/// is (`per_process_env`: a world build reads and records none), none if
+/// it names no tree; else the tree the runtime tree's [`SOURCE_LINK`]
+/// names, else the build's own root while it is a git checkout of one, else
+/// none.  A gate's build slot
 /// mirrors a checkout without `.git`, so a build made there names no tree
 /// it would not find again.  Every way of starting a session finds the
 /// same one, as the link belongs to the runtime tree.  The checks are kinds
 /// of entry, not stats: a world built while the tree is edited stays valid
 /// when a file under it is added or renamed, or a commit touches `.git`.
 pub fn source_directory() -> Option<PathBuf> {
-    source_directory_from(getenv("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
+    source_directory_from(per_process_env("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
 }
 
 /// [`source_directory`] from the variable's VALUE, the runtime tree RUNTIME
