@@ -747,6 +747,18 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// Write TAG and VALUE to stderr as one line in one write: `TAG: {...}`,
+/// the event lines launchers and harnesses parse (`romacs-world`,
+/// `romacs-error`). `eprintln!("{}", value)` hands serde's pieces to
+/// unbuffered stderr a write apiece, so another thread's output (a graphics
+/// driver's warning) could land inside the line.
+pub fn event_line(tag: &str, value: &Json) {
+    let mut line = format!("{tag}: ").into_bytes();
+    let _ = serde_json::to_writer(&mut line, value);
+    line.push(b'\n');
+    let _ = io::Write::write_all(&mut io::stderr().lock(), &line);
+}
+
 /// Environment NAME for a variable each process sets from its own
 /// environment, which restore sets again (`Vm::world_reinit`): none in a
 /// world build, so a world holds no process's value and binds none; this
