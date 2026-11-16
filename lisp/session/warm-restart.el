@@ -1595,18 +1595,22 @@ output to LOG: the successor of a session that is no server."
 
 (defun warm-restart--confirm (plan force asked)
   "Refuse PLAN while a buffer of it is blocked; unless FORCE, ask whether
-the processes it ends, those not in ASKED (names), may end.  Return the
-names asked about, ASKED among them."
+the processes that would end and ask on exit, those not in ASKED, may end.
+Return ASKED with the processes asked about, ASKED itself when none was:
+processes, not names, as a name freed meanwhile may be taken again."
   (when-let* ((blocked (warm-restart--entries plan 'blocked)))
     (user-error "Cannot restart now: %s"
                 (mapconcat (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason))) blocked "; ")))
-  (let ((asking (cl-loop for p in (plist-get plan :processes)
-                         when (and (plist-get p :query) (not (member (plist-get p :process) asked)))
-                         collect (plist-get p :process))))
-    (when (and asking (not force)
-               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? " (string-join asking ", ")))))
+  (let ((asking (and (not force)
+                     (cl-loop for process in (process-list)
+                              when (and (process-live-p process) (process-query-on-exit-flag process)
+                                        (not (memq process asked)))
+                              collect process))))
+    (when (and asking
+               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? "
+                                         (mapconcat #'process-name asking ", ")))))
       (user-error "Restart cancelled"))
-    (append asked asking)))
+    (append asking asked)))
 
 ;;;###autoload
 (defun romacs-restart (&optional force)
@@ -1618,16 +1622,18 @@ network connections are not carried yet: when one would ask before
 `kill-emacs', so does this, unless FORCE.  See `romacs-restart-command'
 for running a newer build."
   (interactive)
-  (let ((asked (warm-restart--confirm (warm-restart-plan) force nil)))
+  (let ((asked (warm-restart--confirm (warm-restart-plan) force nil)) plan)
     ;; What the successor reads is on disk before it starts, and before
     ;; its supervisor's deadline runs.
     (run-hooks 'warm-restart-before-handover-functions)
-    ;; Timers and process output run while those hooks wait: the plan is
-    ;; made again, so a buffer they made is carried and a process they
-    ;; started is asked about.
-    (let* ((plan (warm-restart-plan))
-           (_ (warm-restart--confirm plan force asked))
-           (image (warm-restart-write plan))
+    ;; Timers and process output run while those hooks wait, and while a
+    ;; question waits for its answer: the plan is made again until one
+    ;; needs no question, so what they made is carried, refused or asked
+    ;; about.
+    (while (let ((before asked))
+             (setq plan (warm-restart-plan) asked (warm-restart--confirm plan force asked))
+             (not (eq asked before))))
+    (let ((image (warm-restart-write plan))
           (server (bound-and-true-p romacs-server-name)))
       ;; Before anything closes the endpoint: whoever starts this server
       ;; next restores the image, the successor or a server a launcher

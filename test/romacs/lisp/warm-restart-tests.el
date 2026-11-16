@@ -300,13 +300,15 @@
 
 ;; What the handover hooks do while they wait (the agents' writer drains,
 ;; timers and process output run) is in the plan the image is written from.
-(defun warm-restart-test--restart-with-hook (hook)
-  "`romacs-restart', forced, with HOOK on the handover hooks; the plan it
-writes, or nil when it refused first."
+(defun warm-restart-test--restart-with-hook (hook &optional answer)
+  "`romacs-restart' with HOOK on the handover hooks: the plan it writes, or
+nil when it refused first.  ANSWER, when given, answers its questions
+(called with each prompt) and the restart is not forced."
   (let ((warm-restart-before-handover-functions (list hook)) (written nil))
     (cl-letf (((symbol-function 'warm-restart-write)
-               (lambda (plan &rest _) (setq written plan) (throw 'warm-restart-test-written nil))))
-      (catch 'warm-restart-test-written (romacs-restart t)))
+               (lambda (plan &rest _) (setq written plan) (throw 'warm-restart-test-written nil)))
+              ((symbol-function 'yes-or-no-p) (or answer (symbol-function 'yes-or-no-p))))
+      (catch 'warm-restart-test-written (romacs-restart (not answer))))
     written))
 
 (ert-deftest warm-restart-plan-is-made-after-the-handover-hooks ()
@@ -328,5 +330,33 @@ writes, or nil when it refused first."
                     :type 'user-error)))
           (should (string-match-p "Cannot restart now: .*busy for the test" (cadr err))))
       (when (get-buffer name) (kill-buffer name)))))
+
+;; A question waits for its answer, as the hooks do: what is made or
+;; started meanwhile is asked about or carried too.
+(ert-deftest warm-restart-asks-about-a-process-that-took-an-asked-name ()
+  (let* ((name "warm-restart-test-renamed")
+         (first (make-pipe-process :name name :noquery nil))
+         (second nil) (prompts nil))
+    (unwind-protect
+        (progn
+          (warm-restart-test--restart-with-hook
+           (lambda () (delete-process first) (setq second (make-pipe-process :name name :noquery nil)))
+           (lambda (prompt) (push prompt prompts) t))
+          (should (equal (process-name second) name))
+          (should (= 2 (cl-count-if (lambda (prompt) (string-search name prompt)) prompts))))
+      (dolist (process (list first second))
+        (when (and process (process-live-p process)) (delete-process process))))))
+
+(ert-deftest warm-restart-plans-again-after-a-question-that-waited ()
+  (let ((name "warm-restart-test-asked")
+        (buffer-name (generate-new-buffer-name "warm-restart-made-while-asking"))
+        (process nil))
+    (unwind-protect
+        (let ((plan (warm-restart-test--restart-with-hook
+                     (lambda () (setq process (make-pipe-process :name name :noquery nil)))
+                     (lambda (prompt) (when (string-search name prompt) (get-buffer-create buffer-name)) t))))
+          (should (member buffer-name (mapcar (lambda (e) (plist-get e :name)) (plist-get plan :buffers)))))
+      (when (and process (process-live-p process)) (delete-process process))
+      (when (get-buffer buffer-name) (kill-buffer buffer-name)))))
 
 ;;; warm-restart-tests.el ends here
