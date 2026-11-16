@@ -36,7 +36,6 @@ fn romacs() -> String {
 /// Cases that differ on purpose, each recorded in DIVERGENCES.md. A case
 /// that comes to agree must leave this list.
 const KNOWN: &[&str] = &[
-    "equal char-tables:",    // VM2-EQUAL1
     "aset string-wide:",     // VM2-ASET-STRING1
     "aset string-raw:",      // VM2-ASET-STRING1
 ];
