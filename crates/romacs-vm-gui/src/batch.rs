@@ -285,7 +285,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     }
     // The store's checks, locks and use stamps are the launcher's, outside
     // a flight recording (romacs_vm::flight::without).
-    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, || {}), world)));
+    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, |_| {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
@@ -353,7 +353,7 @@ pub fn prepare_beside(store: PathBuf) {
 pub fn prepare(store: PathBuf) -> Result<(), String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
-    match world.prepare(|| builder_args(&world)) {
+    match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
             eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
             Ok(())

@@ -34,6 +34,8 @@ impl Vm {
     /// the process that restores the image all of it is old.
     fn at_rest_for_image(mut self) -> Result<AtRest, String> {
         self.world_quiescent()?;
+        // Also leaves the minors' books at rest (the holders unknown, no
+        // cache or name logged), which `world_quiescent` need not ask.
         self.settle_generations();
         Ok(AtRest(self))
     }
@@ -109,6 +111,7 @@ impl Vm {
         // HOST(slot:process-environment): rebuilds the environment lists from this process
         // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
+        self.reseed_environment_variables();
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
             let current = self.slots[self.buffer_slot].value;

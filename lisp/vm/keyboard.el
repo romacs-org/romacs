@@ -1017,18 +1017,29 @@ the command loop handles, for `command-error-function'.")
   "Call FUNCTION, noting for cmd_error which function signals out of it."
   (handler-bind-1 function '(t) #'romacs--note-signaling-function))
 
+(defun romacs--c-half-p (function)
+  "Whether FUNCTION is a private `romacs--' function: the Lisp half of
+something GNU writes in C, whose frames GNU never records."
+  (and (symbolp function)
+       (eq t (compare-strings "romacs--" nil nil (symbol-name function) 0 8))))
+
 (defun romacs--note-signaling-function (_error)
   "eval.c signal_or_quit's Vsignaling_function, from the frames below this
 handler: past the top one, and past `error' after it.  A `signal' frame
 whose caller is `error' or `user-error' is dropped first: pinned GNU runs
-subr.el native-compiled, whose call to `signal' records no frame."
+subr.el native-compiled, whose call to `signal' records no frame.  A frame
+called by a C half, and the run of C halves under it, are dropped too:
+they are C in GNU, so its top frame is the primitive that called them."
   (let ((frames nil) (n 0))
     (mapbacktrace (lambda (_evald function _args _flags)
-                    (when (< n 5) (setq frames (cons function frames) n (1+ n))))
+                    (when (< n 16) (setq frames (cons function frames) n (1+ n))))
                   #'romacs--note-signaling-function)
     (setq frames (cdr (nreverse frames)))
     (if (and (eq (car frames) 'signal) (memq (car (cdr frames)) '(error user-error)))
         (setq frames (cdr frames)))
+    (when (romacs--c-half-p (car (cdr frames)))
+      (setq frames (cdr frames))
+      (while (romacs--c-half-p (car frames)) (setq frames (cdr frames))))
     (setq frames (cdr frames))
     (if (eq (car frames) 'error) (setq frames (cdr frames)))
     (setq romacs--signaling-function (car frames))))

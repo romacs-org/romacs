@@ -82,7 +82,7 @@ usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
                       [--mode WxH] [--populate] [--line-numbers TYPE] [--sample FILE]
-                      [--host-calls] [--setup FORM]... [--inherit]
+                      [--host-calls] [--setup FORM]... [--inherit] [--home DIR]
 """
 import argparse
 import hashlib
@@ -383,19 +383,27 @@ def text_point(stderr_records):
 class Session:
     def __init__(self, args, root, latency):
         self.args, self.root, self.latency = args, root, latency
+        # --home DIR: one HOME for every session that names it, so sessions of one binary restore one
+        # world (romacs#252 keys a world by its HOME); its state directory stays the session's own,
+        # as the last launch's profile there (launch-profile.json) moved C-f by 50% between sessions.
+        self.shared_home = getattr(args, 'home', None)
         # Whether a count takes in the threads the evaluator starts during
         # it (`perf_stat'): only when asked, here or by a harness's own
         # options naming `inherit'.
         self.inherit = getattr(args, 'inherit', False)
         self.compositor = self.keyboard = self.process = None
 
+    @property
+    def home(self):
+        return Path(self.shared_home).resolve() if self.shared_home else self.root / 'home'   # absolute: Romacs runs elsewhere
+
     def env(self):
-        home = self.root / 'home'
+        home = self.home
         path = os.environ.get('PATH', '/usr/bin:/bin')
         env = {'PATH': f'{self.args.tools}:{path}' if self.args.tools else path,
                'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'XDG_RUNTIME_DIR': str(self.root),
                'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
-               'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'),
+               'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(self.root / 'state' if self.shared_home else home / 'state'),
                'TMPDIR': str(self.root), 'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman',
                'WLR_HEADLESS_OUTPUTS': '1', 'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
         for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GNU_SOURCE'):
@@ -407,7 +415,8 @@ class Session:
 
     def start(self):
         work, config = self.root / 'work', self.root / 'config'
-        for directory in (self.root / 'home', work, config):
+        self.home.mkdir(parents=True, exist_ok=True)
+        for directory in (work, config):
             directory.mkdir()
         (config / 'rc.xml').write_text(live.RC_XML)
         sample = getattr(self.args, 'sample', None)
@@ -416,7 +425,7 @@ class Session:
         if self.args.populate:
             git = ['git', '-C', str(work), '-c', 'user.name=perkey', '-c', 'user.email=perkey@localhost', '-c', 'commit.gpgsign=false']
             for command in (['init', '-q', '-b', 'main'], ['add', self.file.name], ['commit', '-q', '-m', 'text']):
-                subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.root / 'home')})
+                subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.home)})
         self.stdout, self.stderr = self.root / 'binary.stdout', self.root / 'binary.stderr'
         self.environ = env = self.env()
         log = (self.root / 'compositor.log').open('w')
@@ -473,6 +482,10 @@ class Session:
                          ' (switch-to-buffer (car others))'
                          f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if getattr(self.args, 'split', 1) > 2 else ""}))')
         forms += getattr(self.args, 'setup', None) or []
+        # Last, a full collection: what the world image's own allocation history left for the
+        # first minor collection would otherwise land in the counted keys, so two sessions of
+        # one binary, each restoring an image of its own, differed by up to 60% per key.
+        forms.append('(garbage-collect)')
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -509,6 +522,20 @@ class Session:
         self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
         if any(r.get('signal') or r.get('native_error') for r in done()):
             raise Invalid(f'M-: (setq auto-save-timeout nil) signalled: {done()}')
+
+    def collect(self):
+        """M-: (garbage-collect), then quiet again: each counted phase starts from a heap just
+        collected, so a minor collection the phase did not cause cannot land in its count. Not with
+        --host-calls, whose rows are read after the session's last M-:."""
+        if getattr(self.args, 'host_calls', False):
+            return
+        before = len(records(self.stdout))
+        self.type(['-M', 'alt', ':', '-m', 'alt'])
+        self.type(['(garbage-collect)'])
+        self.type(['-k', 'Return'])
+        done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+        self.wait(done, self.args.timeout, 'M-: (garbage-collect)')
+        self.quiesce()
 
     def evaluator(self):
         for task in Path(f'/proc/{self.process.pid}/task').iterdir():
@@ -615,6 +642,7 @@ class Session:
         commands = {'self-insert': 'self-insert-command', 'C-f': 'forward-char', 'C-n': self.commands.get('[14]')}
         commands['region'] = 'forward-char'
         for name in phases(self.args):
+            self.collect()
             if name == 'region':
                 mark = self.run_keys(KEYS['mark'], 1)
                 result['mark'] = delivery(mark, 'set-mark-command', 1)
@@ -757,6 +785,7 @@ def arguments(argv=None):
     parser.add_argument('--sessions', type=int, default=5)
     parser.add_argument('--latency-sessions', type=int, default=1)
     # GNU's undo-auto--boundary-timer fires 10s after the visit's first change.
+    parser.add_argument('--home', type=Path, help='a HOME every session shares (not its state directory); default each its own')
     parser.add_argument('--settle', type=float, default=12, help='quiet evaluator seconds before measuring')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')

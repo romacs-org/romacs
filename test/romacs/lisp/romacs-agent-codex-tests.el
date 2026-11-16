@@ -455,5 +455,27 @@ journals what its harness writes."
       (should (equal (gethash "model" params) "b"))
       (should (equal (gethash "effort" params) "high")))))
 
+(ert-deftest romacs-agent-codex-replay-passes-over-output-deltas ()
+  ;; A call's output as it streams draws nothing: a replay passes over
+  ;; it unparsed.  Its end, a request, and an older line without its
+  ;; time are each still read as they were.
+  (let* ((session (romacs-agent--make :id "c" :harness 'codex))
+         (lines '(("{\"out\":{\"emittedAtMs\":1,\"method\":\"item/commandExecution/outputDelta\",\"params\":{\"delta\":\"a \\\"b\\\"\\n\",\"itemId\":\"exec-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":5,\"t\":1.0}" . t)
+                  ("{\"out\":{\"method\":\"item/fileChange/outputDelta\",\"params\":{\"delta\":\"ok\",\"itemId\":\"p-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":6,\"t\":1.0}" . t)
+                  ("{\"out\":{\"emittedAtMs\":2,\"method\":\"item/completed\",\"params\":{\"item\":{\"aggregatedOutput\":\"a\",\"command\":\"ls\",\"id\":\"exec-1\",\"status\":\"completed\",\"type\":\"commandExecution\"},\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":7,\"t\":1.0}" . nil)
+                  ("{\"out\":{\"id\":3,\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"command\":\"ls\",\"itemId\":\"exec-2\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":8,\"t\":1.0}" . nil)))
+         (skip (with-temp-buffer
+                 (dolist (line lines) (insert (car line) "\n"))
+                 (romacs-agent--codex-streamed-skip))))
+    (with-temp-buffer
+      (dolist (line lines)
+        (erase-buffer)
+        (insert (car line))
+        (should (eq (and (funcall skip (point-min) (point-max)) t) (cdr line)))
+        ;; What it passes over, read, would have drawn nothing.
+        (when (cdr line)
+          (let ((record (json-parse-string (car line) :object-type 'hash-table)))
+            (should-not (romacs-agent--codex-events session (gethash "out" record)))))))))
+
 (provide 'romacs-agent-codex-tests)
 ;;; romacs-agent-codex-tests.el ends here
