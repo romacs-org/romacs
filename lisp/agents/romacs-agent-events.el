@@ -327,7 +327,7 @@ reader here.  It moves at a start that leaves it unloaded."
   "Let go of this process's claim on session ID."
   (ignore-errors (romacs-agent-events--write db "delete from moving where session = ? and pid = ?" (list (list id (emacs-pid))))))
 
-(defun romacs-agent-events-import (session &optional keep)
+(cl-defun romacs-agent-events-import (session &optional keep)
   "Move SESSION's journal into SQLite, once: its records (but for
 `thinking_tokens' counters, which no reader folds), `romacs-agent-events--chunk'
 a transaction, then its `imported' row, which makes them its records;
@@ -356,6 +356,11 @@ imported."
                           (when (>= (length rows) romacs-agent-events--chunk)
                             (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))
                             (setq rows nil))))
+                ;; Moved by another meanwhile, before this claimed it: its
+                ;; records are those, nothing to remove or write.
+                (when (sqlite-select db "select 1 from imported where session = ?" (list id))
+                  (puthash id t romacs-agent-events--imported)
+                  (cl-return-from romacs-agent-events-import t))
                 (romacs-agent-events--write db "delete from events where session = ?" (list (list id)))
                 (condition-case err
                     (progn

@@ -416,7 +416,13 @@ turns, and its journal's file; a state root of its own."
                (insert (substring text 0 (string-search "{\"note\":{\"type\":\"cut\"" text))
                        (string-trim-right (romacs-agent-events-tests--line 100 "note" (romacs-mcp--object "type" "last"))))))
            (should (romacs-agent-events-import session))
-           (should (member 100 (romacs-agent-events-tests--seqs session)))))))))
+           (should (member 100 (romacs-agent-events-tests--seqs session)))
+           ;; Another that saw it not moved claims it after: it finds it moved,
+           ;; and its records stay.
+           (let ((before (events)) (romacs-agent-events--imported (make-hash-table :test #'equal)))
+             (cl-letf (((symbol-function 'romacs-agent-events-p) #'ignore))
+               (should (romacs-agent-events-import session)))
+             (should (= (events) before)))))))))
 
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
   ;; Its supervisor's socket there when compacting holds the write lock:
