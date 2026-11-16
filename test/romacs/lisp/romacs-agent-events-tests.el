@@ -396,6 +396,16 @@ turns, and its journal's file; a state root of its own."
                (should-error (romacs-agent-events-import session)))
              (delete-file socket))
            (should-not (romacs-agent-events-p session))
+           ;; Loaded by an editor as it moved (its mark replaces the claim): undone.
+           (let ((lines (symbol-function 'romacs-agent--journal-lines)))
+             (cl-letf (((symbol-function 'romacs-agent--journal-lines)
+                        (lambda (&rest args) (claimed 1) (apply lines args))))
+               (should-error (romacs-agent-events-import session))))
+           (should-not (romacs-agent-events-p session))
+           (should (= (events) 0))
+           ;; The editor's mark stays; a move waits for a start that leaves it unloaded.
+           (should-not (romacs-agent-events-import session))
+           (claimed dead)
            ;; Its last line cut short: no move.
            (write-region "{\"note\":{\"type\":\"cut\"" nil journal t 'silent)
            (should-error (romacs-agent-events-import session))
