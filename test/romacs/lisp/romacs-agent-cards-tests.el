@@ -224,12 +224,12 @@ its end in STATE."
        :input (romacs-agent-cards-tests--table "worktree" "/w/tree/"))
       (romacs-agent-cards-tests--draw
        session :type 'tool :state 'completed :id "d"
-       :output (json-serialize (romacs-agent-cards-tests--table "verdict" "ok" "report" "lint: ok\ndev-check: ok")))
+       :output (json-serialize (romacs-agent-cards-tests--table "unit" "romacs-dev-check-x" "report" "/r/x.txt" "watched" t)))
       (romacs-agent-ui--run-settle)
-      (should (equal (romacs-agent-cards-tests--visible) "▸ ◈ ⚑ dev-check ok · 1/1 stages\n"))
+      (should (equal (romacs-agent-cards-tests--visible) "▸ ◈ ⚑ dev-check started · told at its end\n"))
       (goto-char (point-min))
       (romacs-agent-chat-toggle)
-      (search-forward "dev-check ok")
+      (search-forward "dev-check started")
       (should (eq (car (ensure-list (get-text-property (1- (point)) 'face))) 'romacs-agent-done)))))
 
 (ert-deftest romacs-agent-run-says-what-it-did-and-failures-stay ()

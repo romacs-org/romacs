@@ -363,13 +363,6 @@ known."
  :body (lambda (_input output)
          (or (romacs-agent-rows--field (romacs-agent-rows--json output) "status") (romacs-agent-rows-words output))))
 
-(defun romacs-agent-rows--stages (report)
-  "REPORT's stages, (NAME . OK) for each line \"NAME: ok|...\" but its verdict."
-  (cl-loop for line in (split-string (or report "") "\n")
-           when (and (string-match "\\`\\([a-z][a-z-]*\\): \\([A-Za-z]+\\)" line)
-                     (not (equal (match-string 1 line) "dev-check")))
-           collect (cons (match-string 1 line) (equal (downcase (match-string 2 line)) "ok"))))
-
 (romacs-agent-rows-define
  "romacs_dev_check"
  :row (lambda (input)
@@ -377,17 +370,16 @@ known."
          (concat "⚑ dev-check" (if-let* ((tree (romacs-agent-rows--field input "worktree")))
                                    (romacs-agent-rows--dim (concat " · " (file-name-nondirectory (directory-file-name tree))))
                                  ""))))
+ ;; The check runs on as a unit: the call answers its start, and the
+ ;; task is told its end, or reads the report it names.
  :ended (lambda (_input output)
-          (let* ((answer (romacs-agent-rows--json output))
-                 (stages (romacs-agent-rows--stages (romacs-agent-rows--field answer "report")))
-                 (failed (cl-remove-if #'cdr stages))
-                 (verdict (or (romacs-agent-rows--field answer "verdict") "?")))
+          (let ((answer (romacs-agent-rows--json output)))
             (romacs-agent-rows--romacs
-             (concat "⚑ dev-check " (propertize verdict 'face (if (equal verdict "ok") 'romacs-agent-done 'romacs-agent-error))
+             (concat "⚑ dev-check " (propertize "started" 'face 'romacs-agent-done)
                      (romacs-agent-rows--dim
-                      (if failed (concat " · " (mapconcat #'car failed ", "))
-                        (format " · %d/%d stages" (length stages) (length stages))))))))
- :body (lambda (_input output) (or (romacs-agent-rows--field (romacs-agent-rows--json output) "report")
+                      (if (eq (romacs-agent-rows--get answer "watched") t) " · told at its end"
+                        (concat " · report " (abbreviate-file-name (or (romacs-agent-rows--field answer "report") "?")))))))))
+ :body (lambda (_input output) (or (romacs-agent-rows--field (romacs-agent-rows--json output) "next")
                                   (romacs-agent-rows-words output))))
 
 ;;; The harnesses' own tools
