@@ -3745,8 +3745,9 @@ wrote or read it: it is not written again for the same seq.")
 
 (defun romacs-agent--kept-put (session text)
   "Keep TEXT as SESSION's state (`romacs-agent--kept-text'), its only copy,
-in its rows (`romacs-agent-turns-fold-put'); non-nil when kept."
-  (romacs-agent-turns-fold-put (romacs-agent-id session) text))
+in its rows (`romacs-agent-turns-fold-put'), by the writer from the
+editor; non-nil when kept or queued to be."
+  (romacs-agent-written-p (romacs-agent-write 'romacs-agent-turns-fold-put (list (romacs-agent-id session) text))))
 
 (defun romacs-agent--kept-get (session)
   "SESSION's state as kept, as text, or nil.  One an earlier build kept in

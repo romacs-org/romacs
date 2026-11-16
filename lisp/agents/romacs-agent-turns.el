@@ -42,7 +42,8 @@
 (defun romacs-agent-turns--db ()
   "The database, its turns' tables made; nil without SQLite."
   (when-let* ((db (romacs-agent-store--open)))
-    (unless (eq romacs-agent-turns--made db)
+    ;; The editor reads: the writer made them (`romacs-agent-store--made').
+    (unless (or (eq romacs-agent-turns--made db) (romacs-agent-store-readonly-p))
       (dolist (statement romacs-agent-turns--schema) (sqlite-execute db statement))
       ;; Columns added since: the session's folded state, on one row of its
       ;; own (`romacs-agent-turns-fold-put'), and what a chat draws a turn
@@ -52,8 +53,11 @@
           (unless (member (car column) columns)
             (sqlite-execute db (format "alter table turns add column %s %s" (car column) (cdr column))))))
       (ignore-errors (dolist (statement romacs-agent-turns--search-schema) (sqlite-execute db statement)))
+      (romacs-agent-drawn-table db)
       (setq romacs-agent-turns--made db))
     db))
+
+(add-hook 'romacs-agent-store-made-functions #'romacs-agent-turns--db)
 
 ;;; Writing
 
@@ -368,6 +372,13 @@ transaction: never two of one, nor a form without its row."
             (when form (romacs-agent-turns--drawn (nth 0 row) (list (nth 1 row))))))
       (error (ignore-errors (sqlite-execute db "rollback"))
              (message "romacs-agent-turns: %s" (error-message-string err))))))
+
+(defun romacs-agent-turns-drawn-keep (id first-seq form)
+  "Keep FORM as session ID's turn from FIRST-SEQ drawn (`romacs-agent-drawn-put'):
+the writer's, for a turn the editor just drew."
+  (when-let* ((db (romacs-agent-turns--db)))
+    (romacs-agent-drawn-put db id first-seq form)
+    t))
 
 (defvar romacs-agent-turns--drawn-kept :none
   "The forms the fill's batch process kept, to tell the editor: a list of

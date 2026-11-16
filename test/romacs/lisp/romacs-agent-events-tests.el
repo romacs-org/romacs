@@ -489,21 +489,25 @@ turns, and its journal's file; a state root of its own."
          (should (> (file-attribute-size (file-attributes journal)) size)))))))
 
 (ert-deftest romacs-agent-events-a-flip-the-lock-holds-off-is-tried-again ()
-  ;; A worker holding the lock: the flip waits for a later turn, not lost.
-  (let ((romacs-agent-events--flip-queue nil) (flips 0) (later nil)
+  ;; A worker holding the lock: the flip is tried again a moment later,
+  ;; not lost, and what waits for it waits on.
+  (let ((romacs-agent-events--flip-queue nil) (flips 0) (later nil) (waited nil)
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (&rest _) '((10 3))))
               ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+              ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-events--flip)
                (lambda (&rest _) (if (= (cl-incf flips) 1) (signal 'sqlite-locked-error '("database is locked")) t)))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
-              ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest _) (setq later f))))
+              ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (setq later (cons f args)))))
       (romacs-agent-events--flip-soon '("s"))
-      (should (equal romacs-agent-events--flip-queue '("s")))
+      (should (= flips 1))
       (should later)
-      (funcall later)
+      (should-not waited)
+      (apply (car later) (cdr later))
       (should (= flips 2))
+      (should (equal waited '("s")))
       (should-not romacs-agent-events--flip-queue))))
 
 (ert-deftest romacs-agent-events-a-flip-finds-the-journal-as-written ()

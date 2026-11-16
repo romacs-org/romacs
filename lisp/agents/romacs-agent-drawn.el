@@ -115,8 +115,9 @@ properties, before the markers there with BEFORE-MARKERS; point after it."
 
 (defvar romacs-agent-drawn--made nil "The databases the table was made in.")
 
-(defun romacs-agent-drawn--table (db)
-  "DB, its table made once."
+(defun romacs-agent-drawn-table (db)
+  "DB, its table made once: by the store's writers (`romacs-agent-turns--db'),
+never by the editor, which only reads it."
   (unless (memq db romacs-agent-drawn--made)
     (sqlite-execute db romacs-agent-drawn--schema)
     (push db romacs-agent-drawn--made))
@@ -125,7 +126,7 @@ properties, before the markers there with BEFORE-MARKERS; point after it."
 (defun romacs-agent-drawn-put (db session first-seq form)
   "Keep FORM as the drawn turn of SESSION (an id) from FIRST-SEQ in DB, at
 this version: no transaction of its own, so it may be in its writer's."
-  (sqlite-execute (romacs-agent-drawn--table db)
+  (sqlite-execute (romacs-agent-drawn-table db)
                   "insert or replace into turn_drawn values (?, ?, ?, ?)"
                   (list session first-seq romacs-agent-drawn-version form)))
 
@@ -134,7 +135,7 @@ this version: no transaction of its own, so it may be in its writer's."
 first seq to (VERSION . FORM)."
   (let ((found (make-hash-table)))
     (when first-seqs
-      (dolist (row (sqlite-select (romacs-agent-drawn--table db)
+      (dolist (row (sqlite-select db
                                   (format "select first_seq, version, form from turn_drawn where session = ? and first_seq in (%s)"
                                           (mapconcat (lambda (_) "?") first-seqs ","))
                                   (cons session first-seqs)))
@@ -144,7 +145,7 @@ first seq to (VERSION . FORM)."
 (defun romacs-agent-drawn-stale (db &optional limit)
   "The turns in DB drawn by an older version: (SESSION FIRST-SEQ)
 lists, at most LIMIT."
-  (sqlite-select (romacs-agent-drawn--table db)
+  (sqlite-select db
                  (concat "select session, first_seq from turn_drawn where version < ?"
                          (if limit " limit ?" ""))
                  (append (list romacs-agent-drawn-version) (and limit (list limit)))))
