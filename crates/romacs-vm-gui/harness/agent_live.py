@@ -90,6 +90,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -246,6 +247,8 @@ def session(args, base):
     a = Agents(args, base, 'ag')
     try:
         a.up()
+        # Asked, not allowed: the default allows every tool call unasked.
+        a.eval("(setq romacs-agent-approval-policy 'ask)")
         sid = a.start('say hello from the fake harness')
         a.idle(sid)
         a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "alpha beta\\n") t)')
@@ -275,8 +278,9 @@ def session(args, base):
         chat = a.chat(sid)
         result = {'edited': edited, 'evaluated': evaluated, 'approval': approval, 'interrupt_s': round(interrupt_s, 2),
                   'attached_after_reshow': attached,
-                  'chat_has': {k: k in chat for k in ('> say hello', 'hello from the fake harness',
-                                                      '✓ romacs_buffer_edit', '✓', '◆ Bash asks')}}
+                  'chat_has': {**{k: k in chat for k in ('> say hello', 'hello from the fake harness', '✓', '◆ Bash asks')},
+                               # A Romacs tool's row: its mark, then its name as words.
+                               '✓ ◈ buffer edit': bool(re.search(r'✓ \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
                         and approval.get('behavior') == 'allow'
                         and approval.get('updatedInput', {}).get('run_in_background') is False
@@ -776,8 +780,28 @@ def tour(work, delegate_target):
         ('romacs_task_watch', {'taskId': '<the same taskId>', 'file': 'tour.txt', 'stop': True}, lambda t: '"watching":[]' in t),
         ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
         ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
+        ('romacs_task_renew', {'taskId': '<the same taskId>', 'why': 'the tour'}, lambda t: '"taskId"' in t),
+        ('romacs_orchestration_issues', {'hours': 1}, issues_summary),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
+        # Refused, and says why: the tour's session received no message.
+        ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
+         lambda t: 'No message m-none among the ones this session received' in t),
     ]
+
+
+# Tour steps whose call is refused, its refusal checked.
+REFUSED_IN_TOUR = {'romacs_task_reply'}
+
+
+def issues_summary(text):
+    """Whether TEXT is romacs_orchestration_issues's summary: how many, by
+    kind, and where they are logged."""
+    try:
+        summary = json.loads(text)
+    except ValueError:
+        return False
+    return (isinstance(summary, dict) and isinstance(summary.get('total'), int)
+            and isinstance(summary.get('kinds'), list) and isinstance(summary.get('log'), str))
 
 
 DIFF = """--- a/greet.py
@@ -824,7 +848,7 @@ def tools(args, base):
             if tool == 'romacs_delegate_task':
                 task_id = json.loads(a.tool_results()[-1][1])['taskId']
         results = a.tool_results()[-len(steps):]
-        checked = {tool: (name == tool and not error and check(text))
+        checked = {tool: (name == tool and bool(error) == (tool in REFUSED_IN_TOUR) and check(text))
                    for (tool, _, check), (name, text, error) in zip(steps, results)}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         result = {'checked': checked, 'not_in_tour': missing,
@@ -911,7 +935,7 @@ def delegate(args, base):
         result['ok'] = (waited['status'] == 'completed' and waited['result'] == 'reviewed'
                         and run['codex_home'] == str(home) and run['model'] == 'm-test' and run['effort'] == 'low'
                         and result['same_request_same_task'] and asynced['status'] == 'running'
-                        and '[completed]' in wake and 'slow done' in wake and result['follow_up']
+                        and '[completed, 9 chars]' in wake and 'slow done' in wake and result['follow_up']
                         and cancel.get('status') == 'cancelled' and not result['cancelled_woke']
                         and cancelled_after == '"cancelled"' and interrupted == '"failed"' and expired.get('waitTimedOut')
                         # A wake per child turn end no wait answered, each with its own result: the
@@ -923,11 +947,20 @@ def delegate(args, base):
         a.close()
 
 
+WOKEN = re.compile(r'Delegated task (\S+) \(.*?\) \[(\w+), (\d+) chars\]:\n(.*?)'
+                   r'(?=\n\nDelegated task |\n\nReply to this result|\Z)', re.S)
+
+
 def woken_ids(wakes, once, interrupted):
-    ids = [w.split()[2] for w in wakes]
-    told = [w for w in wakes if w.split()[2] == interrupted['taskId']]
+    """Each task's end the WAKES told, one entry each (ends that came
+    together share a wake): those of ONCE once each, and the INTERRUPTED
+    child's failed run and next turn."""
+    told = [m.groups() for w in wakes for m in WOKEN.finditer(w)]
+    ids = [t[0] for t in told]
+    mine = [(status, int(size), text) for task, status, size, text in told if task == interrupted['taskId']]
     return (all(ids.count(task['taskId']) == 1 for task in once) and len(ids) == len(once) + 2
-            and len(told) == 2 and '[failed]' in told[0] and told[1].endswith('[completed]:\nafter interrupt'))
+            and all(int(size) == len(text) for _, _, size, text in told)
+            and [m[0] for m in mine] == ['failed', 'completed'] and mine[1][2] == 'after interrupt')
 
 
 def build_dir(a, commit):
@@ -1151,6 +1184,8 @@ def gnosis(args, base):
         ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
         with RomacsMcp.for_server(a, agent_tools=True) as mcp:
             offered = [t for t in mcp.tools() if t.startswith('gnosis_')]
+            registered = sorted(t for t in parity_live.read_sexp(a.eval("(mapcar #'car romacs-mcp-tools)"))
+                                if t.startswith('gnosis_'))
             page1 = mcp.call('gnosis_content_search', limit=2)
             page2 = mcp.call('gnosis_content_search', limit=2, cursor=page1['next'])
             records = mcp.call('gnosis_content_fetch', ids=[str(i) for i in ids])
@@ -1202,7 +1237,7 @@ def gnosis(args, base):
                   'status': status.get('status'), 'cancel_refused': [refused, refusal[:120]], 'sessions': len(sessions['items']),
                   'review_rows': reviews, 'claude': claude, 'malformed': malformed, 'codex': codex,
                   'codex_turn_model': codex_run['model'] == 'm-luna', 'tutor': tutor, 'ask_states': asks}
-        result['ok'] = (len(offered) == 20 and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
+        result['ok'] = (sorted(offered) == registered and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
                         and practice.get('status') in ('pending', 'running') and refused and 'native review' in refusal
                         and reviews == '0' and 'resolved' in claude and 'pass' in claude
                         and 'rejected' in malformed and 'no grade recorded' in malformed
@@ -1505,11 +1540,11 @@ def environment(args, base):
         a.up()
         launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
-                  'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
+                  'ROMACS_GUI_FONT_SIZE': '15', 'AGENT_TEST_KEPT': 'kept'}
         parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',
                   'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts', 'T3CODE_THREAD_ID': 'thread-1', 'T3CODE_CLI_PATH': '/t3',
                   'CODEX_HOME': '/parent/codex', 'CODEX_THREAD_ID': 'parent-thread', 'CODEX_CI': '1'}
-        dropped = [k for k in {**launch, **parent} if k != 'ROMACS_AGENT_TEST_KEPT']
+        dropped = [k for k in {**launch, **parent} if k != 'AGENT_TEST_KEPT']
         a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in {**launch, **parent}.items()) + ' t)')
         codex_home = a.codex_instance()
         a.work.mkdir(parents=True, exist_ok=True)
@@ -1528,7 +1563,7 @@ def environment(args, base):
         sid, tid, claude, codex = children('unit')
         # A command the agent's own evaluation starts in the editor.
         a.send(sid, 'call romacs_eval ' + json.dumps(
-            {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_)\' | sort")'}))
+            {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_|AGENT_TEST_)\' | sort")'}))
         a.idle(sid)
         from_eval = a.tool_results()[-1][1]
         # The unit unsets them even from the user manager's environment.
@@ -1546,13 +1581,13 @@ def environment(args, base):
 
         def clean(env, own=None):
             return (not any(k in env for k in dropped if k != own)
-                    and env.get('ROMACS_AGENT_TEST_KEPT') == 'kept')
+                    and env.get('AGENT_TEST_KEPT') == 'kept')
         result = {'claude_env': claude, 'codex_env': codex, 'claude_detached': claude2, 'codex_detached': codex2,
                   'eval_env': from_eval, 'unit_unset': unset, 'detached_units': detached}
         result['ok'] = (clean(claude) and clean(claude2)
                         and clean(codex, 'CODEX_HOME') and codex.get('CODEX_HOME') == str(codex_home)
                         and clean(codex2, 'CODEX_HOME') and codex2.get('CODEX_HOME') == str(codex_home)
-                        and not any(k in from_eval for k in dropped) and 'ROMACS_AGENT_TEST_KEPT' in from_eval
+                        and not any(k in from_eval for k in dropped) and 'AGENT_TEST_KEPT' in from_eval
                         and (unset == 'no unit' or all(k in unset for k in dropped))
                         and detached == ['nil'])
         return result
@@ -1751,7 +1786,9 @@ def rpc(args, base):
         # server restores its sessions knowing it.
         setup = (f"(progn (load {lisp(RPC_DRIVER)}) (setq fakerpc-program (list \"python3\" {lisp(RPC)})) "
                  f"(setq romacs-agent-providers (list (cons \"fakerpc\" {lisp(homes[0])}) "
-                 f"(list \"fakerpc2\" :harness 'fakerpc :config-dir {lisp(homes[1])}))) t)")
+                 f"(list \"fakerpc2\" :harness 'fakerpc :config-dir {lisp(homes[1])})) "
+                 # Asked, not allowed: the default allows every tool call unasked.
+                 "romacs-agent-approval-policy 'ask) t)")
         (a.home / '.config/romacs').mkdir(parents=True, exist_ok=True)
         with open(a.home / '.config/romacs/init.el', 'a') as init:
             init.write(f"\n(setq romacs-agent-claude-program {lisp(HARNESS)})\n(with-eval-after-load 'romacs-agent {setup})\n")
@@ -2027,17 +2064,18 @@ def composer(args, base, real=False):
 
         good = [typed('before_first_prompt', 'say hello from Romacs')]
         turn('first')
-        # A collapsed tool output is the transcript's last text while a turn
-        # runs: typing then, and after the turn ends, shows.
+        # A folded call is the transcript's last text while a turn runs (its
+        # output is drawn only when opened): typing then, and after the turn
+        # ends, shows.
         release = a.root / 'release-hold'
         a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
-        # Held until released: the folded output stays the transcript's last text.
+        # Held until released: the call's row stays the transcript's last text.
         until(lambda: a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                             '(quote romacs-agent-output)) t))') == 't', 15, 'tool output last')
+                             '(quote romacs-agent-tool)) t))') == 't', 15, 'tool row last')
         steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-ui--end))))')
         good.append(typed('while_output_last', 'typed while'))
         good.append(a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                           '(quote romacs-agent-output)) t))') == 't' and a.state(sid) == 'running')
+                           '(quote romacs-agent-tool)) t))') == 't' and a.state(sid) == 'running')
         release.write_text('')
         a.idle(sid)
         good.append(typed('after_output_turn', ' and after', 'typed while and after'))
@@ -2180,24 +2218,21 @@ def composer(args, base, real=False):
         a.keys('-M', 'alt', '>', '-m', 'alt')
         good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
-        # A session started from the home page with c, its prompt typed in
-        # the minibuffer: its chat is shown, and its composer takes keys.
+        # A session started from the board with c: its chat opens with no
+        # prompt (asked only its directory), and its composer takes keys.
         a.eval(f'(progn (delete-other-windows) (romacs-agents) (delete-other-windows) (cd {lisp(a.work)}) t)')
         before = set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or [])
         a.keys('c')
         until(lambda: a.eval('(and (minibufferp (window-buffer (minibuffer-window))) (active-minibuffer-window) t)') == 't',
               10, 'directory asked')
         a.keys('-k', 'Return')
-        until(lambda: 'Prompt' in (parity_live.read_sexp(a.eval('(and (active-minibuffer-window) (minibuffer-prompt))')) or ''),
-              10, 'prompt asked')
-        a.keys('say hello from Romacs')
-        a.keys('-k', 'Return')
         until(lambda: set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or []) - before,
               10, 'session started')
         sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
         chat = f'(romacs-agent-buffer {a.s(sid)})'
-        until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 120, 'home session answered')
-        a.idle(sid)
+        until(lambda: a.eval(f'(eq (window-buffer (selected-window)) {chat})') == 't', 10, 'home chat shown')
+        good.append(typed('home_first_prompt', 'say hello from Romacs'))
+        turn('home first')
         good.append(typed('home_session', 'say from home'))
         turn('home')
         good.append(typed('home_after_turn', 'more'))
@@ -2443,7 +2478,8 @@ def real(args, base):
                         text = block.get('content')
                         text = ''.join(c.get('text', '') for c in text) if isinstance(text, list) else str(text)
                         outputs.setdefault(uses.get(block['tool_use_id']), (text, block.get('is_error')))
-        checked = {tool: tool in outputs and not outputs[tool][1] and check(outputs[tool][0]) for tool, _, check in steps}
+        checked = {tool: tool in outputs and bool(outputs[tool][1]) == (tool in REFUSED_IN_TOUR) and check(outputs[tool][0])
+                   for tool, _, check in steps}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         cost = [r['out'].get('total_cost_usd') for r in a.journal(sid)
                 if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
