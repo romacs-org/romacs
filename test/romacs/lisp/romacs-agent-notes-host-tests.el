@@ -157,3 +157,40 @@ state and runtime directories its own."
        (romacs-agent-notes-host-tests--check session '("plan"))))))
 
 ;;; romacs-agent-notes-host-tests.el ends here
+
+(ert-deftest romacs-agent-notes-host-a-batch-process-writes-its-notes-before-ending ()
+  ;; A batch process (a turns' fill, a script) noting a session with no
+  ;; supervisor: the real notes-only host writes the note before the
+  ;; process ends, and no host is left behind.
+  (skip-unless (romacs-agent-notes-host-tests--host))
+  (romacs-agent-notes-host-tests--with
+   (lambda (session)
+     (let ((id (romacs-agent-id session)))
+       (with-temp-buffer
+         (call-process (expand-file-name invocation-name invocation-directory) nil t nil "--batch"
+                       "-l" "romacs-agent" "-l" "romacs-agent-writer"
+                       "--eval" (format "(progn (setq romacs-agent-events-store nil) (romacs-agent--load %S) (romacs-agent--note (romacs-agent-get %S) (romacs-mcp--object \"type\" \"plan\")))"
+                                        (romacs-agent-dir session) id)))
+       (romacs-agent-notes-host-tests--check session '("plan"))
+       ;; Its host ends a moment after the process that attached to it.
+       (should (romacs-agent-notes-host-tests--until
+                (lambda () (and (not (file-exists-p (romacs-agent-host-socket session)))
+                                (not (string-search (romacs-agent-dir session)
+                                                    (shell-command-to-string "ps -eo args")))))))))))
+
+(ert-deftest romacs-agent-notes-host-a-stolen-attachment-writes-the-note-once ()
+  ;; Another server steals the notes-only host's attachment before the
+  ;; note is written, then lets go: the note goes through the next host,
+  ;; once, numbered after what is there.
+  (skip-unless (romacs-agent-notes-host-tests--host))
+  (romacs-agent-notes-host-tests--with
+   (lambda (session)
+     (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+     (should (romacs-agent-notes-host-tests--until (lambda () (file-exists-p (romacs-agent-host-socket session)))))
+     (let ((thief (make-network-process :name "thief" :family 'local :service (romacs-agent-host-socket session)
+                                        :noquery t :coding 'no-conversion)))
+       (process-send-string thief "{\"attach\":{\"from\":1,\"steal\":true}}\n")
+       (accept-process-output nil 0.5)
+       (delete-process thief))
+     (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session))))
+     (romacs-agent-notes-host-tests--check session '("plan")))))

@@ -655,3 +655,75 @@ connection of its own, as the writer's process has."
           (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
           (should (= (romacs-agent-held-notes-count) 1)))
       (delete-process host))))
+
+(ert-deftest romacs-agent-writer-a-draining-editor-launches-no-harness ()
+  ;; An ending editor, or one handing over, starts no harness: a launch
+  ;; waiting for a move that ends during the drain is refused.
+  (let ((romacs-agent-writer--draining t) (ran nil)
+        (session (romacs-agent--make :id "d" :harness 'claude :dir temporary-file-directory :cwd "/" :seq 1)))
+    (cl-letf (((symbol-function 'call-process) (lambda (&rest _) (setq ran t) 0)))
+      (should-error (romacs-agent--launch session (list "claude")) :type 'user-error)
+      (should-not ran))))
+
+(ert-deftest romacs-agent-writer-a-drain-starts-a-host-for-stranded-notes ()
+  ;; Notes held with no host on its way (one that ended before writing
+  ;; them): a drain starts one for them and waits; they are saved.
+  (let* ((romacs-agent-writer-start-functions nil)
+         (romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--note-hosts (make-hash-table :test #'equal))
+         (romacs-agent--launched (make-hash-table :test #'equal))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent-events--waiting (make-hash-table :test #'equal))
+         (dir (make-temp-file "romacs-stranded-" t))
+         (session (romacs-agent--make :id "s" :harness 'claude :dir dir :seq 1 :state 'ended))
+         (said nil))
+    (puthash "s" session romacs-agent--sessions)
+    (puthash "s" (list (romacs-mcp--object "type" "plan" "romacsNote" 1)) romacs-agent--held-notes)
+    (unwind-protect
+        (romacs-agent-writer-tests--with
+          (cl-letf (((symbol-function 'redisplay) #'ignore)
+                    ((symbol-function 'romacs-agent-events-own) #'ignore)
+                    ((symbol-function 'romacs-agent-host-socket) (lambda (_) (expand-file-name "none.sock" dir)))
+                    ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+            (romacs-agent-writer-drain)
+            (should (zerop (romacs-agent-held-notes-count)))
+            (should (member "Saving 1 agent records...done" said))))
+      (delete-directory dir t))))
+
+(ert-deftest romacs-agent-writer-a-drain-stops-waiting-for-held-notes-that-do-not-go ()
+  ;; Held records that do not go for a while count as not saved: an
+  ;; ending editor is not kept from ending by a host that never answers.
+  (let ((romacs-agent-writer--held-seen (cons 2 (- (float-time) 60))))
+    (cl-letf (((symbol-function 'romacs-agent-writer--held) (lambda () 2)))
+      (should-not (romacs-agent-writer--held-moving-p)))
+    (cl-letf (((symbol-function 'romacs-agent-writer--held) (lambda () 1)))
+      (should (romacs-agent-writer--held-moving-p)))))
+
+(ert-deftest romacs-agent-writer-a-notes-host-ended-with-notes-held-is-tried-again ()
+  ;; A notes-only host gone with notes still held: another is started a
+  ;; moment later, a few times in a row; none once they are written.  One
+  ;; written meanwhile keeps a note made since.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--note-hosts (make-hash-table :test #'equal))
+         (romacs-agent--notes-tried (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "t" :harness 'claude :dir temporary-file-directory :seq 1))
+         (later nil))
+    (puthash "t" (list (romacs-mcp--object "type" "plan" "romacsNote" 1)) romacs-agent--held-notes)
+    (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (push (cons f args) later))))
+      (dotimes (_ (1+ romacs-agent--notes-tries)) (romacs-agent--notes-again session))
+      (should (= (length later) romacs-agent--notes-tries))
+      (should (eq (caar later) #'romacs-agent--ensure-host))
+      (remhash "t" romacs-agent--held-notes)
+      (romacs-agent--notes-again session)
+      (should-not (gethash "t" romacs-agent--notes-tried))
+      ;; Written: let go at once, unless a note came meanwhile.
+      (let ((host (make-pipe-process :name "t" :noquery t)))
+        (unwind-protect
+            (progn
+              (puthash "t" host romacs-agent--note-hosts)
+              (setq later nil)
+              (romacs-agent--notes-written session)
+              (puthash "t" (list (romacs-mcp--object "type" "title" "romacsNote" 2)) romacs-agent--held-notes)
+              (funcall (caar later))
+              (should (process-live-p host)))
+          (delete-process host))))))

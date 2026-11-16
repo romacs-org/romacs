@@ -75,6 +75,14 @@ opening what it writes, as a writer off the editor opens it.")
 can make yet (notes for a supervisor not attached here): a requested
 restart waits for them, and a drain counts them not saved.")
 
+(defvar romacs-agent-writer-held-start-functions nil
+  "Functions a drain calls first: those holding records start what writes
+them, where nothing is on its way to (a host for held notes).")
+
+(defconst romacs-agent-writer--held-patience 30
+  "Seconds a drain waits for held records to go while none goes: then
+they count as not saved, rather than keep the editor from ending.")
+
 (defvar romacs-agent-writer-held-live-functions nil
   "Functions that each return non-nil while records they hold are on
 their way (a host of theirs starting or attached): a drain waits for
@@ -344,6 +352,18 @@ answer it, until asked to stop."
                                      writes))))))
     t))
 
+(defvar romacs-agent-writer--held-seen nil
+  "While a drain waits for held records: (COUNT . TIME), how many were
+held when the count last fell, and when.")
+
+(defun romacs-agent-writer--held-moving-p ()
+  "Whether held records still go, or went in the last
+`romacs-agent-writer--held-patience' seconds."
+  (let ((held (romacs-agent-writer--held)))
+    (when (or (null romacs-agent-writer--held-seen) (< held (car romacs-agent-writer--held-seen)))
+      (setq romacs-agent-writer--held-seen (cons held (float-time))))
+    (< (- (float-time) (cdr romacs-agent-writer--held-seen)) romacs-agent-writer--held-patience)))
+
 (defun romacs-agent-writer-drain (&optional quittable)
   "Let the writer make every write queued, however long that takes,
 saying so: the editor is ending, or handing over to its successor,
@@ -354,17 +374,20 @@ another.  QUITTABLE: a restart is beginning, and \\[keyboard-quit]
 cancels it; the writes stay queued, made in the background."
   (when (> (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held)) 0)
     (let ((count (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))) (tries 0)
-          (romacs-agent-writer--draining t))
+          (romacs-agent-writer--draining t) (romacs-agent-writer--held-seen nil))
       (message (if quittable "Saving %d agent records... (C-g cancels the restart)"
                  "Saving %d agent records...")
                count)
       (redisplay t)
       ;; What failed before is tried once more, now.
       (maphash (lambda (id _) (romacs-agent-writer--again id)) (copy-hash-table romacs-agent-writer--failed))
+      (with-demoted-errors "romacs-agent-writer: starting what writes held records: %S"
+        (run-hooks 'romacs-agent-writer-held-start-functions))
       ;; Until nothing is queued and no writer runs: writes the answers'
       ;; callbacks queue, even while the writer stops, are made too.
       (while (and (or (> (romacs-agent-writer--unanswered) 0) romacs-agent-writer--job
-                      (run-hook-with-args-until-success 'romacs-agent-writer-held-live-functions))
+                      (and (run-hook-with-args-until-success 'romacs-agent-writer-held-live-functions)
+                           (romacs-agent-writer--held-moving-p)))
                   (< tries 4))
         (cond
          ((> (romacs-agent-writer--unanswered) 0)
@@ -387,7 +410,8 @@ cancels it; the writes stay queued, made in the background."
               (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
               (ignore-errors (isolate-await job)))))
          ;; Records on their way through their own host: its answers.
-         (t (accept-process-output nil 0.1))))
+         (t (accept-process-output nil 0.1)
+            (when (fboundp (quote romacs--isolate-pump)) (romacs--isolate-pump 0)))))
       ;; What failed, or no writer would answer: made here, the editor
       ;; ending, a few rounds while what is made queues more.
       (let ((rounds 0))

@@ -3102,14 +3102,46 @@ while it does not yet listen; given up, its notes stay held."
                           "\n")))
         (file-error
          (if (> tries 0) (run-at-time 0.1 nil #'romacs-agent--notes-connect session (1- tries))
-           (remhash id romacs-agent--note-hosts)))))))
+           (remhash id romacs-agent--note-hosts)
+           (romacs-agent--notes-again session)))))))
 
 (defun romacs-agent--notes-sentinel (process _event)
-  "A connection to a notes-only host ended: that host ends with it."
+  "A connection to a notes-only host ended: that host ends with it; notes
+it did not write go through another (`romacs-agent--notes-again')."
   (unless (process-live-p process)
-    (let ((id (romacs-agent-id (process-get process 'romacs-agent))))
-      (when (eq (gethash id romacs-agent--note-hosts) process)
-        (remhash id romacs-agent--note-hosts)))))
+    (let ((session (process-get process 'romacs-agent)))
+      (when (eq (gethash (romacs-agent-id session) romacs-agent--note-hosts) process)
+        (remhash (romacs-agent-id session) romacs-agent--note-hosts)
+        (romacs-agent--notes-again session)))))
+
+(defconst romacs-agent--notes-tries 5
+  "How many notes-only hosts in a row a session's held notes are tried
+through, a second apart, before they wait for its next note or a drain.")
+
+(defvar romacs-agent--notes-tried (make-hash-table :test #'equal)
+  "Each session id to how many notes-only hosts in a row ended with its
+notes still held.")
+
+(defun romacs-agent--notes-again (session)
+  "SESSION's notes-only host is gone with notes still held: another is
+started for them a second later, a few times in a row."
+  (let ((id (romacs-agent-id session)))
+    (if (null (gethash id romacs-agent--held-notes)) (remhash id romacs-agent--notes-tried)
+      (when (< (gethash id romacs-agent--notes-tried 0) romacs-agent--notes-tries)
+        (puthash id (1+ (gethash id romacs-agent--notes-tried 0)) romacs-agent--notes-tried)
+        (run-at-time 1 nil #'romacs-agent--ensure-host session)))))
+
+(defun romacs-agent--held-hosts ()
+  "Start a host for each session's held notes that none is on its way
+to (`romacs-agent-writer-held-start-functions'): a drain then waits for
+them."
+  (maphash (lambda (id _notes)
+             (when-let* ((session (romacs-agent-loaded id)))
+               (remhash id romacs-agent--notes-tried)
+               (romacs-agent--ensure-host session)))
+           (copy-hash-table romacs-agent--held-notes)))
+
+(add-hook 'romacs-agent-writer-held-start-functions #'romacs-agent--held-hosts)
 
 (defun romacs-agent--end-notes-host (session)
   "Let SESSION's notes-only host go, starting or attached: it ends, and
@@ -3126,7 +3158,10 @@ ends."
   (when-let* (((null (gethash (romacs-agent-id session) romacs-agent--held-notes)))
               (host (gethash (romacs-agent-id session) romacs-agent--note-hosts))
               ((processp host)))
-    (run-at-time 0 nil (lambda () (when (process-live-p host) (delete-process host))))))
+    (run-at-time 0 nil (lambda ()
+                         ;; A note made meanwhile went to it: kept.
+                         (when (and (process-live-p host) (null (gethash (romacs-agent-id session) romacs-agent--held-notes)))
+                           (delete-process host))))))
 
 (defvar romacs-agent--held-notes (make-hash-table :test #'equal)
   "Each session id to its notes waiting for its supervisor, oldest first,
@@ -3414,6 +3449,10 @@ shows on a command line other users can read."
 manager answers, else detached.  INPUT is a file the supervisor gives the
 harness as its whole stdin, and IMAGES what the journal keeps as attached
 to it."
+  ;; An ending editor, or one handing over, starts no harness: a launch
+  ;; waiting for a move it saw end is left to the next.
+  (when (bound-and-true-p romacs-agent-writer--draining)
+    (user-error "Session %s is not started: the editor is ending" (romacs-agent-title session)))
   (romacs-agent--fold-now session)
   ;; A notes-only host of it is let go: this supervisor takes the lock as
   ;; it ends, and is the one attached.
