@@ -4,14 +4,20 @@
 Each scenario of display_stages.el runs in a fresh `BINARY -Q --loadup'
 window in a private headless labwc (scaling_live.py's sessions): a buffer
 shown one way, then STEPS steps, each a timer that makes the scenario's
-change followed by the loop's own redisplay.  The session reads the
+change followed by the loop's own redisplay and those of what the change
+set off: a step ends once it has settled, its redisplay run, no timer ripe
+and a redisplay run after any timer that ran (`display-stages--settled-p'),
+so where a follow-up redisplay counts does not hang on the host's speed.
+The session reads the
 evaluator's instruction counter and `romacs--display-stats' at the start of
 every step and after the last one's redisplay, all before it serializes
 anything, so a step's figures are differences of two readings:
 
   step_instructions     everything the step ran: its timer, its change and
-                        its redisplay
-  display_instructions  the part inside redisplay (the frame frozen and
+                        its redisplays
+  cycles                redisplays the step ran: its own, and any after a
+                        timer it set off (jit-lock's `jit-lock-force-redisplay')
+  display_instructions  the part inside redisplays (the frame frozen and
                         compared, and laid out and submitted if it changed)
   display_conses        conses made inside redisplay
   windows_rebuilt       windows redisplay built in full
@@ -28,9 +34,10 @@ anything, so a step's figures are differences of two readings:
 A scenario's figure is the median over its steps (the upper of two middle
 ones); redisplay's instructions have their 90th percentile as well
 (`display_instructions_p90': the streamed deltas that add a row).  A step is
-odd when it broke its scenario's rule: one redisplay a step, with a frame
-submitted in every step of a scenario that changes what the frame shows,
-and in none of one that does not.  The host redisplays for reasons of its
+odd when it broke its scenario's rule: as many redisplays as its steps
+usually run (their median), with a frame submitted in every step of a
+scenario that changes what the frame shows, and in none of one that does
+not.  The host redisplays for reasons of its
 own now and then, so the figures are taken over the steps that kept the
 rule, and the report names the odd ones.  A measurement is refused when
 the thread has no instruction counter, or when more than a tenth of the
@@ -38,8 +45,8 @@ steps are odd.  Each step's counts, `collections' among them, are in the
 report.
 
 The bars file maps each scenario to a bar per figure.  Instructions and
-conses are held under theirs, a ceiling; the windows rebuilt, the bands,
-the layouts and the frames are held to theirs exactly, so a scenario whose
+conses are held under theirs, a ceiling; the redisplays, the windows
+rebuilt, the bands, the layouts and the frames are held to theirs exactly, so a scenario whose
 step no longer does its change fails as one that costs more does, and work
 that removes cost lowers its bars in the same change.  A scenario or figure
 without a bar fails.  --write-bars FILE writes the bars this run would
@@ -73,7 +80,7 @@ HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE / 'display_stages.el'
 BARS = HERE / 'display_stages_bars.json'
 # A figure and the count of a reading it is the difference of.
-COUNTS = {'step_instructions': 'step-instructions', 'display_instructions': 'instructions', 'display_conses': 'conses',
+COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display_instructions': 'instructions', 'display_conses': 'conses',
           'windows_rebuilt': 'windows-rebuilt', 'band_expansions': 'band-expansions', 'layouts': 'layouts',
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
@@ -111,10 +118,11 @@ def figures(deltas):
 
 
 def odd_steps(scenario, deltas):
-    """The steps that broke SCENARIO's rule: one redisplay, with a frame
-    submitted in every step of one that paints, and in none of one that
-    does not."""
-    return [i for i, d in enumerate(deltas) if d['cycles'] != 1 or (d['frames-submitted'] == 0) == scenario['paints']]
+    """The steps that broke SCENARIO's rule: as many redisplays as its steps
+    usually run, with a frame submitted in every step of one that paints,
+    and in none of one that does not."""
+    usual = quantile([d['cycles'] for d in deltas], .5)
+    return [i for i, d in enumerate(deltas) if d['cycles'] != usual or (d['frames-submitted'] == 0) == scenario['paints']]
 
 
 def refusal(scenario, result, wanted):
@@ -127,8 +135,8 @@ def refusal(scenario, result, wanted):
         return 'no instruction counter (romacs-instructions is nil)'
     odd = odd_steps(scenario, steps(readings))
     if len(odd) > ODD * wanted:
-        return (f"steps {odd} did not run one redisplay that submitted "
-                f"{'a frame, as a step that changes the frame does' if scenario['paints'] else 'no frame, as a step that changes nothing shown does'}")
+        return (f"steps {odd} did not run as many redisplays as the others, with "
+                f"{'a frame submitted, as a step that changes the frame does' if scenario['paints'] else 'no frame submitted, as a step that changes nothing shown does'}")
     return None
 
 
