@@ -845,7 +845,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // kind, as JSON on standard output; the store is only read.
     if world_census {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-census needs a live --loadup launch".into()); }
-        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+        // As a launch finds its world: the store named, the installation's, the user's.
+        let store = world_store.or_else(world::installed_store).or_else(|| world::default_store(|name| std::env::var_os(name)))
+            .ok_or("no world store")?;
         println!("{}", world::census(&store)?);
         return Ok(None);
     }
@@ -867,6 +869,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // opens and maps the world on the evaluator's thread while this one
     // brings up the window and the GPU.
     let named_store = world_store.clone();
+    let from_installed = named_store.is_none();
     let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
         (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
         (true, true) => {
@@ -927,10 +930,16 @@ fn run() -> Result<Option<exit::Exit>, String> {
             if started.is_err() { first_presentation = 2; }
             started.ok()
         } else { None };
+        // The installation's world serves first, unless a store was named:
+        // its installer built it, and a launch only reads it (world::installed).
+        let (installed, installed_vm) = match world_store.as_ref().filter(|_| from_installed).and_then(|_| world::installed()) {
+            Some((world, vm, carry)) => (Some(world), Some((vm, carry))),
+            None => (None, None),
+        };
         // A store that cannot be used boots from source, and says so once
         // the session is up (`world::store_warning_form`).
         let mut store_problem = None;
-        let world = world_store.and_then(|store| match world::open(store) {
+        let world = world_store.filter(|_| installed.is_none()).and_then(|store| match world::open(store) {
             Ok(world) => Some(world),
             Err(reason) => {
                 romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason}));
@@ -939,14 +948,15 @@ fn run() -> Result<Option<exit::Exit>, String> {
             }
         });
         startup::mark_phase("world-open");
-        let restored = world.as_ref().and_then(|world| world::launch(world, |reason| {
+        let restored = installed_vm.or_else(|| world.as_ref().and_then(|world| world::launch(world, |reason| {
             // Said on stderr too, so a launcher sees it whether or not a
             // window can, with why the world was not usable.
             romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
             loading::step("world-build", loading::FIRST_START);
-        }));
+        })));
         // The world this launch booted from, which its worker isolates adopt.
-        let isolate_world = world.as_ref().map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        let isolate_world = installed.as_ref().or(world.as_ref())
+            .map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
         // Bounding the store waits for the first frame, on a thread of its own.
         let prune = world.map(|current| move || { std::thread::spawn(move || {
             if let Ok(deleted) = current.prune() && !deleted.is_empty() {

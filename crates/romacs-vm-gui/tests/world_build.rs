@@ -232,3 +232,42 @@ fn an_installed_batch_world_serves_any_home() {
     assert_eq!(built.len(), 1, "{built:?}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// An installation's GUI world (`--world-build` into `EXECUTABLE.worlds`,
+/// as an installer runs it) serves a launch under any HOME: the launch finds
+/// it beside the executable before any store of the user's, restores it
+/// read only without asking its records again (a recorded fact that now
+/// differs, here an unset variable now set, is not looked at), writes
+/// nothing there and makes no store of its own. The build fills the
+/// store's digest cache, which a launch only reads.
+#[test]
+fn an_installed_gui_world_serves_any_home_without_asking_its_records() {
+    let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("installed-gui-world-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let (bin, a, b) = (root.join("bin"), root.join("home-a"), root.join("home-b"));
+    for dir in [&bin, &a, &b] { std::fs::create_dir_all(dir).unwrap(); }
+    let exe = bin.join("romacs-vm-gui");
+    std::fs::hard_link(env!("CARGO_BIN_EXE_romacs-vm-gui"), &exe)
+        .or_else(|_| std::fs::copy(env!("CARGO_BIN_EXE_romacs-vm-gui"), &exe).map(drop)).unwrap();
+    std::fs::create_dir_all(root.join("share")).unwrap();
+    std::os::unix::fs::symlink(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."), root.join("share/romacs")).unwrap();
+    let installed = bin.join("romacs-vm-gui.worlds");
+    let command = |home: &std::path::Path| {
+        let mut command = std::process::Command::new(&exe);
+        command.current_dir(home).env("HOME", home).env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_CONFIG_HOME", home.join("config")).env("USER", "builder").env("LOGNAME", "builder")
+            .env_remove("ROMACS_WORLD").env_remove("ROMACS_RUNTIME_ROOT").env_remove("ROMACS_LISP_DIR")
+            .env_remove("EMACS_TEST_DIRECTORY").env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY");
+        command
+    };
+    let output = command(&a).arg("--loadup").arg("--world-store").arg(&installed).arg("--world-build").output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success() && said.contains(r#""mode":"prepared""#), "{said}");
+    assert!(std::fs::read_dir(installed.join("ids")).unwrap().next().is_some(), "the build left the digest cache empty");
+    let before = files(&installed);
+    let census = command(&b).env("EMACS_TEST_DIRECTORY", "/elsewhere").args(["--loadup", "--world-census"]).output().unwrap();
+    assert!(census.status.success(), "the installed world did not serve: {}", String::from_utf8_lossy(&census.stderr));
+    assert_eq!(files(&installed), before, "a launch wrote to the installation's store");
+    assert!(!b.join("cache/romacs/worlds").exists(), "a launch made a store of its own");
+    let _ = std::fs::remove_dir_all(&root);
+}
