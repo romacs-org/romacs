@@ -528,6 +528,29 @@ impl Vm {
         found.map_err(|fault| self.regexp_fault(fault))
     }
 
+    /// The character where PATTERN, matched at character AT of STRING (byte
+    /// AT_BYTE) and no earlier, ends; case-sensitive, without match data, as
+    /// composite.c's fast_looking_at reads the string where it lies: a match
+    /// costs what it reads, not the string.
+    pub(crate) fn string_looking_at(&mut self, string: Value, pattern: Value, at: usize, at_byte: usize)
+        -> std::result::Result<Option<usize>, prim::Fault> {
+        let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
+            let pattern = vm.regexp_input(pattern)?;
+            let source = vm.regexp_syntax(Some(string))?;
+            let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
+            let mut compiled = compiled.borrow_mut();
+            let input = vm.regexp_subject(string)?;
+            input.remember(at_byte, at);
+            compiled.set_target_multibyte(input.multibyte);
+            let syntax = syntax::VmSyntax::new(vm, source);
+            let found = regex::re_match(&compiled, &input.bytes, at_byte, input.bytes.len(), &syntax, usize::MAX);
+            drop((syntax, compiled));
+            if regex::take_matcher_overflow() { return Ok(None); }
+            Ok(found.map(|(end, _)| input.character(end)))
+        };
+        run(self).map_err(|fault| self.regexp_fault(fault))
+    }
+
     fn regexp_fault(&mut self, fault: Fault) -> prim::Fault {
         match fault {
             Fault::Wrong(predicate, value) => prim::Fault::Wrong(predicate, value),
