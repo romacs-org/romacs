@@ -104,6 +104,19 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                      '("/p/one" "a" "/p/three" "/h/x")))
       (should-not (cl-find 'history (rows :history history :settled t) :key (lambda (row) (plist-get row :kind)))))))
 
+(ert-deftest romacs-agent-board-says-the-transcripts-are-being-read ()
+  ;; Their first scan under way, none listed: one line says so, never an
+  ;; empty section; once listed, or settled, none.
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'idle 10)
+    (let ((last (car (last (rows :reading t)))))
+      (should (eq (plist-get last :kind) 'reading))
+      (should (string-match-p "Reading harness transcripts" (substring-no-properties (romacs-agent-board--line last 80)))))
+    (should-not (cl-find 'reading (rows :reading t :history (list (list :path "/h/x" :title "x" :cwd "/p/one" :mtime now)))
+                         :key (lambda (row) (plist-get row :kind))))
+    (should-not (cl-find 'reading (rows :reading t :settled t) :key (lambda (row) (plist-get row :kind))))
+    (should-not (cl-find 'reading (rows) :key (lambda (row) (plist-get row :kind))))))
+
 (ert-deftest romacs-agent-board-a-line-says-provider-and-model ()
   (romacs-agent-board-tests--with
     (mk "a" "Port the theme" 'running 30 :model "claude-opus-5-5")

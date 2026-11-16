@@ -433,6 +433,10 @@ transaction.  How many rows it holds."
 
 (defvar romacs-agent-history--indexing nil "The batch process scanning the transcripts, while it runs.")
 
+(defun romacs-agent-history-indexing-p ()
+  "Whether a batch process is writing the transcripts' rows anew."
+  (process-live-p romacs-agent-history--indexing))
+
 (defvar romacs-agent-history-indexed-hook nil
   "Run once a batch process has written the transcripts' rows anew.")
 
