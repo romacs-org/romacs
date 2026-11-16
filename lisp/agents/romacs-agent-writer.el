@@ -59,7 +59,7 @@ batch process's answer."
 
 (defvar romacs-agent-writer-features
   '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events romacs-agent-turns
-                 romacs-agent-store romacs-agent-drawn romacs-agent-writer cl-extra help-mode)
+                 romacs-agent-store romacs-agent-drawn romacs-agent-history romacs-agent-writer cl-extra help-mode)
   "The features the writer loads: those defining what it is asked to run.")
 
 (defvar romacs-agent-writer-bindings-function nil
@@ -163,17 +163,22 @@ it did not answer.  The writer stops; a later write starts another."
     (let ((count (length romacs-agent-writer--pending)) (tries 0) (romacs-agent-writer--draining t))
       (message "Saving %d agent records..." count)
       (redisplay t)
-      (while (and romacs-agent-writer--pending (< (cl-incf tries) 4))
+      ;; Every write answered, those its answers' callbacks queue too:
+      ;; only then is the writer stopped.
+      (while (and romacs-agent-writer--pending (< tries 4))
         (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
           ;; Gone: a new writer, sent what is still unanswered.
+          (cl-incf tries)
           (setq romacs-agent-writer--job nil)
           (mapc #'romacs-agent-writer--send romacs-agent-writer--pending))
-        (let ((job romacs-agent-writer--job))
-          (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
-          ;; Its loop ends after every write sent before the stop: all made.
-          (when (condition-case nil (progn (isolate-await job) t) (error nil))
-            (setq romacs-agent-writer--pending nil))
-          (when (eq job romacs-agent-writer--job) (setq romacs-agent-writer--job nil))))
+        (condition-case nil (isolate-await romacs-agent-writer--job 0.1)
+          (isolate-timeout nil)
+          ;; A writer that cannot be waited on counts as gone.
+          (error (cl-incf tries))))
+      (when-let* ((job romacs-agent-writer--job))
+        (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
+        (ignore-errors (isolate-await job))
+        (when (eq job romacs-agent-writer--job) (setq romacs-agent-writer--job nil)))
       (message (if romacs-agent-writer--pending "Saving %d agent records...failed: %d not saved"
                  "Saving %d agent records...done")
                count (length romacs-agent-writer--pending)))))

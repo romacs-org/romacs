@@ -8,7 +8,8 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-claude)
-  (require 'romacs-agent-events))
+  (require 'romacs-agent-events)
+  (require 'romacs-agent-history))
 
 (defmacro romacs-agent-writer-tests--with (&rest body)
   "BODY as the editor, its writes queued to a writer that runs here: what
@@ -25,14 +26,17 @@ connection of its own, as the writer's process has."
                 (lambda (to message)
                   (if (eq to 'parent) (romacs-agent-writer--receive 'writer message)
                     (setq sent (append sent (list message)))))))
-       (cl-flet ((serve ()
-                   (let ((inbox (append sent (list '(romacs-agent-writer-stop))))
-                         (romacs-agent-store--db nil) (romacs-agent-events--made nil)
+       (cl-labels ((serve-only ()
+                   (let ((inbox sent) (romacs-agent-store--db nil) (romacs-agent-events--made nil)
                          (romacs-agent-turns--made nil) (romacs-agent-store--readonly nil))
                      (setq sent nil)
-                     (cl-letf (((symbol-function 'isolate-receive) (lambda (&rest _) (pop inbox))))
+                     (cl-letf (((symbol-function 'isolate-receive)
+                                (lambda (&rest _) (or (pop inbox) '(romacs-agent-writer-stop)))))
                        (unwind-protect (romacs-agent-writer--serve)
-                         (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db))))))))
+                         (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))))))
+                 (serve ()
+                   (setq sent (append sent (list '(romacs-agent-writer-stop))))
+                   (serve-only)))
          ,@body))))
 
 (ert-deftest romacs-agent-writer-writes-in-order-and-answers ()
@@ -91,7 +95,50 @@ connection of its own, as the writer's process has."
           (cl-letf (((symbol-function 'isolate-future-done-p) (lambda (future) (eq future dead))))
             (romacs-agent-writer-drain)))
         (should (equal (reverse romacs-agent-writer-tests--made) '(a b)))
+        (should-not romacs-agent-writer--pending)
+        ;; A write's answer that queues another: that one is made too,
+        ;; before the writer stops.
+        (setq romacs-agent-writer-tests--made nil)
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(c)
+                            (lambda (_) (romacs-agent-write 'romacs-agent-writer-tests--make '(d))))
+        (cl-letf (((symbol-function 'isolate-await)
+                   (lambda (&rest _)
+                     ;; Served as answers come; the stop, last, ends it.
+                     (unless (member '(romacs-agent-writer-stop) sent) (serve-only))
+                     t)))
+          (romacs-agent-writer-drain))
+        (should (equal (reverse romacs-agent-writer-tests--made) '(c d)))
         (should-not romacs-agent-writer--pending)))))
+
+(ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
+  ;; After a move, what waits runs in two steps: the notes' writes, then,
+  ;; once the writer has answered a write behind them, the launch.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
+        (romacs-agent-events--waiting (make-hash-table :test #'equal)) (launched nil))
+    (romacs-agent-writer-tests--with
+      (puthash "s" (list (cons t (lambda () (romacs-agent-write 'romacs-agent-writer-tests--make '(note))))
+                         (cons nil (lambda () (setq launched (reverse romacs-agent-writer-tests--made)))))
+               romacs-agent-events--waiting)
+      (romacs-agent-events--waited "s")
+      (should-not launched)
+      (serve)
+      (should (equal launched '(note))))))
+
+(ert-deftest romacs-agent-writer-a-flip-made-before-a-writer-ended-is-moved ()
+  ;; A flip the writer made before it ended, sent again, answers nil: the
+  ;; store says imported, so the editor does what a move does.
+  (let ((romacs-agent-events--flip-queue nil) (waited nil) (told nil)
+        (romacs-agent--sessions (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
+              ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
+              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+              ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
+              ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
+              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+      (let ((romacs-agent-events-migrated-functions (list (lambda (ids) (setq told ids)))))
+        (romacs-agent-events--flip-soon '("s")))
+      (should (equal told '("s")))
+      (should (equal waited '("s"))))))
 
 (ert-deftest romacs-agent-writer-the-editor-reads-and-an-import-waits ()
   ;; The editor's connection only reads; a launch on a session whose

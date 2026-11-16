@@ -794,7 +794,10 @@ tried again a moment later."
              'romacs-agent-events--flip (list id (car row) (cadr row))
              (lambda (answer)
                (cl-decf asked)
-               (pcase answer
+               (pcase (if (and (equal answer '(ok nil)) (romacs-agent-events--imported-row-p id))
+                          ;; Made before a writer that ended, sent again.
+                          '(ok t)
+                        answer)
                  (`(ok t)
                   (push id moved)
                   ;; Loaded: where its next supervisor's records start is a
@@ -868,11 +871,24 @@ here, and no supervisor writing its journal."
   (and (gethash id romacs-agent-events--waiting) t))
 
 (defun romacs-agent-events--waited (id)
-  "Call what waits for the session ID names to move, moved or not."
+  "Call what waits for the session ID names to move, moved or not: the
+notes' writes first, then, once the writer has made them (a write
+behind them answered), the rest, so a supervisor launched then numbers
+its records after them and reads where they end."
   (when-let* ((thens (gethash id romacs-agent-events--waiting)))
     (remhash id romacs-agent-events--waiting)
-    (pcase-dolist (`(,_ . ,then) thens)
-      (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))
+    (let ((firsts (seq-take-while #'car thens)) (rest (seq-drop-while #'car thens)))
+      (pcase-dolist (`(,_ . ,then) firsts)
+        (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))
+      (when rest
+        (romacs-agent-write 'ignore nil
+                            (lambda (_answer)
+                              (pcase-dolist (`(,_ . ,then) rest)
+                                (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))))))
+
+(defun romacs-agent-events--imported-row-p (id)
+  "Whether the store says the session ID names is imported, read now."
+  (and (sqlite-select (romacs-agent-events--db) "select 1 from imported where session = ?" (list id)) t))
 
 (defun romacs-agent-events--flippable-p (id)
   "Whether the editor may make the session ID names its records' own now:
