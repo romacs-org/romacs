@@ -47,7 +47,7 @@ fn entries_of(dir: &Path, prefix: &str, ancestors: &mut HashSet<(u64, u64)>, fou
         let path = item.path();
         // Through a link to what it names, as `tree -l'.
         let Ok(meta) = crate::host::metadata(&path) else { continue };
-        if meta.is_dir() {
+        if meta.file_type().is_dir() {
             walk(&path, &format!("{prefix}{name}/"), ancestors, found, false)?;
         } else if let Some(stem) = name.strip_suffix(".gpg").filter(|stem| !stem.is_empty()) {
             found.push(format!("{prefix}{stem}"));
