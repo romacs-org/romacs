@@ -57,12 +57,6 @@ pub(super) fn is_regexp_primitive(p: Primitive) -> bool {
     )
 }
 
-/// A string prepared for anchored matches (`Vm::string_subject').
-pub(crate) struct StringSubject {
-    input: Input<'static>,
-    string: Value,
-}
-
 struct Input<'a> {
     bytes: Cow<'a, [u8]>,
     multibyte: bool,
@@ -534,30 +528,25 @@ impl Vm {
         found.map_err(|fault| self.regexp_fault(fault))
     }
 
-    /// STRING prepared once for anchored matches at many positions
-    /// ([`Self::subject_looking_at`]), as composite.c's fast_looking_at reads
-    /// one string at each candidate start.
-    pub(crate) fn string_subject(&mut self, string: Value) -> std::result::Result<StringSubject, prim::Fault> {
-        let input = self.regexp_input(string).map_err(|fault| self.regexp_fault(fault))?;
-        Ok(StringSubject { input, string })
-    }
-
-    /// The character where PATTERN, matched at character AT of SUBJECT and
-    /// no earlier, ends; case-sensitive, without match data.
-    pub(crate) fn subject_looking_at(&mut self, subject: &StringSubject, pattern: Value, at: usize)
+    /// The character where PATTERN, matched at character AT of STRING (byte
+    /// AT_BYTE) and no earlier, ends; case-sensitive, without match data, as
+    /// composite.c's fast_looking_at reads the string where it lies: a match
+    /// costs what it reads, not the string.
+    pub(crate) fn string_looking_at(&mut self, string: Value, pattern: Value, at: usize, at_byte: usize)
         -> std::result::Result<Option<usize>, prim::Fault> {
         let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
             let pattern = vm.regexp_input(pattern)?;
-            let source = vm.regexp_syntax(Some(subject.string))?;
+            let source = vm.regexp_syntax(Some(string))?;
             let compiled = vm.regexp_pattern(&pattern, false, Translation::None, || None, &source)?;
             let mut compiled = compiled.borrow_mut();
-            compiled.set_target_multibyte(subject.input.multibyte);
+            let input = vm.regexp_subject(string)?;
+            input.remember(at_byte, at);
+            compiled.set_target_multibyte(input.multibyte);
             let syntax = syntax::VmSyntax::new(vm, source);
-            let start = subject.input.byte(at);
-            let found = regex::re_match(&compiled, &subject.input.bytes, start, subject.input.bytes.len(), &syntax, usize::MAX);
+            let found = regex::re_match(&compiled, &input.bytes, at_byte, input.bytes.len(), &syntax, usize::MAX);
             drop((syntax, compiled));
             if regex::take_matcher_overflow() { return Ok(None); }
-            Ok(found.map(|(end, _)| subject.input.character(end)))
+            Ok(found.map(|(end, _)| input.character(end)))
         };
         run(self).map_err(|fault| self.regexp_fault(fault))
     }
