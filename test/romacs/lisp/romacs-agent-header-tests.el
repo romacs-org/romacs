@@ -56,7 +56,6 @@ string, an overlay."
            (with-current-buffer chat
              (romacs-agent-chat-mode)
              (setq romacs-agent-ui--session session
-                   romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
                    romacs-agent-ui--tasks (make-hash-table :test #'equal)
                    romacs-agent-ui--messages (make-hash-table :test #'equal)
                    romacs-agent-ui--end (point-marker)

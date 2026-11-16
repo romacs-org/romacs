@@ -22,7 +22,6 @@
        (romacs-agent-chat-mode)
        (setf (romacs-agent-buffer ,var) (current-buffer))
        (setq romacs-agent-ui--session ,var
-             romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
              romacs-agent-ui--tasks (make-hash-table :test #'equal)
              romacs-agent-ui--messages (make-hash-table :test #'equal)
              romacs-agent-ui--end (point-marker))

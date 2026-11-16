@@ -184,7 +184,7 @@ failed, Grep (whose row counts what it found)."
      (should-not (and (listp buffer-undo-list) (seq-some #'identity buffer-undo-list)))
      ;; Rows trimmed away take their payloads with them.
      (romacs-agent-ui--open-payloads-in (point-min) (point-max))
-     (let ((romacs-agent-ui--tool-lines (make-hash-table :test #'equal)))
+     (progn
        (puthash "x" '(:output "kept") (or romacs-agent-ui--payloads (setq romacs-agent-ui--payloads (make-hash-table :test #'equal))))
        ;; Opened with no row, a payload is forgotten.
        (should-not (romacs-agent-ui--open-payload "x"))

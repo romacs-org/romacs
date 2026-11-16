@@ -123,8 +123,6 @@ fork), said by no one: the quietest row.")
   (or romacs-agent-ui--asks (setq romacs-agent-ui--asks (make-hash-table :test #'equal))))
 (defvar-local romacs-agent-ui--end nil
   "Marker at the transcript's end; the composer follows it.")
-(defvar-local romacs-agent-ui--tool-lines nil
-  "Tool use id to the marker at its row's mark.")
 (defvar-local romacs-agent-ui--draft-images nil
   "The image files of the message being written, in order.")
 (defvar-local romacs-agent-ui--tasks nil
@@ -549,7 +547,6 @@ shows while its run is folded."
     (romacs-agent-ui--run-open event)
     (romacs-agent-ui--run-started id (substring text 1) (or card (plist-get event :parent)))
     (romacs-agent-ui--step-insert (concat indent (propertize "●" 'face 'romacs-agent-running)) card)
-    (puthash id (copy-marker (1- romacs-agent-ui--end)) romacs-agent-ui--tool-lines)
     ;; Its call, for its end to draw: the tool and what it was given.
     (romacs-agent-ui--step-insert (propertize (concat text "\n") 'romacs-agent-tool id 'romacs-agent-call (list name input))
                                   card)))
@@ -638,18 +635,19 @@ by its seq in the whole journal."
                :output)))
 
 (defun romacs-agent-ui--tool-mark (id)
-  "Where call ID's row has its mark: as drawn here, else found back from
-the transcript's end by its row's text (a turn kept as drawn)."
-  (or (and romacs-agent-ui--tool-lines (gethash id romacs-agent-ui--tool-lines))
-      (save-excursion
-        (goto-char romacs-agent-ui--end)
-        (when-let* ((found (text-property-search-backward 'romacs-agent-tool id #'equal)))
-          (let ((start (prop-match-beginning found)))
-            (goto-char start)
-            ;; The row's text follows its mark.
-            (while (and (> (point) (point-min)) (equal (get-text-property (1- (point)) 'romacs-agent-tool) id))
-              (backward-char))
-            (copy-marker (1- (point))))))))
+  "Where call ID's row has its mark, a marker: found back from the
+transcript's end by its row's text, which names the call
+\(`romacs-agent-tool'); nil when the chat has no row of it.  A call
+ending live, or one a user acts on, is near the end or at point."
+  (save-excursion
+    (goto-char romacs-agent-ui--end)
+    (when-let* ((found (text-property-search-backward 'romacs-agent-tool id #'equal)))
+      (let ((start (prop-match-beginning found)))
+        (goto-char start)
+        ;; The row's text follows its mark.
+        (while (and (> (point) (point-min)) (equal (get-text-property (1- (point)) 'romacs-agent-tool) id))
+          (backward-char))
+        (and (> (point) (point-min)) (copy-marker (1- (point))))))))
 
 (defun romacs-agent-ui--payload-at (id mark)
   "Call ID's payload as its row at MARK names it (`romacs-agent-payload'):
@@ -715,7 +713,7 @@ renderer shows it.  A card's task record gives it the task's state and
 link."
   (let* ((id (plist-get event :id))
          (output (or (plist-get event :output) ""))
-         (mark (gethash id romacs-agent-ui--tool-lines))
+         (mark (romacs-agent-ui--tool-mark id))
          (call (and mark (get-text-property (1+ mark) 'romacs-agent-call)))
          (input (romacs-agent-ui--input (cadr call)))
          (renderer (and call (romacs-agent-rows-get (car call))))
@@ -2236,8 +2234,7 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
 (defun romacs-agent-ui--reset ()
   "Make the current chat's record of what its transcript draws empty."
   (dolist (variable romacs-agent-ui--drawn-state) (kill-local-variable variable))
-  (setq romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-        romacs-agent-ui--tasks (make-hash-table :test #'equal)
+  (setq romacs-agent-ui--tasks (make-hash-table :test #'equal)
         romacs-agent-ui--messages (make-hash-table :test #'equal)))
 
 (defun romacs-agent-ui--make-chat (session)
@@ -2338,12 +2335,12 @@ the row at the start draws them again."
      (lambda ()
        (let ((inhibit-read-only t)) (delete-region (point-min) cut))
        ;; What pointed into them points nowhere now.
-       (dolist (table (list romacs-agent-ui--tool-lines romacs-agent-ui--tasks))
+       (let ((table romacs-agent-ui--tasks))
          (maphash (lambda (id marker) (when (= marker (point-min)) (set-marker marker nil) (remhash id table)))
                   (copy-hash-table table)))
        ;; And the payloads their rows kept.
        (when romacs-agent-ui--payloads
-         (maphash (lambda (id _) (unless (gethash id romacs-agent-ui--tool-lines) (remhash id romacs-agent-ui--payloads)))
+         (maphash (lambda (id _) (unless (romacs-agent-ui--tool-mark id) (remhash id romacs-agent-ui--payloads)))
                   (copy-hash-table romacs-agent-ui--payloads)))
        (setq romacs-agent-ui--fills
              (seq-filter (lambda (marker)
@@ -3696,7 +3693,7 @@ harness's own subagent or command."
   (if (plist-get row :session)
       (let ((display-buffer-overriding-action '(display-buffer-same-window)))
         (romacs-agent-show (plist-get row :session)))
-    (goto-char (or (gethash (plist-get row :tool) romacs-agent-ui--tool-lines)
+    (goto-char (or (romacs-agent-ui--tool-mark (plist-get row :tool))
                    (user-error "Its card is not in this chat")))
     ;; A command's row may be folded in its run.
     (romacs-agent-ui--reveal (point))

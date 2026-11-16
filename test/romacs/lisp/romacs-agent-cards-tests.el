@@ -28,7 +28,6 @@
          (with-temp-buffer
            (romacs-agent-chat-mode)
            (setq romacs-agent-ui--session ,var
-                 romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
                  romacs-agent-ui--tasks (make-hash-table :test #'equal)
                  romacs-agent-ui--messages (make-hash-table :test #'equal)
                  romacs-agent-ui--end (point-marker))
@@ -461,7 +460,7 @@ its end in STATE."
     (goto-char (match-beginning 0))
     (should (eq (key-binding (kbd "RET")) #'romacs-agent-chat-goto-reply))
     (romacs-agent-chat-goto-reply)
-    (should (eq (point) (marker-position (gethash "r" romacs-agent-ui--tool-lines))))))
+    (should (eq (point) (marker-position (romacs-agent-ui--tool-mark "r"))))))
 
 (ert-deftest romacs-agent-a-failed-reply-keeps-its-message ()
   (romacs-agent-cards-tests--with-chat session
