@@ -62,7 +62,7 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
                                   (mapconcat (lambda (unit) (format "Id=%s\nActiveState=%s\n" unit state))
                                              (cdr (member "--" args)) "\n")))
                   nil))
-               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text) (push (cons task text) told) task))
+               ((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
                ((symbol-function 'run-at-time) (lambda (&rest _) (timer-create))))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 
@@ -179,6 +179,32 @@ private directory `root'.  `told' collects (TASK . TEXT) a task is told,
         (index "- 444 d  new")
         (romacs-agent-watch--tick)
         (should (= (length told) 3))))))
+
+(ert-deftest romacs-agent-watch-a-dev-check-for-the-task-calling ()
+  ;; romacs_dev_check's unit is watched for the task that called it, from
+  ;; when it was started, its report the output; a caller that is no
+  ;; task is not told, and its answer says so.
+  (romacs-agent-watch-tests--with
+    (should (eq romacs-mcp-dev-watch-function #'romacs-agent-watch--dev-check))
+    (setq caller "child")
+    (should (funcall romacs-mcp-dev-watch-function "romacs-dev-check-x" "/r/x.txt" 100.0))
+    (should (equal (gethash "child" romacs-agent-watch--watches)
+                   '((:unit "romacs-dev-check-x.service" :output "/r/x.txt" :since 100.0))))
+    (should (file-exists-p (romacs-agent-watch--file child)))
+    (setq caller nil)
+    (should-not (funcall romacs-mcp-dev-watch-function "romacs-dev-check-y" "/r/y.txt" 100.0))))
+
+(ert-deftest romacs-agent-watch-reads-the-journal-from-its-start ()
+  ;; A unit started again at once (a tree's check after one that failed)
+  ;; is not told by the earlier run's end in the same second: the journal
+  ;; is read from the watch's start, to the microsecond.
+  (romacs-agent-watch-tests--with
+    (let ((watch (list :unit "check.service" :since 100.25)) (asked nil))
+      (puthash "child" (list watch) romacs-agent-watch--watches)
+      (cl-letf (((symbol-function 'romacs-agent-watch--output)
+                 (lambda (program args _then) (push (cons program args) asked) nil)))
+        (romacs-agent-watch--report "child" watch))
+      (should (member "@100.250000" (cdr (assoc "journalctl" asked)))))))
 
 (provide 'romacs-agent-watch-tests)
 ;;; romacs-agent-watch-tests.el ends here

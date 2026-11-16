@@ -22,63 +22,87 @@
     (set-file-modes (expand-file-name "tools/dev-check" tree) #o755)
     tree))
 
-(defun romacs-mcp-dev-tests--call (&rest fields)
-  "The tool's answer to a call with FIELDS, once its check has ended."
-  (let ((deferred (romacs-mcp-dev--check (apply #'romacs-mcp--object fields)))
-        (end (+ (float-time) 30)) (result nil))
-    (should (eq (car deferred) 'romacs-mcp--deferred))
-    (while (and (not (setq result (funcall (cadr deferred)))) (< (float-time) end))
-      (accept-process-output nil 0.05))
-    (car result)))
+(defmacro romacs-mcp-dev-tests--starting (started &rest body)
+  "BODY with each unit start's arguments (UNIT REPORT COMMAND DIRECTORY
+ENVIRONMENT) put in STARTED instead of run."
+  (declare (indent 1))
+  `(let ((,started nil))
+     (cl-letf (((symbol-function 'romacs-mcp-dev--start) (lambda (&rest args) (setq ,started args))))
+       ,@body)))
 
-(ert-deftest romacs-mcp-dev-tests-verdict-and-report ()
-  "The check's exit is the verdict and its output the report; it runs in
-the tree, with the trunk, the target and the tests switch it was given."
-  (let ((tree (romacs-mcp-dev-tests--tree 1)))
+(ert-deftest romacs-mcp-dev-tests-a-check-is-a-unit-answered-at-once ()
+  "The check starts as a unit of its own tree, in the tree, with the trunk,
+the target and the tests switch it was given; the answer names the unit
+and the report at once."
+  (let ((tree (romacs-mcp-dev-tests--tree 1)) (romacs-mcp-dev-watch-function nil))
     (unwind-protect
-        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree "trunk" "main" "tests" :false
-                                                  "targetDir" "/somewhere/target")))
-          (should (equal (gethash "verdict" answer) "fail"))
-          (should (equal (gethash "exit" answer) 1))
-          (should (equal (gethash "report" answer)
-                         (format "args:--binary %s --trunk main --no-tests\ntarget:/somewhere/target\nin:%s\n"
-                                 (expand-file-name invocation-name invocation-directory)
-                                 (directory-file-name (file-truename tree))))))
+        (romacs-mcp-dev-tests--starting started
+          (let ((answer (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree "trunk" "main" "tests" :false
+                                                                  "targetDir" "/somewhere/target"))))
+            (pcase-let ((`(,unit ,report ,command ,directory ,environment) started))
+              (should (equal unit (romacs-mcp-dev--unit tree)))
+              (should (equal (gethash "unit" answer) unit))
+              (should (equal (gethash "report" answer) report))
+              (should (eq (gethash "watched" answer) :false))
+              (should (string-match-p (regexp-quote report) (gethash "next" answer)))
+              (should (equal command (list (expand-file-name "tools/dev-check" tree)
+                                           "--binary" (expand-file-name invocation-name invocation-directory)
+                                           "--trunk" "main" "--no-tests")))
+              (should (equal directory tree))
+              (should (equal (seq-filter (lambda (e) (string-prefix-p "CARGO_TARGET_DIR=" e)) environment)
+                             '("CARGO_TARGET_DIR=/somewhere/target")))
+              (should (member (concat "PATH=" (getenv "PATH")) environment)))))
       (delete-directory tree t))))
 
-(ert-deftest romacs-mcp-dev-tests-defaults ()
-  "A call that names only the tree runs every stage against the default trunk."
-  (let ((tree (romacs-mcp-dev-tests--tree 0)))
+(ert-deftest romacs-mcp-dev-tests-a-task-calling-is-told-and-given-the-report ()
+  "With the agents layer watching for the caller, the answer says so, and
+names the report a caller never told reads."
+  (let* ((tree (romacs-mcp-dev-tests--tree 0)) (watched nil)
+         (romacs-mcp-dev-watch-function (lambda (unit report started) (setq watched (list unit report (numberp started))))))
     (unwind-protect
-        (let ((answer (romacs-mcp-dev-tests--call "worktree" tree)))
-          (should (equal (gethash "verdict" answer) "ok"))
-          (should (string-prefix-p (format "args:--binary %s\n" (expand-file-name invocation-name invocation-directory))
-                                   (gethash "report" answer))))
+        (romacs-mcp-dev-tests--starting _started
+          (let ((answer (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree))))
+            (should (eq (gethash "watched" answer) t))
+            (should (equal watched (list (gethash "unit" answer) (gethash "report" answer) t)))
+            (should (string-match-p (regexp-quote (gethash "report" answer)) (gethash "next" answer)))))
       (delete-directory tree t))))
 
-(ert-deftest romacs-mcp-dev-tests-incomplete ()
-  "A check that could not run a stage is not a pass."
-  (let ((tree (romacs-mcp-dev-tests--tree 2)))
-    (unwind-protect
-        (should (equal (gethash "verdict" (romacs-mcp-dev-tests--call "worktree" tree)) "incomplete"))
-      (delete-directory tree t))))
+(ert-deftest romacs-mcp-dev-tests-the-environment-systemd-takes ()
+  "Each name once, its first value as `getenv' reads it; entries systemd
+refuses are left out."
+  (should (equal (romacs-mcp-dev--environment '("A=1" "B=2" "A=3" "BASH_FUNC_f%%=() { :; }" "C=x\ny" "UNSET"))
+                 '("A=1" "B=2"))))
 
-(ert-deftest romacs-mcp-dev-tests-nothing-left-behind ()
-  "A check no one polls for still ends and leaves no buffer; neither does
-one that could not start."
-  (cl-flet ((buffers () (seq-count (lambda (buffer) (string-prefix-p " *romacs-dev-check*" (buffer-name buffer)))
-                                   (buffer-list))))
-    (let ((tree (romacs-mcp-dev-tests--tree 0)) (before (buffers)) (end (+ (float-time) 30)))
-      (unwind-protect
-          (progn
-            (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree))
-            (while (and (> (buffers) before) (< (float-time) end)) (accept-process-output nil 0.05))
-            (should (= (buffers) before))
-            (let ((exec-path nil))
-              (with-temp-file (expand-file-name "tools/dev-check" tree) (insert "#!/nonexistent/interpreter\n"))
-              (should-error (romacs-mcp-dev--check (romacs-mcp--object "worktree" tree)))
-              (should (= (buffers) before))))
-        (delete-directory tree t)))))
+(ert-deftest romacs-mcp-dev-tests-the-unit-is-collected-in-the-build-slice ()
+  (should (equal (romacs-mcp-dev--unit-argv "u" "/r.txt" '("/t/tools/dev-check" "--binary" "/b$x") "/t/" '("A=1"))
+                 '("--user" "--quiet" "--collect" "--slice=romacs-build" "--expand-environment=no"
+                   "--unit=u" "--working-directory=/t/" "--property=StandardOutput=truncate:/r.txt"
+                   "--property=StandardError=inherit" "--setenv=A=1" "--" "/t/tools/dev-check" "--binary" "/b$x"))))
+
+(ert-deftest romacs-mcp-dev-tests-a-unit-that-did-not-start-is-said ()
+  "systemd-run runs with the unit's arguments; its refusal (a check of
+the tree running) is an error naming the unit and its report."
+  (let* ((bin (make-temp-file "romacs-mcp-dev-tests-bin-" t))
+         (calls (expand-file-name "calls" bin))
+         (report (expand-file-name "reports/u.txt" bin))
+         (exec-path (list bin)))
+    (unwind-protect
+        (cl-flet ((fake (status)
+                    (with-temp-file (expand-file-name "systemd-run" bin)
+                      (insert (format "#!/bin/sh\nprintf '%%s\\n' \"$@\" > %s\necho 'Unit u.service was already loaded'\nexit %d\n"
+                                      calls status)))
+                    (set-file-modes (expand-file-name "systemd-run" bin) #o755)))
+          (fake 0)
+          (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" '("A=1"))
+          (should (file-directory-p (file-name-directory report)))
+          (should (equal (with-temp-buffer (insert-file-contents calls) (split-string (buffer-string) "\n" t))
+                         (romacs-mcp-dev--unit-argv "u" report '("/t/tools/dev-check") "/t/" '("A=1"))))
+          (fake 1)
+          (let ((said (cadr (should-error (romacs-mcp-dev--start "u" report '("/t/tools/dev-check") "/t/" nil)
+                                          :type 'user-error))))
+            (should (string-match-p (regexp-quote report) said))
+            (should (string-match-p "already loaded" said))))
+      (delete-directory bin t))))
 
 (ert-deftest romacs-mcp-dev-tests-guide-at-once ()
   "A function by name, and no query, are answered at once."

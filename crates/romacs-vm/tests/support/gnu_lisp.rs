@@ -10,12 +10,11 @@
 //! and user are its own, not the builder's. A world
 //! is keyed by this executable and records every file the boot read, so a
 //! rebuilt executable or an edited Lisp file builds it again. Anywhere else
-//! (another target, a process that already holds an image, a refused
-//! restore, `ROMACS_WORLD=off`) the boot runs from source, as it answers the
+//! (another target, a process that already holds an image, a restore
+//! that fails, `ROMACS_WORLD=off`) the boot runs from source, as it answers the
 //! same.
 use romacs_vm::Vm;
-use romacs_vm::world::arena;
-use romacs_vm::world::store::{Launch, World};
+use romacs_vm::world::store::World;
 use std::path::{Path, PathBuf};
 
 /// GNU batch's VM after the loadup bootstrap, with each file of THEN (a
@@ -29,47 +28,15 @@ pub fn gnu_lisp(then: &[&str]) -> Vm {
     vm
 }
 
-/// The boot from its world, when this process can map one: its global
-/// allocator is the arena, it runs one test (nextest's process per test, as
-/// every check runs them), and it maps no image yet. A process maps one
-/// image, and its mapping is not to be raced: under libtest's threads,
-/// which run many tests in one process, every boot is from source, as is a
-/// test's second boot.
+/// The boot from its world, when this process can map one
+/// (`World::for_test`): in the `gnu` target, one test a process.
 fn restored(root: &Path) -> Option<Vm> {
-    let alone = std::env::var_os("NEXTEST_EXECUTION_MODE").is_some_and(|mode| mode == "process-per-test");
-    if !alone || !arena_allocates() || arena::mapped_image().is_some() {
-        return None;
-    }
     let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
-    let world = World::new(store, vec!["consumer romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())]).ok()?;
-    match world.launch::<()>(|| std::env::args_os().skip(1).collect(), true, || {}) {
-        Launch::Restored { mut vm, .. } => {
-            vm.world_reinit();
-            vm.eval_source("(romacs-world-restart)").unwrap();
-            Some(*vm)
-        }
-        Launch::Build => {
-            let built = world.begin_build(&world.build_roots(vec![root.to_owned()])).map_err(|e| e.to_string())
-                .and_then(|()| {
-                    romacs_vm::host::end_at_dump_point();
-                    world.build(|| Ok((booted(root, true), (), serde_json::Value::Null)))
-                });
-            if let Err(error) = &built {
-                eprintln!("GNU Lisp world: {error}");
-            }
-            std::process::exit(i32::from(built.is_err()));
-        }
-        Launch::Chain { .. } => None,
-    }
-}
-
-/// Whether this process's global allocator is the arena (the `gnu`
-/// target's): a new block lies in its range. The arena exists in any
-/// process that asks for it, whatever allocator serves the heap.
-fn arena_allocates() -> bool {
-    let block = Box::new(0_u8);
-    let at = std::ptr::from_ref(&*block) as usize;
-    arena::current_range().is_some_and(|(base, len)| (base..base + len).contains(&at))
+    let recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
+    World::for_test(store, &recipe, || {
+        romacs_vm::host::end_at_dump_point();
+        Ok((booted(root, true), ()))
+    }).map(|(vm, ())| vm)
 }
 
 /// The boot from source, recording for a world when WORLD.
@@ -84,7 +51,7 @@ fn booted(root: &Path, world: bool) -> Vm {
     vm.set_frame_geometry(80, 25, 1, 1).unwrap();
     vm.set_load_path(&load_path(root)).unwrap();
     vm.install_lisp_prelude().unwrap();
-    load(&mut vm, root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    load(&mut vm, root, "lisp/session/romacs-loadup-bootstrap.el");
     vm
 }
 
@@ -99,12 +66,23 @@ fn load(vm: &mut Vm, root: &Path, name: &str) {
 }
 
 /// GNU's installed load-path (`test/gnu/run.py` `load_path`): the Lisp
-/// root, its subdirectories in reverse name order with obsolete last, then
-/// `lisp/romacs`.
+/// root, its GNU subdirectories in reverse name order with obsolete last,
+/// then Romacs's own directories (lisp/bundled.json): its subsystems, then
+/// each bundled package.
 fn load_path(root: &Path) -> Vec<PathBuf> {
-    let lisp = root.join("lisp/gnu");
+    let lisp = root.join("lisp");
+    let layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(lisp.join("bundled.json")).unwrap()).unwrap();
+    let names_of = |key: &str| layout[key].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    let packages = layout["packages"].as_str().unwrap().to_owned();
+    let own: Vec<String> = names_of("directories").into_iter().chain(names_of("off_path")).chain([packages.clone()]).collect();
+    let mut romacs: Vec<PathBuf> = names_of("directories").iter().map(|d| lisp.join(d)).filter(|d| d.is_dir()).collect();
+    let mut bundled: Vec<PathBuf> = std::fs::read_dir(lisp.join(&packages)).into_iter().flatten()
+        .filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_dir()).collect();
+    bundled.sort();
+    romacs.extend(bundled);
     let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
         .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
+        .filter(|name| !own.contains(name))
         .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
             && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
         .collect();
@@ -112,6 +90,6 @@ fn load_path(root: &Path) -> Vec<PathBuf> {
     let (obsolete, rest): (Vec<&String>, Vec<&String>) = names.iter().rev().partition(|n| *n == "obsolete");
     std::iter::once(lisp.clone())
         .chain(rest.into_iter().chain(obsolete).map(|n| lisp.join(n)))
-        .chain(std::iter::once(root.join("lisp/romacs")))
+        .chain(romacs)
         .collect()
 }

@@ -17,7 +17,7 @@ pub(crate) enum Handshake {
 }
 
 impl Leaf<'_> {
-    fn plist_value(&self, mut plist: Value, key: Value) -> Value {
+    pub(crate) fn plist_value(&self, mut plist: Value, key: Value) -> Value {
         for _ in 0..self.list_limit() {
             let Some((k, rest)) = self.pair(plist) else { break };
             let Some((v, rest)) = self.pair(rest) else { break };

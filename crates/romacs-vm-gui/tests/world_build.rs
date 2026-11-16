@@ -46,8 +46,59 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// A GUI world's key and records come from what a session reads, not from
+/// the environment `--world-build` ran in: one prepared with a launch
+/// font, SHELL and the runtime tree named outright restores for a session
+/// started with none of them, or naming the tree through a symlink
+/// (`--world-census` restores it read only). The
+/// build says its key and recipe, and a launch whose recipe differs names
+/// the line that did.
+#[test]
+fn a_gui_world_serves_a_session_however_it_was_started() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = std::env::temp_dir().join(format!("romacs-world-started-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let store = home.join("worlds");
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // The tree this executable finds where it was built, named as that finds it.
+    let tree = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(std::path::Path::parent).unwrap();
+    let command = |args: &[&str]| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"));
+        command.arg("--loadup").arg("--world-store").arg(&store).args(args).env("HOME", &home)
+            .env("XDG_CACHE_HOME", home.join("cache")).env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_DATA_HOME", home.join("data")).env_remove("ROMACS_WORLD").env_remove("ROMACS_LISP_DIR")
+            .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY");
+        command
+    };
+    let output = command(&["--world-build"]).env("ROMACS_GUI_FONT", "Monospace").env("ROMACS_GUI_FONT_SIZE", "15")
+        .env("SHELL", "/bin/sh").env("ROMACS_RUNTIME_ROOT", tree).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+    let prepared = said.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["mode"] == "prepared" && event["recipe"][0] == "consumer romacs-vm-gui");
+    let prepared = prepared.unwrap_or_else(|| panic!("no prepared GUI world: {said}"));
+    assert!(prepared["key"].as_str().is_some_and(|key| key.len() == 64), "{prepared}");
+    assert!(!prepared["recipe"].to_string().contains("Monospace"), "the launch font keys the world: {prepared}");
+    let session = |args: &[&str]| command(args).env_remove("ROMACS_GUI_FONT").env_remove("ROMACS_GUI_FONT_SIZE")
+        .env_remove("SHELL").env_remove("ROMACS_RUNTIME_ROOT").output().unwrap();
+    let restored = session(&["--world-census"]);
+    assert!(restored.status.success(), "the world does not serve a session started without them: {}",
+            String::from_utf8_lossy(&restored.stderr));
+    // The same tree named through a symlink, as a launcher's `current' link names it.
+    let link = home.join("current");
+    std::os::unix::fs::symlink(tree, &link).unwrap();
+    let linked = command(&["--world-census"]).env("ROMACS_RUNTIME_ROOT", &link).output().unwrap();
+    assert!(linked.status.success(), "the world does not serve a session naming its tree through a link: {}",
+            String::from_utf8_lossy(&linked.stderr));
+    let missed = session(&["--world-census", "--geometry", "900x700"]);
+    let said = String::from_utf8_lossy(&missed.stderr);
+    assert!(!missed.status.success() && said.contains(r#""now":"geometry 900 700""#) && said.contains(r#""was":"geometry "#), "{said}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// A `--batch' session's world holds the stock theme the chain enables
-/// (lisp/romacs/romacs-theme.el `romacs-theme-start'): the session that prepares
+/// (lisp/ui/romacs-theme.el `romacs-theme-start'): the session that prepares
 /// it and one restored from it both start in `default'. The first says why
 /// it booted from source under ROMACS_DIAGNOSTICS=1; the second says nothing.
 #[test]
@@ -82,7 +133,7 @@ fn a_batch_world_starts_in_the_stock_theme() {
 /// What a batch session answers about its HOME, user, locale and the
 /// variables startup computes from them.
 const STARTUP_STATE: &str = "(prin1 (list user-emacs-directory current-language-environment locale-coding-system
-  (user-login-name) (getenv \"HOME\") project-list-file
+  (user-login-name) (getenv \"HOME\") project-list-file shell-file-name
   (mapcar (lambda (v) (cons v (and (boundp v) (symbol-value v)))) romacs-loadup-delayed-init-variables)))";
 
 /// Every file under DIR, with its length and modification time.
@@ -118,8 +169,9 @@ fn an_installed_batch_world_serves_any_home() {
     let installed = bin.join("romacs-vm-gui.worlds");
     let command = |home: &std::path::Path, lang: &str| {
         let mut command = std::process::Command::new(&exe);
-        // A world binds the login name and SHELL its chain reads (VM2-BATCH2):
-        // both homes give the same, so the test does not pass by inheritance.
+        // A world binds the login name its chain reads (VM2-BATCH2): both
+        // homes give the same, so the test does not pass by inheritance.
+        // SHELL is each process's, as GNU's init_callproc reads it.
         command.current_dir(home).env("HOME", home).env("LANG", lang).env("XDG_CACHE_HOME", home.join("cache"))
             .env("USER", "builder").env("LOGNAME", "builder").env("NAME", "A Builder").env("SHELL", "/bin/sh")
             .env_remove("XDG_CONFIG_HOME").env_remove("LC_ALL").env_remove("LC_CTYPE")
@@ -137,7 +189,7 @@ fn an_installed_batch_world_serves_any_home() {
         .filter(|path| path.extension().is_some_and(|x| x == "json")).collect();
     assert_eq!(manifests.len(), 1, "{manifests:?}");
     let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifests[0]).unwrap()).unwrap();
-    let personal = |name: &str| ["HOME", "USER", "LANG", "LANGUAGE"].contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_");
+    let personal = |name: &str| ["HOME", "USER", "LANG", "LANGUAGE", "SHELL"].contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_");
     for record in manifest["records"].as_array().unwrap() {
         let text = record.to_string();
         assert!(!text.contains(a.to_str().unwrap()), "a record names the builder's HOME: {text}");
@@ -146,7 +198,7 @@ fn an_installed_batch_world_serves_any_home() {
     let before = files(&installed);
     let session = |world: bool| {
         let mut command = command(&b, "C.UTF-8");
-        command.env("ROMACS_DIAGNOSTICS", "1").args(["-Q", "--batch", "--eval", STARTUP_STATE]);
+        command.env("ROMACS_DIAGNOSTICS", "1").env("SHELL", "/bin/bash").args(["-Q", "--batch", "--eval", STARTUP_STATE]);
         if !world { command.env("ROMACS_WORLD", "off"); }
         let output = command.output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -155,7 +207,7 @@ fn an_installed_batch_world_serves_any_home() {
     let (restored, said) = session(true);
     assert!(said.contains(r#""installed":true"#), "the installed world was not restored: {said}");
     let (source, _) = session(false);
-    assert!(restored.contains(b.to_str().unwrap()), "{restored}");
+    assert!(restored.contains(b.to_str().unwrap()) && restored.contains("\"/bin/bash\""), "{restored}");
     assert_eq!(restored, source);
     assert_eq!(files(&installed), before, "the session wrote in the installation's store");
     let made = b.join("cache/romacs/worlds");

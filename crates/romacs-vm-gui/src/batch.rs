@@ -12,9 +12,10 @@
 //! the same user.
 //!
 //! A session that names no store restores the installation's world first,
-//! `EXECUTABLE.worlds` beside the executable, which its installer built
-//! (`--world-build --batch`): it only reads that store, writing no lock,
-//! use stamp or digest there. Then the user's store. No session is slower
+//! `EXECUTABLE.worlds` beside the executable, when one was prepared there
+//! (`--world-build --batch`; the curl installer prepares none): it only
+//! reads that store, writing no lock, use stamp or digest there. Then the
+//! user's store. No session is slower
 //! than a boot from source: one whose world is missing or stale boots the
 //! chain from source while a detached builder, under the world's lock,
 //! prepares it for the next; a session in a fresh HOME makes no store at
@@ -81,11 +82,11 @@ fn run_emacs(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(
             std::process::exit(code)
         })));
         let args: Vec<String> = args.iter().map(|arg| super::startup::lisp_string(arg)).collect();
-        let quick = if quick { super::startup::QUICK_START } else { "" };
+        let start = if quick { super::startup::QUICK_START } else { super::startup::SITE_LISP_START };
         vm.eval_source(&format!(
             "(progn (setq command-line-args (cons (expand-file-name invocation-name invocation-directory) (list {}))
                           command-line-default-directory default-directory)
-                    {quick}
+                    {start}
                     (romacs--after-init)
                     (condition-case err (command-line-1 (cdr command-line-args))
                       ((debug t) (funcall command-error-function err \"\" nil) (kill-emacs -1)))
@@ -148,7 +149,7 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
 /// the batch world of the compile environment in the store's `worlds/`,
 /// and that world's identity keys every artifact. An interactive session
 /// never waits for a compile: a load with no artifact reads source and the
-/// session compiles the file in the background (lisp/romacs/romacs-precompile.el).
+/// session compiles the file in the background (lisp/session/romacs-precompile.el).
 pub fn configure_compiled_lisp(worlds: Option<&Path>, interactive: bool) {
     if !romacs_vm::compiled_lisp::requested(interactive) || romacs_vm::world::store::disabled() { return; }
     let Some((store, compiles)) = compiled_store(worlds, interactive) else { return };
@@ -171,7 +172,6 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
     let mut runtime = vec![dir.clone()];
-    if let Some(root) = super::startup::runtime_of(&dir) { runtime.push(root.join("lisp/romacs")); }
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
@@ -260,7 +260,7 @@ fn beside_executable(suffix: &str) -> Option<PathBuf> {
 /// (`ROMACS_DIAGNOSTICS=1`): otherwise a batch session is as quiet as GNU's.
 fn diagnose(what: &serde_json::Value) {
     if std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1") {
-        eprintln!("romacs-world: {what}");
+        romacs_vm::host::event_line("romacs-world", what);
     }
 }
 
@@ -286,7 +286,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     }
     // The store's checks, locks and use stamps are the launcher's, outside
     // a flight recording (romacs_vm::flight::without).
-    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, || {}), world)));
+    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, |_| {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
@@ -295,16 +295,16 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
         }
         Launch::Build => {
             // Room for this world among its family's (its lock file there
-            // makes it the current one), before the build confines this
-            // process to reading the store; no other family's world goes.
+            // makes it the current one), before the build begins; no other
+            // family's world goes.
             match world.prune_family() {
                 Ok(deleted) if deleted.is_empty() => {}
-                Ok(deleted) => eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted})),
+                Ok(deleted) => romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "pruned", "worlds": deleted})),
                 Err(error) => eprintln!("romacs-world: prune failed: {error}"),
             }
             let result = build(&world, &dir);
             match &result {
-                Ok(len) => eprintln!("romacs-world: {}", serde_json::json!({"event": "world-build", "ok": true, "image_bytes": len})),
+                Ok(len) => romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "world-build", "ok": true, "image_bytes": len})),
                 Err(error) => eprintln!("romacs-world: build failed: {error}"),
             }
             std::process::exit(if result.is_ok() { 0 } else { 1 })
@@ -335,16 +335,16 @@ fn installed_world(dir: &Path) -> Option<Box<Vm>> {
 
 /// `--world-build`'s batch half, beside the GUI's world: the batch world
 /// in STORE made usable, unless the installation's serves this executable
-/// already. The GUI's world is what the build is for: a batch world refused
+/// already. The GUI's world is what the build is for: a batch world not captured
 /// or failed is a warning, and its sessions boot from source.
 pub fn prepare_beside(store: PathBuf) {
     let installed = super::startup::lisp_root(&super::startup::lisp_dir()).ok()
         .zip(beside_executable("worlds").filter(|store| store.is_dir()))
         .is_some_and(|(dir, installed)| World::ready_read_only(&installed, recipe(&dir)));
     if installed {
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "skipped": "the installation's serves"}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "batch-world", "skipped": "the installation's serves"}));
     } else if let Err(reason) = prepare(store) {
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "batch-world", "ok": false, "warning": reason}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "batch-world", "ok": false, "warning": reason}));
     }
 }
 
@@ -354,9 +354,9 @@ pub fn prepare_beside(store: PathBuf) {
 pub fn prepare(store: PathBuf) -> Result<(), String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
-    match world.prepare(|| builder_args(&world)) {
+    match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
-            eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
             Ok(())
         }
         Err(reason) => Err(format!("batch world not prepared: {reason}")),
@@ -375,7 +375,7 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
         Ok(world) => Some(world),
         // The default store's session stays as quiet as GNU's.
         Err(reason) => {
-            if named { eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
+            if named { romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason.to_string()})); }
             None
         }
     }
@@ -410,10 +410,10 @@ fn chain(dir: &Path) -> Result<Vm, String> {
     Ok(vm)
 }
 
-/// The builder: the chain in build mode up to GNU's dump point, confined
-/// to its read roots, then the world published. The image's length.
+/// The builder: the chain in build mode up to GNU's dump point, then the
+/// world published. The image's length.
 fn build(world: &World, dir: &Path) -> Result<usize, String> {
-    world.begin_build(&world.build_roots(super::world::build_roots(dir))).map_err(|e| e.to_string())?;
+    world.begin_build().map_err(|e| e.to_string())?;
     romacs_vm::host::end_at_dump_point();
     world.build(|| Ok((chain(dir)?, (), serde_json::json!({}))))
 }

@@ -28,7 +28,7 @@ fn identify(vm: &mut Vm, path: &Path) -> Result<(), String> {
 
 /// A session with an init, even one not written yet, has somewhere to save
 /// settings: name PATH, then load the saved settings, after Romacs's
-/// defaults and before the init (lisp/romacs/romacs-saved-settings.el).
+/// defaults and before the init (lisp/session/romacs-saved-settings.el).
 pub fn start_saved_settings(vm: &mut Vm, path: &Path) -> Result<(), String> {
     identify(vm, path)?;
     vm.eval_source("(when (fboundp 'romacs-saved-settings-start) (romacs-saved-settings-start))")?;
@@ -44,13 +44,37 @@ pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
         Ok(_) => {},
     }
     identify(vm, path)?;
-    vm.load_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    // Through Lisp where the session has it (lisp/session/romacs-init-load.el):
+    // an error's backtrace is kept as it happens, for the warning that says
+    // so.  Its answer is nil, or the error worded as the loader words one.
+    let file = serde_json::to_string(path.to_str().ok_or("init path is not UTF-8")?).map_err(|error| error.to_string())?;
+    let answer = vm.eval_source(&format!(
+        "(if (fboundp 'romacs-init-load) (let ((said (romacs-init-load {file}))) (if (stringp said) (encode-coding-string said 'utf-8) said)) t)"))?;
+    if answer.is_nil() { return Ok(true); }
+    if !answer.is_t() { return Err(named(path, &String::from_utf8_lossy(answer.bytes()?))); }
+    // The loader's error names the file already (`FILE: line N form M:
+    // ...`); one that does not is named once here.
+    vm.load_file(path).map_err(|error| named(path, &error.to_string()))?;
     Ok(true)
+}
+
+/// ERROR, an error loading PATH, naming PATH once.
+fn named(path: &Path, error: &str) -> String {
+    let file = path.display().to_string();
+    if error.starts_with(&file) { error.to_owned() } else { format!("{file}: {error}") }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_init_error_names_its_file_once() {
+        let path = Path::new("/home/user/.config/romacs/init.el");
+        let loader = "/home/user/.config/romacs/init.el: line 3 form 2: (oops): (void-function oops)";
+        assert_eq!(named(path, loader), loader);
+        assert_eq!(named(path, "Permission denied"), "/home/user/.config/romacs/init.el: Permission denied");
+    }
 
     #[test]
     fn xdg_paths_follow_the_standard_fallback() {

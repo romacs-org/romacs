@@ -21,7 +21,8 @@
 //!    half-pixel grid), no clip cutting the band's ink in either place
 //!    (`reads_y`, `moved`).
 //! 4. Nothing else in the band: the band is the rows' ink box (their cells
-//!    grown by the picture's reach, out to device pixels), and whatever else
+//!    grown by how far their own ink reached when the picture drew them, out
+//!    to device pixels), and whatever else
 //!    the new frame draws there, or the old frame at its source, is a
 //!    uniform rectangle spanning both places (a window's background, an
 //!    unclipped border, a pane's dim), or, in the band's place only, a pane
@@ -43,7 +44,7 @@ use romacs_display_protocol::frame_glyphs::{FrameGlyph, FrameGlyphBuffer};
 use romacs_display_protocol::types::Rect;
 
 use super::damage::{self, Key, Run, Sides};
-use super::reach::Reach;
+use super::reach::{Inks, Reach};
 
 /// A band of the picture to move: its place before, logical pixels on
 /// whole device pixels, and how far down it goes (up when negative).
@@ -71,9 +72,9 @@ const MIN_GROUPS: usize = 2;
 const MAX_TRIES: usize = 8;
 
 /// The moves that bring a picture of SIDES' old frame toward its new one,
-/// whose groups at CHANGED (sorted) differ in place; REACH is how far ink
+/// whose groups at CHANGED (sorted) differ in place; INKS is how far ink
 /// leaves its cells, SCALE the device pixels per logical one.
-pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32) -> Found {
+pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], inks: Inks<'_>, scale: f32) -> Found {
     let mut found = Found::default();
     if !on_pixels(1.0, scale) {
         return found;
@@ -87,7 +88,7 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
             .iter()
             .filter(|c| c.0 == window)
             .take(MAX_TRIES)
-            .find_map(|&(_, dy)| band(sides, window, dy, reach, scale))
+            .find_map(|&(_, dy)| band(sides, changed, window, dy, inks, scale))
         else {
             continue;
         };
@@ -100,12 +101,13 @@ pub(crate) fn find(sides: &Sides<'_>, changed: &[Key], reach: Reach, scale: f32)
 }
 
 /// The band of WINDOW's rows that moved DY, if one passes the predicate:
-/// its move, where it lands, and the groups it places.
-fn band(sides: &Sides<'_>, window: i64, dy: f32, reach: Reach, scale: f32) -> Option<(Move, Rect, Vec<Key>)> {
+/// its move, where it lands, and the groups it places. CHANGED (sorted) are
+/// the groups that differ in place, which the picture has not drawn.
+fn band(sides: &Sides<'_>, changed: &[Key], window: i64, dy: f32, inks: Inks<'_>, scale: f32) -> Option<(Move, Rect, Vec<Key>)> {
     let mut placed: Vec<Key> = sides
         .after
         .keys()
-        .filter(|key| key.0 == window && moved(sides, **key, dy, reach, scale))
+        .filter(|key| key.0 == window && moved(sides, **key, dy, inks, scale))
         .copied()
         .collect();
     placed.sort_unstable();
@@ -113,15 +115,19 @@ fn band(sides: &Sides<'_>, window: i64, dy: f32, reach: Reach, scale: f32) -> Op
     if placed.len() < MIN_GROUPS {
         return None;
     }
+    // The rows' ink: each group's bounds grown by how far its ink reached
+    // where the picture drew it, a distance away.
     let rows = placed
         .iter()
         .flat_map(|key| sides.after[key].iter().map(|&at| sides.runs[at].bounds))
+        .map(|r| inks.drawn(window, Rect::new(r.x, r.y - dy, r.width, r.height)).grow(r))
         .reduce(damage::union)?;
     let frame = Rect::new(0.0, 0.0, sides.new.width, sides.new.height);
-    let area = outward(intersection(reach.grow(rows), frame)?, scale);
+    let area = outward(intersection(rows, frame)?, scale);
     let from = Rect::new(area.x, area.y - dy, area.width, area.height);
     let inside = from.y >= 0.0 && from.y + from.height <= sides.new.height;
-    (inside && alone(sides, &placed, area, from, dy, reach, scale)).then_some((Move { from, dy }, area, placed))
+    let step = Move { from, dy };
+    (inside && alone(sides, changed, &placed, (area, step), inks, scale)).then_some((step, area, placed))
 }
 
 /// Of PLACED (sorted), the groups whose whole visual row moved DY from a
@@ -230,7 +236,7 @@ fn signature(frame: &FrameGlyphBuffer, runs: &[Run], at: &[usize]) -> u64 {
 /// device pixels in both places, drawing nothing from y, its ink clear of
 /// its clips' tops and bottoms in both places (their sides cut it alike in
 /// either).
-fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach, scale: f32) -> bool {
+fn moved(sides: &Sides<'_>, key: Key, dy: f32, inks: Inks<'_>, scale: f32) -> bool {
     let source = (key.0, (f32::from_bits(key.1) - dy).to_bits(), key.2);
     let (Some(was), Some(is)) = (sides.before.get(&source), sides.after.get(&key)) else {
         return false;
@@ -238,6 +244,7 @@ fn moved(sides: &Sides<'_>, key: Key, dy: f32, reach: Reach, scale: f32) -> bool
     let Some(bounds) = is.iter().map(|&at| sides.runs[at].bounds).reduce(damage::union) else {
         return false;
     };
+    let reach = inks.drawn(key.0, Rect::new(bounds.x, bounds.y - dy, bounds.width, bounds.height));
     let inked = reach.grow(bounds);
     let before = Rect::new(inked.x, inked.y - dy, inked.width, inked.height);
     let inside = |clip: Rect, rect: Rect| clip.y <= rect.y && rect.y + rect.height <= clip.y + clip.height;
@@ -469,7 +476,7 @@ fn outward(rect: Rect, scale: f32) -> Rect {
     Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
-/// Clause 4: whether the band at AREA, moving DY from FROM, holds nothing
+/// Clause 4: whether the band at AREA, moving by STEP from its source, holds nothing
 /// but the groups it PLACES (sorted): whatever else either frame draws in
 /// its place there (the new frame at AREA, the old at FROM), its ink grown
 /// by REACH, is a uniform rectangle spanning both places, which looks alike
@@ -477,7 +484,8 @@ fn outward(rect: Rect, scale: f32) -> Rect {
 /// where they move: a dim spans both places or touches neither, no corner
 /// touches either, no edge touches FROM, and an edge in AREA is opaque and
 /// the same in both frames, drawn over the band after the copy.
-fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, reach: Reach, scale: f32) -> bool {
+fn alone(sides: &Sides<'_>, changed: &[Key], placed: &[Key], (area, step): (Rect, Move), inks: Inks<'_>, scale: f32) -> bool {
+    let Move { from, dy, .. } = step;
     let span = (from.y.min(area.y), (from.y + from.height).max(area.y + area.height));
     let spans = |r: Rect| r.y <= span.0 && r.y + r.height >= span.1;
     // A window's background, or a border as its clip cuts it.
@@ -489,7 +497,9 @@ fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, rea
         }
         _ => None,
     };
-    let fits = |frame: &FrameGlyphBuffer, run: &Run, place: Rect| {
+    // A group the old picture drew reaches as far as it did there; one the
+    // new frame adds, as far as any ink the picture drew.
+    let fits = |frame: &FrameGlyphBuffer, run: &Run, place: Rect, reach: Reach| {
         let glyphs = &frame.glyphs[run.glyphs.clone()];
         if glyphs.iter().all(|g| uniform(g).is_some()) {
             glyphs
@@ -502,11 +512,14 @@ fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, rea
     };
     let mut carried: Vec<Key> = placed.iter().map(|k| (k.0, (f32::from_bits(k.1) - dy).to_bits(), k.2)).collect();
     carried.sort_unstable();
-    let others = |frame: &FrameGlyphBuffer, runs: &[Run], groups: &damage::Groups, moving: &[Key], place: Rect| {
-        groups
-            .iter()
-            .filter(|(key, _)| moving.binary_search(key).is_err())
-            .all(|(_, at)| at.iter().all(|&i| fits(frame, &runs[i], place)))
+    let others = |frame: &FrameGlyphBuffer, runs: &[Run], groups: &damage::Groups, moving: &[Key], place: Rect, new: bool| {
+        groups.iter().filter(|(key, _)| moving.binary_search(key).is_err()).all(|(key, at)| {
+            let drawn = !new || changed.binary_search(key).is_err();
+            at.iter().all(|&i| {
+                let reach = if drawn { inks.drawn(key.0, runs[i].bounds) } else { inks.all };
+                fits(frame, &runs[i], place, reach)
+            })
+        })
     };
     let chrome = |frame: &FrameGlyphBuffer| super::super::panes::pane_geometry(&frame.panes, frame.background, scale);
     let (now, was) = (chrome(sides.new), chrome(&sides.old.frame));
@@ -518,8 +531,8 @@ fn alone(sides: &Sides<'_>, placed: &[Key], area: Rect, from: Rect, dy: f32, rea
         && now.corners.iter().chain(&was.corners).all(|corner| !touches(corner.square))
         && was.edges.iter().all(|(r, _)| !damage::overlaps(*r, from))
         && now.edges.iter().all(|edge| !damage::overlaps(edge.0, from) && (!damage::overlaps(edge.0, area) || covering(edge)));
-    others(sides.new, sides.runs, &sides.after, placed, area)
-        && others(&sides.old.frame, &sides.old.runs, &sides.before, &carried, from)
+    others(sides.new, sides.runs, &sides.after, placed, area, true)
+        && others(&sides.old.frame, &sides.old.runs, &sides.before, &carried, from, false)
         && chrome_clear
 }
 
