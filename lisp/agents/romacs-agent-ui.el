@@ -125,8 +125,6 @@ fork), said by no one: the quietest row.")
   "Marker at the transcript's end; the composer follows it.")
 (defvar-local romacs-agent-ui--draft-images nil
   "The image files of the message being written, in order.")
-(defvar-local romacs-agent-ui--tasks nil
-  "A delegated task's id to the marker of its card's state chip.")
 (defvar-local romacs-agent-ui--messages nil
   "An open message's id to (START . LENGTH): where its text starts and how
 much of it its deltas wrote.")
@@ -428,9 +426,10 @@ waiting on its workers."
 
 (defun romacs-agent-ui--chip (id word)
   "Task ID's state, its status WORD as `romacs-agent-ui--task-key' reads
-it, as its card shows it: the state's glyph."
+it, as its card shows it: the state's glyph, which names the task
+\(`romacs-agent-chip')."
   (let ((state (romacs-agent-ui--state-of (romacs-agent-ui--task-key id word))))
-    (propertize (or (romacs-agent-ui--label state) (downcase (nth 2 state))) 'romacs-agent-chip t)))
+    (propertize (or (romacs-agent-ui--label state) (downcase (nth 2 state))) 'romacs-agent-chip id)))
 
 (defvar romacs-agent-ui--link-map
   (let ((map (make-sparse-keymap)))
@@ -471,19 +470,19 @@ to its thread, which fold its result as the rest of the row does."
                 (line-beginning-position)
                 (propertize (concat "  " (romacs-agent-ui--chip id (gethash "status" record "running"))
                                     "  " (romacs-agent-ui--thread-link id))
-                            'romacs-agent-tool tool)))
-        (puthash id (copy-marker (+ start 2)) romacs-agent-ui--tasks)))))
+                            'romacs-agent-tool tool)))))))
 
 (defun romacs-agent-ui--settle-task (id state)
-  "Show STATE on task ID's card, when it has one here."
-  (when-let* ((mark (gethash id romacs-agent-ui--tasks)))
+  "Show STATE on task ID's card, when it has one here: its chip, found
+back from the transcript's end by its text."
+  (when-let* ((found (save-excursion (goto-char (or romacs-agent-ui--end (point-max)))
+                                     (text-property-search-backward 'romacs-agent-chip id #'equal))))
     (save-excursion
-      (let* ((inhibit-read-only t) (start (marker-position mark))
+      (let* ((inhibit-read-only t) (start (prop-match-beginning found))
              (chip (romacs-agent-ui--like start (propertize (romacs-agent-ui--chip id state)
                                                             'romacs-agent-tool (get-text-property start 'romacs-agent-tool)))))
         (delete-region start (next-single-property-change start 'romacs-agent-chip))
-        (romacs-agent-ui--insert-at start chip)
-        (set-marker mark start)))))
+        (romacs-agent-ui--insert-at start chip)))))
 
 (defun romacs-agent-ui--wakes (session text)
   "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
@@ -2235,8 +2234,7 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
 (defun romacs-agent-ui--reset ()
   "Make the current chat's record of what its transcript draws empty."
   (dolist (variable romacs-agent-ui--drawn-state) (kill-local-variable variable))
-  (setq romacs-agent-ui--tasks (make-hash-table :test #'equal)
-        romacs-agent-ui--messages (make-hash-table :test #'equal)))
+  (setq romacs-agent-ui--messages (make-hash-table :test #'equal)))
 
 (defun romacs-agent-ui--make-chat (session)
   "SESSION's chat buffer, made empty: its composer, no transcript yet
@@ -2335,10 +2333,6 @@ the row at the start draws them again."
     (romacs-agent-ui--unrecorded
      (lambda ()
        (let ((inhibit-read-only t)) (delete-region (point-min) cut))
-       ;; What pointed into them points nowhere now.
-       (let ((table romacs-agent-ui--tasks))
-         (maphash (lambda (id marker) (when (= marker (point-min)) (set-marker marker nil) (remhash id table)))
-                  (copy-hash-table table)))
        (romacs-agent-ui--earlier-row)))))
 
 (defun romacs-agent-ui--unrecorded (function)

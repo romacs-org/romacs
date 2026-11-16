@@ -184,7 +184,6 @@
               (romacs-agent-chat-mode)
               (let ((inhibit-read-only t))
                 (setq romacs-agent-ui--session session
-                      romacs-agent-ui--tasks (make-hash-table :test #'equal)
                       romacs-agent-ui--messages (make-hash-table :test #'equal)
                       romacs-agent-ui--end (point-marker))
                 (romacs-agent-ui--replay session)))
