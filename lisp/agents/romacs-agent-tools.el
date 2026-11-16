@@ -139,15 +139,16 @@ call stays running until its answer is ready."
               (setq done t)
               (if (eq (car-safe value) 'romacs-mcp--deferred)
                   (let ((poll (nth 1 value)))
-                    (list 'romacs-mcp--deferred
-                          (lambda ()
-                            (let ((ok nil))
-                              (unwind-protect
-                                  (let ((answer (funcall poll)))
-                                    (setq ok t)
-                                    (when answer (romacs-agent-tools--finish session key name start (car answer) nil))
-                                    answer)
-                                (unless ok (romacs-agent-tools--finish session key name start "signalled an error" t)))))))
+                    (romacs-mcp-defer
+                     (lambda ()
+                       (let ((ok nil))
+                         (unwind-protect
+                             (let ((answer (funcall poll)))
+                               (setq ok t)
+                               (when answer (romacs-agent-tools--finish session key name start (car answer) nil))
+                               answer)
+                           (unless ok (romacs-agent-tools--finish session key name start "signalled an error" t)))))
+                     (nth 2 value)))
                 (romacs-agent-tools--finish session key name start value nil)
                 value))
           (unless done (romacs-agent-tools--finish session key name start "signalled an error" t)))))))
@@ -867,7 +868,15 @@ the call (and retire this wait) and drop its answer."
                   (romacs-agent-tools--answer child (romacs-agent-done-seq child)))
                 (list (romacs-agent-tools--task child)))
                ((> (float-time) deadline)
-                (let ((task (romacs-agent-tools--task child))) (puthash "waitTimedOut" t task) (list task)))))))))
+                (let ((task (romacs-agent-tools--task child))) (puthash "waitTimedOut" t task) (list task))))))
+     deadline)))
+
+(defun romacs-agent-tools--wake-waits (_session _event)
+  "A wait answers when its child's status changes: every session event
+asks the woken deferred requests again (`romacs-mcp-defer')."
+  (romacs-mcp-deferred-wake))
+
+(add-hook 'romacs-agent-event-functions #'romacs-agent-tools--wake-waits)
 
 (defun romacs-agent-tools--delegate (arguments)
   "Start a child session on ARGUMENTS' task, or find the one this caller
@@ -1192,7 +1201,7 @@ besides."
                   (not (eq (romacs-agent-state child) 'starting)))
               (let ((value (funcall then)))
                 (if (eq (car-safe value) 'romacs-mcp--deferred)
-                    (funcall (setq next (cadr value)))
+                    (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
                   (list value)))))))))
 
 ;;; Going on under another instance
@@ -1482,7 +1491,7 @@ CELL's error as the call's."
                ((plist-get made :error) (user-error "%s" (plist-get made :error)))
                (t (let ((value (funcall answer (plist-get made :child))))
                     (if (eq (car-safe value) 'romacs-mcp--deferred)
-                        (funcall (setq next (cadr value)))
+                        (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
                       (list value))))))))))
 
 (defun romacs-agent-tools--renew (arguments)
