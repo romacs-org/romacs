@@ -2795,13 +2795,15 @@ the note is folded here at once and written once it is moved."
     (if (romacs-agent--harness-live-p session)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
       (let ((record (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" (float-time) "note" note)))
+        ;; Written before a launch that waits too: its records come after.
         (romacs-agent-events-then
          session
          (lambda ()
            (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
              (let ((coding-system-for-write 'utf-8-unix))
                (write-region (concat (romacs-agent--json record) "\n") nil
-                             (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))))
+                             (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))))
+         t)
         (romacs-agent--record session record)))))
 
 (defun romacs-agent--restart (session)
@@ -3418,6 +3420,9 @@ forked, or one a message was sent to."
   (or (romacs-agent-imported session) (plist-get (romacs-agent-options session) :fork)
       (romacs-agent-input-seq session) (> (romacs-agent-turns session) 0)))
 
+(defvar romacs-agent--resuming (make-hash-table :test #'equal)
+  "The ids of the sessions resumed whose launch waits for their move.")
+
 (defun romacs-agent-resume (session)
   "Run SESSION's harness again on its conversation, after it ended, in the
 configuration directory its instance had when it started: the harness
@@ -3427,6 +3432,12 @@ keeps the conversation there."
     (user-error "Session %s is still attached" (romacs-agent-title session)))
   (when (romacs-agent--per-turn-p session)
     (user-error "Session %s continues with its next message" (romacs-agent-title session)))
+  ;; Resumed already, waiting for its move: that launch drains the queue.
+  (unless (gethash (romacs-agent-id session) romacs-agent--resuming)
+    (romacs-agent--resume-now session)))
+
+(defun romacs-agent--resume-now (session)
+  "Resume SESSION (`romacs-agent-resume'), its launch once it is moved."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (romacs-agent--check-companions)
   (romacs-agent--refork session)
@@ -3436,9 +3447,11 @@ keeps the conversation there."
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   (let ((environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
     ;; Moved to SQLite first, in a worker when it is long.
+    (puthash (romacs-agent-id session) t romacs-agent--resuming)
     (romacs-agent-events-then
      session
      (lambda ()
+       (remhash (romacs-agent-id session) romacs-agent--resuming)
        (let ((process-environment environment))
          ;; A conversation that never began (its first run never started) is
          ;; begun, under its own id: there is none to resume.

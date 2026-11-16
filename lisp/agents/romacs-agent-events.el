@@ -737,7 +737,12 @@ which is then called, moved or not.  The ones made theirs are told
              (when (romacs-agent-events--flippable-p id)
                (when-let* ((row (car (sqlite-select (romacs-agent-events--db) "select size, count from staged where session = ?" (list id)))))
                  (condition-case err
-                     (when (romacs-agent-events--flip id (car row) (cadr row)) (push id moved))
+                     (when (romacs-agent-events--flip id (car row) (cadr row))
+                       (push id moved)
+                       ;; Loaded: where its next supervisor's records start
+                       ;; is a seq now, not a journal's byte.
+                       (when-let* ((session (gethash id romacs-agent--sessions)))
+                         (setf (romacs-agent-journal-start session) (romacs-agent-events-end session))))
                    ;; A worker writing: tried again a moment later.
                    (sqlite-locked-error (setq locked t)
                                         (setq romacs-agent-events--flip-queue (append romacs-agent-events--flip-queue (list id))))
@@ -762,14 +767,16 @@ first: functions called once a worker has moved it, or its move failed.")
 from one when a view of it holds places in that journal: the session
 goes on in its journal rather than move under that view.")
 
-(defun romacs-agent-events-then (session then)
+(defun romacs-agent-events-then (session then &optional first)
   "Call THEN once SESSION's records are in SQLite.  At once when they are,
 or are made so here (`romacs-agent-events-own'), or cannot be: the store
 off, a supervisor running for it, an import here failing, or a view
 holding places in its journal (`romacs-agent-events-held-functions').
 A journal too long to move here, or one a worker moves now, waits for
 that worker VM, ahead of every other session, and THEN is called once it
-is moved or its move failed.  Several are called in the order given."
+is moved or its move failed.  Several are called in the order given,
+but those given FIRST (a note's write) before the others: a supervisor
+launched after them numbers its records after theirs."
   (romacs-agent-events-own session)
   (let ((id (romacs-agent-id session)))
     (if (and (not (gethash id romacs-agent-events--waiting))
@@ -780,7 +787,11 @@ is moved or its move failed.  Several are called in the order given."
                               (or romacs-agent-fold-bytes most-positive-fixnum)))
                        (not (run-hook-with-args-until-success 'romacs-agent-events-held-functions session)))))
         (funcall then)
-      (puthash id (append (gethash id romacs-agent-events--waiting) (list then)) romacs-agent-events--waiting)
+      (puthash id (let ((waiting (gethash id romacs-agent-events--waiting)))
+                    (if (not first) (append waiting (list (cons nil then)))
+                      (let ((firsts (seq-take-while #'car waiting)))
+                        (append firsts (list (cons t then)) (nthcdr (length firsts) waiting)))))
+               romacs-agent-events--waiting)
       (let ((dir (romacs-agent-dir session)))
         ;; A job moving it already: it is flipped as that job ends.
         (unless (gethash id romacs-agent-events--migrating)
@@ -802,7 +813,7 @@ here, and no supervisor writing its journal."
   "Call what waits for the session ID names to move, moved or not."
   (when-let* ((thens (gethash id romacs-agent-events--waiting)))
     (remhash id romacs-agent-events--waiting)
-    (dolist (then thens)
+    (pcase-dolist (`(,_ . ,then) thens)
       (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))
 
 (defun romacs-agent-events--flippable-p (id)
