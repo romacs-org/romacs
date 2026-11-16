@@ -152,9 +152,6 @@ impl Vm {
                 return Err(self.signal_error("wrong-type-argument", &[listp, fundef], error));
             }
         };
-        if self.loader.recording.is_some() && let Some(name) = self.source_string_if(file).map(str::to_owned) {
-            self.note_init_load(crate::world::layer::Kind::Autoload, name, None, ignore_errors);
-        }
         self.set_rooted(args, OUT, file);
         Ok(Some(ignore_errors))
     }

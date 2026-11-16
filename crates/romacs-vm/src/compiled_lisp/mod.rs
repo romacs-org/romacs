@@ -1,8 +1,12 @@
 //! Compiled Lisp: Romacs's analogue of `.elc` files (design note
-//! lazy-libraries.md). A load GNU would satisfy with compiled code runs
-//! an artifact instead of reading, expanding and compiling the source:
-//! the units a compile process made from the file, in order, under GNU's
-//! compiled-load semantics (`Vm::load_artifact`).
+//! lazy-libraries.md). A load of a library by its name runs an artifact
+//! instead of reading, expanding and compiling the source: the units a
+//! compile process made from the file, in order, under GNU's compiled-load
+//! semantics (`Vm::load_artifact`). That is every such load, not only
+//! those GNU would satisfy with compiled code: a user's packages and the
+//! libraries on `load-path` are compiled as package.el compiles a package
+//! it installs (DIVERGENCES VM2-LOADCOMPILED). A `load` that names the
+//! `.el` reads source, as GNU's does.
 //!
 //! A compile process is a batch session over the base world that walks
 //! the file by bytecomp's file-compilation rules (lisp/emacs-lisp/romacs-compile.el),
@@ -335,13 +339,6 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     })
 }
 
-    /// Whether PATH has a compiled form GNU's suffix rules would pick:
-    /// a file of the installation's Lisp trees, or one beside an `.elc`
-    /// that is not older than it when `load-prefer-newer` asks.
-    fn has_compiled_form(&self, config: &Config, path: &Path) -> bool {
-        config.runtime.iter().any(|root| path.starts_with(root)) || self.current_elc(path)
-    }
-
     /// Whether GNU would load the source file PATH compiled: a file of the
     /// installation's Lisp trees (the configured ones, else the runtime
     /// root's lisp/), or one beside a current `.elc`.  When
@@ -373,8 +370,8 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
 
     /// The compiled load of the source file PATH (resolved), when this
     /// load is one: a stored artifact whose inputs hold, else one compiled
-    /// now. None loads PATH as source: no store, no compiled form, a
-    /// compile refused, failed or not ours to run, or PATH being compiled
+    /// now. None loads PATH as source: no store, a compile refused,
+    /// failed or not ours to run, or PATH being compiled
     /// up this compile's chain (a cycle: gnus-sum's compile requires
     /// gnus-art, which requires gnus-sum), whatever the store holds, so a
     /// compile's result never depends on whether another one published
@@ -382,10 +379,10 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<Option<Compiled>> {
         let Some(configured) = configured() else { return Ok(None) };
         let config = &configured.config;
-        if !self.has_compiled_form(config, path) || configured.chain.lines().any(|file| Path::new(file) == path) {
+        if configured.chain.lines().any(|file| Path::new(file) == path) {
             return Ok(None);
         }
-        let load_path = self.load_path_strings()?;
+        let load_path = self.load_path_roots()?;
         let Ok(found) = self.stored(configured, path, &load_path) else { return Ok(None) };
         let (artifact, data) = match found {
             Some(found) => found,
@@ -430,6 +427,9 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     fn compile_now(&mut self, config: &Config, path: &Path, load_path: &[String]) -> Result<Option<PathBuf>> {
         let Some(configured) = configured() else { return Ok(None) };
         let Some((program, args, environment)) = compile_command(configured, path, load_path) else { return Ok(None) };
+        if configured.trace {
+            crate::host::event_line("romacs-compiled-lisp", &json!({"compile": path.to_string_lossy()}));
+        }
         Ok(run_compile(&config.store, program, args, environment)
             .and_then(|out| out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)))
     }
@@ -464,7 +464,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let config = &configured.config;
         let identity = configured.identity().ok_or("no compile world")?;
         let source = host::canonicalize(source).map_err(|e| format!("{}: {e}", source.display()))?;
-        let load_path = self.load_path_strings()?;
+        let load_path = self.load_path_roots()?;
         if let Ok(Some((held, _))) = self.stored(configured, &source, &load_path) {
             return Ok((held, true));
         }
