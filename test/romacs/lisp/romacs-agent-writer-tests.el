@@ -17,7 +17,8 @@ it is sent waits until `serve' runs the writer's loop over it, with a
 connection of its own, as the writer's process has."
   (declare (indent 0))
   `(let ((sent nil) (romacs-agent-writer-queued t) (romacs-agent-writer--job nil)
-         (romacs-agent-writer--pending nil) (romacs-agent-writer--next 0))
+         (romacs-agent-writer--pending (make-hash-table)) (romacs-agent-writer--unsent nil)
+         (romacs-agent-writer--unsent-tail nil) (romacs-agent-writer--next 0) (romacs-agent-writer--in-flight 0))
      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (vector 'future)))
                ((symbol-function 'isolate-on-done) #'ignore)
                ((symbol-function 'isolate-future-done-p) #'ignore)
@@ -47,10 +48,10 @@ connection of its own, as the writer's process has."
       (should (eq (romacs-agent-write 'list '(1) (lambda (answer) (push answer answers))) 'queued))
       (romacs-agent-write 'error '("Boom") (lambda (answer) (push (car answer) answers)))
       (should-not answers)
-      (should (= (length romacs-agent-writer--pending) 2))
+      (should (= (romacs-agent-writer-pending-count) 2))
       (serve)
       (should (equal (nreverse answers) '((ok (1)) error)))
-      (should-not romacs-agent-writer--pending))
+      (should (zerop (romacs-agent-writer-pending-count))))
     ;; Not queued (a batch process, a worker): here, now.
     (let ((romacs-agent-writer-queued nil))
       (should (equal (romacs-agent-write 'list '(2)) '(ok (2)))))))
@@ -64,7 +65,7 @@ connection of its own, as the writer's process has."
       (romacs-agent-write 'list '(2) (lambda (answer) (push answer answers)))
       (setq sent nil)
       (romacs-agent-writer--ended romacs-agent-writer--job)
-      (should (equal (mapcar #'cadr sent) '(1 2)))
+      (should (equal (mapcar #'car (cadr (car sent))) '(1 2)))
       (serve)
       (should (equal (nreverse answers) '((ok (1)) (ok (2))))))))
 
@@ -83,7 +84,7 @@ connection of its own, as the writer's process has."
         (dotimes (i 500) (romacs-agent-write 'romacs-agent-writer-tests--make (list i)))
         (romacs-agent-writer-drain)
         (should (equal (reverse romacs-agent-writer-tests--made) (number-sequence 0 499)))
-        (should-not romacs-agent-writer--pending)
+        (should (zerop (romacs-agent-writer-pending-count)))
         (should (member "Saving 500 agent records..." said))
         (should (member "Saving 500 agent records...done" said))
         ;; The writer gone with two unanswered: a new one makes them.
@@ -95,7 +96,7 @@ connection of its own, as the writer's process has."
           (cl-letf (((symbol-function 'isolate-future-done-p) (lambda (future) (eq future dead))))
             (romacs-agent-writer-drain)))
         (should (equal (reverse romacs-agent-writer-tests--made) '(a b)))
-        (should-not romacs-agent-writer--pending)
+        (should (zerop (romacs-agent-writer-pending-count)))
         ;; A write's answer that queues another: that one is made too,
         ;; before the writer stops.
         (setq romacs-agent-writer-tests--made nil)
@@ -108,7 +109,22 @@ connection of its own, as the writer's process has."
                      t)))
           (romacs-agent-writer-drain))
         (should (equal (reverse romacs-agent-writer-tests--made) '(c d)))
-        (should-not romacs-agent-writer--pending)))))
+        (should (zerop (romacs-agent-writer-pending-count)))))))
+
+(ert-deftest romacs-agent-writer-a-burst-waits-for-room-never-errs ()
+  ;; Thousands of writes at once: never more batches in the writer's
+  ;; queue than the window, never an error to the caller, all made, in order.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (rounds 0))
+    (romacs-agent-writer-tests--with
+      (dotimes (i 20000) (should (eq (romacs-agent-write 'romacs-agent-writer-tests--make (list i)) 'queued)))
+      (should (<= (length sent) romacs-agent-writer--window))
+      (while (and (> (romacs-agent-writer-pending-count) 0) (< (cl-incf rounds) 100))
+        (should (<= (length sent) romacs-agent-writer--window))
+        (serve-only))
+      (should (zerop (romacs-agent-writer-pending-count)))
+      (should (equal (reverse romacs-agent-writer-tests--made) (number-sequence 0 19999)))
+      ;; Nothing left: the writer only stops.
+      (serve))))
 
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
@@ -163,7 +179,7 @@ connection of its own, as the writer's process has."
             (write-region "{\"note\":{\"type\":\"run\"},\"seq\":1,\"t\":1.0}\n" nil (expand-file-name "journal.jsonl" dir) nil 'silent))
           ;; No store yet: none to read, the writer asked to make it.
           (should-not (romacs-agent-store--open))
-          (should (equal (mapcar #'car sent) '(romacs-agent-write)))
+          (should (equal (mapcar #'car sent) '(romacs-agent-write-batch)))
           (serve)
           (let ((db (romacs-agent-store--open)))
             (should db)
