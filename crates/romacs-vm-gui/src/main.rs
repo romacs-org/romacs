@@ -1399,14 +1399,16 @@ fn evaluate(
         // The launch font's face, as source: declared BEFORE GNU's Lisp, so
         // GNU's own `defface' (custom.el) leaves the declared face alone, and
         // after the workspace's own faces otherwise, exactly as before. A
-        // restored session sets it first, as no world holds it.
+        // session restored from a base world sets it first, as no base world
+        // holds it; a layer was built with it (world.rs `layer_world`).
         let font = world::LaunchFont::from_env()?;
+        let from_layer = worlds.as_ref().is_some_and(|worlds| worlds.from_layer);
         let started = if launch == startup::Launch::Workspace {
             let started = startup::initialize(&mut vm)?;
             if let Some(font) = &font { vm.eval_source(&font.declaration())?; }
             started
         } else if let Some(carry) = carry {
-            if let Some(font) = &font { vm.eval_source(&font.restored())?; }
+            if let Some(font) = font.as_ref().filter(|_| !from_layer) { vm.eval_source(&font.restored())?; }
             // As a fresh process takes the per-process startup steps.
             vm.eval_source("(romacs-world-restart)")?;
             startup::mark_phase("world-restart");

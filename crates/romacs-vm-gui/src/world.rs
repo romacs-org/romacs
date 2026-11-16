@@ -5,9 +5,10 @@
 //! window geometry and the collection floor) and on keyed host facts. Each
 //! recipe input is what a session reads, not what the caller of a build
 //! had: the launch font is each process's (`LaunchFont`), as GNU's
-//! `--font' is. A restored launch attaches its hosts, sets its launch font,
-//! runs `romacs-world-restart` and continues with the interactive session
-//! (`startup::start_session`) and the workspace.
+//! `--font' is, and no base world holds it. A restored launch attaches its
+//! hosts, sets its launch font, runs `romacs-world-restart` and continues
+//! with the interactive session (`startup::start_session`) and the
+//! workspace.
 //!
 //! A live `--loadup` launch uses a world unless ROMACS_WORLD=off: in
 //! `--world-store`, or else in `$XDG_CACHE_HOME/romacs/worlds`
@@ -24,8 +25,9 @@
 //!
 //! A launch that loads the user's init restores the init's layer instead
 //! when the store holds one (`romacs_vm::world::layer`): the base world
-//! with the libraries the init's recorded plan loads, keyed by the base
-//! and the plan, replayed after the chain. The launch checks the init is
+//! with the libraries the init's recorded plan loads, keyed by the base,
+//! the launch font and the plan, replayed after the chain with the font
+//! declared first, as a source boot runs the init after it (`layer_world`). The launch checks the init is
 //! the one planned and leaves out the entries a build left to the session; a stale or
 //! missing layer boots from the base world, records the plan the init
 //! makes now, and builds the layer ahead of the next launch, on a thread
@@ -77,10 +79,11 @@ impl LaunchFont {
         format!("(progn (defface default '{spec} \"Launch font\") {frame})")
     }
 
-    /// The font set in a restored session, where GNU's Lisp declared the
-    /// default face: its spec becomes the launch font's, as the declaration
-    /// leaves it, and the face takes the font on every frame, whatever theme
-    /// the world enabled.
+    /// The font set in a session restored from a base world, where GNU's
+    /// Lisp declared the default face: its spec becomes the launch font's,
+    /// as the declaration leaves it, and the face takes the font on every
+    /// frame, whatever theme the world enabled. A layer holds its font
+    /// already (`layer_world`).
     pub fn restored(&self) -> String {
         let (spec, frame) = self.parts();
         format!("(progn (put 'default 'face-defface-spec '{spec}) (set-face-attribute 'default nil :family {} :height {}) {frame})",
@@ -181,7 +184,19 @@ pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, i
         return Err(format!("the plan for {} changed since the launch resolved it", args.init.display()));
     }
     let deferred: Vec<Entry> = args.excluded.iter().filter_map(|&at| full.entries.get(at)).filter(|e| e.kind == Kind::After).cloned().collect();
-    build_and_exit(&base.layered(plan.recipe()), width, height, floor, Some((plan, deferred)))
+    build_and_exit(&layer_world(base, &plan), width, height, floor, Some((plan, deferred)))
+}
+
+/// The world of PLAN's layer over BASE. Its libraries and their
+/// configuration run after the launch font is declared, as a source boot
+/// runs the init after it, so what they do with the default face stands:
+/// the layer is this launch font's, keyed by it.
+fn layer_world(base: &World, plan: &Plan) -> World {
+    let font = match LaunchFont::from_env() {
+        Ok(Some(font)) => format!("font {}", font.declaration()),
+        _ => "font default".to_owned(),
+    };
+    base.layered(std::iter::once(font).chain(plan.recipe()).collect())
 }
 
 /// Build WORLD, with PLAN's libraries for a layer, and exit with the outcome.
@@ -261,7 +276,7 @@ pub fn layer(base: &World, init: &Path) -> Option<Layer> {
     }
     let last = Plan::read_last(&base.store, init).filter(|(last, _, _)| last.init_digest == plan.init_digest && last.within(&plan));
     let usable = |last: Plan, from: String, preload: Vec<String>| {
-        let world = base.layered(last.recipe());
+        let world = layer_world(base, &last);
         world.ready().then(|| Layer { world, full: last.clone(), excluded: Vec::new(), plan: last, resolved_from: Some(from), preload })
     };
     if let Some((last, from, preload)) = last.clone().filter(|(_, from, _)| *from == plan.digest()) && let Some(layer) = usable(last, from, preload) {
@@ -304,7 +319,7 @@ pub fn resolve(base: &World, full: Plan) -> Option<Layer> {
         if plan.entries.is_empty() {
             return None;
         }
-        let world = base.layered(plan.recipe());
+        let world = layer_world(base, &plan);
         let Some(uncaptured) = world.standing_uncaptured() else { return Some(Layer { world, full, excluded, plan, resolved_from: None, preload }) };
         // A declared library left to the session loads ahead of its use, as it loaded.
         for name in uncaptured.iter().filter(|r| r["kind"] == LIVE_ENTRY).flat_map(|r| r["features"].as_array().cloned().unwrap_or_default()) {
@@ -573,7 +588,10 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
     vm.set_frame_geometry(width, height, line_height, column_width)?;
     vm.eval_source(INTERPROGRAM)?;
-    let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, None, dir)?;
+    // A layer's font, declared as a source boot declares it (`layer_world`);
+    // a base world holds none.
+    let font = if plan.is_some() { LaunchFont::from_env()?.map(|font| font.declaration()) } else { None };
+    let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_deref(), dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
     let events = match plan {
         Some((plan, deferred)) => {
