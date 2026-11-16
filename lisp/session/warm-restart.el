@@ -1690,6 +1690,20 @@ whose worlds it then boots from."
            (list (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))))
           (t (user-error "No build at %s" target)))))
 
+(defvar warm-restart-obstacle-functions nil
+  "Functions, each saying what keeps a requested restart from starting now:
+a list of reasons (strings), or nil when it has none.  A request waits
+while any names one, as it waits for an idle session, never blocking the
+editor: work a restart must not cut short (records still being written)
+is done in the background meanwhile.")
+
+(defun warm-restart--hook-obstacles ()
+  "The reasons `warm-restart-obstacle-functions' give, in their order."
+  (let ((reasons nil))
+    (run-hook-wrapped 'warm-restart-obstacle-functions
+                      (lambda (function) (setq reasons (append reasons (funcall function))) nil))
+    reasons))
+
 (defun warm-restart--obstacles (request)
   "Why REQUEST cannot restart now, as strings; nil when it can."
   (let ((ready (plist-get request :ready)))
@@ -1698,7 +1712,8 @@ whose worlds it then boots from."
           ((and ready (funcall ready)))
           ((and (fboundp 'romacs-mcp-in-flight-p) (romacs-mcp-in-flight-p)) (list "a Romacs tool call is in flight"))
           (t (let ((plan (warm-restart-plan)))
-               (append (mapcar (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
+               (append (warm-restart--hook-obstacles)
+                       (mapcar (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
                                (warm-restart--entries plan 'blocked))
                        (unless (plist-get request :force)
                          (mapcar (lambda (p) (format "process %s would end" (plist-get p :process)))

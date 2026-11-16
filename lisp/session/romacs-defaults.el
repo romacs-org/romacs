@@ -36,6 +36,15 @@
 
 ;;; Code:
 
+;; The options those libraries compute from the per-user directory
+;; (`romacs-defaults--session-options') are bound before the libraries
+;; load, so their `defcustom' computes nothing: the world ends before the
+;; startup steps that name the per-user directory, and each session gives
+;; them their standard value (`romacs-defaults-start').
+(defvar savehist-file nil)
+(defvar save-place-file nil)
+(defvar recentf-save-file nil)
+
 (require 'elec-pair)
 (require 'savehist)
 (require 'saveplace)

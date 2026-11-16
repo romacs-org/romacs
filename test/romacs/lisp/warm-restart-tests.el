@@ -284,4 +284,18 @@
             (should (equal root (concat "ROMACS_RUNTIME_ROOT=" build)))))
       (delete-directory dir t))))
 
+(ert-deftest warm-restart-a-request-waits-for-what-its-obstacle-functions-name ()
+  ;; Work a restart must not cut short (agent records still being
+  ;; written) holds a request back without blocking: it is retried until
+  ;; the function names nothing.
+  (let ((pending 2) (warm-restart-obstacle-functions nil))
+    (add-hook 'warm-restart-obstacle-functions
+              (lambda () (and (> pending 0) (list (format "%d agent records not yet written" pending)))))
+    (add-hook 'warm-restart-obstacle-functions #'ignore)
+    (cl-letf (((symbol-function 'current-idle-time) (lambda () '(0 1 0 0)))
+              ((symbol-function 'warm-restart-plan) (lambda () nil)))
+      (should (equal (warm-restart--obstacles (list :force t)) '("2 agent records not yet written")))
+      (setq pending 0)
+      (should-not (warm-restart--obstacles (list :force t))))))
+
 ;;; warm-restart-tests.el ends here

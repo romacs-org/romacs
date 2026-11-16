@@ -78,6 +78,12 @@ records alone with RECORDS-ONLY, and the buffer."
       (setf (romacs-agent-buffer session) nil)
       (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
 
+(defun romacs-agent-chat-rows-tests--keep (session)
+  "Keep each of SESSION's turn rows drawn, as the worker that writes them does."
+  (dolist (row (plist-get (romacs-agent-turns-page session nil 1000) :rows))
+    (romacs-agent-drawn-put (romacs-agent-turns--db) (romacs-agent-id session) (plist-get row :first-seq)
+                            (romacs-agent-ui-draw-turn session row))))
+
 (ert-deftest romacs-agent-chat-from-rows-reads-as-from-records ()
   ;; Drawn from its rows, a chat reads as drawn from its records, its
   ;; finished turns' records never read; a long output opens from its
@@ -85,6 +91,7 @@ records alone with RECORDS-ONLY, and the buffer."
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-chat-rows-tests--with 12
     (should (= (romacs-agent-turns-fill session) 12))
+    (romacs-agent-chat-rows-tests--keep session)
     (let* ((from-records (romacs-agent-chat-rows-tests--drawn session t))
            (reads nil)
            (from-rows (cl-letf* ((read (symbol-function 'romacs-agent--read-journal-file))
@@ -108,7 +115,7 @@ records alone with RECORDS-ONLY, and the buffer."
                     (lambda (session function from end skip)
                       (push (cons from end) reads)
                       (funcall read session function from end skip))))
-          (should (equal (romacs-agent-ui--payload-output (gethash "u12" romacs-agent-ui--payloads))
+          (should (equal (romacs-agent-ui--payload-output (romacs-agent-ui--payload-at "u12" (romacs-agent-ui--tool-mark "u12")))
                          romacs-agent-chat-rows-tests--long)))
         ;; Its start (the whole input) and its end (the output), each a
         ;; bounded read.
@@ -134,6 +141,7 @@ records alone with RECORDS-ONLY, and the buffer."
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-chat-rows-tests--with 3
     (should (= (romacs-agent-turns-fill session) 3))
+    (romacs-agent-chat-rows-tests--keep session)
     (let ((rows (romacs-agent-chat-rows-tests--drawn session))
           (records (romacs-agent-chat-rows-tests--drawn session t)))
       (should-not (string-search "Earlier turns" (car rows)))

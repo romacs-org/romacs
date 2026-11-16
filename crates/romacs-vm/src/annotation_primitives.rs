@@ -1439,6 +1439,16 @@ impl Vm {
             return integer(limit.max(begv));
         }
         let initial = self.char_property_accessible(position - i64::from(position >= 0), property)?;
+        if let Some(Object::Buffer(_)) = self.object_if(object) {
+            if let Some(at) = self.previous_value_change(object, property, initial, (position, limit.max(begv))).map_err(Fault::Error)? {
+                return integer(at);
+            }
+            // As the walk below: BEGV is its last step.
+            if begv > limit && self.char_property_accessible(begv - 1, property)? != initial {
+                return integer(begv);
+            }
+            return integer(limit);
+        }
         // Fprevious_char_property_change's steps: each is the nearest
         // overlay endpoint or text-property boundary before the last, never
         // below BEGV, so BEGV ends the walk.
@@ -1450,6 +1460,36 @@ impl Vm {
             }
         }
         integer(limit)
+    }
+
+    /// Fprevious_single_char_property_change's walk in OBJECT, a multibyte
+    /// buffer and the current one: from POSITION back to FLOOR, the nearest
+    /// position whose character before reads PROPERTY other than INITIAL,
+    /// if any is above FLOOR. It steps from one boundary to the nearest
+    /// before it, as GNU's does, over the runs of the keys that decide
+    /// PROPERTY and the overlays' ends, which hold every place its value
+    /// can change: a walk costs the boundaries it passes, not the buffer's.
+    fn previous_value_change(&self, object: Value, property: Value, initial: Value, (position, floor): (i64, i64)) -> Result<Option<i64>> {
+        let Object::Buffer(b) = self.object(object)? else { return Err("multibyte buffer required".into()) };
+        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize));
+        let (floor, mut at) = (byte(floor)?, byte(position)?.min(b.accessible().end));
+        // A malformed alias list leaves every key deciding.
+        let keys = self.deciding_keys(property).ok();
+        loop {
+            let text = match &keys {
+                Some(keys) => keys.iter().fold(floor, |p, key| p.max(b.properties.previous_single_change(at, *key, p))),
+                None => b.properties.previous_change(at, floor),
+            };
+            let overlay = ByteOffset(b.intervals.previous(at.0 as u32, floor.0 as u32, &b.anchors) as usize);
+            let previous = text.max(overlay);
+            if previous <= floor {
+                return Ok(None);
+            }
+            if self.char_property_at_byte(object, b.body().char_start_before(previous.0), property, None)?.0 != initial {
+                return Ok(Some(b.char_of_byte(previous)?.0 as i64 + 1));
+            }
+            at = previous;
+        }
     }
 
     /// Fget_char_property in the current buffer: POSITION's PROPERTY from
@@ -1477,49 +1517,30 @@ impl Vm {
         self.get_char_property_values(at, property, object).map_err(Fault::Error)
     }
 
-    /// The positions above LOW and below POSITION in a text buffer where a
-    /// text property run or an overlay starts or ends, nearest first.
+    /// The positions above LOW and below POSITION in a unibyte buffer where
+    /// a text property run or an overlay starts or ends, nearest first.
     fn char_property_boundaries_before(&self, object: Value, position: i64, low: i64) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
         use crate::prim::Fault;
-        if let Some(Object::ByteBuffer(b)) = self.object_if(object) {
-            let (low, mut at, mut positions) = (ByteOffset((low - 1).max(0) as usize), ByteOffset((position - 1).max(0) as usize), vec![]);
-            while at > low {
-                at = b.previous_property_change(at, low);
-                if at > low { positions.push(at.0 as i64 + 1); }
-            }
-            if let Some(text) = b.shown() {
-                let byte = |n: i64| text.byte_of_char(CharOffset((n - 1).clamp(0, b.bytes.len() as i64) as usize)).map(|at| at.0 as u32).map_err(Fault::Error);
-                let (from, to) = (byte(low.0 as i64 + 1)?, byte(position)?);
-                let mut ends = Vec::new();
-                text.intervals.visit(from, to, false, &text.anchors, |_, start, end| {
-                    ends.extend([start, end].into_iter().filter(|&e| e > from && e < to));
-                });
-                for end in ends {
-                    positions.push(text.char_of_byte(ByteOffset(end as usize)).map_err(Fault::Error)?.0 as i64 + 1);
-                }
-                positions.sort_unstable_by(|a, b| b.cmp(a));
-                positions.dedup();
-            }
-            return Ok(positions);
+        let Some(Object::ByteBuffer(b)) = self.object_if(object) else { return Err(Fault::Error("unibyte buffer required".into())) };
+        let (low, mut at, mut positions) = (ByteOffset((low - 1).max(0) as usize), ByteOffset((position - 1).max(0) as usize), vec![]);
+        while at > low {
+            at = b.previous_property_change(at, low);
+            if at > low { positions.push(at.0 as i64 + 1); }
         }
-        let b = self.annotated(object).map_err(Fault::Error)?;
-        let range = b.accessible();
-        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize)).map_err(Fault::Error);
-        let (from, to) = (byte(low)?, byte(position)?.min(range.end));
-        let mut bytes = Vec::new();
-        let mut at = from;
-        while at < to {
-            at = b.properties.next_change(at, to);
-            if at < to { bytes.push(at.0 as u32); }
+        if let Some(text) = b.shown() {
+            let byte = |n: i64| text.byte_of_char(CharOffset((n - 1).clamp(0, b.bytes.len() as i64) as usize)).map(|at| at.0 as u32).map_err(Fault::Error);
+            let (from, to) = (byte(low.0 as i64 + 1)?, byte(position)?);
+            let mut ends = Vec::new();
+            text.intervals.visit(from, to, false, &text.anchors, |_, start, end| {
+                ends.extend([start, end].into_iter().filter(|&e| e > from && e < to));
+            });
+            for end in ends {
+                positions.push(text.char_of_byte(ByteOffset(end as usize)).map_err(Fault::Error)?.0 as i64 + 1);
+            }
+            positions.sort_unstable_by(|a, b| b.cmp(a));
+            positions.dedup();
         }
-        b.intervals.visit(from.0 as u32, to.0 as u32, false, &b.anchors, |_, start, end| {
-            bytes.extend([start, end].into_iter().filter(|&e| e > from.0 as u32 && e < to.0 as u32));
-        });
-        bytes.sort_unstable_by(|a, b| b.cmp(a));
-        bytes.dedup();
-        bytes.into_iter()
-            .map(|at| b.char_of_byte(ByteOffset(at as usize)).map(|c| c.0 as i64 + 1).map_err(Fault::Error))
-            .collect()
+        Ok(positions)
     }
 
     fn property_single_change(

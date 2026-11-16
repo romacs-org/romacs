@@ -1657,9 +1657,6 @@ pub struct Vm {
     random: random::Random,
     /// A world build's P tracking (`world`); None outside build mode.
     tracking: Option<Box<world::Tracking>>,
-    /// The re-seed definitions waiting for their variable's first access
-    /// (`world::pending`), by slot.
-    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1888,7 +1885,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
     face_keys,
     debug_event_slots,
-    pending,
 } at_rest {
     site_leaf,
     regexp_cache,
@@ -2107,7 +2103,6 @@ impl Vm {
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             tracking: None,
-            pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,

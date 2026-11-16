@@ -186,3 +186,19 @@ fn a_load_path_entry_under_home_is_expanded() {
     assert!(vm.eval_source("(eq tilde-loaded 'yes)").unwrap().is_t());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// lread.c openp: a nil or relative `load-path` element names a directory
+/// under `default-directory`, not the process's directory (VM2-PATH2).
+#[test]
+fn nil_and_relative_load_path_entries_follow_default_directory() {
+    let dir = scratch("relative");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("rel-nil.el"), "(setq rel-nil 'yes)").unwrap();
+    std::fs::write(dir.join("sub/rel-sub.el"), "(setq rel-sub 'yes)").unwrap();
+    let directory = format!("{}/", dir.display());
+    let mut vm = Vm::new();
+    vm.eval_source(&format!("(let ((default-directory {directory:?}) (load-path '(nil))) (load \"rel-nil\" nil t))")).unwrap();
+    vm.eval_source(&format!("(let ((default-directory {directory:?}) (load-path '(\"sub\"))) (load \"rel-sub\" nil t))")).unwrap();
+    assert!(vm.eval_source("(and (eq rel-nil 'yes) (eq rel-sub 'yes))").unwrap().is_t());
+    std::fs::remove_dir_all(dir).unwrap();
+}
