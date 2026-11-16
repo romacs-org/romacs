@@ -10,6 +10,7 @@
   (require 'romacs-agent-events))
 
 (require 'romacs-agent-claude)
+(require 'romacs-test-notes)
 
 (defun romacs-agent-events-tests--line (seq key value)
   "Record SEQ's line as the supervisor writes it: keys sorted."
@@ -380,8 +381,8 @@ turns, and its journal's file; a state root of its own."
 (ert-deftest romacs-agent-events-a-loaded-session-waits-for-its-move ()
   ;; A launch or a note on a loaded session too long to move here waits
   ;; for a worker to move it, ahead of the rest, and then goes to SQLite:
-  ;; the note folded at once, written after.  One a chat shows goes on in
-  ;; its journal at once.
+  ;; the notes held, their host started once it is moved.  One a chat
+  ;; shows goes on in its journal at once.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
   (require 'romacs-agent-turns)
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
@@ -403,9 +404,8 @@ turns, and its journal's file; a state root of its own."
            (should (equal ran '(shown)))
            (should-not (romacs-agent-events-p session)))
          ;; No job may run yet: it waits, ahead of the rest.  A launch,
-         ;; then two notes, run as they came: the launch's supervisor
-         ;; numbers after every record numbered here (`--seq-from'), the
-         ;; notes' among them, written or not.
+         ;; then two notes, run as they came; the notes are numbered by
+         ;; the host that writes them.
          (setf (romacs-agent-journal-start session) size)
          (romacs-agent-events-then
           session (lambda () (push (list (romacs-agent-events-p session) (1+ (romacs-agent-seq session))) ran)))
@@ -413,7 +413,8 @@ turns, and its journal's file; a state root of its own."
          (romacs-agent--note session (romacs-mcp--object "type" "plan"))
          (should (equal ran '(shown)))
          (should (romacs-agent-events-waiting-p id))
-         (should (= (romacs-agent-seq session) 12))
+         (should (= (romacs-agent-seq session) 10))
+         (should (= (romacs-agent-held-notes-count) 2))
          (should (equal (car romacs-agent-events--migrate-queue) (romacs-agent-dir session)))
          (should (= (file-attribute-size (file-attributes journal)) size))
          ;; A job runs: moved, flipped though loaded, then what waited.
@@ -421,7 +422,8 @@ turns, and its journal's file; a state root of its own."
           (let ((romacs-agent-events--migrate-running 0)
                 (romacs-agent-events--migrate-queue (list (romacs-agent-dir session))))
             (romacs-agent-events--migrate-next)))
-         (should (equal ran '((t 13) shown)))
+         (should (equal ran '((t 11) shown)))
+         (should (zerop (romacs-agent-held-notes-count)))
          (should-not (romacs-agent-events-waiting-p id))
          (should (romacs-agent-events-p session))
          (should (equal (sqlite-select (romacs-agent-events--db) "select seq, kind from events where session = ? and seq > 10 order by seq" (list id))
@@ -458,7 +460,7 @@ turns, and its journal's file; a state root of its own."
         (romacs-agent-events--migrating (make-hash-table :test #'equal))
         (romacs-agent-events--migrate-running 1) (romacs-agent-events--migrate-queue nil)
         (ran nil))
-    (puthash "s" (list (cons nil (lambda () (push 1 ran))) (cons nil (lambda () (push 2 ran)))) romacs-agent-events--waiting)
+    (puthash "s" (list (lambda () (push 1 ran)) (lambda () (push 2 ran))) romacs-agent-events--waiting)
     (cl-letf (((symbol-function 'romacs-agent-events--flip-soon) #'ignore)
               ((symbol-function 'isolate-await) (lambda (_) nil)))
       (romacs-agent-events--migrated (list "/root/s") 'done))

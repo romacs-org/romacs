@@ -2254,6 +2254,11 @@ what came meanwhile."
           (cond ((not (hash-table-p record)))
                 ((gethash "refused" record)
                  (romacs-agent--raise session (list :type 'error :text "another server is attached")))
+                ((and (gethash "attached" record) (gethash (romacs-agent-id session) romacs-agent--note-hosts))
+                 ;; A notes-only host: it takes the held notes and nothing
+                 ;; else, and the session stays as it was.
+                 (romacs-agent--send-held session process)
+                 (romacs-agent--notes-written session))
                 ((gethash "attached" record)
                  (romacs-agent--kept session process)
                  ;; The notes held for it, numbered by it, now it is ours.
@@ -2291,6 +2296,15 @@ what came meanwhile."
 (defun romacs-agent--sentinel (process _event)
   (unless (process-live-p process)
     (let ((session (process-get process 'romacs-agent)))
+      (if-let* (((eq (romacs-agent-connection session) process))
+                (state (gethash (romacs-agent-id session) romacs-agent--note-hosts)))
+          ;; A notes-only host gone: the session as it was; notes it did not
+          ;; write go again, through the next host.
+          (progn (setf (romacs-agent-connection session) nil (romacs-agent-state session) state)
+                 (remhash (romacs-agent-id session) romacs-agent--note-hosts)
+                 (remhash (romacs-agent-id session) romacs-agent--launched)
+                 (romacs-agent--drop-relays session)
+                 (romacs-agent--changed session))
       (when (eq (romacs-agent-connection session) process)
         (setf (romacs-agent-connection session) nil)
         (romacs-agent--drop-relays session)
@@ -2312,7 +2326,7 @@ what came meanwhile."
           (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection
           ;; waiting for it takes effect.
-          (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))))))
+          (when (romacs-agent-pending-selection session) (romacs-agent--settle session))))))))
 
 (defconst romacs-agent--reattach-delays '(1 2 4 8 15 30 60)
   "Seconds before each look for a supervisor that still listens after its
@@ -2386,12 +2400,12 @@ while it does not yet listen; the connection it replaces is let go."
             (romacs-agent--caught-up-p session)
             (setf (romacs-agent-state session) 'ended)
             (romacs-agent--changed session)
-            (romacs-agent--release-held session)
+            (remhash (romacs-agent-id session) romacs-agent--launched)
             nil)
            ((romacs-agent--caught-up-p session)
             ;; It ended before this server attached: its journal says it all.
             ;; Its notes first: the run's end may launch the next.
-            (romacs-agent--release-held session)
+            (remhash (romacs-agent-id session) romacs-agent--launched)
             (romacs-agent--run-ended session))
            ((> (or tries 0) 0)
             (run-at-time 0.1 nil #'romacs-agent--attach session (1- tries) steal))
@@ -2399,14 +2413,14 @@ while it does not yet listen; the connection it replaces is let go."
            ((not (romacs-agent--recorded-p session))
             (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session))
                                                :text "its supervisor never started"))
-            (romacs-agent--release-held session)
+            (remhash (romacs-agent-id session) romacs-agent--launched)
             nil)
            (t (setf (romacs-agent-state session) 'detached)
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
               ;; No socket at all: no supervisor of it runs, its notes are
               ;; numbered here; one there may yet answer, and they wait.
               (unless (file-exists-p (romacs-agent-host-socket session))
-                (romacs-agent--release-held session))
+                (remhash (romacs-agent-id session) romacs-agent--launched))
               ;; Tried again a while, as a lost attachment is, while its
               ;; socket is there: no view's opening comes to retry it.
               (romacs-agent--reattach-later session)
@@ -2980,47 +2994,78 @@ attached (another may be)."
   (when (and (eq (romacs-agent-state session) 'detached)
              (not (process-live-p (romacs-agent-connection session)))
              (not (romacs-agent--per-turn-p session))
-             (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session)))
+             (romacs-agent-host-socket session) (romacs-agent--supervisor-listens-p session))
     (user-error "Session %s is detached: attach to it (show its chat) first" (romacs-agent-title session))))
 
 (defun romacs-agent--note (session note)
-  "Record NOTE in SESSION's records, in its place: through its supervisor
-when one runs and is attached here; with none, the records are the
-server's to add to.  One still in its journal is moved to SQLite first
-\(`romacs-agent-events-then'): the note is folded here at once and
-written once it is moved.  Refused while detached from a supervisor that
-may run (`romacs-agent--check-note')."
+  "Record NOTE in SESSION's records, through the host that writes them: its
+supervisor when one is attached here; else the note is held and goes
+through the supervisor that runs, once attached, or through a notes-only
+host started for it (`romacs-agent--ensure-host').  This server never
+numbers or writes a session's records itself.  Refused while detached
+from a supervisor that may run (`romacs-agent--check-note')."
   (romacs-agent--check-note session)
   (let ((connection (romacs-agent-connection session)))
-    (cond
-     ((process-live-p connection)
-      (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n")))
-     ;; A supervisor starting, or running unattached: it alone numbers its
-     ;; session's records, so the note waits to go through it.
-     ((romacs-agent--supervisor-may-run-p session)
+    (if (process-live-p connection)
+        (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
       (let ((held (copy-hash-table note)))
         ;; Known by its id when its record comes back: let go then.
         (puthash "romacsNote" (cl-incf romacs-agent--held-next) held)
         (puthash (romacs-agent-id session)
                  (append (gethash (romacs-agent-id session) romacs-agent--held-notes) (list held))
-                 romacs-agent--held-notes)))
-     (t (romacs-agent--note-here session note)))))
+                 romacs-agent--held-notes))
+      (romacs-agent--ensure-host session))))
 
-(defun romacs-agent--note-here (session note)
-  "Number NOTE here, as SESSION's next record, and write it where its
-records are: no supervisor of SESSION runs, so this server alone numbers.
-One still in its journal is moved to SQLite first
-\(`romacs-agent-events-then'); the note is folded here at once."
-  (let ((record (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" (float-time) "note" note)))
-    (romacs-agent-events-then
-     session
-     (lambda ()
-       (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
-         (let ((coding-system-for-write 'utf-8-unix))
-           (write-region (concat (romacs-agent--json record) "\n") nil
-                         (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))))
-     t)
-    (romacs-agent--record session record)))
+(defvar romacs-agent--note-hosts (make-hash-table :test #'equal)
+  "Each session id a notes-only host was started for, to the state the
+session had: its notes written, the host ends and the state stays.")
+
+(defun romacs-agent--ensure-host (session)
+  "A host to write SESSION's held notes: its supervisor, attached when one
+may run, else a notes-only host started off the main VM once SESSION's
+records are where they stay (`romacs-agent-events-then'), unless one is
+by then.  Nothing while a host is on its way: it takes them as it
+attaches."
+  (let ((id (romacs-agent-id session)))
+    (cond ((process-live-p (romacs-agent-connection session)))
+          ((gethash id romacs-agent--launched))
+          ((romacs-agent--supervisor-may-run-p session)
+           (romacs-agent--attach session romacs-agent--launch-tries))
+          (t (romacs-agent-events-then
+              session
+              (lambda ()
+                (unless (or (null (gethash id romacs-agent--held-notes))
+                            (process-live-p (romacs-agent-connection session))
+                            (gethash id romacs-agent--launched))
+                  (funcall romacs-agent--notes-host session))))))))
+
+(defvar romacs-agent--notes-host #'romacs-agent--launch-notes
+  "Start a notes-only host for a session: the real one, a process.  A
+test puts in its place one that writes the held notes and echoes them.")
+
+(defun romacs-agent--launch-notes (session)
+  "Start a notes-only host for SESSION, asynchronously, and attach to it:
+it writes the notes held for SESSION and ends as this server lets go."
+  (let* ((id (romacs-agent-id session))
+         (command (append (list (romacs-agent--program "romacs-agent-host") "--dir" (romacs-agent-dir session)
+                                "--socket" (romacs-agent-host-socket session))
+                          (and (romacs-agent-events-p session) (list "--store" (romacs-agent-store--file)))
+                          (list "--notes-only"))))
+    (make-directory (file-name-directory (romacs-agent-host-socket session)) t)
+    (puthash id (romacs-agent-state session) romacs-agent--note-hosts)
+    (puthash id t romacs-agent--launched)
+    (make-process :name (format "romacs-agent-notes-%s" (romacs-agent--key id)) :noquery t
+                  :connection-type 'pipe :buffer nil :command (cons "setsid" (cons "--fork" command))
+                  :sentinel #'ignore)
+    (romacs-agent--attach session romacs-agent--launch-tries)))
+
+(defun romacs-agent--notes-written (session)
+  "SESSION's notes-only host has written every note held: let it go, so it
+ends; SESSION keeps the state it had."
+  (when-let* (((gethash (romacs-agent-id session) romacs-agent--note-hosts))
+              ((null (gethash (romacs-agent-id session) romacs-agent--held-notes)))
+              (connection (romacs-agent-connection session)))
+    (run-at-time 0 nil (lambda () (when (process-live-p connection) (delete-process connection))))))
 
 (defvar romacs-agent--held-notes (make-hash-table :test #'equal)
   "Each session id to its notes waiting for its supervisor, oldest first,
@@ -3040,7 +3085,8 @@ it go."
               (held (gethash (romacs-agent-id session) romacs-agent--held-notes)))
     (let ((rest (cl-remove-if (lambda (h) (equal (gethash "romacsNote" h) id)) held)))
       (if rest (puthash (romacs-agent-id session) rest romacs-agent--held-notes)
-        (remhash (romacs-agent-id session) romacs-agent--held-notes)))))
+        (remhash (romacs-agent-id session) romacs-agent--held-notes)
+        (romacs-agent--notes-written session)))))
 
 (defvar romacs-agent--launched (make-hash-table :test #'equal)
   "The ids of the sessions whose supervisor this server launched and has
@@ -3064,13 +3110,6 @@ acknowledgement has let go of the ones written already."
   (dolist (note (gethash (romacs-agent-id session) romacs-agent--held-notes))
     (process-send-string process (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))))
 
-(defun romacs-agent--release-held (session)
-  "No supervisor of SESSION can run: its held notes are numbered here."
-  (remhash (romacs-agent-id session) romacs-agent--launched)
-  (when-let* ((notes (gethash (romacs-agent-id session) romacs-agent--held-notes)))
-    (remhash (romacs-agent-id session) romacs-agent--held-notes)
-    (dolist (note notes) (romacs-agent--note-here session note))))
-
 (defun romacs-agent-held-notes-count ()
   "How many notes wait for a supervisor that is not attached here."
   (let ((count 0))
@@ -3078,6 +3117,20 @@ acknowledgement has let go of the ones written already."
     count))
 
 (add-hook 'romacs-agent-writer-held-functions #'romacs-agent-held-notes-count)
+
+(defun romacs-agent-held-notes-live-p ()
+  "Whether a host is on its way for some held notes: launched here,
+attached, or to start once its session is moved."
+  (catch 'live
+    (maphash (lambda (id _notes)
+               (when (or (gethash id romacs-agent--launched)
+                         (romacs-agent-events-waiting-p id)
+                         (when-let* ((session (romacs-agent-loaded id))) (process-live-p (romacs-agent-connection session))))
+                 (throw 'live t)))
+             romacs-agent--held-notes)
+    nil))
+
+(add-hook 'romacs-agent-writer-held-live-functions #'romacs-agent-held-notes-live-p)
 
 (defun romacs-agent--restart (session)
   "Stop SESSION's harness to go on with its selection in a new one."
@@ -3300,6 +3353,9 @@ manager answers, else detached.  INPUT is a file the supervisor gives the
 harness as its whole stdin, and IMAGES what the journal keeps as attached
 to it."
   (romacs-agent--fold-now session)
+  ;; A notes-only host of it lets go of the session's lock as it ends.
+  (when (gethash (romacs-agent-id session) romacs-agent--note-hosts)
+    (when (process-live-p (romacs-agent-connection session)) (delete-process (romacs-agent-connection session))))
   ;; The process launching it attaches it: its relays lead here from the start.
   (romacs-agent--route-here session)
   (romacs-agent--set-stopped session nil)
@@ -3311,9 +3367,6 @@ to it."
                                 ;; Journaled first: where this run's records start.
                                 "--note" "{\"type\":\"run\"}")
                           (and (romacs-agent-events-p session) (list "--store" (romacs-agent-store--file)))
-                          ;; It numbers after every record numbered here,
-                          ;; some perhaps still on their way to the store.
-                          (list "--seq-from" (number-to-string (1+ (romacs-agent-seq session))))
                           (and input (list "--input" input))
                           (and images (list "--input-images" (json-serialize (vconcat images))))
                           (cons "--" argv)))

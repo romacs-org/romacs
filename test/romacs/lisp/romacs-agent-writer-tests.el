@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-notes)
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
@@ -383,23 +384,26 @@ connection of its own, as the writer's process has."
         (should (= (romacs-agent-writer-pending-count) 1000))
         (should (member "Saving 1000 agent records...failed: 1000 not saved" said))))))
 
+;; A supervisor launched here and not attached numbers its session's
+;; records alone: a note waits, numbered by nobody, and goes through it as
+;; this server attaches.  With none that may run, a notes-only host is
+;; started for it, once.
 (ert-deftest romacs-agent-writer-a-note-for-a-starting-supervisor-goes-through-it ()
-  ;; A supervisor launched here and not attached numbers its session's
-  ;; records alone: a note waits, numbered by nobody, and goes through it
-  ;; as this server attaches; a launch that never starts lets it be
-  ;; numbered here.
   (let ((romacs-agent--launched (make-hash-table :test #'equal))
         (romacs-agent--held-notes (make-hash-table :test #'equal))
+        (romacs-agent-events--waiting (make-hash-table :test #'equal))
         (session (romacs-agent--make :id "h" :harness 'claude :dir "/nonexistent/h" :seq 7 :state 'starting))
-        (sent nil) (here nil))
+        (sent nil) (hosts 0))
     (puthash "h" t romacs-agent--launched)
     (cl-letf (((symbol-function 'romacs-agent-host-socket) (lambda (_) "/nonexistent/h.sock"))
               ((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
-              ((symbol-function 'romacs-agent--note-here) (lambda (_s note) (push note here))))
+              ((symbol-function 'romacs-agent-events-own) #'ignore)
+              (romacs-agent--notes-host (lambda (_s) (cl-incf hosts))))
       (romacs-agent--note session (romacs-mcp--object "type" "plan"))
       (should (= (romacs-agent-seq session) 7))
       (should (= (romacs-agent-held-notes-count) 1))
       (should (equal (romacs-agent-writer--held) 1))
+      (should (zerop hosts))
       ;; Its attachment acknowledged: through it, kept until it comes back.
       (romacs-agent--send-held session 'process)
       (should (string-search "\"plan\"" (car sent)))
@@ -412,12 +416,12 @@ connection of its own, as the writer's process has."
       (let ((note (car (gethash "h" romacs-agent--held-notes))))
         (romacs-agent--held-echoed session (romacs-mcp--object "seq" 8 "note" note)))
       (should (zerop (romacs-agent-held-notes-count)))
-      ;; Launched again, and it never starts: numbered here.
-      (puthash "h" t romacs-agent--launched)
+      ;; None may run: a notes-only host, one for two notes.
       (romacs-agent--note session (romacs-mcp--object "type" "selection"))
-      (romacs-agent--release-held session)
-      (should (equal (gethash "type" (car here)) "selection"))
-      (should (zerop (romacs-agent-held-notes-count))))))
+      (puthash "h" t romacs-agent--launched)
+      (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+      (should (= hosts 1))
+      (should (= (romacs-agent-held-notes-count) 2)))))
 
 (ert-deftest romacs-agent-writer-the-last-resort-sends-nothing ()
   ;; While the editor makes the writes itself, what their answers queue is
@@ -429,34 +433,18 @@ connection of its own, as the writer's process has."
         (should-not sent)
         (should (= (romacs-agent-writer-pending-count) 1))))))
 
-(ert-deftest romacs-agent-writer-a-drain-leaves-an-importing-sessions-notes ()
-  ;; A session the writer imports now: its waiting notes are not written to
-  ;; its journal under the import; the import's answer lets them go.
-  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal))
-        (romacs-agent-events--importing (make-hash-table :test #'equal)) (ran nil))
-    (puthash "i" t romacs-agent-events--importing)
-    (puthash "i" (list (cons t (lambda () (push 'note ran)))) romacs-agent-events--waiting)
-    (romacs-agent-events-write-waiting-notes)
-    (should-not ran)
-    (should (gethash "i" romacs-agent-events--waiting))))
-
-(ert-deftest romacs-agent-writer-an-ending-editor-writes-waiting-notes ()
-  ;; Ending: the notes waiting for their sessions' moves are written where
-  ;; those sessions' records are, the launches let go; notes held for a
-  ;; supervisor not attached count as not saved, and keep a requested
-  ;; restart waiting.
+(ert-deftest romacs-agent-writer-an-ending-editor-counts-held-notes ()
+  ;; Ending: notes held for a host that is not on its way count as not
+  ;; saved, and keep a requested restart waiting.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-events--waiting (make-hash-table :test #'equal))
-        (romacs-agent--held-notes (make-hash-table :test #'equal)) (ran nil) (said nil))
+        (romacs-agent--launched (make-hash-table :test #'equal))
+        (romacs-agent--held-notes (make-hash-table :test #'equal)) (said nil))
     (romacs-agent-writer-tests--with
       (cl-letf (((symbol-function 'redisplay) #'ignore)
                 ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
-        (puthash "w" (list (cons nil (lambda () (push 'launch ran))) (cons t (lambda () (push 'note ran))))
-                 romacs-agent-events--waiting)
         (puthash "h" (list (romacs-mcp--object "type" "plan")) romacs-agent--held-notes)
         (should (equal (romacs-agent-writer--obstacle) '("1 agent records not yet written")))
         (romacs-agent-writer-drain)
-        (should (equal ran '(note)))
-        (should (zerop (hash-table-count romacs-agent-events--waiting)))
         (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
 
 (ert-deftest romacs-agent-writer-what-a-last-resort-write-queues-is-made ()
@@ -475,30 +463,13 @@ connection of its own, as the writer's process has."
         (should (equal (reverse romacs-agent-writer-tests--made) '(1 2)))
         (should (zerop (romacs-agent-writer-pending-count)))))))
 
-(ert-deftest romacs-agent-writer-a-launch-numbers-after-the-editor ()
-  ;; What waits for a move runs in the order it came; a launch's supervisor
-  ;; numbers after every record numbered here (`--seq-from'), so a note
-  ;; still on its way to the store is never numbered over.
-  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal)) (order nil) (argv nil)
-        (romacs-agent--launched (make-hash-table :test #'equal))
-        (session (romacs-agent--make :id "s" :harness 'claude :dir "/nonexistent/s" :cwd "/" :seq 41)))
-    (puthash "s" (list (cons t (lambda () (push 'note order))) (cons nil (lambda () (push 'launch order))))
+(ert-deftest romacs-agent-writer-what-waits-for-a-move-runs-in-order ()
+  ;; What waits for a move runs in the order it came.
+  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal)) (order nil))
+    (puthash "s" (list (lambda () (push 'note order)) (lambda () (push 'launch order)))
              romacs-agent-events--waiting)
     (romacs-agent-events--waited "s")
-    (should (equal (nreverse order) '(note launch)))
-    (cl-letf (((symbol-function 'romacs-agent--fold-now) #'ignore)
-              ((symbol-function 'romacs-agent--route-here) #'ignore)
-              ((symbol-function 'romacs-agent--set-stopped) #'ignore)
-              ((symbol-function 'romacs-agent-events-own) #'ignore)
-              ((symbol-function 'romacs-agent-events-p) #'ignore)
-              ((symbol-function 'romacs-agent-host-socket) (lambda (_) "/nonexistent/s.sock"))
-              ((symbol-function 'make-directory) #'ignore)
-              ((symbol-function 'set-file-modes) #'ignore)
-              ((symbol-function 'romacs-agent--manifest) #'ignore)
-              ((symbol-function 'call-process) (lambda (&rest args) (setq argv args) 0)))
-      (romacs-agent--launch session (list "claude"))
-      (should (equal (cadr (member "--seq-from" argv)) "42"))
-      (should (gethash "s" romacs-agent--launched)))))
+    (should (equal (nreverse order) '(note launch)))))
 
 (ert-deftest romacs-agent-writer-a-flip-made-before-a-writer-ended-is-moved ()
   ;; A flip the writer made before it ended, sent again, answers nil: the

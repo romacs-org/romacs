@@ -70,15 +70,15 @@ batch process's answer."
   "Functions the writer calls as it starts, before its first write: those
 opening what it writes, as a writer off the editor opens it.")
 
-(defvar romacs-agent-writer-before-drain-functions nil
-  "Functions a drain calls first: those that hold records outside the
-writer's queue put them where they belong, now (notes waiting for their
-sessions' moves).")
-
 (defvar romacs-agent-writer-held-functions nil
   "Functions that each return how many records they hold that no writer
 can make yet (notes for a supervisor not attached here): a requested
 restart waits for them, and a drain counts them not saved.")
+
+(defvar romacs-agent-writer-held-live-functions nil
+  "Functions that each return non-nil while records they hold are on
+their way (a host of theirs starting or attached): a drain waits for
+them as for its own writes.")
 
 (defun romacs-agent-writer--held ()
   "How many records are held outside the writer's queue."
@@ -352,7 +352,6 @@ are made too.  A writer gone meanwhile is started again and sent what
 it did not answer.  The writer then stops; a later write starts
 another.  QUITTABLE: a restart is beginning, and \\[keyboard-quit]
 cancels it; the writes stay queued, made in the background."
-  (with-demoted-errors "romacs-agent-writer: before draining: %S" (run-hooks 'romacs-agent-writer-before-drain-functions))
   (when (> (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held)) 0)
     (let ((count (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))) (tries 0)
           (romacs-agent-writer--draining t))
@@ -364,26 +363,31 @@ cancels it; the writes stay queued, made in the background."
       (maphash (lambda (id _) (romacs-agent-writer--again id)) (copy-hash-table romacs-agent-writer--failed))
       ;; Until nothing is queued and no writer runs: writes the answers'
       ;; callbacks queue, even while the writer stops, are made too.
-      (while (and (or (> (romacs-agent-writer--unanswered) 0) romacs-agent-writer--job) (< tries 4))
-        (if (> (romacs-agent-writer--unanswered) 0)
-            (progn
-              (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
-                ;; Gone: a new writer, sent what is still unanswered.
-                (cl-incf tries)
-                (setq romacs-agent-writer--job nil)
-                (romacs-agent-writer--unsend))
-              (romacs-agent-writer--flush)
-              (condition-case nil (isolate-await romacs-agent-writer--job 0.1)
-                (isolate-timeout nil)
-                ;; A writer that cannot be waited on counts as gone.
-                (error (cl-incf tries))))
+      (while (and (or (> (romacs-agent-writer--unanswered) 0) romacs-agent-writer--job
+                      (run-hook-with-args-until-success 'romacs-agent-writer-held-live-functions))
+                  (< tries 4))
+        (cond
+         ((> (romacs-agent-writer--unanswered) 0)
+          (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
+            ;; Gone: a new writer, sent what is still unanswered.
+            (cl-incf tries)
+            (setq romacs-agent-writer--job nil)
+            (romacs-agent-writer--unsend))
+          (romacs-agent-writer--flush)
+          (condition-case nil (isolate-await romacs-agent-writer--job 0.1)
+            (isolate-timeout nil)
+            ;; A writer that cannot be waited on counts as gone.
+            (error (cl-incf tries))))
+         (romacs-agent-writer--job
           ;; All answered: the writer stops, forgotten at once, so what is
           ;; queued while it stops goes to a new one; then look again.
           (let ((job romacs-agent-writer--job))
             (setq romacs-agent-writer--job nil)
             (unless (isolate-future-done-p job)
               (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
-              (ignore-errors (isolate-await job))))))
+              (ignore-errors (isolate-await job)))))
+         ;; Records on their way through their own host: its answers.
+         (t (accept-process-output nil 0.1))))
       ;; What failed, or no writer would answer: made here, the editor
       ;; ending, a few rounds while what is made queues more.
       (let ((rounds 0))
