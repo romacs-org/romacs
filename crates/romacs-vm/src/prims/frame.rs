@@ -735,7 +735,7 @@ fn internal_handle_focus_in(cx, event: Value) {
     cx.windows().handle_focus_in(frame);
     Ok(Value::NIL)
 }}
-// keyboard.c read_char's `unread_switch_frame', taken (lisp/romacs/vm/keyboard.el).
+// keyboard.c read_char's `unread_switch_frame', taken (lisp/vm/keyboard.el).
 defsubr! { name = "romacs--take-unread-switch-frame", gnu = "keyboard.c:2683", effect = Global,
 fn romacs_take_unread_switch_frame(cx) {
     Ok(cx.windows().take_unread_switch_frame())
