@@ -446,6 +446,19 @@ const DISPLAY_VARIABLES: [&str; 29] = [
 const MARK_ACTIVE: usize = 6;
 const TRANSIENT_MARK_MODE: usize = 7;
 
+/// What a window does about tree-sitter faces this frame
+/// (`Vm::treesit_parse_pending`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Plain {
+    /// It fontifies.
+    No,
+    /// It keeps the faces it has: its parse is on a thread, or a small
+    /// edit shows before its parse.
+    Kept,
+    /// Its buffer's first parse has not landed: it takes stopgap faces.
+    First,
+}
+
 /// What a window's last full snapshot read, besides its point, its cursor
 /// and its mode line's Lisp: while this is unchanged, so are the window's
 /// text, faces and start (GNU redisplay's test that a window needs no
@@ -2579,8 +2592,13 @@ impl Vm {
         if self.variable_value(functions)? == Value::NIL {
             return Ok(true);
         }
-        if self.treesit_parse_pending(root, buffer_slot)? {
-            return Ok(true);
+        match self.treesit_parse_pending(root, buffer_slot)? {
+            Plain::No => {}
+            Plain::Kept => return Ok(true),
+            Plain::First => {
+                self.treesit_stopgap(root, text_height)?;
+                return Ok(true);
+            }
         }
         let mut range = self.displayed_range(self.slots[root].value, text_height)?;
         let mut tries = 1;
@@ -2611,11 +2629,26 @@ impl Vm {
         }
         Ok(true)
     }
-    /// Whether the first parse of the buffer in BUFFER_SLOT has not landed,
-    /// so that redisplay shows the window in ROOT plain and leaves its faces
-    /// to the frame the landing wakes (`land_treesit'): fontifying now would
-    /// wait for the parse.
-    fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<bool> {
+    /// The window in ROOT, waiting for its first parse, takes the stopgap
+    /// faces of the rows it shows (`romacs-treesit--stopgap`,
+    /// `lisp/romacs-treesit.el`): lexical faces from the syntax table
+    /// and the mode's keywords, which the landing's fontification replaces.
+    fn treesit_stopgap(&mut self, root: usize, text_height: u32) -> Result<()> {
+        let window = self.slots[root].value;
+        let Some((start, end)) = self.displayed_range(window, text_height)? else { return Ok(()) };
+        let position = |n: usize| Value::integer(i64::try_from(n).unwrap_or(i64::MAX));
+        let args = [window, position(start)?, position(end)?];
+        let call = "(lambda (window start end) (when (fboundp 'romacs-treesit--stopgap) (romacs-treesit--stopgap window start end)))";
+        if let Err(error) = self.call_prepared_source_raw(call, &args) {
+            self.display_state.diagnostics.get_mut().push(format!("fontification: {error}"));
+        }
+        Ok(())
+    }
+    /// Whether the window in ROOT fontifies now, keeps the faces it has
+    /// for the frame a landing parse wakes (`land_treesit`), or waits for
+    /// the first parse of the buffer in BUFFER_SLOT: fontifying would wait
+    /// for the parse.
+    fn treesit_parse_pending(&mut self, root: usize, buffer_slot: usize) -> Result<Plain> {
         let id = self.window(self.slots[root].value)?.id;
         let buffer = self.slots[buffer_slot].value;
         let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
@@ -2625,24 +2658,24 @@ impl Vm {
             if !self.treesit_plain.contains(&id) {
                 self.treesit_plain.push(id);
             }
-            return Ok(true);
+            return Ok(Plain::Kept);
         }
-        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(Plain::No) };
         if text.treesit.small_edit_due(limit) {
             self.treesit_deferred.as_mut().expect("a deferred frame").push(id);
-            return Ok(true);
+            return Ok(Plain::Kept);
         }
         // This window fontifies now: the next edit counts from here.
         text.treesit.edited.set(0);
         if self.process_jobs.wake().is_none() {
-            return Ok(false);
+            return Ok(Plain::No);
         }
-        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
+        let Some(text) = self.treesit_text_of(buffer)? else { return Ok(Plain::No) };
         let pending = text.treesit.early.as_mut().is_some_and(|early| early.pending());
         if pending && !self.treesit_plain.contains(&id) {
             self.treesit_plain.push(id);
         }
-        Ok(pending)
+        Ok(if pending { Plain::First } else { Plain::No })
     }
     /// BUFFER's text, its base's for an indirect one; none for a killed buffer.
     pub(crate) fn treesit_text_of(&mut self, buffer: Value) -> Result<Option<&mut crate::annotations::AnnotatedBuffer>> {
