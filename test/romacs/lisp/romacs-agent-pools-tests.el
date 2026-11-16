@@ -169,7 +169,7 @@ a time, `allow' marks it allowed."
         ;; Scheduled at the earliest reset plus its margin, said and kept.
         (should (= (romacs-agent-resume-time session) (+ soon 1)))
         (should (cl-find #'romacs-agent-tools--resume armed :key #'cadr))
-        (let ((journal (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))
+        (let ((journal (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "\n")))
           (should (string-match-p "\"type\":\"resume\",\"state\":\"scheduled\"" journal)))
         ;; Kept in its manifest: a restarted server, loading it, arms it again.
         (let ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
@@ -183,7 +183,7 @@ a time, `allow' marks it allowed."
         (should (equal told (list romacs-agent-tools--resumed)))
         (should-not (romacs-agent-resume-time session))
         (should (string-match-p "\"state\":\"fired\",\"on\":\"claude\""
-                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))
+                                (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "\n")))
         ;; Another account back first: it moves there.
         (spend "claude" (+ (float-time) 600) 10.0)
         (allow "claude2" 11.0)
@@ -282,7 +282,7 @@ a time, `allow' marks it allowed."
         (let ((wait (cl-find #'romacs-agent-tools--hand-over armed :key #'car)))
           (apply (car wait) (cdr wait)))
         (should (string-match-p "\"to\":null,\"why\":\"every claude account is at its limit\",\"resets\":[0-9]"
-                                (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" dir)) (buffer-string))))))))
+                                (mapconcat #'romacs-agent--json (romacs-agent--journal-records session) "\n")))))))
 
 (ert-deftest romacs-agent-pools-the-room-file-has-one-writer ()
   (romacs-agent-pools-tests--with

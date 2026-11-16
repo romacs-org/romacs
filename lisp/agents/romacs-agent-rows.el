@@ -37,6 +37,13 @@
 :shown :card :answers (this file's Commentary)."
   (puthash name renderer romacs-agent-rows))
 
+(defun romacs-agent-rows-name (name)
+  "A tool's NAME as a row shows it and its renderer is known by: an MCP
+tool by its own name."
+  (if (and (stringp name) (string-match "\\`mcp__[^_]+\\(?:_[^_]+\\)*__\\(.+\\)\\'" name))
+      (match-string 1 name)
+    (or name "tool")))
+
 (defun romacs-agent-rows-get (name)
   "Tool NAME's renderer: its own, Romacs's generic one for any other
 romacs_ tool, or nil, the chat's generic row.  A Romacs tool's answer
@@ -567,6 +574,21 @@ words, and what it was given."
                   (concat (string-replace "_" " " (string-remove-prefix "romacs_" name))
                           (if (string-empty-p brief) "" (romacs-agent-rows--dim (concat "  " brief)))))))
         :body (lambda (_input output) (romacs-agent-rows-words output))))
+
+(defun romacs-agent-rows-texts (name input output)
+  "What a call of tool NAME with INPUT (a table) shows on its row, as a
+turn's row keeps it: a plist of :row, its text as it starts, and :ended,
+its text once it ended with OUTPUT (nil when its renderer says none, or
+OUTPUT is nil).  Pure: what a chat drawn from rows shows without the
+call's whole input or output."
+  (when-let* ((renderer (romacs-agent-rows-get (romacs-agent-rows-name name))))
+    (let ((input (if (hash-table-p input) input (make-hash-table :test #'equal))))
+      (list :row (funcall (plist-get renderer :row) input)
+            :ended (and output (plist-get renderer :ended) (funcall (plist-get renderer :ended) input output))))))
+
+;; A turn's row keeps its calls' texts as drawn (romacs-agent-turns.el).
+(defvar romacs-agent-turns-tool-texts-function)
+(setq romacs-agent-turns-tool-texts-function #'romacs-agent-rows-texts)
 
 (provide 'romacs-agent-rows)
 ;;; romacs-agent-rows.el ends here

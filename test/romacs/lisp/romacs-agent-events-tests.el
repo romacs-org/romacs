@@ -82,7 +82,9 @@ turns, and its journal's file; a state root of its own."
               (tail-seq (romacs-agent-events-tests--at session (car tail)))
               (after (romacs-agent-events-tests--seqs session (romacs-agent--journal-after session 20)))
               (notes (length (romacs-agent--journal-notes session "run")))
-              (recorded (romacs-agent--recorded-p session)))
+              (recorded (romacs-agent--recorded-p session))
+              (last (gethash "seq" (romacs-agent--journal-last session '("romacsRequest") #'romacs-agent--record-request)))
+              (head (romacs-agent-events-tests--at session (romacs-agent--journal-head session))))
          (should (romacs-agent-events-import session))
          (should (romacs-agent-events-p session))
          (should-not (file-exists-p journal))
@@ -95,13 +97,27 @@ turns, and its journal's file; a state root of its own."
          (should-not (romacs-agent--journal-after session 999))
          (should (= (length (romacs-agent--journal-notes session "run")) notes))
          (should (eq (romacs-agent--recorded-p session) recorded))
+         ;; Read from their ends as the journal's were.
+         (should (= (gethash "seq" (romacs-agent--journal-last session '("romacsRequest") #'romacs-agent--record-request)) last))
+         (should (= (romacs-agent-events-tests--at session (romacs-agent--journal-head session)) head))
+         (should (= (romacs-agent--journal-head session 2) 2))
+         ;; Their size in UTF-8 bytes, from a seq on, against a limit.
+         (should (romacs-agent-events-over-p session 0 100))
+         (should-not (romacs-agent-events-over-p session 0 1000000))
+         (should-not (romacs-agent-events-over-p session 999 0))
          ;; With no supervisor, Romacs's own note goes to SQLite.
          (romacs-agent--note session (romacs-mcp--object "type" "selection"))
          (should (= (length (romacs-agent--journal-notes session "selection")) 1))
          (should (= (car (last (romacs-agent-events-tests--seqs session))) (1+ (car (last seqs)))))
          ;; Importing again: nothing.
          (should (romacs-agent-events-import session))
-         (should (= (length (romacs-agent-events-tests--seqs session)) (1+ (length seqs)))))))))
+         (should (= (length (romacs-agent-events-tests--seqs session)) (1+ (length seqs))))
+         ;; Bytes, not characters: 1,000 three-byte characters are over 2,500.
+         (romacs-agent--note session (romacs-mcp--object "type" "wide" "text" (make-string 1000 ?界)))
+         (let ((wide (caar (sqlite-select (romacs-agent-events--db) "select max(seq) from events where session = ?"
+                                          (list (romacs-agent-id session))))))
+           (should (romacs-agent-events-over-p session wide 2500))
+           (should-not (romacs-agent-events-over-p session wide 3200))))))))
 
 (ert-deftest romacs-agent-events-replay-in-steps-from-sqlite ()
   ;; A replay between keystrokes reads its pages from one snapshot: a
