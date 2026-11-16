@@ -478,7 +478,9 @@ fn wait_while_kept(child: &mut std::process::Child, dir: &Path) -> Result<std::p
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
             return Ok(status);
         }
-        if !dir.is_dir() {
+        // Gone only when it is confirmed gone: an error reading it (a
+        // moment's I/O trouble) is no end of the session.
+        if std::fs::metadata(dir).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
             let _ = child.kill();
         }
         std::thread::sleep(WATCH);

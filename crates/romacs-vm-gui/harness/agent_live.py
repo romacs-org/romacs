@@ -206,7 +206,24 @@ class Agents(Server):
                   "(romacs-agent-restore) t)")
 
     def close(self):
-        # Sessions started detached: end their supervisors and harnesses.
+        # Sessions started detached: end their supervisors and harnesses,
+        # found by their sessions' directories under this tree too, so a
+        # session whose directory went (and its host.json) is ended as well.
+        agents = str(self.home / '.local/state/romacs/agents').encode()
+        hosts, parents = set(), {}
+        for proc in Path('/proc').iterdir():
+            try:
+                argv = (proc / 'cmdline').read_bytes().split(b'\0')
+                parents[int(proc.name)] = int((proc / 'stat').read_text().rsplit(')', 1)[1].split()[1])
+                if argv[0].endswith(b'romacs-agent-host') and agents in b' '.join(argv):
+                    hosts.add(int(proc.name))
+            except (OSError, ValueError, IndexError):
+                pass
+        for pid in [p for p, parent in parents.items() if parent in hosts] + sorted(hosts):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
         for host in (self.home / '.local/state/romacs/agents').glob('*/host.json'):
             info = json.loads(host.read_text())
             for pid in (info.get('harness'), info.get('pid')):
