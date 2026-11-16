@@ -44,6 +44,14 @@ pub fn load(vm: &mut Vm, path: &Path) -> Result<bool, String> {
         Ok(_) => {},
     }
     identify(vm, path)?;
+    // Through Lisp where the session has it (lisp/session/romacs-init-load.el):
+    // an error's backtrace is kept as it happens, for the warning that says
+    // so.  Its answer is nil, or the error worded as the loader words one.
+    let file = serde_json::to_string(path.to_str().ok_or("init path is not UTF-8")?).map_err(|error| error.to_string())?;
+    let answer = vm.eval_source(&format!(
+        "(if (fboundp 'romacs-init-load) (let ((said (romacs-init-load {file}))) (if (stringp said) (encode-coding-string said 'utf-8) said)) t)"))?;
+    if answer.is_nil() { return Ok(true); }
+    if !answer.is_t() { return Err(named(path, &String::from_utf8_lossy(answer.bytes()?))); }
     // The loader's error names the file already (`FILE: line N form M:
     // ...`); one that does not is named once here.
     vm.load_file(path).map_err(|error| named(path, &error.to_string()))?;

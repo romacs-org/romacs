@@ -91,6 +91,21 @@ second turn, then its exit.  Its first turn ends at seq 12."
      (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
        (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
+(defun romacs-agent-kept-tests--replay (twin)
+  "The session recorded in TWIN, loaded as a server that kept nothing of
+it does: no state kept to go on from (its id's is the other's), so every
+one of its records is read, which this checks."
+  (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (read 0)
+        (records (with-temp-buffer (insert-file-contents (expand-file-name "journal.jsonl" twin))
+                                   (count-lines (point-min) (point-max)))))
+    (prog1 (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                      ((symbol-function 'romacs-agent--record)
+                       (lambda (session record) (cl-incf read) (funcall real session record)))
+                      ((symbol-function 'romacs-agent-turns-fold) #'ignore)
+                      ((symbol-function 'romacs-agent-turns-fold-put) #'ignore))
+             (romacs-agent--load twin))
+      (cl-assert (= read records) t "the twin read %d of its %d records" read records))))
+
 (defun romacs-agent-kept-tests--load (dir)
   "The session recorded in DIR, loaded by a server knowing no session,
 which then goes idle: what it keeps is written."
@@ -112,7 +127,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir head)
       (let ((first (romacs-agent-kept-tests--load dir)))
         (should (= (romacs-agent-seq first) 12))
-        (should (file-exists-p (romacs-agent--kept-file first))))
+        (should (romacs-agent--kept-get first)))
       (romacs-agent-kept-tests--write dir tail t)
       (let* ((read nil)
              (restored (cl-letf* ((real (symbol-function 'romacs-agent--record))
@@ -123,8 +138,7 @@ contents, so two equal states print the same."
         ;; Only what came after its kept state was read.
         (should (equal (nreverse read) (number-sequence 13 (length records))))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (= (romacs-agent-seq restored) (length records)))
           (should (equal (romacs-agent-reply restored) "bye"))
           (should (= (romacs-agent-turns restored) 2))
@@ -143,8 +157,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir tail t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (equal (romacs-agent-kept-tests--state restored)
                          (romacs-agent-kept-tests--state replayed))))))))
 
@@ -174,8 +187,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir (nthcdr 6 records) t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin records)
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should (equal (romacs-agent-reply restored) "twice"))
           (should (equal (romacs-agent-kept-tests--state restored)
                          (romacs-agent-kept-tests--state replayed))))))))
@@ -238,8 +250,7 @@ contents, so two equal states print the same."
       (romacs-agent-kept-tests--write dir (list exit) t)
       (let ((restored (romacs-agent-kept-tests--load dir)))
         (romacs-agent-kept-tests--write twin (append records (list exit)))
-        (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
-                          (romacs-agent--load twin))))
+        (let ((replayed (romacs-agent-kept-tests--replay twin)))
           (should-not (romacs-agent-failed restored))
           (should (equal (romacs-agent-reply restored) "hello"))
           (should (equal (romacs-agent-kept-tests--state restored)
@@ -278,12 +289,11 @@ contents, so two equal states print the same."
     (let ((records (romacs-agent-kept-tests--claude)))
       (romacs-agent-kept-tests--write dir records)
       (let* ((session (romacs-agent-kept-tests--load dir))
-             (file (romacs-agent--kept-file session))
-             (good (with-temp-buffer (insert-file-contents file) (buffer-string))))
+             (good (romacs-agent--kept-get session)))
         (dolist (bad (list (replace-regexp-in-string ":layout (id " ":layout (old id " good t t)
                            (replace-regexp-in-string ":seq [0-9]+" ":seq 999" good)
                            (substring good 0 (/ (length good) 2))))
-          (with-temp-file file (insert bad))
+          (romacs-agent--kept-put session bad)
           (let* ((read 0)
                  (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
                                    ((symbol-function 'romacs-agent--record)
@@ -292,29 +302,50 @@ contents, so two equal states print the same."
             (should (= read (length records)))
             (should (equal (romacs-agent-reply again) "bye"))))))))
 
+(ert-deftest romacs-agent-kept-survives-an-added-field ()
+  ;; Kept by a build that lacked a field this one has: read back, no record
+  ;; read again, the new field at its default.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (let ((records (romacs-agent-kept-tests--claude)))
+      (romacs-agent-kept-tests--write dir records)
+      (let* ((session (romacs-agent-kept-tests--load dir))
+             (kept (car (read-from-string (romacs-agent--kept-get session))))
+             (dropped (car (car (last (plist-get kept :fields))))))
+        (romacs-agent--kept-put
+         session (let ((print-circle t) (print-length nil) (print-level nil))
+                   (prin1-to-string (plist-put (plist-put (copy-sequence kept) :layout (remq dropped (plist-get kept :layout)))
+                                               :fields (assq-delete-all dropped (copy-alist (plist-get kept :fields)))))))
+        (let* ((read 0)
+               (again (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                                 ((symbol-function 'romacs-agent--record)
+                                  (lambda (session record) (cl-incf read) (funcall real session record))))
+                        (romacs-agent-kept-tests--load dir))))
+          (should (= read 0))
+          (should (equal (romacs-agent-reply again) "bye"))))))))
 (ert-deftest romacs-agent-kept-only-what-reads-back ()
   ;; A field holding what cannot be read back: nothing is kept.
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (let ((session (romacs-agent-kept-tests--load dir)))
-      (delete-file (romacs-agent--kept-file session))
+      (romacs-agent--kept-put session nil)
       (remhash session romacs-agent--kept)
       (setf (romacs-agent-message session) (current-buffer))
       (should-not (romacs-agent--kept-text session))
       (romacs-agent--keep session)
-      (should-not (file-exists-p (romacs-agent--kept-file session))))))
+      (should-not (romacs-agent--kept-get session)))))
 
 (ert-deftest romacs-agent-kept-a-copy-keeps-nothing ()
   ;; A copy replaying the journal (a chat drawn) never writes the session's state.
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (let ((session (romacs-agent-kept-tests--load dir)))
-      (delete-file (romacs-agent--kept-file session))
+      (romacs-agent--kept-put session nil)
       (let ((scratch (romacs-agent--scratch session)))
         (setf (romacs-agent-caught-up scratch) t)
         (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
         (romacs-agent--keep scratch))
-      (should-not (file-exists-p (romacs-agent--kept-file session))))))
+      (should-not (romacs-agent--kept-get session)))))
 
 (ert-deftest romacs-agent-kept-journal-after-either-key-order ()
   (romacs-agent-kept-tests--with
@@ -392,7 +423,7 @@ contents, so two equal states print the same."
                                 (lambda (&rest _) (ert-fail "attached where nothing answers"))))
                        (romacs-agent-kept-tests--load dir))))
         (should (eq (romacs-agent-state session) 'ended))
-        (should (file-exists-p (romacs-agent--kept-file session)))
+        (should (romacs-agent--kept-get session))
         (should-not (file-exists-p socket))))))
 
 (ert-deftest romacs-agent-kept-a-live-socket-is-left-and-attached ()
@@ -407,6 +438,52 @@ contents, so two equal states print the same."
                                                                                  :host-socket socket)))
                  (should (file-exists-p socket)))
         (delete-process server)))))
+
+(ert-deftest romacs-agent-kept-one-copy-and-an-old-file-moved-in ()
+  ;; Kept in its rows, one copy however often it is written and however
+  ;; many turns it has; a state an earlier build kept in a file is read,
+  ;; moved into its rows and the file removed, the first time.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (let* ((session (romacs-agent-kept-tests--load dir)) (id (romacs-agent-id session))
+           (db (romacs-agent-turns--db)))
+      (sqlite-execute db "insert into turns (session, first_seq, last_seq) values (?, 5, 12), (?, 13, 20)" (list id id))
+      (romacs-agent--kept-put session "(:a 1)")
+      (romacs-agent--kept-put session "(:a 2)")
+      (should (equal (sqlite-select db "select first_seq, fold from turns where session = ? and fold is not null" (list id))
+                     '((13 "(:a 2)"))))
+      ;; From a file, once.
+      (romacs-agent--kept-put session nil)
+      (write-region "(:a 3)" nil (romacs-agent--kept-file session) nil 'silent)
+      (should (equal (romacs-agent--kept-get session) "(:a 3)"))
+      (should-not (file-exists-p (romacs-agent--kept-file session)))
+      (should (equal (romacs-agent--kept-get session) "(:a 3)"))
+      (should (= (caar (sqlite-select db "select count(*) from turns where session = ? and fold is not null" (list id))) 1))))))
+(ert-deftest romacs-agent-kept-a-busy-database-is-tried-again ()
+  ;; Its state not kept (the database held by another writer): tried again
+  ;; at the next idle moment, no record since, and kept then.
+  (romacs-agent-kept-tests--with
+    (let ((dir (expand-file-name romacs-agent-kept-tests--id (romacs-agent--state-root))))
+      (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+      (let* ((session (romacs-agent-kept-tests--load dir)) (tries 0) (romacs-agent--keep-tries nil))
+        (remhash session romacs-agent--kept)
+        (setq romacs-agent--keeping nil)
+        (cl-letf* ((put (symbol-function 'romacs-agent--kept-put))
+                   ((symbol-function 'romacs-agent--kept-put)
+                    (lambda (s text) (and (> (cl-incf tries) 1) (funcall put s text))))
+                   ((symbol-function 'run-with-idle-timer) (lambda (&rest _) nil)))
+          ;; Kept as its records left it (idle), its connection's view
+          ;; (detached) laid over it meanwhile.
+          (romacs-agent--keep session 'idle)
+          (setf (romacs-agent-state session) 'detached)
+          (should-not (gethash session romacs-agent--kept))
+          (should (equal romacs-agent--keeping (list (list session (romacs-agent-seq session) 'idle))))
+          (romacs-agent--keep-pending))
+        (should (= tries 2))
+        (should (eql (gethash session romacs-agent--kept) (romacs-agent-seq session)))
+        (should (eq (cdr (assq 'state (plist-get (romacs-agent--read-kept session) :fields))) 'idle))))))
 
 (ert-deftest romacs-agent-kept-restore-soon-loads-every-session-in-turns ()
   ;; A server's start: sessions load from the command loop after it, the
@@ -498,15 +575,15 @@ contents, so two equal states print the same."
                                          (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key)))
                                      (funcall (nth 1 future) (nth 2 future))))
               (should (equal (nth 4 future) (list (length records))))
-              (should (file-exists-p (romacs-agent--kept-file session)))
+              ;; The worker's fold kept in the session's rows.
+              (should (romacs-agent--kept-get session))
               (setq read nil)
               (funcall (nth 3 future) future)
               (romacs-agent-kept-tests--drain)))
           (should-not read)
           (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
           (romacs-agent-kept-tests--write twin records)
-          (let ((replayed (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (romacs-agent-fold-bytes nil))
-                            (romacs-agent--load twin))))
+          (let ((replayed (let ((romacs-agent-fold-bytes nil)) (romacs-agent-kept-tests--replay twin))))
             (should (= (romacs-agent-seq session) (length records)))
             (should (equal (romacs-agent-kept-tests--state session) (romacs-agent-kept-tests--state replayed)))
             (should (eq (romacs-agent-state session) (romacs-agent-state replayed)))))))))

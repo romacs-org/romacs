@@ -377,6 +377,59 @@ unless CUT, then its turn's end."
              (should (memq 'romacs-agent-dim (ensure-list (get-text-property (point) 'face)))))
          (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-chat-undo-moves-with-the-transcript ()
+  ;; Undo entries past where the transcript grew move with the text after
+  ;; it; those before stay.
+  (should (equal (romacs-agent-ui--undo-shifted '(nil (10 . 14) ("ab" . 12) ("cd" . -13) 15 (t . 0) (nil face x 11 . 13) (3 . 5))
+                                                10 4)
+                 '(nil (14 . 18) ("ab" . 16) ("cd" . -17) 19 (t . 0) (nil face x 15 . 17) (3 . 5)))))
+
+(ert-deftest romacs-agent-chat-undo-shifts-in-place ()
+  ;; The list and its entries stay the same conses.
+  (let* ((entry (cons 10 14)) (entries (list nil entry 15)))
+    (should (eq (romacs-agent-ui--undo-shifted entries 10 4) entries))
+    (should (eq (cadr entries) entry))
+    (should (equal entries '(nil (14 . 18) 19)))))
+
+(ert-deftest romacs-agent-chat-undo-shift-applies-and-pending ()
+  ;; A combined change's bounds move; one that cannot be placed ends the
+  ;; list; a pending undo sharing the entries moves them once.
+  (let ((entries (list nil (list 'apply 2 12 14 'ignore) 15)))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (apply 2 16 18 ignore) 19))))
+  (let ((entries (list nil (cons 12 14) (list 'apply 'ignore 1) (cons 20 22))))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (16 . 18)))))
+  (let* ((shared (cons 12 14)) (entries (list nil shared)) (pending (list shared))
+         (seen (make-hash-table :test #'eq)))
+    (romacs-agent-ui--undo-shifted entries 10 4 seen)
+    (romacs-agent-ui--undo-shifted pending 10 4 seen)
+    (should (equal shared '(16 . 18)))))
+
+(ert-deftest romacs-agent-chat-undo-barrier-and-pending-owner ()
+  ;; An entry that cannot be placed ends each list holding it, even one
+  ;; whose entries were moved already through another.
+  (let* ((barrier (list 'apply 'delete-region 12 14))
+         (entries (list nil barrier (cons 24 26)))
+         (pending (cdr entries))
+         (seen (make-hash-table :test #'eq)))
+    (setq entries (romacs-agent-ui--undo-shifted entries 10 4 seen))
+    (setq pending (romacs-agent-ui--undo-shifted pending 10 4 seen))
+    (should (equal entries '(nil)))
+    (should-not pending))
+  ;; Another buffer's pending undo is left as it is.
+  (with-temp-buffer
+    (setq-local romacs-agent-ui--end (point-marker))
+    (let ((pending-undo-list (list (cons 12 14)))
+          (last-command 'undo))
+      (romacs-agent-ui--editing (insert "abcd"))
+      (should (equal pending-undo-list '((12 . 14))))
+      ;; The chat's own, an undo run where it is shown, moves.
+      (cl-letf (((symbol-function 'window-buffer) (lambda (&rest _) (current-buffer))))
+        (set-marker romacs-agent-ui--end 1)
+        (romacs-agent-ui--editing (goto-char 1) (insert "abcd")))
+      (should (equal pending-undo-list '((16 . 18)))))))
+
 ;; A journal whose last turns reach further back than the budget: the
 ;; tail starts at the earliest turn within it.
 (ert-deftest romacs-agent-journal-tail-keeps-to-its-budget ()

@@ -968,9 +968,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
-        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
-            // Said on stderr too, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START}));
+        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, |reason| {
+            // Said on stderr too, so a launcher sees it whether or not a
+            // window can, with why the world was not usable.
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
             loading::step("world-build", loading::FIRST_START);
         })));
         // The world this launch booted from, which its worker isolates adopt.
@@ -1397,19 +1398,23 @@ fn evaluate(
         }
         // The launch font's face, as source: declared BEFORE GNU's Lisp, so
         // GNU's own `defface' (custom.el) leaves the declared face alone, and
-        // after the workspace's own faces otherwise, exactly as before.
-        let font = world::launch_font()?;
+        // after the workspace's own faces otherwise, exactly as before. A
+        // session restored from a base world sets it first, as no base world
+        // holds it; a layer was built with it (world.rs `layer_world`).
+        let font = world::LaunchFont::from_env()?;
+        let from_layer = worlds.as_ref().is_some_and(|worlds| worlds.from_layer);
         let started = if launch == startup::Launch::Workspace {
             let started = startup::initialize(&mut vm)?;
-            if let Some((source, _)) = &font { vm.eval_source(source)?; }
+            if let Some(font) = &font { vm.eval_source(&font.declaration())?; }
             started
         } else if let Some(carry) = carry {
+            if let Some(font) = font.as_ref().filter(|_| !from_layer) { vm.eval_source(&font.restored())?; }
             // As a fresh process takes the per-process startup steps.
             vm.eval_source("(romacs-world-restart)")?;
             startup::mark_phase("world-restart");
             startup::resume_loadup(&mut vm, launch, carry.loadup)?
         } else {
-            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
+            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(world::LaunchFont::declaration).as_deref())?
         };
         startup::mark_phase("session-lisp");
         if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
@@ -1418,6 +1423,12 @@ fn evaluate(
             eprintln!("romacs: usage log: {error}");
         }
         startup::before_init(&mut vm, launch, quick)?;
+        // The user's settings, packages, init and what runs after it are
+        // Lisp that may not end: C-g quits it, as GNU's startup lets it
+        // (the evaluator is busy to the input thread until its first wait).
+        // Each step goes on past a quit; Romacs's own defaults before them
+        // are not quit (a C-g then waits as a key).
+        if live { vm.enter_busy(); }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // `load-path' before the packages and the init add to it: a
@@ -1444,10 +1455,10 @@ fn evaluate(
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     // As GNU's startup says it (startup.el `startup--load-user-init-file'):
-                    // a *Warnings* buffer the first frame shows.
-                    let warned = vm.eval_source(&format!(
-                        "(display-warning 'initialization (format-message \"An error occurred while loading your init file:\\n\\n%s\\n\\nTo ensure normal operation, you should investigate and remove the cause of the error in your initialization file.\" {}) :error)",
-                        startup::lisp_string(&error)));
+                    // a *Warnings* buffer the first frame shows, with the
+                    // backtrace a button away, and the launch screen's init
+                    // stage failed (lisp/session/romacs-init-load.el).
+                    let warned = vm.eval_source(&format!("(romacs-init-failed {})", startup::lisp_string(&error)));
                     if warned.is_err() { let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details"); }
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
@@ -1474,6 +1485,9 @@ fn evaluate(
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
+        // The startup Lisp a C-g could quit has run: one typed late waits
+        // for the first read.
+        if live { vm.leave_busy(); }
         // As GNU's command loop reports an error that ends `command-line-1';
         // else startup's own message is shown, as GNU's first redisplay
         // shows it before the command loop's first timer runs.
@@ -1482,7 +1496,8 @@ fn evaluate(
                 eprintln!("romacs: startup after init failed: {error}");
                 let _ = echo::show(&mut vm, &error);
             }
-            Ok(()) => echo::show_current_message(&mut vm)?,
+            // Not fatal: a quit typed late (`quit-flag') may end it.
+            Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1497,8 +1512,8 @@ fn evaluate(
             }
         }
         let face = vm.display_default_face()?;
-        if let Some((_, points)) = font {
-            eprintln!("romacs: font family={} points={} pixels={}", face.family, points, face.pixel_size);
+        if let Some(font) = font {
+            eprintln!("romacs: font family={} points={} pixels={}", face.family, font.points, face.pixel_size);
         } else {
             eprintln!("romacs: font family={} pixels={}", face.family, face.pixel_size);
         }

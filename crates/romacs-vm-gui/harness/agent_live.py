@@ -662,8 +662,11 @@ def unit(args, base):
 # check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
 # tool the endpoint offers that is missing here fails the tour.
 # Tools the tour leaves to their own workflows: a restart ends the tour's
-# server (`restart'); gnosis's tools need its fixture database (`gnosis').
-ELSEWHERE = ['romacs_restart_request', 'romacs_restart']
+# server (`restart'); gnosis's tools need its fixture database (`gnosis');
+# romacs_attach journals into a live chat (romacs-agent-attach-tests.el,
+# `mcp_tour'); romacs_dev_check checks a Romacs source tree
+# (romacs-mcp-dev-tests.el, `mcp_tour').
+ELSEWHERE = ['romacs_restart_request', 'romacs_restart', 'romacs_attach', 'romacs_dev_check']
 
 
 def tour(work, delegate_target):
@@ -683,10 +686,20 @@ def tour(work, delegate_target):
         ('romacs_call_outcome', {'id': 1}, lambda t: '"outcome"' in t),
         ('romacs_restart_status', {}, lambda t: '"state"' in t),
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
+        ('romacs_limits', {}, lambda t: '"harnesses"' in t),
+        ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
+        ('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'}, lambda t: '62' in t),
         ('romacs_delegate_task', {'task': delegate_target['task'], 'role': 'review', 'mode': 'wait',
                                   'target': delegate_target['target'], 'clientRequestId': 'tour-review'},
          lambda t: '"completed"' in t and 'APPROVE' in t),
         ('romacs_task_status', {'taskId': '<the taskId romacs_delegate_task returned>'}, lambda t: '"completed"' in t),
+        ('romacs_task_list', {}, lambda t: '"tasks"' in t),
+        ('romacs_task_watch', {'taskId': '<the same taskId>', 'file': 'tour.txt', 'stop': True}, lambda t: '"watching":[]' in t),
+        ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
+        ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
     ]
 
@@ -728,7 +741,7 @@ def tools(args, base):
         task_id = None
         for tool, arguments, _ in steps:
             if 'taskId' in arguments:
-                arguments = {'taskId': task_id}
+                arguments = {**arguments, 'taskId': task_id}
             # No instance: it is optional, and the tour shows each tool works without one.
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
@@ -1539,7 +1552,9 @@ def mcp_tour(args, base):
                 return text
 
             on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
-            for name in [n for n in names if n not in on_task + ('romacs_restart_request', 'romacs_restart')]:
+            # A restart would end the tour's server: the `restart' workflows call it.
+            elsewhere = ('romacs_restart',)
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',) + elsewhere]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
@@ -1560,7 +1575,8 @@ def mcp_tour(args, base):
                   'instructions': instructions, 'help': helped[:600],
                   'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
                   'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
-                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent
+                                 and n not in elsewhere]}
         result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
                         and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
                         and helped.startswith('core:') and 'agents:' in helped
@@ -1570,11 +1586,12 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project); romacs_attach and romacs_task_reply from a
-                        # caller that is no agent session (the tour's client).
+                        # tree is (the tour's project); romacs_attach, romacs_task_reply and
+                        # romacs_task_renew from a caller that is no agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
                                                                   'romacs_task_watch', 'romacs_dev_check',
-                                                                  'romacs_attach', 'romacs_task_reply')
+                                                                  'romacs_attach', 'romacs_task_reply',
+                                                                  'romacs_task_renew')
                                 for n in errors)
                         and task is not None)
         return result
@@ -2281,8 +2298,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
@@ -2364,7 +2381,7 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-c C-; a, RET): on a project, its
+    """The agent board by real keys (C-x C-a a, RET): on a project, its
     first row opens, the thread that wants the user most, else the newest
     (a delegated one folds under its parent) or, with no thread, its
     newest transcript; on "◇ N more", every transcript is shown and the
@@ -2411,7 +2428,7 @@ def board_keys(args, base):
             # host (seen: no command ran for it): keys must reach the frame,
             # then the board, before one is relied on.
             a.keyboard_ready()
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
+            a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
                 before = a.log().count('"native_command":"romacs-agent-board-next"')
@@ -2455,8 +2472,12 @@ def board_keys(args, base):
         steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
                                          a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
                                 ['t', 't', 'nil'])
-        # The newest thread forgotten after the board was drawn.
-        a.eval(f'(progn (remhash {lisp_text(sids[1])} romacs-agent--sessions) t)')
+        # The newest thread gone after the board was drawn: its records too
+        # (a session still recorded is listed from its row and loaded when asked).
+        a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
+               '(remhash id romacs-agent--sessions) '
+               '(when (fboundp (quote romacs-agent-store--open)) '
+               '(sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list id))) t)')
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
@@ -2862,7 +2883,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
