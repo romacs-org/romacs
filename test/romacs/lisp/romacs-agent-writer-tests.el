@@ -622,3 +622,32 @@ connection of its own, as the writer's process has."
       (romacs-agent--note session (romacs-mcp--object "type" "plan"))
       (should (zerop hosts))
       (should (zerop (romacs-agent-held-notes-count))))))
+
+(ert-deftest romacs-agent-writer-a-notes-host-is-not-the-session-s-connection ()
+  ;; A notes-only host writing a session's notes is its own connection:
+  ;; the session has no supervisor attached, and is resumed as one with
+  ;; none; its notes go through that host and its records let them go.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--note-hosts (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "n" :harness 'claude :dir temporary-file-directory :seq 2 :state 'ended))
+         (host (make-pipe-process :name "n" :noquery t)) (sent nil) (resumed nil))
+    (process-put host 'romacs-agent session)
+    (process-put host 'notes-only t)
+    (puthash "n" host romacs-agent--note-hosts)
+    (puthash "n" (list (romacs-mcp--object "type" "plan" "romacsNote" 1)) romacs-agent--held-notes)
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
+                  ((symbol-function 'romacs-agent--resume-now) (lambda (_) (setq resumed t))))
+          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
+          (should (string-search "\"plan\"" (car sent)))
+          (should-not (romacs-agent-connection session))
+          (should (eq (romacs-agent-state session) 'ended))
+          ;; A second note goes to it at once.
+          (romacs-agent--note session (romacs-mcp--object "type" "title"))
+          (should (string-search "\"title\"" (car sent)))
+          (romacs-agent-resume session)
+          (should resumed)
+          ;; Its records come back: let go.
+          (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "seq" 3 "note" (car (gethash "n" romacs-agent--held-notes)))) "\n"))
+          (should (= (romacs-agent-held-notes-count) 1)))
+      (delete-process host))))
