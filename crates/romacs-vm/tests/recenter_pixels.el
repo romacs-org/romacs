@@ -2,7 +2,7 @@
 ;; Answered by pinned GNU X11 (child_frames_oracle.py --probe), replayed by
 ;; tests/point_visibility.rs: each case recentres in a window redisplay has not
 ;; laid out in the current faces, then paints; a forced start there stands or
-;; scrolls as in a painted window.  Rows are a line tall: the two
+;; scrolls as in a painted window, and a whole screen scrolls from it.  Rows are a line tall: the two
 ;; engines' fonts differ in pixels, so taller rows are not compared here.  A
 ;; fresh window is split from the top one, starts at BEGV and has another
 ;; buffer above it: window management's own differences stay out
@@ -123,3 +123,11 @@
 (pv-step nil)
 (progn (rp-fresh) (rp-shrink 0.4) (goto-char (rp-line 30)) (rp-force (rp-line 20)))
 (pv-step nil)
+(progn (rp-fresh) (goto-char (point-max)) (rp-recenter -1))
+(pv-step '(scroll-up-command))
+(pv-step '(scroll-down-command scroll-down-command))
+(progn (rp-fresh) (goto-char (point-min)) (list (window-start) (point)))
+(pv-step '(scroll-down-command))
+(pv-step '(scroll-up-command scroll-up-command))
+(progn (rp-fresh) (goto-char (rp-line 40)) (list (window-start) (point)))
+(pv-step '(scroll-up-command))

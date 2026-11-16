@@ -735,7 +735,8 @@ pub(crate) enum Recentred {
     Unlaid,
 }
 
-/// GNU's `clip_to_bounds`: N within LOWER and UPPER, UPPER when they cross.
+/// GNU's `clip_to_bounds`: N within LOWER and UPPER; LOWER first when
+/// they cross.
 fn clip(lower: i64, n: i64, upper: i64) -> i64 {
     if n < lower { lower } else if n <= upper { n } else { upper }
 }

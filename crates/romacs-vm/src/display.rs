@@ -1778,8 +1778,8 @@ impl Vm {
     /// The rows WINDOW's buffer shows from the line starting at byte FROM
     /// through the end of byte TO's line, laid out as painting lays them
     /// out in a window as wide as WINDOW and tall enough for them all: each
-    /// row's buffer byte, height, and first shown byte. None as for
-    /// `window_layout'. The first row starts at FROM, and a row after a
+    /// row's buffer byte, height, and first shown byte. None with no layout
+    /// host. The first row starts at FROM, and a row after a
     /// buffer newline just after it, where GNU's motion by lines puts it,
     /// even where invisible text follows; its first shown byte is past that
     /// text, where motion by pixels puts it.
