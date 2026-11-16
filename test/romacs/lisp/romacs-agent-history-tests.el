@@ -56,6 +56,13 @@
                 (romacs-agent-history-list))
               (should (= asked 1))
               (should (= (length romacs-agent-history--listing) 1)))
+            ;; A session that goes on with it, kept as its row alone (quiet,
+            ;; or ended): not listed.
+            (let ((romacs-agent--sessions (make-hash-table :test #'equal)))
+              (should (romacs-agent-history-items))
+              (sqlite-execute (romacs-agent-store--open) "insert into sessions (id, dir, transcript) values ('row', '/r', ?)" (list path))
+              (should-not (romacs-agent-history-items))
+              (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = 'row'"))
             ;; Gone: its row too.
             (delete-file path)
             (should (= (romacs-agent-history-index) 0))
