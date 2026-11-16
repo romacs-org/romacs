@@ -184,4 +184,25 @@ records alone with RECORDS-ONLY, and the buffer."
           (should (string-prefix-p "> live one\nsaid live\n" (buffer-string)))))
       (kill-buffer buffer))))
 
+(ert-deftest romacs-agent-drawn-turn-from-its-events ()
+  ;; Drawn from its events, a turn reads as drawn from its row, and keeps
+  ;; a folded call's output as a pointer, not the output.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 2
+    (should (= (romacs-agent-turns-fill session) 2))
+    (let* ((row (car (plist-get (romacs-agent-turns-page session nil 1) :rows)))
+           (events (append (romacs-agent-ui--row-events session row) nil)))
+      ;; The events as a fill has them: the call's whole output.
+      (setq events (mapcar (lambda (event)
+                             (if (and (eq (plist-get event :type) 'tool) (plist-get event :output-ref))
+                                 (append (list :output romacs-agent-drawn-tests--long)
+                                         (cl-loop for (k v) on event by #'cddr unless (memq k '(:output-ref :output-bytes :output)) append (list k v)))
+                               event))
+                           events))
+      (let ((from-events (romacs-agent-ui-draw-turn session events))
+            (from-row (romacs-agent-ui-draw-turn session row)))
+        (should-not (string-search romacs-agent-drawn-tests--long from-events))
+        (should (string-search ":bytes 3000" from-events))
+        (should (equal (car (read-from-string from-events)) (car (read-from-string from-row))))))))
+
 ;;; romacs-agent-drawn-tests.el ends here

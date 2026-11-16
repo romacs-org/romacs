@@ -2681,9 +2681,26 @@ end: its text and properties as drawn, the composer after them."
       (push (copy-marker at) romacs-agent-ui--fills)
       (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))))
 
-(defun romacs-agent-ui-draw-turn (session row)
-  "SESSION's turn ROW (`romacs-agent-turns-page''s) drawn as its chat draws
-it, as a drawn form (`romacs-agent-drawn-form'): in a buffer of its own,
+(defun romacs-agent-ui--turn-events (session turn)
+  "TURN as the events a turn kept as drawn is drawn from: a turn row
+\(`romacs-agent-turns-page''s, :items) unfolded, or its events from its
+input to its end, a call whose row is drawn without its output keeping
+only a pointer to it (`romacs-agent-ui--later-p')."
+  (if (and (consp turn) (keywordp (car turn))) (romacs-agent-ui--row-events session turn)
+    (mapcar (lambda (event)
+              (if (and (eq (plist-get event :type) 'tool) (memq (plist-get event :state) '(completed failed))
+                       (plist-get event :output) (romacs-agent-ui--later-p (plist-get event :name)))
+                  (let ((event (copy-sequence event)))
+                    (setq event (plist-put event :output-bytes (string-bytes (plist-get event :output))))
+                    (setq event (plist-put event :output-ref (list :session session :id (plist-get event :id) :row t)))
+                    (plist-put event :output nil))
+                event))
+            turn)))
+
+(defun romacs-agent-ui-draw-turn (session turn)
+  "SESSION's TURN drawn as its chat draws it, as a drawn form
+\(`romacs-agent-drawn-form'): TURN a turn row or its events
+\(`romacs-agent-ui--turn-events'), drawn in a buffer of its own,
 SESSION's chat untouched and no record read, for a worker that writes
 turn rows to keep with them (`romacs-agent-drawn-put')."
   (let ((scratch (romacs-agent--scratch session))
@@ -2696,7 +2713,7 @@ turn rows to keep with them (`romacs-agent-drawn-put')."
           (romacs-agent-ui--reset)
           (setq romacs-agent-ui--end (point-marker))
           (let ((romacs-agent-ui--replaying t))
-            (dolist (event (romacs-agent-ui--row-events scratch row))
+            (dolist (event (romacs-agent-ui--turn-events scratch turn))
               (romacs-agent-ui--editing (romacs-agent-ui--draw scratch event buffer))))
           (romacs-agent-drawn-form (point-min) romacs-agent-ui--end))
       (kill-buffer buffer))))
