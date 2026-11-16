@@ -144,8 +144,6 @@ much of it its deltas wrote.")
 (defvar-local romacs-agent-ui--history nil)
 (defvar-local romacs-agent-ui--composer nil
   "The overlay at the composer's start: the live rule and the empty hint.")
-(defvar-local romacs-agent-ui--fills nil
-  "A marker at the start of each turn rule's fill, as they are drawn.")
 (defvar-local romacs-agent-ui--fitted nil
   "The width the rules' fills last fitted.")
 (defvar-local romacs-agent-ui--staying nil
@@ -294,10 +292,8 @@ start is always taken after its own text is in."
           (insert-before-markers text)
           (dolist (window windows) (set-window-start window start t))
           (dolist (marker staying) (set-marker marker start))))
-      ;; A rule's fill, remembered: a resize refits the rules alone.
-      (when-let* ((offset (text-property-any 0 (length text) 'romacs-agent-rule-fill t text)))
-        (push (copy-marker (+ start offset)) romacs-agent-ui--fills)
-        ;; Drawn at the width of its day: the next refit visits every rule.
+      ;; A rule drawn at the width of its day: the next refit visits them.
+      (when (text-property-any 0 (length text) 'romacs-agent-rule-fill t text)
         (setq romacs-agent-ui--fitted nil)))))
 
 (defun romacs-agent-ui--insert (text &rest properties)
@@ -1223,7 +1219,7 @@ yet paint a face's strike-through on a stretch glyph."
 
 (defun romacs-agent-ui--refit-rules (&rest _)
   "The window's width changed: each turn's rule fills it again.  Only the
-rules are visited (their fills' markers), never the transcript, and a fill
+rules are visited (their fills, `romacs-agent-ui--rule-fills'), and a fill
 already that wide is left alone."
   (when (and (derived-mode-p 'romacs-agent-chat-mode) (markerp romacs-agent-ui--end))
     (let ((width (romacs-agent-ui--rule-width)))
@@ -1232,9 +1228,10 @@ already that wide is left alone."
         (romacs-agent-ui--editing
           (let ((inhibit-read-only t))
           (save-excursion
-            (dolist (marker romacs-agent-ui--fills)
-              (let* ((start (marker-position marker))
-                     (end (next-single-property-change start 'romacs-agent-rule-fill nil (point-max)))
+            ;; The last first: a fill made longer or shorter moves none
+            ;; still to come.
+            (dolist (start (reverse (romacs-agent-ui--rule-fills)))
+              (let* ((end (next-single-property-change start 'romacs-agent-rule-fill nil (point-max)))
                      (fill (progn (goto-char start)
                                   (max 1 (- width (string-width (buffer-substring (line-beginning-position) start)))))))
                 ;; Its tail alone changes: the first character, where its
@@ -1249,6 +1246,15 @@ already that wide is left alone."
                        (delete-region (+ start fill) end)))))
             (romacs-agent-ui--refit-tables))))
         (romacs-agent-ui--composer-update)))))
+
+(defun romacs-agent-ui--rule-fills ()
+  "Where each rule's fill starts in the current chat's transcript, in
+order: found by its text (`romacs-agent-rule-fill'), not remembered."
+  (let ((starts nil) (at (point-min)) (end (marker-position romacs-agent-ui--end)))
+    (while (setq at (text-property-any at end 'romacs-agent-rule-fill t))
+      (push at starts)
+      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))
+    (nreverse starts)))
 
 (defun romacs-agent-ui--render (session event)
   "Show SESSION's EVENT in its chat buffer, when it has one and has not
@@ -2222,7 +2228,7 @@ as far back as they go, past the bound a first show keeps to.")
 (defconst romacs-agent-ui--drawn-state
   '(romacs-agent-ui--run romacs-agent-ui--runs
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
-    romacs-agent-ui--fills romacs-agent-ui--fitted romacs-agent-ui--asked-rows)
+    romacs-agent-ui--fitted romacs-agent-ui--asked-rows)
   "A chat's variables that describe its transcript as drawn, besides its
 tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
 
@@ -2333,11 +2339,7 @@ the row at the start draws them again."
        (let ((table romacs-agent-ui--tasks))
          (maphash (lambda (id marker) (when (= marker (point-min)) (set-marker marker nil) (remhash id table)))
                   (copy-hash-table table)))
-       (setq romacs-agent-ui--fills
-             (seq-filter (lambda (marker)
-                           (or (> marker (point-min)) (progn (set-marker marker nil) nil)))
-                         romacs-agent-ui--fills)
-             romacs-agent-ui--asked-rows
+       (setq romacs-agent-ui--asked-rows
              (seq-filter (lambda (row)
                            (or (> (cdr row) (point-min)) (progn (set-marker (cdr row) nil) nil)))
                          romacs-agent-ui--asked-rows))
@@ -2373,7 +2375,6 @@ composer as it is."
   (romacs-agent-ui--unrecorded
    (lambda ()
      (let ((inhibit-read-only t)) (delete-region (point-min) romacs-agent-ui--end))
-     (dolist (marker romacs-agent-ui--fills) (set-marker marker nil))
      (romacs-agent-ui--reset)
      (setq romacs-agent-ui--unfilled t)
      (romacs-agent-ui--fill (current-buffer)))))
@@ -2565,8 +2566,7 @@ shows a row waiting for one, it shows the turn.  An edit to no undo."
                        (length (- (prop-match-end found) (prop-match-beginning found))))
                    (goto-char start)
                    (romacs-agent-drawn-insert (cdr kept))
-                   (delete-region (point) (+ (point) length))
-                   (romacs-agent-ui--note-fills start (point)))))
+                   (delete-region (point) (+ (point) length)))))
              (romacs-agent-ui--fit-inserted))))))))
 
 (defun romacs-agent-ui--drawn-form (start end)
@@ -2683,18 +2683,8 @@ Pure: it reads no record."
 end: its text and properties as drawn, the composer after them."
   (save-excursion
     (goto-char romacs-agent-ui--end)
-    (let ((start (point)) (inhibit-read-only t))
-      (romacs-agent-drawn-insert form t)
-      (romacs-agent-ui--note-fills start (point)))))
-
-(defun romacs-agent-ui--note-fills (start end)
-  "The rules between START and END fit the window as the others do
-\(`romacs-agent-ui--refit-rules'), once the turns inserted with them are
-in (`romacs-agent-ui--fit-inserted')."
-  (let ((at start))
-    (while (setq at (text-property-any at end 'romacs-agent-rule-fill t))
-      (push (copy-marker at) romacs-agent-ui--fills)
-      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))))
+    (let ((inhibit-read-only t))
+      (romacs-agent-drawn-insert form t))))
 
 (defun romacs-agent-ui--fit-inserted ()
   "Fit the current chat's rules to its window once, turns drawn elsewhere

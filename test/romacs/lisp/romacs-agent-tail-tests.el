@@ -186,8 +186,7 @@ result."
              (should (string-prefix-p "▴ Earlier turns" (buffer-string)))
              (should (string-search "answer 5" (buffer-string)))
              ;; Its rules' fills are all in the buffer: a resize refits them.
-             (should romacs-agent-ui--fills)
-             (should (seq-every-p #'marker-position romacs-agent-ui--fills))
+             (should (romacs-agent-ui--rule-fills))
              (romacs-agent-ui--refit-rules)
              ;; Point among the oldest: they stay.
              (dolist (n '(6 7)) (funcall turn n))
