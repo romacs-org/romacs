@@ -424,6 +424,40 @@ turns, and its journal's file; a state root of its own."
                (should (romacs-agent-events-import session)))
              (should (= (events) before)))))))))
 
+(ert-deftest romacs-agent-events-a-session-loading-here-is-not-moved-under-it ()
+  ;; Loading in the editor, held before its places are found: a worker that
+  ;; tries to move it between the kept state's place and the replay is
+  ;; refused, and the load reads its whole journal.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-main-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     3
+     (lambda (session _journal)
+       (let* ((id (romacs-agent-id session)) (dir (romacs-agent-dir session))
+              (seqs (romacs-agent-events-tests--seqs session))
+              (restore (symbol-function 'romacs-agent--restore-kept))
+              (pid (symbol-function 'emacs-pid))
+              (worker :none))
+         (remhash id romacs-agent--sessions)
+         (let ((noninteractive nil))
+           (cl-letf (((symbol-function 'isolate-main-p) (lambda () t))
+                     ((symbol-function 'romacs-agent--restore-kept)
+                      (lambda (&rest args)
+                        (prog1 (apply restore args)
+                          ;; A worker, another process, tries to move it now.
+                          (setq worker
+                                (cl-letf (((symbol-function 'emacs-pid) (lambda () 1)))
+                                  (romacs-agent-events-import
+                                   (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir)))
+                                   t)))))))
+             (romacs-agent--load dir)))
+         (should-not worker)
+         (should-not (romacs-agent-events-p (romacs-agent-get id)))
+         (should (equal (romacs-agent-events-tests--seqs (romacs-agent-get id)) seqs))
+         (should (eql (caar (sqlite-select (romacs-agent-events--db) "select pid from moving where session = ?" (list id)))
+                      (funcall pid))))))))
+
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
   ;; Its supervisor's socket there when compacting holds the write lock:
   ;; nothing is removed.

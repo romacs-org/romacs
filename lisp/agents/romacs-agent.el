@@ -3885,6 +3885,9 @@ once, and loads on once its kept state is written."
       (let ((session (romacs-agent--of-manifest dir manifest)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
         (romacs-agent--index session)
+        ;; Held here before any place in its records is found: a worker
+        ;; moving it to SQLite meanwhile does not finish (romacs-agent-events).
+        (run-hook-with-args 'romacs-agent-loading-functions session)
         ;; Its kept state back, its journal is read on from there: by its
         ;; supervisor's replay from that record, or here.
         (let ((from (romacs-agent--restore-kept session (and (romacs-agent--fold-aside-p session 0)
@@ -4109,6 +4112,9 @@ come before.  What the worker answers later is let go."
 ;;;###autoload
 (defvar romacs-agent-restored-hook nil
   "Run after `romacs-agent-restore' has loaded every recorded session.")
+
+(defvar romacs-agent-loading-functions nil
+  "Called with a session as it is loaded, before its records are read.")
 
 (defvar romacs-agent-loaded-functions nil
   "Functions called with each session a server loads and its manifest (a

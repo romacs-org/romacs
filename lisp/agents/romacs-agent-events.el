@@ -309,11 +309,13 @@ it is this process's to move, no other live process holding it."
         free)
     (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
 
-(defun romacs-agent-events--hold (session &rest _)
-  "Mark SESSION, loaded in this editor and still in its journal, this
-editor's in `moving': a worker neither claims it nor finishes a move it
-began, so its records never switch from journal to SQLite under a
-reader here.  It moves at a start that leaves it unloaded."
+(defun romacs-agent-events--hold (session)
+  "Mark SESSION, being loaded in this editor and still in its journal,
+this editor's in `moving', before any place in its records is found: a
+worker neither claims it nor finishes a move it began, so its records
+never switch from journal to SQLite under a reader here.  A worker that
+committed first left it imported, and its places are SQLite's from the
+start.  It moves at a start that leaves it unloaded."
   (when (and romacs-agent-events-store (not noninteractive) (fboundp 'isolate-main-p) (isolate-main-p)
              (romacs-agent-dir session) (not (romacs-agent-events-p session)))
     (when-let* ((db (romacs-agent-events--db)))
@@ -321,7 +323,7 @@ reader here.  It moves at a start that leaves it unloaded."
         (romacs-agent-events--write db "insert or replace into moving values (?, ?, ?)"
                                     (list (list (romacs-agent-id session) (emacs-pid) (float-time))))))))
 
-(add-hook 'romacs-agent-loaded-functions #'romacs-agent-events--hold)
+(add-hook 'romacs-agent-loading-functions #'romacs-agent-events--hold)
 
 (defun romacs-agent-events--release (db id)
   "Let go of this process's claim on session ID."
