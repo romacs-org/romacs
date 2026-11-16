@@ -49,7 +49,7 @@ conversation is in `one'; `told' collects what a task is told."
        (put (format "session-env/%s/env" romacs-agent-instance-tests--id) "X=1"))
      (puthash (romacs-agent-id session) session romacs-agent--sessions)
      (romacs-agent--manifest session nil)
-     (cl-letf (((symbol-function 'romacs-agent-tools--tell) (lambda (task text) (push (cons task text) told) task))
+     (cl-letf (((symbol-function 'romacs-agent-tools--tell) (lambda (task text &rest _) (push (cons task text) told) task))
                ((symbol-function 'run-at-time) #'ignore))
        (unwind-protect (progn ,@body) (delete-directory root t)))))
 

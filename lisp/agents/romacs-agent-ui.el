@@ -428,7 +428,7 @@ it, `romacs-agent-rows-texts'), else what its renderer draws
 session is known and still goes on.  A turn ended is not the task done:
 work it left running, such as a command in the background, keeps it
 waiting on its workers."
-  (let ((key (and-let* ((session (romacs-agent-get id))) (romacs-agent-ui--state-key session))))
+  (let ((key (and-let* ((session (romacs-agent-loaded id))) (romacs-agent-ui--state-key session))))
     (if (memq key romacs-agent-ui--live-keys) key (romacs-agent-ui--status-key word))))
 
 (defun romacs-agent-ui--chip (id word)
@@ -1029,7 +1029,7 @@ the sender's thread and the reply hint where it can be answered, then
 its text."
   (let* ((from (plist-get message :from))
          (sender (plist-get from :session))
-         (known (and sender (romacs-agent-get sender)))
+         (known (and sender (romacs-agent-loaded sender)))
          (name (romacs-agent-ui--sender-name from))
          (answerable (or sender (plist-get from :address)))
          (id (plist-get message :id)))
@@ -1048,7 +1048,7 @@ its text."
 (defun romacs-agent-ui--sender-name (from)
   "The sender FROM names, a message's: its session's title now when it is
 known, else the name it sent."
-  (or (and-let* ((sender (plist-get from :session)) (known (romacs-agent-get sender))) (romacs-agent-title known))
+  (or (and-let* ((sender (plist-get from :session)) (known (romacs-agent-loaded sender))) (romacs-agent-title known))
       (plist-get from :name) "another session"))
 
 (defun romacs-agent-ui--message-wake (message)
@@ -1469,7 +1469,7 @@ and the parent of one whose state that changed, in the next batch."
   (dolist (session sessions)
     (romacs-agent-ui--summarize-children session)
     (when-let* (((romacs-agent-ui--announce session))
-                (parent (romacs-agent-get (plist-get (romacs-agent-options session) :parent))))
+                (parent (romacs-agent-loaded (plist-get (romacs-agent-options session) :parent))))
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--header-refresh session)
     (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
@@ -1600,7 +1600,7 @@ decided once per event."
       ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil (eq type 'exit) (plist-get event :time))))
     (when moved
       (when-let* ((parent (plist-get (romacs-agent-options session) :parent))
-                  (known (romacs-agent-get parent)))
+                  (known (romacs-agent-loaded parent)))
         (romacs-agent-ui--children-changed known)))
     moved))
 
@@ -2353,7 +2353,7 @@ composer as it is."
     (recenter -1)
     (romacs-agent-mark-seen session)
     ;; Its parent's failed count may have just lost it, and the status bar its news.
-    (when-let* ((parent (romacs-agent-get (plist-get (romacs-agent-options session) :parent))))
+    (when-let* ((parent (romacs-agent-loaded (plist-get (romacs-agent-options session) :parent))))
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--batch)
     (when (memq (romacs-agent-state session) '(starting running waiting-approval)) (romacs-agent-ui--tick-start))
@@ -2746,7 +2746,8 @@ strings, compared by value."
          (at (if (get-text-property start 'romacs-agent-task) start
                (next-single-property-change start 'romacs-agent-task nil (line-end-position))))
          (id (get-text-property at 'romacs-agent-task))
-         (session (and id (romacs-agent-get id))))
+         ;; A task only listed (its row) is loaded as it opens.
+         (session (and id (romacs-agent-load-session id))))
     (cond (session (romacs-agent-show session))
           (id (user-error "Task %s is gone" id))
           (t (user-error "No delegated task on this row")))))

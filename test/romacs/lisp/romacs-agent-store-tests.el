@@ -87,6 +87,11 @@ journal one turn long."
           (journals nil))
       (record old "old")
       (record live "live" t)
+      ;; OLD a task delegated by "parent" with client request "request-1".
+      (let* ((file (expand-file-name (concat old "/manifest.json") root))
+             (manifest (romacs-agent--read-json file)))
+        (puthash "options" (romacs-mcp--object "parent" "parent" "request" "request-1") manifest)
+        (romacs-agent--write-json file manifest))
       (romacs-agent-store-fill)
       ;; Its supervisor at work on a turn.
       (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
@@ -98,15 +103,35 @@ journal one turn long."
                  ((symbol-function 'romacs-agent--sweep) #'ignore)
                  ((symbol-function 'romacs-agent-store-fill-soon) #'ignore))
         (romacs-agent-restore)
-        (should-not (romacs-agent-get old))
+        (should-not (romacs-agent-loaded old))
         (should (romacs-agent-get live))
         (should-not (member old journals))
         (let ((shown (mapcar #'romacs-agent-id (romacs-agent-board--sessions))))
           (should (member old shown))
           (should (member live shown)))
-        (let ((found (romacs-agent-find old)))
+        (let ((found (romacs-agent-get old)))
           (should (equal (romacs-agent-title found) "old"))
-          (should (eq (romacs-agent-get old) found)))))))
+          (should (eq (romacs-agent-get old) found)))
+        ;; A delegation asked again after a start, its task left a row and
+        ;; indexed nowhere: found by its row, loaded.
+        (remhash old romacs-agent--sessions)
+        (let ((romacs-agent--requests (make-hash-table :test #'equal)))
+          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old"))
+          (should-not (romacs-agent-requested "parent" "request-2"))
+          ;; Asked for before its row lands (a fill still running): by its
+          ;; manifest.  And one no session delegated: its NULL parent matched.
+          (remhash old romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
+          (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list old))
+          (let ((romacs-agent-store--filling (make-process :name "fill" :command '("sleep" "30") :noquery t)))
+            (unwind-protect
+                (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old"))
+              (delete-process romacs-agent-store--filling)))
+          (remhash old romacs-agent--sessions)
+          (sqlite-execute (romacs-agent-store--open) "update sessions set parent = null, request = 'request-9' where id = ?" (list live))
+          (remhash live romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
+          (should (equal (romacs-agent-id (romacs-agent-requested nil "request-9")) live)))))))
 
 ;; Restored a turn at a time from the command loop: the same.
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded-in-steps ()
@@ -128,7 +153,7 @@ journal one turn long."
                 ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
         (romacs-agent-restore-soon)
         (should-not romacs-agent--restoring)
-        (should-not (romacs-agent-get old))
+        (should-not (romacs-agent-loaded old))
         (should (romacs-agent-get live))))))
 
 ;; A first start, no rows yet: their fill runs aside, only the live
@@ -158,7 +183,7 @@ journal one turn long."
             (progn
               (romacs-agent-restore-soon)
               (should (> fills 0))
-              (should-not (romacs-agent-get old))
+              (should-not (romacs-agent-loaded old))
               (should (romacs-agent-get live)))
           (delete-process romacs-agent-store--filling))
         ;; Filled, or no start restoring: loaded as it is.
@@ -169,7 +194,7 @@ journal one turn long."
         (should (= fills 0))
         ;; The restore over, a fill that ends without its row: loaded then.
         (setq romacs-agent-store--filled t)
-        (should-not (romacs-agent-get old))
+        (should-not (romacs-agent-loaded old))
         (romacs-agent-store--load-missing)
         (should (romacs-agent-get old))
         (should-not romacs-agent--restore-pending)))))
@@ -213,12 +238,12 @@ journal one turn long."
                       ((symbol-function 'romacs-agent--sweep) #'ignore)
                       ((symbol-function 'romacs-agent-store-fill-soon) #'ignore))
               (romacs-agent-restore)
-              (should-not (romacs-agent-get (id 'quiet)))
-              (should-not (romacs-agent-get (id 'ending)))
-              (dolist (name '(busy wanting behind journal)) (should (romacs-agent-get (id name))))
+              (should-not (romacs-agent-loaded (id 'quiet)))
+              (should-not (romacs-agent-loaded (id 'ending)))
+              (dolist (name '(busy wanting behind journal)) (should (romacs-agent-loaded (id name))))
               ;; Nothing written: still rows.
               (romacs-agent--quiet-tick)
-              (should-not (romacs-agent-get (id 'quiet)))
+              (should-not (romacs-agent-loaded (id 'quiet)))
               ;; Its supervisor writes: loaded, attached.  The other's writes
               ;; and ends: loaded all the same.
               (append 'quiet 3)

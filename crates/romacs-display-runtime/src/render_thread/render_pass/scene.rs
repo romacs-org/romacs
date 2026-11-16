@@ -91,8 +91,10 @@ pub(super) fn render_frame_root_glyphs(
 /// alone. Not under a background GRADIENT, a pointer's highlight (a POINTER selection, a
 /// HOVERED scroll bar), idle dimming, an enabled body effect or one still
 /// running, a box border that animates, or with media glyphs, whose textures
-/// change under the frame; nor on a translucent frame, nor under
-/// `ROMACS_DISABLE_RETAINED_ROOT`.
+/// change under the frame; nor under `ROMACS_DISABLE_RETAINED_ROOT`.  A
+/// translucent frame is pictured too: through the picture it holds the same
+/// pixels, alpha and all, as its whole pass draws (root_picture_test,
+/// translucent).
 fn pictured(
     renderer: &WgpuRenderer,
     render: &GuiFrameRenderState,
@@ -120,7 +122,6 @@ fn pictured(
         && super::retained_static::static_body_effects(&renderer.effects)
         && frame.cursor_effects_by_window.values().all(super::retained_static::static_body_effects)
         && !render.compositor.renderer_effects.needs_redraw()
-        && frame.background_alpha >= 1.0
         && !frame.faces.values().any(|face| face.box_corner_radius > 0 && face.box_border_style.is_fancy())
         && frame.glyphs.iter().all(plain)
         && std::env::var_os("ROMACS_DISABLE_RETAINED_ROOT").is_none()

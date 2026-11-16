@@ -2206,6 +2206,23 @@ impl PresentedPointerMap {
         Ok(())
     }
 
+    /// The frame's glyphs were compacted, glyph I now at NEW_INDEX[I] or
+    /// gone: each paint span keeps those of its glyphs that stayed, which
+    /// stay contiguous, and a span left with none goes.
+    pub(crate) fn remap_glyphs(&mut self, new_index: &[Option<u32>]) {
+        for appearance in &mut self.appearances {
+            appearance.paint_spans.retain_mut(|span| {
+                let first = span.first as usize;
+                let end = first.saturating_add(span.len as usize);
+                let mut kept = new_index.get(first..end).unwrap_or(&[]).iter().flatten();
+                let Some(&start) = kept.next() else { return false };
+                span.first = start;
+                span.len = 1 + u32::try_from(kept.count()).unwrap_or(u32::MAX - 1);
+                true
+            });
+        }
+    }
+
     pub(crate) fn rebuild_damage_bounds(&mut self) {
         for appearance in &mut self.appearances {
             appearance.rebuild_damage_bounds();

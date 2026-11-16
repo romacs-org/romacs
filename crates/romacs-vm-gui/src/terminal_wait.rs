@@ -58,12 +58,16 @@ pub fn wait(input: &Receiver<InputEvent>, terminal: &Receiver<()>, timeout: Opti
     let _watch = if processes.is_empty() { None } else {
         romacs_vm::ProcessWatch::start(processes.to_vec(), move || { let _ = signal.try_send(()); }).ok()
     };
-    crossbeam_channel::select_biased! {
+    // The evaluator's span of work ends while it waits (watchdog.rs).
+    crate::watchdog::waiting();
+    let wake = crossbeam_channel::select_biased! {
         recv(input) -> event => event.map(Wake::Input).unwrap_or(Wake::Closed),
         recv(terminal) -> event => if event.is_ok() { Wake::Terminal } else { Wake::Closed },
         recv(process) -> _ => Wake::Process,
         recv(deadline) -> _ => Wake::Timeout,
-    }
+    };
+    crate::watchdog::working();
+    wake
 }
 
 #[cfg(test)]

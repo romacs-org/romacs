@@ -295,23 +295,15 @@ impl Leaf<'_> {
     /// inserted at point of the current multibyte buffer, byte for byte.
     pub fn fileio_copy_string_properties(&mut self, string: Value) -> std::result::Result<(), Fault> {
         let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(string) else { return Ok(()) };
-        let map = s.properties.to_map();
-        if map.is_empty() { return Ok(()) }
+        if s.properties.is_empty() { return Ok(()) }
+        let runs = s.properties.runs(ByteOffset(0)..ByteOffset(s.bytes().len()));
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { return Ok(()) };
         let at = t.point.0;
-        // to_map gives each byte's properties; put them back as runs.
-        let mut runs: Vec<(usize, usize, &crate::properties::Values)> = vec![];
-        for (offset, values) in &map {
-            match runs.last_mut() {
-                Some((_, end, run)) if *end == offset.0 && *run == values => *end += 1,
-                _ => runs.push((offset.0, offset.0 + 1, values)),
-            }
-        }
-        for (start, end, values) in runs {
+        for (range, values) in runs {
             // The newest is written last, to stay first.
-            for (key, value) in values.iter().rev() {
-                t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), *key, *value);
+            for (key, value) in values.into_iter().rev() {
+                t.properties.put(ByteOffset(at + range.start.0)..ByteOffset(at + range.end.0), key, value);
             }
         }
         Ok(())

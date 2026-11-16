@@ -246,7 +246,7 @@ else none.  The turn failing, or its harness ending, gives none."
                                                (if (and note (not (string-empty-p note))) "note" "selection"))))))))
         (add-hook 'romacs-agent-event-functions waiter)
         (condition-case nil
-            (romacs-agent--input session romacs-agent-renew--note-prompt nil "renew-note")
+            (romacs-agent--input session romacs-agent-renew--note-prompt nil nil "renew-note")
           (error (remove-hook 'romacs-agent-event-functions waiter)
                  (funcall then nil "selection"))))))))
 
@@ -293,7 +293,7 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
 
 (defun romacs-agent-renew--unfinished (session)
   "Finish SESSION's renewal if one is journaled that no run followed."
-  (when (and (romacs-agent-renewing session) (eq (romacs-agent-get (romacs-agent-id session)) session))
+  (when (and (romacs-agent-renewing session) (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (condition-case err (romacs-agent-renew--finish session (romacs-agent-harness-session session))
       (error (romacs-agent--raise session (list :type 'error :text (format "Renewal not finished: %s"
                                                                            (error-message-string err))))))))
