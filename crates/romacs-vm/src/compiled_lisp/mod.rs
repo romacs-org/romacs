@@ -368,6 +368,29 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         modified(compiled) >= host::metadata(path).ok().and_then(modified)
     }
 
+    /// `load-path` as this session searches it now, every entry absolute:
+    /// nil and relative entries against `default-directory`, `~' against
+    /// this session's home. A compile runs in the store's home and
+    /// directory, so it must get the directories this session would
+    /// search, and an artifact's inputs are checked against the same names.
+    pub(crate) fn absolute_load_path(&mut self) -> Result<Vec<String>> {
+        let directory = self.slot("default-directory");
+        let directory = self.variable_value(directory)?;
+        let slot = self.slot("load-path");
+        let entries = self.variable_value(slot)?;
+        let mut absolute = Vec::new();
+        for entry in self.list_values(entries)? {
+            let name = if entry == Value::NIL { directory } else { entry };
+            // A name only a file name handler expands is kept as written.
+            let expanded = self.expand_file_name_legacy(name, directory).unwrap_or_else(|_| {
+                self.propagated_escape = None;
+                name
+            });
+            absolute.push(self.source_string(expanded)?.to_owned());
+        }
+        Ok(absolute)
+    }
+
     /// The compiled load of the source file PATH (resolved), when this
     /// load is one: a stored artifact whose inputs hold, else one compiled
     /// now. None loads PATH as source: no store, a compile refused,
@@ -382,7 +405,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         if configured.chain.lines().any(|file| Path::new(file) == path) {
             return Ok(None);
         }
-        let load_path = self.load_path_strings()?;
+        let load_path = self.absolute_load_path()?;
         let Ok(found) = self.stored(configured, path, &load_path) else { return Ok(None) };
         let (artifact, data) = match found {
             Some(found) => found,
@@ -461,7 +484,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let config = &configured.config;
         let identity = configured.identity().ok_or("no compile world")?;
         let source = host::canonicalize(source).map_err(|e| format!("{}: {e}", source.display()))?;
-        let load_path = self.load_path_strings()?;
+        let load_path = self.absolute_load_path()?;
         if let Ok(Some((held, _))) = self.stored(configured, &source, &load_path) {
             return Ok((held, true));
         }
