@@ -88,16 +88,47 @@ fn copy_keymap(cx, keymap: Value) { cx.copy_keymap(keymap, 0) }}
 // FIXED values of the caller's, then each (item . result) the filters gave:
 // each result joins SAVED and the walk restarts, so the pairs stay rooted
 // across the call.  Err is the call to make, THEN its continuation.
+// GNU's walk is one pass, so a filter that changes the keymaps it walks
+// (`set-transient-map' pushes onto the composed map in place) cannot change
+// which binding wins: before the first filter runs, KEYMAP's spines are
+// copied and the restarts walk the copy.
 pub(super) fn walk(cx: &mut Leaf<'_>, saved: &[Value], fixed: usize, then: crate::prim::Then) -> std::result::Result<std::result::Result<Value, Step>, Fault> {
     let filters = saved[3 + fixed..].chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
     match cx.lookup_key_walk(saved[0], saved[1], saved[2] != Value::NIL, filters)? {
         Ok(binding) => Ok(Ok(binding)),
         Err((item, filter, object)) => {
             let mut saved = saved.to_vec();
+            if saved.len() == 3 + fixed { saved[0] = keymap_spines(cx, saved[0]); }
             saved.push(item);
             Ok(Err(filter_call(cx, filter, object, then, saved)))
         }
     }
+}
+// MAPS, a keymap or a list of keymaps, with each keymap's list (its
+// parent's included) and the list itself copied; bindings, prefix maps and
+// a keymap named by a symbol are shared.
+fn keymap_spines(cx: &mut Leaf<'_>, maps: Value) -> Value {
+    let keymap = cx.intern("keymap");
+    if cx.pair(maps).is_some_and(|(head, _)| head == keymap) { return copy_spine(cx, maps); }
+    let mut elements = Vec::new();
+    let mut tail = maps;
+    while let Some((map, rest)) = cx.pair(tail) {
+        if elements.len() > cx.list_limit() { return maps; }
+        elements.push(if cx.pair(map).is_some_and(|(head, _)| head == keymap) { copy_spine(cx, map) } else { map });
+        tail = rest;
+    }
+    elements.into_iter().rev().fold(tail, |list, map| cx.cons(map, list))
+}
+// LIST's conses copied, its final cdr kept; a circular LIST as it is.
+fn copy_spine(cx: &mut Leaf<'_>, list: Value) -> Value {
+    let mut elements = Vec::new();
+    let mut tail = list;
+    while let Some((element, rest)) = cx.pair(tail) {
+        if elements.len() > cx.list_limit() { return list; }
+        elements.push(element);
+        tail = rest;
+    }
+    elements.into_iter().rev().fold(tail, |copy, element| cx.cons(element, copy))
 }
 // The call that applies a menu item's FILTER to OBJECT, as get_keyelt does
 // (menu_item_eval_property: an error gives nil), through the prelude's
