@@ -808,13 +808,18 @@ def reap(args, base):
         third = runs()[-1]
         a.idle(child, 60)
         replies = a.results(child) if a.journal(child) else None
+        # Each resumed harness took its message: the task_send's (wrapped as
+        # one from another session) and the tell's.
+        inputs = [json.dumps(r['in']) for r in a.journal(child) if 'in' in r]
+        received = [any(word in i for i in inputs) for word in ('say second', 'say third')]
         parent_alive = a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(parent)})) (not (romacs-agent-stopped {a.s(parent)})))') == 't'
         resumed = [r['argv'][r['argv'].index('--resume') + 1] if '--resume' in r['argv'] else None for r in (second, third)]
         result = {'reaped': reaped, 'first_argv_session': first['argv'][first['argv'].index('--session-id') + 1]
                   if '--session-id' in first['argv'] else None,
-                  'resumed_on': resumed, 'parent_alive': parent_alive, 'replies': replies}
+                  'resumed_on': resumed, 'parent_alive': parent_alive, 'received': received, 'replies': replies}
         result['ok'] = (reaped == {'state': 'idle', 'status': 'completed', 'board': 'idle'}
-                        and resumed == [child, child] and first.get('started') == child and parent_alive)
+                        and resumed == [child, child] and first.get('started') == child and parent_alive
+                        and received == [True, True] and replies is not None and len(replies) == 3 and replies[2] == 'third')
         return result
     finally:
         a.close()
