@@ -119,6 +119,7 @@ journal one turn long."
           ;; Asked for before its row lands (a fill still running): by its
           ;; manifest.  And one no session delegated: its NULL parent matched.
           (remhash old romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
           (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list old))
           (let ((romacs-agent-store--filling (make-process :name "fill" :command '("sleep" "30") :noquery t)))
             (unwind-protect
@@ -127,6 +128,7 @@ journal one turn long."
           (remhash old romacs-agent--sessions)
           (sqlite-execute (romacs-agent-store--open) "update sessions set parent = null, request = 'request-9' where id = ?" (list live))
           (remhash live romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
           (should (equal (romacs-agent-id (romacs-agent-requested nil "request-9")) live)))))))
 
 ;; Restored a turn at a time from the command loop: the same.
