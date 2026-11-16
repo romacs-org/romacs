@@ -205,6 +205,14 @@ class Toolchain(unittest.TestCase):
                 else:
                     os.environ[name] = value
 
+    def test_the_tests_see_no_running_editors_launch_variables(self):
+        # A check started from inside Romacs: the session's source
+        # directory steered source-directory in the VM's tests.
+        env = check.test_environment('/scratch', {'PATH': '/usr/bin', 'ROMACS_SOURCE_DIRECTORY': '/elsewhere',
+                                                  'ROMACS_RUNTIME_ROOT': '/build', 'WAYLAND_DISPLAY': 'wayland-1',
+                                                  'ROMACS_TOOLCHAIN_BIN': '/rust'})
+        self.assertEqual(env, {'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': '/rust', 'TMPDIR': '/scratch'})
+
     def test_neither_way_is_no_toolchain(self):
         self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin'}))
         # cargo without nextest runs no test.
