@@ -25,7 +25,8 @@
 #
 # Environment (all optional):
 #   ROMACS_GUI_FONT / ROMACS_GUI_FONT_SIZE   font family / points (default Romacs's
-#                                            own, Iosevka 14)
+#                                            own, Iosevka 14; either alone keeps
+#                                            the other)
 #   ROMACS_TARGET_DIR                        build directory
 #   ROMACS_NO_BUILD=1                        run the existing binary as-is
 set -euo pipefail
