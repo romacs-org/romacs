@@ -2,7 +2,7 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
-pub(crate) use redisplay::shown_bytes;
+pub(crate) use redisplay::{shown_bytes, Recentred};
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;

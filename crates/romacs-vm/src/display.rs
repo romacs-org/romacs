@@ -255,6 +255,12 @@ pub(super) struct DisplayState {
     /// Per window id, what its last full snapshot read (`ShownKey`), for
     /// GNU's redisplay shortcuts (`Vm::reuse_shown`).
     shown: std::collections::BTreeMap<u64, Shown>,
+    /// Per window id, the window laid out from its start under a key
+    /// (`Vm::window_layout`): by its last paint, or since by redisplay or a
+    /// motion, painted or not. A face change misses by the key's face
+    /// revision; dropped when the window publishes again, as what its bands
+    /// then paint may change the layout under the same key.
+    laid: std::collections::BTreeMap<u64, (ShownKey, Laid)>,
     /// `shown' when a frame last skipped the hooks (`Vm::defer_parse'), until
     /// the hooks run: they are told what changed since they last ran.
     hooked: Option<std::collections::BTreeMap<u64, Shown>>,
@@ -298,7 +304,7 @@ pub(super) struct DisplayState {
     /// (`Vm::check_reuse`), a bit each.
     check_told: std::collections::BTreeMap<u64, u16>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats, check_told });
+romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, laid, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats, check_told });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
@@ -347,6 +353,7 @@ impl DisplayState {
     pub(super) fn forget_window(&mut self, id: u64) {
         self.previous.remove(&id);
         self.shown.remove(&id);
+        self.laid.remove(&id);
         self.segments.remove(&id);
         self.bases.remove(&id);
         self.check_told.remove(&id);
@@ -364,8 +371,8 @@ impl DisplayState {
     pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
         let base = self.base(end.id);
         let segments = self.segments.get(&end.id).cloned();
-        if let Some(shown) = self.shown.get_mut(&end.id) && !shown.mini {
-            shown.laid = Some((shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
+        if let Some(shown) = self.shown.get(&end.id) && !shown.mini {
+            self.laid.insert(end.id, (shown.key.clone(), laid(end, byte, base, shown.len, shown.at_zv, segments.as_deref())));
         }
     }
     pub fn new() -> Self {
@@ -398,6 +405,7 @@ impl DisplayState {
             table_ids: 0,
             previous: std::collections::BTreeMap::new(),
             shown: std::collections::BTreeMap::new(),
+            laid: std::collections::BTreeMap::new(),
             hooked: None,
             overlays: 0,
             segments: std::collections::BTreeMap::new(),
@@ -511,14 +519,11 @@ struct Shown {
     /// The face table its handles index: a remapping changes the table with
     /// no change of face.
     table: u64,
-    /// The window laid out from its start under a key: by its last paint
-    /// under KEY, or by redisplay since under the key then (`window_layout`).
-    laid: Option<(ShownKey, Laid)>,
     /// The key the recorded end was laid out under when redisplay recorded
     /// it since the last paint (`record_end_laid'), else KEY's.
     ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, table, laid, ended });
+romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, table, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]
@@ -1535,7 +1540,8 @@ impl Vm {
         let snapshot = self.publish_window(snapshot);
         let point = self.window_point_value(window)?.as_integer()?;
         let key = self.shown_key(window, width, height)?;
-        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, table: table.id, laid: None, ended: None });
+        self.display_state.shown.insert(id, Shown { key, point, mini, len, at_zv, table: table.id, ended: None });
+        self.display_state.laid.remove(&id);
         Ok(snapshot)
     }
     /// The format WINDOW's mode-line band expands, converted: GNU's
@@ -1573,25 +1579,35 @@ impl Vm {
             }
         })
     }
-    /// WINDOW laid out from its start as painting will, with the mode line
-    /// it last showed (GNU's CURRENT_MODE_LINE_HEIGHT): from its record
-    /// (`Shown`) while what it read (`ShownKey`) is unchanged, else laid out
-    /// now and recorded under the key now. None
-    /// before its first paint in these faces, or with no layout host. Runs
-    /// no Lisp.
+    /// WINDOW laid out from its start as painting will, with the bands it
+    /// paints now (`painted_band`): from its record while what it read
+    /// (`ShownKey`) is unchanged, else laid out now and recorded under the
+    /// key now, painted or not. None as `lay_out_window`. Runs no Lisp.
     pub(crate) fn window_layout(&mut self, window: Value) -> Result<Option<Laid>> {
         let (width, height) = self.window_body_size(window)?;
         let key = self.shown_key(window, width, height)?;
         let id = self.window(window)?.id;
-        let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
-        if let Some((known, laid)) = &shown.laid && *known == key { return Ok(Some(*laid)); }
+        if let Some((known, laid)) = self.display_state.laid.get(&id) && *known == key { return Ok(Some(*laid)); }
         let Some((end, shown)) = self.lay_out_window(window)? else { return Ok(None) };
         let byte = shown.base + end.end;
         let b = self.shown_text(self.window(window)?.buffer)?;
         let byte = shown.segments.as_ref().map_or(byte, |segments| shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)));
         let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
-        if let Some(shown) = self.display_state.shown.get_mut(&id) { shown.laid = Some((key, laid)); }
+        self.display_state.laid.insert(id, (key, laid));
         Ok(Some(laid))
+    }
+    /// The height of WINDOW's text area as painting lays it out now: its
+    /// recorded layout's while its key holds, else its size less its bands
+    /// (`painted_band`), laid out alone with no text. None as
+    /// `lay_out_window`.
+    pub(crate) fn window_text_area_height(&mut self, window: Value) -> Result<Option<f32>> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let id = self.window(window)?.id;
+        if let Some((known, laid)) = self.display_state.laid.get(&id) && *known == key { return Ok(Some(laid.body_height)); }
+        if !self.may_lay_out(window)? { return Ok(None); }
+        let snapshot = self.alone_snapshot(window, None)?;
+        Ok(Some(self.lay_out_alone(snapshot)?.body_height))
     }
     /// Whether the end recorded for WINDOW still holds (GNU's Fwindow_end
     /// asks `window_end_valid', `clip_changed' and `window_outdated'):
@@ -1615,27 +1631,47 @@ impl Vm {
         Ok(())
     }
     /// WINDOW laid out from its start as `window_layout' lays it out, every
-    /// row, and the text it showed; not recorded.
+    /// row, and the text it showed; not recorded. None until a host lays
+    /// frames out (GNU's initial frame counts lines), or for a mini-window
+    /// not painted in these faces: its paint splices overlay strings in and
+    /// resizes it.
     pub(crate) fn lay_out_window(&mut self, window: Value) -> Result<Option<(romacs_layout_input::WindowEnd, ShownText)>> {
+        if !self.may_lay_out(window)? { return Ok(None); }
+        let (_, height) = self.window_body_size(window)?;
+        let shown = self.window_text(window, height, None)?;
+        let snapshot = self.alone_snapshot(window, Some(&shown))?;
+        Ok(Some((self.lay_out_alone(snapshot)?, shown)))
+    }
+    /// Whether `lay_out_window` lays WINDOW out.
+    fn may_lay_out(&mut self, window: Value) -> Result<bool> {
+        let w = self.window(window)?;
+        let (id, mini) = (w.id, w.mini);
+        let painted = || self.display_state.previous.contains_key(&id)
+            && self.display_state.shown.get(&id).is_some_and(|shown| shown.key.faces == self.display_state.face_revision);
+        Ok(self.display_state.hosted && self.has_layout_host() && (!mini || painted()))
+    }
+    /// WINDOW's snapshot for laying it out alone as painting will: its size,
+    /// wrap and fringes, the bands it paints now (`painted_band`), and SHOWN,
+    /// the text it shows, else none.
+    fn alone_snapshot(&mut self, window: Value, shown: Option<&ShownText>) -> Result<WindowSnapshot> {
         let (width, height) = self.window_body_size(window)?;
         let w = self.window(window)?;
         let (id, buffer, vscroll) = (w.id, w.buffer, w.vscroll_px);
-        let Some(shown) = self.display_state.shown.get(&id) else { return Ok(None) };
-        if shown.key.faces != self.display_state.face_revision || !self.has_layout_host() { return Ok(None); }
-        if !self.display_state.previous.contains_key(&id) { return Ok(None) }
         let (mode_line, mode_line_face, mode_stretches) = self.painted_band(window, false)?;
         let (header_line, header_line_face, header_stretches) = self.painted_band(window, true)?;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
-        let shown = self.window_text(window, height, None)?;
         // Laying rows out reads the fringes' widths, not their bitmaps.
         let table = self.window_faces(window)?;
         let chrome = self.window_chrome(window, &table, false)?;
         let band_stretches = BandStretches { header_line: header_stretches, mode_line: mode_stretches };
-        let snapshot = WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte: shown.start_byte, point_byte: shown.point_byte, buffer_version: 0,
-            text: shown.text.clone(), mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
-            hscroll: self.window_hscroll_px(window, buffer)?, faces: shown.faces.published(), tab_width, wrap, cursor_off: false, cursor: Default::default(),
-            stretches: shown.stretches.clone(), images: shown.images.clone(), wrap_flips: shown.wrap_flips.clone(), line_numbers: shown.line_numbers.clone(), chrome };
-        Ok(Some((self.lay_out_alone(snapshot)?, shown)))
+        let faces = shown.map_or_else(|| WindowFaces::new(table.clone()).published(), |shown| shown.faces.published());
+        let (start_byte, point_byte) = shown.map_or((0, 0), |shown| (shown.start_byte, shown.point_byte));
+        let text = shown.map_or_else(|| TextSlice { extends: vec![], utf8: String::new(), face_runs: vec![], raw: vec![] }, |shown| shown.text.clone());
+        Ok(WindowSnapshot { underline_rules: Default::default(), band_stretches, id, width, height, start_byte, point_byte, buffer_version: 0,
+            text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px: vscroll,
+            hscroll: self.window_hscroll_px(window, buffer)?, faces, tab_width, wrap, cursor_off: false, cursor: Default::default(),
+            stretches: shown.map(|s| s.stretches.clone()).unwrap_or_default(), images: shown.map(|s| s.images.clone()).unwrap_or_default(),
+            wrap_flips: shown.map(|s| s.wrap_flips.clone()).unwrap_or_default(), line_numbers: shown.and_then(|s| s.line_numbers.clone()), chrome })
     }
     /// GNU's Fwindow_line_height (window.c:2048) for live WINDOW over the
     /// rows painting lays out from its start: LINE nil is point's row,
@@ -1742,17 +1778,18 @@ impl Vm {
     /// The rows WINDOW's buffer shows from the line starting at byte FROM
     /// through the end of byte TO's line, laid out as painting lays them
     /// out in a window as wide as WINDOW and tall enough for them all: each
-    /// row's buffer byte, height, and first shown byte. None as for
-    /// `window_layout'. A row after a buffer newline starts just after it,
-    /// where GNU's motion by lines puts it, even where invisible text
-    /// follows; its first shown byte is past that text, where motion by
-    /// pixels puts it.
+    /// row's buffer byte, height, and first shown byte. None with no layout
+    /// host. The first row starts at FROM, and a row after a
+    /// buffer newline just after it, where GNU's motion by lines puts it,
+    /// even where invisible text follows; its first shown byte is past that
+    /// text, where motion by pixels puts it.
     pub(crate) fn rows_between(&mut self, window: Value, from: usize, to: usize) -> Result<Option<Vec<(usize, f32, usize)>>> {
-        let Some((end, shown)) = self.lay_out_lines(window, from, to, true)? else { return Ok(None) };
+        let Some((end, shown)) = self.lay_out_lines(window, from, to)? else { return Ok(None) };
         let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
         let (text, shown_text) = (b.as_str().as_bytes(), shown.text.utf8.as_bytes());
         let start = |at: usize| match at.checked_sub(1).filter(|&i| shown_text.get(i) == Some(&b'\n')).map(|i| shown.buffer_byte(i)) {
             Some(newline) if text.get(newline) == Some(&b'\n') => newline + 1,
+            None if at == 0 => from,
             _ => shown.buffer_byte(at),
         };
         Ok(Some(end.rows.iter().map(|row| (start(row.start), row.height, shown.buffer_byte(row.start))).collect()))
@@ -1765,18 +1802,15 @@ impl Vm {
         let begv = b.accessible().start.0;
         let line = b.as_str()[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
         // A window's first redisplay places point too.
-        Ok(self.lay_out_lines(window, line, point_byte, false)?.and_then(|(end, _)| end.point))
+        Ok(self.lay_out_lines(window, line, point_byte)?.and_then(|(end, _)| end.point))
     }
     /// WINDOW's lines from the one holding buffer byte FROM through TO's,
     /// laid out as painting lays them out in a window as wide as WINDOW and
-    /// tall enough for them all, and the text they showed. None as for
-    /// `window_layout'.
-    /// DISPLAYED: only for a window painted in the current faces.
-    fn lay_out_lines(&mut self, window: Value, from: usize, to: usize, displayed: bool) -> Result<Option<(romacs_layout_input::WindowEnd, ShownText)>> {
+    /// tall enough for them all, and the text they showed. None with no
+    /// layout host.
+    fn lay_out_lines(&mut self, window: Value, from: usize, to: usize) -> Result<Option<(romacs_layout_input::WindowEnd, ShownText)>> {
         let id = self.window(window)?.id;
-        let faces = self.display_state.face_revision;
         if !self.has_layout_host() { return Ok(None); }
-        if displayed && !self.display_state.shown.get(&id).is_some_and(|shown| shown.key.faces == faces) { return Ok(None); }
         let (width, _) = self.window_body_size(window)?;
         let buffer = self.window(window)?.buffer;
         let (tab_width, wrap) = (self.buffer_tab_width(buffer)?, self.window_line_wrap(window, buffer)?);
@@ -1908,7 +1942,9 @@ impl Vm {
                 at_zv = shown.end >= accessible.end.0;
             }
         };
-        let labels = if mini { None } else { crate::prim::window_line_numbers(self, window).ok().flatten() };
+        // Labelled as from START, a span's too: GNU's iterator sizes them
+        // from the line it starts on, not from the window's start.
+        let labels = if mini { None } else { crate::prim::window_line_numbers(self, window, start).ok().flatten() };
         let mut sources = ElementFaces::new(self, window, buffer, shown.clone())?;
         if let Some(range) = region.clone() { sources.add_region(range, region_face); }
         let mut faces = WindowFaces::new(table.clone());
