@@ -29,22 +29,23 @@
 
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
-       input_seq done_seq seen_seq settled_seq)
+       input_seq done_seq seen_seq settled_seq request)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
   '("create table if not exists sessions (
        id text primary key, dir text not null, harness text, provider text, model text,
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
-       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer)"
+       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
+       request text)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
-    "create index if not exists sessions_parent on sessions (parent)"
+    "create index if not exists sessions_parent on sessions (parent, request)"
     "create table if not exists board_folds (project text primary key)")
   "The table and its indexes, made when the database is opened.")
 
-(defconst romacs-agent-store--version 2
+(defconst romacs-agent-store--version 3
   "The table's form (`user_version'): a database of another is made again,
 as a cache is.")
 
@@ -137,7 +138,8 @@ moment later, unless AGAIN says this is that try."
          :transcript (romacs-agent-store--transcript (romacs-agent-harness session) (romacs-agent-config-dir session)
                                                      (romacs-agent-harness-session session))
          :input_seq (romacs-agent-input-seq session) :done_seq (romacs-agent-done-seq session)
-         :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session))))
+         :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session)
+         :request (plist-get (romacs-agent-options session) :request))))
 
 ;;; Filling it
 
@@ -177,6 +179,7 @@ manifest."
             :model (or (funcall field 'model) (and (hash-table-p options) (romacs-agent--value (gethash "model" options))))
             :title (or (funcall field 'title) (gethash "title" manifest)) :cwd (gethash "cwd" manifest)
             :parent (and (hash-table-p options) (romacs-agent--value (gethash "parent" options)))
+            :request (and (hash-table-p options) (romacs-agent--value (gethash "request" options)))
             ;; A turn under way when it was kept, with no supervisor now
             ;; to go on with it: detached.
             :state (let ((state (funcall field 'state)))
@@ -327,7 +330,14 @@ when the database cannot be written."
                         (list project))
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
+(defun romacs-agent-store-requested (parent request)
+  "The id of the session PARENT started with client request id REQUEST,
+from the rows: one a start left a row is known by it too."
+  (when-let* ((db (romacs-agent-store--open)))
+    (caar (sqlite-select db "select id from sessions where parent = ? and request = ? limit 1" (list parent request)))))
+
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
+(add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
 (setq romacs-agent-listed-p #'romacs-agent-store-listed-p)

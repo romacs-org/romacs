@@ -87,6 +87,11 @@ journal one turn long."
           (journals nil))
       (record old "old")
       (record live "live" t)
+      ;; OLD a task delegated by "parent" with client request "request-1".
+      (let* ((file (expand-file-name (concat old "/manifest.json") root))
+             (manifest (romacs-agent--read-json file)))
+        (puthash "options" (romacs-mcp--object "parent" "parent" "request" "request-1") manifest)
+        (romacs-agent--write-json file manifest))
       (romacs-agent-store-fill)
       (cl-letf* ((read (symbol-function 'romacs-agent--read-journal))
                  ((symbol-function 'romacs-agent--read-journal)
@@ -105,11 +110,12 @@ journal one turn long."
         (let ((found (romacs-agent-get old)))
           (should (equal (romacs-agent-title found) "old"))
           (should (eq (romacs-agent-get old) found)))
-        ;; A delegation asked again, its task left a row: found, loaded.
+        ;; A delegation asked again after a start, its task left a row and
+        ;; indexed nowhere: found by its row, loaded.
         (remhash old romacs-agent--sessions)
         (let ((romacs-agent--requests (make-hash-table :test #'equal)))
-          (puthash (cons "parent" "request-1") old romacs-agent--requests)
-          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old")))))))
+          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old"))
+          (should-not (romacs-agent-requested "parent" "request-2")))))))
 
 ;; Restored a turn at a time from the command loop: the same.
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded-in-steps ()
