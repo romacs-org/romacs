@@ -6,6 +6,8 @@ pub mod echo;
 pub mod eval_last_sexp;
 pub mod fonts;
 pub mod grammars;
+pub mod lisp_layout;
+pub mod loading;
 pub mod loadup;
 pub mod measure;
 pub mod native;
@@ -18,3 +20,11 @@ pub mod terminal_wait;
 #[cfg(test)]
 #[path = "../tests/support/home.rs"]
 mod test_home;
+
+/// The arena as this library's unit tests' allocator, so a test's loadup
+/// can restore a world (`test_world`), as the program's does.
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: romacs_vm::world::arena::Arena = romacs_vm::world::arena::Arena;
+#[cfg(test)]
+mod test_world;

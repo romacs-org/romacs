@@ -65,13 +65,83 @@ impl Leaf<'_> {
                 return Err(Fault::Error("string-width of composed text (the `composition' property) is not implemented".into()));
             }
         }
-        let view = self.vm.str_view_from(string, from).expect("string-width takes a string");
-        let chars: Vec<u32> = if view.multibyte { view.chars().take(to - from).collect() }
-            else { view.bytes[..to - from].iter().map(|&b| u32::from(b)).collect() };
+        let whole = self.vm.str_view(string).expect("string-width takes a string");
+        // GNU's `multibyte': fewer characters than bytes, a string holding a
+        // character beyond ASCII, the only kind find_automatic_composition reads.
+        let multibyte = whole.multibyte && whole.chars < whole.bytes.len();
         let display = self.display_table()?;
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
-        let mut width = 0i64;
-        for c in chars { width += self.char_width_in(c, display, &rule)?; }
+        let compositions = if multibyte && from < to { self.composition_table()? } else { None };
+        // FROM..TO and the PREV-CHARS a rule looks ahead (3), decoded once.
+        let mut text = self.characters(string, from, to - from + 3);
+        let (mut width, mut i) = (0i64, 0);
+        while from + i < to {
+            if let Some(table) = compositions
+                && let Some((end, emoji)) = self.composition_at(table, string, &text, from, i)? {
+                // compose-gstring-and-emoji-for-terminal: two columns; another
+                // function's run keeps its characters' widths, as
+                // compose-gstring-for-terminal leaves them.
+                if !emoji && end > text.len() {
+                    let more = self.characters(string, from + text.len(), end - text.len());
+                    text.extend(more);
+                }
+                width += if emoji { 2 } else {
+                    let mut sum = 0;
+                    for &(c, _) in &text[i..end] { sum += self.char_width_in(c, display, &rule)?; }
+                    sum
+                };
+                i = end;
+                continue;
+            }
+            width += self.char_width_in(text[i].0, display, &rule)?;
+            i += 1;
+        }
         Value::integer(width).map_err(Fault::Error)
+    }
+    /// Up to COUNT characters of STRING from character FROM, each with the
+    /// byte it starts at; a unibyte string's characters are its bytes.
+    fn characters(&self, string: Value, from: usize, count: usize) -> Vec<(u32, usize)> {
+        let total = self.vm.str_view(string).expect("string-width takes a string").bytes.len();
+        let view = self.vm.str_view_from(string, from).expect("string-width takes a string");
+        let mut at = total - view.bytes.len();
+        let mut out = Vec::with_capacity(count.min(view.chars));
+        let mut bytes = view.bytes;
+        while out.len() < count && !bytes.is_empty() {
+            let (code, length) = if view.multibyte { crate::lstring::string_char(bytes) } else { (u32::from(bytes[0]), 1) };
+            out.push((code, at));
+            at += length;
+            bytes = &bytes[length..];
+        }
+        out
+    }
+    /// `composition-function-table', when it is a char-table.
+    fn composition_table(&mut self) -> std::result::Result<Option<Value>, Fault> {
+        let symbol = self.intern("composition-function-table");
+        let Some(table) = self.variable_value(symbol)? else { return Ok(None) };
+        Ok(matches!(self.vm.object_if(table), Some(crate::data::Object::CharTable(_))).then_some(table))
+    }
+    /// find_automatic_composition at character FROM+START of STRING, whose
+    /// characters from FROM are TEXT (a composition may end past TEXT and the
+    /// width's TO): the first rule of TABLE for the character PREV-CHARS after
+    /// START, its PREV-CHARS that, whose regexp matches at START (nil: that
+    /// character alone) with a positive length. Its end, from FROM, and
+    /// whether its function is `compose-gstring-and-emoji'.
+    fn composition_at(&mut self, table: Value, string: Value, text: &[(u32, usize)], from: usize, start: usize)
+        -> std::result::Result<Option<(usize, bool)>, Fault> {
+        let emoji = self.intern("compose-gstring-and-emoji");
+        for k in 0..=3usize.min(text.len() - 1 - start) {
+            let mut rules = self.vm.char_table_get(table, text[start + k].0 as usize).map_err(Fault::Error)?;
+            while let Some((item, rest)) = self.pair(rules) {
+                rules = rest;
+                let Ok(rule) = self.vector_values(item) else { continue };
+                if rule.len() != 3 || rule[1].integer_value() != Some(k as i64) { continue; }
+                let end = if rule[0] == Value::NIL { Some(start + 1) } else if self.string_view(rule[0]).is_ok() {
+                    self.vm.string_looking_at(string, rule[0], from + start, text[start].1)?
+                        .map(|end| end - from).filter(|&end| end > start)
+                } else { None };
+                if let Some(end) = end { return Ok(Some((end, rule[2] == emoji))); }
+            }
+        }
+        Ok(None)
     }
 }

@@ -222,22 +222,26 @@
           (should-error (romacs-mcp--buffer-list (romacs-mcp--object "instance" "wrong" "offset" 0 "limit" 1))))
       (mapc #'kill-buffer buffers))))
 
-(ert-deftest romacs-mcp-editor-no-minibuffer-or-credential-disclosure ()
-  (let* ((secret (generate-new-buffer "mcp-secret-fixture"))
-         (alias (make-indirect-buffer secret "mcp-secret-alias" nil)))
+(ert-deftest romacs-mcp-editor-reads-every-named-buffer ()
+  "Romacs hides no buffer from an agent: one visiting a credential file is
+listed and read like any other; internal buffers, minibuffers among them,
+are left out of the listing by their leading space."
+  (let ((secret (generate-new-buffer "mcp-authinfo-fixture")))
     (unwind-protect
         (progn
-          (with-current-buffer secret (setq buffer-file-name "/fixture/.authinfo.gpg"))
-          (dolist (buffer (list secret alias (window-buffer (minibuffer-window))))
-            (should (romacs-mcp--editor-denied-p buffer))
-            (should-error (romacs-mcp--buffer-read
-                           (romacs-mcp-test--editor-args "name" (buffer-name buffer) "start" 1 "maxChars" 1))))
-          (cl-letf (((symbol-function 'buffer-list) (lambda (&rest _) (make-list 200 secret))))
-            (let ((value (romacs-mcp--buffer-list (romacs-mcp-test--editor-args "offset" 0 "limit" 1))))
-              (should (= 0 (length (gethash "buffers" value))))
-              (should (= romacs-mcp-editor-scan-limit (gethash "scanned" value)))
-              (should (= romacs-mcp-editor-scan-limit (gethash "nextOffset" value))))))
-      (kill-buffer alias) (kill-buffer secret))))
+          (with-current-buffer secret
+            (setq buffer-file-name "/fixture/.authinfo.gpg")
+            (insert "machine example"))
+          (let ((value (romacs-mcp--buffer-read
+                        (romacs-mcp-test--editor-args "name" (buffer-name secret) "start" 1 "maxChars" 7))))
+            (should (equal (gethash "text" value) "machine")))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda (&rest _) (list (window-buffer (minibuffer-window)) secret))))
+            (let ((names (mapcar (lambda (entry) (gethash "name" entry))
+                                 (gethash "buffers" (romacs-mcp--buffer-list
+                                                     (romacs-mcp-test--editor-args "offset" 0 "limit" 4))))))
+              (should (equal names (list (buffer-name secret)))))))
+      (kill-buffer secret))))
 
 (ert-deftest romacs-mcp-responsive-native-pending-and-regular-reschedule ()
   (let* ((romacs-mcp--active nil) (romacs-mcp--timer nil)

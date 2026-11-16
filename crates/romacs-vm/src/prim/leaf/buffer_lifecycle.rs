@@ -98,13 +98,13 @@ impl Leaf<'_> {
         out.extend(order.into_iter().filter(|b| !led.contains(&b.0)));
         self.vm.set_buffer_order(&out);
     }
-    /// Whether a use of the random state refuses this world build.
-    pub(crate) fn random_fenced(&self) -> bool {
-        self.vm.random_fenced()
+    /// Whether a use of the random state is not captured in this world build.
+    pub(crate) fn random_tracked(&self) -> bool {
+        self.vm.random_tracked()
     }
     /// get_random: 62 random bits from the VM's generator.
     pub(crate) fn random_bits(&mut self) -> u64 {
-        self.vm.fence_random();
+        self.vm.track_random();
         self.vm.random.bits()
     }
     /// Fmake_indirect_buffer (buffer.c:807) up to its Lisp: NAME's

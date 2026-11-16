@@ -148,7 +148,7 @@ fn a_search_reads_its_variables_not_their_names() {
 
 /// `proper-list-p` walks a list reading each cons once, with the cycle
 /// check `safe-length` has: the guard a mapping loop in place pays per
-/// element (lisp/romacs/romacs-compile.el).
+/// element (lisp/emacs-lisp/romacs-compile.el).
 #[test]
 fn proper_list_p_reads_each_cons_once() {
     let _alone = alone();
