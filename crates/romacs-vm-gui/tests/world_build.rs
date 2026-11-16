@@ -67,7 +67,11 @@ fn a_gui_world_serves_a_session_however_it_was_started() {
     let tree = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(std::path::Path::parent).unwrap();
     let command = |args: &[&str]| {
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"));
+        // A world binds the login name its chain reads (VM2-BATCH2), from
+        // LOGNAME or else USER: both are given, so the test does not depend
+        // on which the host sets.
         command.arg("--loadup").arg("--world-store").arg(&store).args(args).env("HOME", &home)
+            .env("USER", "builder").env("LOGNAME", "builder")
             .env("XDG_CACHE_HOME", home.join("cache")).env("XDG_CONFIG_HOME", home.join("config"))
             .env("XDG_DATA_HOME", home.join("data")).env_remove("ROMACS_WORLD").env_remove("ROMACS_LISP_DIR")
             .env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY");
@@ -95,7 +99,9 @@ fn a_gui_world_serves_a_session_however_it_was_started() {
             String::from_utf8_lossy(&linked.stderr));
     let manifest = store.join(format!("{}.json", prepared["key"].as_str().unwrap()));
     let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
-    let personal = |name: &str| ["HOME", "USER", "LANG", "LANGUAGE", "SHELL"].contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_");
+    // The login name stays bound, as the batch world's does; the rest of the
+    // builder's environment does not.
+    let personal = |name: &str| ["HOME", "LANG", "LANGUAGE", "SHELL"].contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_");
     for record in manifest["records"].as_array().unwrap() {
         let text = record.to_string();
         // The store's own pinned directory is under this test's HOME.
