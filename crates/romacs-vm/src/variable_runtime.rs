@@ -719,10 +719,11 @@ impl Vm {
             // where no let shadowed (DefvarBoundp decided before the value ran).
             DefvarSetDefault => {
                 let value = self.stack[start+1];
-                // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
-                // variable_primitive checks a tracked variable first (F2)
-                let shadow = if self.slots[slot].value == Value::UNBOUND { None }
-                    else { self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND) };
+                let shadow = if self.slots[slot].value == Value::UNBOUND { None } else {
+                    // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
+                    // variable_primitive checks a tracked variable first (F2)
+                    self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND)
+                };
                 if let Some((_,old,_,_)) = shadow { *old = value; }
                 else {
                     self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
