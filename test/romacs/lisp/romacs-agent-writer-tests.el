@@ -155,6 +155,22 @@ connection of its own, as the writer's process has."
         (should (zerop (romacs-agent-writer-pending-count)))
         (should-not sent)))))
 
+(ert-deftest romacs-agent-writer-a-drain-outlasts-writers-that-die ()
+  ;; Every writer the drain starts dies before it answers: past its tries
+  ;; the drain makes the writes in the editor; none is left, none lost.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (spawned 0))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (cl-incf spawned) (vector 'doomed)))
+                ((symbol-function 'isolate-future-done-p) (lambda (_) t))
+                ((symbol-function 'isolate-await) (lambda (&rest _) (signal 'isolate-died nil)))
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) #'ignore))
+        (dotimes (i 3) (romacs-agent-write 'romacs-agent-writer-tests--make (list i)))
+        (romacs-agent-writer-drain)
+        (should (> spawned 1))
+        (should (equal (reverse romacs-agent-writer-tests--made) '(0 1 2)))
+        (should (zerop (romacs-agent-writer-pending-count)))))))
+
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
   ;; once the writer has answered a write behind them, the launch.
