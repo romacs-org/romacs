@@ -16,7 +16,7 @@ impl Leaf<'_> {
             else if self.string_view(buffer).is_ok() { self.lifecycle_get(buffer)? }
             else { return Err(Fault::Wrong("bufferp", buffer)); };
         self.vm.ensure_windows().map_err(Fault::Error)?;
-        // minibuf.c: one of `Vminibuffer_list' (lisp/romacs/vm/minibuf.el),
+        // minibuf.c: one of `Vminibuffer_list' (lisp/vm/minibuf.el),
         // or with LIVE an active one, of depth 1 to the current level.
         // Before the first read made the list, *Minibuf-0* is the buffer
         // the mini-window shows.
