@@ -550,8 +550,10 @@ OUTPUT), read from the lines its item names; nil when no row has it."
 (defun romacs-agent-history--settings ()
   "The form giving a batch process this editor's settings the scan reads:
 its providers, T3's settings file and the listing's size."
-  (format "(setq romacs-agent-providers '%S romacs-agent-t3-settings %S romacs-agent-history-limit %S)"
-          romacs-agent-providers (bound-and-true-p romacs-agent-t3-settings) romacs-agent-history-limit))
+  (format "(setq romacs-agent-providers '%S romacs-agent-history-limit %S%s)"
+          romacs-agent-providers romacs-agent-history-limit
+          ;; T3's, when set here: unset, the process keeps its own default.
+          (if (boundp 'romacs-agent-t3-settings) (format " romacs-agent-t3-settings %S" romacs-agent-t3-settings) "")))
 
 (defun romacs-agent-history-index-soon ()
   "Write the transcripts' rows anew in a batch process of this build, off
@@ -568,7 +570,15 @@ it ends."
                           "-f" "romacs-agent-history-index-batch")
            :sentinel (lambda (process _event)
                        (unless (process-live-p process)
-                         (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process)))
+                         (let ((buffer (process-buffer process)))
+                           ;; Failed: said, its last line; the rows as they were.
+                           (unless (eql (process-exit-status process) 0)
+                             (message "romacs-agent-history: listing the transcripts failed: %s"
+                                      (if (buffer-live-p buffer)
+                                          (with-current-buffer buffer
+                                            (car (last (split-string (buffer-string) "\n" t))))
+                                        (process-exit-status process))))
+                           (when (buffer-live-p buffer) (kill-buffer buffer)))
                          (romacs-agent-history--from-rows)
                          (run-hooks 'romacs-agent-history-indexed-hook)))))))
 

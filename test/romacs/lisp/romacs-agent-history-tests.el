@@ -10,6 +10,8 @@
   (require 'romacs-agent-claude)
   (require 'romacs-agent-history))
 
+(defvar romacs-agent-t3-settings)
+
 (defconst romacs-agent-history-tests--id "c1c1c1c1-2222-4333-8444-555566667777")
 
 (defun romacs-agent-history-tests--transcript (dir id prompt)
@@ -145,7 +147,14 @@
       (let ((romacs-agent-providers nil) (romacs-agent-history-limit nil))
         (eval form t)
         (should (equal romacs-agent-providers '(t3 (:name "x" :harness claude))))
-        (should (= romacs-agent-history-limit 7))))))
+        (should (= romacs-agent-history-limit 7)))))
+  ;; T3's settings file unset here: not given, the process keeps its default.
+  (when (boundp 'romacs-agent-t3-settings)
+    (let ((form (let ((romacs-agent-t3-settings "/x.json")) (romacs-agent-history--settings))))
+      (should (string-search "\"/x.json\"" form))))
+  (let ((form (cl-letf (((symbol-function 'boundp) (lambda (s) (not (eq s 'romacs-agent-t3-settings)))))
+                (romacs-agent-history--settings))))
+    (should-not (string-search "romacs-agent-t3-settings" form))))
 
 (provide 'romacs-agent-history-tests)
 ;;; romacs-agent-history-tests.el ends here
