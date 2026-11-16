@@ -3733,9 +3733,11 @@ the editor reads it as it is and writes nothing."
   (or (romacs-agent-turns-fold (romacs-agent-id session))
       (let ((file (romacs-agent--kept-file session)))
         (when (file-readable-p file)
-          (let ((text (with-temp-buffer
-                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                        (buffer-string))))
+          ;; Gone since: moved in meanwhile, read from the rows below.
+          (when-let* ((text (ignore-error file-missing
+                              (with-temp-buffer
+                                (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                (buffer-string)))))
             (when (and (romacs-agent--kept-moves-p) (romacs-agent--kept-put session text)) (delete-file file))
             text)))
       ;; Moved in meanwhile, by a process off the editor.

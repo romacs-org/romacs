@@ -485,6 +485,20 @@ contents, so two equal states print the same."
           (should (equal (romacs-agent--kept-get session) "(:a 3)"))))
       (should (file-exists-p (romacs-agent--kept-file session)))
       (should-not (romacs-agent-turns-fold id))
+      ;; Moved in by another process between the look and the read: from the rows.
+      (let ((noninteractive nil) (moved nil))
+        (cl-letf* ((read (symbol-function 'insert-file-contents))
+                   ((symbol-function 'isolate-main-p) (lambda () t))
+                   ((symbol-function 'insert-file-contents)
+                    (lambda (file &rest args)
+                      (unless moved
+                        (setq moved t)
+                        (let ((noninteractive t)) (romacs-agent--kept-put session "(:a 3)"))
+                        (rename-file file (concat file ".moved")))
+                      (apply read file args))))
+          (should (equal (romacs-agent--kept-get session) "(:a 3)")))
+        (rename-file (concat (romacs-agent--kept-file session) ".moved") (romacs-agent--kept-file session))
+        (romacs-agent--kept-put session nil))
       ;; Off the editor: moved in, its file removed.
       (should (equal (romacs-agent--kept-get session) "(:a 3)"))
       (should-not (file-exists-p (romacs-agent--kept-file session)))
