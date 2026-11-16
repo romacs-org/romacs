@@ -3118,6 +3118,10 @@ it did not write go through another (`romacs-agent--notes-again')."
   "How many notes-only hosts in a row a session's held notes are tried
 through, a second apart, before they wait for its next note or a drain.")
 
+(defvar romacs-agent--notes-retrying (make-hash-table :test #'equal)
+  "The ids of the sessions whose held notes wait a moment for another
+notes-only host (`romacs-agent--notes-again').")
+
 (defvar romacs-agent--notes-tried (make-hash-table :test #'equal)
   "Each session id to how many notes-only hosts in a row ended with its
 notes still held.")
@@ -3127,9 +3131,14 @@ notes still held.")
 started for them a second later, a few times in a row."
   (let ((id (romacs-agent-id session)))
     (if (null (gethash id romacs-agent--held-notes)) (remhash id romacs-agent--notes-tried)
-      (when (< (gethash id romacs-agent--notes-tried 0) romacs-agent--notes-tries)
+      (when (and (< (gethash id romacs-agent--notes-tried 0) romacs-agent--notes-tries)
+                 (not (gethash id romacs-agent--notes-retrying)))
         (puthash id (1+ (gethash id romacs-agent--notes-tried 0)) romacs-agent--notes-tried)
-        (run-at-time 1 nil #'romacs-agent--ensure-host session)))))
+        ;; On its way meanwhile: a drain waits for it.
+        (puthash id t romacs-agent--notes-retrying)
+        (run-at-time 1 nil (lambda ()
+                             (remhash id romacs-agent--notes-retrying)
+                             (romacs-agent--ensure-host session)))))))
 
 (defun romacs-agent--held-hosts ()
   "Start a host for each session's held notes that none is on its way
@@ -3221,6 +3230,7 @@ attached, or to start once its session is moved."
     (maphash (lambda (id _notes)
                (when (or (gethash id romacs-agent--launched)
                          (gethash id romacs-agent--note-hosts)
+                         (gethash id romacs-agent--notes-retrying)
                          (romacs-agent-events-waiting-p id)
                          (when-let* ((session (romacs-agent-loaded id))) (process-live-p (romacs-agent-connection session))))
                  (throw 'live t)))
