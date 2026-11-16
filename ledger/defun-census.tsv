@@ -99,7 +99,6 @@ dump-tab-bar-row	absent	portable dumper: Romacs starts from its own world image
 dump-tool-bar-row	absent	portable dumper: Romacs starts from its own world image
 encode-big5-char	absent	no shipped Lisp calls it and it is no command
 encode-sjis-char	absent	no shipped Lisp calls it and it is no command
-event-convert-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
 file-attributes-lessp	absent	no shipped Lisp calls it and it is no command
 font-drive-otf	absent	no shipped Lisp calls it and it is no command
 font-get-system-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)

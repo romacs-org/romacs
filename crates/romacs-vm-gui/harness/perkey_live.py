@@ -473,6 +473,10 @@ class Session:
                          ' (switch-to-buffer (car others))'
                          f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if getattr(self.args, 'split', 1) > 2 else ""}))')
         forms += getattr(self.args, 'setup', None) or []
+        # Last, a full collection: what the world image's own allocation history left for the
+        # first minor collection would otherwise land in the counted keys, so two sessions of
+        # one binary, each restoring an image of its own, differed by up to 60% per key.
+        forms.append('(garbage-collect)')
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -509,6 +513,20 @@ class Session:
         self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
         if any(r.get('signal') or r.get('native_error') for r in done()):
             raise Invalid(f'M-: (setq auto-save-timeout nil) signalled: {done()}')
+
+    def collect(self):
+        """M-: (garbage-collect), then quiet again: each counted phase starts from a heap just
+        collected, so a minor collection the phase did not cause cannot land in its count. Not with
+        --host-calls, whose rows are read after the session's last M-:."""
+        if getattr(self.args, 'host_calls', False):
+            return
+        before = len(records(self.stdout))
+        self.type(['-M', 'alt', ':', '-m', 'alt'])
+        self.type(['(garbage-collect)'])
+        self.type(['-k', 'Return'])
+        done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+        self.wait(done, self.args.timeout, 'M-: (garbage-collect)')
+        self.quiesce()
 
     def evaluator(self):
         for task in Path(f'/proc/{self.process.pid}/task').iterdir():
@@ -615,6 +633,7 @@ class Session:
         commands = {'self-insert': 'self-insert-command', 'C-f': 'forward-char', 'C-n': self.commands.get('[14]')}
         commands['region'] = 'forward-char'
         for name in phases(self.args):
+            self.collect()
             if name == 'region':
                 mark = self.run_keys(KEYS['mark'], 1)
                 result['mark'] = delivery(mark, 'set-mark-command', 1)

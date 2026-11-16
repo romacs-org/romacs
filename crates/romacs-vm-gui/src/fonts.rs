@@ -381,8 +381,8 @@ impl romacs_vm::DisplayHost for Display {
         self.lose_device_hook.as_mut().is_some_and(|hook| hook())
     }
     /// The launch screen shows what startup reports (loading.rs).
-    fn startup_progress(&mut self, stage: &str, label: &str) {
-        crate::loading::step(stage, label);
+    fn startup_progress(&mut self, stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) -> bool {
+        crate::loading::step_counted(stage, label, count, failed)
     }
     fn decode_image(&mut self, query: romacs_vm::ImageQuery) -> Result<romacs_vm::ImageFacts, String> {
         let (id, request) = self.prepare(query)?;

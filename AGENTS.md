@@ -173,6 +173,9 @@ possible; say so where you do.
 - `doc/performance.org` collects the practices behind these rules: measuring
   slow keys, what runs on the main VM and in worker VMs, handing results
   over, and bounding the main VM's own work.
+- When Elisp behaves differently from what GNU would do, or a GNU idiom breaks
+  (for example a synchronous process wait), file a tracker issue labelled
+  `agent-friction`: what you expected, what Romacs did, and the form.
 
 ## Testing loop
 

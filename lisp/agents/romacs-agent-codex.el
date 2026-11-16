@@ -591,6 +591,18 @@ line an earlier `codex exec' run journaled)."
           (method (romacs-agent--codex-notified session method (gethash "params" line)))
           (t (romacs-agent--codex-answer session id line)))))
 
+(defconst romacs-agent--codex-output-delta
+  "{\"out\":{\\(?:\"emittedAtMs\":[0-9]+,\\)?\"method\":\"item/\\(?:commandExecution\\|fileChange\\)/outputDelta\",\"params\":{\"delta\":"
+  "How a journal line of a command's or a patch's output, as it streams,
+starts: keys come sorted, so no request id can be among them.")
+
+(defun romacs-agent--codex-streamed-skip ()
+  "A function of a journal line's start and end saying whether it is a
+call's output streaming: a chat draws none of it (a call's output is its
+`item/completed' record's), so a replay passes over it unparsed."
+  (lambda (start _end)
+    (save-excursion (goto-char start) (looking-at-p romacs-agent--codex-output-delta))))
+
 (defun romacs-agent--codex-conversation-files (home session)
   "The files under HOME, relative to it, that hold SESSION's Codex
 thread: its rollout, wherever its day put it."
@@ -616,6 +628,7 @@ thread: its rollout, wherever its day put it."
   :interrupt #'romacs-agent--codex-interrupt
   :respond #'romacs-agent--codex-respond
   :events #'romacs-agent--codex-events
+  :streamed-skip #'romacs-agent--codex-streamed-skip
   :input-events #'romacs-agent--codex-input-events
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-history--codex-files :find romacs-agent-history--codex-find

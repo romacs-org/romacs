@@ -71,29 +71,28 @@
       (should (equal (gethash "toolName" rule) "Edit")))))
 
 (ert-deftest romacs-agent-approval-chat-reads-the-answers ()
+  ;; y on a question brings its layer (romacs-agent-ask.el): its options
+  ;; with what they mean; a pick there answers.  ! answers it too: no
+  ;; rule for the session.
   (let* ((session (romacs-agent-approval-tests--session))
          (event (car (romacs-agent--claude-events session (json-parse-string romacs-agent-approval-tests--ask))))
          (given nil))
     (with-temp-buffer
       (setq romacs-agent-ui--session session)
       (puthash "q1" event (romacs-agent-ui--asks))
-      (cl-letf (((symbol-function 'completing-read) (lambda (prompt table &rest _)
-                                                      (should (string-match-p "Which colour" prompt))
-                                                      (should (equal (all-completions "" table) '("Red" "Blue")))
-                                                      ;; Each option with what it means.
-                                                      (let ((note (alist-get 'annotation-function
-                                                                             (cdr (funcall table "" nil 'metadata)))))
-                                                        (should (string-match-p "Choose blue" (funcall note "Blue"))))
-                                                      "Blue"))
-                ((symbol-function 'romacs-agent-respond) (lambda (_s id allow &rest _) (setq given (list id allow)))))
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (_s id allow &rest _) (setq given (list id allow)))))
         (should (romacs-agent-ui--asking-p))
         (should (equal (romacs-agent-ui--allow-label) "Answer"))
-        (romacs-agent-chat-allow)
-        (should (equal given '("q1" (:answers (("Which colour do you prefer?" . "Blue"))))))
-        ;; ! on a question answers it too: no rule for the session.
-        (setq given nil)
-        (romacs-agent-chat-allow-always)
-        (should (equal given '("q1" (:answers (("Which colour do you prefer?" . "Blue"))))))))))
+        (dolist (command '(romacs-agent-chat-allow romacs-agent-chat-allow-always))
+          (setq given nil)
+          (let ((layer (funcall command)))
+            (with-current-buffer layer
+              (should (string-search "Which colour" (buffer-string)))
+              (should (string-search "Choose blue" (buffer-string)))
+              (goto-char (point-min))
+              (search-forward "Blue")
+              (romacs-agent-ask-pick)))
+          (should (equal given '("q1" (:answers (("Which colour do you prefer?" . "Blue")))))))))))
 
 (provide 'romacs-agent-approval-tests)
 ;;; romacs-agent-approval-tests.el ends here
