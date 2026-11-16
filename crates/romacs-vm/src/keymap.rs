@@ -419,28 +419,60 @@ impl Vm {
             }
         }
         name.push_str(base);
-        self.keymap_symbol(&name)
+        self.intern(&name)
+    }
+    /// keyboard.c parse_modifiers: SYMBOL's (BASE MASK) on its
+    /// `event-symbol-element-mask' and (BASE MODIFIERS...) on its
+    /// `event-symbol-elements', made once; `event-basic-type' and
+    /// `event-modifiers' read them. GNU caches them on every key lookup or
+    /// definition of the symbol (keymap.c reorder_modifiers) and every read.
+    pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> Result<()> {
+        let (mask_key, elements_key) = (self.keymap_symbol("event-symbol-element-mask"), self.keymap_symbol("event-symbol-elements"));
+        let plist = self.symbol_plist(symbol)?;
+        if self.plist_lookup(plist, mask_key).tag() == 3 { return Ok(()); }
+        let name = self.key_event_name(symbol).ok_or("symbol event required")?.to_owned();
+        let (modifiers, start) = parse_event_modifiers(name.as_bytes());
+        let base = self.intern(&name[start..]);
+        let mask = self.list_value(&[base, Value::integer(modifiers).expect("modifier bits are a fixnum")]);
+        self.put_symbol_property(symbol, mask_key, mask)?;
+        // lispy_modifier_list: consed from the lowest bit, so highest first.
+        let mut elements = Value::NIL;
+        for (bit, modifier) in MODIFIER_NAMES {
+            if modifiers & 1 << bit != 0 {
+                let modifier = self.keymap_symbol(modifier);
+                elements = self.alloc_cons(modifier, elements);
+            }
+        }
+        let elements = self.alloc_cons(base, elements);
+        self.put_symbol_property(symbol, elements_key, elements)?;
+        Ok(())
     }
     fn canonical_key_event_symbol(&mut self, event: Value) -> Result<Value> {
         // GNU keymap.c:338,762 reorder both stored and looked-up symbols.
         // Only abbreviated keyboard modifiers (not `control-`, etc.) are
         // prefixes; solitary list modifiers accept both spellings.
+        self.cache_event_symbol_elements(event)?;
         let name = self.key_event_name(event).ok_or("symbol event required")?.to_owned();
         let (modifiers, base) = parse_event_modifiers(name.as_bytes());
         if base == 0 { return Ok(event); }
         Ok(self.modified_key_event_symbol(&name[base..], modifiers))
     }
-    fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
+    pub(crate) fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
         // the base, so (shift control a) and (control shift a) agree.
+        // A symbol naming a modifier is one unless it is last; any other
+        // element is the base, and a second one is refused. nil is a base
+        // like any symbol, so (nil a) is a and nil itself is nil.
         let parts = self.list_values(event)?;
-        let Some((&last, modifiers)) = parts.split_last() else { return Err("Invalid base event".into()); };
-        let mut mask = 0;
-        for &modifier in modifiers {
-            mask |= self.key_event_name(modifier).and_then(Self::key_event_modifier)
-                .ok_or("Two bases given in one event")?;
+        let (mut mask, mut base) = (0, Value::NIL);
+        for (i, &item) in parts.iter().enumerate() {
+            let modifier = if i + 1 < parts.len() { self.key_event_name(item).and_then(Self::key_event_modifier) } else { None };
+            match modifier {
+                Some(bit) => mask |= bit,
+                None if base != Value::NIL => return Err("Two bases given in one event".into()),
+                None => base = item,
+            }
         }
-        let mut base = last;
         if let Some(name) = self.key_event_name(base) {
             if name.chars().count() == 1 {
                 // event-convert-list uses SREF, the first byte, even for a
@@ -655,6 +687,10 @@ impl Vm {
         }
     }
 }
+
+/// keyboard.c modifier_names: the symbol for each modifier bit.
+pub(crate) const MODIFIER_NAMES: [(u32, &str); 12] = [(0, "up"), (1, "down"), (2, "drag"), (3, "click"), (4, "double"), (5, "triple"),
+    (22, "alt"), (23, "super"), (24, "hyper"), (25, "shift"), (26, "control"), (27, "meta")];
 
 /// keyboard.c parse_modifiers_uncached: the modifier bits NAME's prefixes
 /// spell (each an abbreviation followed by `-'), with `click' for a bare

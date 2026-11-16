@@ -39,6 +39,7 @@ mod isolate_worker;
 mod exit;
 mod quit;
 mod client;
+mod restart;
 #[cfg(test)]
 #[path = "../tests/support/home.rs"]
 mod test_home;
@@ -698,6 +699,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
+    if argv.first().map(String::as_str) == Some("--restart-supervise") { std::process::exit(restart::supervise(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
@@ -1416,6 +1418,12 @@ fn evaluate(
             eprintln!("romacs: usage log: {error}");
         }
         startup::before_init(&mut vm, launch, quick)?;
+        // The user's settings, packages, init and what runs after it are
+        // Lisp that may not end: C-g quits it, as GNU's startup lets it
+        // (the evaluator is busy to the input thread until its first wait).
+        // Each step goes on past a quit; Romacs's own defaults before them
+        // are not quit (a C-g then waits as a key).
+        if live { vm.enter_busy(); }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
                 // `load-path' before the packages and the init add to it: a
@@ -1442,10 +1450,10 @@ fn evaluate(
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
                     // As GNU's startup says it (startup.el `startup--load-user-init-file'):
-                    // a *Warnings* buffer the first frame shows.
-                    let warned = vm.eval_source(&format!(
-                        "(display-warning 'initialization (format-message \"An error occurred while loading your init file:\\n\\n%s\\n\\nTo ensure normal operation, you should investigate and remove the cause of the error in your initialization file.\" {}) :error)",
-                        startup::lisp_string(&error)));
+                    // a *Warnings* buffer the first frame shows, with the
+                    // backtrace a button away, and the launch screen's init
+                    // stage failed (lisp/session/romacs-init-load.el).
+                    let warned = vm.eval_source(&format!("(romacs-init-failed {})", startup::lisp_string(&error)));
                     if warned.is_err() { let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details"); }
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
@@ -1472,6 +1480,9 @@ fn evaluate(
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
+        // The startup Lisp a C-g could quit has run: one typed late waits
+        // for the first read.
+        if live { vm.leave_busy(); }
         // As GNU's command loop reports an error that ends `command-line-1';
         // else startup's own message is shown, as GNU's first redisplay
         // shows it before the command loop's first timer runs.
@@ -1480,7 +1491,8 @@ fn evaluate(
                 eprintln!("romacs: startup after init failed: {error}");
                 let _ = echo::show(&mut vm, &error);
             }
-            Ok(()) => echo::show_current_message(&mut vm)?,
+            // Not fatal: a quit typed late (`quit-flag') may end it.
+            Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
