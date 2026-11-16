@@ -38,7 +38,7 @@ whatever TMPDIR is); `delivered' collects wakes."
      (dolist (s (list parent child)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
      (romacs-agent--index child)
      (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
-                (lambda (_session text done &optional _valid) (push text delivered) (funcall done)))
+                (lambda (_session text done &rest _) (push text delivered) (funcall done)))
                ((symbol-function 'run-at-time) #'ignore))
        (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 

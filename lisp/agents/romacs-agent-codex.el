@@ -242,10 +242,12 @@ answer, or a message a steer missed its turn with, as a new turn."
     (`(:reply ,id ,method)
      (romacs-mcp--object "id" id "error" (romacs-mcp--object "code" -32601
                                                              "message" (format "Romacs does not answer %s" method))))
-    (`(:turn ,steer ,text ,images)
+    (`(:turn ,steer ,text ,images . ,rest)
+     ;; Another session's message goes as it was steered, in its envelope.
      (let ((line (romacs-agent--codex-turn session (romacs-agent-request-id session)
                                            (let ((romacs-agent--message-images images))
-                                             (romacs-agent--codex-items text)))))
+                                             (romacs-agent--codex-items
+                                              (if (car rest) (romacs-agent--messages-text (car rest) text) text))))))
        ;; Its echo is known by the steer it stands for.
        (puthash "clientUserMessageId" steer (gethash "params" line))
        line))))
@@ -293,18 +295,22 @@ startup's next step."
 
 (defun romacs-agent--codex-message (session object)
   "The events of OBJECT, a message written: its input, and for a steer
-what to do should it miss its turn."
+what to do should it miss its turn.  A missed steer's turn is its
+message again: its text and record (another session's) the steer's."
   (let* ((params (gethash "params" object))
-         (text (romacs-agent--text-of (gethash "input" params)))
+         (steer (romacs-agent--value (gethash "clientUserMessageId" params)))
+         (owed (and steer (cl-find-if (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))
+                                      (plist-get (romacs-agent-driver-state session) :owed))))
+         (text (if owed (nth 2 owed) (romacs-agent--text-of (gethash "input" params))))
+         (messages (if owed (nth 4 owed) (romacs-agent--messages-of (gethash "romacsMessages" object))))
          (images (append (or (gethash "images" object)
                              (cl-loop for item across (gethash "input" params)
                                       when (equal (gethash "type" item) "localImage") collect (gethash "path" item)))
-                         nil))
-         (steer (romacs-agent--value (gethash "clientUserMessageId" params))))
-    (append (list (list :type 'input :text text :images images))
+                         nil)))
+    (append (list (append (list :type 'input :text text :images images) (and messages (list :messages messages))))
             (if (equal (gethash "method" object) "turn/steer")
                 (list (list :type 'handshake
-                            :state (list :steers (cons (list (gethash "id" object) text images)
+                            :state (list :steers (cons (list (gethash "id" object) text images messages)
                                                        (plist-get (romacs-agent-driver-state session) :steers)))))
               (and steer (romacs-agent--codex-paid
                           session (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))))))))
