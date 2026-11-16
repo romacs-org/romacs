@@ -629,7 +629,10 @@ connection of its own, as the writer's process has."
   ;; none; its notes go through that host and its records let them go.
   (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
          (romacs-agent--note-hosts (make-hash-table :test #'equal))
-         (session (romacs-agent--make :id "n" :harness 'claude :dir temporary-file-directory :seq 2 :state 'ended))
+         ;; Detached, left so by a supervisor gone abruptly: the socket
+         ;; answering is its notes-only host's.
+         (session (romacs-agent--make :id "n" :harness 'claude :dir temporary-file-directory :seq 2 :state 'detached
+                                      :host-socket temporary-file-directory))
          (host (make-pipe-process :name "n" :noquery t)) (sent nil) (resumed nil))
     (process-put host 'romacs-agent session)
     (process-put host 'notes-only t)
@@ -637,11 +640,12 @@ connection of its own, as the writer's process has."
     (puthash "n" (list (romacs-mcp--object "type" "plan" "romacsNote" 1)) romacs-agent--held-notes)
     (unwind-protect
         (cl-letf (((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
+                  ((symbol-function 'romacs-agent--supervisor-listens-p) (lambda (_) t))
                   ((symbol-function 'romacs-agent--resume-now) (lambda (_) (setq resumed t))))
           (romacs-agent--filter-lines host (concat (json-serialize (romacs-mcp--object "attached" 1 "notesOnly" t)) "\n"))
           (should (string-search "\"plan\"" (car sent)))
           (should-not (romacs-agent-connection session))
-          (should (eq (romacs-agent-state session) 'ended))
+          (should (eq (romacs-agent-state session) 'detached))
           ;; A second note goes to it at once.
           (romacs-agent--note session (romacs-mcp--object "type" "title"))
           (should (string-search "\"title\"" (car sent)))

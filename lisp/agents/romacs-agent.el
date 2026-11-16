@@ -3002,6 +3002,9 @@ attached (another may be)."
   (when (and (eq (romacs-agent-state session) 'detached)
              (not (process-live-p (romacs-agent-connection session)))
              (not (romacs-agent--per-turn-p session))
+             ;; What answers at its socket may be the notes-only host
+             ;; started here for it, which takes the note.
+             (not (gethash (romacs-agent-id session) romacs-agent--note-hosts))
              (romacs-agent-host-socket session) (romacs-agent--supervisor-listens-p session))
     (user-error "Session %s is detached: attach to it (show its chat) first" (romacs-agent-title session))))
 
