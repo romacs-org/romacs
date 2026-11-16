@@ -80,7 +80,7 @@ the store keeps them (`romacs-agent-store-folded').")
 (defun romacs-agent-board--parent (session)
   "The known session SESSION was delegated by, or nil."
   (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (or (romacs-agent-get parent)
+    (or (romacs-agent-loaded parent)
         (and romacs-agent-board--unloaded (gethash parent (car romacs-agent-board--unloaded))))))
 
 (defun romacs-agent-board--children (session)
@@ -654,10 +654,10 @@ newest thread; on \"more\", list every transcript."
 (defun romacs-agent-board--live (session)
   "SESSION, loaded first when it was shown from its row alone, unless no
 longer known: then the board is drawn again."
-  (or (and (eq (romacs-agent-get (romacs-agent-id session)) session) session)
+  (or (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) session)
       (and romacs-agent-board--unloaded
            (eq (gethash (romacs-agent-id session) (car romacs-agent-board--unloaded)) session)
-           (romacs-agent-find (romacs-agent-id session)))
+           (romacs-agent-get (romacs-agent-id session)))
       (progn (romacs-agent-board--redraw)
              (user-error "That thread is gone: the board is drawn again"))))
 
@@ -796,7 +796,7 @@ its next activity.  A settled one, bring back."
       ;; Each by its id, loaded first when shown from its row alone; one
       ;; gone is skipped, and the board drawn once, after.
       (dolist (session finished)
-        (when-let* ((live (romacs-agent-find (romacs-agent-id session))))
+        (when-let* ((live (romacs-agent-get (romacs-agent-id session))))
           (romacs-agent-settle live)))
       (romacs-agent-board--redraw))))
 

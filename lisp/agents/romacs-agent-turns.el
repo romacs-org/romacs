@@ -446,7 +446,7 @@ are filled and drawn soon, by the fill's batch process."
   "A live turn's end: SESSION's rows are caught up a moment later, by a
 batch process (`romacs-agent-turns-fill-soon'), not here."
   (when (and (eq (plist-get event :type) 'done) (romacs-agent-dir session)
-             (eq (romacs-agent-get (romacs-agent-id session)) session))
+             (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (unless romacs-agent-turns--due
       (run-with-timer 2 nil (lambda () (let ((ids romacs-agent-turns--due))
                                          (setq romacs-agent-turns--due nil)
@@ -541,7 +541,7 @@ It moves no session's records to SQLite: the editor alone does."
       (when (file-exists-p (expand-file-name "manifest.json" dir))
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
           (romacs-agent--load dir))
-        (when-let* ((session (romacs-agent-get (file-name-nondirectory dir))))
+        (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a
           ;; session loaded beside its running supervisor has an older seq.
           (setq written (+ written (condition-case err (romacs-agent-turns-fill session)

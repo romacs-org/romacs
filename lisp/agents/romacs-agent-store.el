@@ -465,14 +465,14 @@ header's facts too.  Nil with no row.  Acting on it loads it
 (defun romacs-agent-store-unloaded ()
   "The sessions that have a row but are not loaded, newest first, each a
 session record made from its row alone: to show, not to act on (acting
-on one loads it, `romacs-agent-find')."
+on one loads it, `romacs-agent-get')."
   (when-let* ((db (romacs-agent-store--open)))
     (delq nil
           (mapcar (lambda (row)
                     (pcase-let ((`(,id ,dir ,harness ,provider ,model ,title ,cwd ,parent ,state ,last ,cost
                                    ,input ,done ,seen ,settled)
                                  row))
-                      (unless (romacs-agent-get id)
+                      (unless (romacs-agent-loaded id)
                         (romacs-agent--make :id id :dir dir :harness (intern harness) :provider provider :model model
                                             :title title :cwd cwd :options (and parent (list :parent parent))
                                             :state (intern (or state "detached")) :last-time last :cost cost

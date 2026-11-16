@@ -116,7 +116,7 @@ harness's: it keeps its colour as the row settles and dims.")
 
 (defun romacs-agent-rows--title (id)
   "Task ID's title, while the session is known."
-  (or (and (stringp id) (and-let* ((session (romacs-agent-get id))) (romacs-agent-title session))) "a task"))
+  (or (and (stringp id) (and-let* ((session (romacs-agent-loaded id))) (romacs-agent-title session))) "a task"))
 
 (defun romacs-agent-rows-quoted (text)
   "TEXT quoted: each of its lines behind a bar, which is decoration

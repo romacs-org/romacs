@@ -330,7 +330,7 @@ call stays running until its answer is ready."
      "next" (if (equal status "running") (romacs-agent-tools--running-next session) :null))))
 
 (defun romacs-agent-tools--known (arguments)
-  (or (romacs-agent-find (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
+  (or (romacs-agent-get (gethash "taskId" arguments)) (user-error "No task %s" (gethash "taskId" arguments))))
 
 (defun romacs-agent-tools--woken-file (session)
   (expand-file-name "woken" (romacs-agent-dir session)))
@@ -789,7 +789,7 @@ unanswered."
   "Stop SESSION's harness when it has sat idle its role's time since its
 last record; when it has not yet, look again then."
   (remhash (romacs-agent-id session) romacs-agent-tools--reaping)
-  (when-let* (((eq (romacs-agent-get (romacs-agent-id session)) session))
+  (when-let* (((eq (romacs-agent-loaded (romacs-agent-id session)) session))
               ((not (romacs-agent-cancelled session)))
               (delay (romacs-agent-tools--reap-delay session))
               ;; Its replay not yet over, what it does is not yet known.
@@ -1042,6 +1042,7 @@ Romacs (its own channel's reply line says how), or a sender gone."
                         ;; Its own channel's, when it came by one: the call to copy.
                         (user-error "Message %s came from outside Romacs. %s" id
                                     (romacs-agent--message-reply-line message)))
+                       ;; One a start left a row: loaded, to be answered.
                        ((romacs-agent-get sender-id))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
          ;; Its note first able to go: never an answer sent and its note lost.
@@ -1210,7 +1211,7 @@ says so, and its parent is woken with the end."
 moved it); with no account left, say so; its end then goes to its parent
 as it would have."
   (when (eq (gethash (romacs-agent-id session) romacs-agent-tools--moving) token)
-    (cond ((not (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+    (cond ((not (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
                      (eql (romacs-agent-done-seq session) (car token)) (romacs-agent-limited session)
                      (not (romacs-agent-pending-selection session))))
            (romacs-agent-tools--not-moved session nil))
@@ -1300,7 +1301,7 @@ reset, once."
    (t
     (remhash session romacs-agent-tools--resumes)
     (romacs-agent-tools--keep-resume session nil)
-    (when (and (eq (romacs-agent-get (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
+    (when (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (not (romacs-agent-cancelled session))
                (not (romacs-agent-stopped session)) (romacs-agent-limited session)
                (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session)))
       (let ((target (romacs-agent-pool-pick (romacs-agent-harness session))))
@@ -1361,7 +1362,7 @@ its parent and wake rule)."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
-         (task (or (romacs-agent-find id) (user-error "No task %s" id)))
+         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
          (provider (or (gethash "provider" arguments) (romacs-agent-provider task)))
          (instance (or (romacs-agent--configured provider) (user-error "No agent provider %s" provider)))
          (model (gethash "model" arguments)) (effort (gethash "effort" arguments))
