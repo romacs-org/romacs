@@ -41,7 +41,7 @@ from romacs_mcp_client import RomacsMcp
 OUT = threading.Lock()
 LOG = os.environ.get('FAKE_HARNESS_LOG')
 # The variables whose inheritance the environment tests watch.
-WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_')
+WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_', 'AGENT_TEST_')
 
 
 # What `initialize' answers, in claude 2.1.316's shape.

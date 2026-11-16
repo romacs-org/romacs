@@ -409,7 +409,7 @@ them all at once.  Answers once all are consumed or `timeout' passes."
                   "seconds" (- (float-time) started)))))))))
 
 (defun romacs-mcp-session--own-timer-p (timer)
-  (memq (timer--function timer) '(romacs-mcp--drain romacs-mcp--poll-deferred)))
+  (memq (timer--function timer) '(romacs-mcp--drain romacs-mcp--poll-deferred romacs-mcp--poll-clocked romacs-mcp--poll-woken)))
 
 (defun romacs-mcp-session--timer-name (timer)
   (let ((function (timer--function timer)))

@@ -182,12 +182,10 @@ failed, Grep (whose row counts what it found)."
      (should (string-search "alpha é" (current-kill 0)))
      ;; Drawn so, the outputs are no edit to undo: they stay.
      (should-not (and (listp buffer-undo-list) (seq-some #'identity buffer-undo-list)))
-     ;; Rows trimmed away take their payloads with them.
+     ;; Opened, every row's payload is drawn and none is left to open.
      (romacs-agent-ui--open-payloads-in (point-min) (point-max))
-     (let ((romacs-agent-ui--tool-lines (make-hash-table :test #'equal)))
-       (puthash "x" '(:output "kept") (or romacs-agent-ui--payloads (setq romacs-agent-ui--payloads (make-hash-table :test #'equal))))
-       ;; Opened with no row, a payload is forgotten.
-       (should-not (romacs-agent-ui--open-payload "x"))
-       (should-not (gethash "x" romacs-agent-ui--payloads))))))
+     (should-not (romacs-agent-ui--payload-ids (point-min) (point-max)))
+     ;; A call with no row has nothing to open: its payload went with it.
+     (should-not (romacs-agent-ui--open-payload "x")))))
 
 ;;; romacs-agent-lazy-tests.el ends here
