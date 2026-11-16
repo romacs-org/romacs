@@ -748,28 +748,36 @@ its parent again."
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--wake-missed)
 
 ;;; Reaping finished tasks
+;;
+;; A delegated task whose turn has ended keeps no processes it does not
+;; use: after `romacs-agent-reap-after' idle its harness is stopped to
+;; sleep (`romacs-agent-stop' REAPED), and it reads idle; its next
+;; message, a romacs_task_send or what a watch tells it, resumes its
+;; conversation.  One its harness still works for (a shell it started
+;; runs on, a build in the background) is kept.  A user's own session,
+;; which no session delegated, is never reaped.
 
-(defcustom romacs-agent-reap-after '(("review" . 300))
-  "How long a delegated task may sit idle after a turn before its harness
-is stopped, by role: an alist of a role (a string, or t for any other)
-and seconds.  Its conversation stays: a message to it (romacs_task_send)
-resumes it.  Stopping a task ends what its harness started too, so a
-lane that waits on its own child processes is better left out."
-  :type '(alist :key-type (choice string (const :tag "Any other role" t)) :value-type number)
+(defcustom romacs-agent-reap-after 600
+  "Seconds a delegated task may sit idle after a turn before its harness
+is stopped to sleep, or nil to keep every task's harness.  Its
+conversation stays, and its next message resumes it."
+  :type '(choice (const :tag "Never" nil) number)
   :group 'romacs-agent)
 
+(defconst romacs-agent-tools--shells '("bash" "sh" "zsh" "dash" "fish" "ksh")
+  "What a harness runs its commands in: one running means work goes on.")
+
 (defun romacs-agent-tools--reap-delay (session)
-  "Seconds SESSION may sit idle, or nil to keep it: a session with a role
-was delegated (a user's own has none), whoever delegated it."
-  (when-let* ((role (plist-get (romacs-agent-options session) :role)))
-    (cdr (or (assoc role romacs-agent-reap-after) (assq t romacs-agent-reap-after)))))
+  "Seconds SESSION may sit idle, or nil to keep it: only a delegated task
+is reaped, never a user's own session."
+  (and (plist-get (romacs-agent-options session) :parent) romacs-agent-reap-after))
 
 (defvar romacs-agent-tools--reaping (make-hash-table :test #'equal)
   "Tasks whose look is scheduled: a replay's many ends schedule one.")
 
 (defun romacs-agent-tools--reap-later (session &optional delay)
   "Look at SESSION once it may have sat idle long enough to be reaped:
-after DELAY seconds, by default its role's time."
+after DELAY seconds, by default its time."
   (when-let* ((delay (or delay (romacs-agent-tools--reap-delay session)))
               ((not (gethash (romacs-agent-id session) romacs-agent-tools--reaping))))
     (puthash (romacs-agent-id session) t romacs-agent-tools--reaping)
@@ -780,14 +788,43 @@ after DELAY seconds, by default its role's time."
 waiting to be sent or written and not yet journaled back, no question
 unanswered."
   (and (eq (romacs-agent-state session) 'idle)
+       (not (romacs-agent-stopped session))
        (null (romacs-agent-queue session))
        (<= (romacs-agent-requests session) (romacs-agent-inputs session))
        (zerop (hash-table-count (romacs-agent-approvals session)))
        (or (process-live-p (romacs-agent-connection session)) (romacs-agent-unit session))))
 
+(defun romacs-agent-tools--processes (session pid)
+  "The pids SESSION's supervisor PID runs beside: its unit's (its cgroup)
+when it runs as its own unit, else PID's descendants; a supervisor run
+detached shares the cgroup it was started in with others."
+  (let* ((unit (romacs-agent-unit session))
+         (line (and unit (ignore-errors (with-temp-buffer (insert-file-contents (format "/proc/%d/cgroup" pid))
+                                                          (buffer-string)))))
+         (group (and line (string-match (format "^0::\\(.*/%s\\.service\\)$" (regexp-quote unit)) line)
+                     (concat "/sys/fs/cgroup" (match-string 1 line)))))
+    (if group
+        (mapcan (lambda (procs) (mapcar #'string-to-number (split-string (with-temp-buffer (insert-file-contents procs)
+                                                                                           (buffer-string)))))
+                (directory-files-recursively group "\\`cgroup\\.procs\\'"))
+      (let ((children (make-hash-table)) (found (list pid)) (todo (list pid)))
+        (dolist (p (list-system-processes))
+          (when-let* ((parent (alist-get 'ppid (process-attributes p)))) (push p (gethash parent children))))
+        (while todo
+          (dolist (child (gethash (pop todo) children)) (push child found) (push child todo)))
+        found))))
+
+(defun romacs-agent-tools--working-p (session)
+  "Whether SESSION's harness still works for something after its turn: a
+shell it started runs among its processes."
+  (when-let* ((pid (romacs-agent--host-pid session)))
+    (cl-some (lambda (p) (member (alist-get 'comm (process-attributes p)) romacs-agent-tools--shells))
+             (romacs-agent-tools--processes session pid))))
+
 (defun romacs-agent-tools--reap (session)
-  "Stop SESSION's harness when it has sat idle its role's time since its
-last record; when it has not yet, look again then."
+  "Stop SESSION's harness to sleep when it has sat idle its time since its
+last record with nothing at work; when it has not yet, or works on, look
+again then."
   (remhash (romacs-agent-id session) romacs-agent-tools--reaping)
   (when-let* (((eq (romacs-agent-get (romacs-agent-id session)) session))
               ((not (romacs-agent-cancelled session)))
@@ -798,9 +835,9 @@ last record; when it has not yet, look again then."
                    (progn (romacs-agent-tools--reap-later session delay) nil)))
               ((romacs-agent-tools--idle-p session)))
     (let ((left (- (+ (or (romacs-agent-last-time session) 0) delay) (float-time))))
-      (if (> left 0)
-          (romacs-agent-tools--reap-later session left)
-        (romacs-agent-stop session)))))
+      (cond ((> left 0) (romacs-agent-tools--reap-later session left))
+            ((romacs-agent-tools--working-p session) (romacs-agent-tools--reap-later session delay))
+            (t (romacs-agent-stop session t))))))
 
 (defun romacs-agent-tools--reap-on-event (session event)
   ;; A turn's end: its task may be done.
