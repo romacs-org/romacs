@@ -2,6 +2,7 @@
 //! constrain-to-field, which the field primitives and the field-respecting
 //! line and word motion share.
 use super::*;
+use crate::coordinates::{ByteOffset, CharOffset};
 
 impl Leaf<'_> {
     /// CHECK_FIXNUM_COERCE_MARKER.
@@ -95,7 +96,19 @@ impl Leaf<'_> {
     /// would leave the boundary's line. A beginning N lines away escapes
     /// from a field edge at point.
     pub(crate) fn line_field_position(&mut self, n: Value, end: bool) -> super::super::Out {
-        let bound = self.line_boundary_position(n, end)?;
+        // No field at either end, the common case, leaves the boundary
+        // as it is, found and checked in bytes.
+        let byte = self.line_boundary_byte(n, end)?;
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        if let data::Object::Buffer(b) = &self.vm.objects[index] {
+            let (point, buffer) = (b.point, self.vm.slots[self.vm.buffer_slot].value);
+            // A read that signals takes the general path, which first
+            // checks what would make it unnecessary.
+            if let Ok(false) = self.field_near_bytes(buffer, ByteOffset(byte), point) {
+                return self.position_of_byte(byte);
+            }
+        }
+        let bound = self.position_of_byte(byte)?;
         let point = Value::integer(self.point()?).map_err(Fault::Error)?;
         let escape = !end && n != Value::NIL && n.integer_value() != Some(1);
         self.constrain_to_field(bound, point, if escape { Value::TRUE } else { Value::NIL }, Value::TRUE, Value::NIL)
@@ -106,15 +119,9 @@ impl Leaf<'_> {
         if new == old || self.variable_value(inhibit)?.is_some_and(|v| v != Value::NIL) {
             return Ok(new);
         }
-        let begv = self.buffer_shape()?.begv;
-        let key = self.intern("field");
-        // The positions before NEW and OLD too: a non-sticky field such as
-        // a prompt ends there with no `field' at the position itself.
-        let near_field = self.char_property_here(new, key)? != Value::NIL
-            || self.char_property_here(old, key)? != Value::NIL
-            || (new > begv && self.char_property_here(new - 1, key)? != Value::NIL)
-            || (old > begv && self.char_property_here(old - 1, key)? != Value::NIL);
-        if !near_field || (capture != Value::NIL && self.captured(old, capture, begv)?) {
+        let shape = self.buffer_shape()?;
+        let begv = shape.begv;
+        if !self.field_near(new, old, (begv, shape.zv))? || (capture != Value::NIL && self.captured(old, capture, begv)?) {
             return Ok(new);
         }
         let forward = new > old;
@@ -128,6 +135,48 @@ impl Leaf<'_> {
         // ESCAPE can put BOUND beyond NEW, which is then already in OLD's field.
         let crosses = if bound < new { forward } else { !forward };
         Ok(if crosses && (only_in_line == Value::NIL || !self.newline_between(new, bound)?) { bound } else { new })
+    }
+
+    /// Whether a `field' char-property is non-nil at character position NEW
+    /// or OLD, or at the character before either: a non-sticky field such
+    /// as a prompt ends there with no `field' at the position itself.
+    /// A position outside BEGV..ZV signals as `get-char-property' does.
+    fn field_near(&mut self, new: i64, old: i64, (begv, zv): (i64, i64)) -> std::result::Result<bool, Fault> {
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let accessible = (begv..=zv).contains(&new) && (begv..=zv).contains(&old);
+        if let (true, data::Object::Buffer(b)) = (accessible, &self.vm.objects[index]) {
+            let byte = |n: i64| b.byte_of_char(CharOffset((n - 1) as usize)).map_err(Fault::Error);
+            let (new, old, buffer) = (byte(new)?, byte(old)?, self.vm.slots[self.vm.buffer_slot].value);
+            return self.field_near_bytes(buffer, new, old);
+        }
+        let key = self.intern("field");
+        Ok(self.char_property_here(new, key)? != Value::NIL
+            || self.char_property_here(old, key)? != Value::NIL
+            || (new > begv && self.char_property_here(new - 1, key)? != Value::NIL)
+            || (old > begv && self.char_property_here(old - 1, key)? != Value::NIL))
+    }
+
+    /// `field_near' at bytes NEW and OLD of BUFFER, the current buffer and
+    /// a multibyte one, each in its accessible region: read where they are,
+    /// converting no position.
+    fn field_near_bytes(&mut self, buffer: Value, new: ByteOffset, old: ByteOffset) -> std::result::Result<bool, Fault> {
+        let key = self.intern("field");
+        let data::Object::Buffer(b) = self.vm.object(buffer).map_err(Fault::Error)? else { unreachable!("a multibyte buffer") };
+        let begv = b.accessible().start;
+        // Usually nothing near them could give a field: then none is read.
+        // A character is at most 4 bytes, so the span holds the ones before.
+        let low = new.min(old).0.saturating_sub(4).max(begv.0);
+        if self.vm.char_property_absent(buffer, key, low..new.0.max(old.0) + 1) {
+            return Ok(false);
+        }
+        let before = |at: ByteOffset| (at > begv).then(|| ByteOffset(b.body().char_start_before(at.0)));
+        let spots = [Some(new), Some(old), before(new), before(old)];
+        for at in spots.into_iter().flatten() {
+            if self.vm.char_property_at_byte(buffer, at.0, key, None).map_err(Fault::Error)?.0 != Value::NIL {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Whether OLD's CAPTURE property says to ignore field boundaries: it

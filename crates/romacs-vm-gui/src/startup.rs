@@ -289,7 +289,7 @@ impl Phases {
     pub fn start(&self) -> std::time::Instant { self.start }
     pub fn mark(&mut self, phase: &str) {
         let now = std::time::Instant::now();
-        eprintln!("romacs-startup: {}", serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
+        romacs_vm::host::event_line("romacs-startup", &serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
                                                "ms": (now - self.last).as_secs_f64() * 1000.0}));
         self.last = now;
     }
@@ -298,13 +298,28 @@ impl Phases {
 
 /// GNU's `lisp/` for this process; see [`lisp_dir_from`].
 pub fn lisp_dir() -> std::path::PathBuf {
-    lisp_dir_from(std::env::var_os("ROMACS_LISP_DIR"), romacs_vm::host::runtime_root)
+    let (dir, ignored) = lisp_dir_from(std::env::var_os("ROMACS_LISP_DIR"), romacs_vm::host::runtime_root, is_gnu_lisp);
+    if let Some(ignored) = ignored {
+        eprintln!("romacs: ROMACS_LISP_DIR {} holds no GNU Lisp; using {}", ignored.display(), dir.display());
+    }
+    dir
 }
 
-/// `ROMACS_LISP_DIR`, else the runtime tree's `lisp/`
-/// (`romacs_vm::host::runtime_root`).
-fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce() -> std::path::PathBuf) -> std::path::PathBuf {
-    lisp_dir.map(Into::into).unwrap_or_else(|| runtime_root().join("lisp"))
+/// Whether DIR is a GNU Lisp tree: the directory loadup.el is in.
+fn is_gnu_lisp(dir: &std::path::Path) -> bool {
+    dir.join("loadup.el").is_file()
+}
+
+/// `ROMACS_LISP_DIR` when IS_GNU_LISP says it holds GNU's Lisp, else the
+/// runtime tree's `lisp/` (`romacs_vm::host::runtime_root`), with the
+/// override it ignored: one left from another build's layout (a tree
+/// that layout had, gone) must not end the start.
+fn lisp_dir_from(lisp_dir: Option<std::ffi::OsString>, runtime_root: impl FnOnce() -> std::path::PathBuf,
+                 is_gnu_lisp: impl Fn(&std::path::Path) -> bool) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    match lisp_dir.map(std::path::PathBuf::from) {
+        Some(dir) if is_gnu_lisp(&dir) => (dir, None),
+        other => (runtime_root().join("lisp"), other),
+    }
 }
 
 /// Romacs's per-user cache, `$XDG_CACHE_HOME/romacs`, or `~/.cache/romacs`
@@ -514,7 +529,6 @@ fn declare_stock_theme(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<()
 fn set_up_workspace(vm: &mut Vm, root: Option<&std::path::Path>, showcase: bool) -> Result<Started, String> {
     // VM2's own runtime (its Lisp-written primitives), as every GUI path installs.
     vm.install_lisp_prelude()?;
-    install_window_change(vm)?;
     policy!(vm, root, "session/romacs-startup.el")?;
     declare_stock_theme(vm, root)?;
     policy!(vm, root, "romacs-find-file.el")?;
@@ -613,18 +627,7 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
 /// chain (world.rs); a source boot takes them after it. Dired is GNU's
 /// dired.el here: the workspace's browser would shadow its autoloads and
 /// its `defvar` of `dired-mode-map` would keep GNU's keys out.
-/// window.c's change functions (lisp/vm/window-change.el), which every
-/// redisplay runs (host_input.rs), installed before a live launch's first
-/// one: a resize can repaint before the first key reaches the command loop
-/// that would install them. Their state is defvar'd, so that later install
-/// keeps it.
-fn install_window_change(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(include_str!("../../../lisp/vm/window-change.el"))?;
-    Ok(())
-}
-
 pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
-    install_window_change(vm)?;
     if launch == Launch::GnuOnly {
         return Ok(());
     }
@@ -769,14 +772,20 @@ pub fn open_workspace(vm: &mut Vm, started: Started, files: &[std::path::PathBuf
 pub const QUICK_START: &str = "(progn (setq init-file-user nil site-run-file nil inhibit-x-resources t)
   (put 'site-run-file 'standard-value '(nil)))";
 
+/// What a session that is not -Q takes instead of [`QUICK_START`]: the
+/// system's site-lisp directories before `load-path`, each with its
+/// subdirs.el, as GNU's startup has them (lisp/session/romacs-site-lisp.el).
+pub const SITE_LISP_START: &str = "(progn (require 'romacs-site-lisp) (romacs-site-lisp-start))";
+
 /// A --loadup session's last steps before the user's init: -Q's settings
-/// ([`QUICK_START`]), then the session's start of lisp/session/romacs-defaults.el:
+/// ([`QUICK_START`]) or else the site-lisp ([`SITE_LISP_START`]), then the
+/// session's start of lisp/session/romacs-defaults.el:
 /// its libraries' per-user files, and Romacs's interactive defaults unless
 /// -Q, which keeps GNU's values; the init may override them or turn them
 /// off with `romacs-defaults-mode'.
 pub fn before_init(vm: &mut Vm, launch: Launch, quick: bool) -> Result<(), String> {
     if launch == Launch::Loadup {
-        if quick { vm.eval_source(QUICK_START)?; }
+        vm.eval_source(if quick { QUICK_START } else { SITE_LISP_START })?;
         vm.eval_source(&format!("(when (fboundp 'romacs-defaults-start) (romacs-defaults-start {}))",
                                 if quick { "t" } else { "nil" }))?;
         vm.eval_source("(when (fboundp 'romacs-gui-loadup-before-init) (romacs-gui-loadup-before-init))")?;
@@ -1977,9 +1986,14 @@ mod tests {
         // An installed runtime tree (the Nix wrapper's ROMACS_RUNTIME_ROOT, or a
         // release tarball's share/romacs) supplies lisp/.
         let root = || std::path::PathBuf::from("/opt/romacs/share/romacs");
-        assert_eq!(lisp_dir_from(None, root), std::path::Path::new("/opt/romacs/share/romacs/lisp"));
+        let own = std::path::PathBuf::from("/opt/romacs/share/romacs/lisp");
+        assert_eq!(lisp_dir_from(None, root, |_| true), (own.clone(), None));
         // The more specific override still wins.
-        assert_eq!(lisp_dir_from(Some("/elsewhere/lisp".into()), root), std::path::Path::new("/elsewhere/lisp"));
+        assert_eq!(lisp_dir_from(Some("/elsewhere/lisp".into()), root, |_| true), ("/elsewhere/lisp".into(), None));
+        // One that does not (a tree an older layout had, gone) gives way to
+        // the runtime's own, and is named.
+        assert_eq!(lisp_dir_from(Some("/opt/romacs/share/romacs/no-such-lisp".into()), root, |_| false),
+                   (own, Some("/opt/romacs/share/romacs/no-such-lisp".into())));
     }
 
     #[test]
@@ -2002,7 +2016,7 @@ mod tests {
     #[test]
     fn runtime_root_resolves_gnu_lisp_before_bundled_lisp() {
         let root = romacs_vm::host::runtime_root().canonicalize().unwrap();
-        let dir = lisp_dir_from(None, || root.clone()).canonicalize().unwrap();
+        let dir = lisp_dir_from(None, || root.clone(), is_gnu_lisp).0.canonicalize().unwrap();
         let mut vm = Vm::new();
         vm.set_load_path(&runtime_load_path(&dir).unwrap()).unwrap();
         let locate = |vm: &mut Vm, name: &str| printed(vm, &format!("(locate-file-internal {} load-path '(\".elc\" \".el\"))", lisp_string(name)));

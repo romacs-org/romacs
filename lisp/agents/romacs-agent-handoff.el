@@ -31,9 +31,12 @@ not replayed: read files again before relying on them."
   "A brief's head; %s names where the thread comes from.")
 
 (defun romacs-agent-handoff--item-text (item)
-  (if (eq (plist-get item :role) 'note) (format "[%s]" (plist-get item :text))
-    (format "%s: %s" (pcase (plist-get item :role) ('user "User") ('assistant "Assistant") (_ "Tool"))
-            (string-trim (or (plist-get item :text) "")))))
+  (pcase (plist-get item :role)
+    ('note (format "[%s]" (plist-get item :text)))
+    ;; A brief the thread began with, carried on as it was.
+    ('context (plist-get item :text))
+    (role (format "%s: %s" (pcase role ('user "User") ('assistant "Assistant") (_ "Tool"))
+                  (string-trim (or (plist-get item :text) ""))))))
 
 (defun romacs-agent-handoff--chosen (items budget)
   "The indexes of ITEMS, chronological plists of :role and :text, a brief
@@ -45,8 +48,9 @@ assistant's, then the latest of the rest, unbroken, while it lasts."
          (last-of (lambda (role) (cl-loop for i downfrom (1- n) to 0
                                           when (eq (plist-get (aref vec i) :role) role) return i)))
          (first-user (cl-loop for i below n when (eq (plist-get (aref vec i) :role) 'user) return i))
-         ;; A note (what an import left out) always says so.
-         (notes (cl-loop for i below n when (eq (plist-get (aref vec i) :role) 'note) collect i))
+         ;; A note (what an import left out) always says so, and a brief
+         ;; the thread began with is always carried on.
+         (notes (cl-loop for i below n when (memq (plist-get (aref vec i) :role) '(note context)) collect i))
          (kept (delete-dups (append notes (delq nil (list first-user (funcall last-of 'user) (funcall last-of 'assistant))))))
          (used (apply #'+ (mapcar size kept))))
     ;; The latest stretch, unbroken: an older item that would fit after
@@ -61,10 +65,12 @@ assistant's, then the latest of the rest, unbroken, while it lasts."
         (cl-decf i)))
     (sort kept #'<)))
 
-(defun romacs-agent-handoff-brief (items from next &optional budget)
+(defun romacs-agent-handoff-brief (items from next &optional budget head)
   "A brief carrying ITEMS, a thread's chronological plists of :role (user,
-assistant or tool) and :text, from FROM (where it ran), to go on with
-NEXT, within BUDGET characters of history (`romacs-agent-handoff-budget')."
+assistant, tool, note or context: a brief it began with) and :text, from
+FROM (where it ran), to go on with NEXT, within BUDGET characters of
+history (`romacs-agent-handoff-budget').  HEAD is its first paragraph, a
+format of FROM (default a handoff's)."
   (let* ((chosen (romacs-agent-handoff--chosen items (or budget romacs-agent-handoff-budget)))
          (vec (vconcat items))
          (lines nil) (previous -1))
@@ -76,7 +82,7 @@ NEXT, within BUDGET characters of history (`romacs-agent-handoff-budget')."
     (when (< (1+ previous) (length items))
       (push (format "[%d item%s left out]" (- (length items) previous 1) (if (= (- (length items) previous 1) 1) "" "s"))
             lines))
-    (concat (format romacs-agent-handoff--head from) "\n\n"
+    (concat (format (or head romacs-agent-handoff--head) from) "\n\n"
             (mapconcat #'identity (nreverse lines) "\n\n")
             "\n\n---\n\n" next)))
 
@@ -110,7 +116,13 @@ streamed (an imported transcript has no turn ends, only messages)."
           ('gap (close-turn) (push (list :role 'note :text (plist-get event :text)) items))
           ('input (close-turn)
                   (when-let* ((text (plist-get event :text)))
-                    (push (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text) items)))
+                    (push (if-let* ((message (car (plist-get event :messages))))
+                              ;; Another session's, not the user's request.
+                              (list :role 'tool :text (format "Message from %s (%s): %s"
+                                                              (plist-get (plist-get message :from) :name)
+                                                              (plist-get message :kind) text))
+                            (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text))
+                          items)))
           ('delta (unless (plist-get event :parent) (push (plist-get event :text) streamed)))
           ('message-end (unless (plist-get event :parent)
                           (when streamed (setq reply (apply #'concat (reverse streamed)) streamed nil))))

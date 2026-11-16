@@ -1,7 +1,7 @@
 //! `--world-trace OUT.json` (DESIGN-M1 §5, §13 step 2): run the recipe, the
 //! preloads, harness and adapter, as a world build would, and write its read
 //! trace. The process re-executes itself with the pinned per-process
-//! environment, in build mode; the child lists every refusal
+//! environment, in build mode; the child lists all it cannot capture
 //! rather than stopping at the first, writes the trace to OUT and exits 1 if
 //! there was any.
 use romacs_vm::host::{self, Pinned};
@@ -45,7 +45,7 @@ fn absolute_args(args: &[OsString], cwd: &Path) -> Vec<OsString> {
 
 /// The parent: make the pinned directories and OUT, run the child with the
 /// pinned environment in `p/cwd`, and exit as it does. The child creates no
-/// file: its effects refuse, and OUT exists.
+/// file: a build performs no effect, and OUT exists.
 pub fn trace(out: &Path) -> ! {
     let status = host::current_dir().and_then(|cwd| {
         let out = cwd.join(out);
@@ -79,16 +79,16 @@ pub fn begin() {
 }
 
 /// The child, once the recipe ran: check the startup inputs, write the
-/// trace to OUT and exit, 1 if anything was refused.
+/// trace to OUT and exit, 1 if anything was not captured.
 pub fn finish(vm: &mut Vm, out: &Path) -> ! {
     vm.world_check_inputs();
     let trace = host::leave_build().expect("a world trace is recording");
     let count = |list: &str| trace[list].as_array().map_or(0, Vec::len);
-    let (records, refusals) = (count("records"), count("refusals"));
+    let (records, uncaptured) = (count("records"), count("uncaptured"));
     let written = serde_json::to_vec_pretty(&trace).map_err(std::io::Error::other).and_then(|bytes| host::write(out, bytes));
-    crate::emit(json!({"event": "world-trace", "out": out, "records": records, "refusals": refusals,
+    crate::emit(json!({"event": "world-trace", "out": out, "records": records, "uncaptured": uncaptured,
                        "error": written.as_ref().err().map(ToString::to_string)}));
-    std::process::exit(if written.is_err() { 3 } else if refusals > 0 { 1 } else { 0 })
+    std::process::exit(if written.is_err() { 3 } else if uncaptured > 0 { 1 } else { 0 })
 }
 
 /// How many leading preloads a world holds: the loadup bootstrap and every
@@ -188,7 +188,7 @@ pub fn boot(args: &crate::Args) -> (Vm, Vec<serde_json::Value>, usize) {
         let cwd = host::current_dir().unwrap_or_default();
         absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd)
     };
-    match world.launch::<()>(builder_args, false, || {}) {
+    match world.launch::<()>(builder_args, false, |_| {}) {
         Launch::Restored { vm, manifest, .. } => {
             let mut vm = *vm;
             vm.world_reinit();

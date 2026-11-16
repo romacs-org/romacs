@@ -179,6 +179,19 @@ of the user's own too: Codex marks every one isOther."
                          :notes (cl-remove-if (lambda (note) (member (cdr note) '(nil ""))) options)
                          :multi nil)))
 
+(defun romacs-agent--codex-given-answers (params result)
+  "The answers RESULT gives `requestUserInput''s PARAMS, as Claude's are:
+a table from each question to its answers' labels, joined; nil when it
+gives none."
+  (let ((given (and (hash-table-p result) (gethash "answers" result))) (object (romacs-mcp--object)))
+    (when (and (hash-table-p given) (hash-table-p params) (vectorp (gethash "questions" params)))
+      (cl-loop for q across (gethash "questions" params)
+               for answer = (gethash (gethash "id" q) given)
+               for labels = (and (hash-table-p answer) (gethash "answers" answer))
+               when (and (stringp (gethash "question" q)) (vectorp labels))
+               do (puthash (gethash "question" q) (mapconcat (lambda (l) (format "%s" l)) labels ", ") object))
+      (and (> (hash-table-count object) 0) object))))
+
 (defun romacs-agent--codex-answers (params answers)
   "ANSWERS ((QUESTION . ANSWER) ...) as `requestUserInput''s answers, by
 question id: an option by its label, other words as Codex's own client
@@ -229,20 +242,39 @@ answer, or a message a steer missed its turn with, as a new turn."
     (`(:reply ,id ,method)
      (romacs-mcp--object "id" id "error" (romacs-mcp--object "code" -32601
                                                              "message" (format "Romacs does not answer %s" method))))
-    (`(:turn ,steer ,text ,images)
+    (`(:turn ,steer ,text ,images . ,rest)
+     ;; Another session's message goes as it was steered, in its envelope.
      (let ((line (romacs-agent--codex-turn session (romacs-agent-request-id session)
                                            (let ((romacs-agent--message-images images))
-                                             (romacs-agent--codex-items text)))))
+                                             (romacs-agent--codex-items
+                                              (if (car rest) (romacs-agent--messages-text (car rest) text) text))))))
        ;; Its echo is known by the steer it stands for.
        (puthash "clientUserMessageId" steer (gethash "params" line))
        line))))
+
+(defun romacs-agent--codex-owed-now (session)
+  "The line SESSION's harness is owed first now: a refusal always; a
+missed steer's turn not while something holds the session (a renewal's
+note, a rollback): that one waits, and goes with the conversation it is
+left to (`romacs-agent--codex-owed-turns')."
+  (let ((owed (plist-get (romacs-agent-driver-state session) :owed)))
+    (if (romacs-agent--held-p session)
+        (cl-find :reply owed :key #'car)
+      (car owed))))
+
+(defun romacs-agent--codex-owed-turns (session)
+  "The messages SESSION's harness is owed as turns of their own (missed
+steers): each (TEXT IMAGES), oldest first."
+  (cl-loop for owed in (plist-get (romacs-agent-driver-state session) :owed)
+           when (eq (car owed) :turn) collect (list (nth 2 owed) (nth 3 owed))))
 
 (defun romacs-agent--codex-next (session)
   "SESSION's next line from this run's state: what it owes, else its
 startup's next step."
   (let* ((state (romacs-agent-driver-state session))
          (sent (plist-get state :sent)))
-    (cond ((plist-get state :owed) (romacs-agent--codex-owed-line session (car (plist-get state :owed))))
+    (cond ((when-let* ((owed (romacs-agent--codex-owed-now session)))
+             (romacs-agent--codex-owed-line session owed)))
           ((plist-get state :thread) :ready)
           ((null sent)
            (romacs-agent--codex-request
@@ -263,18 +295,22 @@ startup's next step."
 
 (defun romacs-agent--codex-message (session object)
   "The events of OBJECT, a message written: its input, and for a steer
-what to do should it miss its turn."
+what to do should it miss its turn.  A missed steer's turn is its
+message again: its text and record (another session's) the steer's."
   (let* ((params (gethash "params" object))
-         (text (romacs-agent--text-of (gethash "input" params)))
+         (steer (romacs-agent--value (gethash "clientUserMessageId" params)))
+         (owed (and steer (cl-find-if (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))
+                                      (plist-get (romacs-agent-driver-state session) :owed))))
+         (text (if owed (nth 2 owed) (romacs-agent--text-of (gethash "input" params))))
+         (messages (if owed (nth 4 owed) (romacs-agent--messages-of (gethash "romacsMessages" object))))
          (images (append (or (gethash "images" object)
                              (cl-loop for item across (gethash "input" params)
                                       when (equal (gethash "type" item) "localImage") collect (gethash "path" item)))
-                         nil))
-         (steer (romacs-agent--value (gethash "clientUserMessageId" params))))
-    (append (list (list :type 'input :text text :images images))
+                         nil)))
+    (append (list (append (list :type 'input :text text :images images) (and messages (list :messages messages))))
             (if (equal (gethash "method" object) "turn/steer")
                 (list (list :type 'handshake
-                            :state (list :steers (cons (list (gethash "id" object) text images)
+                            :state (list :steers (cons (list (gethash "id" object) text images messages)
                                                        (plist-get (romacs-agent-driver-state session) :steers)))))
               (and steer (romacs-agent--codex-paid
                           session (lambda (owed) (and (eq (car owed) :turn) (equal (cadr owed) steer)))))))))
@@ -292,9 +328,11 @@ what to do should it miss its turn."
                                       (list :experimental t))))))
      (method nil)
      ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
-      (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
-      (let ((result (gethash "result" object)))
+      (let ((result (gethash "result" object))
+            (asked (nth 2 (gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session)))))
+        (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
         (list (list :type 'answered :request-id (romacs-agent--codex-approval-id session id)
+                    :answers (romacs-agent--codex-given-answers asked result)
                     :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
                                       (cl-some (lambda (key)
                                                  (let ((given (gethash key result)))
@@ -328,7 +366,7 @@ what to do should it miss its turn."
                                         (plist-get (romacs-agent-options session) :model))))
                  ;; Codex takes up no turn its last run was cut in: it is over.
                  (when (romacs-agent-interrupted session)
-                   (list (list :type 'done :error t :reason "Cut short when Codex stopped"))))))
+                   (list (list :type 'done :error t :interrupted t :reason "Cut short when Codex stopped"))))))
       ("turn/start"
        (cond (error (list (list :type 'done :error t :text error :reason error)))
              ;; Acknowledged after its end: it stays over.
@@ -422,6 +460,9 @@ an approval or questions for the user, anything else refused."
     (append started
             (when completed
               (list (list :type 'tool :state (if failed 'failed 'completed) :id id
+                          ;; Its input as it ended: some items fill theirs in
+                          ;; only then (a web search's query).
+                          :input (cadr (romacs-agent--codex-tool item))
                           :output (romacs-agent--codex-output item)))))))
 
 (defun romacs-agent--codex-item (session item completed &optional id)
@@ -464,7 +505,7 @@ an approval or questions for the user, anything else refused."
          (reason (or (romacs-agent--codex-error turn) (and (equal status "interrupted") "Interrupted")))
          (ms (gethash "durationMs" turn)))
     (list :type 'done :text (romacs-agent-reply session) :error (not (equal status "completed"))
-          :reason reason :duration (and (numberp ms) (/ ms 1000.0))
+          :interrupted (equal status "interrupted") :reason reason :duration (and (numberp ms) (/ ms 1000.0))
           ;; Refused at its account's usage limit.
           :limit (let ((error (gethash "error" turn)))
                    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
@@ -591,6 +632,18 @@ line an earlier `codex exec' run journaled)."
           (method (romacs-agent--codex-notified session method (gethash "params" line)))
           (t (romacs-agent--codex-answer session id line)))))
 
+(defconst romacs-agent--codex-output-delta
+  "{\"out\":{\\(?:\"emittedAtMs\":[0-9]+,\\)?\"method\":\"item/\\(?:commandExecution\\|fileChange\\)/outputDelta\",\"params\":{\"delta\":"
+  "How a journal line of a command's or a patch's output, as it streams,
+starts: keys come sorted, so no request id can be among them.")
+
+(defun romacs-agent--codex-streamed-skip ()
+  "A function of a journal line's start and end saying whether it is a
+call's output streaming: a chat draws none of it (a call's output is its
+`item/completed' record's), so a replay passes over it unparsed."
+  (lambda (start _end)
+    (save-excursion (goto-char start) (looking-at-p romacs-agent--codex-output-delta))))
+
 (defun romacs-agent--codex-conversation-files (home session)
   "The files under HOME, relative to it, that hold SESSION's Codex
 thread: its rollout, wherever its day put it."
@@ -609,6 +662,10 @@ thread: its rollout, wherever its day put it."
   :lifetime 'persistent :forks #'romacs-agent--codex-forking
   :conversation-files #'romacs-agent--codex-conversation-files
   :rollback #'romacs-agent--codex-rollback
+  :owed-turns #'romacs-agent--codex-owed-turns
+  ;; A renewed conversation is a new thread, named once Codex starts it
+  ;; (`romacs-agent--codex-thread').
+  :renew #'ignore
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next
@@ -616,6 +673,7 @@ thread: its rollout, wherever its day put it."
   :interrupt #'romacs-agent--codex-interrupt
   :respond #'romacs-agent--codex-respond
   :events #'romacs-agent--codex-events
+  :streamed-skip #'romacs-agent--codex-streamed-skip
   :input-events #'romacs-agent--codex-input-events
   :native-id-p #'romacs-agent--uuid-p
   :history '(:files romacs-agent-history--codex-files :find romacs-agent-history--codex-find

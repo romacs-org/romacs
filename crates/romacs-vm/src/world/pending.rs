@@ -10,10 +10,10 @@
 //! (`romacs--world-reseed-lazy-p`), and its variable's first access
 //! evaluates it (`romacs--world-force`), then proceeds as that access.
 //!
-//! A pending variable's redirect is `Forwarded(Fwd::Fence(slot))`, the
-//! fence's own: every access of a fenced variable already takes the
-//! forwarded paths, and each reaches `fence_access` or `unfenced`, which
-//! find no fence cell and force it here. A plain variable's access never
+//! A pending variable's redirect is `Forwarded(Fwd::Tracked(slot))`, the
+//! tracking's own: every access of a tracked variable already takes the
+//! forwarded paths, and each reaches `tracked_access` or `untracked`, which
+//! find no tracking cell and force it here. A plain variable's access never
 //! looks at this table. Forcing restores the redirect the variable had,
 //! so every later access is a plain one.
 //!
@@ -36,17 +36,17 @@ romacs_snapshot::snapshot_struct!(Pending { redirect, entry });
 impl Vm {
     /// Make the variable at SLOT wait for ENTRY's evaluation until its
     /// first access. False, and nothing changes, when it cannot: in a world
-    /// build, whose fence owns `Fwd::Fence`, or for a variable that is
+    /// build, whose tracking owns `Fwd::Tracked`, or for a variable that is
     /// buffer-local, forwarded or bound by a `let` now. One pending already
     /// is pending on ENTRY.
     pub(crate) fn pend_variable(&mut self, slot: usize, entry: u32) -> bool {
-        if self.fence.is_some() {
+        if self.tracking.is_some() {
             return false;
         }
         self.forwarding(slot);
         let redirect = self.variable_redirects.get(slot).copied().flatten();
         match redirect {
-            Some(VariableRedirect::Forwarded(Fwd::Fence(_))) => match self.pending.get_mut(&slot) {
+            Some(VariableRedirect::Forwarded(Fwd::Tracked(_))) => match self.pending.get_mut(&slot) {
                 Some(pending) => { pending.entry = entry; true }
                 None => false,
             },
@@ -56,14 +56,14 @@ impl Vm {
                     self.variable_redirects.resize(slot + 1, None);
                 }
                 self.pending.insert(slot, Pending { redirect, entry });
-                self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Fence(slot as u32)));
+                self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(Fwd::Tracked(slot as u32)));
                 true
             }
             _ => false,
         }
     }
 
-    /// The variable at SLOT is accessed with no fence cell: when it is
+    /// The variable at SLOT is accessed with no tracking cell: when it is
     /// pending, its redirect comes back and its definition is evaluated
     /// (`romacs--world-force`), with collection held, since the access may
     /// come from a native frame holding Values in its locals. An error is

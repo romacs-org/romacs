@@ -57,7 +57,7 @@ or run again.  A reader not defined yet is advised as it is defined."
 and the libraries' top-level forms that asked for a secret.
 Each is (KIND SYMBOL FORM CUT DECLARED), innermost first: KIND is
 `defcustom', `defvar', `defconst', `defvar-local' or `defimage', or `form'
-for another top-level form (SYMBOL nil), FORM the form as loaded, CUT non-nil when an effect the build refused cut the definition
+for another top-level form (SYMBOL nil), FORM the form as loaded, CUT non-nil when an effect the build did not perform cut the definition
 short, so SYMBOL was defined as nil, and DECLARED non-nil when a library
 the init only declared defined it.  A world build keeps them
 \(`world_form_done'); `romacs-world-restart' evaluates each again in this
@@ -209,8 +209,8 @@ Each of FORMS is a printed (LEXICAL . FORM) the init gave
 `eval-after-load', in order; each is registered first, so it runs where
 GNU runs it, and kept as made by its position (`romacs--layer-baked-after-loads').
 A form that does not read back (a closure, which prints as an object, or
-one the recording withheld after a secret reader ran) refuses LIBRARY,
-which then loads at its first use."
+one the recording withheld after a secret reader ran) leaves LIBRARY
+uncaptured, and it loads at its first use."
   (let ((n 0))
     (dolist (printed forms)
       (let* ((entry (condition-case nil (car (read-from-string printed))
@@ -270,6 +270,42 @@ noted as its library's, wherever that library was loaded."
 (defun romacs--init-layer-end ()
   "The user's init has loaded."
   (advice-remove 'eval-after-load #'romacs--init-eval-after-load))
+
+;;; Libraries the layer left to the session, loaded ahead of their use
+
+(defvar romacs-layer-preload-delay 1
+  "Seconds of idleness before the next library the init layer left to the
+session loads ahead of its first use (`romacs--layer-preload').")
+
+(defun romacs--layer-preload (names)
+  "Load the features NAMES, strings, in order, ahead of their first use:
+the libraries the init only declared that its layer left to the session,
+as they loaded in the build.  One loads at a time, while no key waits; a
+waiting key stops the loading until the next idle moment.  An error
+stops it, as a warning: the library's first use meets it again."
+  (when names
+    (run-with-idle-timer romacs-layer-preload-delay nil
+                         #'romacs--layer-preload-step (mapcar #'intern names))))
+
+(defun romacs--layer-preload-step (queue)
+  "Load the first feature of QUEUE not loaded yet, unless a key waits,
+then go on with the rest (`romacs--layer-preload').  A feature no file
+of its name provides (sasl.el's `sasl-plain') comes with the file that
+does, later in QUEUE.  QUEUE is no `features': a parameter of that name
+would shadow the loaded ones."
+  (while (and queue (or (featurep (car queue)) (not (locate-library (symbol-name (car queue))))))
+    (setq queue (cdr queue)))
+  (cond
+   ((null queue))
+   ((input-pending-p)
+    (run-with-idle-timer romacs-layer-preload-delay nil #'romacs--layer-preload-step queue))
+   (t
+    (condition-case err
+        (progn (require (car queue))
+               (run-at-time 0 nil #'romacs--layer-preload-step (cdr queue)))
+      (error (display-warning 'romacs-layer
+                              (format-message "Loading `%s' ahead of its use: %s"
+                                              (car queue) (error-message-string err))))))))
 
 (provide 'romacs-world-layer)
 ;;; romacs-world-layer.el ends here

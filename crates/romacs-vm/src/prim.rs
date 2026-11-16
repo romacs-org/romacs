@@ -391,6 +391,20 @@ mod leaf {
         }
         /// A line boundary without moving point (GNU editfns.c).
         pub fn line_boundary_position(&mut self, count: Value, end: bool) -> super::Out {
+            let byte = self.line_boundary_byte(count, end)?;
+            self.position_of_byte(byte)
+        }
+        /// The position of byte BYTE of the current buffer's text.
+        pub(crate) fn position_of_byte(&mut self, byte: usize) -> super::Out {
+            let index = self.vm.buffer_index().map_err(Fault::Error)?;
+            let position = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(Fault::Error)?.0,
+                _ => byte,
+            };
+            Value::integer(position as i64 + 1).map_err(Fault::Error)
+        }
+        /// `line_boundary_position' as the byte offset of the current buffer's text.
+        pub(crate) fn line_boundary_byte(&mut self, count: Value, end: bool) -> std::result::Result<usize, Fault> {
             // CHECK_INTEGER: a bignum counts past either end of the buffer.
             let count = if count == Value::NIL { 1 } else if let Some(n) = count.integer_value() { n } else {
                 match self.bigint_value(count) {
@@ -400,7 +414,6 @@ mod leaf {
                 }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            let error = |e: String| Fault::Error(e);
             // Byte scans: a newline byte is never part of another character.
             let (text, point, low, high): (&dyn crate::text::Newlines, usize, usize, usize) = match &self.vm.objects[index] {
                 data::Object::Buffer(b) => { let range = b.accessible(); (b.body(), b.point.0, range.start.0, range.end.0) }
@@ -410,13 +423,8 @@ mod leaf {
             // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
             // the COUNTth newline from point, or the accessible end when
             // there are fewer; bol: the start of the line COUNT - 1 lines on.
-            let byte = if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
-                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) };
-            let position = match &self.vm.objects[index] {
-                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(error)?.0,
-                _ => byte,
-            };
-            Ok(Value::integer(position as i64 + 1).unwrap())
+            Ok(if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
+                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) })
         }
         /// Point of the current buffer as a 1-based character position.
         pub(crate) fn point(&mut self) -> std::result::Result<i64, Fault> {
@@ -1113,8 +1121,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1123,9 +1131,9 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1137,8 +1145,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1147,8 +1155,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1531,6 +1539,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
+            self.vm.permanent_names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.
@@ -1929,6 +1938,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod load_progress;
     mod model;
     mod effects;
     mod clipboard;
@@ -2555,7 +2565,8 @@ impl Vm {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
         self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
+        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
     }
 }
 

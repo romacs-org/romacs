@@ -234,6 +234,29 @@ rolls back by the line (revert REQUEST)."
           (should (equal (cadr (member "--session-id" argv)) native))
           (should-not (member "--resume" argv)))))))
 
+(ert-deftest romacs-agent-rollback-claude-resume-reads-the-journal-tail ()
+  "A resume that reads the records asks only the journal's last prompt or
+rollback: a long history before them is not parsed."
+  (romacs-agent-rollback-tests--with ()
+    (apply #'romacs-agent-rollback-tests--journal session
+           (append (cl-loop for n from 1 to 3000
+                            append (list (romacs-agent-rollback-tests--prompt n (make-string 200 ?x))
+                                         (romacs-agent-rollback-tests--assistant (format "u%d" n))))
+                   (list (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 3000)))
+                   (list (romacs-agent-rollback-tests--prompt 3001 "again"))))
+    (let ((parsed 0))
+      (cl-letf* ((parse (symbol-function 'json-parse-string))
+                 ((symbol-function 'json-parse-string) (lambda (&rest args) (cl-incf parsed) (apply parse args))))
+        (should-not (romacs-agent--claude-head-read session)))
+      (should (< 0 parsed 10)))
+    ;; The rollback last: the whole journal, for where it went back to.
+    (romacs-agent-rollback-tests--journal session (romacs-agent-rollback-tests--prompt 1 "a")
+                                          (romacs-agent-rollback-tests--assistant "u1")
+                                          (romacs-agent-rollback-tests--prompt 2 (make-string 300000 ?y))
+                                          (romacs-agent-rollback-tests--assistant "u2")
+                                          (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 2)))
+    (should (equal (romacs-agent--claude-head-read session) "u1"))))
+
 (ert-deftest romacs-agent-rollback-codex-reverts-the-turn ()
   (let* ((session (romacs-agent--make :id "c" :harness 'codex :harness-session "th"))
          (records (list (romacs-mcp--object "in" (romacs-mcp--object "id" "turn/start:4" "method" "turn/start" "romacsRequest" 7))

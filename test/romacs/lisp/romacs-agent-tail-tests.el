@@ -377,4 +377,110 @@ unless CUT, then its turn's end."
              (should (memq 'romacs-agent-dim (ensure-list (get-text-property (point) 'face)))))
          (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-chat-undo-moves-with-the-transcript ()
+  ;; Undo entries past where the transcript grew move with the text after
+  ;; it; those before stay.
+  (should (equal (romacs-agent-ui--undo-shifted '(nil (10 . 14) ("ab" . 12) ("cd" . -13) 15 (t . 0) (nil face x 11 . 13) (3 . 5))
+                                                10 4)
+                 '(nil (14 . 18) ("ab" . 16) ("cd" . -17) 19 (t . 0) (nil face x 15 . 17) (3 . 5)))))
+
+(ert-deftest romacs-agent-chat-undo-shifts-in-place ()
+  ;; The list and its entries stay the same conses.
+  (let* ((entry (cons 10 14)) (entries (list nil entry 15)))
+    (should (eq (romacs-agent-ui--undo-shifted entries 10 4) entries))
+    (should (eq (cadr entries) entry))
+    (should (equal entries '(nil (14 . 18) 19)))))
+
+(ert-deftest romacs-agent-chat-undo-shift-applies-and-pending ()
+  ;; A combined change's bounds move; one that cannot be placed ends the
+  ;; list; a pending undo sharing the entries moves them once.
+  (let ((entries (list nil (list 'apply 2 12 14 'ignore) 15)))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (apply 2 16 18 ignore) 19))))
+  (let ((entries (list nil (cons 12 14) (list 'apply 'ignore 1) (cons 20 22))))
+    (romacs-agent-ui--undo-shifted entries 10 4)
+    (should (equal entries '(nil (16 . 18)))))
+  (let* ((shared (cons 12 14)) (entries (list nil shared)) (pending (list shared))
+         (seen (make-hash-table :test #'eq)))
+    (romacs-agent-ui--undo-shifted entries 10 4 seen)
+    (romacs-agent-ui--undo-shifted pending 10 4 seen)
+    (should (equal shared '(16 . 18)))))
+
+(ert-deftest romacs-agent-chat-undo-barrier-and-pending-owner ()
+  ;; An entry that cannot be placed ends each list holding it, even one
+  ;; whose entries were moved already through another.
+  (let* ((barrier (list 'apply 'delete-region 12 14))
+         (entries (list nil barrier (cons 24 26)))
+         (pending (cdr entries))
+         (seen (make-hash-table :test #'eq)))
+    (setq entries (romacs-agent-ui--undo-shifted entries 10 4 seen))
+    (setq pending (romacs-agent-ui--undo-shifted pending 10 4 seen))
+    (should (equal entries '(nil)))
+    (should-not pending))
+  ;; Another buffer's pending undo is left as it is.
+  (with-temp-buffer
+    (setq-local romacs-agent-ui--end (point-marker))
+    (let ((pending-undo-list (list (cons 12 14)))
+          (last-command 'undo))
+      (romacs-agent-ui--editing (insert "abcd"))
+      (should (equal pending-undo-list '((12 . 14))))
+      ;; The chat's own, an undo run where it is shown, moves.
+      (cl-letf (((symbol-function 'window-buffer) (lambda (&rest _) (current-buffer))))
+        (set-marker romacs-agent-ui--end 1)
+        (romacs-agent-ui--editing (goto-char 1) (insert "abcd")))
+      (should (equal pending-undo-list '((16 . 18)))))))
+
+;; A journal whose last turns reach further back than the budget: the
+;; tail starts at the earliest turn within it.
+(ert-deftest romacs-agent-journal-tail-keeps-to-its-budget ()
+  (romacs-agent-tail-tests--with-session
+   5 100000
+   (lambda (session journal)
+     (let ((romacs-agent-journal-tail-bytes 250000))
+       ;; Twelve turns asked, about two fit: the earliest within it.
+       (let ((tail (romacs-agent--journal-tail session 12)))
+         (should (car tail))
+         (should (>= (car tail) (- (file-attribute-size (file-attributes journal)) 250000)))
+         (should (memq (cdr tail) '(2 3)))
+         ;; Asked for by hand, earlier turns are past it.
+         (should (equal (romacs-agent--journal-tail session 12 nil nil 'none) '(nil . 5))))
+       ;; In a chat: its first show keeps to it, its earlier row pages past.
+       (let* ((romacs-agent-chat-turns 12) (buffer (romacs-agent-tail-tests--open session)))
+         (unwind-protect
+             (with-current-buffer buffer
+               (should (memq (length (romacs-agent-tail-tests--questions buffer)) '(2 3)))
+               (romacs-agent-chat-earlier)
+               (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5))))
+           (kill-buffer buffer)))))))
+
+;; What comes before a session's first prompt (its fork notes): only that.
+(ert-deftest romacs-agent-journal-head-is-before-the-first-prompt ()
+  (romacs-agent-tail-tests--with-session
+   3 0
+   (lambda (session journal)
+     (should (= (romacs-agent--journal-head session) (romacs-agent-tail-tests--byte-of journal "\"question 1\"")))
+     (delete-file journal)
+     (write-region "{\"note\":{\"type\":\"run\"},\"seq\":1,\"t\":1}\n" nil journal nil 'silent)
+     (should (= (romacs-agent--journal-head session) (file-attribute-size (file-attributes journal)))))))
+
+;; A restored chat a window shows replays its tail, never the whole
+;; journal.
+(ert-deftest romacs-agent-chat-shown-again-replays-its-tail ()
+  (romacs-agent-tail-tests--with-session
+   5 0
+   (lambda (session _journal)
+     (let* ((romacs-agent-chat-turns 2) (froms nil)
+            (read (symbol-function 'romacs-agent--read-journal))
+            (buffer (romacs-agent-ui--make-chat session)))
+       (unwind-protect
+           (cl-letf (((symbol-function 'romacs-agent--read-journal)
+                      (lambda (session function &optional from &rest rest)
+                        (push from froms)
+                        (apply read session function from rest))))
+             (with-current-buffer buffer (romacs-agent-ui--shown-again))
+             (should froms)
+             (should (cl-every #'integerp froms))
+             (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5))))
+         (kill-buffer buffer))))))
+
 ;;; romacs-agent-tail-tests.el ends here

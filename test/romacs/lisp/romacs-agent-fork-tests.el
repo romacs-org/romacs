@@ -153,9 +153,7 @@ start launched, its manifest written."
   (require 'romacs-agent-ui)
   (romacs-agent-fork-tests--with 'claude ()
     (let* ((fork (romacs-agent-fork source))
-           (first (with-temp-buffer
-                    (insert-file-contents (expand-file-name "journal.jsonl" (romacs-agent-dir fork)))
-                    (json-parse-string (buffer-substring (point-min) (line-end-position)) :object-type 'hash-table)))
+           (first (car (romacs-agent--journal-records fork)))
            (note (gethash "note" first)))
       (should (eql (gethash "seq" first) 1))
       (should (equal (gethash "type" note) "fork"))
