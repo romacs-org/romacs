@@ -266,18 +266,76 @@ connection of its own, as the writer's process has."
         (should (= (romacs-agent-writer-pending-count) 1))
         (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
 
-(ert-deftest romacs-agent-writer-a-kept-state-not-kept-is-kept-again ()
-  ;; A kept state the writer fails to write: its session is no longer
-  ;; marked kept at that record, so the next keep writes it again.
-  (let ((romacs-agent-writer-start-functions nil) (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key))
+(ert-deftest romacs-agent-writer-a-requested-restart-waits-for-the-writes ()
+  ;; A requested restart waits while agent records are not yet written
+  ;; (`warm-restart-obstacle-functions', the restart's);
+  ;; a restart begun by hand drains them, and C-g cancels it, the writes
+  ;; still queued.
+  (require 'warm-restart)
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) #'ignore))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(1))
+        (should (equal (romacs-agent-writer--obstacle) '("1 agent records not yet written")))
+        ;; C-g while it drains: the restart stops, nothing lost.
+        (cl-letf (((symbol-function 'isolate-await) (lambda (&rest _) (signal 'quit nil))))
+          (should (eq (condition-case nil (progn (run-hooks 'warm-restart-before-handover-functions) 'restarted)
+                        (quit 'cancelled))
+                      'cancelled)))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        ;; Made meanwhile: no obstacle.
+        (serve)
+        (should (equal romacs-agent-writer-tests--made '(1)))
+        (should-not (romacs-agent-writer--obstacle))))))
+
+(defvar romacs-agent-writer-tests--values nil "What keyed writes put, by key.")
+(defun romacs-agent-writer-tests--put (key value) (setf (alist-get key romacs-agent-writer-tests--values nil nil #'equal) value))
+(defun romacs-agent-writer-tests--put-fails (_key _value) (error "Disk full"))
+
+(ert-deftest romacs-agent-writer-a-later-write-of-a-key-wins ()
+  ;; Two writes of one thing, the first failing: the second's value stays,
+  ;; the first is never tried again over it.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--values nil) (later nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (push (cons f args) later) nil))
+                ((symbol-function 'message) #'ignore))
+        ;; Both queued before either is answered.
+        (romacs-agent-write 'romacs-agent-writer-tests--put-fails '("k" old) nil '(row "k"))
+        (romacs-agent-write 'romacs-agent-writer-tests--put '("k" new) nil '(row "k"))
+        (serve)
+        (should (equal romacs-agent-writer-tests--values '(("k" . new))))
+        (should (zerop (romacs-agent-writer-pending-count)))
+        (should-not later)
+        ;; The first fails alone, kept; a later one of its key supersedes it.
+        (romacs-agent-write 'romacs-agent-writer-tests--put-fails '("j" old) nil '(row "j"))
+        (serve)
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (romacs-agent-write 'romacs-agent-writer-tests--put '("j" new) nil '(row "j"))
+        (serve)
+        (dolist (call later) (apply (car call) (cdr call)))
+        (serve)
+        (should (equal (alist-get "j" romacs-agent-writer-tests--values nil nil #'equal) 'new))
+        (should (zerop (romacs-agent-writer-pending-count)))))))
+
+(ert-deftest romacs-agent-writer-a-last-keep-that-fails-is-not-saved ()
+  ;; The last keep of a session fails as the editor ends: it is kept,
+  ;; tried by the drain and then here, and counted not saved, never "done".
+  (let ((romacs-agent-writer-start-functions nil) (said nil)
         (session (romacs-agent--make :id "k")))
     (romacs-agent-writer-tests--with
       (cl-letf (((symbol-function 'romacs-agent-turns-fold-put) (lambda (&rest _) (error "Disk full")))
-                ((symbol-function 'message) #'ignore))
+                ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
+                ((symbol-function 'sleep-for) #'ignore)
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
         (should (romacs-agent--kept-put session "(:a 1)"))
-        (puthash session 7 romacs-agent--kept)
         (serve)
-        (should-not (gethash session romacs-agent--kept))))))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (cl-letf (((symbol-function 'isolate-await) (lambda (&rest _) (serve-only) t)))
+          (romacs-agent-writer-drain))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
 
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,

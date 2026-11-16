@@ -76,7 +76,7 @@ opening what it writes, as a writer off the editor opens it.")
   "Non-nil while the writer is drained: its end sends nothing again.")
 
 (defvar romacs-agent-writer--pending (make-hash-table)
-  "The writes not answered, by id: each (ID FUNCTION ARGS DONE TRIES).")
+  "The writes not answered, by id: each (ID FUNCTION ARGS DONE TRIES KEY).")
 
 (defvar romacs-agent-writer--unsent nil
   "The writes waiting for room in the writer's queue, oldest first.")
@@ -106,10 +106,13 @@ for the editor's end, which makes it itself.")
 
 (defvar romacs-agent-writer--in-flight 0 "The batches sent and not answered.")
 
-(defun romacs-agent-write (function args &optional done)
+(defun romacs-agent-write (function args &optional done key)
   "Run (apply FUNCTION ARGS), a write to the agents' store, off the editor.
 FUNCTION is a symbol the writer defines.  DONE, when given, is called on
-the editor with (ok VALUE) or (error ERR) once it ran.  In a process
+the editor with (ok VALUE) or (error ERR) once it ran.  KEY names what a
+write puts in place of what was there (a session's row): a later write
+of the same KEY supersedes an earlier one that failed, never retried
+after it.  In a process
 that does not queue (`romacs-agent-writer-queued-p') it runs here, now,
 and its answer is returned; queued, `queued' is: it never waits, and a
 full channel to the writer holds it here until there is room."
@@ -118,7 +121,8 @@ full channel to the writer holds it here until there is room."
                       (error (list 'error err)))))
         (when done (funcall done answer))
         answer)
-    (let ((entry (list (cl-incf romacs-agent-writer--next) function args done 0)))
+    (let ((entry (list (cl-incf romacs-agent-writer--next) function args done 0 key)))
+      (when key (romacs-agent-writer--supersede key))
       (puthash (car entry) entry romacs-agent-writer--pending)
       (romacs-agent-writer--queue entry))
     (romacs-agent-writer--flush)
@@ -161,7 +165,7 @@ queued to be: its value when it ran here."
       (when isolate
         (let ((batch nil) (n 0))
           (while (and romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
-            (pcase-let ((`(,id ,function ,args ,_ ,_) (pop romacs-agent-writer--unsent)))
+            (pcase-let ((`(,id ,function ,args ,_ ,_ ,_) (pop romacs-agent-writer--unsent)))
               (push (list id function args) batch)
               (cl-incf n)))
           (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
@@ -196,8 +200,18 @@ try stays queued, and the drain says so.  Only an ending editor commits."
     (with-demoted-errors "romacs-agent-writer: opening here: %S" (run-hooks 'romacs-agent-writer-start-functions))
     (maphash (lambda (_id entry) (push entry entries)) romacs-agent-writer--pending)
     (setq romacs-agent-writer--unsent nil romacs-agent-writer--unsent-tail nil romacs-agent-writer--in-flight 0)
+    ;; Of the writes of one KEY, the last alone: it supersedes the others.
+    (let ((last (make-hash-table :test #'equal)))
+      (dolist (entry entries)
+        (when-let* ((key (nth 5 entry)))
+          (when (> (car entry) (car (gethash key last '(0)))) (puthash key entry last))))
+      (dolist (entry entries)
+        (when-let* ((key (nth 5 entry)))
+          (unless (eq entry (gethash key last))
+            (remhash (car entry) romacs-agent-writer--pending)
+            (setq entries (delq entry entries))))))
     (dolist (entry (sort entries (lambda (a b) (< (car a) (car b)))))
-      (pcase-let ((`(,id ,function ,args ,done ,_) entry) (answer nil) (tries 0))
+      (pcase-let ((`(,id ,function ,args ,done ,_ ,_) entry) (answer nil) (tries 0))
         (while (progn (setq answer (condition-case err (list 'ok (apply function args)) (error (list 'error err))))
                       (and (eq (car answer) 'error) (< (cl-incf tries) romacs-agent-writer--here-tries)))
           (sleep-for 1))
@@ -248,10 +262,26 @@ and the writes waiting for room are sent."
   "Keep ENTRY, a write that failed, and send it again after a while: 1, 2,
 4... seconds, `romacs-agent-writer--failed-tries' times; then it waits
 for the editor's end (`romacs-agent-writer-drain')."
-  (let* ((tries (1+ (nth 4 entry))) (kept (list (nth 0 entry) (nth 1 entry) (nth 2 entry) (nth 3 entry) tries)))
-    (puthash (car kept) kept romacs-agent-writer--failed)
-    (when (< tries romacs-agent-writer--failed-tries)
-      (run-with-timer (expt 2 (1- tries)) nil #'romacs-agent-writer--again (car kept)))))
+  (let* ((tries (1+ (nth 4 entry))) (key (nth 5 entry))
+         (kept (list (nth 0 entry) (nth 1 entry) (nth 2 entry) (nth 3 entry) tries key)))
+    ;; A later write of its KEY, queued already, supersedes it.
+    (unless (and key (romacs-agent-writer--later-p key (car entry)))
+      (puthash (car kept) kept romacs-agent-writer--failed)
+      (when (< tries romacs-agent-writer--failed-tries)
+        (run-with-timer (expt 2 (1- tries)) nil #'romacs-agent-writer--again (car kept))))))
+
+(defun romacs-agent-writer--supersede (key)
+  "Drop the failed writes of KEY: a later one of it is queued."
+  (let ((stale nil))
+    (maphash (lambda (id entry) (when (equal (nth 5 entry) key) (push id stale))) romacs-agent-writer--failed)
+    (dolist (id stale) (remhash id romacs-agent-writer--failed))))
+
+(defun romacs-agent-writer--later-p (key id)
+  "Whether a write of KEY later than ID is queued and not answered."
+  (catch 'later
+    (maphash (lambda (other entry) (when (and (> other id) (equal (nth 5 entry) key)) (throw 'later t)))
+             romacs-agent-writer--pending)
+    nil))
 
 (defun romacs-agent-writer--again (id)
   "Send the failed write ID again, unless it is made or gone meanwhile."
@@ -277,15 +307,19 @@ answer it, until asked to stop."
                                      writes))))))
     t))
 
-(defun romacs-agent-writer-drain ()
-  "Let the writer make every write queued, however long that takes, saying
-so: the editor is ending, or handing over to its successor, which reads
-the store.  Writes the answers' callbacks queue meanwhile are made too.
-A writer gone meanwhile is started again and sent what it did not
-answer.  The writer then stops; a later write starts another."
+(defun romacs-agent-writer-drain (&optional quittable)
+  "Let the writer make every write queued, however long that takes,
+saying so: the editor is ending, or handing over to its successor,
+which reads the store.  Writes the answers' callbacks queue meanwhile
+are made too.  A writer gone meanwhile is started again and sent what
+it did not answer.  The writer then stops; a later write starts
+another.  QUITTABLE: a restart is beginning, and \\[keyboard-quit]
+cancels it; the writes stay queued, made in the background."
   (when (> (romacs-agent-writer-pending-count) 0)
     (let ((count (romacs-agent-writer-pending-count)) (tries 0) (romacs-agent-writer--draining t))
-      (message "Saving %d agent records..." count)
+      (message (if quittable "Saving %d agent records... (C-g cancels the restart)"
+                 "Saving %d agent records...")
+               count)
       (redisplay t)
       ;; What failed before is tried once more, now.
       (maphash (lambda (id _) (romacs-agent-writer--again id)) (copy-hash-table romacs-agent-writer--failed))
@@ -321,9 +355,27 @@ answer.  The writer then stops; a later write starts another."
                  "Saving %d agent records...done")
                count (romacs-agent-writer-pending-count)))))
 
+(defun romacs-agent-writer--at-exit ()
+  "The editor is ending: every queued write is made, uninterrupted, since
+quitting now would lose them."
+  (let ((inhibit-quit t)) (romacs-agent-writer-drain)))
+
+(defun romacs-agent-writer--before-handover ()
+  "A restart begins: every queued write is made before its image and its
+successor, which reads them; \[keyboard-quit] cancels the restart, and
+the session goes on with its writes still queued."
+  (let ((inhibit-quit nil)) (romacs-agent-writer-drain t)))
+
+(defun romacs-agent-writer--obstacle ()
+  "Why a requested restart waits (`warm-restart-obstacle-functions'): the
+writes not yet made, which the writer makes meanwhile, off the editor."
+  (let ((count (romacs-agent-writer-pending-count)))
+    (and (> count 0) (list (format "%d agent records not yet written" count)))))
+
 ;; Late, after anything else that writes at the end.
-(add-hook 'kill-emacs-hook #'romacs-agent-writer-drain 90)
-(add-hook 'warm-restart-before-handover-functions #'romacs-agent-writer-drain)
+(add-hook 'kill-emacs-hook #'romacs-agent-writer--at-exit 90)
+(add-hook 'warm-restart-before-handover-functions #'romacs-agent-writer--before-handover)
+(add-hook 'warm-restart-obstacle-functions #'romacs-agent-writer--obstacle)
 
 (provide 'romacs-agent-writer)
 ;;; romacs-agent-writer.el ends here

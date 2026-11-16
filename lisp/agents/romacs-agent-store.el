@@ -187,7 +187,8 @@ as keywords), in place of its session's, or only when it has none with
 ABSENT; non-nil when it was written or queued to the writer, quietly nil
 when the database cannot be written."
   (romacs-agent-written-p
-   (romacs-agent-write 'romacs-agent-store--write-values (list (romacs-agent-store--row-values row) absent))))
+   (romacs-agent-write 'romacs-agent-store--write-values (list (romacs-agent-store--row-values row) absent)
+                       nil (list 'row (plist-get row :id)))))
 
 (defun romacs-agent-store--row-values (row)
   "ROW, a plist of the columns' values, as the columns' values in order."
@@ -492,7 +493,7 @@ there is no database."
 (defun romacs-agent-store-fold (project folded)
   "Keep PROJECT, a directory, FOLDED on the board or not, by the writer;
 quietly nothing when the database cannot be written."
-  (romacs-agent-write 'romacs-agent-store--fold-row (list project folded)))
+  (romacs-agent-write 'romacs-agent-store--fold-row (list project folded) nil (list 'fold project)))
 
 (defun romacs-agent-store--fold-row (project folded)
   "Keep PROJECT FOLDED on the board or not, here.  A failure signals."
