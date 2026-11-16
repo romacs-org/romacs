@@ -468,20 +468,22 @@ to its thread, which fold its result as the rest of the row does."
         (romacs-agent-ui--insert-at
          start (romacs-agent-ui--like
                 (line-beginning-position)
-                (propertize (concat "  " (romacs-agent-ui--chip id (gethash "status" record "running"))
+                (propertize (concat "  " (propertize (romacs-agent-ui--chip id (gethash "status" record "running"))
+                                                     'romacs-agent-card id)
                                     "  " (romacs-agent-ui--thread-link id))
                             'romacs-agent-tool tool)))))))
 
 (defun romacs-agent-ui--settle-task (id state)
   "Show STATE on task ID's card, when it has one here: its chip, found
-back from the transcript's end by its text."
+back from the transcript's end by its text (`romacs-agent-card'), not a
+chip of the task's results arriving."
   (when-let* ((found (save-excursion (goto-char (or romacs-agent-ui--end (point-max)))
-                                     (text-property-search-backward 'romacs-agent-chip id #'equal))))
+                                     (text-property-search-backward 'romacs-agent-card id #'equal))))
     (save-excursion
       (let* ((inhibit-read-only t) (start (prop-match-beginning found))
-             (chip (romacs-agent-ui--like start (propertize (romacs-agent-ui--chip id state)
+             (chip (romacs-agent-ui--like start (propertize (romacs-agent-ui--chip id state) 'romacs-agent-card id
                                                             'romacs-agent-tool (get-text-property start 'romacs-agent-tool)))))
-        (delete-region start (next-single-property-change start 'romacs-agent-chip))
+        (delete-region start (prop-match-end found))
         (romacs-agent-ui--insert-at start chip)))))
 
 (defun romacs-agent-ui--wakes (session text)
@@ -649,10 +651,21 @@ read through its turn's row when opened."
           ;; Kept as drawn, it is read through its turn's row.
           :ref (or (plist-get kept :ref) (list :session romacs-agent-ui--session :id id :row t)))))
 
-(defun romacs-agent-ui--open-payload (id &optional folded)
+(defun romacs-agent-ui--row-mark (id at)
+  "The mark of call ID's row on the line AT is in, a marker, or nil."
+  (save-excursion
+    (goto-char at)
+    (let ((at (line-beginning-position)) (end (line-end-position)))
+      ;; Ids are strings, compared by value.
+      (while (and (< at end) (not (equal (get-text-property at 'romacs-agent-tool) id)))
+        (setq at (next-single-property-change at 'romacs-agent-tool nil end)))
+      (and (< at end) (> at (point-min)) (copy-marker (1- at))))))
+
+(defun romacs-agent-ui--open-payload (id &optional folded at)
   "Draw call ID's kept payload under its row, shown or FOLDED, and forget
-it; nil when it has none, or no row any more."
-  (when-let* ((mark (romacs-agent-ui--tool-mark id))
+it; nil when it has none, or no row any more.  AT, when given, is on the
+row's line (the user's, a sweep's): it is not looked for."
+  (when-let* ((mark (or (and at (romacs-agent-ui--row-mark id at)) (romacs-agent-ui--tool-mark id)))
               (payload (romacs-agent-ui--payload-at id mark))
               ((progn (let ((inhibit-read-only t))
                         (save-excursion (goto-char mark)
@@ -683,17 +696,21 @@ it; nil when it has none, or no row any more."
   "Draw, folded, the kept payloads of the calls whose rows are between
 START and END: what reads the transcript's text there (copy, quote)
 finds them as it found every output."
-  (dolist (id (romacs-agent-ui--payload-ids start end))
-    (romacs-agent-ui--open-payload id t)))
+  ;; The last first: a body opened moves no row still to come.
+  (dolist (found (reverse (romacs-agent-ui--payload-ids start end)))
+    (romacs-agent-ui--open-payload (car found) t (cdr found))))
 
 (defun romacs-agent-ui--payload-ids (start end)
   "The calls whose rows between START and END name a kept payload
-\(`romacs-agent-payload')."
-  (let ((ids nil) (at start))
+\(`romacs-agent-payload'), in order, each (ID . POSITION), POSITION on
+its row's line."
+  (let ((found nil) (at start))
     (while (and at (< at end))
-      (when-let* ((kept (get-text-property at 'romacs-agent-payload))) (push (plist-get kept :id) ids))
+      (when-let* ((kept (get-text-property at 'romacs-agent-payload))
+                  ((not (assoc (plist-get kept :id) found))))
+        (push (cons (plist-get kept :id) at) found))
       (setq at (next-single-property-change at 'romacs-agent-payload nil end)))
-    (delete-dups (nreverse ids))))
+    (nreverse found)))
 
 (defun romacs-agent-ui--tool-end (event failed)
   "EVENT ends its call, FAILED or not: the row's mark settles and the row
@@ -2879,7 +2896,7 @@ tool call on it."
               (romacs-agent-ui--hide output end 'romacs-agent-output
                                      (not (memq 'romacs-agent-output (ensure-list (get-text-property output 'invisible))))))
           ;; Opened the first time: drawn from where it is kept.
-          (romacs-agent-ui--open-payload id))))))
+          (romacs-agent-ui--open-payload id nil start))))))
 
 (defun romacs-agent-ui--output-start (id from)
   "Where the output of fold ID starts, from FROM on, or nil: ids are
@@ -3307,11 +3324,12 @@ too where the run left no row.  An open run is left as it is: it settles
 folded.  Shown, the outputs kept for their rows are drawn first."
   (unless hide
     ;; But the open run's: it settles folded, as the sweep below leaves it.
-    (dolist (id (romacs-agent-ui--payload-ids (point-min) romacs-agent-ui--end))
-      (let ((mark (romacs-agent-ui--tool-mark id)))
+    ;; The last first: a body opened moves no row still to come.
+    (dolist (found (reverse (romacs-agent-ui--payload-ids (point-min) romacs-agent-ui--end)))
+      (let ((mark (romacs-agent-ui--row-mark (car found) (cdr found))))
         (unless (and mark romacs-agent-ui--run
                      (equal (get-text-property mark 'romacs-agent-run) (plist-get romacs-agent-ui--run :id)))
-          (romacs-agent-ui--open-payload id)))))
+          (romacs-agent-ui--open-payload (car found) nil (cdr found))))))
   (let ((end (marker-position (if romacs-agent-ui--run (plist-get romacs-agent-ui--run :head) romacs-agent-ui--end))))
     (dolist (fold '((romacs-agent-run . romacs-agent-steps) (romacs-agent-output . romacs-agent-output)))
       (let ((position (point-min)))
