@@ -28,7 +28,7 @@
 
 (defconst romacs-agent-turns--added
   '(("fold" . "text") ("items" . "text") ("images" . "text") ("messages" . "text") ("duration" . "real")
-    ("status" . "text") ("reason" . "text"))
+    ("status" . "text") ("reason" . "text") ("request" . "integer"))
   "The turns' columns added after the table was first made, each (NAME
 . TYPE): added where missing as the database opens.")
 
@@ -159,6 +159,22 @@ thinking) and of the same message and parent, else a new one."
                (romacs-agent-turns--grow last event))
       (romacs-agent-turns--add turn kind event "message" message "parent" parent "text" (list (or (plist-get event :text) ""))))))
 
+(defvar romacs-agent-turns-tool-texts-function nil
+  "Called with a tool's name, its whole input and its output (nil while it
+runs), as the fill has them: a plist of :row and :ended, the texts its row
+shows (counts the bounded input cannot give), kept in its item; nil, none.
+The chat's rows set it (romacs-agent-rows).")
+
+(require 'romacs-agent-rows nil t)
+
+(defun romacs-agent-turns--texts (item name input output)
+  "Keep in ITEM its row's texts for tool NAME of INPUT and OUTPUT
+\(`romacs-agent-turns-tool-texts-function')."
+  (when-let* ((texts (and romacs-agent-turns-tool-texts-function
+                          (ignore-errors (funcall romacs-agent-turns-tool-texts-function name input output)))))
+    (puthash "row" (romacs-agent-turns--null (plist-get texts :row)) item)
+    (puthash "ended" (romacs-agent-turns--null (plist-get texts :ended)) item)))
+
 (defun romacs-agent-turns--item (turn event)
   "Fold EVENT into TURN's items."
   (let ((by-id (plist-get turn :by-id)))
@@ -166,19 +182,24 @@ thinking) and of the same message and parent, else a new one."
       ('delta (romacs-agent-turns--text turn "text" event))
       ('thinking (romacs-agent-turns--text turn "thinking" event))
       ('tool
-       (let ((known (gethash (plist-get event :id) by-id)))
+       (let ((known (gethash (plist-get event :id) by-id))
+             (inputs (plist-get turn :inputs)))
          (if (not known)
-             (puthash (plist-get event :id)
-                      (romacs-agent-turns--add
+             (let ((item (romacs-agent-turns--add
                        turn "tool" event "id" (plist-get event :id) "name" (romacs-agent-turns--null (plist-get event :name))
                        "parent" (romacs-agent-turns--null (plist-get event :parent))
                        "state" (if (memq (plist-get event :state) '(completed failed)) (symbol-name (plist-get event :state)) "running")
                        "t_end" :null "output_bytes" 0
                        "input" (romacs-agent-turns--bounded (plist-get event :input)
-                                                            (member (plist-get event :name) '("Edit" "Write" "MultiEdit" "NotebookEdit"))))
-                      by-id)
+                                                            (member (plist-get event :name) '("Edit" "Write" "MultiEdit" "NotebookEdit"))))))
+               ;; Its whole input, kept until its turn's row is written.
+               (puthash (plist-get event :id) (cons (plist-get event :name) (plist-get event :input)) inputs)
+               (romacs-agent-turns--texts item (plist-get event :name) (plist-get event :input) (plist-get event :output))
+               (puthash (plist-get event :id) item by-id))
            (when (memq (plist-get event :state) '(completed failed))
-             (let ((output (or (plist-get event :output) "")))
+             (let ((output (or (plist-get event :output) ""))
+                   (whole (gethash (plist-get event :id) inputs)))
+               (romacs-agent-turns--texts known (car whole) (cdr whole) output)
                (puthash "state" (symbol-name (plist-get event :state)) known)
                (puthash "t_end" (or (plist-get event :time) :null) known)
                (puthash "output_bytes" (string-bytes output) known)
@@ -263,7 +284,8 @@ or as a fill ends (`romacs-agent-turns--held')."
                       (romacs-agent--json (romacs-agent-turns--images (plist-get turn :images)))
                       (romacs-agent--json (romacs-agent-turns--messages (plist-get turn :messages)))
                       (and started (plist-get done :time) (- (plist-get done :time) started))
-                      (romacs-agent-turns--status done) (plist-get done :reason))))
+                      (romacs-agent-turns--status done) (plist-get done :reason)
+                      (plist-get turn :request))))
       (if (listp romacs-agent-turns--held) (push row romacs-agent-turns--held)
         (romacs-agent-turns--put (list row))))))
 
@@ -277,13 +299,13 @@ never two of one."
           (dolist (row rows)
             ;; Its folded state, on it, is left as it is.
             (sqlite-execute db (concat "insert into turns (session, first_seq, last_seq, t, prompt, reply, tools, cost,"
-                                       " items, images, messages, duration, status, reason)"
-                                       " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (session, first_seq) do update set"
+                                       " items, images, messages, duration, status, reason, request)"
+                                       " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (session, first_seq) do update set"
                                        " last_seq = excluded.last_seq, t = excluded.t, prompt = excluded.prompt,"
                                        " reply = excluded.reply, tools = excluded.tools, cost = excluded.cost,"
                                        " items = excluded.items, images = excluded.images, messages = excluded.messages,"
                                        " duration = excluded.duration,"
-                                       " status = excluded.status, reason = excluded.reason")
+                                       " status = excluded.status, reason = excluded.reason, request = excluded.request")
                             row)
             (when (sqlite-select db "select 1 from sqlite_master where name = 'turns_fts'")
               (sqlite-execute db "delete from turns_fts where session = ? and first_seq = ?" (list (nth 0 row) (nth 1 row)))
@@ -304,7 +326,9 @@ never two of one."
           (puthash session (list :first (plist-get event :seq) :prompt (plist-get event :text) :tools nil
                                  :time (plist-get event :time) :images (plist-get event :images)
                                  :messages (plist-get event :messages)
-                                 :items nil :by-id (make-hash-table :test #'equal) :done nil)
+                                 :request (plist-get event :request)
+                                 :items nil :by-id (make-hash-table :test #'equal)
+                                 :inputs (make-hash-table :test #'equal) :done nil)
                    romacs-agent-turns--open)))
        ;; Only its end makes a turn a row: one cut by an exit may yet be
        ;; resumed and end, its row written then.
@@ -447,22 +471,23 @@ given), the latest first."
 LIMIT (20) latest turns before seq BEFORE, newest first, each a plist of
 :first-seq :last-seq :t :prompt :reply :items (a vector of tables, as
 `romacs-agent-turns--item' makes them) :cost :images (its prompt's files)
-:messages (who said what in it, tables) :duration :status
-:reason; :after, the seq its latest row ends at (nil with no row), after
+:messages (who said what in it, tables) :duration :status :reason
+:request (its prompt's request id); :after, the seq its latest row ends
+at (nil with no row), after
 which its records are the turn under way, drawn from them; and :more,
 whether it has rows before this page's."
   (when-let* ((db (romacs-agent-turns--db)))
     (let* ((id (romacs-agent-id session)) (limit (or limit 20))
            (rows (sqlite-select db (concat "select first_seq, last_seq, t, prompt, reply, items, cost, images, messages, duration,"
-                                           " status, reason from turns where session = ? and first_seq > 0"
+                                           " status, reason, request from turns where session = ? and first_seq > 0"
                                            (if before " and first_seq < ?" "") " order by first_seq desc limit ?")
                                 (append (list id) (and before (list before)) (list (1+ limit))))))
       (list :rows (mapcar (lambda (row)
-                            (pcase-let ((`(,first ,last ,time ,prompt ,reply ,items ,cost ,images ,messages ,duration ,status ,reason) row))
+                            (pcase-let ((`(,first ,last ,time ,prompt ,reply ,items ,cost ,images ,messages ,duration ,status ,reason ,request) row))
                               (list :first-seq first :last-seq last :t time :prompt prompt :reply reply
                                     :items (romacs-agent-turns--parse items) :cost cost
                                     :images (romacs-agent-turns--parse images) :messages (romacs-agent-turns--parse messages)
-                                    :duration duration :status status :reason reason)))
+                                    :duration duration :status status :reason reason :request request)))
                           (seq-take rows limit))
             :after (romacs-agent-turns--last session)
             :more (> (length rows) limit)))))
@@ -480,26 +505,37 @@ whether it has rows before this page's."
   "How far back from its journal's end a tool's output is looked for in a
 session whose records are still in a journal; in SQLite it is a seq.")
 
+(defun romacs-agent-turns--record-tools (session seq key)
+  "The tool events SESSION's record SEQ gives, read into a copy, each (ID
+. VALUE), VALUE its KEY (:input or :output): those with KEY, in order.
+Nil when a journal's record lies further back than
+`romacs-agent-turns--lookup-bytes'."
+  (let* ((events (romacs-agent-events-p session))
+         (from (if events seq (romacs-agent--journal-file-after session seq romacs-agent-turns--lookup-bytes t)))
+         (end (if events (1+ seq) (and (integerp from) (romacs-agent--journal-file-after session seq romacs-agent-turns--lookup-bytes))))
+         (scratch (romacs-agent--scratch session)) (found nil))
+    (when (and (integerp from) (integerp end))
+      (let ((romacs-agent-event-functions
+             (list (lambda (_session event)
+                     (when (and (eq (plist-get event :type) 'tool) (plist-member event key)
+                                (if (eq key :output) (memq (plist-get event :state) '(completed failed)) t))
+                       (push (cons (plist-get event :id) (plist-get event key)) found))))))
+        (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from end)))
+    (nreverse found)))
+
 (defun romacs-agent-turns-item (session id)
-  "The output of SESSION's tool ID: its item's, when it holds it, else the
-record that completed it, read into a copy; nil when no row has it, or a
-journal's record lies further back than `romacs-agent-turns--lookup-bytes'.
-Of the tools that record completes, the one of ID, else the only one: an
-id a harness numbers by its turn reads otherwise in a copy."
+  "SESSION's tool ID as its row opens: (:input INPUT :output OUTPUT), its
+whole input from the record that started it and its output from its item
+when it holds it, else from the record that completed it; nil when no row
+has it.  Of the tools a record gives, the one of ID, else the only one: an
+id a harness numbers by its turn reads otherwise in a copy.  A journal's
+record further back than `romacs-agent-turns--lookup-bytes' gives nil."
   (when-let* ((item (romacs-agent-turns--tool session id)))
-    (or (gethash "output" item)
-        (let* ((last (aref (gethash "seq" item) 1))
-               (events (romacs-agent-events-p session))
-               (from (if events last (romacs-agent--journal-file-after session last romacs-agent-turns--lookup-bytes t)))
-               (end (if events (1+ last) (and (integerp from) (romacs-agent--journal-file-after session last romacs-agent-turns--lookup-bytes))))
-               (scratch (romacs-agent--scratch session)) (outputs nil))
-          (when (and (integerp from) (integerp end))
-            (let ((romacs-agent-event-functions
-                   (list (lambda (_session event)
-                           (when (and (eq (plist-get event :type) 'tool) (memq (plist-get event :state) '(completed failed)))
-                             (push (cons (plist-get event :id) (or (plist-get event :output) "")) outputs))))))
-              (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from end)))
-          (or (cdr (assoc id outputs)) (and (= (length outputs) 1) (cdar outputs)))))))
+    (cl-flet ((pick (found) (or (cdr (assoc id found)) (and (= (length found) 1) (cdar found)))))
+      (let ((seqs (gethash "seq" item)))
+        (list :input (pick (romacs-agent-turns--record-tools session (aref seqs 0) :input))
+              :output (or (gethash "output" item)
+                          (pick (romacs-agent-turns--record-tools session (aref seqs 1) :output))))))))
 
 ;;; A session's folded state
 
