@@ -3975,14 +3975,14 @@ at once (`romacs-agent-restore').")
 (defun romacs-agent--fold-aside-p (session from)
   "Whether a worker VM folds SESSION's records from place FROM, where its
 kept state ends (nil: its start): more than `romacs-agent-fold-bytes' of
-them are left to read (in SQLite, their text's characters)."
+them are left to read."
   (and romacs-agent-fold-bytes (not romacs-agent--fold-here)
        (fboundp 'isolate-spawn) (isolate-main-p)
-       (> (if (romacs-agent-events-p session) (romacs-agent-events-size session from)
-            (- (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+       (if (romacs-agent-events-p session) (romacs-agent-events-over-p session from romacs-agent-fold-bytes)
+         (> (- (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
                    0)
-               (or from 0)))
-          romacs-agent-fold-bytes)))
+               (or from 0))
+            romacs-agent-fold-bytes))))
 
 (defun romacs-agent--fold-aside (session manifest)
   "Have a worker VM fold SESSION's journal and write its kept state;

@@ -124,7 +124,13 @@ call and result, an answer and a result a turn."
                        (lambda (_dir) (setf (romacs-agent-seq session) 46) (puthash id session romacs-agent--sessions)))
                       ((symbol-function 'princ) #'ignore))
               (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
-            (should (= (romacs-agent-turns-count session) 12))))
+            (should (= (romacs-agent-turns-count session) 12))
+            ;; Its records moved to SQLite: filled from there, every row.
+            (let ((romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal)))
+              (should (romacs-agent-events-import session))
+              (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ?" (list id))
+              (should (= (romacs-agent-turns-fill session) 12))
+              (should (= (romacs-agent-turns-count session) 12)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
@@ -141,6 +147,54 @@ call and result, an answer and a result a turn."
     (should (= (gethash "new_string" (aref (gethash "edits" edit) 0)) 3))
     (should (= (length (gethash "content" other)) (1+ romacs-agent-turns--cut)))
     (should (equal (gethash "old_string" other) "é"))))
+
+(ert-deftest romacs-agent-turns-asks-and-inputs-as-items ()
+  ;; A question's ask, as JSON its view reads; a tool's ask with its input;
+  ;; an input written into the turn with its images and who said it.
+  (let ((turn (list :items nil :by-id (make-hash-table :test #'equal))))
+    (romacs-agent-turns--item turn (list :type 'approval :seq 3 :time 1.0 :request-id "r1" :tool "AskUserQuestion" :user t
+                                         :questions '(("Which?" :header "Pick" :options ("A" "B") :notes (("A" . "the first")) :multi nil))))
+    (romacs-agent-turns--item turn (list :type 'answered :seq 4 :request-id "r1" :behavior "allow"
+                                         :answers (romacs-mcp--object "Which?" "A")))
+    (romacs-agent-turns--item turn (list :type 'approval :seq 5 :request-id "r2" :tool "Bash" :description "list"
+                                         :input (romacs-mcp--object "command" "ls")))
+    (romacs-agent-turns--item turn (list :type 'input :seq 6 :text "also" :steer t :request 7 :images '("/a.png")
+                                         :messages (list (list :id "m" :from "parent" :kind 'message :text "hi" :wake t))))
+    (let* ((items (romacs-agent-turns--ended-items turn))
+           (parsed (json-parse-string (romacs-agent--json items) :object-type 'hash-table :null-object nil :false-object nil))
+           (ask (aref parsed 0)) (tool (aref parsed 1)) (input (aref parsed 2))
+           (question (aref (gethash "questions" ask) 0)))
+      (should (equal (gethash "question" question) "Which?"))
+      (should (equal (gethash "options" question) ["A" "B"]))
+      (should (equal (gethash "A" (gethash "notes" question)) "the first"))
+      (should-not (gethash "multi" question))
+      (should (eq (gethash "user" ask) t))
+      (should (equal (gethash "Which?" (gethash "answers" ask)) "A"))
+      (should (equal (gethash "seq" ask) [3 4]))
+      (should (equal (gethash "command" (gethash "input" tool)) "ls"))
+      (should (equal (gethash "description" tool) "list"))
+      (should-not (gethash "plan" tool))
+      (should (equal (gethash "images" input) ["/a.png"]))
+      (should (equal (gethash "from" (aref (gethash "messages" input) 0)) "parent"))
+      (should (equal (gethash "kind" (aref (gethash "messages" input) 0)) "message")))))
+
+(ert-deftest romacs-agent-turns-codex-answers-and-interrupts ()
+  ;; Codex's answers, by question id, kept as Claude's are, by question; a
+  ;; turn it interrupted ends interrupted, not failed.
+  (require 'romacs-agent-codex)
+  (let ((params (romacs-mcp--object "questions" (vector (romacs-mcp--object "id" "q1" "question" "Which?")
+                                                        (romacs-mcp--object "id" "q2" "question" "Unanswered?"))))
+        (result (romacs-mcp--object "answers" (romacs-mcp--object "q1" (romacs-mcp--object "answers" ["A" "B"])))))
+    (let ((answers (romacs-agent--codex-given-answers params result)))
+      (should (equal (gethash "Which?" answers) "A, B"))
+      (should-not (gethash "Unanswered?" answers)))
+    (should-not (romacs-agent--codex-given-answers params (romacs-mcp--object "decision" "accept"))))
+  (let ((session (romacs-agent--make :id "c" :harness 'codex :tools (make-hash-table :test #'equal)
+                                     :streamed (make-hash-table :test #'equal))))
+    (should (equal (romacs-agent-turns--status (romacs-agent--codex-done session (romacs-mcp--object "status" "interrupted")))
+                   "interrupted"))
+    (should (equal (romacs-agent-turns--status (romacs-agent--codex-done session (romacs-mcp--object "status" "failed")))
+                   "failed"))))
 
 (ert-deftest romacs-agent-turns-a-long-output-is-read-when-asked ()
   ;; A tool's output over the inline size is not in its row: read from
@@ -176,11 +230,15 @@ call and result, an answer and a result a turn."
               (should-not (gethash "output" tool)))
             (should (= (plist-get (car (plist-get (romacs-agent-turns-page session) :rows)) :duration) 3.0))
             (should (equal (romacs-agent-turns-item session "big") long))
+            ;; Its id read otherwise in a copy (a harness that numbers ids by
+            ;; turn): the only tool its completing record completes.
+            (sqlite-execute (romacs-agent-turns--db) "update turns set items = replace(items, '\"big\"', '\"1:big\"') where session = ?" (list id))
+            (should (equal (romacs-agent-turns-item session "1:big") long))
             ;; Its records moved to SQLite: the same, by seqs.
             (let ((romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal)))
               (should (romacs-agent-events-import session))
               (should (romacs-agent-events-p session))
-              (should (equal (romacs-agent-turns-item session "big") long)))))
+              (should (equal (romacs-agent-turns-item session "1:big") long)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
