@@ -179,6 +179,19 @@ of the user's own too: Codex marks every one isOther."
                          :notes (cl-remove-if (lambda (note) (member (cdr note) '(nil ""))) options)
                          :multi nil)))
 
+(defun romacs-agent--codex-given-answers (params result)
+  "The answers RESULT gives `requestUserInput''s PARAMS, as Claude's are:
+a table from each question to its answers' labels, joined; nil when it
+gives none."
+  (let ((given (and (hash-table-p result) (gethash "answers" result))) (object (romacs-mcp--object)))
+    (when (and (hash-table-p given) (hash-table-p params) (vectorp (gethash "questions" params)))
+      (cl-loop for q across (gethash "questions" params)
+               for answer = (gethash (gethash "id" q) given)
+               for labels = (and (hash-table-p answer) (gethash "answers" answer))
+               when (and (stringp (gethash "question" q)) (vectorp labels))
+               do (puthash (gethash "question" q) (mapconcat (lambda (l) (format "%s" l)) labels ", ") object))
+      (and (> (hash-table-count object) 0) object))))
+
 (defun romacs-agent--codex-answers (params answers)
   "ANSWERS ((QUESTION . ANSWER) ...) as `requestUserInput''s answers, by
 question id: an option by its label, other words as Codex's own client
@@ -292,9 +305,11 @@ what to do should it miss its turn."
                                       (list :experimental t))))))
      (method nil)
      ((gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
-      (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
-      (let ((result (gethash "result" object)))
+      (let ((result (gethash "result" object))
+            (asked (nth 2 (gethash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session)))))
+        (remhash (romacs-agent--codex-approval-id session id) (romacs-agent-approvals session))
         (list (list :type 'answered :request-id (romacs-agent--codex-approval-id session id)
+                    :answers (romacs-agent--codex-given-answers asked result)
                     :behavior (if (or (member (gethash "decision" result) '("accept" "acceptForSession"))
                                       (cl-some (lambda (key)
                                                  (let ((given (gethash key result)))
@@ -328,7 +343,7 @@ what to do should it miss its turn."
                                         (plist-get (romacs-agent-options session) :model))))
                  ;; Codex takes up no turn its last run was cut in: it is over.
                  (when (romacs-agent-interrupted session)
-                   (list (list :type 'done :error t :reason "Cut short when Codex stopped"))))))
+                   (list (list :type 'done :error t :interrupted t :reason "Cut short when Codex stopped"))))))
       ("turn/start"
        (cond (error (list (list :type 'done :error t :text error :reason error)))
              ;; Acknowledged after its end: it stays over.
@@ -464,7 +479,7 @@ an approval or questions for the user, anything else refused."
          (reason (or (romacs-agent--codex-error turn) (and (equal status "interrupted") "Interrupted")))
          (ms (gethash "durationMs" turn)))
     (list :type 'done :text (romacs-agent-reply session) :error (not (equal status "completed"))
-          :reason reason :duration (and (numberp ms) (/ ms 1000.0))
+          :interrupted (equal status "interrupted") :reason reason :duration (and (numberp ms) (/ ms 1000.0))
           ;; Refused at its account's usage limit.
           :limit (let ((error (gethash "error" turn)))
                    (and (hash-table-p error) (equal (gethash "codexErrorInfo" error) "usageLimitExceeded")))
