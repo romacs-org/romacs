@@ -65,6 +65,11 @@ own properties, any other data as it is."
                (t 'none)))
         ;; The call's input is its turn row's, read when its body is opened.
         ((eq property 'romacs-agent-call) (if (consp value) (list (car value)) 'none))
+        ;; A folded call's output: which, how big, whether it failed; the
+        ;; output itself is read through its turn's row when opened.
+        ((eq property 'romacs-agent-payload)
+         (if (consp value) (list :id (plist-get value :id) :bytes (plist-get value :bytes) :failed (plist-get value :failed))
+           'none))
         ;; A run's row: that it is one; what it counted lives while it is open.
         ((eq property 'romacs-agent-run-head) (and value t))
         ((stringp value) (substring-no-properties value))
