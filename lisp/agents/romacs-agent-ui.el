@@ -1317,7 +1317,7 @@ or a repeat."
                                 'face 'romacs-agent-approval 'romacs-agent-approval (plist-get event :request-id)))
         ;; Questions answered: their row says how, their layer goes.
         ((and 'answered (guard (plist-get (gethash (plist-get event :request-id) (romacs-agent-ui--asks)) :questions)))
-         (romacs-agent-ui--answered (plist-get event :request-id)))
+         (romacs-agent-ui--answered (plist-get event :request-id) (plist-get event :answers)))
         ;; Under an approval shown: one the policy answered had none.
         ((and 'answered (guard (gethash (plist-get event :request-id) (romacs-agent-ui--asks))))
          (romacs-agent-ui--line session event (romacs-agent-ui--noted
@@ -2450,6 +2450,17 @@ notes, multi), as an `approval' event's :questions."
                   :multi (gethash "multi" question)))
           questions))
 
+(defun romacs-agent-ui--row-messages (messages)
+  "A turn row's MESSAGES (tables of who said what) as an input event's
+:messages, plists, a table in them a plist too; nil for none."
+  (cl-labels ((plist (table) (let ((plist nil))
+                               (maphash (lambda (key value)
+                                          (setq plist (plist-put plist (intern (concat ":" key))
+                                                                 (if (hash-table-p value) (plist value) value))))
+                                        table)
+                               plist)))
+    (and (> (length messages) 0) (mapcar #'plist messages))))
+
 (defun romacs-agent-ui--row-events (session row)
   "The events SESSION's turn ROW (`romacs-agent-turns-page''s) was folded
 from, as its chat draws them: its prompt, each of its items in order (a
@@ -2458,6 +2469,8 @@ points at it, read when opened, `romacs-agent-ui--later-p'), its end.
 Pure: it reads no record."
   (let* ((time (plist-get row :t)) (seq (plist-get row :first-seq))
          (events (list (list :type 'input :text (or (plist-get row :prompt) "") :request (plist-get row :request)
+                             :images (append (plist-get row :images) nil)
+                             :messages (romacs-agent-ui--row-messages (plist-get row :messages))
                              :seq seq :time time))))
     (cl-flet ((add (&rest event) (push event events)))
       (seq-doseq (item (plist-get row :items))
@@ -2489,9 +2502,12 @@ Pure: it reads no record."
                     :plan (gethash "plan" item) :questions (and questions (romacs-agent-ui--item-questions questions))
                     :seq (aref at 0) :time when)
                (when (gethash "behavior" item)
-                 (add :type 'answered :request-id id :behavior (gethash "behavior" item) :seq (aref at 1) :time when))))
+                 (add :type 'answered :request-id id :behavior (gethash "behavior" item) :answers (gethash "answers" item)
+                      :seq (aref at 1) :time when))))
             ("input" (add :type 'input :text (gethash "text" item) :steer (gethash "steer" item)
-                          :request (gethash "request" item) :seq (aref at 0) :time when))
+                          :request (gethash "request" item) :images (append (gethash "images" item) nil)
+                          :messages (romacs-agent-ui--row-messages (gethash "messages" item))
+                          :seq (aref at 0) :time when))
             ((and kind (or "plan" "status" "error" "compacted"))
              (add :type (intern kind) :text (gethash "text" item) :seq (aref at 0) :time when)))))
       (let ((status (plist-get row :status)) (duration (plist-get row :duration)))
@@ -2816,12 +2832,31 @@ wait, RET or y on it answers them; answered, it recedes."
 
 (add-hook 'romacs-agent-ask-sent-functions #'romacs-agent-ui--note-chosen)
 
-(defun romacs-agent-ui--answered (id)
+(defun romacs-agent-ui--answer-labels (questions answers)
+  "ANSWERS, a table from each of QUESTIONS' text to its answer as the
+harness got it (labels joined by \", \"), as chosen labels: ((QUESTION
+LABEL...)...), each answer's labels by its question's options, whole
+when they hold the separator; nil when ANSWERS is not a table."
+  (when (hash-table-p answers)
+    (delq nil
+          (mapcar (lambda (question)
+                    (when-let* ((answer (gethash (car question) answers)))
+                      (let* ((options (plist-get (cdr question) :options))
+                             (labels (if (member answer options) (list answer)
+                                       (or (seq-filter (lambda (option) (string-search option answer)) options)
+                                           (list answer)))))
+                        (cons (car question) labels))))
+                  questions))))
+
+(defun romacs-agent-ui--answered (id &optional answers)
   "Questions ID are answered: their row says with what, when this chat
-sent it, and their layer goes."
+sent it or ANSWERS (the harness's, `romacs-agent-ui--answer-labels')
+says, and their layer goes."
   (romacs-agent-ask-close romacs-agent-ui--session id)
-  (let ((questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions))
-        (chosen (or (alist-get id romacs-agent-ui--chosen nil nil #'equal) t))
+  (let* ((questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions))
+         (chosen (or (alist-get id romacs-agent-ui--chosen nil nil #'equal)
+                     (romacs-agent-ui--answer-labels questions answers)
+                     t))
         (start (alist-get id romacs-agent-ui--asked-rows nil nil #'equal)))
     (setq romacs-agent-ui--chosen (cl-remove id romacs-agent-ui--chosen :key #'car :test #'equal)
           romacs-agent-ui--asked-rows (cl-remove id romacs-agent-ui--asked-rows :key #'car :test #'equal))

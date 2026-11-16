@@ -183,4 +183,28 @@ records alone with RECORDS-ONLY, and the buffer."
       (should (equal (plist-get (romacs-agent-rows-texts "Bash" full "a\nb") :row)
                      (funcall (plist-get (romacs-agent-rows-get "Bash") :row) full))))))
 
+(ert-deftest romacs-agent-chat-row-messages-images-answers ()
+  ;; A row's prompt keeps its files and who said what; an answer the
+  ;; harness got comes back as the labels picked, whole.
+  (let* ((from (make-hash-table :test #'equal)) (message (make-hash-table :test #'equal))
+         (answers (make-hash-table :test #'equal))
+         (row (list :first-seq 2 :last-seq 3 :t 1.0 :prompt "see" :images ["/tmp/a.png"]
+                    :messages (vector message) :items [])))
+    (puthash "session" "s-1" from)
+    (puthash "name" "lead" from)
+    (dolist (pair `(("id" . "m1") ("from" . ,from) ("kind" . "note") ("text" . "hi")))
+      (puthash (car pair) (cdr pair) message))
+    (let ((input (car (romacs-agent-ui--row-events 'session row))))
+      (should (equal (plist-get input :images) '("/tmp/a.png")))
+      (let ((card (car (plist-get input :messages))))
+        (should (equal (plist-get card :text) "hi"))
+        (should (equal (plist-get (plist-get card :from) :name) "lead"))))
+    (puthash "Which?" "Research, then implement, B" answers)
+    (should (equal (romacs-agent-ui--answer-labels
+                    '(("Which?" :options ("Research, then implement" "B" "C"))) answers)
+                   '(("Which?" "Research, then implement" "B"))))
+    (puthash "Which?" "my own words" answers)
+    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("A"))) answers)
+                   '(("Which?" "my own words"))))))
+
 ;;; romacs-agent-chat-rows-tests.el ends here
