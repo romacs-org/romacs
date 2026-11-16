@@ -80,7 +80,7 @@ conversation anew under a new id."
 RESUME is non-nil."
   (let ((dir (romacs-agent-dir session))
         (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session))))
-    (romacs-agent--write-json
+    (romacs-agent--keep-json
      (expand-file-name "mcp.json" dir)
      (romacs-mcp--object
       "mcpServers" (romacs-mcp--object

@@ -2468,8 +2468,12 @@ def board_keys(args, base):
         steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
                                          a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
                                 ['t', 't', 'nil'])
-        # The newest thread forgotten after the board was drawn.
-        a.eval(f'(progn (remhash {lisp_text(sids[1])} romacs-agent--sessions) t)')
+        # The newest thread gone after the board was drawn: its records too
+        # (a session still recorded is listed from its row and loaded when asked).
+        a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
+               '(remhash id romacs-agent--sessions) '
+               '(when (fboundp (quote romacs-agent-store--open)) '
+               '(sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list id))) t)')
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])

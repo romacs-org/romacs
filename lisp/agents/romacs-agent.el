@@ -574,6 +574,17 @@ characters they encode, to put in a buffer, a string or more JSON."
     (set-file-modes temporary #o600)
     (rename-file temporary file t)))
 
+(defun romacs-agent--keep-json (file object)
+  "Write OBJECT as JSON to FILE as `romacs-agent--write-json' does, unless
+FILE holds it already: a file written again at every launch costs the
+editor a write and a rename, which a loaded disk makes long."
+  (let ((text (romacs-agent--json object)))
+    (unless (and (file-readable-p file)
+                 (equal text (with-temp-buffer
+                               (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                               (buffer-string))))
+      (romacs-agent--write-json file object))))
+
 (defun romacs-agent--read-json (file)
   (when (file-readable-p file)
     (with-temp-buffer
@@ -3396,6 +3407,10 @@ given, is its state as its records left it."
                                                                      '(:rolling-back)))
                                                      (_ (cl-struct-slot-value 'romacs-agent slot session)))))))))))
 
+(defvar romacs-agent-kept-functions nil
+  "Called with a session and its state as its records left it (or nil:
+its own) each time its state is kept (`romacs-agent--keep').")
+
 (defun romacs-agent--keep (session &optional state)
   "Write SESSION's state, as its records have folded it, to its directory:
 only the registered session's (a copy replaying them keeps nothing), and
@@ -3412,7 +3427,8 @@ its records left it (`romacs-agent--keep-soon')."
             (with-temp-file temp (insert text))
             (set-file-modes temp #o600)
             (rename-file temp file t)))
-        (puthash session seq romacs-agent--kept)))))
+        (puthash session seq romacs-agent--kept)
+        (run-hook-with-args 'romacs-agent-kept-functions session state)))))
 
 (defvar romacs-agent--keeping nil
   "The sessions whose state is kept at the editor's next idle moment,
@@ -3666,18 +3682,21 @@ no string in a record can hold, and only those are parsed."
         (ignore-errors (read (current-buffer)))))))
 
 (defun romacs-agent--restore-kept (session &optional limit)
-  "Put SESSION's kept state back, when this build defines the session
-record as it was written and its journal holds the record it is at:
-the byte its journal goes on from after that record.  Else nil, SESSION
-untouched.  With LIMIT, `beyond' and SESSION untouched when that record
-is not within the journal's last LIMIT bytes (`romacs-agent--journal-after')."
+  "Put SESSION's kept state back, when this build's session record has
+every field it was written with and its journal holds the record it is
+at: the byte its journal goes on from after that record.  Else nil,
+SESSION untouched.  A field this build added since keeps its default: a
+new field only records can give a value must change
+`romacs-agent--kept-version'.  With LIMIT, `beyond' and SESSION untouched
+when that record is not within the journal's last LIMIT bytes
+\(`romacs-agent--journal-after')."
   (when-let* ((kept (romacs-agent--read-kept session))
               ((eql (plist-get kept :version) romacs-agent--kept-version))
-              ((equal (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
+              ((cl-subsetp (plist-get kept :layout) (romacs-agent--slot-names 'romacs-agent)))
               ((integerp (plist-get kept :seq)))
               (from (romacs-agent--journal-after session (plist-get kept :seq) limit)))
     (unless (eq from 'beyond)
-      ;; The layout is this build's: each field is where it was written.
+      ;; Each field by its name, where this build has it.
       (pcase-dolist (`(,slot . ,value) (plist-get kept :fields))
         (aset session (cl-struct-slot-offset 'romacs-agent slot) value))
       (when-let* ((forked (plist-get kept :forked)))
@@ -3961,17 +3980,58 @@ own fields is taken back.")
 restored into (`romacs-agent-restore'), once: another table, as a test
 binds, is restored anew.")
 
+(defvar romacs-agent-listed-p nil
+  "When non-nil, a function of a session's directory saying whether a
+listing has it (romacs-agent-store): such a session with no kept state
+and no supervisor running is left unloaded, its journal unread, until it
+is asked for (`romacs-agent-find').")
+
+(defvar romacs-agent-pending-functions nil
+  "Called with a session's directory and its manifest (a table) while it
+is not loaded: non-nil when something waits on it (a watch kept, a
+resume due), so it is loaded as a restore runs.")
+
+(defun romacs-agent--unloaded-p (dir)
+  "Whether the session recorded in DIR is left unloaded: listed, with
+neither its kept state nor its supervisor's socket, and nothing waiting
+on it (`romacs-agent-pending-functions')."
+  (and romacs-agent-listed-p
+       (not (file-exists-p (expand-file-name "state.eld" dir)))
+       (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
+       (funcall romacs-agent-listed-p dir)
+       (not (and romacs-agent-pending-functions
+                 (run-hook-with-args-until-success
+                  'romacs-agent-pending-functions dir
+                  (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))))
+
+(defun romacs-agent--restore-load (dir)
+  "Load the session recorded in DIR as a restore does: unless it is left
+unloaded (`romacs-agent--unloaded-p')."
+  (unless (romacs-agent--unloaded-p dir) (romacs-agent--load dir)))
+
 (defun romacs-agent--load-new ()
   "Load each session recorded since this process knew the others: a
 directory named by no known session's id, its records not read for one
-that is.  Non-nil when any was loaded."
+that is, and none left unloaded (`romacs-agent--unloaded-p').  Non-nil
+when any was loaded."
   (let ((loaded nil))
     (when (file-directory-p (romacs-agent--state-root))
       (dolist (dir (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))
-        (unless (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+        (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                    (romacs-agent--unloaded-p dir))
           (romacs-agent--load dir)
           (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))))
     loaded))
+
+(defun romacs-agent-find (id)
+  "The session ID names, loaded from its record when it was left unloaded;
+nil when none is recorded."
+  (or (romacs-agent-get id)
+      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]+\\'" id)
+           (let ((dir (expand-file-name id (romacs-agent--state-root))))
+             (when (file-exists-p (expand-file-name "manifest.json" dir))
+               (romacs-agent--load dir)
+               (romacs-agent-get id))))))
 
 (defun romacs-agent-know-sessions ()
   "Know every recorded session, cheaply after the first time: restored
@@ -3989,9 +4049,10 @@ opens."
 
 (declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 
-(defconst romacs-agent--restore-turn 0.2
+(defconst romacs-agent--restore-turn 0.05
   "Seconds of loading `romacs-agent-restore-soon' does in one turn of the
-command loop, past the turn's first session.")
+command loop, past the turn's first session: short enough that a key
+waits for no step.")
 
 (defvar romacs-agent--restore-pending nil
   "The session directories `romacs-agent-restore-soon' has still to load.")
@@ -4014,7 +4075,7 @@ A server runs this at its start, so sessions survive it; a restore
 `romacs-agent-restore-soon' began ends here, at once."
   (let ((pending romacs-agent--restore-pending) (romacs-agent--fold-here t))
     (setq romacs-agent--restore-pending nil romacs-agent--restoring nil)
-    (if pending (mapc #'romacs-agent--load pending) (romacs-agent--load-new))
+    (if pending (mapc #'romacs-agent--restore-load pending) (romacs-agent--load-new))
     (romacs-agent--fold-all-now)
     (romacs-agent--restore-tail)
     (when pending (romacs-agent--restore-progress 'done))))
@@ -4043,8 +4104,10 @@ on."
   (when romacs-agent--restore-pending
     (let ((until (+ (float-time) romacs-agent--restore-turn)))
       (while (when-let* ((dir (pop romacs-agent--restore-pending)))
-               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--load dir))
-               (romacs-agent--restore-progress 'running)
+               (with-demoted-errors "romacs-agent: loading a session: %S" (romacs-agent--restore-load dir))
+               ;; Sessions loaded later (`romacs-agent-store--load-missing')
+               ;; are no start's progress.
+               (when romacs-agent--restoring (romacs-agent--restore-progress 'running))
                (< (float-time) until))))
     (if romacs-agent--restore-pending
         (run-at-time 0 nil #'romacs-agent--restore-step)
@@ -4177,4 +4240,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-ui)
 (require 'romacs-agent-tools)
 (require 'romacs-agent-watch)
+(require 'romacs-agent-store)
 ;;; romacs-agent.el ends here
