@@ -90,6 +90,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -438,6 +439,64 @@ def budget(args, base):
         result['ok'] = (server_ms is not None and server_ms < 1100 and 'Quit' in spent['text'] and after == '2000000'
                         and quit['seconds'] < .5 and 'Quit' in quit['text'])
         return result
+    finally:
+        a.close()
+
+
+def sockets(args, base):
+    """romacs#262: the editor's sockets go back to their count once the
+    sessions it ran have ended, whether the editor ended them
+    (`romacs-agent-stop') or their directories went (a test's tree removed
+    with its harnesses waiting), and no supervisor of this tree is left."""
+    a = Agents(args, base, 'sk')
+    agents = a.home / '.local/state/romacs/agents'
+
+    def socks():
+        count = 0
+        for fd in Path(f'/proc/{a.pid}/fd').iterdir():
+            try:
+                count += os.readlink(fd).startswith('socket:')
+            except OSError:
+                pass
+        return count
+
+    def hosts():
+        found = []
+        for proc in Path('/proc').iterdir():
+            try:
+                argv = (proc / 'cmdline').read_bytes().split(b'\0')
+            except OSError:
+                continue
+            if argv and argv[0].endswith(b'romacs-agent-host') and str(agents).encode() in b' '.join(argv):
+                found.append(int(proc.name))
+        return found
+
+    def run(n, end):
+        ids = [a.start(f'say {i}') for i in range(n)]
+        for sid in ids:
+            a.idle(sid)
+        during = socks()
+        end(ids)
+        until(lambda: not hosts(), 30, 'every supervisor ended')
+        return during
+
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        # A first session: what the editor opens once and keeps (its
+        # routes' listener) is in the count the rest come back to.
+        run(1, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
+        baseline = socks()
+        stopped = run(3, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
+        until(lambda: socks() <= baseline, 30, 'sockets back after stops')
+        after_stop = socks()
+        removed = run(3, lambda ids: [shutil.rmtree(agents / sid) for sid in ids])
+        until(lambda: socks() <= baseline, 30, 'sockets back after removals')
+        after_removal = socks()
+        return {'baseline': baseline, 'with_3_stopped_later': stopped, 'after_stops': after_stop,
+                'with_3_removed_later': removed, 'after_removals': after_removal, 'hosts_left': len(hosts()),
+                'ok': stopped > baseline and removed > baseline and after_stop <= baseline
+                      and after_removal <= baseline and not hosts()}
     finally:
         a.close()
 
@@ -3098,7 +3157,7 @@ def history_real(args, base):
         a.close()
 
 
-WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'host': host, 'sockets': sockets, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
@@ -3126,7 +3185,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
+    for name in args.workflow or ['host', 'sockets', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
