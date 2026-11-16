@@ -165,7 +165,12 @@
     (ignore session)
     (setf (romacs-agent-title child) "a (nested) title")
     (should (equal (romacs-agent-tools--wake-parse (romacs-agent-tools--wake-text child '(1 "r\ns" t)))
-                   (list :id romacs-agent-cards-tests--child :title "a (nested) title" :state "failed" :result "r\ns")))
+                   (list :id romacs-agent-cards-tests--child :title "a (nested) title" :state "failed" :reply-to nil
+                         :result "r\ns")))
+    ;; A turn that answered a message names it.
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (romacs-agent-tools--wake-text child '(1 "r" nil "m-12ab")))
+                              :reply-to)
+                   "m-12ab"))
     (should-not (romacs-agent-tools--wake-parse "hello"))))
 
 (ert-deftest romacs-agent-native-subagent-is-the-same-card-without-a-link ()
