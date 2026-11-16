@@ -299,6 +299,17 @@ fn internal_to_rope(bytes: &[u8]) -> Result<(Cow<'_, str>, Vec<u32>)> {
     Ok((Cow::Owned(text), raw))
 }
 
+/// The byte where the character before END starts, for BYTES that lie at
+/// BASE, begin on a character and hold the byte before END.
+#[inline]
+pub(crate) fn char_start_in(bytes: &[u8], base: usize, end: usize) -> usize {
+    let mut i = end - 1 - base;
+    while i > 0 && bytes[i] & 0xc0 == 0x80 {
+        i -= 1;
+    }
+    base + i
+}
+
 /// The bytes from AT to the end of its chunk of ROPE, or of TAIL after it.
 fn chunk_from<'a>(rope: &'a ropey_stable::Rope, tail: &'a str, at: usize) -> &'a [u8] {
     let rope_bytes = rope.len_bytes();
@@ -826,6 +837,7 @@ impl TextBody {
     }
     /// The bytes from AT to the end of its rope chunk (or the tail), for a
     /// parse's reader; empty at the end.
+    #[inline]
     pub(crate) fn chunk_from(&self, at: usize) -> &[u8] {
         chunk_from(&self.rope, &self.tail, at)
     }
@@ -871,13 +883,7 @@ impl TextBody {
     pub(crate) fn char_start_before(&self, at: usize) -> usize {
         // A chunk never splits a character: scan back within the one
         // holding the byte before AT.
-        let start = |bytes: &[u8], base: usize| {
-            let mut i = at - 1 - base;
-            while i > 0 && bytes[i] & 0xc0 == 0x80 {
-                i -= 1;
-            }
-            base + i
-        };
+        let start = |bytes: &[u8], base: usize| char_start_in(bytes, base, at);
         let rope_bytes = self.bytes_len - self.tail.len();
         match self.flat.get() {
             _ if at == 0 => 0,
@@ -891,7 +897,7 @@ impl TextBody {
     }
     /// The bytes of the chunk holding the byte before END, up to END, and
     /// where that chunk starts.
-    fn chunk_before(&self, end: usize) -> (&[u8], usize) {
+    pub(crate) fn chunk_before(&self, end: usize) -> (&[u8], usize) {
         let rope_bytes = self.bytes_len - self.tail.len();
         if end > rope_bytes {
             return (&self.tail.as_bytes()[..end - rope_bytes], rope_bytes);
@@ -1011,6 +1017,7 @@ impl TextBody {
     pub fn len_chars(&self) -> usize {
         self.chars_len
     }
+    #[inline]
     pub fn len_bytes(&self) -> usize {
         self.bytes_len
     }
