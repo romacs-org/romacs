@@ -544,6 +544,7 @@ shows while its run is folded."
     (romacs-agent-ui--run-open event)
     (romacs-agent-ui--run-started id (substring text 1) (or card (plist-get event :parent)))
     (romacs-agent-ui--step-insert (concat indent (propertize "●" 'face 'romacs-agent-running)) card)
+    (romacs-agent-ui--call-started id (1- romacs-agent-ui--end))
     ;; Its call, for its end to draw: the tool and what it was given.
     (romacs-agent-ui--step-insert (propertize (concat text "\n") 'romacs-agent-tool id 'romacs-agent-call (list name input))
                                   card)))
@@ -626,11 +627,42 @@ by its seq in the whole journal."
                            (funcall (romacs-agent--harness-get session :events) (romacs-agent--scratch session) out))
                :output)))
 
+(defvar-local romacs-agent-ui--calls nil
+  "The calls running in the current chat, a table from each id to its
+row's mark, a marker: a call's end finds its row there, however many
+rows came after it (calls started together end in their start order,
+the first the farthest from the end).  Live state: a call leaves it at
+its end, all at a turn's end.  Not the open run's: a call may end after
+its run settled.")
+
+(defun romacs-agent-ui--call-started (id mark)
+  "Call ID's row has its mark at MARK, a position: running, it ends there."
+  (puthash id (copy-marker mark)
+           (or romacs-agent-ui--calls (setq romacs-agent-ui--calls (make-hash-table :test #'equal)))))
+
+(defun romacs-agent-ui--call-mark (id)
+  "Running call ID's row mark (`romacs-agent-ui--calls'), taken out of
+the table, a marker; nil when it holds none, or one whose row went."
+  (when-let* ((mark (and romacs-agent-ui--calls (gethash id romacs-agent-ui--calls))))
+    (remhash id romacs-agent-ui--calls)
+    (if (and (< (marker-position mark) (point-max))
+             (equal (get-text-property (1+ mark) 'romacs-agent-tool) id))
+        mark
+      (set-marker mark nil)
+      nil)))
+
+(defun romacs-agent-ui--calls-ended ()
+  "No call of the current chat runs any more: a turn ended."
+  (when romacs-agent-ui--calls
+    (maphash (lambda (_ mark) (set-marker mark nil)) romacs-agent-ui--calls)
+    (setq romacs-agent-ui--calls nil)))
+
 (defun romacs-agent-ui--tool-mark (id)
   "Where call ID's row has its mark, a marker: found back from the
 transcript's end by its row's text, which names the call
 \(`romacs-agent-tool'); nil when the chat has no row of it.  A call
-ending live, or one a user acts on, is near the end or at point."
+a user acts on is at point (`romacs-agent-ui--row-mark'), one ending
+live in `romacs-agent-ui--calls'; one ended is near the end."
   (save-excursion
     (goto-char (or romacs-agent-ui--end (point-max)))
     (when-let* ((found (text-property-search-backward 'romacs-agent-tool id #'equal)))
@@ -721,7 +753,7 @@ renderer shows it.  A card's task record gives it the task's state and
 link."
   (let* ((id (plist-get event :id))
          (output (or (plist-get event :output) ""))
-         (mark (romacs-agent-ui--tool-mark id))
+         (mark (or (romacs-agent-ui--call-mark id) (romacs-agent-ui--tool-mark id)))
          (call (and mark (get-text-property (1+ mark) 'romacs-agent-call)))
          (input (romacs-agent-ui--input (cadr call)))
          (renderer (and call (romacs-agent-rows-get (car call))))
@@ -1201,6 +1233,7 @@ definition may come last), and draw its tables as grids."
 
 (defun romacs-agent-ui--footer (session event)
   "The rule closing a turn: ✓ or !, and how long it took."
+  (romacs-agent-ui--calls-ended)
   (maphash (lambda (id _) (romacs-agent-ui--message-end id)) (copy-hash-table romacs-agent-ui--messages))
   (let* ((failed (plist-get event :error))
          (duration (or (plist-get event :duration)
@@ -2233,7 +2266,7 @@ keeps every turn."
 as far back as they go, past the bound a first show keeps to.")
 
 (defconst romacs-agent-ui--drawn-state
-  '(romacs-agent-ui--run romacs-agent-ui--runs
+  '(romacs-agent-ui--run romacs-agent-ui--runs romacs-agent-ui--calls
     romacs-agent-ui--asks romacs-agent-ui--faced romacs-agent-ui--shown romacs-agent-ui--open
     romacs-agent-ui--fitted)
   "A chat's variables that describe its transcript as drawn, besides its
