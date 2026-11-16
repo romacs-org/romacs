@@ -128,16 +128,20 @@ def marked_processes(prefix):
 
 
 def end_marked(prefix, seconds=10):
-    """End every process marked under PREFIX; the pids it found, which are
-    gone when it returns, else it raises."""
-    found = marked_processes(prefix)
-    for pid in found:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    until(lambda: not marked_processes(prefix), seconds, f'processes of {prefix} ended')
-    return found
+    """End every process marked under PREFIX, those started meanwhile too;
+    the pids it ended, all gone when it returns, else it raises."""
+    ended, deadline = [], time.time() + seconds
+    while (found := marked_processes(prefix)):
+        if time.time() > deadline:
+            raise RuntimeError(f'processes of {prefix} not ended: {found}')
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        ended += [pid for pid in found if pid not in ended]
+        time.sleep(0.05)
+    return ended
 
 
 class Agents(Server):
@@ -244,8 +248,10 @@ class Agents(Server):
         # sessions' supervisors (detached or user units), their harnesses
         # and MCP relays.  They end with it, whatever host.json still names
         # (a workflow may remove a session's directory).
-        end_marked(str(self.root.resolve()))
-        super().close()
+        try:
+            end_marked(str(self.root.resolve()))
+        finally:
+            super().close()
 
 
 def lisp_text(text):
@@ -537,9 +543,11 @@ def host(args, base):
     root = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / f'anh{os.getpid()}'
     root.mkdir(mode=0o700)
     sock, journal_dir = root / 'host.sock', base / 'host-session'
+    # Started here, not by an editor: marked as this run's all the same.
+    marked = {**os.environ, MARK: str((base / 'host').resolve())}
     process = subprocess.Popen([str(binary), '--dir', str(journal_dir), '--socket', str(sock), '--',
                                 'sh', '-c', 'sleep 0.5; yes line | head -c 4000000; exit 3'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
     try:
         until(lambda: sock.exists(), 10, 'supervisor listening')
         reader = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
@@ -559,7 +567,7 @@ def host(args, base):
         second, go = base / 'host-stuck', base / 'host-go'
         process = subprocess.Popen([str(binary), '--dir', str(second), '--socket', str(sock), '--',
                                     'sh', '-c', f'(sleep 30 <&0 >/dev/null &); while [ ! -e {go} ]; do sleep 0.05; done; exit 4'],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
         until(lambda: sock.exists(), 10, 'second supervisor listening')
 
         def quietly(work):
@@ -601,6 +609,8 @@ def host(args, base):
     finally:
         if process.poll() is None:
             process.kill()
+        # And the stuck harness's descendant, left holding its stdin.
+        end_marked(marked[MARK])
         for leftover in (sock,):
             if leftover.exists():
                 leftover.unlink()
@@ -3219,7 +3229,10 @@ def main():
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
         # No process a workflow started outlives it: one left fails it.
-        outlived = end_marked(str(out.resolve()))
+        try:
+            outlived = end_marked(str(out.resolve()))
+        except RuntimeError as error:
+            outlived = repr(error)
         if outlived:
             results[name] = {**results[name], 'ok': False, 'outlived': outlived}
         print(name, json.dumps(results[name]), flush=True)
