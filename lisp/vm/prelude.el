@@ -112,23 +112,6 @@ join, separator included, is one call of `romacs--concat-list'."
       (setq parts (nreverse parts)))
     (romacs--concat-list parts separator)))
 
-;;; Evaluation
-
-(defun funcall-with-delayed-message (timeout message function)
-  "Like `funcall', but display MESSAGE if FUNCTION takes longer than TIMEOUT.
-TIMEOUT is a number of seconds, and can be an integer or a floating
-point number.
-
-If FUNCTION takes less time to execute than TIMEOUT seconds, MESSAGE
-is not displayed.  GNU eval.c `Ffuncall_with_delayed_message' shows
-MESSAGE from an atimer; here a timer does, which runs where timers run,
-while FUNCTION waits for input or a process (VM2-DELAYED-MESSAGE)."
-  (or (numberp timeout) (signal 'wrong-type-argument (list 'numberp timeout)))
-  (or (stringp message) (signal 'wrong-type-argument (list 'stringp message)))
-  (let ((timer (run-with-timer timeout nil #'message "%s" message)))
-    (unwind-protect (funcall function)
-      (cancel-timer timer))))
-
 
 ;;; Printing
 

@@ -105,15 +105,6 @@ fn labeled_restrictions() {
     ]);
 }
 
-/// eval.c `funcall-with-delayed-message` (`with-delayed-message`): the
-/// function's value, its errors and the argument checks (consult, markdown-mode).
-#[test]
-fn funcall_with_delayed_message() {
-    same_as_gnu("delayed-message", &[
-        "(list (with-delayed-message (1 \"msg\") 42) (funcall-with-delayed-message 0.5 \"m\" (lambda () 'x)) (condition-case e (funcall-with-delayed-message 'a \"m\" #'ignore) (error e)) (condition-case e (funcall-with-delayed-message 1 'm #'ignore) (error e)) (condition-case e (with-delayed-message (1 \"m\") (error \"inner\")) (error e)))",
-    ]);
-}
-
 /// window.c `resize-mini-window-internal`, as `window--resize-mini-window`
 /// prepares and calls it (ivy).
 #[test]
