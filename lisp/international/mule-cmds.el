@@ -3085,49 +3085,52 @@ on encoding."
 (defvar ucs-names nil
   "Hash table of cached CHAR-NAME keys to CHAR-CODE values.")
 
+(defconst ucs-names--ranges
+  ;; Sometimes these ranges will need adjusting as codepoints are
+  ;; added to unicode.  The test case
+  ;; 'mule-cmds-tests--ucs-names-missing-names' will tell you
+  ;; which are missing (Bug#65997).
+  '((#x0000 . #x33FF)
+   ;; (#x3400 . #x4DBF) CJK Ideographs Extension A
+   (#x4DC0 . #x4DFF)
+   ;; (#x4E00 . #x9FFF) CJK Unified Ideographs
+   (#xA000 . #xD7FF)
+   ;; (#xD800 . #xF8FF) Surrogate/Private
+   (#xFB00 . #x143FA)
+   (#x14400 . #x14646)
+   ;; (#x14647 . #x160FF) unused
+   (#x16100 . #x16139)
+   ;; (#x1613A . #x167FF) unused
+   (#x16800 . #x16F9F)
+   (#x16FE0 . #x16FF6)
+   ;; (#x17000 . #x187FF) Tangut Ideographs
+   ;; (#x18800 . #x18AFF) Tangut Components
+   ;; (#x18B00 . #x18CFF) Khitan Small Script
+   ;; (#x18D00 . #x18D20) Tangut Ideograph Supplement
+   ;; (#x18D21 . #x18D7F) unused
+   ;; (#x18D80 . #x18DF2) Tangut Components
+   ;; (#x18DF3 . #x18DFF) unused
+   ;; (#x18E00 . #x19191) Jurchen
+   ;; (#x19192 . #x1919F) unused
+   (#x191A0 . #x191D2)
+   (#x1AFF0 . #x1B128)
+   ;; (#x1B129 . #x1B131) unused
+   (#x1B132 . #x1B132)
+   ;; (#x1B133 . #x1B14F) unused
+   (#x1B150 . #x1B16F)
+   (#x1B170 . #x1B2FF)
+   ;; (#x1B300 . #x1BBFF) unused
+   (#x1BC00 . #x1BCAF)
+   ;; (#x1BCB0 . #x1CBFF) unused
+   (#x1CC00 . #x1FFFF)
+   ;; (#x20000 . #xDFFFF) CJK Ideograph Extension B-J, Seal, unused
+   (#xE0000 . #xE01FF))
+  "The characters whose names `ucs-names' holds, as (FROM . TO) ranges.")
+
 (defun ucs-names ()
   "Return table of CHAR-NAME keys and CHAR-CODE values cached in `ucs-names'."
   (or ucs-names
-      ;; Sometimes these ranges will need adjusting as codepoints are
-      ;; added to unicode.  The test case
-      ;; 'mule-cmds-tests--ucs-names-missing-names' will tell you
-      ;; which are missing (Bug#65997).
-      (let ((ranges
-	     '((#x0000 . #x33FF)
-	       ;; (#x3400 . #x4DBF) CJK Ideographs Extension A
-	       (#x4DC0 . #x4DFF)
-	       ;; (#x4E00 . #x9FFF) CJK Unified Ideographs
-	       (#xA000 . #xD7FF)
-	       ;; (#xD800 . #xF8FF) Surrogate/Private
-	       (#xFB00 . #x143FA)
-               (#x14400 . #x14646)
-	       ;; (#x14647 . #x160FF) unused
-               (#x16100 . #x16139)
-               ;; (#x1613A . #x167FF) unused
-	       (#x16800 . #x16F9F)
-               (#x16FE0 . #x16FF6)
-               ;; (#x17000 . #x187FF) Tangut Ideographs
-               ;; (#x18800 . #x18AFF) Tangut Components
-               ;; (#x18B00 . #x18CFF) Khitan Small Script
-               ;; (#x18D00 . #x18D20) Tangut Ideograph Supplement
-               ;; (#x18D21 . #x18D7F) unused
-	       ;; (#x18D80 . #x18DF2) Tangut Components
-               ;; (#x18DF3 . #x18DFF) unused
-               ;; (#x18E00 . #x19191) Jurchen
-               ;; (#x19192 . #x1919F) unused
-               (#x191A0 . #x191D2)
-	       (#x1AFF0 . #x1B128)
-               ;; (#x1B129 . #x1B131) unused
-               (#x1B132 . #x1B132)
-               ;; (#x1B133 . #x1B14F) unused
-               (#x1B150 . #x1B16F)
-               (#x1B170 . #x1B2FF)
-	       ;; (#x1B300 . #x1BBFF) unused
-               (#x1BC00 . #x1BCAF)
-	       ;; (#x1BCB0 . #x1CBFF) unused
-               (#x1CC00 . #x1FFFF)
-	       ;; (#x20000 . #xDFFFF) CJK Ideograph Extension B-J, Seal, unused
-	       (#xE0000 . #xE01FF)))
+      (let ((ranges ucs-names--ranges)
             (gc-cons-threshold (max gc-cons-threshold 10000000))
 	    (names (make-hash-table :size 42943 :test #'equal)))
 	(require 'charprop) ;; Usually preloaded, but not during bootstrap.
@@ -3188,11 +3191,32 @@ Return nil if CHAR is not a character."
        (or (get-char-code-property char 'name)
            (get-char-code-property char 'old-name))))
 
+(declare-function romacs-unidata-find-name "romacs-unidata" (table name ranges))
+
+(defun ucs-names--current (name)
+  "The character `ucs-names' maps NAME to when NAME is the name of one in
+its ranges, found without making the table: only the blocks of the name
+table that hold every word of NAME are read.  Nil otherwise: an old
+name, a spelling `ucs-names' adds, or no name."
+  (require 'charprop)
+  (romacs-unidata-find-name (unicode-property-table-internal 'name) name ucs-names--ranges))
+
+(defvar ucs-names--direct 16
+  "How many more names `char-from-name' looks up without `ucs-names'.
+A few, as a library's ?\\N{...} ask for, cost much less than making the
+table; a caller that asks for many gets the table at the next one.")
+
 (defun char-from-name (string &optional ignore-case)
   "Return a character as a number from its Unicode name STRING.
 If optional IGNORE-CASE is non-nil, ignore case in STRING.
 Return nil if STRING does not name a character."
-  (or (gethash (if ignore-case (upcase string) string) (ucs-names))
+  (or (let ((name (if ignore-case (upcase string) string)))
+        ;; A character's name wins over every other key of `ucs-names':
+        ;; the table is made for the rest only.
+        (or (and (not ucs-names) (> ucs-names--direct 0)
+                 (progn (setq ucs-names--direct (1- ucs-names--direct))
+                        (ucs-names--current name)))
+            (gethash name (ucs-names))))
       (let ((minus (string-match-p "-[0-9A-F]+\\'" string)))
         (when minus
           ;; Parse names like "VARIATION SELECTOR-17" and "CJK

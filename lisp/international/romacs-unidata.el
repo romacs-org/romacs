@@ -114,6 +114,69 @@ A word-list block is expanded into TABLE on first use."
 	    ((eq sym 'VARIATION\ SELECTOR)
 	     (format "%s-%d" sym (+ (- char #xe0100) 17))))))))
 
+(defun romacs-unidata--split-name (name)
+  "NAME's words as admin/unidata/unidata-gen.el's `unidata-split-name'
+splits a name it encodes: at each space, and around a hyphen inside a
+word that a space does not follow."
+  (let ((len (length name)) (words nil) (idx 0))
+    (dotimes (i len)
+      (let ((c (aref name i)))
+        (cond ((= c ?\s) (push (substring name idx i) words) (setq idx (1+ i)))
+              ((and (= c ?-) (< idx i) (< (1+ i) len) (/= (aref name (1+ i)) ?\s))
+               (push (substring name idx i) words) (push "-" words) (setq idx (1+ i))))))
+    (nreverse (cons (substring name idx) words))))
+
+(defvar romacs-unidata--words nil
+  "(TABLE . WORDS) for the name table last searched: its words, interned
+symbols, as a list in their order.")
+
+(defun romacs-unidata--word-code (table word)
+  "The one-character string that stands for WORD in TABLE's blocks, or
+nil when WORD is none of its words."
+  (let* ((words (if (eq (car romacs-unidata--words) table)
+                    (cdr romacs-unidata--words)
+                  (cdr (setq romacs-unidata--words
+                             (cons table (append (aref (char-table-extra-slot table 4) 0) nil))))))
+         (symbol (intern-soft word))
+         (tail (and symbol (memq symbol words))))
+    (and tail (string (+ (- (length words) (length tail)) 3)))))
+
+(defun romacs-unidata--holds-p (block codes)
+  "Whether BLOCK, a block of names not yet expanded, holds each of CODES."
+  (while (and codes (string-search (car codes) block 1))
+    (setq codes (cdr codes)))
+  (null codes))
+
+(defun romacs-unidata-find-name (table name ranges)
+  "The first character of RANGES, a list of (FROM . TO), whose name in
+TABLE, a name table, is NAME, or nil.  A block's names still encoded are
+expanded only when the block holds the code of every word of NAME, as a
+block holds the words of all its names; a name kept whole is compared
+as it is.  Names computed from the character (Hangul syllables,
+ideographs) are not searched."
+  (let ((needed (catch 'none
+                  (mapcar (lambda (word) (or (romacs-unidata--word-code table word) (throw 'none 'none)))
+                          (romacs-unidata--split-name name)))))
+    (catch 'found
+      (dolist (range ranges)
+        (let ((block (logand (car range) (lognot 127))))
+          (while (<= block (cdr range))
+            ;; A block's encoded names share one string, after any
+            ;; character whose name is computed or that has none.
+            (let ((c (max block (car range))) (end (min (+ block 127) (cdr range))))
+              (while (<= c end)
+                (let ((val (aref table c)))
+                  (cond ((not (stringp val)) (setq c (1+ c)))
+                        ((/= (aref val 0) 0)
+                         (when (string= val name) (throw 'found c))
+                         (setq c (1+ c)))
+                        ((and (not (eq needed 'none)) (romacs-unidata--holds-p val needed))
+                         (funcall (char-table-extra-slot table 1) c val table)
+                         (when (eq (aref table c) val) (setq c (1+ end))))
+                        (t (setq c (1+ end)))))))
+            (setq block (+ block 128)))))
+      nil)))
+
 (defun romacs-unidata-put-name (char val table)
   "Store VAL as the name of CHAR in TABLE."
   (let ((current-val (aref table char)))
