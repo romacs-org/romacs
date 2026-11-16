@@ -117,7 +117,7 @@ failed, Grep (whose row counts what it found)."
   ;; A pointer whose bytes are off finds its record by its seq.
   (romacs-agent-lazy-tests--with-chat
    (lambda (session)
-     (should (equal (romacs-agent-ui--ref-output (list :session session :id "t1" :seq 3 :from 0 :to 10))
+     (should (equal (plist-get (romacs-agent-ui--ref-call (list :session session :id "t1" :seq 3 :from 0 :to 10)) :output)
                     "alpha é\nbeta")))))
 
 (ert-deftest romacs-agent-lazy-results-told-from-text ()

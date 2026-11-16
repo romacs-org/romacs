@@ -590,23 +590,33 @@ much it gave when it is big.  Point is on the row."
                                           (propertize (format " · %s" (file-size-human-readable bytes))
                                                       'face 'romacs-agent-dim 'romacs-agent-tool id)))))))))
 
-(defun romacs-agent-ui--payload-output (payload)
-  "PAYLOAD's output: its text, or read from its journal record."
-  (or (plist-get payload :output)
-      (romacs-agent-ui--ref-output (plist-get payload :ref))
-      ""))
+(defun romacs-agent-ui--payload-call (payload)
+  "PAYLOAD's call as its body is drawn: (INPUT . OUTPUT), INPUT what its
+row kept, or the whole one when its turn's row only kept part
+\(`romacs-agent-ui--ref-call'); OUTPUT its text, or read where its
+pointer says."
+  (let* ((kept (cadr (plist-get payload :call)))
+         (found (and (not (plist-get payload :output)) (romacs-agent-ui--ref-call (plist-get payload :ref)))))
+    (cons (or (plist-get found :input) kept)
+          (or (plist-get payload :output) (plist-get found :output) ""))))
 
-(defun romacs-agent-ui--ref-output (ref)
-  "The output REF points at: with :row, call :id's of its session's turn
-rows (`romacs-agent-turns-item'); else (:session S :id ID :seq SEQ :from
+(defun romacs-agent-ui--payload-output (payload)
+  "PAYLOAD's output: its text, or read where its pointer says."
+  (cdr (romacs-agent-ui--payload-call payload)))
+
+(defun romacs-agent-ui--ref-call (ref)
+  "The call REF points at, a plist of :output and, read from its turn's
+row, the whole :input: with :row, call :id's of its session's turn rows
+\(`romacs-agent-turns-item'); else (:session S :id ID :seq SEQ :from
 BYTE :to BYTE), the journal record there, parsed as its harness parses
 it.  A record there that is not SEQ (bytes counted wrong) is looked for
 by its seq in the whole journal."
-  (if (plist-get ref :row) (romacs-agent-turns-item (plist-get ref :session) (plist-get ref :id))
-    (romacs-agent-ui--record-output ref)))
+  (cond ((null ref) nil)
+        ((plist-get ref :row) (romacs-agent-turns-item (plist-get ref :session) (plist-get ref :id)))
+        (t (list :output (romacs-agent-ui--record-output ref)))))
 
 (defun romacs-agent-ui--record-output (ref)
-  "The output REF (`romacs-agent-ui--ref-output''s, of a record) points at."
+  "The output REF (`romacs-agent-ui--ref-call''s, of a record) points at."
   (when-let* ((session (plist-get ref :session))
               (read (lambda (from to)
                       (let ((found nil))
@@ -628,8 +638,9 @@ it; nil when it has none, or no row any more."
               ((progn (remhash id romacs-agent-ui--payloads) t))
               (mark (gethash id romacs-agent-ui--tool-lines)))
     (let* ((call (plist-get payload :call))
-           (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (cadr call))
-                                             (romacs-agent-ui--payload-output payload) (plist-get payload :failed))))
+           (whole (romacs-agent-ui--payload-call payload))
+           (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (car whole))
+                                             (cdr whole) (plist-get payload :failed))))
       (unless (string-empty-p (string-trim body))
         ;; Drawn as the transcript is: no edit to undo (`romacs-agent-ui--unrecorded').
         (romacs-agent-ui--unrecorded

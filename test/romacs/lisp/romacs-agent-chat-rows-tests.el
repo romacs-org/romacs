@@ -110,9 +110,10 @@ records alone with RECORDS-ONLY, and the buffer."
                       (funcall read session function from end skip))))
           (should (equal (romacs-agent-ui--payload-output (gethash "u12" romacs-agent-ui--payloads))
                          romacs-agent-chat-rows-tests--long)))
-        (should (= (length reads) 1))
-        (should (> (caar reads) 0))
-        (should (integerp (cdar reads))))
+        ;; Its start (the whole input) and its end (the output), each a
+        ;; bounded read.
+        (should (<= 1 (length reads) 2))
+        (should (cl-every (lambda (read) (and (> (car read) 0) (integerp (cdr read)))) reads)))
       (kill-buffer (cdr from-rows))
       (kill-buffer (cdr from-records)))
     ;; A turn ended after its row was written: drawn from its records,
@@ -206,5 +207,22 @@ records alone with RECORDS-ONLY, and the buffer."
     (puthash "Which?" "my own words" answers)
     (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("A"))) answers)
                    '(("Which?" "my own words"))))))
+
+(ert-deftest romacs-agent-chat-row-call-opens-whole ()
+  ;; A row's call opened draws its body from the whole input its turn's
+  ;; records hold, not the part its row kept.
+  (let* ((kept (make-hash-table :test #'equal)) (whole (make-hash-table :test #'equal)))
+    (puthash "old_string" 9 kept)
+    (puthash "old_string" "one\ntwo\n" whole)
+    (cl-letf (((symbol-function 'romacs-agent-turns-item)
+               (lambda (_session id) (and (equal id "e1") (list :input whole :output "done")))))
+      (let ((call (romacs-agent-ui--payload-call
+                   (list :call (list "Edit" kept) :ref (list :session 'session :id "e1" :row t)))))
+        (should (eq (car call) whole))
+        (should (equal (cdr call) "done"))))
+    ;; Kept live, it is what it was.
+    (should (equal (romacs-agent-ui--payload-call (list :call (list "Bash" kept) :output "out")) (cons kept "out")))
+    ;; The fill keeps the renderers' texts.
+    (should (eq romacs-agent-turns-tool-texts-function #'romacs-agent-rows-texts))))
 
 ;;; romacs-agent-chat-rows-tests.el ends here

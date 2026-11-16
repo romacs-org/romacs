@@ -594,5 +594,9 @@ call's whole input or output."
       (list :row (funcall (plist-get renderer :row) input)
             :ended (and output (plist-get renderer :ended) (funcall (plist-get renderer :ended) input output))))))
 
+;; A turn's row keeps its calls' texts as drawn (romacs-agent-turns.el).
+(defvar romacs-agent-turns-tool-texts-function)
+(setq romacs-agent-turns-tool-texts-function #'romacs-agent-rows-texts)
+
 (provide 'romacs-agent-rows)
 ;;; romacs-agent-rows.el ends here
