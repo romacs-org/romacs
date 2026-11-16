@@ -766,7 +766,9 @@ fn runtime_tree(root: &Path) -> Result<(), String> {
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
 /// The Romacs source tree this build came from, `source-directory':
-/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
+/// `ROMACS_SOURCE_DIRECTORY` when set, read as each process's own
+/// (`per_process_env`: a world holds and binds none, and restore asks
+/// again, `Vm::world_reinit`), none if it names no tree; else the
 /// build's own root while it is a git checkout of one, else none.  A gate's
 /// build slot mirrors a checkout without `.git`, so a build made there
 /// names no tree it would not find again.  Both checks are kinds of entry,
@@ -774,7 +776,7 @@ fn runtime_tree(root: &Path) -> Result<(), String> {
 /// file under it is added or renamed, or a commit touches `.git`.
 pub fn source_directory() -> Option<PathBuf> {
     let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
-    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
+    if let Some(dir) = per_process_env("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
         // Absolute, so a buffer's own directory never resolves it.
         return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
     }
