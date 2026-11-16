@@ -1,14 +1,15 @@
 //! The GUI's world (`romacs_vm::world`): a live `--loadup` launch keeps the
 //! VM at the end of the GNU-loadup chain and the bundled packages'
-//! autoloads, with the chain's report beside it. The steps before that point
-//! are the launch's own and depend only on its recipe (the launch mode, the
-//! window geometry and the collection floor) and on keyed host facts. Each
-//! recipe input is what a session reads, not what the caller of a build
-//! had: the launch font is each process's (`LaunchFont`), as GNU's
-//! `--font' is, and no base world holds it. A restored launch attaches its
-//! hosts, sets its launch font, runs `romacs-world-restart` and continues
-//! with the interactive session (`startup::start_session`) and the
-//! workspace.
+//! autoloads, with the chain's report beside it. The world ends at GNU's
+//! dump point, as the batch world does (`romacs--dumping`): it holds no
+//! startup step, so nothing of its builder's HOME, XDG directories, locale
+//! or login name, and no font, window geometry or collection floor. Those
+//! are each process's: a restored launch sets its frame's geometry and
+//! floor, attaches its hosts, sets its launch font (`LaunchFont`, as GNU's
+//! `--font' is), runs `romacs-world-restart`, which takes the startup steps,
+//! and continues with the interactive session (`startup::start_session`)
+//! and the workspace. One world serves every launch of this executable over
+//! this Lisp tree.
 //!
 //! A live `--loadup` launch uses a world unless ROMACS_WORLD=off: in
 //! `--world-store`, or else in `$XDG_CACHE_HOME/romacs/worlds`
@@ -94,48 +95,16 @@ impl LaunchFont {
 /// world holds.
 pub const INTERPROGRAM: &str = "(defvar interprogram-cut-function 'romacs-clipboard-select-text) (defvar interprogram-paste-function 'romacs-clipboard-selection-value)";
 
-/// The world of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR, in
-/// STORE, resolved against this process's directory (`World::new`).
-pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Result<World, String> {
-    World::new(store, recipe(width, height, floor)?).map_err(|e| e.to_string())
+/// The world of a live `--loadup` launch in STORE, resolved against this
+/// process's directory (`World::new`).
+pub fn open(store: PathBuf) -> Result<World, String> {
+    World::new(store, recipe()?).map_err(|e| e.to_string())
 }
 
-/// The recipe of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR.
-fn recipe(width: u32, height: u32, floor: Option<usize>) -> Result<Vec<String>, String> {
+/// The recipe of a live `--loadup` launch: the chain over this Lisp tree.
+fn recipe() -> Result<Vec<String>, String> {
     let dir = startup::lisp_root(&startup::lisp_dir())?;
-    Ok(vec![
-        "consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("geometry {width} {height}"),
-        format!("floor {floor:?}"), format!("lisp {}", dir.display()),
-        font_environment(|name| std::env::var_os(name)),
-    ])
-}
-
-/// What chooses Fontconfig's configuration, from GET: its own variables
-/// and the directories it finds its per-user files in. No host fact
-/// records them, since Fontconfig reads them itself.
-const FONT_ENVIRONMENT: [&str; 7] = ["FONTCONFIG_FILE", "FONTCONFIG_PATH", "FONTCONFIG_SYSROOT", "HOME",
-                                     "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
-
-fn font_environment(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> String {
-    let values: Vec<serde_json::Value> = FONT_ENVIRONMENT.iter()
-        .map(|name| get(name).map_or(serde_json::Value::Null, |v| json!(v.to_string_lossy())))
-        .collect();
-    format!("font-environment {}", serde_json::Value::Array(values))
-}
-
-/// The per-user configuration Fontconfig would read if it were there, from
-/// GET: a build records whether each is, since one appearing changes the
-/// configuration without touching any file the build read.
-fn user_font_configuration(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
-    let home = get("HOME").map(PathBuf::from);
-    let config = get("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".config")));
-    let mut paths: Vec<PathBuf> = config.into_iter()
-        .flat_map(|c| ["fontconfig", "fontconfig/fonts.conf", "fontconfig/conf.d"].map(|p| c.join(p)))
-        .collect();
-    paths.extend(home.into_iter().flat_map(|h| [".fonts.conf", ".fonts.conf.d"].map(|p| h.join(p))));
-    paths.extend(get("FONTCONFIG_FILE").map(PathBuf::from));
-    paths.extend(get("FONTCONFIG_PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()));
-    paths
+    Ok(vec!["consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("lisp {}", dir.display())])
 }
 
 /// Where a launch keeps its worlds when no --world-store names a place:
@@ -154,13 +123,13 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 /// could not capture these very inputs, or failed lately
 /// (`romacs_vm::world::store`), boots from source. A builder process builds
 /// and exits here.
-pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce(&serde_json::Value)) -> Option<(Box<Vm>, Carry)> {
-    match world.launch::<Carry>(|| builder_args(world, width, height, floor), true, on_wait) {
+pub fn launch(world: &World, on_wait: impl FnOnce(&serde_json::Value)) -> Option<(Box<Vm>, Carry)> {
+    match world.launch::<Carry>(|| builder_args(world), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
             romacs_vm::host::event_line("romacs-world", &json!({"mode": "restored", "key": manifest["key"], "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some((vm, carry))
         }
-        Launch::Build => build_and_exit(world, width, height, floor),
+        Launch::Build => build_and_exit(world),
         Launch::Chain { reason } => {
             romacs_vm::host::event_line("romacs-world", &json!({"mode": "source", "reason": reason}));
             None
@@ -169,14 +138,14 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
 }
 
 /// This process is a builder: build WORLD and exit.
-pub fn build_here(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
+pub fn build_here(world: &World) -> Result<(), String> {
     let Launch::Build = world.launch::<Carry>(Vec::new, false, |_| {}) else { return Err("not a world builder".into()) };
-    build_and_exit(world, width, height, floor)
+    build_and_exit(world)
 }
 
 /// Build WORLD and exit with the outcome.
-fn build_and_exit(world: &World, width: u32, height: u32, floor: Option<usize>) -> ! {
-    let result = build(world, width, height, floor);
+fn build_and_exit(world: &World) -> ! {
+    let result = build(world);
     if let Err(error) = &result { eprintln!("romacs-world: build failed: {error}"); }
     std::process::exit(if result.is_ok() { 0 } else { 1 })
 }
@@ -200,11 +169,11 @@ fn lisp_string(text: &str) -> String {
 }
 
 /// `--world-census`: the census (`romacs_vm::world::image::census`) of the
-/// base world in STORE of a live `--loadup` launch of WIDTH by HEIGHT with
-/// FLOOR, restored read only as it was published, before anything of this
-/// process runs in it. Nothing is written to the store.
-pub fn census(store: &Path, width: u32, height: u32, floor: Option<usize>) -> Result<serde_json::Value, String> {
-    let (vm, carry) = World::restore_read_only::<Carry>(store, recipe(width, height, floor)?).map_err(|reason| reason.to_string())?;
+/// base world in STORE of a live `--loadup` launch, restored read only as
+/// it was published, before anything of this process runs in it. Nothing
+/// is written to the store.
+pub fn census(store: &Path) -> Result<serde_json::Value, String> {
+    let (vm, carry) = World::restore_read_only::<Carry>(store, recipe()?).map_err(|reason| reason.to_string())?;
     let census = romacs_vm::world::image::census(&vm, &carry);
     // The process exits next: the image need not be taken apart.
     std::mem::forget((vm, carry));
@@ -215,9 +184,9 @@ pub fn census(store: &Path, width: u32, height: u32, floor: Option<usize>) -> Re
 /// or waited for, when it is missing or stale (`World::prepare`). Says on
 /// stderr why it builds, and how it ended with the key and the recipe, as
 /// a launch says how it booted.
-pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
+pub fn prepare(world: &World) -> Result<(), String> {
     let building = |reason: &serde_json::Value| romacs_vm::host::event_line("romacs-world", &json!({"event": "world-build", "reason": reason}));
-    match world.prepare(|| builder_args(world, width, height, floor), building) {
+    match world.prepare(|| builder_args(world), building) {
         Ok(manifest) => {
             romacs_vm::host::event_line("romacs-world", &json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe}));
             Ok(())
@@ -226,63 +195,45 @@ pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> 
     }
 }
 
-/// A builder's arguments for WORLD's launch: what its recipe takes from the
-/// command line, the store absolute, since the builder runs in the store's
-/// pinned directory. Nothing else of this launch reaches it.
-fn builder_args(world: &World, width: u32, height: u32, floor: Option<usize>) -> Vec<std::ffi::OsString> {
-    let mut args: Vec<std::ffi::OsString> = vec!["--loadup".into(), "--world-store".into(), world.store.clone().into(),
-                                                 "--geometry".into(), format!("{width}x{height}").into()];
-    if let Some(floor) = floor {
-        args.extend(["--gc-floor".into(), floor.to_string().into()]);
-    }
-    args
+/// A builder's arguments for WORLD's launch: the store absolute, since the
+/// builder runs in the store's pinned directory. Nothing of this launch
+/// reaches it.
+fn builder_args(world: &World) -> Vec<std::ffi::OsString> {
+    vec!["--loadup".into(), "--world-store".into(), world.store.clone().into()]
 }
 
 /// The builder: the launch's steps up to the world's end, headless, on the
 /// evaluator's stack, then publish.
-fn build(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
+fn build(world: &World) -> Result<(), String> {
     let world = world.clone();
     crate::spawn_evaluator(move || -> Result<(), String> {
-        // The fonts load before the build records: the files they came from
-        // are keyed at its end (`build_world`).
-        let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
         let dir = startup::lisp_root(&startup::lisp_dir())?;
         world.begin_build().map_err(|e| e.to_string())?;
-        let len = world.build(|| build_world(width, height, floor, &dir, engine))?;
+        // GNU's dump point: the chain leaves its startup steps to each
+        // restored process (`romacs-world-restart`).
+        romacs_vm::host::end_at_dump_point();
+        let len = world.build(|| build_world(&dir))?;
         romacs_vm::host::event_line("romacs-world", &json!({"event": "world-build", "ok": true, "image_bytes": len}));
         Ok(())
     })?.join().map_err(|_| "world builder panicked".to_owned())?
 }
 
-/// The build's steps once it records: up to the chain's end. The world's
-/// VM, its carry and its events, for `World::build` to publish.
-fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::Path,
-               engine: std::rc::Rc<std::cell::RefCell<romacs_layout::LayoutEngine>>) -> Result<(Vm, Carry, serde_json::Value), String> {
+/// The build's steps once it records: up to the chain's end, with no font
+/// and on GNU batch's initial frame, as the batch world's chain; each
+/// restored launch sets its own frame's geometry. The world's VM, its carry
+/// and its events, for `World::build` to publish.
+fn build_world(dir: &std::path::Path) -> Result<(Vm, Carry, serde_json::Value), String> {
     let mut vm = Vm::new();
     vm.world_begin();
-    vm.set_layout_host(Some(Box::new(crate::measure::Host { engine: engine.clone() })));
     // A live launch attaches its terminal service here; the world keeps
     // what that declares, and the restored launch attaches the service.
     vm.declare_terminal_errors()?;
     vm.set_echo_area_host(true);
-    if let Some(floor) = floor { vm.set_collection_floor(floor); }
-    let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
-    vm.set_frame_geometry(width, height, line_height, column_width)?;
+    vm.set_frame_geometry(80, 25, 1, 1)?;
     vm.eval_source(INTERPROGRAM)?;
     // A world holds no launch font (`LaunchFont`).
     let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, None, dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
-    vm.set_layout_host(None);
-    // The fonts the world measured with, the default face's among them:
-    // their files and Fontconfig's are keyed records, so a font added,
-    // removed or changed, or another configuration, rebuilds the world.
-    engine.borrow_mut().frame_metrics(&vm.display_default_face()?)?;
-    for input in engine.borrow().font_inputs() {
-        let _ = romacs_vm::host::metadata(&input);
-    }
-    for path in user_font_configuration(|name| std::env::var_os(name)) {
-        let _ = romacs_vm::host::metadata(&path);
-    }
     Ok((vm, Carry { loadup }, json!({})))
 }
 
@@ -326,25 +277,6 @@ mod tests {
     }
 
     #[test]
-    fn the_font_environment_keys_a_world_and_names_the_per_user_configuration() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| move |name: &str| {
-            pairs.iter().find(|(n, _)| *n == name).map(|(_, v)| std::ffi::OsString::from(v))
-        };
-        let base: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config")];
-        let other: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config"), ("FONTCONFIG_FILE", "/etc/other.conf")];
-        let path: &[(&str, &str)] = &[("HOME", "/h"), ("XDG_CONFIG_HOME", "/h/.config"), ("FONTCONFIG_PATH", "/a:/b")];
-        let keys: Vec<String> = [base, other, path].iter().map(|pairs| font_environment(env(pairs))).collect();
-        assert!(keys[0] != keys[1] && keys[0] != keys[2] && keys[1] != keys[2], "{keys:?}");
-        let scratch = std::env::temp_dir().join(format!("romacs-gui-font-env-{}", std::process::id()));
-        let world = |line: &String| World::new(scratch.join("store"), vec!["consumer test".into(), line.clone()]).unwrap().key;
-        assert_ne!(world(&keys[0]), world(&keys[1]));
-        assert_eq!(user_font_configuration(env(path)), ["/h/.config/fontconfig", "/h/.config/fontconfig/fonts.conf",
-            "/h/.config/fontconfig/conf.d", "/h/.fonts.conf", "/h/.fonts.conf.d", "/a", "/b"].map(PathBuf::from));
-        assert!(user_font_configuration(env(other)).contains(&PathBuf::from("/etc/other.conf")));
-        let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    #[test]
     fn a_builder_gets_the_recipe_and_an_absolute_store_whatever_the_launch_was_given() {
         let scratch = std::env::temp_dir().join(format!("romacs-gui-world-{}", std::process::id()));
         std::fs::create_dir_all(&scratch).unwrap();
@@ -354,12 +286,12 @@ mod tests {
         let mut relative: PathBuf = cwd.components().skip(1).map(|_| "..").collect();
         relative.push(scratch.join("store").strip_prefix("/").unwrap());
         assert!(relative.is_relative());
-        let world = open(relative, 800, 600, Some(5000)).unwrap();
+        let world = open(relative).unwrap();
         assert!(world.store.is_absolute(), "{}", world.store.display());
         assert_eq!(std::fs::canonicalize(&world.store).unwrap(), std::fs::canonicalize(scratch.join("store")).unwrap());
-        let args = builder_args(&world, 800, 600, Some(5000));
+        let args = builder_args(&world);
         let store = world.store.clone().into_os_string();
-        assert_eq!(args, ["--loadup", "--world-store", store.to_str().unwrap(), "--geometry", "800x600", "--gc-floor", "5000"]
+        assert_eq!(args, ["--loadup", "--world-store", store.to_str().unwrap()]
             .map(std::ffi::OsString::from));
         let _ = std::fs::remove_dir_all(&scratch);
     }
