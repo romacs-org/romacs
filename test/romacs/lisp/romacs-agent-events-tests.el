@@ -390,6 +390,24 @@ turns, and its journal's file; a state root of its own."
          (should (file-exists-p journal))
          (should (> (file-attribute-size (file-attributes journal)) size)))))))
 
+(ert-deftest romacs-agent-events-a-flip-the-lock-holds-off-is-tried-again ()
+  ;; A worker holding the lock: the flip waits for a later turn, not lost.
+  (let ((romacs-agent-events--flip-queue nil) (flips 0) (later nil)
+        (romacs-agent--sessions (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
+              ((symbol-function 'sqlite-select) (lambda (&rest _) '((10 3))))
+              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+              ((symbol-function 'romacs-agent-events--flip)
+               (lambda (&rest _) (if (= (cl-incf flips) 1) (signal 'sqlite-locked-error '("database is locked")) t)))
+              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
+              ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest _) (setq later f))))
+      (romacs-agent-events--flip-soon '("s"))
+      (should (equal romacs-agent-events--flip-queue '("s")))
+      (should later)
+      (funcall later)
+      (should (= flips 2))
+      (should-not romacs-agent-events--flip-queue))))
+
 (ert-deftest romacs-agent-events-a-flip-finds-the-journal-as-written ()
   ;; Made its own only if its journal is as it was written from and no
   ;; supervisor runs; else what was written is removed, the session in its

@@ -718,16 +718,22 @@ seconds of them a turn, each in one short transaction
 \(`romacs-agent-events--flip'), its journal then backed up; one loaded
 here is left as it is, written, for a start that leaves it unloaded.
 The ones made theirs are told (`romacs-agent-events-migrated-functions')."
-  (let ((until (+ (float-time) romacs-agent--restore-turn)) (moved nil))
-    (while (when-let* ((id (pop romacs-agent-events--flip-queue)))
+  (let ((until (+ (float-time) romacs-agent--restore-turn)) (moved nil) (locked nil))
+    (while (when-let* (((not locked)) (id (pop romacs-agent-events--flip-queue)))
              (unless (gethash id romacs-agent--sessions)
                (when-let* ((row (car (sqlite-select (romacs-agent-events--db) "select size, count from staged where session = ?" (list id)))))
-                 (when (with-demoted-errors "romacs-agent-events: flipping: %S" (romacs-agent-events--flip id (car row) (cadr row)))
-                   (push id moved))))
+                 (condition-case err
+                     (when (romacs-agent-events--flip id (car row) (cadr row)) (push id moved))
+                   ;; A worker writing: tried again a moment later.
+                   (sqlite-locked-error (setq locked t)
+                                        (setq romacs-agent-events--flip-queue (append romacs-agent-events--flip-queue (list id))))
+                   (error (message "romacs-agent-events: flipping %s: %s" id (error-message-string err))))))
              (< (float-time) until)))
     (romacs-agent-events--back-up-moved moved)
     (when moved (run-hook-with-args 'romacs-agent-events-migrated-functions (nreverse moved)))
-    (when romacs-agent-events--flip-queue (run-at-time 0 nil #'romacs-agent-events--flip-step))))
+    (when romacs-agent-events--flip-queue
+      (if locked (run-with-timer 1 nil #'romacs-agent-events--flip-step)
+        (run-at-time 0 nil #'romacs-agent-events--flip-step)))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-events-migrate-soon)
 
