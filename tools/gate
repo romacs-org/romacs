@@ -62,6 +62,12 @@ GUI_FONTCONFIG = os.environ.get('ROMACS_GATE_FONTCONFIG', '/etc/fonts/fonts.conf
 TOOLCHAIN = os.environ.get('ROMACS_TOOLCHAIN_BIN', str(pathlib.Path(shutil.which('cargo') or '/usr/bin/cargo').parent))
 NEXTEST = os.environ.get('ROMACS_NEXTEST_BIN', str(pathlib.Path(shutil.which('cargo-nextest') or '/usr/bin/cargo-nextest').parent))
 SCCACHE = os.environ.get('ROMACS_SCCACHE', shutil.which('sccache') or 'sccache')
+# A desktop session's variables and a running editor's own launch ones
+# (the launcher's): no test sees them, so a gate or a check started from
+# inside Romacs runs its tests as a plain shell's would.
+EDITOR_LAUNCH = ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS',
+                 'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_SOURCE_DIRECTORY', 'ROMACS_USAGE_LOG',
+                 'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE')
 HOME = pathlib.Path.home()
 CACHE = pathlib.Path(os.environ.get('ROMACS_GATE_CACHE', HOME / '.cache/emax-gate'))
 SHORT = pathlib.Path(os.environ.get('ROMACS_GATE_SCRATCH', HOME / '.cache/ng'))
@@ -386,11 +392,7 @@ def run_env(root, home):
 def test_env(root, home, names=None):
     """Pure test normalization, also used with stable paths for receipt identity."""
     e = env(root, names=names)
-    # No desktop session, and none of a running editor's own launch
-    # variables (a gate started from inside Romacs is a plain shell's).
-    for k in ('DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS',
-              'ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_USAGE_LOG',
-              'ROMACS_GUI_FONT', 'ROMACS_GUI_FONT_SIZE'):
+    for k in EDITOR_LAUNCH:
         e.pop(k, None)
     e.update(HOME=f'{home}/home', XDG_CONFIG_HOME=f'{home}/home/.config',
              XDG_DATA_HOME=f'{home}/home/.local/share', XDG_STATE_HOME=f'{home}/home/.local/state',

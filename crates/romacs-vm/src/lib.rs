@@ -1360,6 +1360,15 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// The char tables read as flat rows (`char_table::flat`).
     flat_tables: char_table::FlatTables,
+    /// The call caches filled since the last collection, up to
+    /// `gc::CACHES_FILLED` (`Vm::empty_dead_caches`): only these may name
+    /// what a minor frees.
+    caches_filled: Vec<u32>,
+    /// The objects whose storage records its own writes (`gc::shares_storage`),
+    /// as the last minor found them all, or None where no minor since a full,
+    /// a promotion or a restore knows them: the minor that needs them then
+    /// asks every object its kind (`Vm::minor`).
+    shared_holders: Option<Vec<u32>>,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1568,6 +1577,9 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
+    /// `gc_payload_bytes` as the last collection left it: what the minors
+    /// since the last full promoted (`Vm::minor`).
+    payload_settled: usize,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1610,6 +1622,9 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    /// The names `permanent_symbol_names` took since the last collection,
+    /// the only ones a minor can find young.
+    permanent_names_added: Vec<Value>,
     // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
@@ -1878,6 +1893,10 @@ romacs_snapshot::snapshot_fields!(Vm {
     site_leaf,
     regexp_cache,
     flat_tables,
+    shared_holders,
+    caches_filled,
+    permanent_names_added,
+    payload_settled,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1960,6 +1979,10 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             flat_tables: char_table::FlatTables::default(),
+            shared_holders: None,
+            caches_filled: Vec::new(),
+            permanent_names_added: Vec::new(),
+            payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),

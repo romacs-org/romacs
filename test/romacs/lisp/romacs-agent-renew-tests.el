@@ -462,9 +462,12 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
       (should (eq (car outcome) :error))
       (should-not (romacs-agent--held-p session)))
     (let ((outcome nil) (end (+ (float-time) 30)) (steps 0))
-      (cl-letf* ((step (symbol-function 'romacs-agent--events-step))
-                 ((symbol-function 'romacs-agent--events-step)
-                  (lambda (&rest args) (when (> (cl-incf steps) 1) (error "Bad batch")) (apply step args))))
+      (cl-letf* ((record (symbol-function 'romacs-agent--record))
+                 ;; The replay's copy fails at its second record, a later batch.
+                 ((symbol-function 'romacs-agent--record)
+                  (lambda (target &rest args)
+                    (when (and (not (eq target session)) (> (cl-incf steps) 1)) (error "Bad batch"))
+                    (apply record target args))))
         (romacs-agent-renew-tests--journal
          session (romacs-agent-renew-tests--prompt 5 "a") (romacs-agent-renew-tests--reply "u1" "b")
          (romacs-agent-renew-tests--prompt 9 "c") (romacs-agent-renew-tests--reply "u2" "d"))

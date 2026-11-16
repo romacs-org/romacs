@@ -475,7 +475,8 @@ pub(crate) enum Init {
     Str(&'static str),
     /// make_float (X).
     Float(f64),
-    /// build_string (getenv (NAME) ?: FALLBACK), read at startup.
+    /// build_string (getenv (NAME) ?: FALLBACK), read at startup: in every
+    /// process, so a world holds none (`Vm::reseed_environment_variables`).
     Getenv(&'static str, &'static str),
     SystemName,
     SourceDirectory,
@@ -543,9 +544,11 @@ pub(crate) struct CVariable {
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
     // The collector's pacing reads both (`Vm::collection_due`), scaling the
-    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    // percentage internally. The threshold starts at 128 MiB, not GNU's
+    // 800000: a floor that bounds the garbage between collections whatever
+    // the heap's size (DIVERGENCES VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(128 << 20) },
     // benchmark.el's `benchmark-run' reads both around its body.
     CVariable { name: "gc-elapsed", gnu: "alloc.c:7536", kind: Kind::Lisp(Init::GcElapsed) },
     CVariable { name: "gcs-done", gnu: "alloc.c:7539", kind: Kind::Int(0) },
@@ -1288,6 +1291,16 @@ impl Vm {
             self.install_local_table(slot, table, false);
         }
     }
+    /// The C variables GNU sets from the environment at every start
+    /// (`Init::Getenv`: init_callproc's `shell-file-name'), set from this
+    /// process's environment after a restore.
+    pub(crate) fn reseed_environment_variables(&mut self) {
+        for variable in C_SPECIALS {
+            if let Kind::Lisp(init @ Init::Getenv(..)) = variable.kind && let Some(&slot) = self.names.get(variable.name) {
+                self.slots[slot].value = self.materialize(init);
+            }
+        }
+    }
     fn materialize(&mut self, init: Init) -> Value {
         match init {
             Init::Nil => Value::NIL,
@@ -1299,7 +1312,7 @@ impl Vm {
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::GcElapsed => self.allocate_object(data::Object::Float(self.gc_stats.elapsed_ns as f64 / 1e9)),
             Init::Getenv(name, fallback) => {
-                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
+                let text = crate::host::per_process_env(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
