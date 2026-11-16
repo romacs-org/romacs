@@ -412,7 +412,7 @@ its end in STATE."
     ;; the message quoted under it; and copied, it has no bar.
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "✉ child · child  thread  ↩ ✓\n┃ Can you rebase?\n"
-                           "  ✓ ◈ ✉ to child  idle  thread\n┃ Rebased.\n┃ All green.\nDone.")))
+                           "  ✓ ◈ ✉ to child  idle  thread\n┃ Rebased.\n┃ All green.\n\nDone.")))
     (should (string-search "Can you rebase?\n" (romacs-agent-ui--text-of (point-min) (point-max))))
     (should-not (string-search "┃" (romacs-agent-ui--text-of (point-min) (point-max))))))
 
@@ -439,7 +439,7 @@ its end in STATE."
      session :type 'tool :state 'completed :id "r"
      :output (format "{\"taskId\":\"%s\",\"title\":\"child\",\"status\":\"idle\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (string-suffix-p "  ✓ ◈ ✉ to child  idle  thread\n┃ Thanks.\n" (romacs-agent-cards-tests--visible)))))
+    (should (string-suffix-p "  ✓ ◈ ✉ to child  idle  thread\n┃ Thanks.\n\n" (romacs-agent-cards-tests--visible)))))
 
 (ert-deftest romacs-agent-an-answered-message-links-its-reply ()
   (romacs-agent-cards-tests--with-chat session
@@ -470,7 +470,7 @@ its end in STATE."
     ;; Not answered; the failure is loud, and shows the message and why.
     (should (equal (romacs-agent-cards-tests--visible)
                    (concat "✉ child · child  thread  ↩\n┃ Can you rebase?\n"
-                           "  ! ◈ ✉ reply\n┃ Rebased.\n\nMessage m-1's sender is gone\n")))))
+                           "  ! ◈ ✉ reply\n┃ Rebased.\n\nMessage m-1's sender is gone\n\n")))))
 
 (ert-deftest romacs-agent-a-message-sent-is-a-card ()
   (romacs-agent-cards-tests--with-chat session
@@ -481,7 +481,7 @@ its end in STATE."
      session :type 'tool :state 'completed :id "s"
      :output (format "{\"taskId\":\"%s\",\"status\":\"running\",\"messageId\":\"m-9\"}" romacs-agent-cards-tests--child))
     (romacs-agent-ui--run-settle)
-    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ◈ ✉ to child  Working  thread\n┃ Rebase, please.\n"))))
+    (should (equal (romacs-agent-cards-tests--visible) "  ✓ ◈ ✉ to child  Working  thread\n┃ Rebase, please.\n\n"))))
 
 (ert-deftest romacs-agent-header-says-only-what-is-worth-a-glance ()
   (romacs-agent-cards-tests--with-chat session
@@ -559,3 +559,20 @@ its end in STATE."
     (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-steer))
     (should-not (memq 'romacs-agent-prompt (ensure-list (get-text-property (1- (point)) 'face))))
     (should (= (length (romacs-agent-ui--input-starts)) 2))))
+
+(ert-deftest romacs-agent-a-sent-message-is-set-apart ()
+  ;; A message sent to another thread: a bar before each line and each
+  ;; line it wraps onto, the bar never copied, its words dim.
+  (let* ((quoted (romacs-agent-rows-quoted "first paragraph, long enough to wrap\n\nsecond" 'romacs-agent-ui-sent))
+         (lines (split-string (substring-no-properties quoted) "\n")))
+    (should (equal lines '("┃ first paragraph, long enough to wrap" "┃ " "┃ second")))
+    (dotimes (i (length quoted))
+      (should (equal (substring-no-properties (get-text-property i 'wrap-prefix quoted)) "┃ "))
+      (unless (or (get-text-property i 'romacs-agent-decor quoted) (eq (aref quoted i) ?\n))
+        (should (eq (get-text-property i 'face quoted) 'romacs-agent-ui-sent))))
+    (with-temp-buffer
+      (insert quoted)
+      (should (equal (romacs-agent-ui--text-of (point-min) (point-max))
+                     "first paragraph, long enough to wrap\n\nsecond"))))
+  (should (equal (face-attribute 'romacs-agent-ui-sent :inherit) 'shadow))
+  (should (eq (face-attribute 'romacs-agent-ui-sent :slant) 'italic)))

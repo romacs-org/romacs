@@ -108,6 +108,9 @@ fork), said by no one: the quietest row.")
   "The other session on a message's card: its sender, or the one it goes to.")
 (defface romacs-agent-message-bar '((t :inherit font-lock-function-name-face))
   "The bar before each line of a message between sessions.")
+(defface romacs-agent-ui-sent '((t :inherit shadow :slant italic))
+  "A message this chat sent another thread: set apart from words for the
+user.")
 (defface romacs-agent-link '((t :inherit link))
   "Face of a link to a delegated task's thread.")
 (defface romacs-agent-unread '((t :weight bold))
@@ -723,7 +726,9 @@ link."
                       :failed failed :bytes (or (plist-get event :output-bytes) (string-bytes output)))))
           (forward-line 1))
         (unless (string-empty-p (string-trim body))
-          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
+          ;; One shown, a message sent, ends with a blank line: what comes
+          ;; after it is not its own.
+          (let ((text (propertize (concat (string-trim-right body) (if shown "\n\n" "\n")) 'romacs-agent-output id
                                   'invisible (if shown nil '(romacs-agent-output)))))
             (unless shown (add-face-text-property 0 (length text) 'romacs-agent-dim t text))
             (romacs-agent-ui--insert-at
