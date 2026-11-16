@@ -14,8 +14,7 @@
 //! Root 6 keeps the startup re-run reading what the first run read (F1):
 //! while startup runs, every variable it reads, every property it reads and
 //! every function cell it calls through is recorded as an input, and after
-//! it a write to an input is not captured, whatever value it stores, except a
-//! layer's library's `put` of the content startup read (`layer`). Reads
+//! it a write to an input is not captured, whatever value it stores. Reads
 //! pass.
 //! An in-place mutation has no write site, so the content of each input is
 //! digested as startup ends and compared at the end of the recipe.
@@ -28,8 +27,6 @@
 //! token counter (`Backtrace::observe`).
 pub mod arena;
 pub mod image;
-pub mod layer;
-pub(crate) mod pending;
 pub mod store;
 pub mod safe;
 
@@ -49,10 +46,6 @@ pub(crate) enum Root {
     Reseed = 4,
     Random = 5,
     Input = 6,
-    /// A variable a layer's re-seed form set from a per-process fact: a
-    /// definition form that reads it is re-seeded too; any other form
-    /// is not captured (`layer`).
-    Tainted = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,8 +89,7 @@ pub(crate) struct Tracking {
     /// that made it undigestable.
     digests: Vec<Result<String, &'static str>>,
     /// The variables startup wrote, each once, and their content digests
-    /// as it ended; and the last superseded run's, which a layer's run
-    /// after its libraries must reproduce (`layer`).
+    /// as it ended; and the last superseded run's.
     outputs: Vec<usize>,
     output_digests: Vec<(usize, Result<String, &'static str>)>,
     /// Each as the superseded run left it and as the next run began.
@@ -179,12 +171,10 @@ impl Vm {
         self.isolate_forget_claim();
     }
 
-    /// A top-level FORM of a loaded file ends: a re-seed form's variable is
+    /// A top-level form of a loaded file ends: a re-seed form's variable is
     /// tracked from here (root 4); the build host's form leaves `system-name`
-    /// to be read again; in a layer, a definition that read a
-    /// per-process fact is kept for restore to evaluate again
-    /// (`romacs--world-reseed-forms`), and its variable tracked (root 7).
-    pub(crate) fn world_form_done(&mut self, form: &crate::Form) {
+    /// to be read again.
+    pub(crate) fn world_form_done(&mut self, _form: &crate::Form) {
         if self.tracking.is_none() {
             return;
         }
@@ -198,72 +188,6 @@ impl Vm {
         if host::at_baked_host() {
             self.forget_system_name();
         }
-        if let Some((kind, name, cut)) = host::layer_form_done() {
-            self.record_reseed_form(kind, &name, form, cut);
-        }
-    }
-
-    /// Keep the definition FORM of KIND, defining NAME, for restore: pushed
-    /// onto `romacs--world-reseed-forms` as (KIND NAME FORM CUT DECLARED),
-    /// CUT when an effect the build did not perform or a secret asked for cut the form short
-    /// and restore evaluates it whole, DECLARED when a library the init only
-    /// declared defined it, so restore may leave it pending until its first
-    /// read. NAME's variable is tracked as tainted.
-    fn record_reseed_form(&mut self, kind: &str, name: &str, form: &crate::Form, cut: bool) {
-        let slot = self.slot(name);
-        // Defined again by a file loaded again: the first form is kept.
-        if self.tracked_cell(slot).is_some_and(|cell| cell.root == Root::Tainted) {
-            return;
-        }
-        self.push_reseed_form(kind, Some(name), form, cut);
-        self.track_variable(slot, Root::Tainted);
-    }
-
-    /// Keep a layer library's top-level FORM that is no definition and asked
-    /// for a secret, for restore to evaluate whole, as code, in load order:
-    /// (form nil FORM t DECLARED) (`romacs--world-reseed-form`).
-    pub(crate) fn record_deferred_form(&mut self, form: &crate::Form) {
-        self.push_reseed_form("form", None, form, true);
-    }
-
-    fn push_reseed_form(&mut self, kind: &str, name: Option<&str>, form: &crate::Form, cut: bool) {
-        let entry = (|| -> crate::Result<()> {
-            let kind = self.intern(kind);
-            let symbol = name.map_or(Value::NIL, |name| self.intern(name));
-            let form = self.literal(form)?;
-            let cut = if cut { Value::TRUE } else { Value::NIL };
-            let declared = if host::layer_in_declared() { Value::TRUE } else { Value::NIL };
-            let entry = self.list_value(&[kind, symbol, form, cut, declared]);
-            let list = self.slot("romacs--world-reseed-forms");
-            let old = self.variable_value(list).unwrap_or(Value::NIL);
-            self.slots[list].value = self.alloc_cons(entry, old);
-            Ok(())
-        })();
-        host::record("layer-reseed", json!({"form": kind, "symbol": name, "kept": entry.is_ok(), "cut": cut, "declared": host::layer_in_declared()}));
-    }
-
-    /// After a layer's libraries, the startup function ran again: each
-    /// variable the superseded run wrote, with its content as that run left
-    /// it, as this run began and as it ended (`supersede_startup`), for the
-    /// layer to judge (`world_layer_load`).
-    pub(crate) fn world_startup_output_states(&mut self) -> Vec<(usize, String, String, String)> {
-        let Some(tracking) = self.tracking.as_ref() else { return Vec::new() };
-        let previous: Vec<(usize, String, String)> = tracking.previous_outputs.iter()
-            .filter_map(|(slot, first, before)| Some((*slot, first.clone().ok()?, before.clone().ok()?))).collect();
-        previous.into_iter()
-            .filter_map(|(slot, first, before)| Some((slot, first, before, self.input_digest(Input::Variable(slot)).ok()?)))
-            .collect()
-    }
-
-    /// The variables the startup run wrote (before a later run supersedes
-    /// it): what a layer's libraries may change and the next run set back.
-    pub(crate) fn world_startup_outputs(&self) -> Vec<usize> {
-        self.tracking.as_ref().map(|tracking| tracking.output_digests.iter().map(|(slot, _)| *slot).collect()).unwrap_or_default()
-    }
-
-    /// The content digest of the variable at SLOT, as the tracking compares it.
-    pub(crate) fn world_variable_digest(&mut self, slot: usize) -> Result<String, &'static str> {
-        self.input_digest(Input::Variable(slot))
     }
 
     /// `romacs--startup-phase`: the startup function's run begins (ON) or
@@ -386,10 +310,7 @@ impl Vm {
         let redirect = self.variable_redirects.get(slot).copied().flatten();
         match redirect {
             Some(VariableRedirect::Forwarded(Fwd::Tracked(_))) => {}
-            // A tainted variable may be buffer-local already (`defvar-local`):
-            // its reads and writes go through the tracking like any other's.
-            Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_))
-            | Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) if root == Root::Tainted || !matches!(redirect, Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => {
+            Some(VariableRedirect::Plain | VariableRedirect::Forwarded(_)) => {
                 // HOST(dynamic:saved): reads the bound variable, not the saved value
                 let older = (0..self.dynamic.len()).filter(|&at| self.dynamic[at].0 == slot).collect();
                 self.tracking_mut().cells.insert(slot, Cell { root, redirect, older });
@@ -451,7 +372,6 @@ impl Vm {
     /// variable is F's as it is.
     pub(crate) fn untracked<T>(&mut self, slot: usize, f: impl FnOnce(&mut Vm) -> T) -> T {
         let Some(own) = self.tracked_cell(slot).map(|cell| cell.redirect) else {
-            self.force_pending(slot);
             return f(self);
         };
         let tracked = std::mem::replace(&mut self.variable_redirects[slot], own);
@@ -494,7 +414,7 @@ impl Vm {
     /// An input notes writes only. While startup runs, a read of an
     /// observed variable makes it an input.
     pub(crate) fn tracked_access(&mut self, slot: usize, access: Access, buffer: Value) {
-        let Some(cell) = self.tracked_cell(slot) else { return self.force_pending(slot) };
+        let Some(cell) = self.tracked_cell(slot) else { return };
         let read = matches!(access, Access::Read | Access::SavedRead);
         if host::in_startup() {
             if cell.root == Root::Observed {
@@ -503,14 +423,6 @@ impl Vm {
             return;
         }
         if (cell.root == Root::Input && read) || host::reseed_reads(&self.symbol_names[slot]) {
-            return;
-        }
-        // A layer's libraries run before the startup function runs again,
-        // which observes its inputs anew: the earlier run's are free. A
-        // definition form of theirs may read a per-process value: it is
-        // re-seeded at restore.
-        if host::layer_active() && (cell.root == Root::Input || (read && host::layer_taint())
-                                    || (cell.root == Root::Tainted && host::layer_defines(&self.symbol_names[slot]))) {
             return;
         }
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
@@ -600,11 +512,8 @@ impl Vm {
     }
 
     /// While startup runs, `get` of SYMBOL's property KEY (None: its whole
-    /// plist) is an input. After it, a write of one is not captured, except a
-    /// layer's library's `put` of STORED holding what startup read there:
-    /// startup reads the same when it runs again after the libraries, as
-    /// cus-start puts `custom-set' again.
-    pub(crate) fn tracked_property(&mut self, symbol: Value, key: Option<Value>, access: Access, stored: Option<Value>) {
+    /// plist) is an input. After it, a write of one is not captured.
+    pub(crate) fn tracked_property(&mut self, symbol: Value, key: Option<Value>, access: Access, _stored: Option<Value>) {
         let Some(tracking) = self.tracking.as_ref() else { return };
         let (Some(slot), key) = (symbol.index_if(7).and_then(|i| i.checked_sub(1)), key.and_then(|k| k.index_if(7)).map(|i| i - 1)) else { return };
         if tracking.observing {
@@ -617,20 +526,10 @@ impl Vm {
             Some(key) => tracking.seen.contains(&Input::Property(slot, key)),
             None => tracking.inputs.iter().any(|&input| matches!(input, Input::Property(s, _) if s == slot)),
         };
-        let again = || matches!(key.zip(stored), Some((key, stored)) if host::layer_active() && self.stores_input(slot, key, stored));
-        if access == Access::Write && written && !again() {
+        if access == Access::Write && written {
             let property = key.map(|key| self.symbol_names[key].clone());
             host::note_uncaptured("per-process", json!({"root": Root::Input as u8, "access": "write", "symbol": self.symbol_names[slot], "property": property}));
         }
-    }
-
-    /// Whether STORED, as SLOT's property KEY, has the content startup read,
-    /// and startup read no more of SLOT's plist.
-    fn stores_input(&self, slot: usize, key: usize, stored: Value) -> bool {
-        let Some(tracking) = self.tracking.as_ref() else { return false };
-        if tracking.seen.contains(&Input::Plist(slot)) { return false }
-        let Some(at) = tracking.inputs.iter().position(|&input| input == Input::Property(slot, key)) else { return false };
-        matches!((&tracking.digests[at], self.content_digest(stored)), (Ok(read), Ok(put)) if *read == put)
     }
 
     /// A write of SLOT's function cell: an input's is not captured.
@@ -815,7 +714,7 @@ impl Vm {
 
     /// Whether a use of the random state now is not captured (root 5).
     pub(crate) fn random_tracked(&self) -> bool {
-        self.tracking.as_ref().is_some_and(|tracking| tracking.random) && !host::in_startup() && !host::layer_taint()
+        self.tracking.as_ref().is_some_and(|tracking| tracking.random) && !host::in_startup()
     }
 }
 

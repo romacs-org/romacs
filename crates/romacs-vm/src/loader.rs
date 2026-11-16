@@ -22,8 +22,6 @@ pub(super) struct Loader {
     steps: Vec<Step>,
     completed_files: usize,
     completed_forms: usize,
-    /// The init's loads, while they are recorded (`world::layer`).
-    pub(super) recording: Option<crate::world::layer::Recording>,
     /// Each compiled load's file (an index in `files`) and the artifact
     /// it ran (`compiled_lisp`), in load order.
     compiled: Vec<(usize, PathBuf)>,
@@ -34,7 +32,7 @@ pub(super) struct Loader {
     /// The outer file's `(defvar X)`s, saved by each load in progress.
     file_specials: Vec<NameSet<String>>,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, recording, compiled, in_artifact, regimes, file_specials });
+romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, compiled, in_artifact, regimes, file_specials });
 impl Loader {
     /// How many source loads are in progress.
     pub(super) fn active_depth(&self) -> usize {
@@ -371,10 +369,6 @@ impl Vm {
         }
         let feature = args[0];
         let noerror = args.get(2).is_some_and(|v| *v != Value::NIL);
-        if self.loader.recording.is_some() && let Some(name) = self.symbol_name_of(feature) {
-            let file = args.get(1).filter(|v| **v != Value::NIL).and_then(|v| self.source_string_if(*v)).map(str::to_owned);
-            self.note_init_load(crate::world::layer::Kind::Require, name, file, noerror);
-        }
         if self.symbol_plist(feature).is_ok() { self.attach_require(feature)?; }
         if self.feature_present(feature)? {
             self.set_rooted(out.0, out.1, feature);
@@ -442,36 +436,26 @@ impl Vm {
         let declared = self.keymap_cons(symbol, declared);
         Ok(Some((dynvars, self.root_frame(&[declared]))))
     }
-    /// A form's EVALUATED outcome when a world's layer is building: a definition
-    /// cut short by a refused effect or a secret it asked for defines nil here
-    /// and is kept whole for restore; any other top-level form that asked
-    /// for a secret is kept whole, as code, for restore, and the load goes on
-    /// with the next form.
-    fn layer_form_finished(&mut self, evaluated: Result<()>, form: &Form, out: Out<'_>) -> Result<()> {
-        if crate::host::mode() != crate::host::Mode::Build {
-            return evaluated;
-        }
-        let mut evaluated = evaluated;
-        // Each form's own: a definition's is its cut (`layer_form_cut`).
-        let asked = crate::host::take_secret_asked();
-        if asked && crate::host::layer_active() && !crate::host::layer_form_is_definition() {
-            self.propagated_escape = None;
-            self.record_deferred_form(form);
-            return Ok(());
-        }
-        if let (Err(_), Some(name)) = (&evaluated, crate::host::layer_form_cut()) {
-            self.propagated_escape = None;
-            let slot = self.slot(&name);
-            if self.slots[slot].value == Value::UNBOUND {
-                self.declare_special_raw(&name, Value::NIL);
-            }
-            self.set_rooted(out.0, out.1, Value::NIL);
-            evaluated = Ok(());
-        }
-        if evaluated.is_ok() {
+    /// A form's EVALUATED outcome: in a world build, one that ended is done
+    /// for the tracking (`world_form_done`).
+    fn world_form_finished(&mut self, evaluated: Result<()>, form: &Form) -> Result<()> {
+        if crate::host::mode() == crate::host::Mode::Build && evaluated.is_ok() {
             self.world_form_done(form);
         }
         evaluated
+    }
+    /// SYMBOL's name as interned, or None for a non-symbol.
+    pub(crate) fn symbol_name_of(&self, symbol: Value) -> Option<String> {
+        let slot = symbol.index_if(7).and_then(|i| i.checked_sub(1))?;
+        self.symbol_names.get(slot).cloned()
+    }
+    /// `load-path` as strings; nil, the working directory, as ".".
+    pub(crate) fn load_path_strings(&mut self) -> Result<Vec<String>> {
+        let slot = self.slot("load-path");
+        let value = self.variable_value(slot)?;
+        self.list_values(value)?.into_iter()
+            .map(|v| if v == Value::NIL { Ok(".".to_owned()) } else { self.source_string(v).map(str::to_owned) })
+            .collect()
     }
     /// macroexp.el internal-macroexpand-for-load: an error that expanding a
     /// top-level form signals reaches the loader's caller as (error "Eager
@@ -850,7 +834,7 @@ fn eval_file_forms<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, path: &Path, 
             head: form_source.trim_start().lines().next().unwrap_or("").chars().take(80).collect(),
         });
         let evaluated = eval_toplevel(m, gc.by_ref(), &form, 0, out);
-        let evaluated = m.leaf((evaluated, &form, out), |vm, (evaluated, form, out)| vm.layer_form_finished(evaluated, form, out));
+        let evaluated = m.leaf((evaluated, &form), |vm, (evaluated, form)| vm.world_form_finished(evaluated, form));
         drop(site);
         match evaluated {
             Ok(()) => m.leaf((step, path, line), Vm::form_done),

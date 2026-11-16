@@ -9,9 +9,8 @@ added; it redefines one hexl function, advises another, and writes what it
 finds to a state file.  First a session whose init requires the bundled
 copies loads them, so the compiled-Lisp store holds their artifacts.  Then,
 with the user's init: a source boot (ROMACS_WORLD=off); a session restored
-from the base world, which records the init's layer and builds it apart; a
-warm one restored from that layer; and one with the layer's plan gone, which
-loads the libraries again through the compiled-Lisp store.  In each, the
+from the base world; and another, which loads the libraries again through the
+compiled-Lisp store and lets its background compiles end.  In each, the
 user's copies, redefinition and advice must be the ones running, and the
 store's use log must show no bundled artifact of a shadowed library used
 after the bundled session.  Libraries a session loads before the init (one the
@@ -61,8 +60,6 @@ BUNDLED_INIT = ''';; -*- lexical-binding: t -*-
 
 USER_INIT = ''';; -*- lexical-binding: t -*-
 (add-to-list 'load-path (expand-file-name "my-lisp" "~"))
-;; hexl first: romacs-agent runs git as it loads, so its entry, and every
-;; startup entry after it, runs live rather than from the layer.
 (require 'hexl)
 (require 'romacs-agent-diff)
 (require 'thingatpt)
@@ -164,9 +161,7 @@ def main():
                     background are done (they end with it), end it, and let the
                     builders it started finish: how it booted and what its init
                     found."""
-                    # One state file for every launch, outside HOME: the init's
-                    # content and the listing of HOME, the parent of a
-                    # load-path directory, key its layer.
+                    # One state file for every launch, outside HOME.
                     state = output / 'init.state'
                     state.unlink(missing_ok=True)
                     (init_dir / 'init.el').write_text(init.format(state=json.dumps(str(state))))
@@ -197,9 +192,9 @@ def main():
                     report['launches'].append(entry)
                     return entry
 
-                def booted(entry, mode, layer):
-                    """Whether ENTRY booted in MODE, from an init layer when LAYER."""
-                    return any(b.get('mode') == mode and ('layer' in b) == layer for b in entry['boot'])
+                def booted(entry, mode):
+                    """Whether ENTRY booted in MODE."""
+                    return any(b.get('mode') == mode for b in entry['boot'])
 
                 def bundled_used(before):
                     """The shadowed libraries whose bundled file the store's use
@@ -234,28 +229,14 @@ def main():
                       cached, {name: uses(Path(src).name)[-3:] for name, src in SHADOWED})
                 bundled_uses = {name: len([line for line in uses(Path(src).name) if str(my_lisp) not in line]) for name, src in SHADOWED}
                 source = launch('source', USER_INIT, {'ROMACS_WORLD': 'off'})
-                check('the source launch boots from source', booted(source, 'source', False), source['boot'])
+                check('the source launch boots from source', booted(source, 'source'), source['boot'])
                 check("a source boot runs the user's copies, redefinition and advice", user_versions(source), source)
                 base = launch('base', USER_INIT)
-                check('the base launch restores the base world, no layer', booted(base, 'restored', False), base['boot'])
+                check('the base launch restores the base world', booted(base, 'restored'), base['boot'])
                 check("a session restored from the base world runs the user's copies, redefinition and advice",
                       user_versions(base), base)
-                layer = launch('layer', USER_INIT)
-                report['layer_builds'] = []
-                for manifest in sorted(store.glob('*.json')):
-                    data = json.loads(manifest.read_text())
-                    if 'init-layer' in json.dumps(data.get('events', {}))[:200] or data.get('uncaptured') or data.get('refusals'):
-                        report['layer_builds'].append({'manifest': manifest.name[:16],
-                                                       'entries': [e.get('name') for e in data.get('events', {}).get('init-layer', {}).get('entries', [])],
-                                                       'uncaptured': (data.get('uncaptured') or data.get('refusals') or [])[:20]})
-                check('the warm session restores its init layer', booted(layer, 'restored', True), layer['boot'])
-                check("a session restored from the init layer runs the user's copies, redefinition and advice",
-                      user_versions(layer), layer)
-                plans = store / 'plans'
-                if plans.exists():
-                    shutil.rmtree(plans)
                 compiled = launch('compiled', USER_INIT, compiles=True)
-                check('the compiled launch restores the base world, no layer', booted(compiled, 'restored', False), compiled['boot'])
+                check('the compiled launch restores the base world', booted(compiled, 'restored'), compiled['boot'])
                 check("a session loading through the compiled-Lisp store runs the user's copies, redefinition and advice",
                       user_versions(compiled), compiled)
                 later_uses = {name: len(uses(Path(src).name)) for name, src in SHADOWED}
@@ -263,7 +244,7 @@ def main():
                                  for name, src in SHADOWED}
                 check('no bundled artifact of a shadowed library is used once the user copies shadow it',
                       not any(bundled_paths.values()), {'after': bundled_paths, 'uses': later_uses})
-                for entry in (source, base, layer, compiled):
+                for entry in (source, base, compiled):
                     found = entry['state']
                     check(f"in the {entry['launch']} launch, a library loaded before the init runs the user's copy after it",
                           all(f'{my_lisp}/{Path(src).name}' in found for _, src in PRELOADED)

@@ -93,7 +93,6 @@ fn autoload(cx, function: Value, file: Value; optional docstring: Value, interac
     let entry = cx.cons(defun, function);
     cx.attach_load_history(entry)?;
     cx.defalias_function(function, descriptor)?;
-    cx.note_init_declared(file);
     Ok(function)
 }}
 
