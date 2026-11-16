@@ -4236,9 +4236,10 @@ is not loaded: non-nil when something waits on it (a watch kept, a
 resume due), so it is loaded as a restore runs.")
 
 (defvar romacs-agent-quiet-p nil
-  "Called with a session's directory: non-nil when its row says it wants
-nothing now, its supervisor or not: idle, nothing asked of the user, no
-error, nothing owed to its parent.  Nil: none is.")
+  "Called with a session's directory: when its row says it wants nothing
+now (idle, nothing asked of the user, no error, nothing owed to its
+parent) and nothing came since its state was kept, the place its records
+were found to end at; else nil.  Nil: none is.")
 
 (defun romacs-agent--unloaded-p (dir)
   "Whether the session recorded in DIR is left unloaded at a start: listed,
@@ -4247,15 +4248,15 @@ supervisor's socket or its row quiet (`romacs-agent-quiet-p'): a quiet
 session whose supervisor runs attaches when it is first asked for, or
 when its supervisor writes more (`romacs-agent--quiet-watch').  Its kept
 state, if any, is read when it is loaded: a start reads rows only."
-  (let ((live (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir)))))
+  (let ((live (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir)))) (quiet nil))
     (and romacs-agent-listed-p
          (funcall romacs-agent-listed-p dir)
-         (or (not live) (and romacs-agent-quiet-p (funcall romacs-agent-quiet-p dir)))
+         (or (not live) (and romacs-agent-quiet-p (setq quiet (funcall romacs-agent-quiet-p dir))))
          (not (and romacs-agent-pending-functions
                    (run-hook-with-args-until-success
                     'romacs-agent-pending-functions dir
                     (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))
-         (progn (when live (romacs-agent--quiet-watch dir)) t))))
+         (progn (when live (romacs-agent--quiet-watch dir quiet)) t))))
 
 ;; A quiet session whose supervisor runs is left a row; what its supervisor
 ;; writes meanwhile (a message come in, a task's end, an ask) is seen in its
@@ -4280,12 +4281,14 @@ their records went then (`romacs-agent--journal-end').")
   "A session record for DIR, to ask its records about: no state read."
   (romacs-agent--make :id (file-name-nondirectory dir) :dir dir))
 
-(defun romacs-agent--quiet-watch (dir)
+(defun romacs-agent--quiet-watch (dir mark)
   "Look at the records of the session recorded in DIR, left unloaded with
-its supervisor running, until it is loaded or its supervisor ends."
+its supervisor running, until it is loaded or its supervisor ends: from
+MARK, the place they were found quiet to end at, so a record written
+since is new."
   (let ((id (file-name-nondirectory dir)))
     (unless (gethash id romacs-agent--quiet)
-      (puthash id (romacs-agent--journal-end (romacs-agent--quiet-session dir)) romacs-agent--quiet))
+      (puthash id mark romacs-agent--quiet))
     (unless (timerp romacs-agent--quiet-timer)
       (setq romacs-agent--quiet-timer
             (run-with-timer romacs-agent--quiet-every romacs-agent--quiet-every #'romacs-agent--quiet-tick)))))
@@ -4309,11 +4312,13 @@ attached, it reads what came.  One loaded otherwise, or whose supervisor
 ended, is no longer looked at; with none left, the timer stops."
   (let ((ends (romacs-agent--quiet-ends)) (due nil))
     (maphash (lambda (id mark)
-               ;; Wrote more: loaded, though its supervisor ended since
-               ;; (its last records, its exit, come with it).
+               ;; Wrote more, or its supervisor ended (it writes its exit,
+               ;; then lets its socket go): loaded, so what came, its exit
+               ;; too, is read.
                (cond ((gethash id romacs-agent--sessions) (push (cons id nil) due))
-                     ((> (or (gethash id ends) mark) mark) (push (cons id t) due))
-                     ((not (file-exists-p (romacs-agent--host-socket id))) (push (cons id nil) due))))
+                     ((or (> (or (gethash id ends) mark) mark)
+                          (not (file-exists-p (romacs-agent--host-socket id))))
+                      (push (cons id t) due))))
              romacs-agent--quiet)
     (pcase-dolist (`(,id . ,load) due)
       (remhash id romacs-agent--quiet)

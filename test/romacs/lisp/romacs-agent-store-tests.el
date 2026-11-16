@@ -250,7 +250,9 @@ journal one turn long."
       (make-directory (expand-file-name "run" root) t)
       (dolist (id ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
       (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
-        (dolist (id ids) (romacs-agent--quiet-watch (expand-file-name id root)))
+        (dolist (id ids)
+          (let ((dir (expand-file-name id root)))
+            (romacs-agent--quiet-watch dir (romacs-agent--journal-end (romacs-agent--quiet-session dir)))))
         (should (timerp romacs-agent--quiet-timer))
         (let ((queries 0) (select (symbol-function 'sqlite-select)))
           (cl-letf (((symbol-function 'sqlite-select)
@@ -266,6 +268,61 @@ journal one turn long."
         (clrhash romacs-agent--quiet)
         (romacs-agent--quiet-tick)
         (should-not romacs-agent--quiet-timer)))))
+
+(ert-deftest romacs-agent-store-a-quiet-session-misses-no-record-and-no-exit ()
+  ;; A record written between the look that found it quiet and its watch
+  ;; is new all the same (the watch starts where the look found its end);
+  ;; a supervisor that ended with nothing new loads it (its exit is read).
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((late "aaaaaaaa-0000-4000-8000-000000000201") (gone "aaaaaaaa-0000-4000-8000-000000000202")
+          (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+          (romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal))
+          (loaded nil))
+      (record late "late") (record gone "gone")
+      (dolist (id (list late gone)) (romacs-agent-events-import (romacs-agent--quiet-session (expand-file-name id root))))
+      (romacs-agent-store-fill)
+      (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'idle', attention = 0, seq = 2")
+      (make-directory (expand-file-name "run" root) t)
+      (dolist (id (list late gone)) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
+            (let ((marks (mapcar (lambda (id) (cons id (romacs-agent-store-quiet-p (expand-file-name id root)))) (list late gone))))
+              (should (equal (mapcar #'cdr marks) '(3 3)))
+              ;; Written after the look, before the watch.
+              (romacs-agent-events-append (romacs-agent--quiet-session (expand-file-name late root))
+                                          (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "late")))
+              (pcase-dolist (`(,id . ,mark) marks) (romacs-agent--quiet-watch (expand-file-name id root) mark)))
+            ;; Its supervisor ends with nothing new.
+            (delete-file (romacs-agent--host-socket gone))
+            (romacs-agent--quiet-tick)
+            (should (member late loaded))
+            (should (member gone loaded)))
+        (when (timerp romacs-agent--quiet-timer) (cancel-timer romacs-agent--quiet-timer))))))
+
+(ert-deftest romacs-agent-store-an-older-table-is-made-again-and-the-rest-kept ()
+  ;; A database whose sessions table an earlier build made: made again with
+  ;; this build's columns, its records and the board's folds kept.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((file (romacs-agent-store--file)))
+      (make-directory (file-name-directory file) t)
+      (let ((db (sqlite-open file)))
+        (sqlite-execute db "create table sessions (id text primary key, dir text, state text)")
+        (sqlite-execute db "insert into sessions values ('old', '/x', 'idle')")
+        (sqlite-execute db "create table events (session text not null, seq integer not null, t real, kind text, record text not null)")
+        (sqlite-execute db "insert into events values ('old', 1, 1.0, 'note', '{}')")
+        (sqlite-execute db "create table board_folds (project text primary key)")
+        (sqlite-execute db "insert into board_folds values ('/p')")
+        (sqlite-pragma db "user_version = 3")
+        (sqlite-close db))
+      (let ((db (romacs-agent-store--open)))
+        (should (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version))
+        (should (member "seq" (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)"))))
+        (should-not (sqlite-select db "select 1 from sessions"))
+        (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
+        (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
 
 (ert-deftest romacs-agent-store-a-row-session-has-its-headers-facts ()
   ;; Kept, a session's row has what its chat's header says; the session

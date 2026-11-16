@@ -47,7 +47,7 @@
     "create table if not exists board_folds (project text primary key)")
   "The table and its indexes, made when the database is opened.")
 
-(defconst romacs-agent-store--version 3
+(defconst romacs-agent-store--version 4
   "The table's form (`user_version'): a database of another is made again,
 as a cache is.")
 
@@ -329,7 +329,9 @@ idle (or detached, unstarted), so nothing asked of the user, and no
 error nor anything owed to its parent (`romacs-agent-quiet-p'); and
 nothing came since its state was kept: its records in SQLite go no
 further than the seq that state folded.  One still in a journal is not
-quiet: whether more came cannot be told there without reading it."
+quiet: whether more came cannot be told there without reading it.
+Quiet, the place its records were found to end at (the seq after the
+kept one): what its supervisor writes from there is new."
   (when-let* (((fboundp 'romacs-agent-events--db))
               ;; Its records' tables, made with the database.
               (db (romacs-agent-events--db))
@@ -341,7 +343,8 @@ quiet: whether more came cannot be told there without reading it."
                                        (list id)))))
     (pcase-let ((`(,state ,attention ,seq ,imported ,last) row))
       (and (member state romacs-agent-store--quiet-states) (eql attention 0)
-           imported (integerp seq) (or (null last) (<= last seq))))))
+           imported (integerp seq) (or (null last) (<= last seq))
+           (1+ seq)))))
 
 (defun romacs-agent-store-row-session (id)
   "The session ID names, made from its row alone (none of its kept state
