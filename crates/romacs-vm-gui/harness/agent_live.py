@@ -105,6 +105,39 @@ HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
 RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
+# What every process a run starts inherits, its value the run's private
+# tree: supervisors start detached (setsid) or as user units, out of the
+# harness's process tree, so they are found by it.
+MARK = 'AGENT_LIVE_RUN'
+
+
+def marked_processes(prefix):
+    """The processes whose MARK lies under PREFIX, a path."""
+    found = []
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            entries = (proc / 'environ').read_bytes().split(b'\0')
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.startswith(MARK.encode() + b'='):
+                value = entry[len(MARK) + 1:].decode(errors='replace')
+                if value == prefix or value.startswith(prefix.rstrip('/') + '/'):
+                    found.append(int(proc.name))
+    return found
+
+
+def end_marked(prefix, seconds=10):
+    """End every process marked under PREFIX; the pids it found, which are
+    gone when it returns, else it raises."""
+    found = marked_processes(prefix)
+    for pid in found:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    until(lambda: not marked_processes(prefix), seconds, f'processes of {prefix} ended')
+    return found
 
 
 class Agents(Server):
@@ -112,6 +145,7 @@ class Agents(Server):
         super().__init__(args, base, name, env_extra)
         self.calls = self.root / 'harness-calls.jsonl'
         self.env['FAKE_HARNESS_LOG'] = str(self.calls)
+        self.env[MARK] = str(self.root.resolve())
         self.work = self.root / 'work'
         # The default instance's directory, as a user who has run Claude Code has.
         (self.home / '.claude').mkdir()
@@ -206,35 +240,11 @@ class Agents(Server):
                   "(romacs-agent-restore) t)")
 
     def close(self):
-        # Sessions started detached: end their supervisors and harnesses,
-        # found by their sessions' directories under this tree too, so a
-        # session whose directory went (and its host.json) is ended as well.
-        agents = str(self.home / '.local/state/romacs/agents').encode()
-        hosts, parents = set(), {}
-        for proc in Path('/proc').iterdir():
-            try:
-                argv = (proc / 'cmdline').read_bytes().split(b'\0')
-                parents[int(proc.name)] = int((proc / 'stat').read_text().rsplit(')', 1)[1].split()[1])
-                if argv[0].endswith(b'romacs-agent-host') and agents in b' '.join(argv):
-                    hosts.add(int(proc.name))
-            except (OSError, ValueError, IndexError):
-                pass
-        for pid in [p for p, parent in parents.items() if parent in hosts] + sorted(hosts):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        for host in (self.home / '.local/state/romacs/agents').glob('*/host.json'):
-            info = json.loads(host.read_text())
-            for pid in (info.get('harness'), info.get('pid')):
-                # Only while the pid is still this tree's process: an ended
-                # one's number may be another's now.
-                try:
-                    if str(self.root) in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace') \
-                            or 'romacs-agent-host' in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace'):
-                        os.kill(pid, signal.SIGKILL)
-                except (OSError, TypeError):
-                    pass
+        # Every process this tree started carries MARK: the editor, its
+        # sessions' supervisors (detached or user units), their harnesses
+        # and MCP relays.  They end with it, whatever host.json still names
+        # (a workflow may remove a session's directory).
+        end_marked(str(self.root.resolve()))
         super().close()
 
 
@@ -3208,6 +3218,10 @@ def main():
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
+        # No process a workflow started outlives it: one left fails it.
+        outlived = end_marked(str(out.resolve()))
+        if outlived:
+            results[name] = {**results[name], 'ok': False, 'outlived': outlived}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
     ok = all(r.get('ok') is not False for r in results.values())
