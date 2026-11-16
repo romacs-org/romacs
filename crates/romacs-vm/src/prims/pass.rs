@@ -1,5 +1,5 @@
 //! The password store's primitives (`crate::pass`), for
-//! lisp/romacs/romacs-pass.el.  TEXT is an entry's decrypted text: each
+//! lisp/romacs-pass.el.  TEXT is an entry's decrypted text: each
 //! primitive reads it once and returns only what it was asked for, and
 //! its own copies of it are wiped when it returns.
 use super::{Fault, Value};

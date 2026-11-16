@@ -15,7 +15,7 @@
 //! Under ROMACS_DIAGNOSTICS=1 each change of how an animation is drawn
 //! (scene and where, cells, or out of view) is a line on stderr.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
-use romacs_display_protocol::text_animation::{TextAnimation, paint};
+use romacs_display_protocol::text_animation::{TextAnimation, clear, paint};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -163,7 +163,7 @@ impl TextAnimations {
     }
 
     /// Paint every animation over FRAME, the copy about to be drawn: a
-    /// scene's surface over blank cells, or its cells. Its glyphs then
+    /// scene's surface over its block, its cells taken out, or its cells. Its glyphs then
     /// differ from the producer's, so it no longer promises to paint as
     /// another frame of its layout identity does (a retained root picture
     /// would show a still animation).
@@ -181,8 +181,9 @@ impl TextAnimations {
                 (_, None) => Drawn::Hidden,
             });
             if let Some(glyph) = shown {
-                let blank = vec![(' ', None); (running.animation.cols * running.animation.rows) as usize];
-                paint(frame, &running.animation, &blank);
+                // The scene covers the block: its cells are taken out, not
+                // blanked, so a tick draws the scene and the rest alone.
+                clear(frame, &running.animation);
                 frame.glyphs.push(glyph);
                 continue;
             }

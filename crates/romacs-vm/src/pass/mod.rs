@@ -1,4 +1,4 @@
-//! The password store's pure parts, for lisp/romacs/romacs-pass.el:
+//! The password store's pure parts, for lisp/romacs-pass.el:
 //! entry text, one-time codes, the store's entry names and new
 //! passwords.  Decryption is gpg's, run from Lisp through gpg-agent; what
 //! it yields is read here once, so the plaintext is split into no more

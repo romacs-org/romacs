@@ -19,7 +19,8 @@ use crate::{Form, Name, Value, Vm, data::Object};
 struct Canon(Vec<u8>);
 
 impl Canon {
-    fn new(cx: &Context<'_>) -> Self {
+    /// The stream's head; a local special that KEEP refuses is left out.
+    fn new(cx: &Context<'_>, keep: impl Fn(&str) -> bool) -> Self {
         let mut canon = Self(Vec::with_capacity(256));
         canon.tag(b'D');
         canon.0.extend_from_slice(&[u8::from(cx.dynamic)]);
@@ -33,7 +34,7 @@ impl Canon {
                 Name::Generated(_) => canon.tag(b'g'),
             }
         }
-        let mut specials: Vec<&str> = cx.specials.iter().map(String::as_str).collect();
+        let mut specials: Vec<&str> = cx.specials.iter().map(String::as_str).filter(|name| keep(name)).collect();
         specials.sort_unstable();
         canon.tag(b'S');
         for special in specials { canon.text(b'y', special.as_bytes()); }
@@ -78,11 +79,18 @@ pub(crate) struct Context<'a> {
     pub(crate) specials: &'a crate::NameSet<String>,
 }
 
+/// Whether a local special declaration of NAME is one GNU's environment
+/// keeps: eval.c Fdefvar adds a value-less `defvar' to the interpreter
+/// environment only for a variable not already declared special.
+fn kept_special(vm: &Vm, name: &str) -> bool {
+    vm.names.get(name).is_none_or(|&slot| !vm.slot_is_special(slot))
+}
+
 /// The key of a lambda compiled from PARAMS and BODY forms, with the
 /// interactive spec and modes its closure keeps apart from the body
 /// (INTERACTIVE: empty, or SPEC and MODES).
 pub(crate) fn of_forms(vm: &Vm, cx: &Context<'_>, params: &[Form], body: &[Form], interactive: &[Form]) -> Option<u128> {
-    let mut canon = Canon::new(cx);
+    let mut canon = Canon::new(cx, |name| kept_special(vm, name));
     forms(vm, &mut canon, params, 0)?;
     // The docstring is the closure's own slot, which `equal` compares apart.
     let body = match body {
@@ -102,7 +110,7 @@ pub(crate) fn of_forms(vm: &Vm, cx: &Context<'_>, params: &[Form], body: &[Form]
 /// the Lisp list BODY and its interactive slot IFORM, `(interactive SPEC .
 /// MODES)` or nil, written as `of_forms` writes a lambda's.
 pub(crate) fn of_lazy(vm: &Vm, cx: &Context<'_>, params: &[Form], body: Value, iform: Value) -> Option<u128> {
-    let mut canon = Canon::new(cx);
+    let mut canon = Canon::new(cx, |name| kept_special(vm, name));
     forms(vm, &mut canon, params, 0)?;
     list_value(vm, &mut canon, body, 0)?;
     if iform == Value::NIL {
@@ -135,7 +143,8 @@ pub(crate) fn of_slots(vm: &Vm, slots: &[Value]) -> Option<u128> {
     }
     names.sort();
     names.dedup();
-    let mut canon = Canon::new(&Context { dynamic: env == Value::NIL, names: &names, specials: &specials });
+    // An explicit environment is kept as given, as GNU's slot holds it.
+    let mut canon = Canon::new(&Context { dynamic: env == Value::NIL, names: &names, specials: &specials }, |_| true);
     list_value(vm, &mut canon, args, 0)?;
     list_value(vm, &mut canon, body, 0)?;
     match slots.get(5) {

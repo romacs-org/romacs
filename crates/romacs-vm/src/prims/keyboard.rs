@@ -4,7 +4,7 @@
 //! Tier: T2 (PRIMITIVE-DOCTRINE section 3), like prims/minibuf.rs. GNU's
 //! `command_loop_1', `read_key_sequence' and `read_char' call Lisp at every
 //! step (hooks, keymap lookup, the command itself), so they are Lisp here:
-//! lisp/romacs/vm/keyboard.el, the "Lisp half". Each entry point below enters it
+//! lisp/vm/keyboard.el, the "Lisp half". Each entry point below enters it
 //! with one `Step::Call', installing it on first use so a bare `Vm::new()'
 //! stays bare. The Rust half keeps what reads no Lisp: the record of this
 //! command's keys (`this-command-keys' and its siblings, over the traced
@@ -13,14 +13,14 @@ use super::*;
 use crate::prim::leaf::Kind;
 
 /// The Lisp half, evaluated once per VM on first use, with minibuf.c's
-/// (prims/minibuf.rs), whose recursive edit is this command loop, and
-/// window.c's window change functions, which the loop's redisplays run
-/// (host_input.rs).
-const LISP_HALF: [&str; 4] = [
+/// (prims/minibuf.rs), whose recursive edit is this command loop. window.c's
+/// change functions, which the loop's redisplays run, are the prelude's
+/// (prims/mod.rs `WINDOW_CHANGE_PRELUDE`): a session that reads no key has
+/// them too, as GNU's are C.
+const LISP_HALF: [&str; 3] = [
     super::HOOKS_LISP,
-    include_str!("../../../../lisp/romacs/vm/keyboard.el"),
-    include_str!("../../../../lisp/romacs/vm/minibuf.el"),
-    include_str!("../../../../lisp/romacs/vm/window-change.el"),
+    include_str!("../../../../lisp/vm/keyboard.el"),
+    include_str!("../../../../lisp/vm/minibuf.el"),
 ];
 
 /// keyboard.c `this_command_keys' (a vector of the events read for this
@@ -160,15 +160,15 @@ fn abort_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", v
 defsubr! { name = "read-key-sequence", gnu = "keyboard.c:11961", effect = Global,
 fn read_key_sequence(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
                      can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = (can_return_switch_frame, disable_text_conversion);
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop], EVENT_ARRAY)
+    let _ = disable_text_conversion;
+    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], EVENT_ARRAY)
 }}
 
 defsubr! { name = "read-key-sequence-vector", gnu = "keyboard.c:12022", effect = Global,
 fn read_key_sequence_vector(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
                             can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = (can_return_switch_frame, disable_text_conversion);
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop], DONE)
+    let _ = disable_text_conversion;
+    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], DONE)
 }}
 
 // keyboard.c read_filtered_event (NO-SWITCH-FRAME, ASCII-REQUIRED, ERROR-NONASCII).
@@ -318,7 +318,7 @@ defsubr! { name = "discard-input", gnu = "keyboard.c:12400", effect = Global,
 fn discard_input(cx) -> Step { enter(cx, "romacs--discard-input", vec![], DONE) }}
 
 // macros.c: defining a keyboard macro, whose events read_char stores
-// (lisp/romacs/vm/keyboard.el `romacs--store-kbd-macro-char').
+// (lisp/vm/keyboard.el `romacs--store-kbd-macro-char').
 defsubr! { name = "start-kbd-macro", gnu = "macros.c:43", effect = Global,
 fn start_kbd_macro(cx, append: Value; optional no_exec: Value) -> Step {
     enter(cx, "romacs--start-kbd-macro", vec![append, no_exec], DONE)
@@ -430,7 +430,7 @@ fn timer_next(cx, timers: Value, idle_timers: Value) {
 defsubr! { name = "romacs--set-idle", gnu = "keyboard.c:4695", effect = Global,
 fn set_idle(cx, idle: Value) {
     // The state timer_start_idle (IDLE non-nil) and timer_stop_idle set;
-    // lisp/romacs/vm/subprocess.el `romacs--timer-start-idle' is the rest.
+    // lisp/vm/subprocess.el `romacs--timer-start-idle' is the rest.
     cx.set_idle_since((idle != Value::NIL).then(crate::host::monotonic));
     Ok(Value::NIL)
 }}
@@ -458,7 +458,7 @@ fn input_pending_p(cx; optional check_timers: Value) {
 }}
 
 // What the display saw of native key repeat since the last call, for the
-// usage log (lisp/romacs/romacs-usage-log.el): (REPEATS AFTER-PRESS
+// usage log (lisp/session/romacs-usage-log.el): (REPEATS AFTER-PRESS
 // LONGEST-HOLD-MS), AFTER-PRESS a vector of counts by the usage log's
 // doubling buckets; nil with no display.
 defsubr! { name = "romacs--take-key-repeats", gnu = "romacs:display", effect = Global,
@@ -514,36 +514,28 @@ mod tests {
     }
 }
 
-/// keyboard.c modifier_names: the symbol for each modifier bit.
-const MODIFIER_NAMES: [(u32, &str); 12] = [(0, "up"), (1, "down"), (2, "drag"), (3, "click"), (4, "double"), (5, "triple"),
-    (22, "alt"), (23, "super"), (24, "hyper"), (25, "shift"), (26, "control"), (27, "meta")];
-
 // keyboard.c parse_modifiers: parse SYMBOL's name once, caching
 // (BASE MASK) on its `event-symbol-element-mask' and (BASE MODIFIERS...)
 // on its `event-symbol-elements', and return the latter.
 defsubr! { name = "internal-event-symbol-parse-modifiers", gnu = "keyboard.c:7609", effect = Global,
 fn internal_event_symbol_parse_modifiers(cx, symbol: Value) {
-    let (mask_key, elements_key) = (cx.intern("event-symbol-element-mask"), cx.intern("event-symbol-elements"));
-    let cached = cx.symbol_property(symbol, mask_key)?;
-    if cx.pair(cached).is_none() {
-        let name = cx.symbol_name(symbol)?;
-        let (modifiers, start) = crate::keymap::parse_event_modifiers(name.as_bytes());
-        let base = cx.intern(&name[start..]);
-        let mask = Value::integer(modifiers).expect("modifier bits are a fixnum");
-        let mask = cx.cons(mask, Value::NIL);
-        let mask = cx.cons(base, mask);
-        cx.put_symbol_property(symbol, mask_key, mask)?;
-        // lispy_modifier_list: consed from the lowest bit, so highest first.
-        let elements = MODIFIER_NAMES.iter().filter(|(bit, _)| modifiers & 1 << bit != 0)
-            .fold(Value::NIL, |list, (_, name)| { let name = cx.intern(name); cx.cons(name, list) });
-        let elements = cx.cons(base, elements);
-        cx.put_symbol_property(symbol, elements_key, elements)?;
-    }
+    cx.symbol_name(symbol)?;
+    cx.cache_event_symbol_elements(symbol)?;
+    let elements_key = cx.intern("event-symbol-elements");
     cx.symbol_property(symbol, elements_key)
 }}
 
+// keyboard.c Fevent_convert_list: (MODIFIER... BASE) as the event it
+// denotes, `(control a)' as C-a and `(down click mouse-1)' as down-mouse-1;
+// keymaps read list keys the same way (keymap.rs `key_event_from_list').
+// mouse.el's `mouse--click-1-maybe-follows-link' calls it on every mouse-1.
+defsubr! { name = "event-convert-list", gnu = "keyboard.c:7832", effect = Global,
+fn event_convert_list(cx, event_desc: Value) {
+    cx.event_convert_list(event_desc)
+}}
+
 // A deadline on one call the host admits, an agent's evaluation
-// (lisp/romacs/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
+// (lisp/agents/romacs-agent-tools.el): MILLISECONDS after it is armed the call is
 // quit at its next safepoint, as by C-g, unless it ended first. GENERATION
 // names the call; nil disarms.
 // What a quit from C-g left pending when it interrupted a macro's

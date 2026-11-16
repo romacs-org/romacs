@@ -1,5 +1,5 @@
 //! Background compiles of compiled Lisp (`crate::compiled_lisp`): what
-//! lisp/romacs/romacs-precompile.el's switch asks.
+//! lisp/session/romacs-precompile.el's switch asks.
 use super::*;
 
 impl Leaf<'_> {
@@ -15,7 +15,7 @@ impl Leaf<'_> {
             Some(n) => n as f64,
             None => self.float_value(delay)?,
         };
-        let load_path = self.vm.load_path_strings().map_err(Fault::Error)?;
+        let load_path = self.vm.load_path_roots().map_err(Fault::Error)?;
         crate::compiled_lisp::start_background(load_path, std::time::Duration::from_secs_f64(seconds.max(0.0)));
         Ok(Value::TRUE)
     }

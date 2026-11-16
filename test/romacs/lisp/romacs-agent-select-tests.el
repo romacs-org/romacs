@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-notes)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -185,7 +186,6 @@
         (romacs-agent-chat-mode)
         (let ((inhibit-read-only t))
           (setq romacs-agent-ui--session session
-                romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
                 romacs-agent-ui--messages (make-hash-table :test #'equal)
                 romacs-agent-ui--end (point-marker))
           (romacs-agent-ui--replay session)))

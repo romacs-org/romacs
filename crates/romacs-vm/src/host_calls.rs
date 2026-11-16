@@ -43,6 +43,8 @@ const SIDES: &[(&str, Side)] = &[
     ("display.family_fonts", Own), ("display.font_families", Own), ("display.open_font", Own),
     ("display.char_font", Own), ("display.glyph_metrics", Own), ("display.clear_font_cache", Own),
     ("display.set_fontsets", Own), ("display.opened_def_font", Own),
+    // fonts.rs: the launch screen's report, a lock in the host's own process.
+    ("display.startup_progress", Own),
     // main.rs: hooks that call the paint sender.
     ("display.set_frame_alpha", Through), ("display.set_visual_config", Through), ("display.lose_device", Through),
     // fonts.rs: native models go to the renderer through the paint sender.
@@ -64,6 +66,7 @@ const SIDES: &[(&str, Side)] = &[
     ("input.input_pending", Through), ("input.key_pending", Through), ("input.redisplay", Through), ("input.next_event", Through),
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
     ("input.native_window", Through), ("input.pointer", Through), ("input.take_key_repeats", Through),
+    ("input.top_level_frames", Through), ("input.focus_frame", Through), ("input.event_frame", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
     ("input.watch_processes", Own), ("input.images_behind", Own),
     // terminal_service.rs: each session's mirror is locked against the
@@ -169,6 +172,7 @@ impl DisplayHost for Counted<Box<dyn DisplayHost>> {
         fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32);
         fn set_visual_config(&mut self, config: &romacs_display_protocol::VisualConfig);
         fn lose_device(&mut self) -> bool;
+        fn startup_progress(&mut self, stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) -> bool;
         fn decode_image(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
         fn release_image(&mut self, id: u64);
         fn begin_decode(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
@@ -195,6 +199,9 @@ impl HostInput for Counted<Box<dyn HostInput>> {
         fn native_window(&mut self, action: NativeWindow) -> Option<bool>;
         fn pointer(&mut self) -> Option<(i32, i32)>;
         fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts>;
+        fn top_level_frames(&mut self) -> bool;
+        fn event_frame(&mut self) -> Option<u64>;
+        fn focus_frame(&mut self, frame: u64);
     }
 }
 

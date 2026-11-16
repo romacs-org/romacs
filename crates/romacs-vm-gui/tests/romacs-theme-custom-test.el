@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
-;; lisp/romacs/romacs-theme.el's themes under GNU's Custom, in a `--loadup'
+;; lisp/ui/romacs-theme.el's themes under GNU's Custom, in a `--loadup'
 ;; session, which starts in the stock theme `default'
 ;; (gnu_completion.rs `romacs_theme_lisp_tests_pass').  The colour engine
 ;; and palettes alone: test/romacs/romacs-test/romacs-theme-test.el.
@@ -44,7 +44,7 @@
       (mapc #'enable-theme (reverse themes)))))
 
 (romacs-deftest romacs-theme-the-modus-generator-is-modus-s ()
-  ;; lisp/romacs/romacs-theme-modus.el's generator, on the stock theme's
+  ;; lisp/ui/romacs-theme-modus.el's generator, on the stock theme's
   ;; reference palette, answers as GNU with modus-themes 5.3.0 does, entry
   ;; for entry (fixture rum-generator.eld).
   (require 'romacs-theme-modus)

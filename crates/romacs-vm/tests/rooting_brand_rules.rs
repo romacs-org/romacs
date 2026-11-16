@@ -38,20 +38,46 @@ fn production(source: &str) -> Vec<Token> {
     let mut i = 0;
     while i < toks.len() {
         if is(i, &Punct('#')) && is(i + 1, &Punct('[')) && is(i + 2, &Ident("cfg".into())) && is(i + 4, &Ident("test".into())) && is(i + 6, &Punct(']')) {
+            // What the attribute is on: an item ends at its block's `}` or a `;`; a field or an
+            // arm also at a `,` outside any brackets. A `}` outside any block closes the enclosing
+            // one, so what the attribute is on ended before it (a last field), and it stays.
             let mut j = i + 7;
-            let mut depth = 0usize;
-            while j < toks.len() {
-                match &toks[j] {
-                    Punct('{') => depth += 1,
-                    Punct('}') if depth == 1 => break,
-                    Punct('}') => depth -= 1,
-                    Punct(';') if depth == 0 => break,
+            while is(j, &Punct('#')) && is(j + 1, &Punct('[')) {
+                j += 2;
+                let mut open = 1usize;
+                while open > 0 && j < toks.len() {
+                    match &toks[j] { Punct('[') => open += 1, Punct(']') => open -= 1, _ => {} }
+                    j += 1;
+                }
+            }
+            if is(j, &Ident("pub".into())) {
+                j += 1;
+                if is(j, &Punct('(')) {
+                    while j < toks.len() && !is(j, &Punct(')')) { j += 1; }
+                    j += 1;
+                }
+            }
+            const ITEMS: &[&str] = &["fn", "mod", "impl", "struct", "enum", "union", "trait", "const", "static", "use",
+                                     "type", "extern", "unsafe", "async", "macro_rules"];
+            let item = matches!(toks.get(j), Some(Ident(word)) if ITEMS.contains(&word.as_str()));
+            let (mut depth, mut nested) = (0usize, 0usize);
+            let end = loop {
+                match toks.get(j) {
+                    None => break toks.len(),
+                    Some(Punct('{')) => depth += 1,
+                    Some(Punct('}')) if depth == 0 => break j,
+                    Some(Punct('}')) if depth == 1 => break j + 1,
+                    Some(Punct('}')) => depth -= 1,
+                    Some(Punct('(' | '[')) => nested += 1,
+                    Some(Punct(')' | ']')) => nested = nested.saturating_sub(1),
+                    Some(Punct(';')) if depth == 0 => break j + 1,
+                    Some(Punct(',')) if depth == 0 && nested == 0 && !item => break j + 1,
                     _ => {}
                 }
                 j += 1;
-            }
-            keep[i..=j.min(toks.len() - 1)].fill(false);
-            i = j + 1;
+            };
+            keep[i..end].fill(false);
+            i = end;
             continue;
         }
         i += 1;
@@ -297,6 +323,26 @@ fn converted_modules_hand_their_engine_on_only_in_tail_position() {
 
 /// The check finds each way of using the handle's turn after a dispatch,
 /// and passes the tail shapes the engine writes.
+#[test]
+fn a_test_only_field_or_arm_is_stripped_and_what_follows_kept() {
+    let kept = |source: &str| production(source).iter().map(|t| format!("{t:?}")).collect::<Vec<_>>().join(" ");
+    // A last field (no comma): the struct's own `}` closes, nothing past it is lost.
+    let last = kept("struct S { a: u8, #[cfg(test)] b: bool } fn after() {}");
+    assert!(!last.contains("\"b\"") && last.contains("\"after\""), "{last}");
+    // A field before others ends at its comma.
+    let first = kept("struct S { #[cfg(test)] b: bool, a: u8 }");
+    assert!(!first.contains("\"b\"") && first.contains("\"a\""), "{first}");
+    // An item with a block, as before.
+    let item = kept("#[cfg(test)] mod tests { fn t() {} } fn after() {}");
+    assert!(!item.contains("\"t\"") && item.contains("\"after\""), "{item}");
+    // A function's parameter and where-clause commas do not end it: its body goes with it.
+    let function = kept("#[cfg(test)] pub(crate) fn plant<T, U>(a: T, b: U) where T: Copy, U: Copy { Mutex::new(a) } fn after() {}");
+    assert!(!function.contains("\"Mutex\"") && function.contains("\"after\""), "{function}");
+    // Nor do a field's tuple-type commas, or a further attribute.
+    let tuple = kept("struct S { #[cfg(test)] #[allow(dead_code)] b: (u8, u8), a: u8 }");
+    assert!(!tuple.contains("\"b\"") && tuple.contains("\"a\""), "{tuple}");
+}
+
 #[test]
 fn the_tail_check_tells_handoffs_apart() {
     let source = r#"

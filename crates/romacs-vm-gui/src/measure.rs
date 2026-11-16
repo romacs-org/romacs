@@ -364,6 +364,57 @@ mod tests {
         }
     }
 
+    /// The engine that paints, counting the elements it is asked to measure.
+    struct Counting { host: Host, measured: Rc<std::cell::Cell<usize>> }
+    impl romacs_vm::LayoutHost for Counting {
+        fn measure(&mut self, input: &romacs_layout_input::MeasureInput) -> Result<romacs_layout_input::Measured, String> {
+            self.measured.set(self.measured.get() + input.text.utf8.chars().count());
+            romacs_vm::LayoutHost::measure(&mut self.host, input)
+        }
+        fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
+            romacs_vm::LayoutHost::lay_out(&mut self.host, frame)
+        }
+    }
+
+    /// A question about a row near where its walk starts measures the
+    /// lines it walks, not a window's worth of elements (4,096 when every
+    /// walk began with a chunk).
+    #[test]
+    fn a_question_of_one_row_measures_its_line() {
+        let mut h = hosted();
+        let measured = Rc::new(std::cell::Cell::new(0));
+        h.vm.set_layout_host(Some(Box::new(Counting { host: Host { engine: h.engine.clone() }, measured: measured.clone() })));
+        h.eval(r#"(progn (erase-buffer) (dotimes (i 300) (insert (format "line %d of some ordinary prose text\n" i)))
+          (goto-char 1) (set-window-start nil 1))"#);
+        h.paint();
+        for form in ["(pos-visible-in-window-p (window-start))", "(pos-visible-in-window-p (point) nil t)", "(posn-at-point)"] {
+            measured.set(0);
+            h.eval(form);
+            assert!(measured.get() < 200, "{form}: {} elements measured", measured.get());
+        }
+    }
+
+    /// A line longer than a measurement's batch is measured in parts, but
+    /// never cut inside a sequence the layout composes into one glyph: a
+    /// flag across the cut measures as the one glyph it paints.
+    #[test]
+    fn a_long_line_is_never_measured_apart_inside_a_composed_glyph() {
+        let mut h = hosted();
+        let width = |h: &mut Hosted, text: &str| h.eval(&format!(
+            "(progn (setq truncate-lines t) (erase-buffer) (insert {text}) (car (window-text-pixel-size nil 1 nil 100000000)))"))
+            .parse::<i64>().unwrap();
+        // A flag; and a man, ZWJ and an indicator that compose, then a flag
+        // of the next two, which the layout pairs past the first's run.
+        for (n, composed) in [(16384, "\"\u{1F1EC}\u{1F1F7}\""), (16381, "\"\u{1F468}\u{200D}\u{1F1E6}\u{1F1EC}\u{1F1E7}\"")] {
+            let long = format!("(make-string {n} ?a)");
+            let (alone, cluster) = (width(&mut h, &long), width(&mut h, composed));
+            // The batches of the line after "x\n" put their cut inside it.
+            for lead in ["\"x\\n\"", "\"\""] {
+                assert_eq!(width(&mut h, &format!("{lead} {long} {composed} \"\\n\"")), alone + cluster, "{n} after {lead}");
+            }
+        }
+    }
+
     /// With the pane gap's bottom divider and internal border
     /// (VM2-PANE-CHROME), moving point down a line at a time keeps the
     /// cursor on a whole row above the mode line: the visibility check lays
@@ -695,6 +746,46 @@ mod tests {
         let first: String = paint.glyphs.iter().filter(|g| g.5 == GlyphRowRole::Text).take_while(|g| g.2 == 0.0).map(|g| g.0).collect();
         let expected = h.eval("(format \"line %d\" (- (window-body-height) next-screen-context-lines))");
         assert_eq!(format!("{first:?}"), expected, "scroll-up keeps the old page's last lines");
+    }
+
+    /// `recenter` in a window not painted in the current faces (an agent
+    /// chat shown in a reused window) chooses from the rows the
+    /// coming paint lays out, as in a window painted now: over rows of
+    /// mixed heights, for each form of its argument, both start alike, the
+    /// paint keeps that start and shows point's row whole. A point row too
+    /// tall for the rows that must fit below it keeps the start, as GNU.
+    #[test]
+    fn recentring_a_window_not_painted_in_these_faces_uses_the_rows_it_paints() {
+        let mut h = hosted();
+        let text = r#"(progn (defface rp-big '((t :height 1.8)) "") (defvar rp-n 0) (erase-buffer)
+            (dotimes (i 120) (insert (if (= (% i 7) 0) (propertize (format "%03d heading\n" i) 'face 'rp-big)
+                                       (format "%03d line %s\n" i (make-string (* 13 (% i 9)) ?x))))))"#;
+        h.eval(text);
+        // A new face: what faces realize may change, and no window is painted in them.
+        let flip = "(eval (list 'defface (intern (format \"rp-flip-%d\" (setq rp-n (1+ rp-n)))) ''((t :foreground \"red\")) \"\"))";
+        for (point, arg) in [("(point-max)", "-1"), ("(point-max)", "nil"), ("2000", "-3"), ("2000", "3"), ("2000", "0"), ("2000", "'(4)"), ("1500", "-1")] {
+            let recentred = format!("(progn (goto-char {point}) (recenter {arg}) (window-start))");
+            h.eval("(progn (set-window-start nil 1) (goto-char 1))");
+            h.paint();
+            let painted = h.eval(&recentred);
+            h.eval("(progn (set-window-start nil 1) (goto-char 1))");
+            h.paint();
+            h.eval(flip);
+            let refaced = h.eval(&recentred);
+            assert_eq!(refaced, painted, "{point} {arg}: the rows before a paint are the paint's");
+            h.paint();
+            assert_eq!(h.eval("(window-start)"), refaced, "{point} {arg}: the paint keeps the start");
+            assert_eq!(h.eval("(length (pos-visible-in-window-p (point) nil t))"), "2", "{point} {arg}: point's row whole");
+        }
+        // Two lines tall, point on a heading 1.8 lines tall: the rows below it
+        // do not fit, and the start stays.
+        let (line, column) = (h.eval("(frame-char-height)").parse::<u32>().unwrap(), h.eval("(frame-char-width)").parse::<u32>().unwrap());
+        let lines = 2 + h.eval("(- (window-total-height) (window-body-height))").parse::<u32>().unwrap() + h.eval("(window-total-height (minibuffer-window))").parse::<u32>().unwrap();
+        let mut small = hosted_with(Some((column * 60, line * lines)));
+        small.eval(text);
+        small.paint();
+        small.eval(flip);
+        assert_eq!(small.eval("(progn (goto-char (point-min)) (search-forward \"070 heading\") (let ((start (window-start))) (recenter -2) (list (eq start (window-start)) (window-body-height))))"), "(t 2)");
     }
 
     /// The display elements GNU's iterator delivers, as the host paints
