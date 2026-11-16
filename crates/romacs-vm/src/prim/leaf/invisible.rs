@@ -153,7 +153,7 @@ impl Leaf<'_> {
     /// the current buffer, as WINDOW shows it.
     pub(crate) fn shown_invisible_kind(&mut self, buffer: Value, window: Value, pos: i64) -> std::result::Result<u8, Fault> {
         let (byte, key) = (self.buffer_byte(buffer, pos)?, self.intern("invisible"));
-        let property = self.vm.window_char_property(buffer, byte, key, window).map_err(Fault::Error)?.0;
+        let property = self.vm.char_property_at_byte(buffer, byte, key, Some(window)).map_err(Fault::Error)?.0;
         self.invisible_kind(property)
     }
     /// `handle_invisible_prop`'s loop over BUFFER, the current buffer, as

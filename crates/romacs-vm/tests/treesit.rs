@@ -341,7 +341,7 @@ fn twin_parsers_parse_an_edit_once() {
         (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh '((1 . 12))))))"), "(nil t)");
 }
 
-/// While a visit's first parse runs on its thread (lisp/romacs/romacs-treesit.el),
+/// While a visit's first parse runs on its thread (lisp/romacs-treesit.el),
 /// a frame leaves the tree alone: `treesit--pre-redisplay' would wait for the
 /// parse, and the window shows its text plain meanwhile. The first frame after
 /// the parse lands runs it, and marks the whole text for its faces. The parse
@@ -555,4 +555,28 @@ fn a_window_waiting_for_its_first_parse_takes_lexical_faces() {
                   '(\"doc\" \"plain\" \"int\" \"if\" \"return\" \"+\" \";\" \"Return\" \"xif\" \"if x\"))))");
     let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
     assert_eq!(value.as_deref(), Ok("(font-lock-doc-face font-lock-comment-face nil font-lock-keyword-face font-lock-keyword-face font-lock-operator-face nil nil nil font-lock-string-face)"));
+}
+
+/// `romacs--treesit-subtree-exceeds' tells what `treesit-subtree-stat'
+/// does against a depth and a width, for a wide tree, a deep one and a
+/// small one, on each side of their numbers.
+#[test]
+fn subtree_exceeds_agrees_with_subtree_stat() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} \
+        (let (out) \
+          (dolist (text (list (mapconcat (lambda (i) (format \"int a%d;\" i)) (number-sequence 1 50) \"\\n\") \
+                              (concat \"int f(void) {{\" (make-string 30 ?{{) (make-string 30 ?}}) \"}}\") \
+                              \"int a;\")) \
+            (with-temp-buffer \
+              (insert text) \
+              (let* ((root (treesit-parser-root-node (treesit-parser-create 'c))) (stat (treesit-subtree-stat root))) \
+                (dolist (d (list 0 (1- (car stat)) (car stat))) \
+                  (dolist (w (list 0 (1- (cadr stat)) (cadr stat))) \
+                    (unless (eq (romacs--treesit-subtree-exceeds root d w) (or (> (car stat) d) (> (cadr stat) w))) \
+                      (push (list text d w stat) out))))))) \
+          out))");
+    let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("nil"));
 }

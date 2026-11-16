@@ -31,8 +31,6 @@
      (with-temp-buffer
        (romacs-agent-chat-mode)
        (setq romacs-agent-ui--session ,var
-             romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-             romacs-agent-ui--tasks (make-hash-table :test #'equal)
              romacs-agent-ui--messages (make-hash-table :test #'equal)
              romacs-agent-ui--end (point-marker))
        ,@body)))
@@ -129,7 +127,8 @@
     (should (equal (buffer-substring-no-properties (point-min) romacs-agent-ui--end) "  · Session compacted\n"))
     (goto-char (point-min))
     (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-chat-show-compaction))
-    (should (eq (get-text-property (+ (point-min) 5) 'face) 'romacs-agent-link))
+    ;; A link, in a note's row.
+    (should (equal (get-text-property (+ (point-min) 5) 'face) '(romacs-agent-link romacs-agent-note)))
     (let ((chat (current-buffer)))
       (save-window-excursion
         (romacs-agent-chat-show-compaction)

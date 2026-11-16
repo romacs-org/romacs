@@ -296,9 +296,11 @@ fn build_face_conflict_details(
 impl RenderApp {
     pub(super) fn prepare_frame_state_for_render(&mut self) {
         self.render_dirty_models();
-        self.prepare_page_scenes();
-        self.process_shader_surfaces();
-        self.render_page_scenes();
+        romacs_display_protocol::meter::spent(super::frame_cost::SCENES, || {
+            self.prepare_page_scenes();
+            self.process_shader_surfaces();
+            self.render_page_scenes();
+        });
         self.synchronize_image_residency();
         self.process_pending_images();
         self.refresh_faces_from_frames();

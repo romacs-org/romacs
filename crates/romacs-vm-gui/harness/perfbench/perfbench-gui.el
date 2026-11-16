@@ -54,9 +54,31 @@ counts none of it; `perfbench-gui-resume' ends that sooner."
                              (push (- (float-time) perfbench-gui--started) perfbench-gui-latencies)
                              (setq perfbench-gui--started nil))))
 
+(defvar perfbench-gui--line 1 "The line the last far jump went to.")
+
+(defconst perfbench-gui-jump 1800
+  "How many lines a far jump moves: past the 100 lines redisplay searches
+below a window for point before it recentres.")
+
+(defun perfbench-gui-jump-down ()
+  "Go to the line `perfbench-gui-jump' lines below the last jump's."
+  (interactive)
+  (setq perfbench-gui--line (+ perfbench-gui--line perfbench-gui-jump))
+  (with-no-warnings (goto-line perfbench-gui--line)))
+
+(defun perfbench-gui-jump-up ()
+  "Go to the line `perfbench-gui-jump' lines above the last jump's."
+  (interactive)
+  (setq perfbench-gui--line (max 1 (- perfbench-gui--line perfbench-gui-jump)))
+  (with-no-warnings (goto-line perfbench-gui--line)))
+
+(global-set-key [f6] #'perfbench-gui-jump-down)
+(global-set-key [f7] #'perfbench-gui-jump-up)
+
 (defun perfbench-gui-visit (file ts where)
   "Visit FILE afresh in the selected window alone, C in `c-ts-mode' when TS,
-point at WHERE: `top', or `middle' (`perfbench-middle').  Its major mode."
+point at WHERE: `top', `bottom', or `middle' (`perfbench-middle'), where the
+far jumps start.  Its major mode."
   (let ((old (find-buffer-visiting file)))
     (when old
       (with-current-buffer old (set-buffer-modified-p nil))
@@ -64,7 +86,11 @@ point at WHERE: `top', or `middle' (`perfbench-middle').  Its major mode."
   (delete-other-windows)
   (let ((major-mode-remap-alist (if ts (cons '(c-mode . c-ts-mode) major-mode-remap-alist) major-mode-remap-alist)))
     (find-file file))
-  (if (eq where 'middle) (perfbench-middle) (goto-char (point-min)))
+  (pcase where
+    ('middle (perfbench-middle))
+    ('bottom (goto-char (point-max)))
+    (_ (goto-char (point-min))))
+  (setq perfbench-gui--line (line-number-at-pos))
   (recenter)
   (symbol-name major-mode))
 

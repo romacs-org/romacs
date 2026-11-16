@@ -221,17 +221,21 @@ pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'
         (started, vm.frame_snapshot(width, height))
     }, b, then)
 }
-/// The frame resized to WIDTH and HEIGHT: its root window first, whose Lisp
-/// may collect, as a request; then the frame's geometry, at the line height
-/// and column width it had before.
-pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (width, height): (u32, u32)) -> Result<()> {
+/// The top-level frame whose id is FRAME (None, the selected frame's)
+/// resized to WIDTH and HEIGHT: its root window first, whose Lisp may
+/// collect, as a request; then the frame's geometry, at the line height and
+/// column width it had before. A frame gone meanwhile is left.
+pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (frame, width, height): (Option<u64>, u32, u32)) -> Result<()> {
     m.request(&EngineKey, gc, |vm| {
         let cell = (vm.window_state.line, vm.window_state.column);
-        let frame = vm.ensure_windows().and_then(|()| Ok(vm.frame(vm.selected_top_frame())?.id));
-        (cell, frame.and_then(|frame| vm.resize_root_window(frame, width, height)))
+        let frame = vm.ensure_windows().and_then(|()| match frame {
+            Some(id) => Ok(id),
+            None => Ok(vm.frame(vm.selected_top_frame())?.id),
+        });
+        (cell, frame.and_then(|frame| vm.resize_root_window(frame, width, height).map(|()| frame)))
     }, (width, height), |vm, (width, height), ((line, column), resized)| {
-        resized?;
-        vm.set_frame_geometry(width, height, line, column)
+        let Ok(root) = vm.frame_of_id(resized?) else { return Ok(()) };
+        vm.set_top_frame_geometry(root, width, height, line, column)
     })
 }
 /// A writer whose Values are rooted: its watchers are free to collect.

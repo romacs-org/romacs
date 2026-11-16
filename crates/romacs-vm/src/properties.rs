@@ -1075,6 +1075,14 @@ impl Properties {
         let layers = keys.into_iter().filter_map(|key| Some((key, self.tree(key)?))).collect();
         KeyRuns { layers, at: range.start, end: range.end }
     }
+    /// Every value the text holds, once a run: what storing all of it stores.
+    pub(crate) fn stored_values(&self) -> Vec<Value> {
+        let mut values = Vec::new();
+        for tree in self.trees() {
+            tree.walk(0, &mut |_, run| values.extend(run.observed()));
+        }
+        values
+    }
     /// Whether any text has the property KEY.
     pub fn has_key(&self, key: Key) -> bool {
         self.layers.contains_key(&key)
@@ -1221,6 +1229,10 @@ impl Properties {
     /// `limit` when that is nearer: [`Self::next_change`] backwards.
     pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
         self.trees().fold(limit, |previous, root| previous.max(root.change_before(at, previous)))
+    }
+    /// [`Self::previous_change`] of `key` alone.
+    pub fn previous_single_change(&self, at: ByteOffset, key: Key, limit: ByteOffset) -> ByteOffset {
+        self.tree(key).map_or(limit, |root| root.change_before(at, limit))
     }
     /// [`Self::next_change`] of `key` alone.
     pub fn next_single_change(&self, at: ByteOffset, key: Key, limit: ByteOffset) -> ByteOffset {

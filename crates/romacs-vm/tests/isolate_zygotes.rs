@@ -380,9 +380,11 @@ fn a_job_collects_only_past_its_budget_and_live_growth_past_it_is_memory_full() 
                                    (error (list (car e) (cdr e) (get (car e) 'error-conditions)
                                                 (equal (substring (error-message-string e) 0 16) \"Memory exhausted\"))))))");
     assert_eq!(out, "(isolate-memory-exhausted (16777216) (isolate-memory-exhausted error) t)", "the child's budget, as data");
-    // A long-lived worker keeps the default pacing.
+    // A long-lived worker keeps the default pacing: at GNU's threshold,
+    // which its 500K conses pass (VM2-GC-PACING).
     let out = eval(&mut vm, "(let ((iso (isolate-create)))
                                (prog1 (isolate-await (isolate-spawn '(lambda ()
+                                                                       (setq gc-cons-threshold 800000)
                                                                        (let ((i 0)) (while (< i 500000) (cons i i) (setq i (1+ i))))
                                                                        (> gcs-done 0))
                                                                     :isolate iso) 30)

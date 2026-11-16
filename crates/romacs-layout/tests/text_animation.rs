@@ -1,7 +1,7 @@
 //! A text animation (romacs_display_protocol::text_animation) drawn over a
 //! frame romacs-layout laid out: every cell of its block shows the animation's
 //! character in its colour, wherever the window sits in the frame.
-use romacs_display_protocol::text_animation::{paint, TextAnimation, TextAnimationKind};
+use romacs_display_protocol::text_animation::{clear, paint, TextAnimation, TextAnimationKind};
 use romacs_display_protocol::{Color, FrameGlyph, FrameGlyphBuffer};
 use romacs_layout_input::{Face, FaceHandle, FaceRun, TextSlice, WindowSnapshot};
 
@@ -64,6 +64,30 @@ fn the_block_shows_the_animation_cells_in_their_colours() {
     // A cell row 1 had no glyph for is placed on the grid like its row's.
     let x = |row, col| glyph(&frame, row, col, |g| match g { FrameGlyph::Char { x, .. } => Some(*x), _ => None });
     assert_eq!(x(1, 3), x(0, 3));
+}
+
+#[test]
+fn a_scene_takes_its_blocks_cells_out_and_leaves_the_rest() {
+    // The block's cells draw nothing past the frame's background: a scene
+    // over the block covers them, and they go rather than being blanked.
+    let mut frame = romacs_layout::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
+    let before = frame.glyphs.len();
+    clear(&mut frame, &logo(0, 4, 2));
+    assert_eq!(shown(&frame, 0), "");
+    assert_eq!(shown(&frame, 1), "");
+    assert_eq!(shown(&frame, 2), "below");
+    assert!(frame.glyphs.len() < before);
+    // A cell that paints something of its own (a background, a box) stays,
+    // blanked: the scene may not cover it.
+    for decorate in [|f: &mut romacs_display_protocol::Face| f.background = Color::rgb(0.5, 0.0, 0.0),
+                     |f: &mut romacs_display_protocol::Face| f.attributes |= romacs_display_protocol::FaceAttributes::BOX] {
+        let mut frame = romacs_layout::layout(&window("abcd\n x\nbelow", vec![]), 1).unwrap();
+        let id = glyph(&frame, 0, 1, face);
+        decorate(frame.faces.get_mut(&id).unwrap());
+        clear(&mut frame, &logo(0, 4, 2));
+        assert_eq!(shown(&frame, 0), "    ", "the block's first row, its own faces kept and blanked");
+        assert_eq!(shown(&frame, 2), "below");
+    }
 }
 
 #[test]

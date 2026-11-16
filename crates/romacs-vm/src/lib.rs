@@ -1360,6 +1360,15 @@ pub struct Vm {
     regexp_cache: regexp::PatternCache,
     /// The char tables read as flat rows (`char_table::flat`).
     flat_tables: char_table::FlatTables,
+    /// The call caches filled since the last collection, up to
+    /// `gc::CACHES_FILLED` (`Vm::empty_dead_caches`): only these may name
+    /// what a minor frees.
+    caches_filled: Vec<u32>,
+    /// The objects whose storage records its own writes (`gc::shares_storage`),
+    /// as the last minor found them all, or None where no minor since a full,
+    /// a promotion or a restore knows them: the minor that needs them then
+    /// asks every object its kind (`Vm::minor`).
+    shared_holders: Option<Vec<u32>>,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
@@ -1405,6 +1414,9 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// A host wait in progress, its host moved out of `host_input`.
     host_wait: Option<host_input::HostWait>,
+    /// A host event a `switch-frame' event went before, and the id of the
+    /// top-level frame it came from: the next read's (host_input.rs).
+    deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1568,6 +1580,9 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
+    /// `gc_payload_bytes` as the last collection left it: what the minors
+    /// since the last full promoted (`Vm::minor`).
+    payload_settled: usize,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1610,6 +1625,9 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    /// The names `permanent_symbol_names` took since the last collection,
+    /// the only ones a minor can find young.
+    permanent_names_added: Vec<Value>,
     // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
@@ -1640,11 +1658,8 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
-    /// A world build's P fence (`world`); None outside build mode.
-    fence: Option<Box<world::Fence>>,
-    /// The re-seed definitions waiting for their variable's first access
-    /// (`world::pending`), by slot.
-    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
+    /// A world build's P tracking (`world`); None outside build mode.
+    tracking: Option<Box<world::Tracking>>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1719,7 +1734,7 @@ pub struct Vm {
 }
 // What a world image may hold of a VM (`world::safe`): every field, each
 // SnapshotSafe or, at rest, checked by `world_quiescent`: the hosts, the
-// children and jobs, the mapped code image, the fence, the lowered code
+// children and jobs, the mapped code image, the tracking, the lowered code
 // (function pointers), the suspended engines (pointers into it), the
 // compiled patterns (their SIMD searchers hold function pointers) and the
 // idle clock reading (process-relative).
@@ -1873,11 +1888,14 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
     face_keys,
     debug_event_slots,
-    pending,
 } at_rest {
     site_leaf,
     regexp_cache,
     flat_tables,
+    shared_holders,
+    caches_filled,
+    permanent_names_added,
+    payload_settled,
     mode_line_forms,
     images,
     lambda_lists,
@@ -1885,6 +1903,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     suspended,
     host_input,
     host_wait,
+    deferred_event,
     layout_host,
     display,
     visual,
@@ -1899,7 +1918,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     isolates,
     keeper,
     inotify,
-    fence,
+    tracking,
     execution,
     spare_programs,
     idle_since,
@@ -1960,6 +1979,10 @@ impl Vm {
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
             flat_tables: char_table::FlatTables::default(),
+            shared_holders: None,
+            caches_filled: Vec::new(),
+            permanent_names_added: Vec::new(),
+            payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
@@ -1981,6 +2004,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
+            deferred_event: None,
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -2083,8 +2107,7 @@ impl Vm {
             cells: Default::default(),
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
-            fence: None,
-            pending: std::collections::BTreeMap::new(),
+            tracking: None,
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
@@ -2168,7 +2191,7 @@ impl Vm {
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
         // keyboard.c:13843: the command that entered the innermost
-        // minibuffer, which read_minibuf binds (lisp/romacs/vm/minibuf.el).
+        // minibuffer, which read_minibuf binds (lisp/vm/minibuf.el).
         vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
@@ -2188,7 +2211,7 @@ impl Vm {
             "last-command-event",
             "command-history",
             // keyboard.c this_command_keys, this_single_command_key_start
-            // and raw_keybuf (prims/keyboard.rs, lisp/romacs/vm/keyboard.el).
+            // and raw_keybuf (prims/keyboard.rs, lisp/vm/keyboard.el).
             "romacs--command-keys",
             "romacs--single-command-key-start",
             "romacs--raw-command-keys",
@@ -2256,8 +2279,8 @@ impl Vm {
     /// Slot stamps retain precise source-macro dependencies; the world epoch
     /// guards speculative dispatch, including intervening writes to other slots.
     fn define_function(&mut self, slot: usize, value: Value, is_macro: bool) -> Result<()> {
-        if self.fence.is_some() {
-            self.fence_function(slot);
+        if self.tracking.is_some() {
+            self.tracked_function(slot);
         }
         let world = self
             .world_version
@@ -3818,11 +3841,11 @@ impl Vm {
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
-        // A `let' moves a fenced value back unread; a watcher would see it.
-        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(slot) {
-            self.fence_unbound(cell as usize);
-            self.fence_watched(cell as usize);
-            return self.unfenced(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+        // A `let' moves a tracked value back unread; a watcher would see it.
+        if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
+            self.tracked_unbound(cell as usize);
+            self.tracked_watched(cell as usize);
+            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
         }
         self.restore_binding(slot, base, value, owner, let_default)
     }

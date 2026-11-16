@@ -99,7 +99,6 @@ dump-tab-bar-row	absent	portable dumper: Romacs starts from its own world image
 dump-tool-bar-row	absent	portable dumper: Romacs starts from its own world image
 encode-big5-char	absent	no shipped Lisp calls it and it is no command
 encode-sjis-char	absent	no shipped Lisp calls it and it is no command
-event-convert-list	needed	lane A (editing, windows, frames, minibuffer readers, display)
 file-attributes-lessp	absent	no shipped Lisp calls it and it is no command
 font-drive-otf	absent	no shipped Lisp calls it and it is no command
 font-get-system-font	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
@@ -111,7 +110,6 @@ fontset-list-all	absent	no shipped Lisp calls it and it is no command
 frame--z-order-lessp	absent	no shipped Lisp calls it and it is no command
 frame-child-frame-border-width	absent	no shipped Lisp calls it and it is no command
 frame-font-cache	absent	no shipped Lisp calls it and it is no command
-frame-id	needed	lane A (editing, windows, frames, minibuffer readers, display)
 frame-pointer-visible-p	needed	lane A (editing, windows, frames, minibuffer readers, display)
 frame-root-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 frame-scale-factor	absent	no shipped Lisp calls it and it is no command
@@ -119,16 +117,15 @@ frame-scroll-bar-height	needed	lane A (editing, windows, frames, minibuffer read
 frame-scroll-bar-width	needed	lane A (editing, windows, frames, minibuffer readers, display)
 frame-window-state-change	absent	no shipped Lisp calls it and it is no command
 fringe-bitmaps-at-pos	needed	lane A (editing, windows, frames, minibuffer readers, display)
-funcall-with-delayed-message	needed	lane A (editing, windows, frames, minibuffer readers, display)
 gap-position	absent	no shipped Lisp calls it and it is no command
 garbage-collect-heapsize	absent	no shipped Lisp calls it and it is no command
 get-buffer-xwidgets	absent	xwidgets: not built (no embedded WebKitGTK widgets)
 get-screen-color	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 get-unused-iso-final-char	absent	no shipped Lisp calls it and it is no command
-gfile-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
-gfile-monitor-name	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
-gfile-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
-gfile-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+gfile-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
+gfile-monitor-name	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
+gfile-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
+gfile-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
 gnutls-asynchronous-parameters	absent	no shipped Lisp calls it and it is no command
 gnutls-ciphers	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 gnutls-digests	absent	no shipped Lisp calls it and it is no command
@@ -162,7 +159,6 @@ haiku-send-message	absent	platform: Haiku build only
 haiku-set-mouse-absolute-pixel-position	absent	platform: Haiku build only
 haiku-write-node-attribute	absent	platform: Haiku build only
 handle-save-session	absent	no shipped Lisp calls it and it is no command
-handle-switch-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 imagemagick-types	absent	pinned GNU is built without ImageMagick: the type is not in image-types
 inotify-allocated-p	absent	inotify debugging helper with no shipped caller
 inotify-watch-list	absent	inotify debugging helper with no shipped caller
@@ -182,9 +178,9 @@ internal-set-lisp-face-attribute-from-resource	needed	lane A (editing, windows, 
 internal-stack-stats	absent	no shipped Lisp calls it and it is no command
 iso-charset	absent	no shipped Lisp calls it and it is no command
 kill-xwidget	absent	xwidgets: not built (no embedded WebKitGTK widgets)
-kqueue-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
-kqueue-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
-kqueue-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/romacs/vm/inotify.el)
+kqueue-add-watch	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
+kqueue-rm-watch	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
+kqueue-valid-p	absent	file notification: Romacs implements the inotify backend (lisp/vm/inotify.el)
 lcms-cam02-ucs	absent	Little CMS colour management: not linked
 lcms-cie-de2000	absent	Little CMS colour management: not linked
 lcms-jab->jch	absent	Little CMS colour management: not linked
@@ -231,7 +227,6 @@ native-elisp-load	needed	lane builtins-b (fonts, coding, images, system, process
 network-interface-info	absent	no shipped Lisp calls it and it is no command
 network-interface-list	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 newline-cache-check	absent	GNU C core debugging aid: Romacs's diagnostics are its own
-next-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 open-dribble-file	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 open-termscript	absent	terminal frames: Romacs has none (GUI and batch only)
 other-window-for-scrolling	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -249,7 +244,6 @@ pgtk-update-drop-status	needed	lane A (editing, windows, frames, minibuffer read
 play-sound-internal	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 position-symbol	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 posn-at-x-y	needed	lane A (editing, windows, frames, minibuffer readers, display)
-previous-frame	needed	lane A (editing, windows, frames, minibuffer readers, display)
 process-connection	absent	no shipped Lisp calls it and it is no command
 process-datagram-address	absent	no shipped Lisp calls it and it is no command
 re--describe-compiled	needed	lane A (editing, windows, frames, minibuffer readers, display)
@@ -262,7 +256,6 @@ redirect-debugging-output	absent	GNU C core debugging aid: Romacs's diagnostics 
 register-code-conversion-map	absent	no shipped Lisp calls it and it is no command
 remember-mouse-glyph	needed	lane A (editing, windows, frames, minibuffer readers, display)
 remove-pos-from-symbol	needed	lane A (editing, windows, frames, minibuffer readers, display)
-resize-mini-window-internal	needed	lane A (editing, windows, frames, minibuffer readers, display)
 serial-process-configure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-cursor-size	absent	no shipped Lisp calls it and it is no command
 set-frame-size-and-position-pixelwise	needed	lane A (editing, windows, frames, minibuffer readers, display)

@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; romacs-json.el replaces json.el's `json-read'.  GNU's own is still in
-;; lisp/gnu/json.el: these tests read it from that file, run it with
+;; lisp/json.el: these tests read it from that file, run it with
 ;; json.el's own reader throughout, and hold Romacs's to the same values,
 ;; points and errors, and to its cost.
 
@@ -311,8 +311,8 @@ provides, whatever the file is called."
       (delete-directory directory t))))
 
 (ert-deftest romacs-json-read-follows-json-without-romacs-on-the-load-path ()
-  "json.el loaded under a `load-path' that holds GNU's Lisp alone, as an
-init layer's build may have it, still gets Romacs's `json-read': the
+  "json.el loaded under a `load-path' that holds GNU's Lisp alone still
+gets Romacs's `json-read': the
 following file is loaded from its own directory, and the load does not
 signal for want of it."
   (let* ((json (locate-file-internal "json.el" load-path))
