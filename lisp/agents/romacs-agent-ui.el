@@ -1029,14 +1029,6 @@ quiet call: its thinking is then for `romacs-agent-chat-expand-all'."
 ;; (romacs-agent-rows.el).  The reply hint is ↩, dim until the message is
 ;; answered, then ↩ ✓, which RET follows to the reply.
 
-(defvar-local romacs-agent-ui--received nil
-  "Each message this chat shows by its id: (SENDER . HINT), the sender's
-name and a marker at its reply hint, nil where nothing can answer it.")
-
-(defun romacs-agent-ui--received ()
-  "This chat's `romacs-agent-ui--received', made when first wanted."
-  (or romacs-agent-ui--received (setq romacs-agent-ui--received (make-hash-table :test #'equal))))
-
 (defvar romacs-agent-ui--reply-link-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map romacs-agent-chat-transcript-map)
@@ -1045,11 +1037,12 @@ name and a marker at its reply hint, nil where nothing can answer it.")
     map)
   "Keys of an answered message's hint: RET goes to the reply.")
 
-(defun romacs-agent-ui--reply-hint (answered &optional reply)
+(defun romacs-agent-ui--reply-hint (answered &optional reply message)
   "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED, a link to the
-REPLY's row, the id of its call, when this chat shows it."
+REPLY's row, the id of its call, when this chat shows it.  It names
+MESSAGE, its id (`romacs-agent-reply'), for the answer to find it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
-              'romacs-agent-reply t
+              'romacs-agent-reply (or message t)
               'help-echo (cond (reply (substitute-command-keys
                                        "Answered: \\<romacs-agent-ui--reply-link-map>\\[romacs-agent-chat-goto-reply] goes to the reply"))
                                 (answered "Answered") (t "Not answered yet"))
@@ -1072,11 +1065,7 @@ its text."
      (concat (propertize (concat "✉ " name) 'face 'romacs-agent-message)
              (propertize (format " · %s" (plist-get message :kind)) 'face 'romacs-agent-dim)
              (if known (concat "  " (romacs-agent-ui--thread-link sender)) "")
-             (if answerable (concat "  " (romacs-agent-ui--reply-hint nil)) "")))
-    (let ((hint (and answerable (text-property-any (save-excursion (goto-char romacs-agent-ui--end)
-                                                                   (line-beginning-position 0))
-                                                   romacs-agent-ui--end 'romacs-agent-reply t))))
-      (puthash id (cons name (and hint (copy-marker hint))) (romacs-agent-ui--received)))
+             (if answerable (concat "  " (romacs-agent-ui--reply-hint nil nil id)) "")))
     (romacs-agent-ui--insert (concat (romacs-agent-rows-quoted (plist-get message :text)) "\n"))))
 
 (defun romacs-agent-ui--sender-name (from)
@@ -1092,16 +1081,17 @@ known, else the name it sent."
           :state (plist-get wake :state) :result (or (plist-get message :text) ""))))
 
 (defun romacs-agent-ui--replied (id &optional reply)
-  "Show message ID answered, where this chat shows its card: by REPLY, a
+  "Show message ID answered, where this chat shows its card, found back
+from its end by its reply hint (`romacs-agent-reply'): by REPLY, a
 marker at the reply's row, when this chat shows it."
-  (when-let* ((hint (cdr (gethash id (romacs-agent-ui--received)))))
+  (when-let* ((found (save-excursion (goto-char (or romacs-agent-ui--end (point-max)))
+                                     (text-property-search-backward 'romacs-agent-reply id #'equal))))
     (save-excursion
-      (let* ((inhibit-read-only t) (start (marker-position hint))
+      (let* ((inhibit-read-only t) (start (prop-match-beginning found))
              (answered (romacs-agent-ui--reply-hint
-                        t (and reply (get-text-property (min (1+ reply) (point-max)) 'romacs-agent-tool)))))
-        (delete-region start (next-single-property-change start 'romacs-agent-reply nil (point-max)))
-        (romacs-agent-ui--insert-at start answered)
-        (set-marker hint start)))))
+                        t (and reply (get-text-property (min (1+ reply) (point-max)) 'romacs-agent-tool)) id)))
+        (delete-region start (prop-match-end found))
+        (romacs-agent-ui--insert-at start answered)))))
 
 (defun romacs-agent-ui--table-width ()
   "Columns a table may take: the window's pixels in the fixed-pitch font's
