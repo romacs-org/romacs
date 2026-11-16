@@ -271,10 +271,12 @@ turns, and its journal's file; a state root of its own."
 
 (ert-deftest romacs-agent-events-compaction-drops-a-codex-commands-streamed-output ()
   ;; A Codex command whose completed item came: its streamed output is gone
-  ;; (the item holds it); one never completed keeps its own.
+  ;; (the item holds it); one never completed keeps its own.  Removed in
+  ;; windows of two seqs, and imported two records a transaction.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
-        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--compact-window 2) (romacs-agent-events--chunk 2))
     (romacs-agent-events-tests--with-session
      0
      (lambda (session journal)
@@ -292,6 +294,41 @@ turns, and its journal's file; a state root of its own."
        (romacs-agent-events-import session)
        (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
        (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))))))
+
+(ert-deftest romacs-agent-events-a-migration-job-moves-what-is-left ()
+  ;; A job moves a session in a journal to SQLite, compacted, its turns
+  ;; rows; the queue leaves one loaded here or run by a supervisor, and a
+  ;; launch leaves a journal too long to move on the editor.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     3
+     (lambda (session journal)
+       (let ((dir (romacs-agent-dir session)) (id (romacs-agent-id session)))
+         ;; Loaded here: not queued.
+         (should-not (member dir (romacs-agent-events--journaled)))
+         ;; A launch: too long to move here, left in its journal.
+         (let ((romacs-agent-events-store t) (romacs-agent-fold-bytes 10))
+           (romacs-agent-events-own session)
+           (should (file-exists-p journal))
+           (should-not (romacs-agent-events-p session)))
+         (remhash id romacs-agent--sessions)
+         (should (member dir (romacs-agent-events--journaled)))
+         ;; Its supervisor runs: not queued.
+         (let ((socket (romacs-agent--host-socket id)))
+           (make-directory (file-name-directory socket) t)
+           (write-region "" nil socket nil 'silent)
+           (should-not (member dir (romacs-agent-events--journaled)))
+           (should-not (romacs-agent-events--migrate-job (list dir)))
+           (delete-file socket))
+         (should (equal (romacs-agent-events--migrate-job (list dir)) (list id)))
+         (should-not (file-exists-p journal))
+         (should (romacs-agent-events-p session))
+         (should (= (caar (sqlite-select (romacs-agent-events--db) "select count(*) from turns where session = ? and first_seq > 0" (list id))) 3))
+         (should-not (member dir (romacs-agent-events--journaled))))))))
 
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
   ;; Its supervisor's socket there when compacting holds the write lock:
