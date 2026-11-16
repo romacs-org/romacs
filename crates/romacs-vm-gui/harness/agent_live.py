@@ -1552,7 +1552,9 @@ def mcp_tour(args, base):
                 return text
 
             on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
-            for name in [n for n in names if n not in on_task + ('romacs_restart_request', 'romacs_restart')]:
+            # A restart would end the tour's server: the `restart' workflows call it.
+            elsewhere = ('romacs_restart',)
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',) + elsewhere]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
@@ -1573,7 +1575,8 @@ def mcp_tour(args, base):
                   'instructions': instructions, 'help': helped[:600],
                   'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
                   'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
-                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent
+                                 and n not in elsewhere]}
         result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
                         and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
                         and helped.startswith('core:') and 'agents:' in helped
