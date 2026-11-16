@@ -218,12 +218,12 @@ journal one turn long."
                       ((symbol-function 'romacs-agent--sweep) #'ignore)
                       ((symbol-function 'romacs-agent-store-fill-soon) #'ignore))
               (romacs-agent-restore)
-              (should-not (romacs-agent-get (id 'quiet)))
-              (should-not (romacs-agent-get (id 'ending)))
+              (should-not (romacs-agent-loaded (id 'quiet)))
+              (should-not (romacs-agent-loaded (id 'ending)))
               (dolist (name '(busy wanting behind journal)) (should (romacs-agent-get (id name))))
               ;; Nothing written: still rows.
               (romacs-agent--quiet-tick)
-              (should-not (romacs-agent-get (id 'quiet)))
+              (should-not (romacs-agent-loaded (id 'quiet)))
               ;; Its supervisor writes: loaded, attached.  The other's writes
               ;; and ends: loaded all the same.
               (append 'quiet 3)
