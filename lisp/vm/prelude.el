@@ -939,6 +939,20 @@ X and Y are nil when the mouse is not over the frame, or there is none."
                          (floor (- (cdr at) border) (frame-char-height))))
       (romacs--mouse nil nil))))
 
+(defun handle-switch-frame (event)
+  "Handle a switch-frame event EVENT.
+Switch-frame events are usually bound to this function.
+A switch-frame event is an event Emacs sends itself to
+indicate that input is arriving in a new frame. It does not
+necessarily represent user-visible input focus."
+  (interactive "^e")
+  ;; frame.c Fhandle_switch_frame: the prefix argument the command loop
+  ;; just cleared is kept, and do_switch_frame selects the frame.
+  (setq prefix-arg current-prefix-arg)
+  (run-hooks 'mouse-leave-buffer-hook)
+  (let ((frame (car (cdr-safe event))))
+    (if (frame-live-p frame) (select-frame frame) nil)))
+
 (defun mouse-position-in-root-frame ()
   "Return (X . Y), `mouse-position' on the root frame.
 Romacs's frames measure from the root frame's corner, as a Wayland

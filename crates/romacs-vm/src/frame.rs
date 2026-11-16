@@ -6,6 +6,10 @@
 //! windows (DIVERGENCES.md VM2-CHILD-FRAME).
 use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
+/// keyboard.c internal_last_event_frame.
+const LAST_EVENT_FRAME: &str = "#:vm2-last-event-frame";
+/// keyboard.c unread_switch_frame.
+const UNREAD_SWITCH_FRAME: &str = "#:vm2-unread-switch-frame";
 /// The fringe width a frame parameter of nil or a non-integer gives
 /// (frame.c gui_set_left_fringe).
 pub(crate) const DEFAULT_FRINGE: u32 = 8;
@@ -59,6 +63,9 @@ pub(super) struct Frame {
     /// `internal-border-width' around its text area (frame.h:1796).
     pub border: u32,
     pub visible: bool,
+    /// Whether a top-level frame is iconified (`frame-visible-p' says
+    /// `icon'): invisible, its window minimized.
+    pub iconified: bool,
     /// Stacking among siblings: a higher one is drawn above a lower one.
     pub z: i64,
     /// GNU `f->focus_frame' (`redirect-frame-focus'), nil when unredirected.
@@ -92,7 +99,7 @@ pub(super) struct Frame {
     /// A top-level frame's native geometry.
     pub native: TopGeometry,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers, status_bar_lines, status_bar_top, native });
+romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers, status_bar_lines, status_bar_top, native, iconified });
 
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
@@ -216,7 +223,7 @@ impl Vm {
             parameters: vec![name], live: true, id: 1, parent: Value::NIL,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: 0, focus: Value::NIL,
             alpha_background: 1.0, hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, status_bar_top: false,
-            native: TopGeometry::default(),
+            native: TopGeometry::default(), iconified: false,
         })));
         let Object::Terminal(t) = self.object_mut(terminal)? else { unreachable!() };
         t.frame = frame;
@@ -244,7 +251,7 @@ impl Vm {
             root, selected: root, minibuffer, terminal, parameters, live: true, id, parent,
             left: 0, top: 0, width: 0, height: 0, border: 0, visible: false, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
             hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, status_bar_top: false,
-            native: TopGeometry::default(),
+            native: TopGeometry::default(), iconified: false,
         })));
         self.window_mut(root)?.frame = frame;
         let mut frames = self.frames();
@@ -252,6 +259,193 @@ impl Vm {
         self.set_frames(&frames);
         self.set_child_geometry(frame, geometry)?;
         Ok(frame)
+    }
+    /// A new visible top-level frame on the selected frame's terminal
+    /// showing BUFFER in its one window, over a mini-window of its own or
+    /// MINI, another frame's it borrows (frame.c make_frame,
+    /// make_frame_without_minibuffer); PARAMETERS stored as given, newest
+    /// first. Its geometry is set by the caller.
+    pub(super) fn allocate_top_frame(&mut self, buffer: Value, mini: Option<Value>,
+                                     parameters: Vec<(Value, Value)>) -> Result<Value> {
+        self.ensure_windows()?;
+        let terminal = self.frame(self.selected_top_frame())?.terminal;
+        let root = self.allocate_window(buffer)?;
+        let minibuffer = match mini {
+            Some(window) => window,
+            None => {
+                // make_frame: the mini-window shows the first minibuffer.
+                let buffer = match self.named_buffer(" *Minibuf-0*") {
+                    Some(buffer) => buffer,
+                    None => self.create_named_buffer(" *Minibuf-0*", false)?,
+                };
+                let window = self.allocate_window(buffer)?;
+                self.window_mut(window)?.mini = true;
+                window
+            }
+        };
+        self.window_state.next_frame += 1;
+        let id = self.window_state.next_frame;
+        let frame = self.allocate_object(Object::Frame(Box::new(Frame {
+            root, selected: root, minibuffer, terminal, parameters, live: true, id, parent: Value::NIL,
+            left: 0, top: 0, width: 0, height: 0, border: 0, visible: true, z: id as i64, focus: Value::NIL, alpha_background: 1.0,
+            hosts_minibuffer: false, fringes: [DEFAULT_FRINGE; 2], tab_bar_lines: 0, dividers: [0; 2], status_bar_lines: 0, status_bar_top: false,
+            native: TopGeometry::default(), iconified: false,
+        })));
+        self.window_mut(root)?.frame = frame;
+        if mini.is_none() { self.window_mut(minibuffer)?.frame = frame; }
+        let mut frames = self.frames();
+        frames.insert(0, frame);
+        self.set_frames(&frames);
+        self.display_state.version += 1;
+        Ok(frame)
+    }
+    /// keyboard.c internal_last_event_frame: the frame the last input
+    /// event came from, nil before any.
+    pub(crate) fn last_event_frame(&self) -> Value {
+        self.names.get(LAST_EVENT_FRAME).map(|&i| self.slots[i].value).filter(|&v| v != Value::UNBOUND).unwrap_or(Value::NIL)
+    }
+    /// Forget the last event's frame (internal_last_event_frame nil), so the
+    /// next event names its frame anew; `last-event-frame' keeps it.
+    fn forget_last_event_frame(&mut self) {
+        let slot = self.slot(LAST_EVENT_FRAME);
+        self.slots[slot].value = Value::NIL;
+    }
+    /// Note FRAME as the last event's, and `last-event-frame' with it.
+    fn set_last_event_frame(&mut self, frame: Value) {
+        for name in [LAST_EVENT_FRAME, "last-event-frame"] {
+            let slot = self.slot(name);
+            self.slots[slot].value = frame;
+        }
+    }
+    /// keyboard.c make_lispy_switch_frame: `(switch-frame FRAME)'.
+    fn switch_frame_event(&mut self, frame: Value) -> Value {
+        let head = self.intern("switch-frame");
+        self.list_value(&[head, frame])
+    }
+    /// kbd_buffer_get_event for an event from the frame whose id is ID: its
+    /// focus frame (`redirect-frame-focus'), else it, becomes the last
+    /// event's; when that is neither the last event's nor the selected
+    /// frame, the `switch-frame' event that is read before it.
+    pub(crate) fn note_event_frame(&mut self, id: u64) -> Option<Value> {
+        let frame = self.frame_of_id(id).ok()?;
+        let focus = self.frame(frame).map_or(Value::NIL, |f| f.focus);
+        let frame = if focus != Value::NIL && self.frame(focus).is_ok_and(|f| f.live) { focus } else { frame };
+        let switching = frame != self.last_event_frame() && frame != self.frame_value_peek();
+        self.set_last_event_frame(frame);
+        switching.then(|| self.switch_frame_event(frame))
+    }
+    /// keyboard.c Finternal_handle_focus_in for FRAME: the focus moving to
+    /// a frame neither the last event's nor selected queues its
+    /// `switch-frame' (`unread_switch_frame'), as one already queued is
+    /// replaced.
+    pub(crate) fn handle_focus_in(&mut self, frame: Value) {
+        let switching = frame != self.last_event_frame() && frame != self.frame_value_peek();
+        self.set_last_event_frame(frame);
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        if switching || !matches!(self.slots[slot].value, Value::NIL | Value::UNBOUND) {
+            let event = self.switch_frame_event(frame);
+            let slot = self.slot(UNREAD_SWITCH_FRAME);
+            self.slots[slot].value = event;
+        }
+    }
+    /// read_char's `unread_switch_frame', taken: the `switch-frame' event a
+    /// focus change or a delayed key sequence left, else nil.
+    pub(crate) fn take_unread_switch_frame(&mut self) -> Value {
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        match std::mem::replace(&mut self.slots[slot].value, Value::NIL) { Value::UNBOUND => Value::NIL, event => event }
+    }
+    /// read_key_sequence's `delayed_switch_frame' at its end: EVENT is
+    /// read next.
+    pub(crate) fn set_unread_switch_frame(&mut self, event: Value) {
+        let slot = self.slot(UNREAD_SWITCH_FRAME);
+        self.slots[slot].value = event;
+    }
+    /// Whether the host shows more top-level frames than the first.
+    pub(crate) fn host_top_level_frames(&mut self) -> bool {
+        self.host_input.as_mut().is_some_and(|host| host.top_level_frames())
+    }
+    /// frame.el `frame-use-time': the highest `window-use-time' of any
+    /// window in FRAME's window tree, 0 for none.
+    pub(crate) fn frame_use_time(&self, frame: Value) -> u64 {
+        let mut leaves = vec![];
+        let root = self.frame(frame).map_or(Value::NIL, |f| f.root);
+        if self.window_leaves(root, &mut leaves).is_err() { return 0; }
+        leaves.into_iter().filter_map(|w| self.window(w).ok().map(|w| w.use_time)).max().unwrap_or(0)
+    }
+    /// Live top-level frames, newest first.
+    pub(crate) fn top_frames(&self) -> Vec<Value> {
+        self.frames().into_iter().filter(|&f| self.frame(f).is_ok_and(|f| f.live && f.parent == Value::NIL)).collect()
+    }
+    /// frame.c other_frames: whether a top-level frame other than FRAME,
+    /// without a `delete-before' parameter, is visible or iconified, or
+    /// with FORCE exists at all: what lets FRAME be deleted. Child frames
+    /// count for nothing.
+    pub(super) fn other_frames(&mut self, frame: Value, force: bool) -> Result<bool> {
+        let delete_before = self.intern("delete-before");
+        Ok(self.top_frames().into_iter().any(|f| f != frame && self.frame(f).is_ok_and(|x| {
+            let before = x.parameters.iter().any(|&(k, v)| k == delete_before && v != Value::NIL);
+            !before && (x.visible || x.iconified || force)
+        })))
+    }
+    /// A live frame other than FRAME whose minibuffer window is on FRAME:
+    /// one that would lose it (frame.c's surrogate minibuffer frame).
+    pub(super) fn minibuffer_borrower(&self, frame: Value) -> Option<Value> {
+        self.frames().into_iter().find(|&f| {
+            f != frame && !self.frame_ancestors(f).contains(&frame)
+                && self.frame(f).ok().and_then(|x| self.window(x.minibuffer).ok()).is_some_and(|w| w.frame == frame)
+        })
+    }
+    /// Delete top-level FRAME and its descendants (frame.c delete_frame,
+    /// once its checks and hooks ran and another frame was selected): their
+    /// windows die, its own mini-window with them.
+    pub(super) fn delete_top_frame(&mut self, frame: Value) -> Result<()> {
+        if !self.frame(frame)?.live { return Ok(()); }
+        let children: Vec<Value> = self.frames().into_iter().filter(|&f| self.frame(f).is_ok_and(|f| f.parent == frame)).collect();
+        for child in children { self.delete_child_frame(child)?; }
+        let (root, minibuffer) = { let f = self.frame(frame)?; (f.root, f.minibuffer) };
+        self.retire_window(root)?;
+        if self.window(minibuffer).is_ok_and(|w| w.frame == frame) { self.retire_window(minibuffer)?; }
+        let f = self.frame_mut(frame)?;
+        (f.live, f.visible, f.iconified) = (false, false, false);
+        (f.root, f.selected) = (Value::NIL, Value::NIL);
+        let frames: Vec<Value> = self.frames().into_iter().filter(|&f| f != frame).collect();
+        self.set_frames(&frames);
+        self.display_state.version += 1;
+        Ok(())
+    }
+    /// frame.c candidate_frame: whether `next-frame' with MINIBUF accepts
+    /// CANDIDATE. One terminal and keyboard hold every frame here.
+    fn candidate_frame(&mut self, candidate: Value, minibuf: Value) -> Result<bool> {
+        let no_other = self.intern("no-other-frame");
+        let visible = self.intern("visible");
+        let c = self.frame(candidate)?;
+        if c.parameters.iter().any(|&(k, v)| k == no_other && v != Value::NIL) { return Ok(false); }
+        Ok(if minibuf == Value::NIL {
+            true
+        } else if minibuf == visible {
+            c.visible
+        } else if let Ok(w) = self.window(minibuf) {
+            let focus = c.focus;
+            c.minibuffer == minibuf || w.frame == candidate || (focus != Value::NIL && w.frame == focus)
+        } else if minibuf.integer_value() == Some(0) {
+            c.visible || c.iconified
+        } else {
+            true
+        })
+    }
+    /// frame.c next_frame and prev_frame: the frame after (BACKWARD,
+    /// before) FRAME in the frame list that MINIBUF accepts, else FRAME.
+    pub(super) fn next_frame(&mut self, frame: Value, minibuf: Value, backward: bool) -> Result<Value> {
+        let mut frames = self.frames();
+        if backward { frames.reverse(); }
+        let (mut passed, mut first) = (false, None);
+        for f in frames {
+            if f == frame { passed = true; continue; }
+            if !self.candidate_frame(f, minibuf)? { continue; }
+            if passed { return Ok(f); }
+            first.get_or_insert(f);
+        }
+        Ok(first.unwrap_or(frame))
     }
     /// Place and size child FRAME, then lay its windows out in the text
     /// area inside its border, which its fringes widen as they do in GNU
@@ -348,8 +542,20 @@ impl Vm {
     }
     /// Select FRAME and its selected window (frame.c do_switch_frame).
     pub(super) fn select_frame_value(&mut self, frame: Value, record: bool) -> Result<()> {
+        let previous = self.frame_value_peek();
         let window = self.frame(frame)?.selected;
         self.select_window_value(window, record)?;
+        // do_switch_frame: the next event makes a `switch-frame' to the
+        // frame it comes from, so typing selecting a frame (`(select-window
+        // (frame-root-window (make-frame)))') did not follow still reaches
+        // the frame typed in; selecting an ancestor of the frame before
+        // keeps it, as typing in a child frame is its root's.
+        if frame != previous && !self.frame_ancestors(previous).contains(&frame) {
+            self.forget_last_event_frame();
+        }
+        // do_switch_frame: no frame here is minibuffer-only.
+        let slot = self.slot("#:vm2-last-nonminibuffer-frame");
+        self.slots[slot].value = frame;
         Ok(())
     }
     /// Whether FRAME shows: it and its ancestors are live and visible.
@@ -420,6 +626,130 @@ fn internal(e: String) -> Fault { Fault::Error(e) }
 /// The frame surface `prims/frame.rs' declares beyond window.rs's: child
 /// frames (GNU frame.c and pgtkfns.c x-create-frame).
 impl crate::window::Windows<'_> {
+    /// Finternal_handle_focus_in for FRAME (frame.rs `Vm::handle_focus_in').
+    pub(crate) fn handle_focus_in(&mut self, frame: Value) { self.vm.handle_focus_in(frame) }
+    pub(crate) fn take_unread_switch_frame(&mut self) -> Value { self.vm.take_unread_switch_frame() }
+    pub(crate) fn unread_switch_frame_pending(&mut self) -> bool {
+        let slot = self.vm.slot(UNREAD_SWITCH_FRAME);
+        !matches!(self.vm.slots[slot].value, Value::NIL | Value::UNBOUND)
+    }
+    pub(crate) fn set_unread_switch_frame(&mut self, event: Value) { self.vm.set_unread_switch_frame(event) }
+    /// Whether the host shows top-level frames beyond the first.
+    pub(crate) fn host_top_level_frames(&mut self) -> bool {
+        self.vm.host_top_level_frames()
+    }
+    /// The selected frame's top-level frame.
+    pub(crate) fn selected_top_frame(&mut self) -> Value {
+        self.vm.selected_top_frame()
+    }
+    /// FRAME's display identity (`frame-id').
+    pub(crate) fn frame_display_id(&mut self, frame: Value) -> std::result::Result<u64, Fault> {
+        Ok(self.vm.frame(frame).map_err(internal)?.id)
+    }
+    /// The frame window V is on.
+    pub(crate) fn window_frame_of(&mut self, v: Value) -> Out {
+        Ok(self.vm.window(v).map_err(internal)?.frame)
+    }
+    /// Whether V is a live minibuffer window.
+    pub(crate) fn is_minibuffer_window(&mut self, v: Value) -> std::result::Result<bool, Fault> {
+        Ok(self.vm.window(v).is_ok_and(|w| w.mini && w.live()))
+    }
+    /// The minibuffer window a frame made with `(minibuffer . nil)' uses
+    /// (make_frame_without_minibuffer): `default-minibuffer-frame''s when
+    /// it is a live frame with one of its own, else the selected frame's.
+    pub(crate) fn default_minibuffer_window(&mut self) -> Out {
+        let slot = self.vm.slot("default-minibuffer-frame");
+        let named = self.vm.variable_value(slot).map_err(internal)?;
+        let own = |vm: &Vm, f: Value| vm.frame(f).ok().filter(|x| x.live).map(|x| x.minibuffer)
+            .filter(|&m| vm.window(m).is_ok_and(|w| w.frame == f));
+        if let Some(window) = own(self.vm, named) { return Ok(window); }
+        Ok(self.vm.frame(self.vm.frame_value_peek()).map_err(internal)?.minibuffer)
+    }
+    /// A new top-level frame showing the current buffer (another while
+    /// that is a minibuffer), over MINI or a mini-window of its own, with
+    /// PARAMETERS stored, laid out at the selected frame's size until the
+    /// caller sizes it.
+    pub(crate) fn create_top_frame(&mut self, mini: Option<Value>, parameters: Vec<(Value, Value)>) -> Out {
+        let current = self.vm.slots[self.vm.buffer_slot].value;
+        let buffer = if self.vm.minibuffer_window_buffer() == Some(current) {
+            self.vm.named_buffer("*scratch*").unwrap_or(current)
+        } else { current };
+        let frame = self.vm.allocate_top_frame(buffer, mini, parameters).map_err(internal)?;
+        self.vm.relayout_top_frame(frame).map_err(internal)?;
+        Ok(frame)
+    }
+    /// Size top-level FRAME for a text area WIDTH by HEIGHT pixels: its
+    /// native size adds its fringes, tab bar and internal border.
+    pub(crate) fn size_top_frame(&mut self, frame: Value, width: u32, height: u32) -> std::result::Result<(), Fault> {
+        let (line, column) = (self.vm.window_state.line.max(1), self.vm.window_state.column.max(1));
+        let [left, right] = self.vm.frame_fringes(frame).map_err(internal)?;
+        let border = 2 * self.vm.host_border(frame);
+        let tab_bar = self.vm.tab_bar_lines(frame) * line;
+        let native = (width.max(2 * column) + left + right + border, height.max(2 * line) + tab_bar + border);
+        self.vm.set_top_frame_geometry(frame, native.0, native.1, line, column).map_err(internal)
+    }
+    /// Show top-level FRAME, or hide it, ICONIFIED or not. A frame
+    /// without a window system stays visible, as a terminal frame does, and
+    /// so does one whose host does not manage its frames' windows.
+    pub(crate) fn set_top_frame_visibility(&mut self, frame: Value, visible: bool, iconified: bool) -> std::result::Result<(), Fault> {
+        if !self.vm.window_system_open() || !self.vm.host_top_level_frames() { return Ok(()); }
+        let f = self.vm.frame_mut(frame).map_err(internal)?;
+        let iconified = iconified && !visible;
+        if (f.visible, f.iconified) != (visible, iconified) {
+            (f.visible, f.iconified) = (visible, iconified);
+            self.vm.display_state.version += 1;
+        }
+        Ok(())
+    }
+    /// Whether top-level FRAME is iconified.
+    pub(crate) fn frame_iconified(&mut self, frame: Value) -> std::result::Result<bool, Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        Ok(self.vm.frame(frame).map_err(internal)?.iconified)
+    }
+    /// frame.c other_frames for FRAME.
+    pub(crate) fn other_frames(&mut self, frame: Value, force: bool) -> std::result::Result<bool, Fault> {
+        self.vm.other_frames(frame, force).map_err(internal)
+    }
+    /// `next-frame' (BACKWARD, `previous-frame') from FRAME, nil for the
+    /// selected one, with MINIFRAME (frame.c:2415).
+    pub(crate) fn next_frame(&mut self, frame: Value, miniframe: Value, backward: bool) -> Out {
+        let frame = self.decode_live_frame(frame)?;
+        self.vm.next_frame(frame, miniframe, backward).map_err(internal)
+    }
+    /// A live frame other than FRAME whose minibuffer window is FRAME's.
+    pub(crate) fn minibuffer_borrower(&mut self, frame: Value) -> Option<Value> {
+        self.vm.minibuffer_borrower(frame)
+    }
+    /// The frame that takes the selection from top-level FRAME, about to
+    /// go (frame.c delete_frame): with MRU the most recently used other
+    /// visible frame (frame.el `get-mru-frame', by `frame-use-time'), else
+    /// the first other visible top-level frame, else any other.
+    pub(crate) fn successor_frame(&mut self, frame: Value, mru: bool) -> Out {
+        let vm = &*self.vm;
+        let usable = |f: Value| f != frame && vm.top_frame(f) != frame && vm.frame(f).is_ok_and(|x| x.live && x.visible);
+        let latest = mru.then(|| vm.frames().into_iter().filter(|&f| usable(f)).max_by_key(|&f| vm.frame_use_time(f))).flatten();
+        let others: Vec<Value> = vm.top_frames().into_iter().filter(|&f| f != frame).collect();
+        let visible = others.iter().copied().find(|&f| usable(f));
+        latest.or(visible).or(others.first().copied()).ok_or_else(|| Fault::Error("Attempt to delete the only frame".into()))
+    }
+    /// Delete top-level FRAME, no longer selected, and its descendants;
+    /// `last-nonminibuffer-frame' leaves it for the selected frame.
+    pub(crate) fn delete_top_frame(&mut self, frame: Value) -> std::result::Result<(), Fault> {
+        self.vm.delete_top_frame(frame).map_err(internal)?;
+        let slot = self.vm.slot("#:vm2-last-nonminibuffer-frame");
+        if self.vm.frame(self.vm.slots[slot].value).map_or(true, |f| !f.live) {
+            self.vm.slots[slot].value = self.vm.frame_value_peek();
+        }
+        Ok(())
+    }
+    /// Ask the host to focus top-level FRAME's window (`x-focus-frame').
+    pub(crate) fn focus_frame(&mut self, frame: Value) -> std::result::Result<(), Fault> {
+        let frame = self.decode_live_frame(frame)?;
+        let top = self.vm.top_frame(frame);
+        let id = self.vm.frame(top).map_err(internal)?.id;
+        if let Some(host) = self.vm.host_input.as_mut() { host.focus_frame(id); }
+        Ok(())
+    }
     /// A live child frame, or GNU's error for the top-level frame CALLER cannot
     /// change.
     fn child(&mut self, frame: Value) -> std::result::Result<Option<Value>, Fault> {

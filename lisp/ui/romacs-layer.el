@@ -88,11 +88,14 @@ foreground."
   "BUFFER -> FRAME: the child frame showing each layer's buffer.  A
 buffer's `kill-buffer-hook' deletes its layer and its entry.")
 
+(defun romacs-layer--root-of (frame)
+  "FRAME's top-level ancestor, or FRAME when it is top-level."
+  (while (frame-parent frame) (setq frame (frame-parent frame)))
+  frame)
+
 (defun romacs-layer--root-frame ()
   "The frame layers are shown over: the selected frame's top-level ancestor."
-  (let ((frame (selected-frame)))
-    (while (frame-parent frame) (setq frame (frame-parent frame)))
-    frame))
+  (romacs-layer--root-of (selected-frame)))
 
 (defun romacs-layer--forget ()
   "Delete the current buffer's layer, as the buffer is killed."
@@ -104,9 +107,11 @@ buffer's `kill-buffer-hook' deletes its layer and its entry.")
 (put 'romacs-layer--forget 'permanent-local-hook t)
 
 (defun romacs-layer--frame-of (buffer)
-  "The live child frame showing BUFFER's layer, if it has one."
+  "The live child frame showing BUFFER's layer over the selected frame's
+top-level frame, if it has one there."
   (let ((frame (gethash buffer romacs-layer--frames)))
-    (and (frame-live-p frame) frame)))
+    (and (frame-live-p frame) (eq (romacs-layer--root-of frame) (romacs-layer--root-frame))
+         frame)))
 
 (defvar romacs-layer--display-table nil
   "`romacs-layer-display-table', once made.")
@@ -136,8 +141,13 @@ its continued rows unmarked (`romacs-layer-display-table')."
                 buffer-display-table (romacs-layer-display-table))))
 
 (defun romacs-layer--frame (buffer)
-  "A live child frame for BUFFER, made once and kept for reuse."
+  "A live child frame for BUFFER over the selected frame's top-level
+frame, made once there and kept for reuse.  A buffer shows in one layer:
+the one it had over another top-level frame goes."
   (or (romacs-layer--frame-of buffer)
+      (let ((old (gethash buffer romacs-layer--frames)))
+        (when (frame-live-p old) (delete-frame old))
+        nil)
       (let ((frame (let ((after-make-frame-functions nil))
                      (make-frame `((parent-frame . ,(romacs-layer--root-frame))
                                    (minibuffer . ,(minibuffer-window))

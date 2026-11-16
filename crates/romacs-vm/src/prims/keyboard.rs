@@ -160,15 +160,15 @@ fn abort_recursive_edit(cx) -> Step { enter(cx, "romacs--exit-recursive-edit", v
 defsubr! { name = "read-key-sequence", gnu = "keyboard.c:11961", effect = Global,
 fn read_key_sequence(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
                      can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = (can_return_switch_frame, disable_text_conversion);
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop], EVENT_ARRAY)
+    let _ = disable_text_conversion;
+    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], EVENT_ARRAY)
 }}
 
 defsubr! { name = "read-key-sequence-vector", gnu = "keyboard.c:12022", effect = Global,
 fn read_key_sequence_vector(cx, prompt: Value; optional continue_echo: Value, dont_downcase_last: Value,
                             can_return_switch_frame: Value, cmd_loop: Value, disable_text_conversion: Value) -> Step {
-    let _ = (can_return_switch_frame, disable_text_conversion);
-    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop], DONE)
+    let _ = disable_text_conversion;
+    enter(cx, "romacs--read-key-sequence-vs", vec![prompt, continue_echo, dont_downcase_last, cmd_loop, can_return_switch_frame], DONE)
 }}
 
 // keyboard.c read_filtered_event (NO-SWITCH-FRAME, ASCII-REQUIRED, ERROR-NONASCII).

@@ -1414,6 +1414,9 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// A host wait in progress, its host moved out of `host_input`.
     host_wait: Option<host_input::HostWait>,
+    /// A host event a `switch-frame' event went before, and the id of the
+    /// top-level frame it came from: the next read's (host_input.rs).
+    deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1900,6 +1903,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     suspended,
     host_input,
     host_wait,
+    deferred_event,
     layout_host,
     display,
     visual,
@@ -2000,6 +2004,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
+            deferred_event: None,
             layout_host: None,
             display: None,
             visual: Box::default(),

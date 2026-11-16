@@ -321,13 +321,18 @@ fn window_text_height(cx; optional window: Value, pixelwise: Value) {
     cx.windows().window_text_size(window, pixelwise, false)
 }}
 
-// Frame visibility (frame.c). The host frame is always visible, as a
-// terminal frame is in GNU batch: requests change nothing, and making it
-// invisible needs FORCE. A child frame shows and hides (VM2-CHILD-FRAME).
+// Frame visibility (frame.c). A top-level frame shows, hides and
+// iconifies, while another visible or iconified top-level frame remains
+// for hiding it (frame.c other_frames); a child frame shows and hides
+// (VM2-CHILD-FRAME).
 defsubr! { name = "make-frame-visible", gnu = "frame.c:3505", effect = Global,
 fn make_frame_visible(cx; optional frame: Value) {
     let frame = cx.windows().decode_live_frame(frame)?;
-    cx.windows().set_frame_visible(frame, true)?;
+    if cx.windows().is_child_frame(frame)? {
+        cx.windows().set_frame_visible(frame, true)?;
+    } else {
+        cx.windows().set_top_frame_visibility(frame, true, false)?;
+    }
     Ok(frame)
 }}
 
@@ -336,24 +341,29 @@ fn make_frame_invisible(cx; optional frame: Value, force: Value) {
     let frame = cx.windows().decode_live_frame(frame)?;
     if cx.windows().is_child_frame(frame)? {
         cx.windows().set_frame_visible(frame, false)?;
-    } else if force == Value::NIL {
-        return Err(Fault::Error("Attempt to make invisible the sole visible or iconified frame".into()));
+    } else {
+        if force == Value::NIL && !cx.windows().other_frames(frame, false)? {
+            return Err(Fault::Error("Attempt to make invisible the sole visible or iconified frame".into()));
+        }
+        cx.windows().set_top_frame_visibility(frame, false, false)?;
     }
     Ok(Value::NIL)
 }}
 
 // A child frame iconifies as `iconify-child-frame' says; its default makes
-// the top-level frame iconify, which the host frame does not.
+// the top-level frame iconify. A top-level frame's window is minimized.
 defsubr! { name = "iconify-frame", gnu = "frame.c:3591", effect = Global,
 fn iconify_frame(cx; optional frame: Value) {
-    cx.windows().decode_live_frame(frame)?;
+    let frame = cx.windows().decode_live_frame(frame)?;
+    if !cx.windows().is_child_frame(frame)? { cx.windows().set_top_frame_visibility(frame, false, true)?; }
     Ok(Value::NIL)
 }}
 
 defsubr! { name = "frame-visible-p", gnu = "frame.c:3633", effect = Reads,
 fn frame_visible_p(cx, frame: Value) {
     if cx.windows().frame_live_p(frame) == Value::NIL { return Err(Fault::Wrong("frame-live-p", frame)); }
-    Ok(if cx.windows().frame_visible(frame)? { Value::TRUE } else { Value::NIL })
+    if cx.windows().frame_visible(frame)? { return Ok(Value::TRUE); }
+    Ok(if cx.windows().frame_iconified(frame)? { cx.intern("icon") } else { Value::NIL })
 }}
 
 defsubr! { name = "visible-frame-list", gnu = "frame.c:3652", effect = Reads,
@@ -361,18 +371,30 @@ fn visible_frame_list(cx) {
     cx.windows().visible_frames()
 }}
 
+defsubr! { name = "next-frame", gnu = "frame.c:2415", effect = Reads,
+fn next_frame(cx; optional frame: Value, miniframe: Value) {
+    cx.windows().next_frame(frame, miniframe, false)
+}}
+
+defsubr! { name = "previous-frame", gnu = "frame.c:2441", effect = Reads,
+fn previous_frame(cx; optional frame: Value, miniframe: Value) {
+    cx.windows().next_frame(frame, miniframe, true)
+}}
+
+// A top-level frame is raised by its window's focus; a child frame is
+// restacked among its siblings.
 defsubr! { name = "raise-frame", gnu = "frame.c:3667", effect = Global,
 fn raise_frame(cx; optional frame: Value) {
-    cx.windows().restack(frame, true)?;
+    let frame = cx.windows().decode_live_frame(frame)?;
+    if cx.windows().is_child_frame(frame)? { cx.windows().restack(frame, true)?; } else { cx.windows().focus_frame(frame)?; }
     Ok(Value::NIL)
 }}
 
-// Fx_focus_frame: the host's one window has the input focus whenever the
-// session does; a request to focus FRAME (server.el's, through
-// `select-frame-set-input-focus') has nothing left to ask.
+// Fx_focus_frame: the host is asked to give FRAME's top-level window the
+// input focus; a Wayland compositor may refuse, as it may GNU's.
 defsubr! { name = "x-focus-frame", gnu = "xfns.c:5069", effect = Global,
 fn x_focus_frame(cx, frame: Value; optional _noactivate: Value) {
-    cx.windows().decode_live_frame(frame)?;
+    cx.windows().focus_frame(frame)?;
     Ok(Value::NIL)
 }}
 

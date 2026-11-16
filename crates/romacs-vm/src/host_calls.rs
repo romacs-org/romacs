@@ -66,6 +66,7 @@ const SIDES: &[(&str, Side)] = &[
     ("input.input_pending", Through), ("input.key_pending", Through), ("input.redisplay", Through), ("input.next_event", Through),
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
     ("input.native_window", Through), ("input.pointer", Through), ("input.take_key_repeats", Through),
+    ("input.top_level_frames", Through), ("input.focus_frame", Through), ("input.event_frame", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
     ("input.watch_processes", Own), ("input.images_behind", Own),
     // terminal_service.rs: each session's mirror is locked against the
@@ -198,6 +199,9 @@ impl HostInput for Counted<Box<dyn HostInput>> {
         fn native_window(&mut self, action: NativeWindow) -> Option<bool>;
         fn pointer(&mut self) -> Option<(i32, i32)>;
         fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts>;
+        fn top_level_frames(&mut self) -> bool;
+        fn event_frame(&mut self) -> Option<u64>;
+        fn focus_frame(&mut self, frame: u64);
     }
 }
 
