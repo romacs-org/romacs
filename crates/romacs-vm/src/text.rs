@@ -141,13 +141,89 @@ pub(crate) trait Newlines {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize>;
     /// The last newline in TO..FROM.
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize>;
+    /// Up to COUNT newlines of FROM..TO, from FROM on (GNU `find_newline`):
+    /// each piece of text is scanned once, however many lines it holds.
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found;
+    /// Up to COUNT newlines of TO..FROM, from FROM back.
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found;
 }
+
+/// A search for newlines: how many it found and where the last of them is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Found {
+    pub(crate) count: usize,
+    pub(crate) last: Option<usize>,
+}
+
+/// N lines of motion, either way, as the newlines to find.
+pub(crate) fn newline_count(n: i64) -> usize {
+    usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX)
+}
+
+impl Found {
+    /// How many it found, as lines.
+    pub(crate) fn lines(self) -> i64 {
+        i64::try_from(self.count).unwrap_or(i64::MAX)
+    }
+    /// FOUND with up to COUNT in all of BYTES's newlines, BYTES starting at
+    /// byte BASE, first to last: a block holding fewer than are still
+    /// wanted is counted, not searched, so lines cost their bytes.
+    fn forward(self, bytes: &[u8], base: usize, count: usize) -> Self {
+        let (mut found, mut at) = (self, base);
+        for block in bytes.chunks(NEWLINE_BLOCK) {
+            let wanted = count - found.count;
+            if wanted == 0 { break; }
+            let here = newlines_in(block);
+            if here >= wanted {
+                let i = memchr::memchr_iter(b'\n', block).nth(wanted - 1).unwrap_or(0);
+                return Found { count, last: Some(at + i) };
+            }
+            if here > 0 { found = Found { count: found.count + here, last: memchr::memrchr(b'\n', block).map(|i| at + i) }; }
+            at += block.len();
+        }
+        found
+    }
+    /// FOUND with up to COUNT in all of BYTES's newlines, BYTES starting at
+    /// byte BASE, last to first.
+    fn backward(self, bytes: &[u8], base: usize, count: usize) -> Self {
+        let (mut found, mut end) = (self, base + bytes.len());
+        for block in bytes.rchunks(NEWLINE_BLOCK) {
+            let wanted = count - found.count;
+            if wanted == 0 { break; }
+            let at = end - block.len();
+            let here = newlines_in(block);
+            if here >= wanted {
+                let i = memchr::memrchr_iter(b'\n', block).nth(wanted - 1).unwrap_or(0);
+                return Found { count, last: Some(at + i) };
+            }
+            if here > 0 { found = Found { count: found.count + here, last: memchr::memchr(b'\n', block).map(|i| at + i) }; }
+            end = at;
+        }
+        found
+    }
+}
+
+/// The bytes a newline scan counts at a time before it searches them.
+const NEWLINE_BLOCK: usize = 1024;
+
+/// How many newlines BYTES holds: memchr's vector count, a fraction of an
+/// instruction a byte (a filtered count compiles to 64-bit lanes, ~3.5).
+fn newlines_in(bytes: &[u8]) -> usize {
+    memchr::memchr_iter(b'\n', bytes).count()
+}
+
 impl Newlines for [u8] {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
-        self[from..to].iter().position(|&c| c == b'\n').map(|i| from + i)
+        memchr::memchr(b'\n', &self[from..to]).map(|i| from + i)
     }
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
-        self[to..from].iter().rposition(|&c| c == b'\n').map(|i| to + i)
+        memchr::memrchr(b'\n', &self[to..from]).map(|i| to + i)
+    }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        Found::default().forward(&self[from..to], from, count)
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        Found::default().backward(&self[to..from], to, count)
     }
 }
 impl Newlines for Vec<u8> {
@@ -157,6 +233,12 @@ impl Newlines for Vec<u8> {
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
         self.as_slice().previous_newline(from, to)
     }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        self.as_slice().newlines_after(from, to, count)
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        self.as_slice().newlines_before(from, to, count)
+    }
 }
 impl Newlines for TextBody {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
@@ -164,6 +246,26 @@ impl Newlines for TextBody {
     }
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
         self.newline_before(from, to)
+    }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        let (mut found, mut at) = (Found::default(), from);
+        for chunk in self.chunks_in(from..to) {
+            if found.count == count { break; }
+            found = found.forward(chunk, at, count);
+            at += chunk.len();
+        }
+        found
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        let (mut found, mut end) = (Found::default(), from.min(self.bytes_len));
+        while end > to && found.count < count {
+            let (chunk, start) = self.chunk_before(end);
+            let start = start.max(to);
+            let slice = &chunk[start - (end - chunk.len())..];
+            found = found.backward(slice, start, count);
+            end = start;
+        }
+        found
     }
 }
 
@@ -727,7 +829,7 @@ impl TextBody {
             let chunk = self.chunk_from(at);
             let chunk = &chunk[..chunk.len().min(limit - at)];
             if chunk.is_empty() { return None; }
-            if let Some(i) = chunk.iter().position(|&b| b == b'\n') { return Some(at + i); }
+            if let Some(i) = memchr::memchr(b'\n', chunk) { return Some(at + i); }
             at += chunk.len();
         }
         None
@@ -739,7 +841,7 @@ impl TextBody {
             let (chunk, start) = self.chunk_before(end);
             let start = start.max(limit);
             let slice = &chunk[start - (end - chunk.len())..];
-            if let Some(i) = slice.iter().rposition(|&b| b == b'\n') { return Some(start + i); }
+            if let Some(i) = memchr::memrchr(b'\n', slice) { return Some(start + i); }
             end = start;
         }
         None

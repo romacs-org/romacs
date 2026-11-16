@@ -164,7 +164,7 @@ impl Vm {
 
     /// redisplay_internal's run_window_change_functions, which every
     /// redisplay's frame snapshot runs first (display.rs): the command
-    /// loop's Lisp half (lisp/romacs/vm/window-change.el) once it is installed.
+    /// loop's Lisp half (lisp/vm/window-change.el) once it is installed.
     /// Lisp runs only when the windows differ from what the last run saw,
     /// so a redisplay that changed no window enters no Lisp.
     pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
@@ -324,7 +324,7 @@ fn host(vm: &mut Vm) -> &mut dyn HostInput {
 }
 
 /// What a host wait's deadline depends on besides the clock, as
-/// `romacs--wait-state` (`lisp/romacs/vm/keyboard.el`) prints it: empty before the
+/// `romacs--wait-state` (`lisp/vm/keyboard.el`) prints it: empty before the
 /// Lisp half is installed.
 const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
 /// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
@@ -333,7 +333,7 @@ const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--e
 /// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
 /// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
 /// input is pending, then wait for one event, or nil once SECONDS pass; its
-/// value goes to OUT. Lisp runs timers between reads (`lisp/romacs/vm/keyboard.el`).
+/// value goes to OUT. Lisp runs timers between reads (`lisp/vm/keyboard.el`).
 /// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
 /// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
 pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
@@ -494,10 +494,10 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(Option<u64>, u32, u32)>, b
         HostEvent::Resize { width, height } => (Some((frame, width, height)), false),
         // A completed background command ends the wait as a timeout does:
         // Lisp may run its callback between commands
-        // (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
+        // (lisp/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
         HostEvent::Background => (None, false),
-        // Lisp reads it (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
+        // Lisp reads it (lisp/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
         event => (None, ended_from(vm, event, frame)),
     })

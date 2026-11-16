@@ -16,7 +16,7 @@
 //! another layer; the init's digest is checked at the launch, so an edited
 //! init never restores a layer planned from the old one.
 //!
-//! The fence (`world`) keeps the layer to what the libraries define. A
+//! The tracking (`world`) keeps the layer to what the libraries define. A
 //! library's `defcustom`, `defvar`, `defconst` or `defvar-local` whose
 //! value reads a per-process fact (`executable-find`, a relative
 //! `expand-file-name`, a delayed variable) is what GNU evaluates in each
@@ -24,12 +24,12 @@
 //! restore evaluates it again, as GNU's delayed init does for its dumped
 //! options, and a later definition reading that variable is kept too. Any
 //! other form's read of such a fact, an effect, a signal, or a timer left
-//! behind refuses the entry by name, and the build publishes its refusal;
+//! behind leaves the entry to the session, named, and the build publishes that;
 //! the next launch plans without those entries, which load from source as
 //! they always did. After the libraries the builder runs the startup
 //! function again, as a restored process does after them, so startup's
 //! inputs are the state they left; what it computed before them it must
-//! compute again, or the build refuses.
+//! compute again, or the build is not captured.
 //!
 //! A library's load-time code may read a variable the init set before
 //! requiring it; the layer loads the library before the init, so such a
@@ -43,17 +43,24 @@ use std::path::{Path, PathBuf};
 pub const FORMAT: &str = "romacs-init-plan 2";
 /// Where a store keeps plans: `STORE/plans/<sha256 of the init's path>.json`.
 const PLANS: &str = "plans";
-/// The refusal kind a layer build lists for an entry it will not hold.
-pub const REFUSAL: &str = "init-layer";
+/// The kind a layer build notes for an entry it leaves to the session,
+/// which runs it live in its own place.
+pub const LIVE_ENTRY: &str = "init-layer";
 
-/// The functions that read a secret: a declared library whose load or
-/// configuration calls one is refused, so the layer never holds what one
-/// returns, and the library keeps its first-use load, where the call
-/// happens in the session. The build's confinement already denies the
-/// files and processes behind them; this names the reason.
-const SECRET_READERS: [&str; 17] = [
+/// The functions that read a secret. In a layer build none runs: each
+/// signals `romacs-secret-deferred' (lisp/session/romacs-world-layer.el), as a
+/// credential file read fails (`host::credential_in_build`), and the
+/// smallest whole form that asked is kept, as code, for the session: a
+/// library's top-level form at restore, one form of the init's
+/// configuration at the init's own call. The layer holds the code that
+/// fetches a secret, never the secret. The password manager's one
+/// decryption entry is among them. The init's plan recording observes them
+/// too (`AFTER_SECRET`).
+const SECRET_READERS: [&str; 22] = [
+    "romacs-pass--decrypt",
     "auth-source-search", "auth-source-pick-first-password", "auth-source-user-or-password",
-    "auth-source-user-and-password", "auth-source-pass-get", "auth-source-pass-parse-entry",
+    "auth-source-user-and-password", "auth-source-netrc-parse", "auth-source-netrc-parse-all",
+    "netrc-parse", "netrc-credentials", "auth-source-pass-get", "auth-source-pass-parse-entry",
     "auth-source-pass--read-entry", "auth-source-pass-entries", "epg-decrypt-file", "epg-decrypt-string",
     "epg-start-decrypt", "epa-decrypt-file", "epa-decrypt-region", "epa-file-insert-file-contents",
     "plstore-open", "secrets-get-secret", "read-passwd",
@@ -115,7 +122,7 @@ impl Entry {
     /// many of its commands the init declared; an `After` entry's forms
     /// are registered first, so they run where GNU runs them, at the
     /// library's `provide` or the end of its file, and the library must be
-    /// there: the layer holds what the init configured, or refuses it.
+    /// there: the layer holds what the init configured, or leaves it to the session.
     fn form(&self) -> String {
         let noerror = if self.noerror { "t" } else { "nil" };
         let name = lisp_string(&self.name);
@@ -182,7 +189,8 @@ impl Recording {
 }
 
 /// The printed form noted for a form the init gave after a secret reader
-/// ran: never its text, which may hold the secret, and never replayed.
+/// ran or a credential file was read: never its text, which may hold the
+/// secret, and never replayed.
 const AFTER_SECRET: &str = "#<after a secret reader>";
 
 /// An init's plan: the loads it issued, in order, each under the
@@ -312,12 +320,14 @@ impl Plan {
     }
 
     /// The plan of the last layer usable for INIT in STORE (`write_last`),
-    /// with the digest of the plan it was resolved from.
-    pub fn read_last(store: &Path, init: &Path) -> Option<(Plan, String)> {
+    /// with the digest of the plan it was resolved from and the features
+    /// left to the session to load ahead of their use.
+    pub fn read_last(store: &Path, init: &Path) -> Option<(Plan, String, Vec<String>)> {
         let text = host::read_store_file(Self::path(store, init, true)).ok()?;
         let json: Json = serde_json::from_str(&text).ok()?;
         let from = json["resolved_from"].as_str()?.to_owned();
-        Some((Plan::from_json(&json).filter(|plan| plan.init == init)?, from))
+        let preload = json["preload"].as_array().map(|names| names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+        Some((Plan::from_json(&json).filter(|plan| plan.init == init)?, from, preload))
     }
 
     fn read_path(file: &Path, init: &Path) -> Option<Plan> {
@@ -331,12 +341,14 @@ impl Plan {
     }
 
     /// Keep this plan in STORE as its init's last usable layer's, resolved
-    /// from the plan of digest FROM: a launch restores it at once while
+    /// from the plan of digest FROM, with PRELOAD, the features of the
+    /// libraries it left to the session: a launch restores it at once while
     /// that plan is the init's, and while a newer plan's layer builds
     /// (romacs-vm-gui world.rs).
-    pub fn write_last(&self, store: &Path, from: &str) -> std::io::Result<()> {
+    pub fn write_last(&self, store: &Path, from: &str, preload: &[String]) -> std::io::Result<()> {
         let mut json = self.json();
         json["resolved_from"] = json!(from);
+        json["preload"] = json!(preload);
         Self::write_json(&json, &Self::path(store, &self.init, true), store)
     }
 
@@ -380,8 +392,10 @@ impl Plan {
     /// This plan with what RECORDED adds: a session restored from this
     /// plan's layer issues no autoload for a library the layer holds, so
     /// RECORDED lacks those entries; they are kept, and each entry of
-    /// RECORDED not in this plan is inserted where RECORDED has it. The
-    /// init's digest is RECORDED's.
+    /// RECORDED not in this plan is inserted where RECORDED has it. One
+    /// this plan holds earlier than RECORDED's order reaches it (the
+    /// restored session issued its loads in another order) is this plan's
+    /// already. The init's digest is RECORDED's.
     pub fn merged(&self, recorded: &Plan) -> Plan {
         let path = |plan: &Plan, entry: &Entry| plan.load_paths[entry.load_path].clone();
         let same = |a: &Entry, pa: &[String], b: &Entry, pb: &[String]| a.same(b) && pa == pb;
@@ -394,6 +408,7 @@ impl Plan {
                     merged.extend(self.entries[cursor..cursor + ahead + 1].iter().map(|kept| (kept.clone(), path(self, kept))));
                     cursor += ahead + 1;
                 }
+                None if self.entries[..cursor].iter().any(|kept| same(kept, &path(self, kept), entry, &paths)) => {}
                 None => merged.push((entry.clone(), paths)),
             }
         }
@@ -407,7 +422,7 @@ impl Plan {
     }
 }
 
-/// The libraries whose configuration is refused, by what loading them
+/// The libraries whose configuration runs live, by what loading them
 /// leaves: features, and files named as `eval-after-load` names them
 /// (`load-history-regexp`): without the Lisp suffixes, an absolute name by
 /// its true name, a relative one as the tail of the loaded file's.
@@ -444,6 +459,14 @@ impl Deferred {
             std::iter::once(file.as_str()).chain(tails).find_map(|tail| self.files.get(tail))
         }).map(String::as_str)
     }
+}
+
+/// The features an entry left to the session provided in the build, in the order they
+/// loaded, when the init only declared its library: what the session may
+/// load ahead of its first use (`romacs--layer-preload'). None for a
+/// library the init loads at startup, which it loads in its own place.
+fn preloads(entry: &Entry, (features, _): &(Vec<String>, Vec<String>)) -> Vec<String> {
+    if entry.declared { features.iter().rev().cloned().collect() } else { Vec::new() }
 }
 
 /// The builder's question of each entry's loads LOADED (the features it
@@ -484,6 +507,7 @@ impl Vm {
     /// Record the loads the init issues from here, at the depth the next
     /// load (the init's own) runs at, until `take_init_loads`.
     pub fn record_init_loads(&mut self) {
+        host::watch_credentials(true);
         let secrets = !self.backtrace.observing();
         if secrets {
             let readers = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
@@ -497,6 +521,7 @@ impl Vm {
     /// broke (a `load-path` that is not all strings), or the init cannot be
     /// read.
     pub fn take_init_loads(&mut self, init: &Path) -> Option<Plan> {
+        host::watch_credentials(false);
         let recording = self.loader.recording.take()?;
         if recording.secrets && self.backtrace.observing() { self.backtrace.observed(); }
         let excluded = self.init_layer_exclusions();
@@ -580,7 +605,8 @@ impl Vm {
     /// noted with that library's entry, made at its first such call.
     pub(crate) fn note_init_after_load(&mut self, name: String, file: Option<String>, form: String) {
         let Some(at) = self.init_recording_point() else { return };
-        let secret = self.loader.recording.as_ref().is_some_and(|r| r.secrets) && self.backtrace.observed_any();
+        let secret = (self.loader.recording.as_ref().is_some_and(|r| r.secrets) && self.backtrace.observed_any())
+            || host::secret_asked();
         let form = if secret { AFTER_SECRET.to_owned() } else { form };
         let recording = self.loader.recording.as_mut().expect("the recording");
         let key = Recording::key(Kind::After, &name, file.as_deref());
@@ -606,18 +632,6 @@ impl Vm {
         self.list_values(value)?.into_iter()
             .map(|v| if v == crate::Value::NIL { Ok(".".to_owned()) } else { self.source_string(v).map(str::to_owned) })
             .collect()
-    }
-
-    /// The first function that reads a secret (`SECRET_READERS`) called
-    /// since `observe`, which ends here.
-    fn secret_call(&mut self) -> Option<String> {
-        // Startup's own observation, begun and ended inside the entry, took
-        // it over: its reads are the fence's to judge.
-        if !self.backtrace.observing() { return None; }
-        let mut calls = self.backtrace.observed();
-        calls.sort_unstable();
-        calls.dedup();
-        calls.into_iter().map(|slot| self.symbol_names[slot].as_str()).find(|name| SECRET_READERS.contains(name)).map(str::to_owned)
     }
 
     /// `features` as it is, rooted, and how many files the loader has
@@ -646,77 +660,177 @@ impl Vm {
         (features, files)
     }
 
-    fn timer_count(&mut self) -> i64 {
-        self.eval_source_raw("(+ (if (boundp 'timer-list) (length timer-list) 0) (if (boundp 'timer-idle-list) (length timer-idle-list) 0))")
-            .ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
+    /// The timers an entry starts (START marks where it begins; at its end,
+    /// how many it started that restore does not make again): no image
+    /// holds one, as each holds a time of the builder's. One a re-seed form
+    /// keeps in its variable (org-persist's lock refresh, a definition kept
+    /// for restore) is made again as restore evaluates that form
+    /// (`remade_values`); any other leaves its entry to the session. An
+    /// idle timer keeps no time: it stays.
+    fn cancel_entry_timers(&mut self, start: bool) -> i64 {
+        if start {
+            let _ = self.eval_source_raw("(setq romacs--layer-entry-timers (and (boundp 'timer-list) (copy-sequence timer-list)))");
+            return 0;
+        }
+        let remade = self.remade_values();
+        let remade = self.list_value(&remade);
+        let slot = self.slot("romacs--layer-remade-timers");
+        self.slots[slot].value = remade;
+        self.eval_source_raw(
+            "(let ((kept nil) (started 0))
+               (when (boundp 'timer-list)
+                 (dolist (timer timer-list)
+                   (cond ((memq timer romacs--layer-entry-timers) (push timer kept))
+                         ((memq timer romacs--layer-remade-timers))
+                         (t (setq started (1+ started)))))
+                 (setq timer-list (nreverse kept)))
+               (setq romacs--layer-entry-timers nil romacs--layer-remade-timers nil)
+               started)").ok().and_then(|v| v.as_integer().ok()).unwrap_or(0)
+    }
+
+    /// What restore sets again: the values of the variables the built-in
+    /// re-seed forms set (`host::reseed_variables`) and of the layer's
+    /// definitions kept for restore (`romacs--world-reseed-forms`), read
+    /// past the tracking, which a read of theirs would otherwise answer.
+    fn remade_values(&mut self) -> Vec<crate::Value> {
+        let mut names: Vec<String> = host::reseed_variables().map(str::to_owned).collect();
+        let list = self.slot("romacs--world-reseed-forms");
+        let mut tail = self.slots[list].value;
+        while let Ok((entry, rest)) = self.cons_pair(tail) {
+            if let Ok((_, after)) = self.cons_pair(entry)
+                && let Ok((symbol, _)) = self.cons_pair(after) {
+                names.extend(self.symbol_name_of(symbol));
+            }
+            tail = rest;
+        }
+        names.iter().map(|name| {
+            let slot = self.slot(name);
+            self.untracked(slot, |vm| vm.default_value(slot)).unwrap_or(crate::Value::UNBOUND)
+        }).collect()
+    }
+
+    /// How many objects hold a resource of this process (a live process, a
+    /// sqlite connection, a tree-sitter parser): what no image holds.
+    fn foreign_resources(&self) -> (usize, Option<&'static str>) {
+        let mut found = self.objects.iter().filter_map(crate::data::Object::foreign_resource);
+        let first = found.next();
+        (usize::from(first.is_some()) + found.count(), first)
     }
 
     /// Replay PLAN in a layer build: each entry under its recorded
     /// `load-path`, then `load-path` as it was, with whatever the libraries
     /// added ahead of it, then the startup function again. An entry that
-    /// signals, reads a fenced fact outside a definition form or has an
-    /// effect (the build's refusals grow), or leaves a timer behind is
-    /// refused by its index and name (`REFUSAL`); the build goes on, so one
-    /// build names every such entry. A definition form that reads a
-    /// per-process fact is kept for restore instead (`world_form_done`).
-    /// The refused entries.
+    /// signals, reads a tracked fact outside a definition form or has an
+    /// effect (what the build cannot capture grows), holds a resource of this process,
+    /// starts a timer no re-seed form makes, or changes what the startup run
+    /// after the libraries sets back, is left to the session, by its index and name
+    /// (`LIVE_ENTRY`): the layer is built again without it, so the image holds
+    /// nothing it did, and the init runs it in the session in its own place.
+    /// The build goes on, so one build names every such entry. A definition
+    /// form that reads a per-process fact is kept for restore instead
+    /// (`world_form_done`); a form that asks for a secret, as code.
+    /// The entries left to the session.
     pub fn world_layer_load(&mut self, plan: &Plan, deferred: &[Entry]) -> Vec<(usize, String)> {
         let kept = self.load_path_strings().unwrap_or_default();
         let mut added: Vec<String> = Vec::new();
-        let mut refused = Vec::new();
+        let mut live = Vec::new();
         // What each entry loaded: the features it provided and the files.
         let mut loaded: Vec<(Vec<String>, Vec<String>)> = Vec::with_capacity(plan.entries.len());
+        // Each secret reader defers in this build (lisp/session/romacs-world-layer.el):
+        // the form that asks is kept, as code, for the session.
+        let readers = SECRET_READERS.join(" ");
+        let slots: Vec<usize> = SECRET_READERS.iter().map(|name| self.slot(name)).collect();
+        let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) t))"));
         host::layer_begin();
         // As the init's libraries find the live session: interactive
-        // (lisp/romacs/romacs-gui-loadup.el), with the init named before it loads
+        // (lisp/session/romacs-gui-loadup.el), with the init named before it loads
         // (romacs-vm-gui user_init.rs). The display stays the chain's.
         let directory = plan.init.parent().map(|d| format!("{}/", d.display())).unwrap_or_default();
         let _ = self.eval_source_raw(&format!("(setq noninteractive nil user-init-file {} user-emacs-directory {})",
                                               lisp_string(&plan.init.display().to_string()), lisp_string(&directory)));
+        // The startup run's outputs, by the first entry that changed each:
+        // the one to name when the run after the libraries sets one back.
+        let outputs = self.world_startup_outputs();
+        let mut digests: Vec<_> = outputs.iter().map(|&slot| self.world_variable_digest(slot)).collect();
+        let before_entries: std::collections::HashMap<usize, Result<String, &'static str>> = outputs.iter().copied().zip(digests.iter().cloned()).collect();
+        let mut changed_by: std::collections::HashMap<usize, usize> = Default::default();
         for (at, entry) in plan.entries.iter().enumerate() {
             let paths: Vec<PathBuf> = plan.load_paths[entry.load_path].iter().map(PathBuf::from).collect();
-            let (refusals, timers) = (host::refusals(), self.timer_count());
+            let uncaptured = host::uncaptured_count();
+            let _ = self.cancel_entry_timers(true);
+            let resources = self.foreign_resources().0;
             let heads = self.load_heads();
             host::layer_declared(entry.declared);
-            let observed = entry.declared && !self.backtrace.observing();
-            if observed { self.backtrace.observe(); }
+            host::take_secret_asked();
+            // The readers' calls are observed beside their deferrals: a call
+            // that was not deferred (a reader the build could not advise) ran,
+            // and the entry is left to the session.
+            let observed = !self.backtrace.observing();
+            if observed { self.backtrace.observe_only(slots.clone()); }
+            let asks = host::reader_asks();
             let result = self.set_load_path(&paths).and_then(|()| self.eval_source_raw(&entry.form()));
-            let secret = if observed { self.secret_call() } else { None };
+            // Startup's own observation, begun and ended inside the entry, took
+            // it over: its reads are the tracking's to judge.
+            let ran = if observed && self.backtrace.observing() { self.backtrace.observed() } else { Vec::new() };
+            // Each top-level form and configuration form keeps for itself what
+            // it asked; one asked outside them leaves the entry to the session.
+            let secret = (ran.len() > host::reader_asks() - asks).then(|| ran.first().map(|&slot| self.symbol_names[slot].clone()).unwrap_or_default())
+                .or_else(|| host::take_secret_asked().then(|| "asked outside its forms".to_owned()));
             for path in self.load_path_strings().unwrap_or_default() {
                 if !plan.load_paths[entry.load_path].contains(&path) && !added.contains(&path) { added.push(path); }
             }
             let within = self.innermost_function();
+            let timers = self.cancel_entry_timers(false);
+            // A resource the entry left that a collection does not take is
+            // the entry's: no image holds one.
+            let resource = match self.foreign_resources() {
+                (now, _) if now <= resources => None,
+                _ => {
+                    let _ = self.eval_source_raw("(garbage-collect)");
+                    let (now, what) = self.foreign_resources();
+                    (now > resources).then(|| what.unwrap_or("a resource of this process"))
+                }
+            };
             let why = match result {
                 _ if secret.is_some() => secret.map(|f| format!("secret: {f}")),
                 Err(error) => Some(format!("error: {error}{}", within.map(|f| format!(" (in {f})")).unwrap_or_default())),
-                Ok(_) if host::refusals() > refusals => Some("fence".to_owned()),
-                Ok(_) if self.timer_count() > timers && !host::layer_timers_allowed() => Some("timer".to_owned()),
+                Ok(_) if resource.is_some() => resource.map(|what| format!("resource: {what}")),
+                Ok(_) if host::uncaptured_count() > uncaptured => Some("per-process".to_owned()),
+                Ok(_) if timers > 0 => Some("timer".to_owned()),
                 Ok(_) => None,
             };
             loaded.push(self.loads_since(heads));
+            for (digest, &slot) in digests.iter_mut().zip(&outputs) {
+                let now = self.world_variable_digest(slot);
+                if now != *digest {
+                    changed_by.entry(slot).or_insert(at);
+                    *digest = now;
+                }
+            }
             if let Some(why) = why {
-                host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
-                refused.push((at, why));
+                host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
+                live.push((at, why));
             }
         }
-        // A library whose configuration is refused, in this build or an
+        // A library whose configuration runs live, in this build or an
         // earlier one of the plan (DEFERRED), stays deferred whole: a
         // declared entry that loaded it anyway (an `autoload' of one of its
-        // commands, a library requiring it) is refused too, or the init
+        // commands, a library requiring it) is left to the session too, or the init
         // would run that configuration at every start.
-        let refused_after: Vec<&Entry> = refused.iter().map(|(at, _)| &plan.entries[*at]).filter(|e| e.kind == Kind::After).collect();
-        let deferred = Deferred::new(deferred.iter().chain(refused_after).map(|e| (e.name.as_str(), e.file.as_deref())));
-        let mut held: std::collections::HashSet<usize> = refused.iter().map(|(at, _)| *at).collect();
+        let live_after: Vec<&Entry> = live.iter().map(|(at, _)| &plan.entries[*at]).filter(|e| e.kind == Kind::After).collect();
+        let deferred = Deferred::new(deferred.iter().chain(live_after).map(|e| (e.name.as_str(), e.file.as_deref())));
+        let mut held: std::collections::HashSet<usize> = live.iter().map(|(at, _)| *at).collect();
         for (at, entry) in plan.entries.iter().enumerate() {
             if !entry.declared || held.contains(&at) { continue; }
             let (features, files) = &loaded[at];
             let Some(library) = deferred.loaded_by(features, files) else { continue };
-            let why = format!("loads {library}, whose configuration is refused");
-            host::refuse(REFUSAL, json!({"entry": at, "name": entry.name, "why": why}));
+            let why = format!("loads {library}, whose configuration runs live");
+            host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": entry.name, "why": why, "features": preloads(entry, &loaded[at])}));
             held.insert(at);
-            refused.push((at, why));
+            live.push((at, why));
         }
         host::layer_declared(false);
+        let _ = self.eval_source_raw(&format!("(when (fboundp 'romacs--world-defer-secrets) (romacs--world-defer-secrets '({readers}) nil))"));
         let restored: Vec<PathBuf> = added.iter().chain(kept.iter().filter(|p| !added.contains(p))).map(PathBuf::from).collect();
         let _ = self.set_load_path(&restored);
         // The startup function runs again after the libraries, as a
@@ -730,10 +844,34 @@ impl Vm {
         host::layer_rerun(false);
         host::layer_end();
         match rerun {
-            Ok(_) => self.world_check_startup_outputs(),
-            Err(error) => host::refuse("fence", json!({"access": "startup-rerun", "error": error})),
+            // A source session runs startup before the libraries and keeps
+            // what they leave; a restored one runs it after them. So an
+            // output an entry changed must be, after the run, what the
+            // libraries left (a global minor mode they turned on stays in
+            // `global-minor-modes'), or that entry is left to the session,
+            // which runs it after its startup, as from source. One no entry changed must
+            // be what the first run made again, or what the layer's own setup
+            // left, else the libraries changed what startup computes, and no
+            // entry is named for it.
+            Ok(_) => for (slot, first, before, after) in self.world_startup_output_states() {
+                let setup = before_entries.get(&slot).and_then(|d| d.as_ref().ok());
+                let symbol = self.symbol_names[slot].clone();
+                match changed_by.get(&slot) {
+                    Some(&at) if after != before => {
+                        let why = format!("startup sets {symbol} again");
+                        host::note_uncaptured(LIVE_ENTRY, json!({"entry": at, "name": plan.entries[at].name, "why": why,
+                                                     "features": preloads(&plan.entries[at], &loaded[at])}));
+                        if !live.iter().any(|(entry, _)| *entry == at) { live.push((at, why)); }
+                    }
+                    Some(_) => {}
+                    None if after != first && setup != Some(&after) =>
+                        host::note_uncaptured("per-process", json!({"root": super::Root::Input as u8, "access": "startup-output", "symbol": symbol})),
+                    None => {}
+                }
+            },
+            Err(error) => host::note_uncaptured("per-process", json!({"access": "startup-rerun", "error": error})),
         }
-        refused
+        live
     }
 }
 
@@ -776,6 +914,8 @@ mod tests {
                    ["display-line-numbers", "savehist", "which-key", "org", "new", "eat"]);
         assert_eq!(merged.init_digest, recorded.init_digest);
         assert!(layer.merged(&plan(vec![require("savehist"), require("org"), require("eat")])).same_loads(&layer));
+        // Loads issued in another order are the layer's already, not new ones.
+        assert!(layer.merged(&plan(vec![require("org"), require("savehist"), require("eat")])).same_loads(&layer));
         // The store's plan is replaced for a load, an init or a sibling change, and only those.
         let kept = plan(vec![require("org")]);
         assert!(!kept.supersedes(Some(&kept)) && kept.supersedes(None));

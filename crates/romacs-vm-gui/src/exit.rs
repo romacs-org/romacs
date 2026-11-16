@@ -102,7 +102,7 @@ pub fn install() {
         let payload = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
         let report = write_report(&thread, &site, &std::backtrace::Backtrace::force_capture().to_string());
-        eprintln!("romacs-panic: {}", json!({"thread": thread, "site": site,
+        romacs_vm::host::event_line("romacs-panic", &json!({"thread": thread, "site": site,
             "report": report.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|e| format!("not written: {e}"))}));
         *LAST_PANIC.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(format!("thread {thread} panicked at {site}: {}", truncate(&payload, 300)));
@@ -168,7 +168,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ErrorLines {
         event.record(&mut message);
         let target = event.metadata().target();
         if ERRORS_SAID.fetch_add(1, Ordering::Relaxed) < ERRORS_TO_SAY {
-            eprintln!("romacs-error: {}", json!({"target": target, "message": message.0}));
+            romacs_vm::host::event_line("romacs-error", &json!({"target": target, "message": message.0}));
         }
         *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{target}: {}", truncate(&message.0, 500)));
     }

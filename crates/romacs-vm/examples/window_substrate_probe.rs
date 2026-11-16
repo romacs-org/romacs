@@ -2,6 +2,8 @@
 #[cfg(not(test))]
 #[path = "../../romacs-vm-gui/src/loadup.rs"]
 mod loadup;
+#[path = "../../romacs-vm-gui/src/lisp_layout.rs"]
+mod lisp_layout;
 
 #[cfg(not(test))]
 fn main() {

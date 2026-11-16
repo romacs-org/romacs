@@ -25,7 +25,7 @@ fn diagnostic_line(value: &serde_json::Value) {
     let _ = std::io::stderr().lock().write_all(&line);
 }
 
-use romacs_vm_gui::{command, echo, fonts, grammars, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
+use romacs_vm_gui::{command, echo, fonts, grammars, loading, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
 mod latency;
 mod title;
 mod prompt;
@@ -37,12 +37,16 @@ mod timers;
 mod world;
 mod isolate_worker;
 mod exit;
-mod preparing;
 mod quit;
 mod client;
+mod restart;
 #[cfg(test)]
 #[path = "../tests/support/home.rs"]
 mod test_home;
+// The unit tests' loadup from a world: the library's module (lib.rs), for
+// this executable's tests too.
+#[cfg(test)]
+mod test_world;
 
 /// Every allocation in the world arena, so a world image can be this
 /// process's heap (`romacs_vm::world::arena`).
@@ -626,10 +630,15 @@ usage: romacs-vm-gui [--loadup | --gnu-lisp | --no-gnu-lisp] [OPTION...] [FILE..
                         exit (what an installer runs); before --batch, the
                         batch world alone (an installation's, in
                         --world-store EXECUTABLE.worlds)
+  --world-build-layer INIT
+                        build INIT's layer from the plan the store keeps,
+                        again without what a round left to the session, over
+                        the ready base world, and exit (what a session starts
+                        after its init)
   --world-census        print what the base world of a live --loadup launch
                         holds, kind by kind (JSON), reading the store only
-  --world-reset         forget the store's failed and refused builds, so the next
-                        launch builds again
+  --world-reset         forget the store's failed builds and what builds could
+                        not capture, so the next launch builds again
   --world-reset=all     remove the store's worlds and files altogether
   --geometry WxH        the window's size
   -Q, -q, --no-init     do not load the user's init file
@@ -690,6 +699,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if client::selected(&argv) { std::process::exit(client::main(&argv)); }
     if argv.first().map(String::as_str) == Some("--server-exited") { std::process::exit(client::exited(&argv)); }
+    if argv.first().map(String::as_str) == Some("--restart-supervise") { std::process::exit(restart::supervise(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
     // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
@@ -717,11 +727,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let mut world_store = None;
     let mut world_reset = None;
     let mut world_build = false;
+    let mut world_build_layer = None;
     let mut world_census = false;
     let mut init_layer = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--world-build" => world_build = true,
+            "--world-build-layer" => world_build_layer = Some(std::path::absolute(args.next().ok_or("missing init file")?).map_err(|e| e.to_string())?),
             "--world-census" => world_census = true,
             // The server a client started (client.rs): no window until a client asks.
             // It is GNU's daemon (`--fg-daemon=NAME') from here: `daemonp'.
@@ -824,7 +836,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if let Some(everything) = world_reset {
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store to reset")?;
         let removed = romacs_vm::world::store::reset(&store, everything).map_err(|e| e.to_string())?;
-        eprintln!("romacs-world: {}", serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
+        romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "reset", "store": store, "everything": everything, "removed": removed}));
         return Ok(None);
     }
     use_collector_threads();
@@ -855,6 +867,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // (built here, or waited for), with no window, and a batch session's
     // beside it (batch.rs); then exit. What an installer runs so a user's
     // first launch and first batch session restore.
+    if let Some(init) = world_build_layer {
+        if !(live && launch == startup::Launch::Loadup) { return Err("--world-build-layer needs a live --loadup launch".into()); }
+        if romacs_vm::world::store::disabled() { return Err("--world-build-layer with ROMACS_WORLD=off".into()); }
+        let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
+        world::prepare_layer(&world::open(store, width, height, floor)?, &init, width, height, floor);
+        return Ok(None);
+    }
     if world_build {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
@@ -876,7 +895,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     let world_store = match (live && launch == startup::Launch::Loadup, romacs_vm::world::store::disabled()) {
         (true, false) => world_store.or_else(|| world::default_store(|name| std::env::var_os(name))),
         (true, true) => {
-            eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": "ROMACS_WORLD=off"}));
             None
         }
         (false, _) => None,
@@ -920,10 +939,25 @@ fn run() -> Result<Option<exit::Exit>, String> {
         if let Some(start) = start { startup::begin_phases(start); }
         let sender = std::sync::Arc::new(sender);
         let mut first_presentation = 1;
+        // The launch screen, from the window's first moment until the
+        // session's first frame (loading.rs); a server shows it in the
+        // window a client asked for at its start.
+        let loading = if live && (!serving || serve_frame) {
+            let started = loading::start(sender.clone(), width, height, loading::profile_path());
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "loading-frame", "painted": started.is_ok(),
+                                                               "error": started.as_ref().err()}));
+            // A first frame that failed may still have been submitted.
+            if started.is_err() { first_presentation = 2; }
+            started.ok()
+        } else { None };
+        // A store that cannot be used boots from source, and says so once
+        // the session is up (`world::store_warning_form`).
+        let mut store_problem = None;
         let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
             Ok(world) => Some(world),
             Err(reason) => {
-                eprintln!("romacs-world: {}", serde_json::json!({"mode": "source", "reason": reason}));
+                romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason}));
+                store_problem = Some(reason);
                 None
             }
         });
@@ -934,20 +968,12 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
-        let mut preparing = None;
-        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
-            // Said first, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": preparing::MESSAGE}));
-            // A server has no window to show it in.
-            if serving { return; }
-            let painted = preparing::start(sender.clone(), width, height);
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing-frame", "painted": painted.is_ok(),
-                                                               "error": painted.as_ref().err()}));
-            // A first frame that failed may still have been submitted.
-            if painted.is_err() { first_presentation = 2; }
-            preparing = painted.ok();
+        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, |reason| {
+            // Said on stderr too, so a launcher sees it whether or not a
+            // window can, with why the world was not usable.
+            romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
+            loading::step("world-build", loading::FIRST_START);
         })));
-        if let Some(preparing) = preparing { first_presentation = preparing.finish(); }
         // The world this launch booted from, which its worker isolates adopt.
         let booted = world.as_ref().map(|base| if from_layer { &layer.as_ref().unwrap().world } else { base });
         let isolate_world = booted.map(|w| (w.store.clone(), w.key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
@@ -955,7 +981,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // own; a launch from the layer keeps the base it boots beside.
         let prune = booted.cloned().map(|current| move || { std::thread::spawn(move || {
             if let Ok(deleted) = current.prune() && !deleted.is_empty() {
-                eprintln!("romacs-world: {}", serde_json::json!({"event": "pruned", "worlds": deleted}));
+                romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "pruned", "worlds": deleted}));
             }
         }); });
         if from_layer && let Some(base) = &world { base.keep(); }
@@ -963,7 +989,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase(if restored.is_some() { "world-restored" } else { "world-none" });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
-                     isolate_world, worlds, first_presentation, quit, prune, serve, serve_landing, early_window)
+                     isolate_world, worlds, store_problem, first_presentation, loading, quit, prune, serve, serve_landing, early_window)
         }));
         let end = match result {
             Ok(Ok(end)) => end,
@@ -1288,7 +1314,11 @@ fn evaluate(
     restored: Option<(Box<Vm>, world::Carry)>,
     isolate_world: Option<(std::path::PathBuf, String)>,
     worlds: Option<world::Worlds>,
+    // Why the world store could not be used, when it could not: said once
+    // the session is up.
+    store_problem: Option<String>,
     first_presentation: u64,
+    loading: Option<loading::Loading>,
     quit: Option<std::sync::Arc<romacs_vm::QuitSignal>>,
     after_first_frame: Option<impl FnOnce()>,
     serve: Option<String>,
@@ -1307,7 +1337,7 @@ fn evaluate(
     };
     if let Some(quit) = quit { vm.share_quit_signal(quit); }
     startup::mark_phase("vm");
-    // How this VM booted, which its worker isolates repeat (lisp/romacs/vm/isolate.el).
+    // How this VM booted, which its worker isolates repeat (lisp/vm/isolate.el).
     match (&carry, isolate_world, launch) {
         (Some(_), Some((store, key)), _) => {
             let compiled = romacs_vm::compiled_lisp::store_dir()
@@ -1368,29 +1398,45 @@ fn evaluate(
         }
         // The launch font's face, as source: declared BEFORE GNU's Lisp, so
         // GNU's own `defface' (custom.el) leaves the declared face alone, and
-        // after the workspace's own faces otherwise, exactly as before.
-        let font = world::launch_font()?;
+        // after the workspace's own faces otherwise, exactly as before. A
+        // session restored from a base world sets it first, as no base world
+        // holds it; a layer was built with it (world.rs `layer_world`).
+        let font = world::LaunchFont::from_env()?;
+        let from_layer = worlds.as_ref().is_some_and(|worlds| worlds.from_layer);
         let started = if launch == startup::Launch::Workspace {
             let started = startup::initialize(&mut vm)?;
-            if let Some((source, _)) = &font { vm.eval_source(source)?; }
+            if let Some(font) = &font { vm.eval_source(&font.declaration())?; }
             started
         } else if let Some(carry) = carry {
+            if let Some(font) = font.as_ref().filter(|_| !from_layer) { vm.eval_source(&font.restored())?; }
             // As a fresh process takes the per-process startup steps.
             vm.eval_source("(romacs-world-restart)")?;
             startup::mark_phase("world-restart");
             startup::resume_loadup(&mut vm, launch, carry.loadup)?
         } else {
-            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
+            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(world::LaunchFont::declaration).as_deref())?
         };
         startup::mark_phase("session-lisp");
         if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
-        // This process's command log, from before the init (lisp/romacs/romacs-usage-log.el).
+        // This process's command log, from before the init (lisp/session/romacs-usage-log.el).
         if launch == startup::Launch::Loadup && let Err(error) = vm.eval_source("(romacs-usage-log-start)") {
             eprintln!("romacs: usage log: {error}");
         }
         startup::before_init(&mut vm, launch, quick)?;
+        // The user's settings, packages, init and what runs after it are
+        // Lisp that may not end: C-g quits it, as GNU's startup lets it
+        // (the evaluator is busy to the input thread until its first wait).
+        // Each step goes on past a quit; Romacs's own defaults before them
+        // are not quit (a C-g then waits as a key).
+        if live { vm.enter_busy(); }
         if load_user_init && launch != startup::Launch::GnuOnly {
             if let Some(path) = user_init::path() {
+                // `load-path' before the packages and the init add to it: a
+                // directory they add may shadow a library loaded already
+                // (lisp/session/romacs-user-shadows.el).
+                if let Err(error) = vm.eval_source("(setq romacs--load-path-at-start load-path)") {
+                    eprintln!("romacs: user shadows: {error}");
+                }
                 if let Err(error) = user_init::start_saved_settings(&mut vm, &path) {
                     eprintln!("romacs: saved settings: {error}");
                 }
@@ -1401,26 +1447,47 @@ fn evaluate(
                 }
                                 // What the init loads is its layer's plan (world.rs).
                 // Its `eval-after-load' calls declare the libraries it
-                // configures, and skip the ones the layer made (lisp/romacs/romacs-loadup-bootstrap.el).
+                // configures, and skip the ones the layer made (lisp/session/romacs-loadup-bootstrap.el).
                 if worlds.is_some() {
                     vm.record_init_loads();
                     if let Err(error) = vm.eval_source("(romacs--init-layer-begin)") { eprintln!("romacs: init layer: {error}"); }
                 }
                 if let Err(error) = user_init::load(&mut vm, &path) {
                     eprintln!("romacs: init failed: {error}");
-                    let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details");
+                    // As GNU's startup says it (startup.el `startup--load-user-init-file'):
+                    // a *Warnings* buffer the first frame shows, with the
+                    // backtrace a button away, and the launch screen's init
+                    // stage failed (lisp/session/romacs-init-load.el).
+                    let warned = vm.eval_source(&format!("(romacs-init-failed {})", startup::lisp_string(&error)));
+                    if warned.is_err() { let _ = echo::show(&mut vm, "Error loading init.el; see stderr for details"); }
                 }
                 if worlds.is_some() && let Err(error) = vm.eval_source("(romacs--init-layer-end)") { eprintln!("romacs: init layer: {error}"); }
                 let plan = vm.take_init_loads(&path);
-                if let Some(worlds) = &worlds { world::after_init(worlds, plan); }
+                // A user's copy of a library loaded before the init wins, as
+                // in a session that first loaded it now.
+                if let Err(error) = vm.eval_source("(progn (require 'romacs-user-shadows) (romacs--load-user-shadows romacs--load-path-at-start))") {
+                    eprintln!("romacs: user shadows: {error}");
+                }
+                if let Some(worlds) = &worlds {
+                    world::after_init(worlds, plan);
+                    if let Some(form) = world::preload_form(worlds) && let Err(error) = vm.eval_source(&form) {
+                        eprintln!("romacs: init layer preload: {error}");
+                    }
+                }
             }
         }
         startup::mark_phase("user-init");
+        if let Some(reason) = &store_problem && let Err(error) = vm.eval_source(&world::store_warning_form(reason)) {
+            eprintln!("romacs: world store warning: {error}");
+        }
         let finished = match launch {
             startup::Launch::Loadup => startup::finish_loadup(&mut vm, &started),
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
             startup::Launch::GnuOnly => Ok(()),
         };
+        // The startup Lisp a C-g could quit has run: one typed late waits
+        // for the first read.
+        if live { vm.leave_busy(); }
         // As GNU's command loop reports an error that ends `command-line-1';
         // else startup's own message is shown, as GNU's first redisplay
         // shows it before the command loop's first timer runs.
@@ -1429,7 +1496,8 @@ fn evaluate(
                 eprintln!("romacs: startup after init failed: {error}");
                 let _ = echo::show(&mut vm, &error);
             }
-            Ok(()) => echo::show_current_message(&mut vm)?,
+            // Not fatal: a quit typed late (`quit-flag') may end it.
+            Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());
@@ -1444,8 +1512,8 @@ fn evaluate(
             }
         }
         let face = vm.display_default_face()?;
-        if let Some((_, points)) = font {
-            eprintln!("romacs: font family={} points={} pixels={}", face.family, points, face.pixel_size);
+        if let Some(font) = font {
+            eprintln!("romacs: font family={} points={} pixels={}", face.family, font.points, face.pixel_size);
         } else {
             eprintln!("romacs: font family={} pixels={}", face.family, face.pixel_size);
         }
@@ -1457,12 +1525,13 @@ fn evaluate(
     // A live GUI has a keyboard: prompts read it mid-command (prompt.rs).
     let host = std::rc::Rc::new(std::cell::RefCell::new(prompt::Shared::default()));
     host.borrow_mut().presentation = first_presentation;
+    host.borrow_mut().loading = loading;
     let last_presentation = || host.borrow().presentation;
     if live {
         vm.set_host_input(Some(Box::new(prompt::GuiHost { shared: host.clone(), sender: sender.clone(), engine: engine.clone(), images: images.clone(), terminal_ready: terminal_ready.clone(), processes: vec![] })));
     }
     // A server listens before its first window, which a client asks for
-    // (lisp/romacs/romacs-server.el); one that cannot listen ends here.
+    // (lisp/session/romacs-server.el); one that cannot listen ends here.
     if let Some(name) = &serve {
         host.borrow_mut().server = Some(prompt::ServerWindow { shown: false, size: (width, height), title: "romacs".into() });
         vm.eval_source(&format!("(progn (require 'romacs-server) (romacs-server-start {}))", startup::lisp_string(name)))
@@ -1472,6 +1541,7 @@ fn evaluate(
         if serve_landing && let Err(error) = vm.eval_source("(romacs-server--landing)") {
             eprintln!("romacs: landing: {error}");
         }
+        startup::mark_phase("server");
     }
     let initial = frame(&mut vm, g1, width, height)?;
     startup::mark_phase("initial-frame");
@@ -1483,6 +1553,8 @@ fn evaluate(
     let early = early_window.map(|ready| ready.recv_timeout(std::time::Duration::from_secs(30)).map_err(|e| e.to_string()).and_then(|r| r));
     if let Some(Err(error)) = &early { eprintln!("romacs: server window: {error}"); }
     if let (Some(Ok(())), Some(server)) = (&early, host.borrow_mut().server.as_mut()) { server.shown = true; }
+    // The session's first paint takes the window from the launch screen.
+    host.borrow_mut().end_loading();
     let mut previous = if serve.is_some() && !host.borrow().window_shown() {
         Shown { frame: initial, ends: Vec::new(), presentation: last_presentation(), tab_bar: Vec::new(), status_bar: Default::default() }
     } else {
@@ -1585,7 +1657,7 @@ fn evaluate(
                     continue;
                 }
                 // A native model's event runs its special-event binding
-                // (lisp/romacs/romacs-model.el), then the frame repaints.
+                // (lisp/graphics/romacs-model.el), then the frame repaints.
                 // Its callbacks may read input: they get the keys queued
                 // ahead, as a command does.
                 if live && let InputEvent::Model { id, event } = &event {
@@ -1873,7 +1945,7 @@ fn next_presentation(host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>) -> 
 fn close_window(vm: &mut Vm, host: &std::rc::Rc<std::cell::RefCell<prompt::Shared>>, lent: Lent<'_>) -> Result<bool, String> {
     terminate(vm, host, Lent { live: &mut *lent.live, width: &mut *lent.width, height: &mut *lent.height })?;
     // A server's window is a resource of the session: closing it ends the
-    // session only when Lisp says so (lisp/romacs/romacs-server.el).
+    // session only when Lisp says so (lisp/session/romacs-server.el).
     if host.borrow().server.is_some() {
         return lent.run(host, |live| {
             live.changed();

@@ -443,13 +443,22 @@ impl Vm {
         Ok(Some((dynvars, self.root_frame(&[declared]))))
     }
     /// A form's EVALUATED outcome when a world's layer is building: a definition
-    /// cut short by a refused effect defines nil here and is kept whole for
-    /// restore.
+    /// cut short by a refused effect or a secret it asked for defines nil here
+    /// and is kept whole for restore; any other top-level form that asked
+    /// for a secret is kept whole, as code, for restore, and the load goes on
+    /// with the next form.
     fn layer_form_finished(&mut self, evaluated: Result<()>, form: &Form, out: Out<'_>) -> Result<()> {
         if crate::host::mode() != crate::host::Mode::Build {
             return evaluated;
         }
         let mut evaluated = evaluated;
+        // Each form's own: a definition's is its cut (`layer_form_cut`).
+        let asked = crate::host::take_secret_asked();
+        if asked && crate::host::layer_active() && !crate::host::layer_form_is_definition() {
+            self.propagated_escape = None;
+            self.record_deferred_form(form);
+            return Ok(());
+        }
         if let (Err(_), Some(name)) = (&evaluated, crate::host::layer_form_cut()) {
             self.propagated_escape = None;
             let slot = self.slot(&name);

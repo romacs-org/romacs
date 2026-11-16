@@ -1,6 +1,6 @@
 //! `romacs --server NAME [OPTION...] [[+LINE[:COLUMN]] FILE...]`: a client
 //! of the named server session. It connects to the server's native socket
-//! (`$XDG_RUNTIME_DIR/romacs/NAME/server.sock`, lisp/romacs/romacs-server.el),
+//! (`$XDG_RUNTIME_DIR/romacs/NAME/server.sock`, lisp/session/romacs-server.el),
 //! starting the server first when none listens: as a transient systemd user
 //! unit, `romacs-server-NAME`, else detached with `setsid`. Then it asks
 //! for a window showing FILES (`romacs/frame`), evaluates a form
@@ -186,7 +186,7 @@ fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// Server NAME's session record (lisp/romacs/romacs-usage-log.el) at its unit's
+/// Server NAME's session record (lisp/session/romacs-usage-log.el) at its unit's
 /// end, named by STATE/romacs/server-NAME.session for the systemd
 /// INVOCATION that ran it: how systemd says it ended (its status, signal
 /// and core dump: the server's own end cannot know its exit code) goes in
@@ -329,7 +329,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
         call(&mut stream, &mut reader, next(), "romacs/stop", json!({"save": save}))?;
     }
     if std::env::var_os("ROMACS_CLIENT_TIMING").is_some() {
-        eprintln!("romacs-client: {}", json!({"started": started, "connect_ms": connected.as_secs_f64() * 1e3,
+        romacs_vm::host::event_line("romacs-client", &json!({"started": started, "connect_ms": connected.as_secs_f64() * 1e3,
                                               "reply_ms": begun.elapsed().as_secs_f64() * 1e3}));
     }
     Ok(0)

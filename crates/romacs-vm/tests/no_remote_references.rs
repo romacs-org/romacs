@@ -112,6 +112,11 @@ const FIELDS: &[(&str, Class)] = &[
     // Read for the symbols marked, which own-obarray ones are only if reached.
     ("obarray_symbol_names", Rescanned),
     ("permanent_symbol_names", Root),
+    // What that map took since the last collection: a minor's roots for it,
+    // a full reading the map; emptied at every collection.
+    ("permanent_names_added", Root),
+    // Object indices and call-cache ids, as a minor reads them (gc.rs).
+    ("shared_holders", Free), ("caches_filled", Free), ("payload_settled", Free),
     // Weak references to nodes the case tables own.
     ("native_case_roots", Cache),
     ("obarray_free_slots", Free), ("generated_symbols", Free), ("generated_slots", Free),
@@ -126,7 +131,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("closures", Barrier), ("cells", Barrier), ("conses", Barrier), ("objects", Barrier),
     // A paired cell's trace pushes the pair's Value, and its writes will shade.
     ("cell_pairs", Owed),
-    ("random", Free), ("fence", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
+    ("random", Free), ("tracking", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
     ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),

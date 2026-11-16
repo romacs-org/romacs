@@ -223,15 +223,41 @@ it loads into a machine already booted.  It runs in a machine of its own:
 loading that file leaves the one that loads it changed."
   (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
          (host (expand-file-name invocation-name invocation-directory))
-         (file (expand-file-name "lisp/romacs/romacs-loadup-bootstrap.el" root))
+         (file (expand-file-name "lisp/session/romacs-loadup-bootstrap.el" root))
          (status nil))
     (skip-unless (and root (file-exists-p file)))
     (with-temp-buffer
-      (setq status (call-process host nil t nil "-Q" "--batch" "-L" (expand-file-name "lisp/romacs" root)
+      (setq status (call-process host nil t nil "-Q" "--batch" "-L" (expand-file-name "lisp/emacs-lisp" root)
                                  "-l" "romacs-lint" "-f" "romacs-lint-batch" file))
       (should (memq status '(0 1)))
       (goto-char (point-min))
       (should (re-search-forward "^romacs-lint: 1 file, " nil t)))))
+
+(ert-deftest romacs-lint-tests-each-file-alone ()
+  "tools/romacs-lint judges each file in a machine of its own, working in a
+private home: a file that empties `load-path' leaves the next file's
+judgement alone, and a file that writes where it runs writes nothing into
+the tree."
+  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+         (host (expand-file-name invocation-name invocation-directory))
+         (dir (file-name-as-directory (make-temp-file "romacs-lint-tests-alone-" t)))
+         (poison (expand-file-name "a-poison.el" dir))
+         (plain (expand-file-name "b-plain.el" dir))
+         (status nil))
+    (skip-unless (and root (executable-find "python3")))
+    (unwind-protect
+        (progn
+          (with-temp-file poison
+            (insert romacs-lint-tests--cookie "\n(setq load-path nil)\n(write-region \"\" nil \"romacs-lint-tests-written\")\n"))
+          (with-temp-file plain
+            (insert romacs-lint-tests--cookie "\n(require 'ring)\n(defun romacs-lint-tests--n (x) (ring-length x))\n"))
+          (with-temp-buffer
+            (let ((default-directory root))
+              (setq status (call-process "python3" nil t nil "-B" "tools/romacs-lint" "--binary" host "--all" poison plain)))
+            (should (eql status 0))
+            (should (string-match-p "^romacs-lint: 2 files, 0 errors" (buffer-string))))
+          (should-not (file-exists-p (expand-file-name "romacs-lint-tests-written" root))))
+      (delete-directory dir t))))
 
 (ert-deftest romacs-lint-tests-arglist-arity ()
   "An argument list's arity, as `func-arity' would give its function's."

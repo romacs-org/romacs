@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent sessions (lisp/romacs/romacs-agent.el, romacs-agent-host, the
+"""Agent sessions (lisp/agents/romacs-agent.el, romacs-agent-host, the
 reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
@@ -662,8 +662,11 @@ def unit(args, base):
 # check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
 # tool the endpoint offers that is missing here fails the tour.
 # Tools the tour leaves to their own workflows: a restart ends the tour's
-# server (`restart'); gnosis's tools need its fixture database (`gnosis').
-ELSEWHERE = ['romacs_restart_request']
+# server (`restart'); gnosis's tools need its fixture database (`gnosis');
+# romacs_attach journals into a live chat (romacs-agent-attach-tests.el,
+# `mcp_tour'); romacs_dev_check checks a Romacs source tree
+# (romacs-mcp-dev-tests.el, `mcp_tour').
+ELSEWHERE = ['romacs_restart_request', 'romacs_restart', 'romacs_attach', 'romacs_dev_check']
 
 
 def tour(work, delegate_target):
@@ -681,11 +684,22 @@ def tour(work, delegate_target):
         ('romacs_send_keys', {'keys': 'C-f'}, lambda t: True),
         ('romacs_wait_idle', {'timeout': 5}, lambda t: True),
         ('romacs_call_outcome', {'id': 1}, lambda t: '"outcome"' in t),
+        ('romacs_restart_status', {}, lambda t: '"state"' in t),
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
+        ('romacs_limits', {}, lambda t: '"harnesses"' in t),
+        ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
+        ('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'}, lambda t: '62' in t),
         ('romacs_delegate_task', {'task': delegate_target['task'], 'role': 'review', 'mode': 'wait',
                                   'target': delegate_target['target'], 'clientRequestId': 'tour-review'},
          lambda t: '"completed"' in t and 'APPROVE' in t),
         ('romacs_task_status', {'taskId': '<the taskId romacs_delegate_task returned>'}, lambda t: '"completed"' in t),
+        ('romacs_task_list', {}, lambda t: '"tasks"' in t),
+        ('romacs_task_watch', {'taskId': '<the same taskId>', 'file': 'tour.txt', 'stop': True}, lambda t: '"watching":[]' in t),
+        ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
+        ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
     ]
 
@@ -727,7 +741,7 @@ def tools(args, base):
         task_id = None
         for tool, arguments, _ in steps:
             if 'taskId' in arguments:
-                arguments = {'taskId': task_id}
+                arguments = {**arguments, 'taskId': task_id}
             # No instance: it is optional, and the tour shows each tool works without one.
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
@@ -856,6 +870,86 @@ def build_dir(a, commit):
     return d
 
 
+def restart_rollback(args, base):
+    """`romacs_restart' into a build that cannot start: its supervisor finds
+    it never serves, starts this build again with the session, and the
+    requester is told it rolled back and why, once."""
+    a = Agents(args, base, 'rb')
+    a.persist()
+    try:
+        a.up()
+        target = a.root / 'build-broken'
+        for sub in ('etc', 'lisp'):
+            (target / sub).mkdir(parents=True)
+        exe = target / 'romacs-vm-gui'
+        exe.write_text('#!/bin/sh\necho "this build cannot start" >&2\nexit 1\n')
+        exe.chmod(0o755)
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        old_pid = a.pid
+        a.send(requester, 'call romacs_restart ' + json.dumps({'target': str(target), 'delay': 1}))
+        until(lambda: any(e.get('tool') == 'romacs_restart' for e in a.logged()), 30, 'requested')
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 300, 'requester told')
+        told = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        a.pid = int(a.eval('(emacs-pid)'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
+        result = {'old_pid': old_pid, 'new_pid': a.pid, 'told': told, 'carried': carried,
+                  'verdict': record.get('verdict'), 'failed': record.get('failed'),
+                  'phases': [ph['phase'] for ph in record.get('phases', [])]}
+        result['ok'] = (a.pid != old_pid and len(told) == 1 and ' rolled back to ' in told[0]
+                        and record.get('verdict') == 'rolled-back' and (record.get('failed') or '').startswith('start:')
+                        and carried == '"carried across\\n"')
+        return result
+    finally:
+        a.close()
+
+
+def restart_hang(args, base):
+    """`romacs_restart' into a build whose session never serves (its init
+    loops for ever): past the start deadline its supervisor ends the hung
+    server, found by its command line, starts this build again with the
+    session, and the requester is told why, once."""
+    a = Agents(args, base, 'rh')
+    a.persist()
+    with open(a.home / '.config/romacs/init.el', 'a') as init:
+        init.write('(when (string-match-p "build-hang0000" (or (getenv "ROMACS_RUNTIME_ROOT") "")) (while t (sleep-for 0.2)))\n')
+    try:
+        a.up()
+        target = build_dir(a, 'hang0000')
+        a.eval("(setq romacs-restart-deadlines '(:exit 30 :start 25 :ready 60))")
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        old_pid = a.pid
+        a.send(requester, 'call romacs_restart ' + json.dumps({'target': str(target), 'delay': 1}))
+        until(lambda: any(e.get('tool') == 'romacs_restart' for e in a.logged()), 30, 'requested')
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 300, 'requester told')
+        told = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        a.pid = int(a.eval('(emacs-pid)'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        # A server of this tree's still running besides the one that serves: the hung target.
+        def ours(pid):
+            try:
+                return str(a.root) in Path(f'/proc/{pid}/environ').read_bytes().decode(errors='replace')
+            except OSError:
+                return False
+        hung = [line for line in subprocess.run(['pgrep', '-af', '--', '--serve rh'], capture_output=True, text=True).stdout.splitlines()
+                if line.split()[1].endswith('romacs-vm-gui') and int(line.split()[0]) != a.pid and ours(line.split()[0])]
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
+        result = {'old_pid': old_pid, 'new_pid': a.pid, 'told': told, 'carried': carried, 'hung_left': hung,
+                  'verdict': record.get('verdict'), 'failed': record.get('failed'),
+                  'phases': [ph['phase'] for ph in record.get('phases', [])]}
+        result['ok'] = (a.pid != old_pid and len(told) == 1 and ' rolled back to ' in told[0] and not hung
+                        and record.get('verdict') == 'rolled-back' and carried == '"carried across\\n"')
+        return result
+    finally:
+        a.close()
+
+
 def restart_unit(args, base):
     """`restart' with the user manager: the server is the unit
     romacs-server-S, and its successor comes from a helper unit once that
@@ -919,8 +1013,12 @@ def restart(args, base, bus=None, race=False):
         else:
             raise RuntimeError(f'not restarted: {pending}')
         a.pid = new_pid()
-        until(lambda: any('Romacs restarted' in e.get('wake', '') for e in a.logged()), 30, 'requester told')
-        told = next(e['wake'] for e in a.logged() if 'Romacs restarted' in e.get('wake', ''))
+        # The requester is told the supervisor's verdict, once.
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 120, 'requester told')
+        told = next(e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart '))
+        verdicts = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
         until(lambda: any(e.get('prompt', '').startswith('Romacs restarted') for e in a.codex_runs()), 30, 'codex told')
         codex_told = next(e['prompt'] for e in a.codex_runs() if e.get('prompt', '').startswith('Romacs restarted'))
         carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
@@ -935,8 +1033,11 @@ def restart(args, base, bus=None, race=False):
         # Racing, the launcher's server (this build) may win: it restores the
         # session in its own build, and says which.
         into = 'Romacs restarted into ' if race else 'Romacs restarted into abcdef01'
+        result.update(verdict=record.get('verdict'), told_count=len(verdicts),
+                      phases=[ph['phase'] for ph in record.get('phases', [])])
         result['ok'] = ('"scheduled"' in asked['text'] and a.pid != old_pid and result['harness_same']
-                        and told.startswith(into) and codex_told.startswith(into)
+                        and ' verified: ' in told and len(verdicts) == 1 and record.get('verdict') == 'verified'
+                        and codex_told.startswith(into)
                         and carried == '"carried across\\n"' and (race or str(target) in runtime) and served == f'"{name}"'
                         and not wake_files and (in_unit == 't') == bool(bus) and (not bus or result['unit_after'] == 'active'))
         return result
@@ -1326,7 +1427,7 @@ def environment(args, base):
     a = Agents(args, base, 'ev')
     try:
         a.up()
-        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp/gnu',
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
                   'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
         parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',
@@ -1413,6 +1514,7 @@ def mcp_tour(args, base):
                 'romacs_file_write': {'path': str(note), 'text': 'two\n', 'save': True},
                 'romacs_send_keys': {'keys': 'C-a'}, 'romacs_wait_idle': {'timeout': 5},
                 'romacs_call_outcome': {'id': 'no-such-call'},
+                'romacs_restart_status': {},
                 'romacs_option_search': {'query': 'kill-ring'},
                 'romacs_option_describe': {'name': 'kill-ring-max'},
                 'romacs_option_set': {'name': 'kill-ring-max', 'value': '61'},
@@ -1450,7 +1552,9 @@ def mcp_tour(args, base):
                 return text
 
             on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
-            for name in [n for n in names if n not in on_task + ('romacs_restart_request',)]:
+            # A restart would end the tour's server: the `restart' workflows call it.
+            elsewhere = ('romacs_restart',)
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',) + elsewhere]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
@@ -1471,7 +1575,8 @@ def mcp_tour(args, base):
                   'instructions': instructions, 'help': helped[:600],
                   'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
                   'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
-                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent
+                                 and n not in elsewhere]}
         result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
                         and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
                         and helped.startswith('core:') and 'agents:' in helped
@@ -1481,9 +1586,12 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project).
+                        # tree is (the tour's project); romacs_attach, romacs_task_reply and
+                        # romacs_task_renew from a caller that is no agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch', 'romacs_dev_check')
+                                                                  'romacs_task_watch', 'romacs_dev_check',
+                                                                  'romacs_attach', 'romacs_task_reply',
+                                                                  'romacs_task_renew')
                                 for n in errors)
                         and task is not None)
         return result
@@ -2190,8 +2298,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
@@ -2273,7 +2381,7 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-c C-; a, RET): on a project, its
+    """The agent board by real keys (C-x C-a a, RET): on a project, its
     first row opens, the thread that wants the user most, else the newest
     (a delegated one folds under its parent) or, with no thread, its
     newest transcript; on "◇ N more", every transcript is shown and the
@@ -2320,7 +2428,7 @@ def board_keys(args, base):
             # host (seen: no command ran for it): keys must reach the frame,
             # then the board, before one is relied on.
             a.keyboard_ready()
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'semicolon', '-m', 'ctrl', '-k', 'a')
+            a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
             def moved():
                 before = a.log().count('"native_command":"romacs-agent-board-next"')
@@ -2364,8 +2472,12 @@ def board_keys(args, base):
         steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
                                          a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
                                 ['t', 't', 'nil'])
-        # The newest thread forgotten after the board was drawn.
-        a.eval(f'(progn (remhash {lisp_text(sids[1])} romacs-agent--sessions) t)')
+        # The newest thread gone after the board was drawn: its records too
+        # (a session still recorded is listed from its row and loaded when asked).
+        a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
+               '(remhash id romacs-agent--sessions) '
+               '(when (fboundp (quote romacs-agent-store--open)) '
+               '(sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list id))) t)')
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
@@ -2771,7 +2883,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
@@ -2987,7 +3099,7 @@ def history_real(args, base):
 
 
 WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
-             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
+             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
              'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,

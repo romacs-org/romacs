@@ -132,6 +132,12 @@ pub trait DisplayHost {
     /// so its device-loss recovery runs (`romacs--debug-lose-device'). Whether
     /// the request reached a display that has a device to lose.
     fn lose_device(&mut self) -> bool { false }
+    /// What a launch is doing, for the screen it shows until its first
+    /// frame (`romacs-startup-progress'): STAGE a step's name (`init',
+    /// `agents', `restore'), LABEL what it is at, COUNT its (DONE . OF)
+    /// when it counts, FAILED when it failed.  Whether a screen took it:
+    /// past the first frame, or with none, a host ignores it.
+    fn startup_progress(&mut self, _stage: &str, _label: &str, _count: Option<(u64, u64)>, _failed: bool) -> bool { false }
     /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
     /// pixels under the facts' id until `release_image'.  An error is the
     /// loader's message; the image then shows as a placeholder.

@@ -67,7 +67,7 @@ macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONME
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s); the window and buffer are #: slots (display.rs); %s reads only the result
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
-prim.rs install_lisp_prelude_raw eval_source_raw 5 boundary  # VM setup: no caller Values
+prim.rs install_lisp_prelude_raw eval_source_raw 6 boundary  # VM setup: no caller Values
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
 prim/leaf/graphics.rs land_images call_prepared_source_propagating 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
 prim.rs write write_from_native 1 held  # a native writer: queued for its engine's completion, or, with no engine to complete it, its watchers hold collection (rooted_write unset)
@@ -154,12 +154,12 @@ threaded_lend.rs unwind_to unwind 1 clean  # the binding stack is traced; the re
 threaded_lend.rs watched bind_variable 1 suspended  # the value is read from the frame just before; the caller's stay in registers
 threaded_lend.rs watched set_variable_value 1 suspended  # it roots the value it was given; the caller's stay in registers
 threaded_lend.rs write_from set_variable_value 1 rooted  # the value is the frame's, read just before; the requester holds no Value
-variable_runtime.rs bind_variable bind_variable 1 clean  # a fenced variable's binding, again through the fence: VALUE is passed on and nothing is used after
+variable_runtime.rs bind_variable bind_variable 1 clean  # a tracked variable's binding, again through the tracking: VALUE is passed on and nothing is used after
 variable_runtime.rs bind_variable notify_watchers 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs bind_variable notify_watchers_at 1 rooted  # VALUE is a frame, read back for the store; the old value is a binding
 variable_runtime.rs notify_set notify_watchers 1 rooted  # VALUE is read from the caller's frame before each call
 variable_runtime.rs notify_set notify_watchers_at 2 rooted  # VALUE is read from the caller's frame before each call
-variable_runtime.rs variable_primitive notify_watchers_at 1 held  # defvar's set-default, in place: a fenced variable's defvar records its saved write at the call, which a queued store would repeat as a plain write
+variable_runtime.rs variable_primitive notify_watchers_at 1 held  # defvar's set-default, in place: a tracked variable's defvar records its saved write at the call, which a queued store would repeat as a plain write
 variable_runtime.rs variable_primitive set_variable_value 1 held  # the file-local defvar's `macroexp--dynvars`, in place beside defvar's set-default; its engine is not suspended, so nothing collects
 variable_runtime.rs variable_primitive write_from_native 1 held  # set and makunbound: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
 watchers.rs call_lisp_at_write reader_call 1 rooted  # a pending escape is a frame, read back
@@ -175,8 +175,8 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 watchers.rs write_from_native perform_write 1 held  # at once: nothing hears it, or no engine will complete it and its watchers hold collection (rooted_write unset)
 window.rs frame_window_snapshots resize_root_window 1 clean  # its size is plain; the root window is read again from the frame after it
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
-world/layer.rs timer_count eval_source_raw 1 clean  # no Values before the call; its value is a fixnum, read at once
-world/layer.rs world_layer_load eval_source_raw 3 boundary  # a layer build's top-level requests: the builder holds no Values, and each result is dropped or only matched
+world/layer.rs cancel_entry_timers eval_source_raw 2 clean  # no Values before either call: the timers it keeps and those restore makes again are Lisp variables', and its value is a fixnum, read at once
+world/layer.rs world_layer_load eval_source_raw 6 boundary  # a layer build's top-level requests (secret-reader advice on, session variables, each entry, a collection when an entry leaves a resource, advice off, startup rerun): the builder holds Rust strings, symbol slots and digests only; across an entry or the collection the `features' head sits in a RootFrame and is read back; each result is dropped or only matched
 world/pending.rs force_pending safe_call 1 held  # gc_holds is raised across the call; INDEX is a fixnum and nothing heap is used after it
 world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds
 prim/leaf/face.rs call_propagating call_lisp_at_write 1 held  # a leaf: its engine is not suspended; its callers hold only symbols, frames and lface vectors the leaf's held collection keeps in place
