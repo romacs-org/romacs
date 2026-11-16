@@ -305,4 +305,43 @@ records alone with RECORDS-ONLY, and the buffer."
       (setf (romacs-agent-buffer session) nil)
       (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
 
+(ert-deftest romacs-agent-drawn-a-card-settles-not-an-arrival ()
+  ;; A task's card settles by its own chip, not the chip of a result of
+  ;; the task's that arrived after it.
+  (romacs-agent-drawn-tests--chat (romacs-agent--make :id "s-c" :harness 'claude)
+    (let ((inhibit-read-only t) (inhibit-field-text-motion t)
+          (record (make-hash-table :test #'equal)) (romacs-agent-glyphs nil))
+      (puthash "taskId" "kid" record)
+      (puthash "status" "running" record)
+      (insert "●" (propertize " ◈ delegate\n" 'romacs-agent-tool "d1"))
+      (set-marker romacs-agent-ui--end (point-max))
+      (goto-char (point-min))
+      (romacs-agent-ui--card-task record "d1")
+      (goto-char (point-max))
+      (insert "arrived " (romacs-agent-ui--chip "kid" "completed") "\n")
+      (set-marker romacs-agent-ui--end (point-max))
+      (let ((arrival (buffer-substring-no-properties (line-beginning-position 0) (point-max))))
+        (romacs-agent-ui--settle-task "kid" "failed")
+        (should (equal (buffer-substring-no-properties (line-beginning-position 0) (point-max)) arrival))
+        (goto-char (point-min))
+        (should (string-search (substring-no-properties (romacs-agent-ui--chip "kid" "failed"))
+                               (buffer-substring-no-properties (point-min) (line-end-position))))))))
+
+(ert-deftest romacs-agent-drawn-opening-every-output-looks-up-no-row ()
+  ;; Opening every output of a chat goes by each row's place: no search
+  ;; from the end for any.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 12
+    (should (= (romacs-agent-turns-fill session) 12))
+    (let ((forms (romacs-agent-drawn-tests--forms session 12)) (searches 0))
+      (romacs-agent-drawn-tests--chat session
+        (dolist (form forms) (romacs-agent-ui--insert-drawn form))
+        (should (= (length (romacs-agent-ui--payload-ids (point-min) romacs-agent-ui--end)) 12))
+        (cl-letf* ((mark (symbol-function 'romacs-agent-ui--tool-mark))
+                   ((symbol-function 'romacs-agent-ui--tool-mark) (lambda (id) (cl-incf searches) (funcall mark id))))
+          (romacs-agent-ui--open-payloads-in (point-min) romacs-agent-ui--end))
+        (should (= searches 0))
+        (should-not (romacs-agent-ui--payload-ids (point-min) romacs-agent-ui--end))
+        (should (string-search romacs-agent-drawn-tests--long (buffer-string)))))))
+
 ;;; romacs-agent-drawn-tests.el ends here
