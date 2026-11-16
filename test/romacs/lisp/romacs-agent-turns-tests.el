@@ -196,7 +196,15 @@ call and result, an answer and a result a turn."
       (romacs-agent-turns--item turn (list :type 'tool :state 'completed :seq 3 :id "g" :output "a\nb\nc\n"))
       (should (equal (gethash "ended" item) "3 matches"))
       ;; The input it keeps is bounded all the same.
-      (should (= (length (gethash "pattern" (gethash "input" item))) (1+ romacs-agent-turns--cut))))))
+      (should (= (length (gethash "pattern" (gethash "input" item))) (1+ romacs-agent-turns--cut))))
+    ;; A search whose query comes only as it ends: its texts and input from then.
+    (romacs-agent-turns--item turn (list :type 'tool :state 'started :seq 4 :id "w" :name "Grep"
+                                         :input (romacs-mcp--object "pattern" "")))
+    (romacs-agent-turns--item turn (list :type 'tool :state 'completed :seq 5 :id "w" :output "a\n"
+                                         :input (romacs-mcp--object "pattern" "zebra")))
+    (let ((item (gethash "w" (plist-get turn :by-id))))
+      (should (equal (gethash "row" item) "Grep zebra"))
+      (should (equal (gethash "pattern" (gethash "input" item)) "zebra")))))
 
 (ert-deftest romacs-agent-turns-codex-answers-and-interrupts ()
   ;; Codex's answers, by question id, kept as Claude's are, by question; a
