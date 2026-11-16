@@ -704,10 +704,11 @@ finds them as it found every output."
   "The calls whose rows between START and END name a kept payload
 \(`romacs-agent-payload'), in order, each (ID . POSITION), POSITION on
 its row's line."
-  (let ((found nil) (at start))
+  (let ((found nil) (seen (make-hash-table :test #'equal)) (at start))
     (while (and at (< at end))
       (when-let* ((kept (get-text-property at 'romacs-agent-payload))
-                  ((not (assoc (plist-get kept :id) found))))
+                  ((not (gethash (plist-get kept :id) seen))))
+        (puthash (plist-get kept :id) t seen)
         (push (cons (plist-get kept :id) at) found))
       (setq at (next-single-property-change at 'romacs-agent-payload nil end)))
     (nreverse found)))
