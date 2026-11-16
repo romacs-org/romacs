@@ -254,7 +254,7 @@ until a worker moves it (`romacs-agent-events-migrate-soon')."
       (error (message "romacs-agent-events: %s: %s" (romacs-agent-id session) (error-message-string err))))))
 
 
-(defconst romacs-agent-events--chunk 2000
+(defconst romacs-agent-events--chunk 500
   "The records an import writes a transaction: other writers (the editor's
 own) wait for no more than that.")
 
@@ -375,7 +375,7 @@ given back as they free (auto_vacuum incremental, set once, one rewrite)."
     (sqlite-pragma db "auto_vacuum = incremental")
     (sqlite-execute db "vacuum")))
 
-(defconst romacs-agent-events--compact-window 5000
+(defconst romacs-agent-events--compact-window 2000
   "The seqs compaction removes deltas of a transaction: other writers wait
 for no more than that.")
 
@@ -449,12 +449,19 @@ over a quarter of the database is free; the records removed."
 
 ;; With the store on, every session still in a journal moves to SQLite:
 ;; after a start's restore, once the editor is idle, a few sessions a job
-;; go to worker VMs, `romacs-agent-fold-jobs' jobs at once.  A job imports
+;; go to worker VMs, `romacs-agent-events-migrate-jobs' jobs at once (one
+;; database takes one writer at a time: more jobs only wait on it).  A job imports
 ;; each (its journal to the backup directory: Romacs's own journals only,
 ;; never a harness's transcripts), compacts it and fills its turn rows,
 ;; each in short transactions on its own connection.  The editor only
 ;; hears which are done.  A session loaded here, or whose supervisor runs,
 ;; is left for its next launch or the next start.
+
+(defcustom romacs-agent-events-migrate-jobs 2
+  "How many worker VMs move sessions to SQLite at once.  The database takes
+one writer at a time, so more jobs only wait for it, and hold the editor's
+own writes up as they do."
+  :type 'natnum :group 'romacs-agent)
 
 (defvar romacs-agent-events--migrate-queue nil "The session directories still to move to SQLite.")
 (defvar romacs-agent-events--migrate-running 0 "How many migration jobs run.")
@@ -468,7 +475,7 @@ over a quarter of the database is free; the records removed."
   "At most how many sessions, and how many bytes of journals, a migration
 job moves; a journal past the bytes goes alone.")
 
-(defconst romacs-agent-events--worker-busy 10000
+(defconst romacs-agent-events--worker-busy 60000
   "The milliseconds a worker's writes wait for the database's lock: a
 worker waits for the editor, never the editor for long on a worker.")
 
@@ -513,10 +520,11 @@ opened before its turn came."
   (and (gethash id romacs-agent-events--migrating) t))
 
 (defun romacs-agent-events--migrate-next ()
-  "Give waiting sessions to worker VMs while fewer than
-`romacs-agent-fold-jobs' jobs run."
-  (while (and romacs-agent-events--migrate-queue
-              (< romacs-agent-events--migrate-running (max 1 romacs-agent-fold-jobs)))
+  "Give the next waiting sessions to a worker VM when fewer than
+`romacs-agent-events-migrate-jobs' jobs run, a job a turn of the command
+loop: a worker's start is the editor's time."
+  (when (and romacs-agent-events--migrate-queue
+             (< romacs-agent-events--migrate-running (max 1 romacs-agent-events-migrate-jobs)))
     (let ((batch nil) (bytes 0))
       (while (and romacs-agent-events--migrate-queue (< (length batch) (car romacs-agent-events--migrate-batch))
                   (let ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (car romacs-agent-events--migrate-queue))))
@@ -539,7 +547,8 @@ opened before its turn came."
                                          :bindings (romacs-agent--fold-bindings))
                         (error (list 'error err)))))
           (if (eq (car-safe future) 'error) (romacs-agent-events--migrated batch future)
-            (isolate-on-done future (lambda (done) (romacs-agent-events--migrated batch done)))))))))
+            (isolate-on-done future (lambda (done) (romacs-agent-events--migrated batch done))))))
+      (run-at-time 0 nil #'romacs-agent-events--migrate-next))))
 
 (defun romacs-agent-events--migrate-job (dirs)
   "In a worker VM: move the sessions recorded in DIRS to SQLite, compact
