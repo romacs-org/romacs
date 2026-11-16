@@ -612,42 +612,11 @@ impl Vm {
             Some(Object::Window(w)) => (w.buffer, Some(object)),
             _ => (object, None),
         };
-        let at = if self.overlay_store(object).is_some() {
+        if self.overlay_store(object).is_some() {
             let byte = self.overlay_position(object, position, false)?;
-            let buffer = self.annotated(object)?;
-            let found = buffer
-                .intervals
-                .query_with_end(
-                    byte,
-                    byte,
-                    true,
-                    byte == buffer.anchors.extent(),
-                    &buffer.anchors,
-                )
-                .0;
-            let at = buffer.char_of_byte(ByteOffset(byte as usize))?.0 + 1;
-            let found = match window {
-                // window.h overlay_matches_window: a `window' that is not a
-                // window object restricts nothing.
-                Some(window) => {
-                    let key = self.intern("window");
-                    let mut kept = vec![];
-                    for o in found {
-                        let w = self.overlay_get(o, key)?;
-                        if w == window || !matches!(self.object_if(w), Some(Object::Window(_))) { kept.push(o); }
-                    }
-                    kept
-                }
-                None => found,
-            };
-            let hit = self.ordered_overlay_hit(found, property)?;
-            if hit.0 != Value::NIL {
-                return Ok(hit);
-            }
-            at
-        } else {
-            usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?
-        };
+            return self.char_property_at_byte(object, byte as usize, property, window);
+        }
+        let at = usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?;
         let raw = self.annotation_raw(object, at)?;
         Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
     }
@@ -667,21 +636,61 @@ impl Vm {
         self.annotation_resolve(&place, property).map_err(Fault::Error)
     }
 
-    /// `get_char_property_and_overlay` (textprop.c) with a window as OBJECT,
-    /// as the display iterator asks: PROPERTY of the character at BYTE of
-    /// BUFFER from the highest overlay that applies to WINDOW (an overlay
-    /// whose `window` property is another window does not), read as
-    /// `overlay-get` reads it, else from the text, together with that
-    /// overlay or nil.
-    pub(crate) fn window_char_property(&self, buffer: Value, byte: usize, property: Value, window: Value) -> Result<(Value, Value)> {
-        let text = self.annotated(buffer)?;
-        let at = byte as u32;
+    /// textprop.c get_char_property_and_overlay at BYTE of BUFFER's overlay
+    /// store, as the display iterator and the field checks ask: PROPERTY
+    /// of the character there from the highest overlay that applies to
+    /// WINDOW (any overlay when None; one whose `window` property is
+    /// another window does not), read as `overlay-get` reads it, else from
+    /// the text, together with that overlay or nil. A multibyte buffer is
+    /// read at BYTE, with no position converted.
+    pub(crate) fn char_property_at_byte(&self, buffer: Value, byte: usize, property: Value, window: Option<Value>) -> Result<(Value, Value)> {
+        let object = self.object(buffer)?;
+        let text = match object {
+            Object::Buffer(b) => b,
+            Object::ByteBuffer(b) => b.shown().ok_or("unibyte buffer not mirrored")?,
+            _ => return Err("buffer required".into()),
+        };
+        let at = u32::try_from(byte).map_err(|_| "buffer too large")?;
         let found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
-        let applying = found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)).collect();
-        let hit = self.ordered_overlay_hit(applying, property)?;
+        let found = match window {
+            Some(window) => found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)).collect(),
+            None => found,
+        };
+        let hit = self.ordered_overlay_hit(found, property)?;
         if hit.0 != Value::NIL { return Ok(hit); }
-        let raw = self.annotation_raw(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?;
-        Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
+        let place = match object {
+            Object::Buffer(b) => Self::annotation_place_at_byte(b, ByteOffset(byte))?,
+            // A unibyte buffer keeps its properties by its own positions,
+            // not its mirror's bytes.
+            _ => self.annotation_place(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?,
+        };
+        Ok((self.annotation_resolve(&place, property)?, Value::NIL))
+    }
+    /// Whether PROPERTY reads nil at every byte in BYTES of BUFFER, a
+    /// multibyte buffer, as known without reading any one: no overlay
+    /// there has it, no text there has a key that decides it (its own,
+    /// `category`, its aliases), and it has no default. False where that
+    /// is not known, or where reading the variables would signal (a reader
+    /// then signals as it would have).
+    pub(crate) fn char_property_absent(&self, buffer: Value, property: Value, bytes: std::ops::Range<usize>) -> bool {
+        let Ok(Object::Buffer(b)) = self.object(buffer) else { return false };
+        let (Ok(start), Ok(end)) = (u32::try_from(bytes.start), u32::try_from(bytes.end)) else { return false };
+        if !b.intervals.is_empty() {
+            let (found, _) = b.intervals.query_with_end(start, end, false, true, &b.anchors);
+            if !found.into_iter().all(|overlay| self.overlay_get(overlay, property).is_ok_and(|v| v == Value::NIL)) {
+                return false;
+            }
+        }
+        let (aliases, defaults) = self.textget_variables();
+        if defaults != Value::NIL && !matches!(self.annotation_plist(defaults, property), Ok(None | Some(Value::NIL))) {
+            return false;
+        }
+        let range = ByteOffset(bytes.start)..ByteOffset(bytes.end);
+        let unset = |key: crate::properties::Key| b.properties.first_unlike(range.clone(), key, None).is_none();
+        if aliases == Value::NIL {
+            return crate::properties::Key::of(property).is_none_or(unset) && unset(crate::properties::Key::CATEGORY);
+        }
+        self.deciding_keys(property).is_ok_and(|keys| keys.into_iter().all(unset))
     }
     /// The text properties whose runs decide PROPERTY's char-property
     /// value: its own, `category`, and its `char-property-alias-alist`
@@ -1448,17 +1457,22 @@ impl Vm {
     pub(crate) fn char_property_accessible(&mut self, position: i64, property: Value) -> crate::prim::Out {
         use crate::prim::Fault;
         let object = self.slots[self.buffer_slot].value;
-        let (begv, zv) = match self.object(object).map_err(Fault::Error)? {
+        let at = Value::integer(position).map_err(Fault::Error)?;
+        match self.object(object).map_err(Fault::Error)? {
+            // Bounded in bytes, so neither edge of the restriction is converted.
             Object::Buffer(b) => {
                 let r = b.accessible();
-                (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+                let byte = usize::try_from(position - 1).ok().and_then(|c| b.byte_of_char(CharOffset(c)).ok());
+                let byte = byte.filter(|byte| r.start <= *byte && *byte <= r.end).ok_or(Fault::Range1(at))?;
+                return self.char_property_at_byte(object, byte.0, property, None).map(|hit| hit.0).map_err(Fault::Error);
             }
-            Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            Object::ByteBuffer(b) => {
+                let (begv, zv) = (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1);
+                if position < begv || position > zv {
+                    return Err(Fault::Range1(at));
+                }
+            }
             _ => return Err(Fault::Error("buffer required".into())),
-        };
-        let at = Value::integer(position).map_err(Fault::Error)?;
-        if position < begv || position > zv {
-            return Err(Fault::Range1(at));
         }
         self.get_char_property_values(at, property, object).map_err(Fault::Error)
     }

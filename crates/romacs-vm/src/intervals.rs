@@ -230,6 +230,9 @@ impl IntervalIndex {
         anchors: &AnchorTree,
         mut emit: impl FnMut(Value, u32, u32),
     ) -> usize {
+        if self.slots.is_empty() {
+            return 0;
+        }
         let mut visited = 0;
         fn visit(
             t: &IntervalIndex,
