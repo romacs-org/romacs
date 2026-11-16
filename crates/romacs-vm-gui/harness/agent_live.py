@@ -180,8 +180,13 @@ class Agents(Server):
         until(lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
 
     def journal(self, sid):
-        path = self.home / '.local/state/romacs/agents' / sid / 'journal.jsonl'
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        """SID's records, as the editor reads them wherever they are kept:
+        its journal, or the agents' database once they are moved there."""
+        text = parity_live.read_sexp(self.eval(
+            f'(let ((session {self.s(sid)}) (records nil)) '
+            '(when session (romacs-agent--read-journal session (lambda (record) (push record records)))) '
+            '(decode-coding-string (json-serialize (vconcat (nreverse records))) (quote utf-8)))'))
+        return json.loads(text) if text else []
 
     def results(self, sid):
         return [r['out'].get('result') for r in self.journal(sid)
