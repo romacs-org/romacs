@@ -683,7 +683,10 @@ it; nil when it has none, or no row any more."
              (goto-char mark)
              (forward-line 1)
              (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
-                                     'invisible (and folded '(romacs-agent-output)))))
+                                     'invisible (and folded '(romacs-agent-output))
+                                     ;; Its row's pointer, put back when its turn is kept.
+                                     'romacs-agent-opened (list :id id :bytes (plist-get payload :bytes)
+                                                                :failed (plist-get payload :failed)))))
                (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
                (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))))
       t)))
@@ -930,6 +933,8 @@ quiet calls as QUIET, a function, makes them anew in a copy."
   (when-let* ((bounds (romacs-agent-ui--run-bounds position))
               (head (car bounds))
               (run (get-text-property head 'romacs-agent-run-head))
+              ;; A run kept as drawn says only that it is one: long settled.
+              ((consp run))
               ((gethash id (plist-get run :quiet))))
     (let* ((calls (copy-hash-table (plist-get run :quiet)))
            (run (progn (funcall quiet calls) (plist-put (copy-sequence run) :quiet calls)))
@@ -1054,7 +1059,7 @@ name and a marker at its reply hint, nil where nothing can answer it.")
 
 (defun romacs-agent-ui--reply-hint (answered &optional reply)
   "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED, a link to the
-REPLY's row, a marker, when this chat shows it."
+REPLY's row, the id of its call, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
               'romacs-agent-reply t
               'help-echo (cond (reply (substitute-command-keys
@@ -1104,7 +1109,8 @@ marker at the reply's row, when this chat shows it."
   (when-let* ((hint (cdr (gethash id (romacs-agent-ui--received)))))
     (save-excursion
       (let* ((inhibit-read-only t) (start (marker-position hint))
-             (answered (romacs-agent-ui--reply-hint t reply)))
+             (answered (romacs-agent-ui--reply-hint
+                        t (and reply (get-text-property (min (1+ reply) (point-max)) 'romacs-agent-tool)))))
         (delete-region start (next-single-property-change start 'romacs-agent-reply nil (point-max)))
         (romacs-agent-ui--insert-at start answered)
         (set-marker hint start)))))
@@ -2573,6 +2579,24 @@ shows a row waiting for one, it shows the turn.  An edit to no undo."
                    (delete-region (point) (+ (point) length))
                    (romacs-agent-ui--note-fills start (point))))))))))))
 
+(defun romacs-agent-ui--drawn-form (start end)
+  "The transcript from START to END as a drawn form, the outputs opened
+there folded back to their rows' pointers (`romacs-agent-opened'): a
+kept turn holds no output."
+  (let ((text (buffer-substring start end)))
+    (with-temp-buffer
+      (insert text)
+      (let ((at (point-min)) (inhibit-read-only t))
+        (while (setq at (text-property-not-all at (point-max) 'romacs-agent-opened nil))
+          (let ((payload (get-text-property at 'romacs-agent-opened))
+                (next (next-single-property-change at 'romacs-agent-opened nil (point-max))))
+            (delete-region at next)
+            (when (> at (point-min))
+              (save-excursion
+                (goto-char (1- at))
+                (put-text-property (line-beginning-position) (line-end-position) 'romacs-agent-payload payload))))))
+      (romacs-agent-drawn-form (point-min) (point-max)))))
+
 (defun romacs-agent-ui--keep-drawn (session)
   "Keep SESSION's turn that just ended in the current chat as it is drawn
 here, from its prompt (`romacs-agent-first-seq') to the transcript's end,
@@ -2582,7 +2606,7 @@ beside its turn row: a chat opened later inserts it."
                                      (text-property-search-backward 'romacs-agent-first-seq nil (lambda (_ v) v)))))
     (condition-case err
         (romacs-agent-drawn-put db (romacs-agent-id session) (prop-match-value found)
-                                (romacs-agent-drawn-form (prop-match-beginning found) romacs-agent-ui--end))
+                                (romacs-agent-ui--drawn-form (prop-match-beginning found) romacs-agent-ui--end))
       (error (message "romacs-agent-ui: a turn not kept as drawn: %s" (error-message-string err))))))
 
 (defun romacs-agent-ui--item-questions (questions)
@@ -2675,11 +2699,13 @@ end: its text and properties as drawn, the composer after them."
 
 (defun romacs-agent-ui--note-fills (start end)
   "The rules between START and END fit the window as the others do
-\(`romacs-agent-ui--refit-rules')."
+\(`romacs-agent-ui--refit-rules'), now: drawn elsewhere, at its width."
   (let ((at start))
     (while (setq at (text-property-any at end 'romacs-agent-rule-fill t))
       (push (copy-marker at) romacs-agent-ui--fills)
-      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))))
+      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end))))
+  (setq romacs-agent-ui--fitted nil)
+  (romacs-agent-ui--refit-rules))
 
 (defun romacs-agent-ui--turn-events (session turn)
   "TURN as the events a turn kept as drawn is drawn from: a turn row
@@ -2901,8 +2927,9 @@ strings, compared by value."
 (defun romacs-agent-chat-goto-reply ()
   "Go to the reply that answered the message on this row."
   (interactive nil romacs-agent-chat-mode)
-  (let ((reply (or (get-text-property (point) 'romacs-agent-reply-at)
-                   (user-error "No reply to go to here"))))
+  (let ((reply (or (romacs-agent-ui--tool-mark (or (get-text-property (point) 'romacs-agent-reply-at)
+                                                   (user-error "No reply to go to here")))
+                   (user-error "The reply is no longer in this chat"))))
     (goto-char reply)
     (romacs-agent-ui--reveal (point))
     (when (eq (window-buffer) (current-buffer)) (recenter))))
@@ -3782,7 +3809,7 @@ HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
 ;; The keymaps a chat puts in its text, which a turn kept as drawn names.
 (mapc #'romacs-agent-drawn-keymap '(romacs-agent-chat-transcript-map romacs-agent-ui--link-map
                                     romacs-agent-ui--compaction-map romacs-agent-ui--earlier-map
-                                    romacs-agent-ui--asked-map))
+                                    romacs-agent-ui--asked-map romacs-agent-ui--reply-link-map))
 
 (provide 'romacs-agent-ui)
 ;;; romacs-agent-ui.el ends here
