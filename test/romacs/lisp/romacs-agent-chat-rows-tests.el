@@ -187,19 +187,22 @@ records alone with RECORDS-ONLY, and the buffer."
 (ert-deftest romacs-agent-chat-row-messages-images-answers ()
   ;; A row's prompt keeps its files and who said what; an answer the
   ;; harness got comes back as the labels picked, whole.
-  (let* ((from (make-hash-table :test #'equal)) (message (make-hash-table :test #'equal))
-         (answers (make-hash-table :test #'equal))
+  ;; Written and read as a turn's row keeps them: through its JSON.
+  (let* ((answers (make-hash-table :test #'equal))
+         (messages (romacs-agent-turns--parse
+                    (romacs-agent--json
+                     (romacs-agent-turns--messages
+                      (list (list :id "m1" :from (list :session "s-1" :name "lead" :address "a@b") :kind "note" :text "hi")
+                            (list :id "m2" :wake (list :task "t-9" :state "completed") :text "done"))))))
          (row (list :first-seq 2 :last-seq 3 :t 1.0 :prompt "see" :images ["/tmp/a.png"]
-                    :messages (vector message) :items [])))
-    (puthash "session" "s-1" from)
-    (puthash "name" "lead" from)
-    (dolist (pair `(("id" . "m1") ("from" . ,from) ("kind" . "note") ("text" . "hi")))
-      (puthash (car pair) (cdr pair) message))
+                    :messages messages :items [])))
     (let ((input (car (romacs-agent-ui--row-events 'session row))))
       (should (equal (plist-get input :images) '("/tmp/a.png")))
-      (let ((card (car (plist-get input :messages))))
+      (let ((card (car (plist-get input :messages))) (wake (cadr (plist-get input :messages))))
         (should (equal (plist-get card :text) "hi"))
-        (should (equal (plist-get (plist-get card :from) :name) "lead"))))
+        (should (equal (plist-get card :from) '(:session "s-1" :name "lead" :address "a@b")))
+        (should (equal (plist-get (plist-get wake :wake) :task) "t-9"))
+        (should (equal (plist-get (plist-get wake :wake) :state) "completed"))))
     (puthash "Which?" "Research, then implement, B" answers)
     (should (equal (romacs-agent-ui--answer-labels
                     '(("Which?" :options ("Research, then implement" "B" "C"))) answers)
