@@ -886,6 +886,75 @@ def tools(args, base):
         a.close()
 
 
+def reap(args, base):
+    """A finished delegated task keeps no processes: reaped after its idle
+    time, it reads idle and completed (on the board too, not ended); a
+    task_send, and what a watch tells it, run its harness again on its own
+    conversation.  The user's own session, which no session delegated, is
+    never reaped."""
+    a = Agents(args, base, 'rp')
+    try:
+        a.up()
+        a.eval('(setq romacs-agent-reap-after 1)')
+        parent = a.start('say ready')
+        a.idle(parent)
+        a.send(parent, 'call romacs_delegate_task ' + json.dumps({'task': 'say first', 'mode': 'wait', 'clientRequestId': 'r1'}))
+        # The answer that started it: a call refused while the editor was
+        # not yet reachable is retried by the harness.
+        answer = until(lambda: next((e['text'] for e in a.logged()
+                                     if e.get('tool') == 'romacs_delegate_task' and not e.get('error')), None),
+                       60, 'task delegated')
+        a.idle(parent, 60)
+        child = json.loads(answer)['taskId']
+
+        def runs():
+            return [e for e in a.logged() if e.get('started') and e.get('started') == child]
+
+        def asleep():
+            return a.eval(f'(and (romacs-agent-reaped-p {a.s(child)}) (eq (romacs-agent-state {a.s(child)}) (quote idle)))') == 't'
+
+        def harness_gone(run):
+            return not Path(f'/proc/{run["pid"]}').exists()
+
+        def looks():
+            return {'state': a.state(child),
+                    'status': a.eval(f'(romacs-agent-tools--status {a.s(child)})').strip('"'),
+                    'board': a.eval(f'(romacs-agent-ui--state-key {a.s(child)})')}
+
+        until(asleep, 30, 'task reaped')
+        first = runs()[-1]
+        until(lambda: harness_gone(first), 15, 'reaped harness ended')
+        reaped = looks()
+        # A message from its parent: its conversation goes on.
+        a.send(parent, 'call romacs_task_send ' + json.dumps({'taskId': child, 'message': 'say second'}))
+        until(lambda: len(runs()) >= 2, 30, 'resumed by task_send')
+        second = runs()[-1]
+        a.idle(child, 60)
+        until(asleep, 30, 'reaped again')
+        until(lambda: harness_gone(second), 15, 'second harness ended')
+        # What a watch tells it (romacs-agent-tools--tell) resumes it the same way.
+        a.eval(f'(romacs-agent-tools--tell {a.s(child)} "say third")')
+        until(lambda: len(runs()) >= 3, 30, 'resumed by a tell')
+        third = runs()[-1]
+        a.idle(child, 60)
+        replies = a.results(child) if a.journal(child) else None
+        # Each resumed harness took its message: the task_send's (wrapped as
+        # one from another session) and the tell's.
+        inputs = [json.dumps(r['in']) for r in a.journal(child) if 'in' in r]
+        received = [any(word in i for i in inputs) for word in ('say second', 'say third')]
+        parent_alive = a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(parent)})) (not (romacs-agent-stopped {a.s(parent)})))') == 't'
+        resumed = [r['argv'][r['argv'].index('--resume') + 1] if '--resume' in r['argv'] else None for r in (second, third)]
+        result = {'reaped': reaped, 'first_argv_session': first['argv'][first['argv'].index('--session-id') + 1]
+                  if '--session-id' in first['argv'] else None,
+                  'resumed_on': resumed, 'parent_alive': parent_alive, 'received': received, 'replies': replies}
+        result['ok'] = (reaped == {'state': 'idle', 'status': 'completed', 'board': 'idle'}
+                        and resumed == [child, child] and first.get('started') == child and parent_alive
+                        and received == [True, True] and replies is not None and len(replies) == 3 and replies[2] == 'third')
+        return result
+    finally:
+        a.close()
+
+
 def delegate(args, base):
     """Delegation at T3 Code's parity, a fake Claude parent and fake Codex
     children: wait (with CODEX_HOME, model and effort passed), async with a
@@ -3239,7 +3308,7 @@ def history_real(args, base):
         a.close()
 
 
-WORKFLOWS = {'host': host, 'sockets': sockets, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
@@ -3267,7 +3336,7 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'sockets', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
+    for name in args.workflow or ['host', 'sockets', 'reap', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
                                   'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
