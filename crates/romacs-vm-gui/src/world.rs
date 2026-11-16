@@ -137,6 +137,54 @@ pub fn launch(world: &World, on_wait: impl FnOnce(&serde_json::Value)) -> Option
     }
 }
 
+/// The installation's store beside this executable (`EXECUTABLE.worlds`),
+/// when there is one: an installer fills it with `--world-build`.
+pub fn installed_store() -> Option<PathBuf> {
+    crate::batch::beside_executable("worlds").filter(|store| store.is_dir())
+}
+
+/// This launch's world from the installation's store ([`installed_store`]),
+/// restored read only without asking its records again
+/// (`World::restore_read_only`): None, saying why on stderr, when the store
+/// has no world for this executable and Lisp tree, and the launch goes on
+/// to the user's store. Nothing is built or written there.
+pub fn installed() -> Option<(World, Box<Vm>, Carry)> {
+    let store = installed_store()?;
+    match World::restore_read_only::<Carry>(&store, recipe().ok()?) {
+        Ok((world, vm, carry)) => {
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "restored", "installed": true, "key": hex(&world.key),
+                                                                "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
+            Some((world, vm, carry))
+        }
+        Err(reason) => {
+            romacs_vm::host::event_line("romacs-world", &json!({"installed": store, "reason": reason}));
+            None
+        }
+    }
+}
+
+/// In a worker isolate: the world of KEY in STORE, restored as its session
+/// restored it. From the installation's store ([`installed_store`]) read
+/// only, its records not asked again and nothing written there, as a launch
+/// reads it ([`installed`]), when this executable and Lisp tree key it as
+/// KEY; from any other store checked and used as `World::restore_only` does.
+pub fn adopt(store: PathBuf, key: [u8; 32]) -> Result<(Box<Vm>, Carry), String> {
+    let installed = installed_store().and_then(|installed| std::fs::canonicalize(installed).ok());
+    if installed.is_some() && std::fs::canonicalize(&store).ok() == installed {
+        let (world, vm, carry) = World::restore_read_only::<Carry>(&store, recipe()?).map_err(|reason| reason.to_string())?;
+        if world.key != key {
+            return Err(format!("the installation's world is {}, not {}", hex(&world.key), hex(&key)));
+        }
+        return Ok((vm, carry));
+    }
+    World { store, key, recipe: Vec::new() }.restore_only::<Carry>().map_err(|reason| reason.to_string())
+}
+
+/// KEY in hexadecimal, as a manifest names it.
+fn hex(key: &[u8; 32]) -> String {
+    key.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// This process is a builder: build WORLD and exit.
 pub fn build_here(world: &World) -> Result<(), String> {
     let Launch::Build = world.launch::<Carry>(Vec::new, false, |_| {}) else { return Err("not a world builder".into()) };
@@ -173,7 +221,7 @@ fn lisp_string(text: &str) -> String {
 /// it was published, before anything of this process runs in it. Nothing
 /// is written to the store.
 pub fn census(store: &Path) -> Result<serde_json::Value, String> {
-    let (vm, carry) = World::restore_read_only::<Carry>(store, recipe()?).map_err(|reason| reason.to_string())?;
+    let (_, vm, carry) = World::restore_read_only::<Carry>(store, recipe()?).map_err(|reason| reason.to_string())?;
     let census = romacs_vm::world::image::census(&vm, &carry);
     // The process exits next: the image need not be taken apart.
     std::mem::forget((vm, carry));

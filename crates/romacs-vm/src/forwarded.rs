@@ -1187,6 +1187,13 @@ impl Vm {
             self.forwarded.objects[i as usize] = Value::UNBOUND;
         }
     }
+    /// `source-directory' made again from this process's environment on
+    /// its next read (`host::source_directory`), as a restored VM must.
+    pub(crate) fn forget_source_directory(&mut self) {
+        if let Some(Fwd::Obj(i)) = Forwarded::lookup("source-directory") {
+            self.forwarded.objects[i as usize] = Value::UNBOUND;
+        }
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A tracked built-in variable is the forwarding the tracking keeps; a

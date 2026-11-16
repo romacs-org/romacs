@@ -364,7 +364,7 @@ never two of one."
   "A live turn's end: SESSION's rows are caught up a moment later, by a
 batch process (`romacs-agent-turns-fill-soon'), not here."
   (when (and (eq (plist-get event :type) 'done) (romacs-agent-dir session)
-             (eq (romacs-agent-get (romacs-agent-id session)) session))
+             (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (unless romacs-agent-turns--due
       (run-with-timer 2 nil (lambda () (let ((ids romacs-agent-turns--due))
                                          (setq romacs-agent-turns--due nil)
@@ -399,18 +399,21 @@ they came.  The number written."
         (remhash scratch romacs-agent-turns--open)
         (- (romacs-agent-turns-count session) before)))))
 
+(defvar romacs-agent-events-store)
+
 (defun romacs-agent-turns-fill-batch ()
   "`romacs-agent-turns-fill' for the sessions the command line names (all
 recorded ones, with none), in a batch process: each fills from where its
-rows end, nothing when its records end there too."
-  (let ((written 0) (t0 (float-time))
+rows end, nothing when its records end there too.  It moves no
+session's records to SQLite: the editor alone does."
+  (let ((written 0) (romacs-agent-events-store nil) (t0 (float-time))
         (ids (prog1 command-line-args-left (setq command-line-args-left nil))))
     (dolist (dir (if ids (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
                    (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
       (when (file-exists-p (expand-file-name "manifest.json" dir))
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
           (romacs-agent--load dir))
-        (when-let* ((session (romacs-agent-get (file-name-nondirectory dir))))
+        (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a
           ;; session loaded beside its running supervisor has an older seq.
           (setq written (+ written (condition-case err (romacs-agent-turns-fill session)
