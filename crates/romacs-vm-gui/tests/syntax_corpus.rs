@@ -50,8 +50,8 @@ const PROBE: &str = r#";;; -*- lexical-binding: t -*-
 /// Elisp with strings, character literals and `syntax-propertize' at work;
 /// C with both comment styles and the preprocessor.
 const FILES: [(&str, &str); 3] = [
-    ("lisp/gnu/subr.el", "emacs-lisp-mode"),
-    ("lisp/gnu/emacs-lisp/rx.el", "emacs-lisp-mode"),
+    ("lisp/subr.el", "emacs-lisp-mode"),
+    ("lisp/emacs-lisp/rx.el", "emacs-lisp-mode"),
     ("test/gnu/test/manual/etags/c-src/etags.c", "c-mode"),
 ];
 
