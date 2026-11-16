@@ -12,9 +12,10 @@
 //! the same user.
 //!
 //! A session that names no store restores the installation's world first,
-//! `EXECUTABLE.worlds` beside the executable, which its installer built
-//! (`--world-build --batch`): it only reads that store, writing no lock,
-//! use stamp or digest there. Then the user's store. No session is slower
+//! `EXECUTABLE.worlds` beside the executable, when one was prepared there
+//! (`--world-build --batch`; the curl installer prepares none): it only
+//! reads that store, writing no lock, use stamp or digest there. Then the
+//! user's store. No session is slower
 //! than a boot from source: one whose world is missing or stale boots the
 //! chain from source while a detached builder, under the world's lock,
 //! prepares it for the next; a session in a fresh HOME makes no store at
@@ -285,7 +286,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     }
     // The store's checks, locks and use stamps are the launcher's, outside
     // a flight recording (romacs_vm::flight::without).
-    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, || {}), world)));
+    let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, |_| {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, .. } => {
@@ -353,7 +354,7 @@ pub fn prepare_beside(store: PathBuf) {
 pub fn prepare(store: PathBuf) -> Result<(), String> {
     let dir = super::startup::lisp_root(&super::startup::lisp_dir())?;
     let world = World::new(store, recipe(&dir)).map_err(|e| e.to_string())?;
-    match world.prepare(|| builder_args(&world)) {
+    match world.prepare(|| builder_args(&world), |_| {}) {
         Ok(manifest) => {
             eprintln!("romacs-world: {}", serde_json::json!({"mode": "prepared", "launch": "batch", "key": manifest["key"]}));
             Ok(())

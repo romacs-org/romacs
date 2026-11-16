@@ -50,11 +50,22 @@ thread at point."
 (defvar-local romacs-agent-board--words nil "Words every thread shown matches, or nil.")
 (defvar-local romacs-agent-board--folds nil "Session id -> `open' or `closed', as the user left it.")
 (defvar-local romacs-agent-board--all-history nil "Every project's transcripts show, not its newest few.")
+(defvar-local romacs-agent-board--folded nil
+  "The projects folded to their heading, a set of their directories, as
+the store keeps them (`romacs-agent-store-folded').")
+
+(defun romacs-agent-board--folded ()
+  "The board's folded projects, read from the store once a buffer."
+  (or romacs-agent-board--folded
+      (let ((folded (make-hash-table :test #'equal)))
+        (dolist (project (romacs-agent-store-folded)) (puthash project t folded))
+        (setq romacs-agent-board--folded folded))))
 
 (defun romacs-agent-board--view ()
   "The board's view, from its buffer's choices, for `romacs-agent-board-rows'."
   (list :settled romacs-agent-board--settled :words romacs-agent-board--words
         :folds (or romacs-agent-board--folds (setq romacs-agent-board--folds (make-hash-table :test #'equal)))
+        :projects (romacs-agent-board--folded)
         :all-history romacs-agent-board--all-history
         ;; No transcript listed yet, their first scan under way.
         :reading (and (null romacs-agent-history--listing) (romacs-agent-history-indexing-p))))
@@ -167,6 +178,12 @@ them; KEYS has every session's key, MARKS whether it shows."
           (and open (mapcan (lambda (child) (romacs-agent-board--thread child (1+ depth) keys marks view))
                             children)))))
 
+(defun romacs-agent-board--tree-keys (session keys marks)
+  "The keys of SESSION and of every thread under it that shows."
+  (cons (gethash session keys)
+        (mapcan (lambda (child) (and (gethash child marks) (romacs-agent-board--tree-keys child keys marks)))
+                (romacs-agent-board--children session))))
+
 (defun romacs-agent-board--history-rows (cwd items view)
   "Project CWD's transcript ITEMS (newest first) as rows: its newest few,
 then a row saying how many more, unless VIEW shows them all."
@@ -187,9 +204,12 @@ first), as VIEW (`romacs-agent-board--view') shows them: per project with
 anything to show, its row, its threads (those wanting the user first,
 then the newest, with what each delegated) and, off the Settled section,
 its transcripts.  A thread shows in the section it is in, a thread above
-it dim for context.  Each row is a plist of :kind (`project', `thread',
-`history', `more' or `reading', the transcripts' first scan under way)
-and :id, which names it across redraws."
+it dim for context.  A project VIEW folds (its :projects) shows its row
+alone, saying how many threads it has and what they are at, unless a
+filter is on; its :first is the row it would show first.  Each row is a
+plist of :kind (`project', `thread', `history', `more' or `reading', the
+transcripts' first scan under way) and :id, which names it across
+redraws."
   (let ((keys (make-hash-table :test #'eq)) (order nil)
         (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal)))
     (dolist (session sessions) (puthash session (romacs-agent-board--key session) keys))
@@ -210,9 +230,15 @@ and :id, which names it across redraws."
                        (rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view))
                                              threads)
                                      (romacs-agent-board--history-rows cwd (nreverse (gethash cwd items)) view))))
-                  (and rows
-                       (cons (list :kind 'project :id cwd :cwd cwd :keys (mapcar (lambda (s) (gethash s keys)) threads))
-                             rows))))
+                  (cond ((null rows) nil)
+                        ((and (plist-get view :projects) (gethash cwd (plist-get view :projects)) (not (plist-get view :words)))
+                         (let ((all (mapcan (lambda (session) (romacs-agent-board--tree-keys session keys marks))
+                                            threads)))
+                           (list (list :kind 'project :id cwd :cwd cwd :keys all :folded (length all)
+                                       :first (car rows)))))
+                        (t (cons (list :kind 'project :id cwd :cwd cwd
+                                       :keys (mapcar (lambda (s) (gethash s keys)) threads))
+                                 rows)))))
               (nreverse order))
        (and (not (plist-get view :settled)) (null history) (plist-get view :reading)
             (list (list :kind 'reading :id 'reading)))))))
@@ -332,9 +358,23 @@ takes what the others and the gaps between them leave."
 (defun romacs-agent-board--line (row width)
   "ROW as a line WIDTH columns wide."
   (pcase (plist-get row :kind)
-    ('project (concat (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
-                      "  " (propertize (plist-get row :cwd) 'face 'romacs-agent-dim)
-                      (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")))
+    ('project
+     ;; Its name always shows, then what its threads are at, then how
+     ;; many when folded, cut from the end only when nothing else is
+     ;; left; the path takes the room after them.
+     (let* ((name (romacs-truncate (propertize (file-name-nondirectory (plist-get row :cwd)) 'face 'romacs-agent-section)
+                                   width))
+            (room (- width (string-width name)))
+            (tail (romacs-truncate
+                   (concat (if-let* ((rollup (romacs-agent-ui--rollup (plist-get row :keys)))) (concat "  " rollup) "")
+                           (if-let* ((count (plist-get row :folded)))
+                               (propertize (format "  ▸ %d thread%s" count (if (= count 1) "" "s")) 'face 'romacs-agent-dim)
+                             ""))
+                   room)))
+       (concat name
+               (romacs-truncate (propertize (concat "  " (plist-get row :cwd)) 'face 'romacs-agent-dim)
+                                (- room (string-width tail)))
+               tail)))
     ('thread (romacs-agent-board--thread-line row width))
     ('history (let ((item (plist-get row :item)))
                 (propertize (romacs-truncate (concat "  ◇ " (plist-get item :title) "  " (let ((harness (plist-get item :harness))) (if harness (format "%s" harness) ""))
@@ -360,7 +400,8 @@ takes what the others and the gaps between them leave."
 
 (defconst romacs-agent-board--key-groups
   '(("Move" (romacs-agent-board-next . "next") (romacs-agent-board-previous . "previous")
-     (romacs-agent-board-fold . "fold") (romacs-agent-board-unfold . "unfold") (romacs-agent-board-close-fold . "fold up"))
+     (romacs-agent-board-fold . "fold") (romacs-agent-board-unfold . "unfold") (romacs-agent-board-close-fold . "fold up")
+     (romacs-agent-board-cycle-projects . "fold projects"))
     ("Thread" (romacs-agent-board-open . "open") (romacs-agent-board-approve . "approve")
      (romacs-agent-board-interrupt . "interrupt") (romacs-agent-board-stop . "stop")
      (romacs-agent-board-resume . "resume") (romacs-agent-board-settle . "settle") (romacs-agent-board-new . "new"))
@@ -595,6 +636,9 @@ window; with none, or no room, hide the card."
 newest thread; on \"more\", list every transcript."
   (interactive nil romacs-agent-board-mode)
   (let ((row (or (romacs-agent-board--row) (user-error "Nothing on this line"))))
+    (when-let* ((first (plist-get row :first)))
+      ;; A folded project: the row it would show first.
+      (setq row first))
     (when (eq (plist-get row :kind) 'project)
       ;; A project: its first row, what wants the user most, else the newest.
       (romacs-agent-board-next 1)
@@ -617,19 +661,40 @@ longer known: then the board is drawn again."
       (progn (romacs-agent-board--redraw)
              (user-error "That thread is gone: the board is drawn again"))))
 
+(defun romacs-agent-board--fold-project (project folded)
+  "Fold PROJECT, a directory, to its heading when FOLDED, else show its
+threads; the store keeps it so."
+  (if folded (puthash project t (romacs-agent-board--folded)) (remhash project (romacs-agent-board--folded)))
+  (romacs-agent-store-fold project folded))
+
 (defun romacs-agent-board--fold (open)
   "Show the threads this one delegated when OPEN is t, hide them when
-nil, flip them when `toggle'; on a delegated thread, its parent's."
+nil, flip them when `toggle'; on a delegated thread, its parent's; on a
+project, its threads."
   (let ((row (romacs-agent-board--row)))
-    (unless (plist-get row :children)
-      (when-let* ((parent (and (plist-get row :session) (romacs-agent-board--parent (plist-get row :session)))))
-        (setq row (list :id (romacs-agent-id parent) :open t :children t))))
-    (unless (plist-get row :children) (user-error "No threads under this one"))
-    (puthash (plist-get row :id)
-             (if (if (eq open 'toggle) (not (plist-get row :open)) open) 'open 'closed)
-             (plist-get (romacs-agent-board--view) :folds))
+    (cond ((eq (plist-get row :kind) 'project)
+           ;; As kept: a filter shows a folded project's threads.
+           (romacs-agent-board--fold-project (plist-get row :cwd)
+                                             (if (eq open 'toggle)
+                                                 (not (gethash (plist-get row :cwd) (romacs-agent-board--folded)))
+                                               (not open))))
+          (t (unless (plist-get row :children)
+               (when-let* ((parent (and (plist-get row :session) (romacs-agent-board--parent (plist-get row :session)))))
+                 (setq row (list :id (romacs-agent-id parent) :open t :children t))))
+             (unless (plist-get row :children) (user-error "No threads under this one"))
+             (puthash (plist-get row :id)
+                      (if (if (eq open 'toggle) (not (plist-get row :open)) open) 'open 'closed)
+                      (plist-get (romacs-agent-board--view) :folds))))
     (romacs-agent-board--redraw)
     (romacs-agent-board--goto (plist-get row :id))))
+
+(defun romacs-agent-board--project-row ()
+  "The row of the project point's line is in, or nil."
+  (save-excursion
+    (let ((row (romacs-agent-board--row)))
+      (while (and row (not (eq (plist-get row :kind) 'project)) (zerop (forward-line -1)))
+        (setq row (romacs-agent-board--row)))
+      (and (eq (plist-get row :kind) 'project) row))))
 
 (defun romacs-agent-board--goto (id)
   "Move to the row named ID, when it shows."
@@ -638,8 +703,21 @@ nil, flip them when `toggle'; on a delegated thread, its parent's."
                                                           (lambda (id row) (equal id (plist-get row :id)))))))
     (when at (goto-char (prop-match-beginning at)) (romacs-agent-board--follow))))
 
+(defun romacs-agent-board-cycle-projects ()
+  "Fold every project to its heading, or, when each shown is kept folded,
+show them all, as `org-global-cycle' does."
+  (interactive nil romacs-agent-board-mode)
+  (let* ((projects (seq-filter (lambda (row) (eq (plist-get row :kind) 'project)) (romacs-agent-board--shown-rows)))
+         (fold (seq-some (lambda (row) (not (gethash (plist-get row :cwd) (romacs-agent-board--folded)))) projects))
+         (project (romacs-agent-board--project-row)))
+    (unless projects (user-error "No projects"))
+    (dolist (row projects) (romacs-agent-board--fold-project (plist-get row :cwd) fold))
+    (romacs-agent-board--redraw)
+    ;; Folded, a thread's line goes: its project's heading stays.
+    (when (and fold project) (romacs-agent-board--goto (plist-get project :id)))))
+
 (defun romacs-agent-board-fold ()
-  "Fold or unfold the threads this one delegated."
+  "Fold or unfold the threads this one delegated, or a project's."
   (interactive nil romacs-agent-board-mode)
   (romacs-agent-board--fold 'toggle))
 
@@ -795,6 +873,8 @@ every word typed, the board following as they are typed."
   "f" #'romacs-agent-board-unfold
   "b" #'romacs-agent-board-close-fold
   "TAB" #'romacs-agent-board-fold
+  "<backtab>" #'romacs-agent-board-cycle-projects
+  "S-<tab>" #'romacs-agent-board-cycle-projects
   "RET" #'romacs-agent-board-open
   "a" #'romacs-agent-board-approve
   "i" #'romacs-agent-board-interrupt

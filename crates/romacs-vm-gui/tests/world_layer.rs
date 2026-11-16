@@ -122,7 +122,8 @@ fn an_init_layer_loads_cus_start_in_full() {
     home.plan_requiring("cus-start", &gnu_lisp);
     let said = home.build();
     assert!(said.contains(r#""event":"layer-built""#) && said.contains(r#""event":"layer-prepared","ok":true"#), "{said}");
-    assert!(!said.contains("live"), "{said}");
+    // Nothing of it was left to run live.
+    assert!(!said.contains("uncaptured"), "{said}");
     let _ = std::fs::remove_dir_all(&home.home);
 }
 

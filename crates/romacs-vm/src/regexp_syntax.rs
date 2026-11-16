@@ -197,11 +197,28 @@ pub(crate) struct VmSyntax<'a> {
     // CELL(Plain)
     ascii: [std::cell::Cell<Option<SyntaxClass>>; 128],
     subject: Option<PropertySubject>,
+    /// The current buffer's category table (else the standard one), which
+    /// `\\cX' tests, as CHAR_HAS_CATEGORY reads `BVAR (current_buffer,
+    /// category_table)'.
+    categories: Option<crate::char_table::TableReader<'a>>,
     /// The subject's `syntax-table` runs, for a text or string: a search
     /// reads the property at one position after another.
     reader: Option<crate::properties::KeyReader<'a>>,
     id: usize,
 }
+/// The current buffer's category table, else the standard one; none before
+/// either exists (a bare VM), when the built-in default stands in.
+fn category_table(vm: &Vm) -> Option<Value> {
+    let own = match vm.object_if(vm.slots[vm.buffer_slot].value) {
+        Some(Object::Buffer(b)) => b.category_table,
+        Some(Object::ByteBuffer(b)) => b.category_table,
+        _ => Value::NIL,
+    };
+    if own != Value::NIL { return Some(own); }
+    let standard = vm.slots[*vm.names.get("#:vm2-standard-category-table")?].value;
+    (standard != Value::NIL && standard != Value::UNBOUND).then_some(standard)
+}
+
 impl<'a> VmSyntax<'a> {
     pub(crate) fn new(vm: &'a Vm, source: SyntaxSource) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -224,6 +241,7 @@ impl<'a> VmSyntax<'a> {
             ascii: [const { std::cell::Cell::new(None) }; 128],
             subject,
             reader,
+            categories: category_table(vm).map(|table| vm.char_table_reader(table)),
             id: NEXT.fetch_add(1, Ordering::Relaxed),
         }
     }
@@ -264,7 +282,11 @@ impl SyntaxLookup for VmSyntax<'_> {
         self.code_syntax_at(c.code(), pos)
     }
     fn char_has_category(&self, c: char, cat: u8) -> bool {
-        regex::default_char_has_category(c, cat)
+        let Some(table) = &self.categories else { return regex::default_char_has_category(c, cat) };
+        match table.get(c as u32).ok().and_then(|set| self.vm.object_if(set)) {
+            Some(Object::BoolVector(bits)) => bits.get(cat as usize).unwrap_or(false),
+            _ => false,
+        }
     }
     fn word_boundary_between(&self, a: char, b: char) -> bool {
         regex::DefaultSyntaxLookup.word_boundary_between(a, b)

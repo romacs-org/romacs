@@ -99,7 +99,6 @@
       (when-let* ((b (get-file-buffer file))) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
       (delete-directory warm-restart-directory t))))
 
-;;; warm-restart-tests.el ends here
 
 (ert-deftest warm-restart-unseen-buffers-come-after-the-shown-and-get-their-modes-when-shown ()
   ;; A start's restore brings back the buffers its windows show first and
@@ -264,3 +263,25 @@
             (should (eq (car (car (window-prev-buffers (frame-first-window)))) back))
             (should-not warm-restart--histories)))
       (kill-buffer back))))
+
+(ert-deftest warm-restart-a-target-through-a-link-restarts-into-its-build ()
+  ;; A restart into an installer's `current' link runs the build the link
+  ;; names, its runtime root that build's true name: the spelling a
+  ;; launcher that resolves the link prebuilt its worlds for, and one a
+  ;; later install's move of the link leaves alone.
+  (let* ((dir (file-truename (make-temp-file "warm-restart-target-" t)))
+         (build (expand-file-name "build-1" dir))
+         (link (expand-file-name "current" dir)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "etc" build) t)
+          (let ((binary (expand-file-name "romacs-vm-gui" build)))
+            (write-region "" nil binary nil 'silent)
+            (set-file-modes binary #o755))
+          (make-symbolic-link build link)
+          (pcase-let ((`((,binary . ,_) ,root) (warm-restart--target link)))
+            (should (equal binary (expand-file-name "romacs-vm-gui" build)))
+            (should (equal root (concat "ROMACS_RUNTIME_ROOT=" build)))))
+      (delete-directory dir t))))
+
+;;; warm-restart-tests.el ends here

@@ -401,4 +401,107 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (string-search "settle finished" (buffer-string))))))
 
 (provide 'romacs-agent-board-tests)
+(ert-deftest romacs-agent-board-a-folded-project-shows-its-heading ()
+  ;; Folded, a project is its row alone: how many threads and what they
+  ;; are at, a delegated one's state too; a filter shows its threads.
+  (romacs-agent-board-tests--with
+    (mk "lead" "lead" 'idle 10)
+    (mk "w" "w" 'running 20 :options '(:parent "lead"))
+    (mk "o" "o" 'idle 30 :cwd "/p/two/")
+    (let ((projects (make-hash-table :test #'equal)))
+      (puthash "/p/one" t projects)
+      (let ((shown (rows :projects projects)))
+        (should (equal (romacs-agent-board-tests--ids shown) '("/p/one" "/p/two" "o")))
+        (should (= (plist-get (car shown) :folded) 2))
+        (let ((line (romacs-agent-board--line (car shown) 100)))
+          (should (string-search "▸ 2 threads" line))
+          (should (string-search (romacs-agent-ui--rollup '(working)) line))
+        ;; States in words, wider than the board: the name stays, the
+        ;; line keeps to the width, what is cut says so.
+        (let* ((words (romacs-agent-ui--rollup '(approval question working)))
+               (line (romacs-agent-board--line (list :kind 'project :cwd "/p/a-long-project-name" :folded 3
+                                                     :keys '(approval question working))
+                                               40)))
+          (should (> (string-width words) 30))
+          (should (string-prefix-p "a-long-project-name" line))
+          (should (<= (string-width line) 40))
+          (should (string-search (substring-no-properties words 0 10) line))
+          (should (string-suffix-p (truncate-string-ellipsis) line)))))
+      (should (member "lead" (romacs-agent-board-tests--ids (rows :projects projects :words '("lead"))))))))
+
+(ert-deftest romacs-agent-board-keys-fold-projects ()
+  ;; TAB on a project folds it and back, S-TAB folds every project, then
+  ;; shows them all; the store keeps each.
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'idle 10)
+    (mk "b" "b" 'idle 20 :cwd "/p/two/")
+    (let ((kept (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
+                ((symbol-function 'romacs-agent-store-fold)
+                 (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
+        (romacs-agent-board-tests--board
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
+          (romacs-agent-board-previous 1)
+          (should (equal (romacs-agent-board-tests--at) "/p/one"))
+          (romacs-agent-board-fold)
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "/p/two" "b")))
+          (should (equal (romacs-agent-board-tests--at) "/p/one"))
+          (should (equal (hash-table-keys kept) '("/p/one")))
+          (romacs-agent-board-fold)
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
+          ;; From a thread: every project folds, point on its heading.
+          (romacs-agent-board-next 1)
+          (romacs-agent-board-cycle-projects)
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "/p/two")))
+          (should (equal (romacs-agent-board-tests--at) "/p/one"))
+          (should (= (hash-table-count kept) 2))
+          (romacs-agent-board-cycle-projects)
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two" "b")))
+          (should (= (hash-table-count kept) 0)))
+        ;; A board shown anew reads what the store kept.
+        (puthash "/p/two" t kept)
+        (romacs-agent-board-tests--board
+          (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "a" "/p/two"))))))))
+
+(ert-deftest romacs-agent-board-folded-heading-past-a-filter-and-narrow ()
+  ;; Narrow, a folded heading cuts its path, never its count or state;
+  ;; under a filter TAB and S-TAB go by the folds kept; RET on a folded
+  ;; project opens the thread it would show first.
+  (romacs-agent-board-tests--with
+    (mk "a" "alpha" 'running 10 :cwd "/home/someone/Worktrees/romacs/a-long-project-name/")
+    (mk "b" "beta" 'idle 20 :cwd "/p/two/")
+    (let ((kept (make-hash-table :test #'equal)))
+      (puthash "/home/someone/Worktrees/romacs/a-long-project-name" t kept)
+      (let* ((row (car (rows :projects kept)))
+             (line (romacs-agent-board--line row 40)))
+        (should (<= (string-width line) 40))
+        ;; What it is at shows before how many, which goes first.
+        (should (string-search (romacs-agent-ui--rollup '(working)) line))
+        (should (string-search "▸ 1 thread" (romacs-agent-board--line row 60))))
+      (cl-letf (((symbol-function 'romacs-agent-store-folded) (lambda () (hash-table-keys kept)))
+                ((symbol-function 'romacs-agent-store-fold)
+                 (lambda (project folded) (if folded (puthash project t kept) (remhash project kept)))))
+        (romacs-agent-board-tests--board
+          ;; RET on the folded heading: its thread.
+          (goto-char (point-min))
+          (romacs-agent-board-next 1)
+          (should (plist-get (romacs-agent-board--row) :folded))
+          (romacs-agent-board-open)
+          (let ((shown nil))
+            (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq shown session))))
+              (funcall (car then)))
+            (should (equal (romacs-agent-id shown) "a")))
+          ;; Filtered, both projects show their threads; S-TAB twice folds
+          ;; then shows, as kept, and TAB on a kept-folded one shows it.
+          (setq romacs-agent-board--words '("a"))
+          (romacs-agent-board-cycle-projects)
+          (should (= (hash-table-count kept) 2))
+          (romacs-agent-board-cycle-projects)
+          (should (= (hash-table-count kept) 0))
+          (romacs-agent-board-cycle-projects)
+          (goto-char (point-min))
+          (romacs-agent-board-next 1)
+          (romacs-agent-board-fold)
+          (should (= (hash-table-count kept) 1)))))))
+
 ;;; romacs-agent-board-tests.el ends here

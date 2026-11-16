@@ -228,7 +228,9 @@ looked, and remember what is there now (an entry gone and back is new)."
   "Tell task ID that WATCH's unit ended, with its status from the journal."
   (romacs-agent-watch--output
    "journalctl" (list "--user" "-u" (plist-get watch :unit) "-o" "cat" "--no-pager"
-                      "--since" (format "@%d" (floor (plist-get watch :since))))
+                      ;; To the microsecond: a unit started again at once
+                      ;; (one check of a tree after another) ends after this.
+                      "--since" (format "@%.6f" (plist-get watch :since)))
    (lambda (journal)
      (when-let* ((task (romacs-agent-get id))
                  ((memq watch (gethash id romacs-agent-watch--watches))))
@@ -305,6 +307,21 @@ watched file may be gone)."
                         :seen (and (not stop) (mapcar #'car (romacs-agent-watch--entries file section))))))
           (t (user-error "Name a unit or a file to watch")))))
 
+(defun romacs-agent-watch--add (id task watch)
+  "Watch WATCH for TASK, whose id is ID, and keep it in its directory."
+  (puthash id (append (gethash id romacs-agent-watch--watches) (list watch)) romacs-agent-watch--watches)
+  (romacs-agent-watch--save task)
+  (romacs-agent-watch--schedule))
+
+(defun romacs-agent-watch--dev-check (unit report started)
+  "Watch the check UNIT, started at STARTED, its REPORT the output, for the
+task calling romacs_dev_check; non-nil when a task calls it."
+  (when-let* ((id (romacs-agent-tools--caller)) (task (romacs-agent-get id)))
+    (romacs-agent-watch--add id task (list :unit (romacs-agent-watch--unit-name unit) :output report :since started))
+    t))
+
+(setq romacs-mcp-dev-watch-function #'romacs-agent-watch--dev-check)
+
 (defun romacs-agent-watch--watch (arguments)
   "Watch, or with stop no longer watch, ARGUMENTS' unit or file for the
 task taskId (the caller's own by default), which the caller is or
@@ -324,9 +341,7 @@ delegated; a unit not running now is refused."
                  (unless (romacs-agent-watch--running-p state)
                    (user-error "Unit %s is not running (%s): start it first, or read its end yourself"
                                (plist-get watch :unit) state))))
-             (puthash id (append (gethash id romacs-agent-watch--watches) (list watch)) romacs-agent-watch--watches)
-             (romacs-agent-watch--save task)
-             (romacs-agent-watch--schedule)))
+             (romacs-agent-watch--add id task watch)))
     (romacs-mcp--object
      "taskId" id
      "unit" (or (plist-get watch :unit) :null) "output" (or (plist-get watch :output) :null)

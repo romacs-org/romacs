@@ -35,8 +35,9 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
 (defun romacs-agent--claude-head (session)
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
-start; else nil.  Its records are read only when it was rolled back since
-it was last spoken to, which its fold keeps (`:rolled-back'); a session
+start or was renewed (a new conversation, under its new id); else nil.
+Its records are read only when it was rolled back or renewed since it was
+last spoken to, which its fold keeps (`:rolled-back'); a session
 whose kept state predates that is read once to know."
   (let ((state (romacs-agent-driver-state session)))
     (if (plist-member state :rolled-back)
@@ -48,12 +49,13 @@ whose kept state predates that is read once to know."
 
 (defun romacs-agent--claude-head-read (session)
   "`romacs-agent--claude-head', from SESSION's records: its journal's last
-prompt or rollback, read from its end (only as far back as that), and all
-of them only after a rollback."
+prompt, rollback or renewal, read from its end (only as far back as that),
+and all of them only after a rollback or renewal."
   (when-let* ((last (romacs-agent--journal-last
-                     session '("romacsRequest" "\"rollback\"")
-                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)))))
-              ((romacs-agent--rollback-note-p last)))
+                     session '("romacsRequest" "\"rollback\"" "\"renew\"")
+                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)
+                                          (romacs-agent--note-p record "renew")))))
+              ((or (romacs-agent--rollback-note-p last) (romacs-agent--note-p last "renew"))))
     (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh)))
 
 (cl-defun romacs-agent--claude-rollback (session records request)
@@ -74,6 +76,11 @@ conversation anew under a new id."
                           (setf (romacs-agent-harness-session session) native)
                           (romacs-agent--manifest-put session "harnessSession" native))))))
   '(relaunch))
+
+(defun romacs-agent--claude-renew (_session)
+  "The id of a renewed conversation: Claude Code begins it under the one
+its command line gives (`romacs-agent--claude-head')."
+  (romacs-agent--uuid))
 
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
@@ -110,7 +117,7 @@ RESUME is non-nil."
                     ((eq head 'fresh) (list "--session-id" (romacs-agent--native-id session)))
                     (head (list "--resume" (romacs-agent--native-id session) "--resume-session-at" head))
                     (resume (list "--resume" (romacs-agent--native-id session)))
-                    (t (list "--session-id" (romacs-agent-id session)))))
+                    (t (list "--session-id" (romacs-agent--native-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
             (romacs-agent--suggestion-words session)
             (plist-get instance :arguments))))
@@ -561,6 +568,46 @@ answer to a hook; (:line ID MODE), a switch to permission mode MODE."
   "\"type\":\"assistant\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":[0-9]+,\"t\":[-+.0-9eE]+}$"
   "How an `assistant' record's line ends.")
 
+(defconst romacs-agent--claude-user-end
+  "\"type\":\"user\"\\(?:,\"uuid\":\"[^\"]*\"\\)?},\"seq\":\\([0-9]+\\),\"t\":\\([-+.0-9eE]+\\)}"
+  "How a `user' record's line ends: its seq and time the match's groups.")
+
+(defun romacs-agent--claude-result-summary (start end)
+  "In a buffer of journal lines, the calls the `user' line from START to
+END gives the results of, from its text alone: a list of (:id :failed
+:parent :bytes :seq :time), or nil unless the line is that and nothing
+more (no text or image of its own to draw).  Each result block starts
+with its content and ends with its error flag, its call's id and its
+type, keys sorted; no string can hold a quoted key, so they are found as
+text.  The message's own blocks are results alone when its first starts
+as one and each result is followed by the next or the list's end; text
+within a result is the result's.  :bytes is about how much a block
+says: its length."
+  (save-excursion
+    (goto-char start)
+    (when (and (looking-at-p "{\"out\":{\"message\":{\"content\":\\[{\"content\":")
+               (progn (goto-char end) (looking-back romacs-agent--claude-user-end (max start (- end 200)))))
+      (let ((seq (string-to-number (match-string 1))) (time (string-to-number (match-string 2)))
+            (results nil) (from start))
+        (goto-char start)
+        (catch 'not-results
+          ;; Within the message's own blocks: the list ends before its
+          ;; role, and what follows (`tool_use_result') is not its.
+          (let ((blocks (save-excursion (if (search-forward "],\"role\":\"user\"}" end t) (match-beginning 0)
+                                          (throw 'not-results nil)))))
+          (while (re-search-forward "\\(,\"is_error\":true\\)?,\"tool_use_id\":\"\\([^\"]+\\)\",\"type\":\"tool_result\"}" blocks t)
+            (push (list :id (match-string 2) :failed (and (match-beginning 1) t)
+                        :bytes (- (point) from) :seq seq :time time)
+                  results)
+            (setq from (point))
+            ;; The next of the message's blocks is a result too, or none is.
+            (unless (looking-at-p "\\]\\|,{\"content\":")
+              (throw 'not-results (setq results nil)))))
+          (when results
+            (let ((parent (and (re-search-forward "\"parent_tool_use_id\":\\(?:\"\\([^\"]+\\)\"\\|null\\)" end t)
+                               (match-string 1))))
+              (mapcar (lambda (result) (append result (list :parent parent))) (nreverse results)))))))))
+
 (defun romacs-agent--claude-streamed-skip ()
   "In a buffer of journal lines, a function of a line's start and end
 saying whether it is a `stream_event' of a content block an `assistant'
@@ -659,8 +706,12 @@ environment."
            "CLAUDE_CODE_SESSION_ATTENDED" "CLAUDE_CODE_SESSION_ID" "CLAUDE_EFFORT" "CLAUDE_PID")
   :lifetime 'persistent :forks #'romacs-agent--claude-forking
   :streamed-skip #'romacs-agent--claude-streamed-skip
+  ;; Its calls' results, told from their text: parsed when opened.
+  :result-summary #'romacs-agent--claude-result-summary
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
+  ;; A renewed conversation is named by Romacs, as a first one is.
+  :renew #'romacs-agent--claude-renew
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
   :select #'romacs-agent--claude-select

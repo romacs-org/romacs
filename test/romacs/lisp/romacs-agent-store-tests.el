@@ -260,4 +260,18 @@ journal one turn long."
       (should (equal (mapcar #'romacs-agent-id settled) (list kept)))
       (should (eq (car settled) (romacs-agent-get kept))))))
 
+(ert-deftest romacs-agent-store-keeps-the-board-s-folds ()
+  ;; Folded projects are kept, and kept past the sessions' table made
+  ;; again for another form of it.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (romacs-agent-store-fold "/p/one" t)
+    (romacs-agent-store-fold "/p/two" t)
+    (romacs-agent-store-fold "/p/two" nil)
+    (should (equal (romacs-agent-store-folded) '("/p/one")))
+    (sqlite-pragma (cdr romacs-agent-store--db) "user_version = 0")
+    (sqlite-close (cdr romacs-agent-store--db))
+    (setq romacs-agent-store--db nil)
+    (should (equal (romacs-agent-store-folded) '("/p/one")))))
+
 ;;; romacs-agent-store-tests.el ends here
