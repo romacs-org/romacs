@@ -549,6 +549,8 @@ window; with none, or no room, hide the card."
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--refresh)
 ;; The sessions' rows made: those left unloaded show.
 (add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--refresh)
+;; The transcripts listed anew, aside: the board shows them.
+(add-hook 'romacs-agent-history-indexed-hook #'romacs-agent-board--refresh)
 
 (defun romacs-agent-board--redraw ()
   "Draw the board, from one of its commands."
