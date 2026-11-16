@@ -1469,7 +1469,7 @@ def unicode(args, base):
              'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
             encoding='utf-8')
         a.providers([('claude', claude_dir)])
-        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) '
+        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
                                               '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
         view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
                                             f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
@@ -1830,7 +1830,7 @@ def rpc(args, base):
 
         # Its history: listed, viewed, imported; one id in two homes.
         items = parity_live.read_sexp(a.eval(
-            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
+            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
             "(plist-get i :title)) \"|\")) (seq-filter (lambda (i) (eq (plist-get i :harness) 'fakerpc)) (romacs-agent-history-items))))")) or []
         items = [i.split('|') for i in items]
         item = lambda ident, provider: (f"(seq-find (lambda (i) (and (equal (plist-get i :id) {lisp_text(ident)}) "
@@ -2298,12 +2298,12 @@ def history(args, base):
         claude_run = [e for e in a.logged() if e.get('started') == cid]
         codex_run = [e for e in a.codex_runs() if e.get('codex') == tid]
         chats = {ident: a.chat(sid) for ident, sid in resumed.items()}
-        listed = text('(progn (romacs-agent-history-list) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
+        listed = text('(progn (romacs-agent-history-list t) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
         a.restart()
         a.providers(setting)
-        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list) '
+        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list t) '
                      f'(list (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)) '
                      f'(plist-get (romacs-agent-imported {a.s(resumed[cid])}) :path) '
                      f'(romacs-agent-harness-session {a.s(resumed[tid])})))')
@@ -2331,7 +2331,7 @@ def history(args, base):
         # Its directory, named by the conversation's identity.
         busy_dir = text(f'(romacs-agent--import-id \'codex {lisp_text(str(codex_home))} {lisp_text(busy)})')
         (a.home / '.local/state/romacs/agents' / busy_dir).mkdir()
-        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} "/nonexistent" {lisp(a.work)} '
+        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} {lisp_text(str(transcript))} {lisp(a.work)} '
                        f'"x" "codex" {lisp_text(str(codex_home))}) (user-error (cadr err)))')
         # Two conversations whose time-ordered ids share their first
         # characters run overlapping turns, each with its own supervisor.
@@ -2531,6 +2531,10 @@ def board_keys(args, base):
 
         steps = {}
         open_board()
+        # The transcripts are listed once their scan, aside, ends: the
+        # board is drawn again then.
+        until(lambda: a.eval(f'(with-selected-window {board} (save-excursion (goto-char (point-min)) '
+                             '(and (re-search-forward "^transcripts  " nil t) t)))') == 't', 30, 'transcripts listed')
         ret_on('^transcripts  ')
         steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
