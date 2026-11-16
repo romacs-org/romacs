@@ -113,8 +113,8 @@
     (read-extended-command-predicate #'command-completion-default-include-p)
     ;; Tree-sitter modes in place of the regex modes, for the languages
     ;; whose grammars Romacs ships (`romacs-treesit-bundled-grammars'):
-    ;; GNU's :set remaps each mode to its ts mode.  markdown-ts-mode is
-    ;; left out until its cost per key is measured within budget.
+    ;; GNU's :set remaps each mode to its ts mode.  Markdown is
+    ;; `romacs-markdown-mode''s, not a ts mode's.
     (treesit-enabled-modes
      '(bash-ts-mode c-ts-mode c++-ts-mode c-or-c++-ts-mode css-ts-mode go-ts-mode
        js-ts-mode json-ts-mode mhtml-ts-mode python-ts-mode rust-ts-mode

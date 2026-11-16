@@ -2010,6 +2010,9 @@ mod tests {
         assert!(path.contains(&directory), "BUNDLED_DEPENDENCY_NOT_LOADABLE: fsm");
         assert_eq!(printed(&mut vm, "(locate-file-internal \"fsm\" load-path '(\".el\"))"),
             lisp_string(&directory.join("fsm.el").to_string_lossy()));
+        // markdown-mode is Romacs's compatibility library (ledger/divergences/MD1.md).
+        assert_eq!(printed(&mut vm, "(locate-file-internal \"markdown-mode\" load-path '(\".el\"))"),
+            lisp_string(&dir.join("textmodes/markdown-mode.el").to_string_lossy()));
         assert!(!path.contains(&dir.join("vm")), "VM helpers are compile-time inputs, not public libraries");
     }
 

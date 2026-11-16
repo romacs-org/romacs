@@ -96,28 +96,6 @@
   },
   "url": "https://github.com/tree-sitter/tree-sitter-json"
  },
- "markdown": {
-  "commit": "413285231ce8fa8b11e7074bbe265b48aa7277f9",
-  "files": {
-   "tree-sitter-markdown/src/parser.c": "6adb54da19b0b5aada9e5d14a4e91b7ce542f852fe7bf7e1b85753898cc34653",
-   "tree-sitter-markdown/src/scanner.c": "17c35f96baf853f88ffa5b142617e10bd592828820a60827b6a1ec5eb32a1500",
-   "tree-sitter-markdown/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
-   "tree-sitter-markdown/src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
-   "tree-sitter-markdown/src/tree_sitter/parser.h": "11b654fbba7770b1c710cc14b169be2deb5d89c0f87233d4605037c26c1ff657"
-  },
-  "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown"
- },
- "markdown-inline": {
-  "commit": "413285231ce8fa8b11e7074bbe265b48aa7277f9",
-  "files": {
-   "tree-sitter-markdown-inline/src/parser.c": "02d9a3fe72eee6be234d1e27067f2c405f7e4d8ef6fc28bceb54ac1b16274823",
-   "tree-sitter-markdown-inline/src/scanner.c": "96f2aa2310e6e9de52f08d6e7b0ac9cd1fe70f35e0449deb726dfe687524cc55",
-   "tree-sitter-markdown-inline/src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
-   "tree-sitter-markdown-inline/src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
-   "tree-sitter-markdown-inline/src/tree_sitter/parser.h": "11b654fbba7770b1c710cc14b169be2deb5d89c0f87233d4605037c26c1ff657"
-  },
-  "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown"
- },
  "python": {
   "commit": "bffb65a8cfe4e46290331dfef0dbf0ef3679de11",
   "files": {
