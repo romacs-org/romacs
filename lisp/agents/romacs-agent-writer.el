@@ -79,6 +79,10 @@ restart waits for them, and a drain counts them not saved.")
   "Functions a drain calls first: those holding records start what writes
 them, where nothing is on its way to (a host for held notes).")
 
+(defvar romacs-agent-writer-gave-up-functions nil
+  "Functions a drain calls when it ends with held records not made: those
+holding them name them, in the log and the usage log, to be found.")
+
 (defconst romacs-agent-writer--held-patience 30
   "Seconds a drain waits for held records to go while none goes: then
 they count as not saved, rather than keep the editor from ending.")
@@ -420,6 +424,9 @@ cancels it; the writes stay queued, made in the background."
           (clrhash romacs-agent-writer--failed)
           ;; Nothing made this round: the rest is not saved.
           (when (zerop (romacs-agent-writer--here)) (setq rounds 5))))
+      (when (> (romacs-agent-writer--held) 0)
+        (with-demoted-errors "romacs-agent-writer: naming what was not saved: %S"
+          (run-hooks 'romacs-agent-writer-gave-up-functions)))
       (let ((left (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))))
         (message (if (> left 0) "Saving %d agent records...failed: %d not saved" "Saving %d agent records...done")
                  count left)
@@ -454,8 +461,9 @@ writes not yet made, which the writer makes meanwhile, off the editor."
   (let ((count (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))))
     (and (> count 0) (list (format "%d agent records not yet written" count)))))
 
-;; Late, after anything else that writes at the end.
-(add-hook 'kill-emacs-hook #'romacs-agent-writer--at-exit 90)
+;; Late, after anything else that writes at the end, and before the usage
+;; log's last write (90), which records what it gave up on.
+(add-hook 'kill-emacs-hook #'romacs-agent-writer--at-exit 89)
 (add-hook 'warm-restart-before-handover-functions #'romacs-agent-writer--before-handover)
 (add-hook 'warm-restart-obstacle-functions #'romacs-agent-writer--obstacle)
 

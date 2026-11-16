@@ -449,8 +449,13 @@ connection of its own, as the writer's process has."
                 ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
         (puthash "h" (list (romacs-mcp--object "type" "plan")) romacs-agent--held-notes)
         (should (equal (romacs-agent-writer--obstacle) '("1 agent records not yet written")))
-        (romacs-agent-writer-drain)
-        (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
+        (let ((noted nil))
+          (cl-letf (((symbol-function 'romacs-usage-log-note) (lambda (&rest args) (push args noted))))
+            (romacs-agent-writer-drain))
+          (should (member "Saving 1 agent records...failed: 1 not saved" said))
+          ;; Named, to be found: in the log and the usage log.
+          (should (member "romacs-agent: 1 notes of session h not saved: plan" said))
+          (should (equal noted '(("agent-notes-not-saved" :session "h" :notes ["plan"])))))))))
 
 (ert-deftest romacs-agent-writer-what-a-last-resort-write-queues-is-made ()
   ;; As the editor ends, a write made here whose answer queues another:

@@ -3172,6 +3172,18 @@ them."
 
 (add-hook 'romacs-agent-writer-held-start-functions #'romacs-agent--held-hosts)
 
+(defun romacs-agent--held-given-up ()
+  "A drain ends with notes still held (`romacs-agent-writer-gave-up-functions'):
+each session's, by their types, in the log and the usage log."
+  (maphash (lambda (id notes)
+             (let ((types (mapcar (lambda (note) (format "%s" (gethash "type" note))) notes)))
+               (message "romacs-agent: %d notes of session %s not saved: %s" (length notes) id (string-join types ", "))
+               (when (fboundp 'romacs-usage-log-note)
+                 (romacs-usage-log-note "agent-notes-not-saved" :session id :notes (vconcat types)))))
+           romacs-agent--held-notes))
+
+(add-hook 'romacs-agent-writer-gave-up-functions #'romacs-agent--held-given-up)
+
 (defun romacs-agent--end-notes-host (session)
   "Let SESSION's notes-only host go, starting or attached: it ends, and
 frees the session's lock, once let go (or, never attached, a moment
