@@ -379,7 +379,8 @@ cancels it; the writes stay queued, made in the background."
   (when (> (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held)) 0)
     (let ((count (+ (romacs-agent-writer-pending-count) (romacs-agent-writer--held))) (tries 0)
           (romacs-agent-writer--draining t) (romacs-agent-writer--held-seen nil))
-      (message (if quittable "Saving %d agent records... (C-g cancels the restart)"
+      (message (if quittable
+                   (substitute-command-keys "Saving %d agent records... (\\[keyboard-quit] cancels the restart)")
                  "Saving %d agent records...")
                count)
       (redisplay t)

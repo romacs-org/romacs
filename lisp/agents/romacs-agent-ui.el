@@ -2627,7 +2627,10 @@ kept turn holds no output."
   "Keep SESSION's turn that just ended in the current chat as it is drawn
 here, from its prompt (`romacs-agent-first-seq') to the transcript's end,
 beside its turn row: a chat opened later inserts it."
-  (when-let* ((found (save-excursion (goto-char romacs-agent-ui--end)
+  (when-let* (;; A session's own, not a transcript's view (`romacs-agent-history-open'),
+              ;; which keeps no turns.
+              ((eq (romacs-agent-loaded (romacs-agent-id session)) session))
+              (found (save-excursion (goto-char romacs-agent-ui--end)
                                      (text-property-search-backward 'romacs-agent-first-seq nil (lambda (_ v) v)))))
     (condition-case err
         (romacs-agent-write 'romacs-agent-turns-drawn-keep
