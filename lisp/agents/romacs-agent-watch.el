@@ -329,7 +329,7 @@ delegated; a unit not running now is refused."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no task")))
-         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
+         (task (or (romacs-agent-load-session id) (user-error "No task %s" id)))
          (watch (progn (unless (equal id caller) (romacs-agent-tools--own task caller "watch for it"))
                        (romacs-agent-watch--described arguments task)))
          (known (cl-find-if (lambda (w) (romacs-agent-watch--same-p w watch)) (gethash id romacs-agent-watch--watches))))

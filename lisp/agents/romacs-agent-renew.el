@@ -246,7 +246,7 @@ else none.  The turn failing, or its harness ending, gives none."
                                                (if (and note (not (string-empty-p note))) "note" "selection"))))))))
         (add-hook 'romacs-agent-event-functions waiter)
         (condition-case nil
-            (romacs-agent--input session romacs-agent-renew--note-prompt nil "renew-note")
+            (romacs-agent--input session romacs-agent-renew--note-prompt nil nil "renew-note")
           (error (remove-hook 'romacs-agent-event-functions waiter)
                  (funcall then nil "selection"))))))))
 

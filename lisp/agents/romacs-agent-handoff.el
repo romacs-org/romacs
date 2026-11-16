@@ -116,7 +116,13 @@ streamed (an imported transcript has no turn ends, only messages)."
           ('gap (close-turn) (push (list :role 'note :text (plist-get event :text)) items))
           ('input (close-turn)
                   (when-let* ((text (plist-get event :text)))
-                    (push (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text) items)))
+                    (push (if-let* ((message (car (plist-get event :messages))))
+                              ;; Another session's, not the user's request.
+                              (list :role 'tool :text (format "Message from %s (%s): %s"
+                                                              (plist-get (plist-get message :from) :name)
+                                                              (plist-get message :kind) text))
+                            (list :role (if (romacs-agent-handoff--wake-p text) 'tool 'user) :text text))
+                          items)))
           ('delta (unless (plist-get event :parent) (push (plist-get event :text) streamed)))
           ('message-end (unless (plist-get event :parent)
                           (when streamed (setq reply (apply #'concat (reverse streamed)) streamed nil))))

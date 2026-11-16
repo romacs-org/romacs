@@ -65,7 +65,23 @@
       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
         (goto-char (point-min))
         (romacs-agent-chat-open-task))
-      (should (equal (romacs-agent-id shown) romacs-agent-cards-tests--child)))))
+      (should (equal (romacs-agent-id shown) romacs-agent-cards-tests--child)))
+    ;; The task only listed (a row, not loaded): loaded as it opens.
+    (let* ((child (romacs-agent-get romacs-agent-cards-tests--child))
+           (root (make-temp-file "romacs-cards-" t)) (shown nil) (loaded nil))
+      (unwind-protect
+          (progn
+            (remhash romacs-agent-cards-tests--child romacs-agent--sessions)
+            (make-directory (expand-file-name romacs-agent-cards-tests--child root))
+            (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
+                      ((symbol-function 'romacs-agent--load)
+                       (lambda (dir) (setq loaded dir) (puthash romacs-agent-cards-tests--child child romacs-agent--sessions) child))
+                      ((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
+              (goto-char (point-min))
+              (romacs-agent-chat-open-task))
+            (should (equal (file-name-nondirectory loaded) romacs-agent-cards-tests--child))
+            (should (eq shown child)))
+        (delete-directory root t)))))
 
 (ert-deftest romacs-agent-wake-of-a-turn-that-left-work-running ()
   ;; Its turn ended with a command still running in the background (an
@@ -165,7 +181,12 @@
     (ignore session)
     (setf (romacs-agent-title child) "a (nested) title")
     (should (equal (romacs-agent-tools--wake-parse (romacs-agent-tools--wake-text child '(1 "r\ns" t)))
-                   (list :id romacs-agent-cards-tests--child :title "a (nested) title" :state "failed" :result "r\ns")))
+                   (list :id romacs-agent-cards-tests--child :title "a (nested) title" :state "failed" :reply-to nil
+                         :result "r\ns")))
+    ;; A turn that answered a message names it.
+    (should (equal (plist-get (romacs-agent-tools--wake-parse (romacs-agent-tools--wake-text child '(1 "r" nil "m-12ab")))
+                              :reply-to)
+                   "m-12ab"))
     (should-not (romacs-agent-tools--wake-parse "hello"))))
 
 (ert-deftest romacs-agent-native-subagent-is-the-same-card-without-a-link ()

@@ -39,7 +39,11 @@ pub(super) const ACQUIRE: &str = "render.acquire-instructions";
 /// Inside the draw: the surface presented.
 pub(super) const PRESENT: &str = "render.present-instructions";
 
-const OWN: [&str; 4] = [INGEST, FRAME, ACQUIRE, PRESENT];
+/// Before the draw: the page scenes' and shader surfaces' own frames
+/// (a text animation's scene), which change with no new frame.
+pub(super) const SCENES: &str = "render.scenes-instructions";
+
+const OWN: [&str; 5] = [INGEST, FRAME, ACQUIRE, PRESENT, SCENES];
 
 thread_local! {
     /// The thread's counts as the last line read them, and the scenes

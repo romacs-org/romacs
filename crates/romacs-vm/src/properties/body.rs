@@ -104,7 +104,7 @@ impl BodyProperties {
         self.store.inherit_inserted(range, inherited);
     }
     pub fn copy_into(&mut self, at: ByteOffset, source: &Properties) {
-        self.record(source.to_map().into_values().flat_map(|values| values.into_iter().map(|(_, value)| value)));
+        self.record(source.stored_values());
         self.store.copy_into(at, source);
     }
     pub fn remove(&mut self, range: Range<ByteOffset>, key: Key) {
