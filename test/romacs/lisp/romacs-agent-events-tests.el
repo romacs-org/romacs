@@ -142,6 +142,17 @@ turns, and its journal's file; a state root of its own."
                                 (seq-filter (lambda (e) (eq (plist-get e :type) 'input)) result))
                         '("question 1" "question 2" "question 3" "question 4" "question 5"))))))))
 
+(ert-deftest romacs-agent-events-a-line-is-kept-as-written ()
+  ;; As the supervisor writes it: its row read from its ends, the line as
+  ;; it is; a counter left out; another order parsed.
+  (let ((line "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":7,\"t\":12.5}"))
+    (should (equal (romacs-agent-events--line-row "s" line) (list "s" 7 12.5 "out" line))))
+  (should-not (romacs-agent-events--line-row
+               "s" "{\"out\":{\"subtype\":\"thinking_tokens\",\"type\":\"system\"},\"seq\":8,\"t\":1.0}"))
+  (let ((row (romacs-agent-events--line-row "s" "{\"seq\":9,\"t\":2.0,\"note\":{\"type\":\"run\"}}")))
+    (should (equal (seq-take row 4) '("s" 9 2.0 "note"))))
+  (should-not (romacs-agent-events--line-row "s" "not json")))
+
 (ert-deftest romacs-agent-events-thinking-counters-are-not-kept ()
   (should (romacs-agent-events--counter-p
            (romacs-mcp--object "seq" 1 "out" (romacs-mcp--object "type" "system" "subtype" "thinking_tokens"))))

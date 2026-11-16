@@ -266,6 +266,30 @@ own) wait for no more than that.")
              (sqlite-execute db "commit"))
     (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
 
+(defconst romacs-agent-events--line
+  "\\`{\"\\([a-z]+\\)\":.*,\"seq\":\\([0-9]+\\),\"t\":\\([-+.0-9eE]+\\)}\\'"
+  "How a record's line reads as the supervisor writes it, its keys sorted:
+its kind first, its seq and time last.")
+
+(defun romacs-agent-events--line-row (id line)
+  "Session ID's journal LINE as its `events' row, the line kept as it is;
+nil for a `thinking_tokens' counter, which no reader folds, or a line
+that is no record.  A line not as the supervisor writes them is parsed."
+  (cond ((and (string-search "thinking_tokens" line)
+              (let ((record (romacs-agent-events--parse line)))
+                (or (not (hash-table-p record)) (romacs-agent-events--counter-p record))))
+         nil)
+        ((string-match romacs-agent-events--line line)
+         (list id (string-to-number (match-string 2 line)) (string-to-number (match-string 3 line))
+               (match-string 1 line) line))
+        (t (let ((record (romacs-agent-events--parse line)))
+             (and (hash-table-p record) (integerp (gethash "seq" record))
+                  (list id (gethash "seq" record) (gethash "t" record)
+                        (romacs-agent-events--kind record) (romacs-agent--json record)))))))
+
+(defconst romacs-agent-events--insert "insert into events values (?, ?, ?, ?, ?)"
+  "How an import writes a record.")
+
 (defun romacs-agent-events-import (session)
   "Move SESSION's journal into SQLite, once: its records (but for
 `thinking_tokens' counters, which no reader folds), `romacs-agent-events--chunk'
@@ -277,24 +301,24 @@ when SESSION is imported."
       (when-let* ((db (romacs-agent-events--db)))
         (let* ((id (romacs-agent-id session))
                (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-               (insert "insert into events values (?, ?, ?, ?, ?)")
                (count 0) (rows nil))
           (romacs-agent-events--write db "delete from events where session = ?" (list (list id)))
           (condition-case err
               (progn
                 (when (file-readable-p journal)
-                  (romacs-agent--read-journal
-                   session
-                   (lambda (record)
-                     (unless (romacs-agent-events--counter-p record)
-                       (push (list id (gethash "seq" record) (gethash "t" record)
-                                   (romacs-agent-events--kind record) (romacs-agent--json record))
-                             rows)
-                       (cl-incf count)
-                       (when (>= (length rows) romacs-agent-events--chunk)
-                         (romacs-agent-events--write db insert (nreverse rows))
-                         (setq rows nil)))))
-                  (when rows (romacs-agent-events--write db insert (nreverse rows))))
+                  ;; A slice of lines at a time, each kept as it is: only one
+                  ;; not as the supervisor writes them is parsed.
+                  (let ((offset 0) slice)
+                    (while (setq slice (and offset (romacs-agent--journal-lines journal offset)))
+                      (dolist (line (car slice))
+                        (when-let* ((row (romacs-agent-events--line-row id line)))
+                          (push row rows)
+                          (cl-incf count)
+                          (when (>= (length rows) romacs-agent-events--chunk)
+                            (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))
+                            (setq rows nil))))
+                      (setq offset (cdr slice))))
+                  (when rows (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))))
                 (sqlite-execute db "begin immediate")
                 (unless (= count (or (caar (sqlite-select db "select count(*) from events where session = ?" (list id))) 0))
                   (error "Importing %s: %d records read, another count written" id count))
