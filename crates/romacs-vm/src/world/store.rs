@@ -465,27 +465,8 @@ impl World {
         }
     }
 
-    /// The world LINES add to this one's recipe: keyed by this world's key
-    /// and LINES, so it binds all this one does (an init layer,
-    /// `super::layer`).
-    pub fn layered(&self, lines: Vec<String>) -> World {
-        let text = format!("{FORMAT}\nbase {}\n{}\n", hex(&self.key), lines.join("\n"));
-        let mut recipe = self.recipe.clone();
-        recipe.extend(lines);
-        World { store: self.store.clone(), key: sha256(text.as_bytes()), recipe }
-    }
-
     fn file(&self, suffix: &str) -> PathBuf {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
-    }
-
-    /// What a build on these very inputs could not capture, when that
-    /// stands: its records all hold, so building again would capture no more.
-    pub fn standing_uncaptured(&self) -> Option<Vec<Json>> {
-        match self.valid_manifest() {
-            Err(reason) => reason.get("uncaptured")?.as_array().cloned(),
-            Ok(_) => None,
-        }
     }
 
     /// The identity of this world's Lisp, from its published manifest
@@ -510,13 +491,6 @@ impl World {
     /// and its image is the one bound.
     pub fn ready(&self) -> bool {
         self.usable().is_ok()
-    }
-
-    /// Hold this world in use for the process's life (`prune` keeps it),
-    /// as a restored launch holds the world it restored: for a world a
-    /// launch boots beside, its layer's base.
-    pub fn keep(&self) {
-        self.mark_use();
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
@@ -1053,7 +1027,7 @@ struct Stored {
     /// A builder or a restored process holds it.
     busy: bool,
     /// It has a manifest and no image: what a build on its inputs could not
-    /// capture, which a launch resolving a layer reads (romacs-vm-gui world.rs).
+    /// capture, which keeps a launch from building it again.
     uncaptured: bool,
 }
 
@@ -1074,8 +1048,7 @@ fn prune_plan(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<St
 /// stays within MOST worlds (`MOST_WORLDS` but for a test's) and
 /// `MOST_BYTES` bytes. A manifest of what was not captured is
 /// kept while it is within `UNUSED`, outside the bounds: forgotten, the
-/// next launch would build its inputs again, as an init layer's
-/// resolution does after each one it forgets.
+/// next launch would build its inputs again.
 fn plan_family(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
     let uncaptured = |w: &&Stored| w.uncaptured && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
@@ -1159,7 +1132,11 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         if real_dir(&plans) {
             for entry in host::read_dir(&plans)? {
                 let name = entry?.file_name().to_string_lossy().into_owned();
-                if super::layer::plan_file(&name) && regular(&plans.join(&name)) {
+                // The plans of the init layers Romacs once kept: a hex
+                // digest and `.json`, or `.last.json`.
+                let key = name.strip_suffix(".last.json").or_else(|| name.strip_suffix(".json"));
+                let plan = key.is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()));
+                if plan && regular(&plans.join(&name)) {
                     host::remove_file(plans.join(&name))?;
                     removed += 1;
                 }

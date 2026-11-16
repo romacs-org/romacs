@@ -32,7 +32,7 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
     assert_eq!(again, images, "a world was built again");
     // The batch world gone and its last build failed just now, so none is
     // due yet (`World::retry_in`): the GUI's world stands, the batch world
-    // is a warning, the layer step still runs.
+    // is a warning.
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     for manifest in worlds.iter().map(|w| w.with_extension("json")) {
         if std::fs::read_to_string(&manifest).unwrap().contains("launch batch") {
@@ -42,7 +42,7 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
         }
     }
     let (ok, said) = build(&home);
-    assert!(ok && said.contains(r#""event":"batch-world","ok":false"#) && said.contains("layer-prepared"), "{said}");
+    assert!(ok && said.contains(r#""event":"batch-world","ok":false"#), "{said}");
     let _ = std::fs::remove_dir_all(&home);
 }
 
