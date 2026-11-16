@@ -191,6 +191,8 @@ and load nothing when none is."
 (load "romacs-keymap.el" nil t t)
 ;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.
 (load "romacs-help.el" nil t t)
+;; GNU's eval.c `funcall-with-delayed-message', over a timer.
+(load "romacs-eval.el" nil t t)
 (load "font-core.el" nil t t)
 (load "emacs-lisp/syntax.el" nil t t)
 ;; The syntax summaries' switches (DIVERGENCES.md VM2-SYNTAX-SUMMARIES).
