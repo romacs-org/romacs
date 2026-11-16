@@ -124,7 +124,13 @@ call and result, an answer and a result a turn."
                        (lambda (_dir) (setf (romacs-agent-seq session) 46) (puthash id session romacs-agent--sessions)))
                       ((symbol-function 'princ) #'ignore))
               (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
-            (should (= (romacs-agent-turns-count session) 12))))
+            (should (= (romacs-agent-turns-count session) 12))
+            ;; Its records moved to SQLite: filled from there, every row.
+            (let ((romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal)))
+              (should (romacs-agent-events-import session))
+              (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ?" (list id))
+              (should (= (romacs-agent-turns-fill session) 12))
+              (should (= (romacs-agent-turns-count session) 12)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 

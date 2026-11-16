@@ -204,10 +204,15 @@ interrupted."
                               " · ")))
              (reverse tools) "\n"))
 
+(defvar romacs-agent-turns--held :none
+  "Rows made while a fill reads the records, written once it is done: a
+read of records in SQLite holds a snapshot no write can be made inside.
+`:none' outside a fill.")
+
 (defun romacs-agent-turns--write (session last)
-  "Write SESSION's turn under way, ended at seq LAST, as its row."
-  (when-let* ((turn (gethash session romacs-agent-turns--open))
-              (db (romacs-agent-turns--db)))
+  "Write SESSION's turn under way, ended at seq LAST, as its row: at once,
+or as a fill ends (`romacs-agent-turns--held')."
+  (when-let* ((turn (gethash session romacs-agent-turns--open)))
     (remhash session romacs-agent-turns--open)
     (let* ((done (plist-get turn :done))
            (started (plist-get turn :time))
@@ -218,10 +223,17 @@ interrupted."
                       (plist-get turn :images)
                       (and started (plist-get done :time) (- (plist-get done :time) started))
                       (romacs-agent-turns--status done) (plist-get done :reason))))
-      ;; The row and its text's index in one transaction: never two of it.
-      (condition-case err
-          (progn
-            (sqlite-execute db "begin immediate")
+      (if (listp romacs-agent-turns--held) (push row romacs-agent-turns--held)
+        (romacs-agent-turns--put (list row))))))
+
+(defun romacs-agent-turns--put (rows)
+  "Write ROWS, each a turn's row and its text's index, in one transaction:
+never two of one."
+  (when-let* ((db (romacs-agent-turns--db)))
+    (condition-case err
+        (progn
+          (sqlite-execute db "begin immediate")
+          (dolist (row rows)
             ;; Its folded state, on it, is left as it is.
             (sqlite-execute db (concat "insert into turns (session, first_seq, last_seq, t, prompt, reply, tools, cost,"
                                        " items, images, duration, status, reason)"
@@ -234,10 +246,10 @@ interrupted."
             (when (sqlite-select db "select 1 from sqlite_master where name = 'turns_fts'")
               (sqlite-execute db "delete from turns_fts where session = ? and first_seq = ?" (list (nth 0 row) (nth 1 row)))
               (sqlite-execute db "insert into turns_fts values (?, ?, ?, ?, ?)"
-                              (list (nth 0 row) (nth 1 row) (nth 4 row) (nth 5 row) (nth 6 row))))
-            (sqlite-execute db "commit"))
-        (error (ignore-errors (sqlite-execute db "rollback"))
-               (message "romacs-agent-turns: %s" (error-message-string err)))))))
+                              (list (nth 0 row) (nth 1 row) (nth 4 row) (nth 5 row) (nth 6 row)))))
+          (sqlite-execute db "commit"))
+      (error (ignore-errors (sqlite-execute db "rollback"))
+             (message "romacs-agent-turns: %s" (error-message-string err))))))
 
 (defun romacs-agent-turns--event (session event)
   "Fold EVENT into SESSION's turn under way; a turn's end writes it."
@@ -296,8 +308,9 @@ they came.  The number written."
          (from (if last (romacs-agent--journal-after session last) 0)))
     (if (not from) 0
       (let ((scratch (romacs-agent--scratch session)) (before (romacs-agent-turns-count session)))
-        (let ((romacs-agent-event-functions (list #'romacs-agent-turns--event)))
-          (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from))
+        (let ((romacs-agent-event-functions (list #'romacs-agent-turns--event)) (romacs-agent-turns--held nil))
+          (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from)
+          (when romacs-agent-turns--held (romacs-agent-turns--put (nreverse romacs-agent-turns--held))))
         ;; A turn under way at the records' end is not one yet.
         (remhash scratch romacs-agent-turns--open)
         (- (romacs-agent-turns-count session) before)))))
