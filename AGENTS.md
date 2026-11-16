@@ -134,6 +134,13 @@ possible; say so where you do.
   observe is a divergence until the oracle binary is rebuilt past it. The pinned GNU
   binary stays the behaviour oracle. After changing autoload cookies or autoloaded
   definitions outside Romacs's runtime files, run `tools/lisp-loaddefs`.
+- Lisp from `lisp/`, a user's init file and a package they install are one kind of
+  code, as in GNU: every mechanism (loading, the compile store, worlds and images,
+  worker VMs, options) serves them the same way. A path only `lisp/` can take is a
+  design defect; fix the mechanism rather than add an exception.
+- The machine belongs to its user. Never fence, sandbox or refuse what a user, their
+  init or their agents do on their own machine "for safety": capture and report a
+  failure, never prevent the attempt.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even
