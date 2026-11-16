@@ -827,16 +827,16 @@ first: functions called once a worker has moved it, or its move failed.")
 from one when a view of it holds places in that journal: the session
 goes on in its journal rather than move under that view.")
 
-(defun romacs-agent-events-then (session then &optional first)
+(defun romacs-agent-events-then (session then &optional note)
   "Call THEN once SESSION's records are in SQLite.  At once when they are,
 or are made so here (`romacs-agent-events-own'), or cannot be: the store
 off, a supervisor running for it, an import here failing, or a view
 holding places in its journal (`romacs-agent-events-held-functions').
 A journal too long to move here, or one a worker moves now, waits for
 that worker VM, ahead of every other session, and THEN is called once it
-is moved or its move failed.  Several are called in the order given,
-but those given FIRST (a note's write) before the others: a supervisor
-launched after them numbers its records after theirs."
+is moved or its move failed.  Several are called in the order given.
+NOTE: THEN writes a note, which an ending editor writes at once
+\(`romacs-agent-events-write-waiting-notes')."
   (let ((id (romacs-agent-id session)) (own (romacs-agent-events-own session)))
     (if (and (not (gethash id romacs-agent-events--waiting))
              (not (eq own 'queued))
@@ -847,10 +847,7 @@ launched after them numbers its records after theirs."
                               (or romacs-agent-fold-bytes most-positive-fixnum)))
                        (not (run-hook-with-args-until-success 'romacs-agent-events-held-functions session)))))
         (funcall then)
-      (puthash id (let ((waiting (gethash id romacs-agent-events--waiting)))
-                    (if (not first) (append waiting (list (cons nil then)))
-                      (let ((firsts (seq-take-while #'car waiting)))
-                        (append firsts (list (cons t then)) (nthcdr (length firsts) waiting)))))
+      (puthash id (append (gethash id romacs-agent-events--waiting) (list (cons (and note t) then)))
                romacs-agent-events--waiting)
       (let ((dir (romacs-agent-dir session)))
         ;; A job moving it already: it is flipped as that job ends; the
@@ -873,27 +870,26 @@ here, and no supervisor writing its journal."
   (and (gethash id romacs-agent-events--waiting) t))
 
 (defun romacs-agent-events--waited (id)
-  "Call what waits for the session ID names to move, moved or not: the
-notes' writes first, then, once the writer has made them (a write
-behind them answered), the rest, so a supervisor launched then numbers
-its records after them and reads where they end."
+  "Call what waits for the session ID names to move, moved or not, in the
+order it came.  A launch among it needs no note to be written first: its
+supervisor numbers after every record numbered here (`--seq-from')."
   (when-let* ((thens (gethash id romacs-agent-events--waiting)))
-    (let ((firsts (seq-take-while #'car thens)) (rest (seq-drop-while #'car thens)))
-      ;; Waiting still, until the notes are made: what comes meanwhile
-      ;; queues behind them (`romacs-agent-events-then').
-      (puthash id (or rest (list (cons nil #'ignore))) romacs-agent-events--waiting)
-      (pcase-dolist (`(,_ . ,then) firsts)
-        (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))
-      (romacs-agent-write
-       'ignore nil
-       (lambda (_answer)
-         (let ((now (gethash id romacs-agent-events--waiting)))
-           (if (seq-some #'car now)
-               ;; Notes came meanwhile: they are made first, the same way.
-               (romacs-agent-events--waited id)
-             (remhash id romacs-agent-events--waiting)
-             (pcase-dolist (`(,_ . ,then) now)
-               (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then))))))))))
+    (remhash id romacs-agent-events--waiting)
+    (pcase-dolist (`(,_ . ,then) thens)
+      (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))
+
+(defun romacs-agent-events-write-waiting-notes ()
+  "The editor is ending, or handing over: write now the notes still
+waiting for their sessions' moves, where those sessions' records are
+\(their journals, not moved), so the next process reads them.  What else
+waits (a launch) is let go: no editor is there to run it."
+  (maphash (lambda (_id thens)
+             (pcase-dolist (`(,note . ,then) thens)
+               (when note (with-demoted-errors "romacs-agent-events: a note: %S" (funcall then)))))
+           romacs-agent-events--waiting)
+  (clrhash romacs-agent-events--waiting))
+
+(add-hook 'romacs-agent-writer-before-drain-functions #'romacs-agent-events-write-waiting-notes)
 
 (defun romacs-agent-events--imported-row-p (id)
   "Whether the store says the session ID names is imported, read now."

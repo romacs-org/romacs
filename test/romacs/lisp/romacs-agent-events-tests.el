@@ -37,6 +37,8 @@ turns, and its journal's file; a state root of its own."
                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
                                       process-environment))
          (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent--launched (make-hash-table :test #'equal))
+         (romacs-agent--held-notes (make-hash-table :test #'equal))
          (id "e7e70000-2222-4333-8444-555566667777")
          (dir (expand-file-name id (romacs-agent--state-root)))
          (journal (expand-file-name "journal.jsonl" dir)))
@@ -401,13 +403,12 @@ turns, and its journal's file; a state root of its own."
            (should (equal ran '(shown)))
            (should-not (romacs-agent-events-p session)))
          ;; No job may run yet: it waits, ahead of the rest.  A launch,
-         ;; then two notes: the notes are written first, the launch's
-         ;; supervisor numbering after them.
+         ;; then two notes, run as they came: the launch's supervisor
+         ;; numbers after every record numbered here (`--seq-from'), the
+         ;; notes' among them, written or not.
          (setf (romacs-agent-journal-start session) size)
          (romacs-agent-events-then
-          session (lambda () (push (and (romacs-agent-events-p session)
-                                        (caar (sqlite-select (romacs-agent-events--db) "select max(seq) from events where session = ?" (list id))))
-                                   ran)))
+          session (lambda () (push (list (romacs-agent-events-p session) (1+ (romacs-agent-seq session))) ran)))
          (romacs-agent--note session (romacs-mcp--object "type" "selection"))
          (romacs-agent--note session (romacs-mcp--object "type" "plan"))
          (should (equal ran '(shown)))
@@ -420,7 +421,7 @@ turns, and its journal's file; a state root of its own."
           (let ((romacs-agent-events--migrate-running 0)
                 (romacs-agent-events--migrate-queue (list (romacs-agent-dir session))))
             (romacs-agent-events--migrate-next)))
-         (should (equal ran '(12 shown)))
+         (should (equal ran '((t 13) shown)))
          (should-not (romacs-agent-events-waiting-p id))
          (should (romacs-agent-events-p session))
          (should (equal (sqlite-select (romacs-agent-events--db) "select seq, kind from events where session = ? and seq > 10 order by seq" (list id))

@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] [--store FILE] -- PROGRAM [ARG...]";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] [--store FILE] [--seq-from N] -- PROGRAM [ARG...]";
 
 struct Config {
     dir: PathBuf,
@@ -54,12 +54,17 @@ struct Config {
     /// The SQLite database the session's records go to, instead of its
     /// journal (`--store FILE`): a session Romacs has imported.
     store: Option<PathBuf>,
+    /// The seq its first record takes at least (`--seq-from N`): the editor
+    /// numbered records up to N - 1 before this run, some perhaps still on
+    /// their way into the store, and this run numbers after them.
+    seq_from: Option<u64>,
     argv: Vec<String>,
 }
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
     let (mut dir, mut socket, mut input, mut note, mut input_images, mut store) = (None, None, None, None, None, None);
+    let mut seq_from = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
@@ -68,13 +73,14 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
             "--input-images" => input_images = Some(args.next().and_then(|text| serde_json::from_str(&text).ok()).ok_or(USAGE)?),
             "--note" => note = Some(args.next().and_then(|text| serde_json::from_str::<Json>(&text).ok()).ok_or(USAGE)?),
             "--store" => store = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
+            "--seq-from" => seq_from = Some(args.next().and_then(|n| n.parse::<u64>().ok()).ok_or(USAGE)?),
             "--" => break,
             _ => return Err(USAGE.into()),
         }
     }
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
-        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, input_images, store, argv }),
+        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, input_images, store, seq_from, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -392,11 +398,17 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     std::fs::write(&temporary, text).and_then(|()| std::fs::rename(&temporary, path)).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The seq the run's records follow: the store's last, or the editor's
+/// last (FROM - 1) when that is later.
+fn first_seq_after(last: u64, from: Option<u64>) -> u64 {
+    last.max(from.map_or(0, |n| n.saturating_sub(1)))
+}
+
 fn run(config: Config) -> Result<i32, String> {
     create_private(&config.dir)?;
     let listener = listen(&config.socket)?;
     let store = Store::open(&config.dir, config.store.as_deref())?;
-    let seq = store.last_seq();
+    let seq = first_seq_after(store.last_seq(), config.seq_from);
     let stderr = OpenOptions::new().create(true).append(true).open(config.dir.join("harness.stderr")).map_err(|e| e.to_string())?;
     let mut child = Command::new(&config.argv[0]).args(&config.argv[1..])
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr)
@@ -697,5 +709,18 @@ mod tests {
         let noted = parse(["--dir", "d", "--socket", "/s", "--note", r#"{"type":"run"}"#, "--", "x"].map(String::from).to_vec()).unwrap();
         assert_eq!(noted.note, Some(json!({"type": "run"})));
         assert!(parse(["--dir", "d", "--socket", "/s", "--note", "not json", "--", "x"].map(String::from).to_vec()).is_err());
+        let floored = parse(["--dir", "d", "--socket", "/s", "--seq-from", "10", "--", "x"].map(String::from).to_vec()).unwrap();
+        assert_eq!(floored.seq_from, Some(10));
+        assert!(parse(["--dir", "d", "--socket", "/s", "--seq-from", "ten", "--", "x"].map(String::from).to_vec()).is_err());
+    }
+
+    #[test]
+    fn a_run_numbers_after_the_editors_records_and_the_stores() {
+        // The editor numbered up to 9 (some not yet in the store, which has 5):
+        // the run's first record is 10.  The store ahead of the editor: after it.
+        assert_eq!(first_seq_after(5, Some(10)) + 1, 10);
+        assert_eq!(first_seq_after(12, Some(10)) + 1, 13);
+        assert_eq!(first_seq_after(5, None) + 1, 6);
+        assert_eq!(first_seq_after(0, Some(0)) + 1, 1);
     }
 }
