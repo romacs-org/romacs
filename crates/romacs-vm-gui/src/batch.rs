@@ -12,9 +12,10 @@
 //! the same user.
 //!
 //! A session that names no store restores the installation's world first,
-//! `EXECUTABLE.worlds` beside the executable, which its installer built
-//! (`--world-build --batch`): it only reads that store, writing no lock,
-//! use stamp or digest there. Then the user's store. No session is slower
+//! `EXECUTABLE.worlds` beside the executable, when one was prepared there
+//! (`--world-build --batch`; the curl installer prepares none): it only
+//! reads that store, writing no lock, use stamp or digest there. Then the
+//! user's store. No session is slower
 //! than a boot from source: one whose world is missing or stale boots the
 //! chain from source while a detached builder, under the world's lock,
 //! prepares it for the next; a session in a fresh HOME makes no store at
