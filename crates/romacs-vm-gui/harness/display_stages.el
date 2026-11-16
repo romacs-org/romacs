@@ -288,7 +288,10 @@ line's end; return it."
 ;; finds it unsettled is owed a redisplay already: the step's own, one
 ;; after a timer that ran, or one after a ripe timer, which runs in the
 ;; poll's own pass (`romacs--timer-check' runs every ripe one).  So the
-;; redisplay after the poll is that one, and polls add none.
+;; redisplay after the poll is that one, and polls add none.  The poll and
+;; the advice on `timer-event-handler' cost a step 15 to 20 k instructions
+;; (plain-idle's 616 k became 629 to 637 k): plain-idle's and chat-idle's
+;; step bars rose by as much, their margins kept.
 
 (defvar display-stages--poll nil
   "The step loop's own timer function, which sets off no redisplay of a step's.")
@@ -309,10 +312,12 @@ the step loop's own."
 
 (defun display-stages--settled-p ()
   "Whether the step marked last has settled: its redisplay ran, no timer is
-ripe, and a redisplay ran after the last timer other than the loop's own."
+ripe, idle timers included, and a redisplay ran after the last timer
+other than the loop's own."
   (and (romacs--redisplay-since-mark)
-       ;; `timer-list' is in the order the timers are due.
-       (not (and timer-list (not (time-less-p nil (timer--time (car timer-list))))))
+       ;; No timer ripe, ordinary or (while idle) idle, as the host's
+       ;; own pass chooses them (`romacs--timer-next').
+       (not (eql (romacs--timer-delay) 0))
        (or (null display-stages--owed)
            (and (> (display-stages--cycles) display-stages--owed)
                 (progn (setq display-stages--owed nil) t)))))

@@ -1,6 +1,6 @@
 {
  "plain-idle": {
-  "step_instructions": 645000,
+  "step_instructions": 667000,
   "cycles": 1,
   "display_instructions": 348000,
   "display_conses": 0,
@@ -26,7 +26,7 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 872000,
+  "step_instructions": 895000,
   "cycles": 1,
   "display_instructions": 573000,
   "display_conses": 0,
