@@ -118,3 +118,26 @@
           (should (equal (plist-get (romacs-agent--driver-of 'romacs-history-test-driver) :file) file))
           (should (member file (romacs-agent-history--driver-files))))
       (delete-file file))))
+
+(ert-deftest romacs-agent-history-a-scan-loads-harnesses-with-what-they-require ()
+  ;; The scan's process loads each harness's file with this editor's
+  ;; `load-path', so a library it requires from elsewhere is found; one
+  ;; that fails to load leaves the others.
+  (let* ((root (make-temp-file "romacs-drivers-" t))
+         (helpers (expand-file-name "helpers" root))
+         (good (expand-file-name "good-driver.el" root))
+         (bad (expand-file-name "bad-driver.el" root))
+         (load-path (cons helpers load-path))
+         (romacs-agent--drivers (list (list 'bad :file bad) (list 'good :file good))))
+    (unwind-protect
+        (progn
+          (make-directory helpers)
+          (write-region "(provide 'romacs-history-test-helper)\n" nil (expand-file-name "romacs-history-test-helper.el" helpers))
+          (write-region "(require 'romacs-history-test-helper)\n(provide 'romacs-history-test-good)\n" nil good)
+          (write-region "(error \"Broken driver\")\n" nil bad)
+          (with-temp-buffer
+            (call-process (expand-file-name invocation-name invocation-directory) nil t nil "--batch"
+                          "--eval" (romacs-agent-history--drivers-form)
+                          "--eval" "(princ (list (featurep 'romacs-history-test-helper) (featurep 'romacs-history-test-good)))")
+            (should (string-search "(t t)" (buffer-string)))))
+      (delete-directory root t))))

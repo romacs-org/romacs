@@ -457,6 +457,13 @@ own two, each once."
                                                   (mapcar #'file-name-sans-extension own)))
                           (delq nil (mapcar (lambda (cell) (plist-get (cdr cell) :file)) romacs-agent--drivers))))))
 
+(defun romacs-agent-history--drivers-form ()
+  "The form loading this editor's harnesses' own files in a batch
+process: with this editor's `load-path', so what they require is found;
+each alone, so one failing to load leaves the others listed."
+  (format "(progn (setq load-path (delete-dups (append '%S load-path))) (dolist (file '%S) (with-demoted-errors \"romacs-agent-history: %%S\" (load file nil t))))"
+          load-path (romacs-agent-history--driver-files)))
+
 (defun romacs-agent-history-index-soon ()
   "Write the transcripts' rows anew in a batch process of this build, off
 the editor, when none runs; `romacs-agent-history-indexed-hook' runs once
@@ -470,7 +477,8 @@ it ends."
                                   "-l" "romacs-agent-claude" "-l" "romacs-agent-codex")
                             ;; Every harness defined here, from its own file
                             ;; (an init's, a package's): its transcripts too.
-                            (mapcan (lambda (file) (list "-l" file)) (romacs-agent-history--driver-files))
+                            (and (romacs-agent-history--driver-files)
+                                 (list "--eval" (romacs-agent-history--drivers-form)))
                             (list "-l" "romacs-agent-history"
                                   "--eval" (romacs-agent-history--settings)
                                   "-f" "romacs-agent-history-index-batch"))
