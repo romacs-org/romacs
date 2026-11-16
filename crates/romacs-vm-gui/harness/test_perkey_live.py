@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """perkey_live's validation, without a compositor or binary."""
 import argparse
+from pathlib import Path
 import unittest
 
 import perkey_live as pk
@@ -44,6 +45,13 @@ class Options(unittest.TestCase):
         # images_typing_live, theme_live and the others build perkey's
         # Session over options that name no `inherit'.
         self.assertFalse(pk.Session(argparse.Namespace(keys=40), None, False).inherit)
+
+    def test_a_shared_home_is_absolute_and_keeps_no_state(self):
+        session = pk.Session(pk.arguments(self.BASE + ['--home', 'shared']), Path('/tmp/perkey-x'), False)
+        env = session.env()
+        self.assertTrue(Path(env['HOME']).is_absolute() and Path(env['XDG_CACHE_HOME']).is_absolute())
+        self.assertEqual(env['XDG_STATE_HOME'], '/tmp/perkey-x/state')              # the session's own
+        self.assertEqual(pk.Session(pk.arguments(self.BASE), Path('/tmp/perkey-x'), False).env()['HOME'], '/tmp/perkey-x/home')
 
 
 class Expectations(unittest.TestCase):
