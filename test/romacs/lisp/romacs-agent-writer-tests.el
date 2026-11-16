@@ -421,7 +421,12 @@ connection of its own, as the writer's process has."
       (puthash "h" t romacs-agent--launched)
       (romacs-agent--note session (romacs-mcp--object "type" "plan"))
       (should (= hosts 1))
-      (should (= (romacs-agent-held-notes-count) 2)))))
+      (should (= (romacs-agent-held-notes-count) 2))
+      ;; Launched, and it never starts: no longer awaited, its notes go
+      ;; through a notes-only host.
+      (romacs-agent--no-supervisor session)
+      (should-not (gethash "h" romacs-agent--launched))
+      (should (= hosts 2)))))
 
 (ert-deftest romacs-agent-writer-the-last-resort-sends-nothing ()
   ;; While the editor makes the writes itself, what their answers queue is
@@ -662,8 +667,11 @@ connection of its own, as the writer's process has."
   (let ((romacs-agent-writer--draining t) (ran nil)
         (session (romacs-agent--make :id "d" :harness 'claude :dir temporary-file-directory :cwd "/" :seq 1)))
     (cl-letf (((symbol-function 'call-process) (lambda (&rest _) (setq ran t) 0)))
+      (setf (romacs-agent-state session) 'starting)
       (should-error (romacs-agent--launch session (list "claude")) :type 'user-error)
-      (should-not ran))))
+      (should-not ran)
+      ;; Ended, so it is resumed again once the editor goes on.
+      (should (eq (romacs-agent-state session) 'ended)))))
 
 (ert-deftest romacs-agent-writer-a-drain-starts-a-host-for-stranded-notes ()
   ;; Notes held with no host on its way (one that ended before writing

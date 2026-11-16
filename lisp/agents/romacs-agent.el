@@ -2334,7 +2334,10 @@ what came meanwhile."
           (romacs-agent--reattach-later session)
           ;; The harness gone (a turn cut, a restart asked for): a selection
           ;; waiting for it takes effect.
-          (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))))))
+          (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
+        ;; Notes it did not write: through whatever comes next, or another
+        ;; host.
+        (romacs-agent--held-host session)))))
 
 (defconst romacs-agent--reattach-delays '(1 2 4 8 15 30 60)
   "Seconds before each look for a supervisor that still listens after its
@@ -2408,31 +2411,45 @@ while it does not yet listen; the connection it replaces is let go."
             (romacs-agent--caught-up-p session)
             (setf (romacs-agent-state session) 'ended)
             (romacs-agent--changed session)
-            (remhash (romacs-agent-id session) romacs-agent--launched)
+            (romacs-agent--no-supervisor session)
             nil)
            ((romacs-agent--caught-up-p session)
             ;; It ended before this server attached: its journal says it all.
-            ;; Its notes first: the run's end may launch the next.
+            ;; The run's end may launch the next, which takes its notes; else
+            ;; they find another host.
             (remhash (romacs-agent-id session) romacs-agent--launched)
-            (romacs-agent--run-ended session))
+            (prog1 (romacs-agent--run-ended session)
+              (romacs-agent--held-host session)))
            ((> (or tries 0) 0)
             (run-at-time 0.1 nil #'romacs-agent--attach session (1- tries) steal))
            ;; Not a record from any supervisor: none ever ran.
            ((not (romacs-agent--recorded-p session))
             (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session))
                                                :text "its supervisor never started"))
-            (remhash (romacs-agent-id session) romacs-agent--launched)
+            (romacs-agent--no-supervisor session)
             nil)
            (t (setf (romacs-agent-state session) 'detached)
               (romacs-agent--raise session (list :type 'status :text "supervisor not reachable"))
-              ;; No socket at all: no supervisor of it runs, its notes are
-              ;; numbered here; one there may yet answer, and they wait.
+              ;; No socket at all: no supervisor of it runs, and its notes
+              ;; go through a notes-only host; one there may yet answer,
+              ;; and they wait for it.
               (unless (file-exists-p (romacs-agent-host-socket session))
-                (remhash (romacs-agent-id session) romacs-agent--launched))
+                (romacs-agent--no-supervisor session))
               ;; Tried again a while, as a lost attachment is, while its
               ;; socket is there: no view's opening comes to retry it.
               (romacs-agent--reattach-later session)
               nil)))))
+
+(defun romacs-agent--no-supervisor (session)
+  "The supervisor launched for SESSION will not attach here: no longer
+awaited, and its held notes go through another host."
+  (remhash (romacs-agent-id session) romacs-agent--launched)
+  (romacs-agent--held-host session))
+
+(defun romacs-agent--held-host (session)
+  "A host for SESSION's held notes, when it has any (`romacs-agent--ensure-host')."
+  (when (gethash (romacs-agent-id session) romacs-agent--held-notes)
+    (romacs-agent--ensure-host session)))
 
 (defun romacs-agent--supervisor-listens-p (session)
   "Whether SESSION's supervisor answers at its socket, as a server's load
@@ -3462,6 +3479,9 @@ to it."
   ;; An ending editor, or one handing over, starts no harness: a launch
   ;; waiting for a move it saw end is left to the next.
   (when (bound-and-true-p romacs-agent-writer--draining)
+    ;; None runs: ended, to be resumed again (a handover cancelled).
+    (setf (romacs-agent-state session) 'ended)
+    (romacs-agent--changed session)
     (user-error "Session %s is not started: the editor is ending" (romacs-agent-title session)))
   (romacs-agent--fold-now session)
   ;; A notes-only host of it is let go: this supervisor takes the lock as
