@@ -1593,6 +1593,21 @@ output to LOG: the successor of a session that is no server."
                  "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
          log (number-to-string (emacs-pid)) (append command (list "--restore" image))))
 
+(defun warm-restart--confirm (plan force asked)
+  "Refuse PLAN while a buffer of it is blocked; unless FORCE, ask whether
+the processes it ends, those not in ASKED (names), may end.  Return the
+names asked about, ASKED among them."
+  (when-let* ((blocked (warm-restart--entries plan 'blocked)))
+    (user-error "Cannot restart now: %s"
+                (mapconcat (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason))) blocked "; ")))
+  (let ((asking (cl-loop for p in (plist-get plan :processes)
+                         when (and (plist-get p :query) (not (member (plist-get p :process) asked)))
+                         collect (plist-get p :process))))
+    (when (and asking (not force)
+               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? " (string-join asking ", ")))))
+      (user-error "Restart cancelled"))
+    (append asked asking)))
+
 ;;;###autoload
 (defun romacs-restart (&optional force)
   "Restart into a new process, carrying this session.
@@ -1603,20 +1618,16 @@ network connections are not carried yet: when one would ask before
 `kill-emacs', so does this, unless FORCE.  See `romacs-restart-command'
 for running a newer build."
   (interactive)
-  (let* ((plan (warm-restart-plan))
-         (asking (cl-remove-if-not (lambda (p) (plist-get p :query)) (plist-get plan :processes))))
-    (when (warm-restart--entries plan 'blocked)
-      (user-error "Cannot restart now: %s"
-                  (mapconcat (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
-                             (warm-restart--entries plan 'blocked) "; ")))
-    (when (and asking (not force)
-               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? "
-                                         (mapconcat (lambda (p) (plist-get p :process)) asking ", ")))))
-      (user-error "Restart cancelled"))
+  (let ((asked (warm-restart--confirm (warm-restart-plan) force nil)))
     ;; What the successor reads is on disk before it starts, and before
     ;; its supervisor's deadline runs.
     (run-hooks 'warm-restart-before-handover-functions)
-    (let ((image (warm-restart-write plan))
+    ;; Timers and process output run while those hooks wait: the plan is
+    ;; made again, so a buffer they made is carried and a process they
+    ;; started is asked about.
+    (let* ((plan (warm-restart-plan))
+           (_ (warm-restart--confirm plan force asked))
+           (image (warm-restart-write plan))
           (server (bound-and-true-p romacs-server-name)))
       ;; Before anything closes the endpoint: whoever starts this server
       ;; next restores the image, the successor or a server a launcher

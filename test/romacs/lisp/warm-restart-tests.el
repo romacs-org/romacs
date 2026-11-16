@@ -298,4 +298,35 @@
       (setq pending 0)
       (should-not (warm-restart--obstacles (list :force t))))))
 
+;; What the handover hooks do while they wait (the agents' writer drains,
+;; timers and process output run) is in the plan the image is written from.
+(defun warm-restart-test--restart-with-hook (hook)
+  "`romacs-restart', forced, with HOOK on the handover hooks; the plan it
+writes, or nil when it refused first."
+  (let ((warm-restart-before-handover-functions (list hook)) (written nil))
+    (cl-letf (((symbol-function 'warm-restart-write)
+               (lambda (plan &rest _) (setq written plan) (throw 'warm-restart-test-written nil))))
+      (catch 'warm-restart-test-written (romacs-restart t)))
+    written))
+
+(ert-deftest warm-restart-plan-is-made-after-the-handover-hooks ()
+  (let ((name (generate-new-buffer-name "warm-restart-made-during-handover")))
+    (unwind-protect
+        (let ((plan (warm-restart-test--restart-with-hook
+                     (lambda () (with-current-buffer (get-buffer-create name) (insert "made while draining"))))))
+          (should (member name (mapcar (lambda (e) (plist-get e :name)) (plist-get plan :buffers)))))
+      (when (get-buffer name) (kill-buffer name)))))
+
+(ert-deftest warm-restart-refuses-a-buffer-the-handover-hooks-blocked ()
+  (let ((name (generate-new-buffer-name "warm-restart-blocked-during-handover")))
+    (unwind-protect
+        (let ((err (should-error
+                    (warm-restart-test--restart-with-hook
+                     (lambda () (with-current-buffer (get-buffer-create name)
+                                  (setq-local warm-restart-blocker-functions
+                                              (list (lambda () "busy for the test"))))))
+                    :type 'user-error)))
+          (should (string-match-p "Cannot restart now: .*busy for the test" (cadr err))))
+      (when (get-buffer name) (kill-buffer name)))))
+
 ;;; warm-restart-tests.el ends here
