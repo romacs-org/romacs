@@ -322,10 +322,13 @@ goes to the backup directory.  Non-nil when SESSION is imported."
        and ((json_extract(record, '$.out.type') = 'stream_event'
              and json_extract(record, '$.out.event.type') = 'content_block_delta'
              and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.api_message_id')))
-            or (json_extract(record, '$.out.method') = 'item/agentMessage/delta'
+            or (json_extract(record, '$.out.method') in ('item/agentMessage/delta', 'item/commandExecution/outputDelta',
+                                                         'item/fileChange/outputDelta')
                 and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.params.itemId'))))")
   "What compacting a session removes, its records before seq ?2: the
-deltas of each message whose whole message came after them.  The last
+deltas of each message whose whole message came after them, and the
+streamed output of each Codex command or file change whose completed item
+came after it (that item holds the output a chat shows).  The last
 statement's count is the records removed.")
 
 (defconst romacs-agent-events--vacuum-limit (* 64 1024 1024)
