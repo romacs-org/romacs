@@ -266,10 +266,13 @@ own) wait for no more than that.")
              (sqlite-execute db "commit"))
     (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
 
-(defconst romacs-agent-events--line
-  "\\`{\"\\([a-z]+\\)\":.*,\"seq\":\\([0-9]+\\),\"t\":\\([-+.0-9eE]+\\)}\\'"
-  "How a record's line reads as the supervisor writes it, its keys sorted:
-its kind first, its seq and time last.")
+(defconst romacs-agent-events--line-head "\\`{\"\\([a-z]+\\)\":"
+  "How a record's line begins as the supervisor writes it, its keys
+sorted: its kind first.")
+
+(defconst romacs-agent-events--line-tail ",\"seq\":\\([0-9]+\\),\"t\":\\([-+.0-9eE]+\\)}\\'"
+  "How it ends: its seq and time last.  Matched against the line's last
+characters alone: a pattern across a line of megabytes overflows.")
 
 (defun romacs-agent-events--line-row (id line)
   "Session ID's journal LINE as its `events' row, the line kept as it is;
@@ -279,9 +282,11 @@ that is no record.  A line not as the supervisor writes them is parsed."
               (let ((record (romacs-agent-events--parse line)))
                 (or (not (hash-table-p record)) (romacs-agent-events--counter-p record))))
          nil)
-        ((string-match romacs-agent-events--line line)
-         (list id (string-to-number (match-string 2 line)) (string-to-number (match-string 3 line))
-               (match-string 1 line) line))
+        ((let ((tail (substring line (max 0 (- (length line) 80)))))
+           (and (string-match romacs-agent-events--line-tail tail)
+                (let ((seq (string-to-number (match-string 1 tail))) (time (string-to-number (match-string 2 tail))))
+                  (and (string-match romacs-agent-events--line-head line)
+                       (list id seq time (match-string 1 line) line))))))
         (t (let ((record (romacs-agent-events--parse line)))
              (and (hash-table-p record) (integerp (gethash "seq" record))
                   (list id (gethash "seq" record) (gethash "t" record)

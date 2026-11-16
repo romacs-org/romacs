@@ -151,7 +151,13 @@ turns, and its journal's file; a state root of its own."
                "s" "{\"out\":{\"subtype\":\"thinking_tokens\",\"type\":\"system\"},\"seq\":8,\"t\":1.0}"))
   (let ((row (romacs-agent-events--line-row "s" "{\"seq\":9,\"t\":2.0,\"note\":{\"type\":\"run\"}}")))
     (should (equal (seq-take row 4) '("s" 9 2.0 "note"))))
-  (should-not (romacs-agent-events--line-row "s" "not json")))
+  (should-not (romacs-agent-events--line-row "s" "not json"))
+  ;; A line of megabytes: its ends read, no pattern across it.
+  (let ((line (concat "{\"out\":{\"text\":\"" (make-string 4000000 ?a) "\"},\"seq\":10,\"t\":3.0}")))
+    (should (equal (seq-take (romacs-agent-events--line-row "s" line) 4) '("s" 10 3.0 "out"))))
+  ;; A nested seq and time are not the line's.
+  (let ((row (romacs-agent-events--line-row "s" "{\"t\":4.0,\"seq\":11,\"note\":{\"seq\":1,\"t\":2}}")))
+    (should (equal (seq-take row 4) '("s" 11 4.0 "note")))))
 
 (ert-deftest romacs-agent-events-thinking-counters-are-not-kept ()
   (should (romacs-agent-events--counter-p
