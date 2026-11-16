@@ -3750,15 +3750,27 @@ in its rows (`romacs-agent-turns-fold-put'); non-nil when kept."
 
 (defun romacs-agent--kept-get (session)
   "SESSION's state as kept, as text, or nil.  One an earlier build kept in
-its directory is moved into its rows, the first time, and its file removed."
+its directory is read from there.  It is moved into its rows, and its
+file removed, only off the editor's main VM (`romacs-agent--kept-moves-p'):
+the editor reads it as it is and writes nothing."
   (or (romacs-agent-turns-fold (romacs-agent-id session))
       (let ((file (romacs-agent--kept-file session)))
         (when (file-readable-p file)
-          (let ((text (with-temp-buffer
-                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                        (buffer-string))))
-            (when (romacs-agent--kept-put session text) (delete-file file))
-            text)))))
+          ;; Gone since: moved in meanwhile, read from the rows below.
+          (when-let* ((text (ignore-error file-missing
+                              (with-temp-buffer
+                                (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                (buffer-string)))))
+            (when (and (romacs-agent--kept-moves-p) (romacs-agent--kept-put session text)) (delete-file file))
+            text)))
+      ;; Moved in meanwhile, by a process off the editor.
+      (romacs-agent-turns-fold (romacs-agent-id session))))
+
+(defun romacs-agent--kept-moves-p ()
+  "Whether this process moves a kept state from its file into its rows: a
+batch process (the turns' fill) or a worker VM, never the editor's main
+VM, whose start writes no state of the sessions it restores."
+  (or noninteractive (and (fboundp 'isolate-main-p) (not (isolate-main-p)))))
 
 (defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a

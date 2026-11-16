@@ -200,6 +200,15 @@ recorded in a private directory; `delivered' collects what wakes it."
   (let ((object (romacs-agent--options-object '(:parent "p" :wake "none"))))
     (should (equal (gethash "wake" object) "none"))))
 
+(ert-deftest romacs-agent-delegate-a-listed-parent-is-loaded-for-its-tasks-end ()
+  ;; A task's end goes to its parent even when the parent is only listed
+  ;; (a row): the parent is loaded for it.
+  (let ((asked nil)
+        (child (romacs-agent--make :id "c" :harness 'claude :options (list :parent "p"))))
+    (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (setq asked id) nil)))
+      (romacs-agent-tools--hand-on child))
+    (should (equal asked "p"))))
+
 (provide 'romacs-agent-delegate-tests)
 ;;; romacs-agent-delegate-tests.el ends here
 
