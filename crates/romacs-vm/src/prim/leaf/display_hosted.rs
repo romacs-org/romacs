@@ -29,6 +29,16 @@ const FIRST_REACH: usize = 128;
 /// apart, one seam per BATCH elements of such a line.
 const BATCH: usize = 16384;
 
+/// Whether a composed sequence the layout measures as one glyph may run
+/// on from SHOWN's last character into C (`romacs_layout_input::cluster`):
+/// within one, each character joins the one before, or both are regional
+/// indicators (a flag). Only where neither holds is a cut never inside one.
+fn continues(shown: &[(char, FaceKey)], c: char) -> bool {
+    let Some(&(last, _)) = shown.last() else { return false };
+    let indicator = |ch: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&ch);
+    romacs_layout_input::cluster::joins(last, c) || indicator(last) && indicator(c)
+}
+
 fn unsupported(what: &str) -> Fault { Fault::Error(format!("VM2 window-text-pixel-size {what} in a displayed window is unsupported")) }
 /// Whether FAULT is such a refusal: what the display iterator cannot yet
 /// measure, not an error of the caller's.
@@ -190,9 +200,9 @@ pub(super) struct Hosted<'l, 'a> {
     /// on, by index since the last reset.
     base: usize,
     glyphs: Vec<(i64, i64, i64, bool)>,
-    /// The elements the next measurement reaches at least: CHUNK, for each
-    /// measurement has a fixed cost, but none past the line after motion
-    /// reseats, as it walks a line at a time, then doubling to CHUNK.
+    /// The elements the next measurement reaches at least: none past the
+    /// line the walk starts on, for most questions are of a row or two,
+    /// then doubling to CHUNK, for each measurement has a fixed cost.
     reach: usize,
     /// The default face's row height, which every host row reaches, and
     /// its ascent.
@@ -202,12 +212,12 @@ pub(super) struct Hosted<'l, 'a> {
 
 impl<'l, 'a> Hosted<'l, 'a> {
     pub(super) fn new(source: Source<'l, 'a>) -> Self {
-        Hosted { source, base: 0, glyphs: vec![], reach: CHUNK, default_height: 0, default_ascent: 0 }
+        Hosted { source, base: 0, glyphs: vec![], reach: 0, default_height: 0, default_ascent: 0 }
     }
     pub(super) fn source(&mut self) -> &mut Source<'l, 'a> { &mut self.source }
     /// Deliver from START, a line start, again.
     pub(super) fn reset(&mut self, start: i64) -> R<()> {
-        (self.base, self.glyphs, self.reach) = (0, vec![], CHUNK);
+        (self.base, self.glyphs, self.reach) = (0, vec![], 0);
         self.source.reset(start)
     }
     /// The host's advance and own height for element INDEX.
@@ -233,8 +243,10 @@ impl<'l, 'a> Hosted<'l, 'a> {
             };
             let Some(e) = slot.elem else { break };
             let c = match host_char(&mut self.source, &e)? { Some(Some(c)) => c, _ => ' ' };
+            // A line past BATCH elements is cut, where no composed glyph crosses the cut.
+            if at - index > BATCH && !continues(&shown, c) { break; }
             shown.push((c, face_key(&e)));
-            if at - index >= self.reach && c == '\n' || at - index >= BATCH { break; }
+            if at - index >= self.reach && c == '\n' { break; }
         }
         self.reach = (self.reach * 2).clamp(FIRST_REACH, CHUNK);
         let window = self.source.window();
@@ -289,11 +301,7 @@ impl Elements for Hosted<'_, '_> {
 }
 
 impl Lines for Hosted<'_, '_> {
-    fn reseat(&mut self, start: i64) -> R<()> {
-        self.reset(start)?;
-        self.reach = 0;
-        Ok(())
-    }
+    fn reseat(&mut self, start: i64) -> R<()> { self.reset(start) }
     fn delivered(&mut self, index: usize) -> R<Slot> { self.source.slot(index) }
     fn line_start_before(&mut self, pos: i64) -> R<i64> { self.source.visible_line_start(pos) }
     fn begv(&self) -> i64 { self.source.begv() }
