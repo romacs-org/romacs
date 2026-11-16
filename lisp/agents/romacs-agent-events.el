@@ -31,7 +31,9 @@
     ;; written beside its supervisor's record), read in the order kept.
     "create index if not exists events_seq on events (session, seq)"
     "create index if not exists events_kind on events (session, kind, seq)"
-    "create table if not exists imported (session text primary key, at real) without rowid")
+    "create table if not exists imported (session text primary key, at real) without rowid"
+    ;; Who moves a session's journal in, while it does (`romacs-agent-events--claim').
+    "create table if not exists moving (session text primary key, pid integer, at real) without rowid")
   "The records' tables, made with the database: never dropped.")
 
 (defvar romacs-agent-events--made nil "The database the tables were made in.")
@@ -295,46 +297,91 @@ that is no record.  A line not as the supervisor writes them is parsed."
 (defconst romacs-agent-events--insert "insert into events values (?, ?, ?, ?, ?)"
   "How an import writes a record.")
 
-(defun romacs-agent-events-import (session)
+(defun romacs-agent-events--claim (db id)
+  "Claim moving session ID's journal in for this process: non-nil when
+it is this process's to move, no other live process holding it."
+  (sqlite-execute db "begin immediate")
+  (condition-case err
+      (let* ((pid (caar (sqlite-select db "select pid from moving where session = ?" (list id))))
+             (free (or (null pid) (= pid (emacs-pid)) (null (process-attributes pid)))))
+        (when free (sqlite-execute db "insert or replace into moving values (?, ?, ?)" (list id (emacs-pid) (float-time))))
+        (sqlite-execute db "commit")
+        free)
+    (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
+
+(defun romacs-agent-events--release (db id)
+  "Let go of this process's claim on session ID."
+  (ignore-errors (romacs-agent-events--write db "delete from moving where session = ? and pid = ?" (list (list id (emacs-pid))))))
+
+(defun romacs-agent-events-import (session &optional keep)
   "Move SESSION's journal into SQLite, once: its records (but for
 `thinking_tokens' counters, which no reader folds), `romacs-agent-events--chunk'
-a transaction, checked as written, then its `imported' row, which makes
-them its records; then the journal goes to the backup directory.  What an
-import cut short wrote, with no `imported' row, is removed first.  Non-nil
-when SESSION is imported."
+a transaction, then its `imported' row, which makes them its records;
+then the journal goes to the backup directory, unless KEEP (a worker's
+move: the editor backs it up when it knows no reader has it).
+
+Only the process that claims the session moves it
+\(`romacs-agent-events--claim'); another's live claim leaves it, nil.
+The records are its journal's up to its size as the move began, its
+last line too when whole and unended; the move is made theirs only if
+the journal is still that size and no supervisor has started, else it
+is undone and the session stays in its journal.  A move cut short,
+what it wrote, is removed by the next.  Non-nil when SESSION is
+imported."
   (or (romacs-agent-events-p session)
-      (when-let* ((db (romacs-agent-events--db)))
-        (let* ((id (romacs-agent-id session))
-               (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
-               (count 0) (rows nil))
-          (romacs-agent-events--write db "delete from events where session = ?" (list (list id)))
-          (condition-case err
-              (progn
-                (when (file-readable-p journal)
-                  ;; A slice of lines at a time, each kept as it is: only one
-                  ;; not as the supervisor writes them is parsed.
-                  (let ((offset 0) slice)
-                    (while (setq slice (and offset (romacs-agent--journal-lines journal offset)))
-                      (dolist (line (car slice))
-                        (when-let* ((row (romacs-agent-events--line-row id line)))
+      (when-let* ((db (romacs-agent-events--db))
+                  (id (romacs-agent-id session))
+                  ((romacs-agent-events--claim db id)))
+        (unwind-protect
+            (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+                   (size (or (file-attribute-size (file-attributes journal)) 0))
+                   (count 0) (rows nil) (offset 0))
+              (cl-flet ((add (row)
                           (push row rows)
                           (cl-incf count)
                           (when (>= (length rows) romacs-agent-events--chunk)
                             (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))
                             (setq rows nil))))
-                      (setq offset (cdr slice))))
-                  (when rows (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))))
-                (sqlite-execute db "begin immediate")
-                (unless (= count (or (caar (sqlite-select db "select count(*) from events where session = ?" (list id))) 0))
-                  (error "Importing %s: %d records read, another count written" id count))
-                (sqlite-execute db "insert into imported values (?, ?)" (list id (float-time)))
-                (sqlite-execute db "commit"))
-            (error (ignore-errors (sqlite-execute db "rollback"))
-                   (ignore-errors (romacs-agent-events--write db "delete from events where session = ?" (list (list id))))
-                   (signal (car err) (cdr err))))
-          (puthash id t romacs-agent-events--imported)
-          (romacs-agent-events--back-up session)
-          t))))
+                (romacs-agent-events--write db "delete from events where session = ?" (list (list id)))
+                (condition-case err
+                    (progn
+                      ;; A slice of lines at a time, each kept as it is: only
+                      ;; one not as the supervisor writes them is parsed.
+                      (let (slice)
+                        (while (setq slice (and offset (< offset size) (romacs-agent--journal-lines journal offset size)))
+                          (dolist (line (car slice))
+                            (when-let* ((row (romacs-agent-events--line-row id line))) (add row)))
+                          (setq offset (cdr slice))))
+                      ;; Its last line, unended: a whole record, or no move.
+                      (when (and offset (< offset size))
+                        (let ((rest (with-temp-buffer
+                                      (set-buffer-multibyte nil)
+                                      (insert-file-contents-literally journal nil offset size)
+                                      (string-trim (decode-coding-string (buffer-string) 'utf-8)))))
+                          (unless (string-empty-p rest)
+                            (unless (hash-table-p (romacs-agent-events--parse rest))
+                              (error "Importing %s: its last line is cut short" id))
+                            (when-let* ((row (romacs-agent-events--line-row id rest))) (add row)))))
+                      (when rows (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows)))
+                      (sqlite-execute db "begin immediate")
+                      ;; Checked holding the write lock: nothing more came, and
+                      ;; no supervisor writes to the journal now.
+                      (unless (eql (or (file-attribute-size (file-attributes journal)) 0) size)
+                        (error "Importing %s: its journal grew meanwhile" id))
+                      (when (file-exists-p (romacs-agent--host-socket id))
+                        (error "Importing %s: its supervisor started meanwhile" id))
+                      (unless (= count (or (caar (sqlite-select db "select count(*) from events where session = ?" (list id))) 0))
+                        (error "Importing %s: %d records read, another count written" id count))
+                      (sqlite-execute db "insert into imported values (?, ?)" (list id (float-time)))
+                      (sqlite-execute db "commit"))
+                  (error (ignore-errors (sqlite-execute db "rollback"))
+                         ;; Its own, claimed: no other process wrote them.
+                         (ignore-errors (romacs-agent-events--write db "delete from events where session = ?" (list (list id))))
+                         (signal (car err) (cdr err)))))
+              (puthash id t romacs-agent-events--imported)
+              (unless keep (romacs-agent-events--back-up session))
+              t)
+          (romacs-agent-events--release db id)))))
 
 (defun romacs-agent-events--counter-p (record)
   "Whether RECORD is a `thinking_tokens' counter, which no reader folds."
@@ -530,8 +577,23 @@ imported, none of them loaded here, nor run by a supervisor."
      (and (file-directory-p (romacs-agent--state-root))
           (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))))
 
+(defun romacs-agent-events--back-up-moved (ids)
+  "Move to the backup directory the journals of the sessions IDS names
+that are imported, none of them loaded here, nor run by a supervisor:
+no reader has them.  A loaded one's goes at a later start."
+  (dolist (id ids)
+    (let ((dir (expand-file-name id (romacs-agent--state-root))))
+      (when (and (not (gethash id romacs-agent--sessions))
+                 (not (file-exists-p (romacs-agent--host-socket id)))
+                 (file-exists-p (expand-file-name "journal.jsonl" dir)))
+        (with-demoted-errors "romacs-agent-events: backing up: %S"
+          (romacs-agent-events--back-up (romacs-agent--make :id id :dir dir)))))))
+
 (defun romacs-agent-events--migrate-start ()
-  "Queue every session still in a journal and start its jobs."
+  "Back up the journals of sessions moved before, queue every session
+still in a journal, and start the jobs."
+  (romacs-agent-events--back-up-moved
+   (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from imported")))
   (setq romacs-agent-events--migrate-queue
         (append romacs-agent-events--migrate-queue
                 (cl-remove-if (lambda (dir) (member dir romacs-agent-events--migrate-queue)) (romacs-agent-events--journaled))))
@@ -596,10 +658,11 @@ left (its supervisor runs, it failed)."
                     (session (romacs-agent--of-manifest dir manifest))
                     ((not (file-exists-p (romacs-agent--host-socket (romacs-agent-id session))))))
           (puthash (romacs-agent-id session) session romacs-agent--sessions)
-          (romacs-agent-events-import session)
-          (romacs-agent-events-compact (romacs-agent-id session))
-          (when (fboundp 'romacs-agent-turns-fill) (romacs-agent-turns-fill session))
-          (romacs-agent-id session))
+          ;; Its journal kept: the editor moves it once no reader has it.
+          (when (romacs-agent-events-import session t)
+            (romacs-agent-events-compact (romacs-agent-id session))
+            (when (fboundp 'romacs-agent-turns-fill) (romacs-agent-turns-fill session))
+            (romacs-agent-id session)))
       (error (message "romacs-agent-events: moving %s: %s" dir (error-message-string err)) nil))))
 
 (defun romacs-agent-events--migrated (batch done)
@@ -612,6 +675,7 @@ ERR) when none started): the ones it moved are told
                  (condition-case err (isolate-await done)
                    (error (message "romacs-agent-events: a migration job: %s" (error-message-string err)) nil)))))
     (dolist (id moved) (puthash id t romacs-agent-events--imported))
+    (romacs-agent-events--back-up-moved moved)
     (when moved (run-hook-with-args 'romacs-agent-events-migrated-functions moved)))
   (romacs-agent-events--migrate-next))
 

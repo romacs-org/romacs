@@ -342,10 +342,71 @@ turns, and its journal's file; a state root of its own."
            (should-not (romacs-agent-events--migrate-job (list dir)))
            (delete-file socket))
          (should (equal (romacs-agent-events--migrate-job (list dir)) (list id)))
-         (should-not (file-exists-p journal))
+         ;; Its journal kept until the editor knows no reader has it.
+         (should (file-exists-p journal))
          (should (romacs-agent-events-p session))
+         (puthash id session romacs-agent--sessions)
+         (romacs-agent-events--back-up-moved (list id))
+         (should (file-exists-p journal))
+         (remhash id romacs-agent--sessions)
+         (romacs-agent-events--back-up-moved (list id))
+         (should-not (file-exists-p journal))
          (should (= (caar (sqlite-select (romacs-agent-events--db) "select count(*) from turns where session = ? and first_seq > 0" (list id))) 3))
          (should-not (member dir (romacs-agent-events--journaled))))))))
+
+(ert-deftest romacs-agent-events-a-move-is-one-processs-and-checked-at-its-end ()
+  ;; Claimed by another live process: left.  A dead one's claim: taken.
+  ;; The journal grown, or a supervisor started, as it moved: undone, the
+  ;; session in its journal.  Its last line unended: kept when whole, no
+  ;; move when cut short.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     2
+     (lambda (session journal)
+       (let ((id (romacs-agent-id session)) (db (romacs-agent-events--db)) (dead 999999999))
+         (cl-flet ((claimed (pid) (sqlite-execute db "insert or replace into moving values (?, ?, ?)" (list id pid 1.0)))
+                   (events () (caar (sqlite-select db "select count(*) from events where session = ?" (list id)))))
+           ;; pid 1 lives as long as the system does.
+           (claimed 1)
+           (should-not (romacs-agent-events-import session))
+           (should (file-exists-p journal))
+           (should (= (events) 0))
+           (should-not (process-attributes dead))
+           (claimed dead)
+           ;; Grown as it moved: undone.
+           (let ((lines (symbol-function 'romacs-agent--journal-lines)) (once nil))
+             (cl-letf (((symbol-function 'romacs-agent--journal-lines)
+                        (lambda (&rest args)
+                          (unless once
+                            (setq once t)
+                            (write-region (romacs-agent-events-tests--line 99 "note" (romacs-mcp--object "type" "late")) nil journal t 'silent))
+                          (apply lines args))))
+               (should-error (romacs-agent-events-import session))))
+           (should-not (romacs-agent-events-p session))
+           (should (= (events) 0))
+           (should (file-exists-p journal))
+           (should-not (sqlite-select db "select 1 from moving where session = ?" (list id)))
+           ;; A supervisor started as it moved: undone.
+           (let ((socket (romacs-agent--host-socket id)) (lines (symbol-function 'romacs-agent--journal-lines)))
+             (make-directory (file-name-directory socket) t)
+             (cl-letf (((symbol-function 'romacs-agent--journal-lines)
+                        (lambda (&rest args) (write-region "" nil socket nil 'silent) (apply lines args))))
+               (should-error (romacs-agent-events-import session)))
+             (delete-file socket))
+           (should-not (romacs-agent-events-p session))
+           ;; Its last line cut short: no move.
+           (write-region "{\"note\":{\"type\":\"cut\"" nil journal t 'silent)
+           (should-error (romacs-agent-events-import session))
+           (should-not (romacs-agent-events-p session))
+           ;; Whole, unended: moved with it.
+           (let ((text (with-temp-buffer (insert-file-contents journal) (buffer-string))))
+             (with-temp-file journal
+               (insert (substring text 0 (string-search "{\"note\":{\"type\":\"cut\"" text))
+                       (string-trim-right (romacs-agent-events-tests--line 100 "note" (romacs-mcp--object "type" "last"))))))
+           (should (romacs-agent-events-import session))
+           (should (member 100 (romacs-agent-events-tests--seqs session)))))))))
 
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
   ;; Its supervisor's socket there when compacting holds the write lock:
