@@ -159,6 +159,15 @@ either `setopt' or \\[customize-variable] to set this option."
              (save-place--normalize-alist))))
   :version "28.1")
 
+(defun save-place--normalize (fun name)
+  "NAME by FUN, `expand-file-name' or `abbreviate-file-name'; NAME as
+written while only TRAMP's autoload stub would answer for it.  Putting
+a remote name read from `save-place-file' in its normal form would load
+TRAMP, which none of those places needs until a remote file is visited."
+  (if (eq (find-file-name-handler name fun) #'tramp-autoload-file-name-handler)
+      name
+    (funcall fun name)))
+
 (defun save-place--normalize-alist ()
   (let ((fun (if save-place-abbreviate-file-names
                  #'abbreviate-file-name #'expand-file-name))
@@ -168,11 +177,11 @@ either `setopt' or \\[customize-variable] to set this option."
           (cl-delete-duplicates
            (cl-loop for (k . v) in save-place-alist
                     collect
-                    (cons (funcall fun k)
+                    (cons (save-place--normalize fun k)
                           (if (listp v)
                               (cl-loop for (k1 . v1) in v
                                        collect
-                                       (cons k1 (funcall fun v1)))
+                                       (cons k1 (save-place--normalize fun v1)))
                             v)))
            :key #'car
            :from-end t
