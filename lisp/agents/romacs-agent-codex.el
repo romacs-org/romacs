@@ -437,6 +437,9 @@ an approval or questions for the user, anything else refused."
     (append started
             (when completed
               (list (list :type 'tool :state (if failed 'failed 'completed) :id id
+                          ;; Its input as it ended: some items fill theirs in
+                          ;; only then (a web search's query).
+                          :input (cadr (romacs-agent--codex-tool item))
                           :output (romacs-agent--codex-output item)))))))
 
 (defun romacs-agent--codex-item (session item completed &optional id)

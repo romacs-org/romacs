@@ -83,6 +83,7 @@ call and result, an answer and a result a turn."
               (should (plist-get page :more))
               (should (= (plist-get page :after) 61))
               (should (equal (plist-get row :status) "completed"))
+              (should (= (plist-get row :request) 12))
               (should (equal (mapcar (lambda (item) (gethash "kind" item)) (plist-get row :items)) '("tool" "text")))
               (let ((tool (aref (plist-get row :items) 0)) (text (aref (plist-get row :items) 1)))
                 (should (equal (gethash "id" tool) "u12"))
@@ -93,7 +94,8 @@ call and result, an answer and a result a turn."
                 (should (equal (gethash "text" text) "answer 12 about zebras"))
                 (should (equal (gethash "message" text) "m12")))
               (should-not (plist-get (romacs-agent-turns-page session 7 5) :more))
-              (should (equal (romacs-agent-turns-item session "u12") "found"))
+              (should (equal (plist-get (romacs-agent-turns-item session "u12") :output) "found"))
+              (should (equal (gethash "command" (plist-get (romacs-agent-turns-item session "u12") :input)) "grep 12"))
               (should-not (romacs-agent-turns-item session "nothing")))
             ;; The tail from the rows: where the journal's scan says.
             (let ((from-rows (romacs-agent--turns-tail session 3))
@@ -178,6 +180,32 @@ call and result, an answer and a result a turn."
       (should (equal (gethash "from" (aref (gethash "messages" input) 0)) "parent"))
       (should (equal (gethash "kind" (aref (gethash "messages" input) 0)) "message")))))
 
+(ert-deftest romacs-agent-turns-a-tool-keeps-its-rows-texts ()
+  ;; Its row's texts made from its whole input and output, while the fill
+  ;; has them: once as it starts, again as it ends.
+  (let ((turn (list :items nil :by-id (make-hash-table :test #'equal) :inputs (make-hash-table :test #'equal)))
+        (romacs-agent-turns-tool-texts-function
+         (lambda (name input output)
+           (list :row (format "%s %s" name (gethash "pattern" input))
+                 :ended (and output (format "%d matches" (length (split-string output "\n" t))))))))
+    (romacs-agent-turns--item turn (list :type 'tool :state 'started :seq 2 :id "g" :name "Grep"
+                                         :input (romacs-mcp--object "pattern" (make-string 3000 ?x))))
+    (let ((item (gethash "g" (plist-get turn :by-id))))
+      (should (= (length (gethash "row" item)) 3005))
+      (should (eq (gethash "ended" item) :null))
+      (romacs-agent-turns--item turn (list :type 'tool :state 'completed :seq 3 :id "g" :output "a\nb\nc\n"))
+      (should (equal (gethash "ended" item) "3 matches"))
+      ;; The input it keeps is bounded all the same.
+      (should (= (length (gethash "pattern" (gethash "input" item))) (1+ romacs-agent-turns--cut))))
+    ;; A search whose query comes only as it ends: its texts and input from then.
+    (romacs-agent-turns--item turn (list :type 'tool :state 'started :seq 4 :id "w" :name "Grep"
+                                         :input (romacs-mcp--object "pattern" "")))
+    (romacs-agent-turns--item turn (list :type 'tool :state 'completed :seq 5 :id "w" :output "a\n"
+                                         :input (romacs-mcp--object "pattern" "zebra")))
+    (let ((item (gethash "w" (plist-get turn :by-id))))
+      (should (equal (gethash "row" item) "Grep zebra"))
+      (should (equal (gethash "pattern" (gethash "input" item)) "zebra")))))
+
 (ert-deftest romacs-agent-turns-codex-answers-and-interrupts ()
   ;; Codex's answers, by question id, kept as Claude's are, by question; a
   ;; turn it interrupted ends interrupted, not failed.
@@ -229,16 +257,16 @@ call and result, an answer and a result a turn."
               (should (= (gethash "output_bytes" tool) 5000))
               (should-not (gethash "output" tool)))
             (should (= (plist-get (car (plist-get (romacs-agent-turns-page session) :rows)) :duration) 3.0))
-            (should (equal (romacs-agent-turns-item session "big") long))
+            (should (equal (plist-get (romacs-agent-turns-item session "big") :output) long))
             ;; Its id read otherwise in a copy (a harness that numbers ids by
             ;; turn): the only tool its completing record completes.
             (sqlite-execute (romacs-agent-turns--db) "update turns set items = replace(items, '\"big\"', '\"1:big\"') where session = ?" (list id))
-            (should (equal (romacs-agent-turns-item session "1:big") long))
+            (should (equal (plist-get (romacs-agent-turns-item session "1:big") :output) long))
             ;; Its records moved to SQLite: the same, by seqs.
             (let ((romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal)))
               (should (romacs-agent-events-import session))
               (should (romacs-agent-events-p session))
-              (should (equal (romacs-agent-turns-item session "1:big") long)))))
+              (should (equal (plist-get (romacs-agent-turns-item session "1:big") :output) long)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
