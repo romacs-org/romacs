@@ -76,15 +76,27 @@ opening what it writes, as a writer off the editor opens it.")
   "Non-nil while the writer is drained: its end sends nothing again.")
 
 (defvar romacs-agent-writer--pending (make-hash-table)
-  "The writes not answered, by id: each (ID FUNCTION ARGS DONE).")
+  "The writes not answered, by id: each (ID FUNCTION ARGS DONE TRIES).")
 
 (defvar romacs-agent-writer--unsent nil
   "The writes waiting for room in the writer's queue, oldest first.")
 (defvar romacs-agent-writer--unsent-tail nil "The last cons of `romacs-agent-writer--unsent'.")
 
-(defun romacs-agent-writer-pending-count ()
-  "How many writes are queued and not yet answered."
+(defvar romacs-agent-writer--failed (make-hash-table)
+  "The writes the writer answered with an error, by id, each (ID FUNCTION
+ARGS DONE TRIES): tried again later, never dropped.")
+
+(defconst romacs-agent-writer--failed-tries 5
+  "How many times a failed write is sent again in a session; then it waits
+for the editor's end, which makes it itself.")
+
+(defun romacs-agent-writer--unanswered ()
+  "How many writes are sent or queued to the writer and not answered."
   (hash-table-count romacs-agent-writer--pending))
+
+(defun romacs-agent-writer-pending-count ()
+  "How many writes are queued and not yet made: unanswered, or failed."
+  (+ (hash-table-count romacs-agent-writer--pending) (hash-table-count romacs-agent-writer--failed)))
 
 (defconst romacs-agent-writer--window 16
   "The batches sent and not answered at most: a worker's queue holds
@@ -106,7 +118,7 @@ full channel to the writer holds it here until there is room."
                       (error (list 'error err)))))
         (when done (funcall done answer))
         answer)
-    (let ((entry (list (cl-incf romacs-agent-writer--next) function args done)))
+    (let ((entry (list (cl-incf romacs-agent-writer--next) function args done 0)))
       (puthash (car entry) entry romacs-agent-writer--pending)
       (romacs-agent-writer--queue entry))
     (romacs-agent-writer--flush)
@@ -149,7 +161,7 @@ queued to be: its value when it ran here."
       (when isolate
         (let ((batch nil) (n 0))
           (while (and romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
-            (pcase-let ((`(,id ,function ,args ,_) (pop romacs-agent-writer--unsent)))
+            (pcase-let ((`(,id ,function ,args ,_ ,_) (pop romacs-agent-writer--unsent)))
               (push (list id function args) batch)
               (cl-incf n)))
           (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
@@ -185,7 +197,7 @@ try stays queued, and the drain says so.  Only an ending editor commits."
     (maphash (lambda (_id entry) (push entry entries)) romacs-agent-writer--pending)
     (setq romacs-agent-writer--unsent nil romacs-agent-writer--unsent-tail nil romacs-agent-writer--in-flight 0)
     (dolist (entry (sort entries (lambda (a b) (< (car a) (car b)))))
-      (pcase-let ((`(,id ,function ,args ,done) entry) (answer nil) (tries 0))
+      (pcase-let ((`(,id ,function ,args ,done ,_) entry) (answer nil) (tries 0))
         (while (progn (setq answer (condition-case err (list 'ok (apply function args)) (error (list 'error err))))
                       (and (eq (car answer) 'error) (< (cl-incf tries) romacs-agent-writer--here-tries)))
           (sleep-for 1))
@@ -223,11 +235,31 @@ and the writes waiting for room are sent."
          (remhash id romacs-agent-writer--pending)
          (when (eq (car answer) 'error)
            (message "romacs-agent-writer: %s: %S" (nth 1 entry) (cadr answer)))
-         (when-let* ((done (nth 3 entry)))
-           (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer)))))
+         (if (and (eq (car answer) 'error) (null (nth 3 entry)))
+             ;; Nobody is told of it: it is kept, and made later.
+             (romacs-agent-writer--failed entry)
+           (when-let* ((done (nth 3 entry)))
+             (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer))))))
      (romacs-agent-writer--flush))))
 
 (add-hook 'isolate-message-functions #'romacs-agent-writer--receive)
+
+(defun romacs-agent-writer--failed (entry)
+  "Keep ENTRY, a write that failed, and send it again after a while: 1, 2,
+4... seconds, `romacs-agent-writer--failed-tries' times; then it waits
+for the editor's end (`romacs-agent-writer-drain')."
+  (let* ((tries (1+ (nth 4 entry))) (kept (list (nth 0 entry) (nth 1 entry) (nth 2 entry) (nth 3 entry) tries)))
+    (puthash (car kept) kept romacs-agent-writer--failed)
+    (when (< tries romacs-agent-writer--failed-tries)
+      (run-with-timer (expt 2 (1- tries)) nil #'romacs-agent-writer--again (car kept)))))
+
+(defun romacs-agent-writer--again (id)
+  "Send the failed write ID again, unless it is made or gone meanwhile."
+  (when-let* ((entry (gethash id romacs-agent-writer--failed)))
+    (remhash id romacs-agent-writer--failed)
+    (puthash id entry romacs-agent-writer--pending)
+    (romacs-agent-writer--queue entry)
+    (romacs-agent-writer--flush)))
 
 (defun romacs-agent-writer--serve ()
   "In the writer: run each batch of writes as it comes, in order, and
@@ -255,10 +287,12 @@ answer.  The writer then stops; a later write starts another."
     (let ((count (romacs-agent-writer-pending-count)) (tries 0) (romacs-agent-writer--draining t))
       (message "Saving %d agent records..." count)
       (redisplay t)
+      ;; What failed before is tried once more, now.
+      (maphash (lambda (id _) (romacs-agent-writer--again id)) (copy-hash-table romacs-agent-writer--failed))
       ;; Until nothing is queued and no writer runs: writes the answers'
       ;; callbacks queue, even while the writer stops, are made too.
-      (while (and (or (> (romacs-agent-writer-pending-count) 0) romacs-agent-writer--job) (< tries 4))
-        (if (> (romacs-agent-writer-pending-count) 0)
+      (while (and (or (> (romacs-agent-writer--unanswered) 0) romacs-agent-writer--job) (< tries 4))
+        (if (> (romacs-agent-writer--unanswered) 0)
             (progn
               (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
                 ;; Gone: a new writer, sent what is still unanswered.
@@ -277,7 +311,10 @@ answer.  The writer then stops; a later write starts another."
             (unless (isolate-future-done-p job)
               (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
               (ignore-errors (isolate-await job))))))
-      ;; No writer would answer: made here, the editor ending.
+      ;; What failed, or no writer would answer: made here, the editor
+      ;; ending.
+      (maphash (lambda (id entry) (puthash id entry romacs-agent-writer--pending)) romacs-agent-writer--failed)
+      (clrhash romacs-agent-writer--failed)
       (when (> (romacs-agent-writer-pending-count) 0)
         (romacs-agent-writer--here))
       (message (if (> (romacs-agent-writer-pending-count) 0) "Saving %d agent records...failed: %d not saved"

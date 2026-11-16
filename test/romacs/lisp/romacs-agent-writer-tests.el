@@ -18,7 +18,8 @@ connection of its own, as the writer's process has."
   (declare (indent 0))
   `(let ((sent nil) (romacs-agent-writer-queued t) (romacs-agent-writer--job nil)
          (romacs-agent-writer--pending (make-hash-table)) (romacs-agent-writer--unsent nil)
-         (romacs-agent-writer--unsent-tail nil) (romacs-agent-writer--next 0) (romacs-agent-writer--in-flight 0))
+         (romacs-agent-writer--unsent-tail nil) (romacs-agent-writer--next 0) (romacs-agent-writer--in-flight 0)
+         (romacs-agent-writer--failed (make-hash-table)))
      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (vector 'future)))
                ((symbol-function 'isolate-on-done) #'ignore)
                ((symbol-function 'isolate-future-done-p) #'ignore)
@@ -236,6 +237,47 @@ connection of its own, as the writer's process has."
         (romacs-agent-writer-drain)
         (should (= (romacs-agent-writer-pending-count) 1))
         (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
+
+(ert-deftest romacs-agent-writer-a-write-the-writer-fails-is-kept ()
+  ;; The writer answers a write with an error: it is kept, sent again
+  ;; later, and at the end made by the editor or counted not saved.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
+        (romacs-agent-writer--failed (make-hash-table)) (romacs-agent-writer-tests--flaky 1)
+        (later nil) (said nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (push (cons f args) later) nil))
+                ((symbol-function 'sleep-for) #'ignore)
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (romacs-agent-write 'romacs-agent-writer-tests--flaky '(1))
+        (romacs-agent-write 'romacs-agent-writer-tests--broken '(2))
+        (serve)
+        (should (= (romacs-agent-writer-pending-count) 2))
+        (should (= (romacs-agent-writer--unanswered) 0))
+        (should (= (length later) 2))
+        ;; Sent again: the flaky one is made now.
+        (dolist (call later) (apply (car call) (cdr call)))
+        (serve)
+        (should (equal romacs-agent-writer-tests--made '(1)))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        ;; The end: the broken one tried again, then counted not saved.
+        (cl-letf (((symbol-function 'isolate-await) (lambda (&rest _) (serve-only) t)))
+          (romacs-agent-writer-drain))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
+
+(ert-deftest romacs-agent-writer-a-kept-state-not-kept-is-kept-again ()
+  ;; A kept state the writer fails to write: its session is no longer
+  ;; marked kept at that record, so the next keep writes it again.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent--kept (make-hash-table :test #'eq :weakness 'key))
+        (session (romacs-agent--make :id "k")))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'romacs-agent-turns-fold-put) (lambda (&rest _) (error "Disk full")))
+                ((symbol-function 'message) #'ignore))
+        (should (romacs-agent--kept-put session "(:a 1)"))
+        (puthash session 7 romacs-agent--kept)
+        (serve)
+        (should-not (gethash session romacs-agent--kept))))))
 
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
