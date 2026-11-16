@@ -64,6 +64,35 @@ connection of its own, as the writer's process has."
       (serve)
       (should (equal (nreverse answers) '((ok (1)) (ok (2))))))))
 
+(defvar romacs-agent-writer-tests--made nil "What the writer made, in order.")
+(defun romacs-agent-writer-tests--make (x) (push x romacs-agent-writer-tests--made) x)
+
+(ert-deftest romacs-agent-writer-a-drain-makes-every-write ()
+  ;; Ending (or handing over to a successor), the editor waits for every
+  ;; write it queued, however many, saying so; a writer that died is
+  ;; started again with what it did not answer.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (said nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-await) (lambda (&rest _) (serve) t))
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (dotimes (i 500) (romacs-agent-write 'romacs-agent-writer-tests--make (list i)))
+        (romacs-agent-writer-drain)
+        (should (equal (reverse romacs-agent-writer-tests--made) (number-sequence 0 499)))
+        (should-not romacs-agent-writer--pending)
+        (should (member "Saving 500 agent records..." said))
+        (should (member "Saving 500 agent records...done" said))
+        ;; The writer gone with two unanswered: a new one makes them.
+        (setq romacs-agent-writer-tests--made nil)
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(a))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(b))
+        (setq sent nil)
+        (let ((dead romacs-agent-writer--job))
+          (cl-letf (((symbol-function 'isolate-future-done-p) (lambda (future) (eq future dead))))
+            (romacs-agent-writer-drain)))
+        (should (equal (reverse romacs-agent-writer-tests--made) '(a b)))
+        (should-not romacs-agent-writer--pending)))))
+
 (ert-deftest romacs-agent-writer-the-editor-reads-and-an-import-waits ()
   ;; The editor's connection only reads; a launch on a session whose
   ;; journal is imported by the writer waits for it, and finds it imported.

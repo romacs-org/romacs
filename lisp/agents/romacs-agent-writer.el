@@ -62,6 +62,9 @@ opening what it writes, as a writer off the editor opens it.")
 
 (defvar romacs-agent-writer--job nil "The writer's future while it runs.")
 (defvar romacs-agent-writer--next 0 "The id of the next write.")
+(defvar romacs-agent-writer--draining nil
+  "Non-nil while the writer is drained: its end sends nothing again.")
+
 (defvar romacs-agent-writer--pending nil
   "The writes sent and not answered, oldest first: (ID FUNCTION ARGS DONE).")
 
@@ -110,7 +113,7 @@ not answer is sent again to a new one, in order: a write is an upsert,
 or a record whose second copy a fold skips."
   (when (eq future romacs-agent-writer--job)
     (setq romacs-agent-writer--job nil)
-    (when romacs-agent-writer--pending
+    (when (and romacs-agent-writer--pending (not romacs-agent-writer--draining))
       (message "romacs-agent-writer: the writer ended, %d writes sent again" (length romacs-agent-writer--pending))
       (mapc #'romacs-agent-writer--send romacs-agent-writer--pending))))
 
@@ -141,14 +144,33 @@ to stop."
                                (error (list 'error err))))))))
     t))
 
-(defun romacs-agent-writer-drain (&optional timeout)
-  "Let the writer finish what it was sent, waiting up to TIMEOUT seconds
-\(5): the editor is ending."
-  (when (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
-    (isolate-send (isolate-future-isolate romacs-agent-writer--job) (list 'romacs-agent-writer-stop))
-    (ignore-errors (isolate-await romacs-agent-writer--job (or timeout 5)))))
+(defun romacs-agent-writer-drain ()
+  "Let the writer make every write it was sent, however long that takes,
+saying so: the editor is ending, or handing over to its successor, which
+reads the store.  A writer gone meanwhile is started again and sent what
+it did not answer.  The writer stops; a later write starts another."
+  (when romacs-agent-writer--pending
+    (let ((count (length romacs-agent-writer--pending)) (tries 0) (romacs-agent-writer--draining t))
+      (message "Saving %d agent records..." count)
+      (redisplay t)
+      (while (and romacs-agent-writer--pending (< (cl-incf tries) 4))
+        (unless (and romacs-agent-writer--job (not (isolate-future-done-p romacs-agent-writer--job)))
+          ;; Gone: a new writer, sent what is still unanswered.
+          (setq romacs-agent-writer--job nil)
+          (mapc #'romacs-agent-writer--send romacs-agent-writer--pending))
+        (let ((job romacs-agent-writer--job))
+          (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
+          ;; Its loop ends after every write sent before the stop: all made.
+          (when (condition-case nil (progn (isolate-await job) t) (error nil))
+            (setq romacs-agent-writer--pending nil))
+          (when (eq job romacs-agent-writer--job) (setq romacs-agent-writer--job nil))))
+      (message (if romacs-agent-writer--pending "Saving %d agent records...failed: %d not saved"
+                 "Saving %d agent records...done")
+               count (length romacs-agent-writer--pending)))))
 
-(add-hook 'kill-emacs-hook #'romacs-agent-writer-drain)
+;; Late, after anything else that writes at the end.
+(add-hook 'kill-emacs-hook #'romacs-agent-writer-drain 90)
+(add-hook 'warm-restart-before-handover-functions #'romacs-agent-writer-drain)
 
 (provide 'romacs-agent-writer)
 ;;; romacs-agent-writer.el ends here
