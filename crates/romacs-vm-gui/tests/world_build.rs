@@ -49,9 +49,11 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
 /// A GUI world's key and records come from what a session reads, not from
 /// the environment `--world-build` ran in: one prepared with a launch
 /// font, SHELL and the runtime tree named outright restores for a session
-/// started with none of them (`--world-census` restores it read only). The
-/// build says its key and recipe, and a launch whose recipe differs names
-/// the line that did.
+/// started with none of them (`--world-census` restores it read only). It
+/// ends at GNU's dump point, as the batch world does: no record names the
+/// builder's HOME or binds its personal environment, and a session under
+/// another HOME, XDG directories and window geometry restores the same
+/// world. The build says its key and recipe.
 #[test]
 fn a_gui_world_serves_a_session_however_it_was_started() {
     use std::os::unix::fs::PermissionsExt;
@@ -84,9 +86,23 @@ fn a_gui_world_serves_a_session_however_it_was_started() {
     let restored = session(&["--world-census"]);
     assert!(restored.status.success(), "the world does not serve a session started without them: {}",
             String::from_utf8_lossy(&restored.stderr));
-    let missed = session(&["--world-census", "--geometry", "900x700"]);
-    let said = String::from_utf8_lossy(&missed.stderr);
-    assert!(!missed.status.success() && said.contains(r#""now":"geometry 900 700""#) && said.contains(r#""was":"geometry "#), "{said}");
+    let manifest = store.join(format!("{}.json", prepared["key"].as_str().unwrap()));
+    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    let personal = |name: &str| ["HOME", "USER", "LANG", "LANGUAGE", "SHELL"].contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_");
+    for record in manifest["records"].as_array().unwrap() {
+        let text = record.to_string();
+        // The store's own pinned directory is under this test's HOME.
+        let named = text.replace(store.to_str().unwrap(), "STORE");
+        assert!(!named.contains(home.to_str().unwrap()), "a record names the builder's HOME: {text}");
+        assert!(record["kind"] != "env" || !record["name"].as_str().is_some_and(personal), "a record binds the builder's environment: {text}");
+    }
+    let other = home.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let elsewhere = session(&["--world-census", "--geometry", "900x700"]);
+    assert!(elsewhere.status.success(), "another geometry missed the world: {}", String::from_utf8_lossy(&elsewhere.stderr));
+    let elsewhere = command(&["--world-census", "--geometry", "900x700"]).env("HOME", &other)
+        .env("XDG_CONFIG_HOME", other.join("config")).env("XDG_DATA_HOME", other.join("data")).output().unwrap();
+    assert!(elsewhere.status.success(), "another HOME missed the world: {}", String::from_utf8_lossy(&elsewhere.stderr));
     let _ = std::fs::remove_dir_all(&home);
 }
 
