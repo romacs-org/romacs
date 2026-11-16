@@ -338,11 +338,7 @@ settles the open run first."
                     (t (romacs-agent--json input)))))
     (truncate-string-to-width (replace-regexp-in-string "[\n\t ]+" " " (format "%s" text)) 100 nil nil t)))
 
-(defun romacs-agent-ui--tool-name (name)
-  "A tool's NAME as a row shows it: an MCP tool by its own name."
-  (if (and (stringp name) (string-match "\\`mcp__[^_]+\\(?:_[^_]+\\)*__\\(.+\\)\\'" name))
-      (match-string 1 name)
-    (or name "tool")))
+(defalias 'romacs-agent-ui--tool-name #'romacs-agent-rows-name)
 
 (defun romacs-agent-ui--png-size (file)
   "FILE's width and height, (W . H), from its header, or nil unless it is a
@@ -418,11 +414,12 @@ one, else nil: the workers' rows name it."
   "TEXT as one row: its newlines and tabs, spaces."
   (replace-regexp-in-string "[\n\t\r]+" " " text))
 
-(defun romacs-agent-ui--tool-text (name input)
-  "A tool row's text after its mark: what its renderer draws
+(defun romacs-agent-ui--tool-text (name input &optional text)
+  "A tool row's text after its mark: TEXT when given (a turn's row kept
+it, `romacs-agent-rows-texts'), else what its renderer draws
 \(`romacs-agent-rows-get'), else NAME and a brief of INPUT."
   (if-let* ((renderer (romacs-agent-rows-get name)))
-      (concat " " (romacs-agent-ui--one-line (funcall (plist-get renderer :row) (romacs-agent-ui--input input))))
+      (concat " " (romacs-agent-ui--one-line (or text (funcall (plist-get renderer :row) (romacs-agent-ui--input input)))))
     (let ((brief (romacs-agent-ui--brief input)))
       (concat " " name (if (string-empty-p brief) "" (concat "  " brief))))))
 
@@ -546,7 +543,8 @@ shows while its run is folded."
          (input (plist-get event :input))
          (card (plist-get (romacs-agent-rows-get name) :card))
          (indent (make-string (* 2 (1+ (romacs-agent-ui--depth session (plist-get event :parent)))) ?\s))
-         (text (romacs-agent-ui--fit (romacs-agent-ui--tool-text name input) (romacs-agent-ui--row-taken (length indent) card))))
+         (text (romacs-agent-ui--fit (romacs-agent-ui--tool-text name input (plist-get event :row))
+                                     (romacs-agent-ui--row-taken (length indent) card))))
     (romacs-agent-ui--run-open event)
     (romacs-agent-ui--run-started id (substring text 1) (or card (plist-get event :parent)))
     (romacs-agent-ui--step-insert (concat indent (propertize "●" 'face 'romacs-agent-running)) card)
@@ -670,12 +668,15 @@ link."
          (record (and card (romacs-agent-ui--task-record output)))
          (shown (plist-get renderer :shown))
          ;; Folded, what it gave waits to be opened: its row keeps where
-         ;; it is (`romacs-agent-ui--payloads').
-         (later (and mark (not shown)))
+         ;; it is (`romacs-agent-ui--payloads'); so does one shown whose
+         ;; output only a pointer holds.
+         (later (and mark (or (not shown) (and (plist-get event :output-ref) (not (plist-get event :output))))))
          (body (if later "" (romacs-agent-ui--call-body renderer input output failed)))
          ;; The row's words anew, fitted to its line.
          (again (and mark (not failed) (plist-get renderer :ended)
-                     (when-let* ((words (funcall (plist-get renderer :ended) input output)))
+                     (when-let* ((words (or (plist-get event :ended)
+                                            (and (not (plist-get event :output-ref))
+                                                 (funcall (plist-get renderer :ended) input output)))))
                        (romacs-agent-ui--fit (romacs-agent-ui--one-line words) (romacs-agent-ui--row-taken
                                                     (save-excursion (goto-char mark) (current-column)) card)))))
          (answered (and (not failed) (plist-get renderer :answers) (funcall (plist-get renderer :answers) input))))
@@ -2452,10 +2453,12 @@ notes, multi), as an `approval' event's :questions."
 (defun romacs-agent-ui--row-events (session row)
   "The events SESSION's turn ROW (`romacs-agent-turns-page''s) was folded
 from, as its chat draws them: its prompt, each of its items in order (a
-call whose row is drawn without its output points at it, read when
-opened, `romacs-agent-ui--later-p'), its end."
+call drawn without its output, or whose output its row does not hold,
+points at it, read when opened, `romacs-agent-ui--later-p'), its end.
+Pure: it reads no record."
   (let* ((time (plist-get row :t)) (seq (plist-get row :first-seq))
-         (events (list (list :type 'input :text (or (plist-get row :prompt) "") :seq seq :time time))))
+         (events (list (list :type 'input :text (or (plist-get row :prompt) "") :request (plist-get row :request)
+                             :seq seq :time time))))
     (cl-flet ((add (&rest event) (push event events)))
       (seq-doseq (item (plist-get row :items))
         (let ((at (gethash "seq" item)) (when (gethash "t" item)))
@@ -2467,15 +2470,18 @@ opened, `romacs-agent-ui--later-p'), its end."
             ("tool"
              (let ((id (gethash "id" item)) (name (gethash "name" item)) (parent (gethash "parent" item)))
                (add :type 'tool :state 'started :id id :name name :input (gethash "input" item)
-                    :parent parent :seq (aref at 0) :time when)
+                    :row (gethash "row" item) :parent parent :seq (aref at 0) :time when)
                (when (member (gethash "state" item) '("completed" "failed"))
                  ;; As a replay of records keeps it: a row drawn without
-                 ;; its output points at it, read when opened.
-                 (apply #'add :type 'tool :state (intern (gethash "state" item)) :id id :name name :parent parent
-                        :output-bytes (gethash "output_bytes" item) :seq (aref at 1) :time (gethash "t_end" item)
-                        (if (romacs-agent-ui--later-p name)
-                            (list :output-ref (list :session session :id id :row t))
-                          (list :output (or (gethash "output" item) (romacs-agent-turns-item session id) "")))))))
+                 ;; its output points at it, read when opened; one its
+                 ;; row's end needs is its row's when short, else its
+                 ;; row keeps the end's text.  No record is read here.
+                 (let ((output (gethash "output" item)))
+                   (apply #'add :type 'tool :state (intern (gethash "state" item)) :id id :name name :parent parent
+                          :ended (gethash "ended" item)
+                          :output-bytes (gethash "output_bytes" item) :seq (aref at 1) :time (gethash "t_end" item)
+                          (if (and output (not (romacs-agent-ui--later-p name))) (list :output output)
+                            (list :output-ref (list :session session :id id :row t))))))))
             ("ask"
              (let ((id (gethash "request_id" item)) (questions (gethash "questions" item)))
                (add :type 'approval :request-id id :tool (gethash "tool" item) :input (gethash "input" item)

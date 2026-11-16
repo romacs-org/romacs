@@ -152,4 +152,35 @@ records alone with RECORDS-ONLY, and the buffer."
     (should (equal (romacs-agent-ui--item-questions (vector question))
                    '(("Which way?" :header "Approach" :options ("Tail" "Virtual") :notes (("Tail" . "the last turns")) :multi nil))))))
 
+(ert-deftest romacs-agent-chat-row-texts-and-no-reads ()
+  ;; A row's call draws from the texts its row keeps, never its records:
+  ;; an edit's counts and a search's matches as the fill drew them, and an
+  ;; output it does not hold only pointed at.  Its prompt keeps its request.
+  (let* ((edit (make-hash-table :test #'equal)) (grep (make-hash-table :test #'equal))
+         (input (make-hash-table :test #'equal))
+         (row (list :first-seq 2 :last-seq 9 :t 100.0 :prompt "go" :request 7 :duration 3.0 :status "completed"
+                    :items (vector edit grep))))
+    (puthash "file_path" "/p/a.el" input)
+    (puthash "old_string" 12 input)
+    (dolist (pair `(("kind" . "tool") ("id" . "e1") ("name" . "Edit") ("state" . "completed") ("seq" . [3 4])
+                    ("input" . ,input) ("row" . "edit a.el +3 −2") ("output_bytes" . 10) ("output" . "ok")))
+      (puthash (car pair) (cdr pair) edit))
+    (dolist (pair '(("kind" . "tool") ("id" . "g1") ("name" . "Grep") ("state" . "completed") ("seq" . [5 6])
+                    ("row" . "grep zebra") ("ended" . "grep zebra · 400 matches") ("output_bytes" . 90000)))
+      (puthash (car pair) (cdr pair) grep))
+    (cl-letf (((symbol-function 'romacs-agent-turns-item) (lambda (&rest _) (error "Read a record")))
+              ((symbol-function 'romacs-agent--read-journal) (lambda (&rest _) (error "Read a record"))))
+      (let ((events (romacs-agent-ui--row-events 'session row)))
+        (should (eql (plist-get (car events) :request) 7))
+        (should (equal (plist-get (nth 1 events) :row) "edit a.el +3 −2"))
+        (let ((ended (seq-find (lambda (e) (and (equal (plist-get e :id) "g1") (eq (plist-get e :state) 'completed))) events)))
+          (should (equal (plist-get ended :ended) "grep zebra · 400 matches"))
+          (should-not (plist-get ended :output))
+          (should (plist-get (plist-get ended :output-ref) :row)))))
+    ;; The texts a fill keeps are the renderers' own.
+    (let ((full (make-hash-table :test #'equal)))
+      (puthash "command" "ls -la" full)
+      (should (equal (plist-get (romacs-agent-rows-texts "Bash" full "a\nb") :row)
+                     (funcall (plist-get (romacs-agent-rows-get "Bash") :row) full))))))
+
 ;;; romacs-agent-chat-rows-tests.el ends here
