@@ -205,4 +205,104 @@ records alone with RECORDS-ONLY, and the buffer."
         (should (string-search ":bytes 3000" from-events))
         (should (equal (car (read-from-string from-events)) (car (read-from-string from-row))))))))
 
+(defmacro romacs-agent-drawn-tests--chat (session &rest body)
+  "BODY in a chat buffer of SESSION's, empty, no window."
+  (declare (indent 1))
+  `(with-temp-buffer
+     (romacs-agent-chat-mode)
+     (setq romacs-agent-ui--session ,session)
+     (romacs-agent-ui--reset)
+     (setq romacs-agent-ui--end (point-marker))
+     ,@body))
+
+(ert-deftest romacs-agent-drawn-kept-runs-fold-and-rules-fit ()
+  ;; A kept turn's run row still folds its steps, and its rule fits the
+  ;; width it is shown at, not the one it was drawn at.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 1
+    (should (= (romacs-agent-turns-fill session) 1))
+    (let ((form (car (romacs-agent-drawn-tests--forms session 1))))
+      (romacs-agent-drawn-tests--chat session
+        (cl-letf (((symbol-function 'romacs-agent-ui--rule-width) (lambda () 40)))
+          (romacs-agent-ui--insert-drawn form)
+          (romacs-agent-ui--fit-inserted))
+        (goto-char (point-min))
+        (search-forward "▸")
+        (beginning-of-line)
+        (should (invisible-p (save-excursion (forward-line 1) (point))))
+        (romacs-agent-chat-toggle)
+        (should (eq (char-after (line-beginning-position)) ?▾))
+        (should-not (invisible-p (save-excursion (forward-line 1) (point))))
+        (goto-char (point-min))
+        (search-forward "── ✓")
+        (should (= (string-width (buffer-substring (line-beginning-position) (line-end-position))) 40))))))
+
+(ert-deftest romacs-agent-drawn-live-turn-keeps-opened-outputs-as-pointers ()
+  ;; An output opened while its turn goes on is folded back to its row's
+  ;; pointer when the turn is kept: no output in the form.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 1
+    (should (= (romacs-agent-turns-fill session) 1))
+    (let ((buffer (romacs-agent-ui--make-chat session)) (input (make-hash-table :test #'equal)))
+      (puthash "command" "ls" input)
+      (with-current-buffer buffer
+        (setq romacs-agent-ui--unfilled nil)
+        (dolist (event (list (list :type 'input :text "go" :request 3 :seq 50 :last t)
+                             (list :type 'tool :state 'started :id "L1" :name "Bash" :input input :seq 51 :last t)
+                             (list :type 'tool :state 'completed :id "L1" :name "Bash" :output (make-string 20000 ?z) :seq 52 :last t)))
+          (romacs-agent-ui--render session event))
+        (should (romacs-agent-ui--open-payload "L1"))
+        (should (string-search (make-string 100 ?z) (buffer-string)))
+        (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq 53 :last t)))
+      (let ((kept (cdr (gethash 50 (romacs-agent-drawn-get (romacs-agent-turns--db) id '(50))))))
+        (should kept)
+        (should-not (string-search (make-string 100 ?z) kept))
+        (should (string-search ":id \"L1\"" kept)))
+      (kill-buffer buffer))))
+
+(ert-deftest romacs-agent-drawn-reply-link-is-a-call-id ()
+  ;; An answered message's hint names its reply's call, found again by its
+  ;; row: kept as drawn, it still goes there.
+  (let ((form (with-temp-buffer
+                (insert "intro\n" (propertize "  ✓" 'romacs-agent-tool nil) (propertize " ✉ reply\n" 'romacs-agent-tool "r1")
+                        (romacs-agent-ui--reply-hint t "r1") "\n")
+                (romacs-agent-drawn-form (point-min) (point-max)))))
+    (should (string-search "romacs-agent-reply-at \"r1\"" form))
+    (should (string-search "keymap romacs-agent-ui--reply-link-map" form))
+    (romacs-agent-drawn-tests--chat (romacs-agent--make :id "s-r" :harness 'claude)
+      (romacs-agent-ui--insert-drawn form)
+      (goto-char (point-min))
+      (search-forward "↩")
+      (romacs-agent-chat-goto-reply)
+      (should (looking-at-p "✓ ✉ reply")))))
+
+(ert-deftest romacs-agent-drawn-older-forms-are-wanted-and-fit-once ()
+  ;; A form an older drawing made is shown, and wanted drawn again; the
+  ;; turns opened are fitted to the window once, however many.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 12
+    (should (= (romacs-agent-turns-fill session) 12))
+    (dolist (row (plist-get (romacs-agent-turns-page session nil 12) :rows))
+      (romacs-agent-drawn-put (romacs-agent-turns--db) id (plist-get row :first-seq) (romacs-agent-ui-draw-turn session row)))
+    (sqlite-execute (romacs-agent-turns--db) "update turn_drawn set version = 1 where first_seq = 2")
+    (let* ((wanted nil) (refits 0)
+           (romacs-agent-drawn-wanted-functions (list (lambda (_ seqs) (setq wanted seqs)))))
+      (cl-letf* ((refit (symbol-function 'romacs-agent-ui--refit-rules))
+                 ((symbol-function 'romacs-agent-ui--refit-rules) (lambda (&rest args) (cl-incf refits) (apply refit args))))
+        (let ((drawn (romacs-agent-drawn-tests--drawn-all session)))
+          (should (equal wanted '(2)))
+          (should (string-search "question 1\n" (car drawn)))
+          (should-not (string-search "⋯" (car drawn)))
+          (kill-buffer (cdr drawn))))
+      (should (<= refits 2)))))
+
+(defun romacs-agent-drawn-tests--drawn-all (session)
+  "SESSION's chat as a first show draws all its turns, and the buffer."
+  (let ((buffer (romacs-agent-ui--make-chat session)))
+    (with-current-buffer buffer
+      (setq romacs-agent-ui--turns nil)
+      (romacs-agent-ui--fill buffer)
+      (setf (romacs-agent-buffer session) nil)
+      (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
+
 ;;; romacs-agent-drawn-tests.el ends here

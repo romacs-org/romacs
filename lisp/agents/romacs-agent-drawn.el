@@ -24,7 +24,7 @@
 
 (require 'cl-lib)
 
-(defconst romacs-agent-drawn-version 1
+(defconst romacs-agent-drawn-version 2
   "The version of what a finished turn draws: raised with any change to
 it (a renderer, the chat's drawing, a face's name), so older forms are
 drawn again.")
@@ -65,6 +65,8 @@ own properties, any other data as it is."
                (t 'none)))
         ;; The call's input is its turn row's, read when its body is opened.
         ((eq property 'romacs-agent-call) (if (consp value) (list (car value)) 'none))
+        ;; A run's row: that it is one; what it counted lives while it is open.
+        ((eq property 'romacs-agent-run-head) (and value t))
         ((stringp value) (substring-no-properties value))
         ((romacs-agent-drawn--data-p value) value)
         (t 'none)))
@@ -87,10 +89,23 @@ own properties, any other data as it is."
       (prin1-to-string (list (buffer-substring-no-properties start end) (vconcat (nreverse props))
                              (vconcat (nreverse flat)))))))
 
+(defun romacs-agent-drawn--shared (props)
+  "PROPS, a form's property lists, each string value one object across
+them as it was when drawn: a run, a call, a turn is told by its string
+being the same (`eq'), as text property changes see it."
+  (let ((strings (make-hash-table :test #'equal)))
+    (mapcar (lambda (plist)
+              (cl-loop for (property value) on plist by #'cddr
+                       append (list property (if (stringp value)
+                                                 (or (gethash value strings) (puthash value value strings))
+                                               value))))
+            props)))
+
 (defun romacs-agent-drawn-insert (form &optional before-markers)
   "Insert FORM (`romacs-agent-drawn-form''s, printed) at point, with its
 properties, before the markers there with BEFORE-MARKERS; point after it."
   (pcase-let ((`(,text ,props ,flat) (car (read-from-string form))) (start (point)) (i 0))
+    (setq props (vconcat (romacs-agent-drawn--shared (append props nil))))
     (if before-markers (insert-before-markers text) (insert text))
     (while (< i (length flat))
       (set-text-properties (+ start (aref flat i)) (+ start (aref flat (1+ i))) (aref props (aref flat (+ i 2))))

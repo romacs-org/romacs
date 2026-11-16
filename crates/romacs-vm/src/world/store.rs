@@ -357,7 +357,7 @@ fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) ->
     let same = |other: &Path| host::metadata(other).is_ok_and(|m| (m.dev(), m.ino()) == (meta.dev(), meta.ino()));
     let home_or_root = same(Path::new("/")) || home.is_some_and(same);
     if home_or_root {
-        eprintln!("romacs-world: {}", json!({"warning": "the world store is the home or root directory", "store": store.display().to_string()}));
+        host::event_line("romacs-world", &json!({"warning": "the world store is the home or root directory", "store": store.display().to_string()}));
     }
     // The user's own store, open to others: made private again, as a world
     // maps its images and its directory holds no one else's.
