@@ -19,6 +19,16 @@
 ;; What the editor writes it already holds: a note is folded into its
 ;; session before it is queued, a kept state is the session's own.  No
 ;; caller reads back a row it has just queued.
+;;
+;; An orderly end loses nothing: an exit and a restart wait for every
+;; queued write (`romacs-agent-writer-drain'), a restart before its
+;; successor starts.  A crash loses what is still queued, a write-back
+;; window as WAL's `synchronous=NORMAL' has on power loss, kept small by
+;; a writer that keeps up.  No queue is kept on disk: that would be a
+;; journal again.  What such a crash can lose is Romacs's own record of
+;; its last moments (notes, kept states, rows, the last two made again
+;; from records); a harness keeps its own transcript of the prompts and
+;; replies, and a supervisor commits its records before it sends them.
 
 ;;; Code:
 
