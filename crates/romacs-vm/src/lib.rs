@@ -112,6 +112,7 @@ pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
+mod pass;
 mod posix_tz;
 mod tzfile;
 mod undo;

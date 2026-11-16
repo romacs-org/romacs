@@ -56,22 +56,36 @@ fn sha3(bytes: &[u8], out: usize) -> Vec<u8> {
     state.iter().flat_map(|lane| lane.to_le_bytes()).take(out).collect()
 }
 
+/// RFC 2104 HMAC under digest D, whose block size is BLOCK, keyed once:
+/// the keyed pads are hashed when it is made, and each message reuses them.
+/// The key's copies and the pads are wiped once hashed.
+struct Hmac<D> { inner: D, outer: D }
+
+impl<D: sha2::Digest + Clone> Hmac<D> {
+    fn new(block: usize, key: &[u8]) -> Self {
+        let key = zeroize::Zeroizing::new(if key.len() > block { D::digest(key).to_vec() } else { key.to_vec() });
+        let keyed = |pad: u8| {
+            let mut bytes = zeroize::Zeroizing::new(vec![0; block]);
+            bytes[..key.len()].copy_from_slice(&key);
+            bytes.iter_mut().for_each(|byte| *byte ^= pad);
+            D::new().chain_update(&*bytes)
+        };
+        Self { inner: keyed(0x36), outer: keyed(0x5c) }
+    }
+
+    fn mac(&self, message: &[u8]) -> Vec<u8> {
+        self.outer.clone().chain_update(self.inner.clone().chain_update(message).finalize()).finalize().to_vec()
+    }
+}
+
 /// RFC 8018 PBKDF2's first block under HMAC-D, which BLOCK is D's block size:
-/// SCRAM's Hi(str, salt, i) (RFC 5802).  The keyed pads are hashed once.
+/// SCRAM's Hi(str, salt, i) (RFC 5802).
 fn pbkdf2_block<D: sha2::Digest + Clone>(block: usize, password: &[u8], salt: &[u8], iterations: u64) -> Vec<u8> {
-    let key = if password.len() > block { D::digest(password).to_vec() } else { password.to_vec() };
-    let keyed = |pad: u8| {
-        let mut bytes = key.clone();
-        bytes.resize(block, 0);
-        bytes.iter_mut().for_each(|byte| *byte ^= pad);
-        D::new().chain_update(bytes)
-    };
-    let (inner, outer) = (keyed(0x36), keyed(0x5c));
-    let hmac = |message: &[u8]| outer.clone().chain_update(inner.clone().chain_update(message).finalize()).finalize().to_vec();
-    let mut u = hmac(&[salt, &1u32.to_be_bytes()].concat());
+    let hmac = Hmac::<D>::new(block, password);
+    let mut u = hmac.mac(&[salt, &1u32.to_be_bytes()].concat());
     let mut result = u.clone();
     for _ in 1..iterations {
-        u = hmac(&u);
+        u = hmac.mac(&u);
         result.iter_mut().zip(&u).for_each(|(byte, next)| *byte ^= next);
     }
     result
@@ -84,6 +98,17 @@ pub(crate) fn pbkdf2_hmac(algorithm: &str, password: &[u8], salt: &[u8], iterati
         "sha1" => pbkdf2_block::<sha1::Sha1>(64, password, salt, iterations),
         "sha256" => pbkdf2_block::<sha2::Sha256>(64, password, salt, iterations),
         "sha512" => pbkdf2_block::<sha2::Sha512>(128, password, salt, iterations),
+        _ => return None,
+    })
+}
+
+/// HMAC of MESSAGE keyed by KEY under ALGORITHM: "sha1", "sha256" or
+/// "sha512", the ones RFC 6238 TOTP names.
+pub(crate) fn hmac(algorithm: &str, key: &[u8], message: &[u8]) -> Option<Vec<u8>> {
+    Some(match algorithm {
+        "sha1" => Hmac::<sha1::Sha1>::new(64, key).mac(message),
+        "sha256" => Hmac::<sha2::Sha256>::new(64, key).mac(message),
+        "sha512" => Hmac::<sha2::Sha512>::new(128, key).mac(message),
         _ => return None,
     })
 }
