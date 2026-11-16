@@ -846,7 +846,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if world_census {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-census needs a live --loadup launch".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        println!("{}", world::census(&store, width, height, floor)?);
+        println!("{}", world::census(&store)?);
         return Ok(None);
     }
     // --world-build: the world this launch would boot from, made usable
@@ -857,7 +857,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-build needs a live --loadup launch".into()); }
         if romacs_vm::world::store::disabled() { return Err("--world-build with ROMACS_WORLD=off".into()); }
         let store = world_store.or_else(|| world::default_store(|name| std::env::var_os(name))).ok_or("no world store")?;
-        world::prepare(&world::open(store.clone(), width, height, floor)?, width, height, floor)?;
+        world::prepare(&world::open(store.clone())?)?;
         batch::prepare_beside(store);
         return Ok(None);
     }
@@ -876,7 +876,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         (false, _) => None,
     };
     if let Some(store) = world_store.as_ref().filter(|_| romacs_vm::world::store::building()) {
-        world::build_here(&world::open(store.clone(), width, height, floor)?, width, height, floor)?;
+        world::build_here(&world::open(store.clone())?)?;
     }
     if live && launch == startup::Launch::Loadup && !romacs_vm::world::store::building() {
         batch::configure_compiled_lisp(named_store.as_deref(), true);
@@ -930,7 +930,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // A store that cannot be used boots from source, and says so once
         // the session is up (`world::store_warning_form`).
         let mut store_problem = None;
-        let world = world_store.and_then(|store| match world::open(store, width, height, floor) {
+        let world = world_store.and_then(|store| match world::open(store) {
             Ok(world) => Some(world),
             Err(reason) => {
                 romacs_vm::host::event_line("romacs-world", &serde_json::json!({"mode": "source", "reason": reason}));
@@ -939,7 +939,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
             }
         });
         startup::mark_phase("world-open");
-        let restored = world.as_ref().and_then(|world| world::launch(world, width, height, floor, |reason| {
+        let restored = world.as_ref().and_then(|world| world::launch(world, |reason| {
             // Said on stderr too, so a launcher sees it whether or not a
             // window can, with why the world was not usable.
             romacs_vm::host::event_line("romacs-world", &serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
@@ -1352,12 +1352,10 @@ fn evaluate(
     if let Some(floor) = floor {
         vm.set_collection_floor(floor);
     }
-    // A restored VM holds the geometry and what follows, up to the chain's
-    // end: its world's recipe fixed them.
-    if carry.is_none() {
-        let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
-        vm.set_frame_geometry(width, height, line_height, column_width)?;
-    }
+    // The frame's geometry is this process's: a world holds the chain's on
+    // GNU batch's initial frame.
+    let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
+    vm.set_frame_geometry(width, height, line_height, column_width)?;
     if live {
         if launch != startup::Launch::GnuOnly && carry.is_none() {
             vm.eval_source(world::INTERPROGRAM)?;
