@@ -203,24 +203,15 @@ records alone with RECORDS-ONLY, and the buffer."
         (should (equal (plist-get card :from) '(:session "s-1" :name "lead" :address "a@b")))
         (should (equal (plist-get (plist-get wake :wake) :task) "t-9"))
         (should (equal (plist-get (plist-get wake :wake) :state) "completed"))))
-    (puthash "Which?" "Research, then implement, B" answers)
-    (should (equal (romacs-agent-ui--answer-labels
-                    '(("Which?" :options ("Research, then implement" "B" "C"))) answers)
-                   '(("Which?" "Research, then implement" "B"))))
-    (puthash "Which?" "my own words" answers)
-    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("A"))) answers)
-                   '(("Which?" "my own words"))))
-    ;; A label inside another is not picked with it; words of one's own
-    ;; that name a label are kept as they came.
-    (puthash "Which?" "Read all, Test" answers)
-    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Read all" "Test"))) answers)
-                   '(("Which?" "Read all" "Test"))))
-    (puthash "Which?" "Please Test only after lunch" answers)
-    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Test"))) answers)
-                   '(("Which?" "Please Test only after lunch"))))
-    (puthash "Which?" "Read, Read all" answers)
-    (should (equal (romacs-agent-ui--answer-labels '(("Which?" :options ("Read" "Read all"))) answers)
-                   '(("Which?" "Read" "Read all"))))))
+    ;; An answer the harness got comes back as it came, labels joined as
+    ;; the row joins them, words of one's own too: read, not parsed.
+    (dolist (answer '("Research, then implement, B" "Read all, Test" "Please Test only after lunch"
+                      "A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, free text"))
+      (puthash "Which?" answer answers)
+      (let ((chosen (romacs-agent-ui--answer-labels '(("Which?" :options ("A" "A, A" "Read" "Read all" "Test"))) answers)))
+        (should (equal chosen (list (list "Which?" answer))))
+        (should (equal (substring-no-properties (romacs-agent-ask-record '(("Which?")) chosen))
+                       (concat "? Which?  → " answer)))))))
 
 (ert-deftest romacs-agent-chat-row-call-opens-whole ()
   ;; A row's call opened draws its body from the whole input its turn's
