@@ -72,8 +72,17 @@ without a scan.")
 (defvar romacs-mcp--active nil)
 (defvar romacs-mcp--timer nil)
 (defvar romacs-mcp--deferred nil
-  "Admitted requests awaiting a deferred result, as (REQUEST ID POLL MODERN).")
-(defvar romacs-mcp--deferred-timer nil)
+  "Admitted requests awaiting a deferred result, as (REQUEST ID POLL MODERN
+DEADLINE): DEADLINE nil for a poll the clock drives, else the time a poll
+woken by `romacs-mcp-deferred-wake' is asked once more.")
+(defvar romacs-mcp--deferred-timer nil
+  "The clock polling deferred requests, while one needs it.")
+(defvar romacs-mcp--deferred-alarm nil
+  "A one-shot timer at the earliest deadline of the woken deferred requests.")
+(defvar romacs-mcp--deferred-woken nil
+  "Non-nil while a wake's pass of the deferred requests is due.")
+(defvar romacs-mcp--polling nil
+  "The deferred request whose poll runs now (`romacs-mcp-deferred-retime').")
 (defvar romacs-mcp--deferred-index (make-hash-table :test #'equal)
   "(PEER . ID) of each deferred request to its entry, for withdrawal.")
 (defvar romacs-mcp-tools nil
@@ -359,14 +368,32 @@ tools' groups, short, since every session pays for it.")
            (sort (copy-sequence (romacs-mcp--available-tools))
                  (lambda (a b) (string-lessp (car a) (car b)))))))
 
-(defun romacs-mcp-defer (poll)
+(defun romacs-mcp-defer (poll &optional deadline)
   "Return a tool result that POLL supplies later, for a handler to return.
 The endpoint answers other requests meanwhile and the command loop keeps
-running: a timer calls POLL with no arguments every 0.05 seconds until it
-returns non-nil, a list whose car is the tool's value.  An error POLL
-signals is the tool's error.  A closed or cancelled request stops polling."
+running.  POLL is called with no arguments until it returns non-nil, a
+list whose car is the tool's value.  An error POLL signals is the tool's
+error.  A closed or cancelled request stops polling.
+Without DEADLINE a timer calls POLL every 0.05 seconds: for a poll that
+watches the clock or steps through work.  With DEADLINE (a `float-time'),
+POLL waits for what it watches to change: it is called when
+`romacs-mcp-deferred-wake' says something did, and at DEADLINE, and no
+timer runs meanwhile."
   (unless (functionp poll) (error "Invalid deferred MCP poll"))
-  (list 'romacs-mcp--deferred poll))
+  (list 'romacs-mcp--deferred poll deadline))
+
+(defun romacs-mcp-deferred-wake ()
+  "Something a woken deferred request waits on changed: ask them again at
+the next turn of the command loop.  Cheap to call often: one pass a turn."
+  (when (and (not romacs-mcp--deferred-woken) (cl-some (lambda (entry) (nth 4 entry)) romacs-mcp--deferred))
+    (setq romacs-mcp--deferred-woken t)
+    (run-at-time 0 nil #'romacs-mcp--poll-woken)))
+
+(defun romacs-mcp-deferred-retime (deadline)
+  "From inside a deferred poll: its request waits from now on as
+`romacs-mcp-defer' with DEADLINE says (a chained deferral takes the
+inner one's).  Outside a poll, nothing."
+  (when romacs-mcp--polling (setcar (nthcdr 4 romacs-mcp--polling) deadline)))
 
 (defun romacs-mcp--valid-char-p (char)
   "Whether CHAR is a Unicode scalar value (JSON can carry it)."
@@ -638,20 +665,33 @@ acknowledgement.  Close an unread peer."
   (let ((key (cons (plist-get (car entry) :peer) (nth 1 entry))))
     (when (eq (gethash key romacs-mcp--deferred-index) entry) (remhash key romacs-mcp--deferred-index))))
 
-(defun romacs-mcp--poll-deferred ()
+(defun romacs-mcp--poll-clocked ()
+  "The clock's pass: the deferred requests with no deadline."
+  (romacs-mcp--poll-deferred 'clock))
+
+(defun romacs-mcp--poll-woken ()
+  "A wake's or a deadline's pass: the deferred requests with one."
+  (romacs-mcp--poll-deferred 'woken))
+
+(defun romacs-mcp--poll-deferred (&optional which)
   "Answer each deferred request whose poll has a result; drop dead ones.
-One pass: the entries that stay are kept as it goes, so retiring many is
-linear."
+WHICH `clock' asks only those with no deadline, `woken' only those with
+one, nil all.  One pass: the entries that stay are kept as it goes, so
+retiring many is linear."
+  (unless (eq which 'clock) (setq romacs-mcp--deferred-woken nil))
   (let ((entries romacs-mcp--deferred) (generation romacs-mcp--generation) (kept nil))
     (dolist (entry entries)
-      (pcase-let ((`(,request ,id ,poll ,modern) entry))
-        (if (or (plist-get request :cancelled)
+      (pcase-let ((`(,request ,id ,poll ,modern ,deadline) entry))
+        (cond
+         ((and which (not (eq which (if deadline 'woken 'clock)))) (push entry kept))
+         ((or (plist-get request :cancelled)
                 (not (romacs-mcp--live-p (plist-get request :peer)
                                          (plist-get request :generation))))
-            (romacs-mcp--unindex entry)
+          (romacs-mcp--unindex entry))
+         (t
           (let* ((failed nil)
                  (done (condition-case failure
-                           (with-local-quit (funcall poll))
+                           (let ((romacs-mcp--polling entry)) (with-local-quit (funcall poll)))
                          ((error quit)
                           (setq failed t)
                           ;; A deferred call failing is a failed call too.
@@ -667,23 +707,35 @@ linear."
               (romacs-mcp--send request
                                 (romacs-mcp--object
                                  "jsonrpc" "2.0" "id" id
-                                 "result" (romacs-mcp--result (car done) failed modern))))))))
+                                 "result" (romacs-mcp--result (car done) failed modern)))))))))
     ;; Entries deferred meanwhile are ahead of ENTRIES; a stop meanwhile
     ;; retired them all.
     (when (= generation romacs-mcp--generation)
       (setq romacs-mcp--deferred (nconc (cl-ldiff romacs-mcp--deferred entries) (nreverse kept)))))
-  (unless (or romacs-mcp--deferred (not romacs-mcp--deferred-timer))
-    (cancel-timer romacs-mcp--deferred-timer)
-    (setq romacs-mcp--deferred-timer nil)))
+  (romacs-mcp--schedule-deferred))
 
-(defun romacs-mcp--defer-request (request id poll modern)
-  "Keep REQUEST with ID until POLL yields its MODERN or legacy result."
-  (let ((entry (list request id poll modern)))
+(defun romacs-mcp--schedule-deferred ()
+  "Time the next polls of the deferred requests: the clock while one with
+no deadline waits, and an alarm at the earliest deadline of the others."
+  (let ((clocked (cl-some (lambda (entry) (null (nth 4 entry))) romacs-mcp--deferred))
+        (deadline (cl-loop for entry in romacs-mcp--deferred when (nth 4 entry) minimize (nth 4 entry))))
+    (cond (clocked
+           (unless romacs-mcp--deferred-timer
+             (setq romacs-mcp--deferred-timer (run-at-time 0.05 0.05 #'romacs-mcp--poll-clocked))))
+          (romacs-mcp--deferred-timer
+           (cancel-timer romacs-mcp--deferred-timer)
+           (setq romacs-mcp--deferred-timer nil)))
+    (when romacs-mcp--deferred-alarm (cancel-timer romacs-mcp--deferred-alarm))
+    (setq romacs-mcp--deferred-alarm
+          (and deadline (run-at-time (max 0 (- deadline (float-time))) nil #'romacs-mcp--poll-woken)))))
+
+(defun romacs-mcp--defer-request (request id poll modern deadline)
+  "Keep REQUEST with ID until POLL yields its MODERN or legacy result,
+woken until DEADLINE when that is non-nil (`romacs-mcp-defer')."
+  (let ((entry (list request id poll modern deadline)))
     (push entry romacs-mcp--deferred)
     (puthash (cons (plist-get request :peer) id) entry romacs-mcp--deferred-index))
-  (unless romacs-mcp--deferred-timer
-    (setq romacs-mcp--deferred-timer
-          (run-at-time 0.05 0.05 #'romacs-mcp--poll-deferred))))
+  (romacs-mcp--schedule-deferred))
 
 (defvar romacs-mcp-admission-paused nil
   "Non-nil holds every new request in its queue: none starts.  A restart
@@ -741,7 +793,7 @@ This is cooperative admission, not a handler, serialization or send deadline."
                           (setq response (romacs-mcp--object
                                           "jsonrpc" "2.0" "id" id "result" result)))
                         (when deferred
-                          (romacs-mcp--defer-request request id (nth 1 result) (nth 2 result)))))
+                          (romacs-mcp--defer-request request id (nth 1 result) (nth 3 result) (nth 2 result)))))
                   (romacs-mcp-protocol-error
                    (setq response
                          (romacs-mcp--object
@@ -1024,8 +1076,9 @@ Keep boot identity and companion receipts until the editor process exits."
   (cl-incf romacs-mcp--generation)
   (when romacs-mcp--timer (cancel-timer romacs-mcp--timer))
   (when romacs-mcp--deferred-timer (cancel-timer romacs-mcp--deferred-timer))
+  (when romacs-mcp--deferred-alarm (cancel-timer romacs-mcp--deferred-alarm))
   (setq romacs-mcp--timer nil romacs-mcp--queue nil
-        romacs-mcp--deferred nil romacs-mcp--deferred-timer nil)
+        romacs-mcp--deferred nil romacs-mcp--deferred-timer nil romacs-mcp--deferred-alarm nil)
   (clrhash romacs-mcp--deferred-index)
   (clrhash romacs-mcp--queued)
   (mapc #'romacs-mcp--close (copy-sequence romacs-mcp--peers))
