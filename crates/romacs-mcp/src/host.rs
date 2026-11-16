@@ -5,7 +5,8 @@
 //! attaches over SOCKET, is sent the journal from a sequence number on and
 //! then each new line, and writes lines to the harness. When the server
 //! exits, crashes or is replaced, the harness and its turn go on; the next
-//! server attaches and replays.
+//! server attaches and replays. A session whose DIR is removed is gone: its
+//! harness is ended, and the host exits with it.
 //!
 //! DIR/journal.jsonl holds every line, one record each: `{"seq":N,"t":SECS,
 //! "out":LINE}` for the harness's output, `"in"` for what was written to it,
@@ -508,7 +509,7 @@ fn run(config: Config) -> Result<i32, String> {
         }
         let _ = drained_tx.send(());
     });
-    let status = child.wait().map_err(|e| e.to_string())?;
+    let status = wait_while_kept(&mut child, &config.dir)?;
     // What the harness wrote before it ended, unless a descendant holds
     // its stdout open.
     let _ = drained.recv_timeout(std::time::Duration::from_secs(1));
@@ -546,6 +547,28 @@ fn run_notes(config: &Config, listener: UnixListener, store: Store, seq: u64) ->
     Ok(0)
 }
 
+/// How often the host looks at its harness and its session's directory.
+const WATCH: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The harness's exit status. A session whose directory was removed is
+/// gone (a test's tree deleted while its harness waits, a session the
+/// editor removed): nothing reads what its harness does, so it is ended,
+/// and the host with it, rather than kept forever by a harness waiting on
+/// its stdin.
+fn wait_while_kept(child: &mut std::process::Child, dir: &Path) -> Result<std::process::ExitStatus, String> {
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            return Ok(status);
+        }
+        // Gone only when it is confirmed gone: an error reading it (a
+        // moment's I/O trouble) is no end of the session.
+        if std::fs::metadata(dir).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+            let _ = child.kill();
+        }
+        std::thread::sleep(WATCH);
+    }
+}
+
 fn main() {
     let code = parse(std::env::args().skip(1).collect()).and_then(run).unwrap_or_else(|error| {
         eprintln!("romacs-agent-host: {error}");
@@ -557,6 +580,21 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_harness_whose_session_directory_was_removed_is_ended() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-gone-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        // A harness that waits on its stdin, as an idle agent does.
+        let mut child = Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap();
+        let _stdin = child.stdin.take();
+        let removed = dir.clone();
+        std::thread::spawn(move || { std::thread::sleep(WATCH * 2); std::fs::remove_dir_all(&removed).unwrap(); });
+        let started = std::time::Instant::now();
+        let status = wait_while_kept(&mut child, &dir).unwrap();
+        assert!(!status.success(), "ended by the host, not by itself: {status:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "ended within a few looks");
+    }
 
     #[test]
     fn json_lines_are_kept_as_json_and_others_as_strings() {

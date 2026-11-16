@@ -3633,6 +3633,9 @@ SESSION's last fork note, a new one says how far the fork now goes."
               ((funcall forking session))
               (forked (plist-get (romacs-agent-options session) :forked))
               (source (romacs-agent-get (car forked)))
+              ;; Folded first: one a worker folds still has no seq of its
+              ;; records yet.
+              ((progn (romacs-agent--fold-now source) t))
               ((> (romacs-agent-seq source) (cadr forked))))
     (romacs-agent--note session (romacs-agent--fork-note source (cadr forked)))))
 
@@ -4937,9 +4940,17 @@ started: a request repeated after a lost reply finds its session.")
       (puthash (cons (plist-get options :parent) (plist-get options :request))
                (romacs-agent-id session) romacs-agent--requests))))
 
+(defvar romacs-agent-requested-functions nil
+  "Functions called with a parent's id and a client request id for the id
+of the session it started so, when no loaded session is indexed by them:
+one a start left a row (`romacs-agent-store-requested').")
+
 (defun romacs-agent-requested (parent request)
-  "The session PARENT started with client request id REQUEST, or nil."
-  (when-let* ((id (gethash (cons parent request) romacs-agent--requests))) (romacs-agent-get id)))
+  "The session PARENT started with client request id REQUEST, or nil;
+loaded if a start left it a row."
+  (when-let* ((id (or (gethash (cons parent request) romacs-agent--requests)
+                      (run-hook-with-args-until-success 'romacs-agent-requested-functions parent request))))
+    (romacs-agent-get id)))
 
 (romacs-mcp-register-method
  "romacs/hello"

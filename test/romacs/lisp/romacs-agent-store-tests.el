@@ -87,6 +87,11 @@ journal one turn long."
           (journals nil))
       (record old "old")
       (record live "live" t)
+      ;; OLD a task delegated by "parent" with client request "request-1".
+      (let* ((file (expand-file-name (concat old "/manifest.json") root))
+             (manifest (romacs-agent--read-json file)))
+        (puthash "options" (romacs-mcp--object "parent" "parent" "request" "request-1") manifest)
+        (romacs-agent--write-json file manifest))
       (romacs-agent-store-fill)
       ;; Its supervisor at work on a turn.
       (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
@@ -107,11 +112,26 @@ journal one turn long."
         (let ((found (romacs-agent-get old)))
           (should (equal (romacs-agent-title found) "old"))
           (should (eq (romacs-agent-get old) found)))
-        ;; A delegation asked again, its task left a row: found, loaded.
+        ;; A delegation asked again after a start, its task left a row and
+        ;; indexed nowhere: found by its row, loaded.
         (remhash old romacs-agent--sessions)
         (let ((romacs-agent--requests (make-hash-table :test #'equal)))
-          (puthash (cons "parent" "request-1") old romacs-agent--requests)
-          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old")))))))
+          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old"))
+          (should-not (romacs-agent-requested "parent" "request-2"))
+          ;; Asked for before its row lands (a fill still running): by its
+          ;; manifest.  And one no session delegated: its NULL parent matched.
+          (remhash old romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
+          (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list old))
+          (let ((romacs-agent-store--filling (make-process :name "fill" :command '("sleep" "30") :noquery t)))
+            (unwind-protect
+                (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old"))
+              (delete-process romacs-agent-store--filling)))
+          (remhash old romacs-agent--sessions)
+          (sqlite-execute (romacs-agent-store--open) "update sessions set parent = null, request = 'request-9' where id = ?" (list live))
+          (remhash live romacs-agent--sessions)
+          (clrhash romacs-agent--requests)
+          (should (equal (romacs-agent-id (romacs-agent-requested nil "request-9")) live)))))))
 
 ;; Restored a turn at a time from the command loop: the same.
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded-in-steps ()
@@ -220,7 +240,7 @@ journal one turn long."
               (romacs-agent-restore)
               (should-not (romacs-agent-loaded (id 'quiet)))
               (should-not (romacs-agent-loaded (id 'ending)))
-              (dolist (name '(busy wanting behind journal)) (should (romacs-agent-get (id name))))
+              (dolist (name '(busy wanting behind journal)) (should (romacs-agent-loaded (id name))))
               ;; Nothing written: still rows.
               (romacs-agent--quiet-tick)
               (should-not (romacs-agent-loaded (id 'quiet)))
