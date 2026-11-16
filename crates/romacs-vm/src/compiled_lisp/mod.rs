@@ -323,7 +323,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 let now = host::replay(record);
                 let holds = now.as_ref() == Some(record);
                 if !holds && configured().is_some_and(|c| c.trace) {
-                    eprintln!("romacs-compiled-lisp: {}", json!({"stale": record, "now": now}));
+                    crate::host::event_line("romacs-compiled-lisp", &json!({"stale": record, "now": now}));
                 }
                 holds
             }
@@ -498,7 +498,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             && let Ok(removed) = store::prune(&config.store, store::BUDGET, &Default::default())
             && !removed.is_empty()
         {
-            eprintln!("romacs-compile: {}", json!({"pruned": removed.len()}));
+            crate::host::event_line("romacs-compile", &json!({"pruned": removed.len()}));
         }
         Ok((path, false))
     }

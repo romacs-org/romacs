@@ -289,7 +289,7 @@ impl Phases {
     pub fn start(&self) -> std::time::Instant { self.start }
     pub fn mark(&mut self, phase: &str) {
         let now = std::time::Instant::now();
-        eprintln!("romacs-startup: {}", serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
+        romacs_vm::host::event_line("romacs-startup", &serde_json::json!({"phase": phase, "at_ms": (now - self.start).as_secs_f64() * 1000.0,
                                                "ms": (now - self.last).as_secs_f64() * 1000.0}));
         self.last = now;
     }
