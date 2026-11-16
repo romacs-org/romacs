@@ -210,15 +210,26 @@ try stays queued, and the drain says so.  Only an ending editor commits."
           (unless (eq entry (gethash key last))
             (remhash (car entry) romacs-agent-writer--pending)
             (setq entries (delq entry entries))))))
-    (dolist (entry (sort entries (lambda (a b) (< (car a) (car b)))))
-      (pcase-let ((`(,id ,function ,args ,done ,_ ,_) entry) (answer nil) (tries 0))
-        (while (progn (setq answer (condition-case err (list 'ok (apply function args)) (error (list 'error err))))
-                      (and (eq (car answer) 'error) (< (cl-incf tries) romacs-agent-writer--here-tries)))
-          (sleep-for 1))
-        (if (eq (car answer) 'error)
-            (message "romacs-agent-writer: not saved: %s: %S" function (cadr answer))
-          (remhash id romacs-agent-writer--pending)
-          (when done (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer))))))))
+    ;; In passes: every write tried, one pause, the failures tried again,
+    ;; `romacs-agent-writer--here-tries' passes at most.  A disk that
+    ;; fails every write holds an ending editor for those pauses alone,
+    ;; however many writes are queued.
+    (let ((todo (sort entries (lambda (a b) (< (car a) (car b))))) (pass 0) (last nil))
+      (while (and todo (< pass romacs-agent-writer--here-tries))
+        (when (> pass 0) (sleep-for 1))
+        (cl-incf pass)
+        (setq todo (cl-remove-if
+                    (lambda (entry)
+                      (pcase-let* ((`(,id ,function ,args ,done ,_ ,_) entry)
+                                   (answer (condition-case err (list 'ok (apply function args)) (error (list 'error err)))))
+                        (if (eq (car answer) 'error)
+                            (progn (setq last (cons function (cadr answer))) nil)
+                          (remhash id romacs-agent-writer--pending)
+                          (when done (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer)))
+                          t)))
+                    todo)))
+      (when todo
+        (message "romacs-agent-writer: %d not saved, the last failing: %s: %S" (length todo) (car last) (cdr last))))))
 
 (defun romacs-agent-writer--unsend ()
   "Mark every unanswered write unsent: its writer is gone."

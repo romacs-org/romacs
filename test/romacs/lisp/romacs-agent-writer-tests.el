@@ -366,6 +366,23 @@ connection of its own, as the writer's process has."
         (should (zerop (romacs-agent-writer-pending-count)))
         (should (equal (sort (copy-sequence romacs-agent-writer-tests--made) #'<) '(1 2)))))))
 
+(ert-deftest romacs-agent-writer-a-failing-disk-holds-an-exit-briefly ()
+  ;; Every write fails as the editor ends: the last resort pauses between
+  ;; passes, not between writes, so a thousand writes cost the same few
+  ;; pauses as one.
+  (let ((romacs-agent-writer-start-functions nil) (pauses 0) (said nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
+                ((symbol-function 'sleep-for) (lambda (&rest _) (cl-incf pauses)))
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (dotimes (i 1000) (romacs-agent-write 'romacs-agent-writer-tests--broken (list i)))
+        (romacs-agent-writer-drain)
+        (should (< pauses romacs-agent-writer--here-tries))
+        (should (= (romacs-agent-writer-pending-count) 1000))
+        (should (member "Saving 1000 agent records...failed: 1000 not saved" said))))))
+
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
   ;; once the writer has answered a write behind them, the launch.
