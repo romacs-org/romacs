@@ -1042,7 +1042,8 @@ Romacs (its own channel's reply line says how), or a sender gone."
                         ;; Its own channel's, when it came by one: the call to copy.
                         (user-error "Message %s came from outside Romacs. %s" id
                                     (romacs-agent--message-reply-line message)))
-                       ((romacs-agent-get sender-id))
+                       ;; One a start left a row: loaded, to be answered.
+                       ((romacs-agent-find sender-id))
                        (t (user-error "Message %s's sender, session %s, is gone" id sender-id))))
          ;; Its note first able to go: never an answer sent and its note lost.
          (record (progn (when by-user (romacs-agent--check-note session))

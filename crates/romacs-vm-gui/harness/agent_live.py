@@ -167,7 +167,8 @@ class Agents(Server):
         return [e.get('config_dir') for e in self.logged() if e.get('started') == sid]
 
     def s(self, sid):
-        return f'(romacs-agent-get {lisp_text(sid)})'
+        # Found, loaded if a start left it a row: as a key on its board row does.
+        return f'(romacs-agent-find {lisp_text(sid)})'
 
     def send(self, sid, text):
         self.eval(f'(romacs-agent-send {self.s(sid)} {lisp_text(text)})')

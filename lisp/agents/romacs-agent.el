@@ -3461,7 +3461,7 @@ SESSION's last fork note, a new one says how far the fork now goes."
   (when-let* ((forking (romacs-agent--harness-get session :forks))
               ((funcall forking session))
               (forked (plist-get (romacs-agent-options session) :forked))
-              (source (romacs-agent-get (car forked)))
+              (source (romacs-agent-find (car forked)))
               ((> (romacs-agent-seq source) (cadr forked))))
     (romacs-agent--note session (romacs-agent--fork-note source (cadr forked)))))
 
@@ -4644,7 +4644,7 @@ started: a request repeated after a lost reply finds its session.")
 
 (defun romacs-agent-requested (parent request)
   "The session PARENT started with client request id REQUEST, or nil."
-  (when-let* ((id (gethash (cons parent request) romacs-agent--requests))) (romacs-agent-get id)))
+  (when-let* ((id (gethash (cons parent request) romacs-agent--requests))) (romacs-agent-find id)))
 
 (romacs-mcp-register-method
  "romacs/hello"
@@ -4654,10 +4654,12 @@ started: a request repeated after a lost reply finds its session.")
    ;; Its incarnation: a resumed harness's relay numbers its calls anew.
    (process-put peer 'romacs-agent-relay (gethash "relay" params))
    ;; A session's own: not one of the endpoint's anonymous peers.
-   (when (romacs-agent-get (gethash "session" params)) (romacs-mcp-own-peer peer))
+   ;; One a start left a row (its harness idle meanwhile): loaded now,
+   ;; its first use.
+   (when (romacs-agent-find (gethash "session" params)) (romacs-mcp-own-peer peer))
    ;; A known session another process is attached to: its relay belongs
    ;; there, through its route, and retries until the route leads there.
-   (when-let* ((session (romacs-agent-get (gethash "session" params))))
+   (when-let* ((session (romacs-agent-find (gethash "session" params))))
      (unless (process-live-p (romacs-agent-connection session))
        ;; Its harness runs and this editor is where its relay is led, yet
        ;; it is not attached here: attached now, so the relay's next try

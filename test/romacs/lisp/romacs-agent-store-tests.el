@@ -104,7 +104,12 @@ journal one turn long."
           (should (member live shown)))
         (let ((found (romacs-agent-find old)))
           (should (equal (romacs-agent-title found) "old"))
-          (should (eq (romacs-agent-get old) found)))))))
+          (should (eq (romacs-agent-get old) found)))
+        ;; A delegation asked again, its task left a row: found, loaded.
+        (remhash old romacs-agent--sessions)
+        (let ((romacs-agent--requests (make-hash-table :test #'equal)))
+          (puthash (cons "parent" "request-1") old romacs-agent--requests)
+          (should (equal (romacs-agent-title (romacs-agent-requested "parent" "request-1")) "old")))))))
 
 ;; Restored a turn at a time from the command loop: the same.
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded-in-steps ()

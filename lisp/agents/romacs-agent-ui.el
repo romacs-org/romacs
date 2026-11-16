@@ -496,7 +496,7 @@ what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     (when-let* ((child (romacs-agent-get (plist-get wake :id))))
+                     (when-let* ((child (romacs-agent-find (plist-get wake :id))))
                        (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
                    wakes)
          wakes)))
@@ -2404,7 +2404,7 @@ source's own source what the fork's first part leaves."
   (let ((plan nil))
     ;; A fork's notes come before its first prompt: only that is read.
     (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session end))) plan)
-      (let* ((source (romacs-agent-get (gethash "from" note)))
+      (let* ((source (romacs-agent-find (gethash "from" note)))
              (after (or (romacs-agent--value (gethash "after" note)) 0))
              (upto (or (romacs-agent--value (gethash "seq" note)) 0))
              (key (romacs-agent-ui--fork-key (gethash "from" note) after upto))
@@ -2627,7 +2627,7 @@ line is parsed, unless every call's row draws its end without it."
   "Draw in SESSION's chat what its fork EVENT took from its source: the
 source's records after the last fork's (EVENT's :after) to EVENT's :seq-from,
 the source's own source and imported transcript first, then a rule."
-  (let* ((source (romacs-agent-get (plist-get event :from)))
+  (let* ((source (romacs-agent-find (plist-get event :from)))
          (after (or (plist-get event :after) 0)) (upto (or (plist-get event :seq-from) 0))
          ;; Where its part starts, for the chat's turns: none of it, a
          ;; byte of its journal, or its start.
