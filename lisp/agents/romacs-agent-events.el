@@ -883,11 +883,16 @@ supervisor numbers after every record numbered here (`--seq-from')."
 waiting for their sessions' moves, where those sessions' records are
 \(their journals, not moved), so the next process reads them.  What else
 waits (a launch) is let go: no editor is there to run it."
-  (maphash (lambda (_id thens)
-             (pcase-dolist (`(,note . ,then) thens)
-               (when note (with-demoted-errors "romacs-agent-events: a note: %S" (funcall then)))))
-           romacs-agent-events--waiting)
-  (clrhash romacs-agent-events--waiting))
+  (let ((done nil))
+    (maphash (lambda (id thens)
+               ;; One the writer imports now: its import's answer lets its
+               ;; notes go into SQLite, which the drain waits for.
+               (unless (gethash id romacs-agent-events--importing)
+                 (pcase-dolist (`(,note . ,then) thens)
+                   (when note (with-demoted-errors "romacs-agent-events: a note: %S" (funcall then))))
+                 (push id done)))
+             romacs-agent-events--waiting)
+    (dolist (id done) (remhash id romacs-agent-events--waiting))))
 
 (add-hook 'romacs-agent-writer-before-drain-functions #'romacs-agent-events-write-waiting-notes)
 

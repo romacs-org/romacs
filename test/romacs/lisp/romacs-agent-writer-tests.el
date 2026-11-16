@@ -400,17 +400,45 @@ connection of its own, as the writer's process has."
       (should (= (romacs-agent-seq session) 7))
       (should (= (romacs-agent-held-notes-count) 1))
       (should (equal (romacs-agent-writer--held) 1))
-      ;; Attached: through it, in order.
+      ;; Its attachment acknowledged: through it, kept until it comes back.
       (romacs-agent--send-held session 'process)
       (should (string-search "\"plan\"" (car sent)))
-      (should (zerop (romacs-agent-held-notes-count)))
+      (should (= (romacs-agent-held-notes-count) 1))
       (should-not (gethash "h" romacs-agent--launched))
+      ;; Refused or stolen, it goes again with the next acknowledgement.
+      (romacs-agent--send-held session 'process)
+      (should (= (length sent) 2))
+      ;; Its record back from the supervisor: let go.
+      (let ((note (car (gethash "h" romacs-agent--held-notes))))
+        (romacs-agent--held-echoed session (romacs-mcp--object "seq" 8 "note" note)))
+      (should (zerop (romacs-agent-held-notes-count)))
       ;; Launched again, and it never starts: numbered here.
       (puthash "h" t romacs-agent--launched)
       (romacs-agent--note session (romacs-mcp--object "type" "selection"))
       (romacs-agent--release-held session)
       (should (equal (gethash "type" (car here)) "selection"))
       (should (zerop (romacs-agent-held-notes-count))))))
+
+(ert-deftest romacs-agent-writer-the-last-resort-sends-nothing ()
+  ;; While the editor makes the writes itself, what their answers queue is
+  ;; made by the next round here, never sent to a writer too.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil))
+    (romacs-agent-writer-tests--with
+      (let ((romacs-agent-writer--here-running t))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(1))
+        (should-not sent)
+        (should (= (romacs-agent-writer-pending-count) 1))))))
+
+(ert-deftest romacs-agent-writer-a-drain-leaves-an-importing-sessions-notes ()
+  ;; A session the writer imports now: its waiting notes are not written to
+  ;; its journal under the import; the import's answer lets them go.
+  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--importing (make-hash-table :test #'equal)) (ran nil))
+    (puthash "i" t romacs-agent-events--importing)
+    (puthash "i" (list (cons t (lambda () (push 'note ran)))) romacs-agent-events--waiting)
+    (romacs-agent-events-write-waiting-notes)
+    (should-not ran)
+    (should (gethash "i" romacs-agent-events--waiting))))
 
 (ert-deftest romacs-agent-writer-an-ending-editor-writes-waiting-notes ()
   ;; Ending: the notes waiting for their sessions' moves are written where

@@ -168,10 +168,14 @@ queued to be: its value when it ran here."
     (isolate-on-done romacs-agent-writer--job #'romacs-agent-writer--ended))
   (isolate-future-isolate romacs-agent-writer--job))
 
+(defvar romacs-agent-writer--here-running nil
+  "Non-nil while the editor makes the writes itself: none is sent then.")
+
 (defun romacs-agent-writer--flush ()
   "Send the unsent writes, in order, a batch at a time, while fewer than
-`romacs-agent-writer--window' batches are unanswered."
-  (let ((isolate t))
+`romacs-agent-writer--window' batches are unanswered; none while the
+editor makes them itself (`romacs-agent-writer--here')."
+  (let ((isolate (not romacs-agent-writer--here-running)))
     (while (and isolate romacs-agent-writer--unsent (< romacs-agent-writer--in-flight romacs-agent-writer--window))
       (setq isolate (condition-case err (romacs-agent-writer--isolate)
                       ;; None to be had: the rest stays unsent, tried later.
@@ -211,7 +215,7 @@ here, in order, opened as a writer opens the store (long waits for its
 lock).  A write is let go only once it is made; one that fails every
 try stays queued, and the drain says so.  Only an ending editor commits.
 How many were made."
-  (let ((entries nil))
+  (let ((entries nil) (romacs-agent-writer--here-running t))
     (let ((romacs-agent-writer-queued nil))
       (with-demoted-errors "romacs-agent-writer: opening here: %S" (run-hooks 'romacs-agent-writer-start-functions)))
     (maphash (lambda (_id entry) (push entry entries)) romacs-agent-writer--pending)
