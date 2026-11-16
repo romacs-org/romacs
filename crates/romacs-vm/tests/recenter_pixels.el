@@ -1,7 +1,8 @@
 ;;; recenter_pixels.el --- recenter on windows never painted or painted in older faces  -*- lexical-binding: t -*-
 ;; Answered by pinned GNU X11 (child_frames_oracle.py --probe), replayed by
 ;; tests/point_visibility.rs: each case recentres in a window redisplay has not
-;; laid out in the current faces, then paints.  Rows are a line tall: the two
+;; laid out in the current faces, then paints; a forced start there stands or
+;; scrolls as in a painted window.  Rows are a line tall: the two
 ;; engines' fonts differ in pixels, so taller rows are not compared here.  A
 ;; fresh window is split from the top one, starts at BEGV and has another
 ;; buffer above it: window management's own differences stay out
@@ -24,6 +25,7 @@
 (defun rp-recenter (arg) (recenter arg) (list (window-start) (point) (window-vscroll nil t)))
 (defun rp-line (n) (save-excursion (goto-char (point-min)) (forward-line (1- n)) (point)))
 (defun rp-hide (from to) (put-text-property (rp-line from) (rp-line to) 'invisible t))
+(defun rp-force (start) (set-window-start nil start) (list (window-start) (point)))
 (defun rp-shrink (lines) (let ((window-resize-pixelwise t)) (window-resize nil (- (round (* lines (frame-char-height)))) nil nil t)))
 ;; plain-0
 (progn (rp-begin '((set scroll-conservatively 0) (set scroll-margin 0) (setq-local truncate-lines nil)) 120) (pv-step nil))
@@ -46,6 +48,12 @@
 (progn (rp-fresh) (goto-char (rp-line 70)) (rp-recenter -30))
 (pv-step nil)
 (progn (rp-fresh) (goto-char (rp-line 3)) (rp-recenter 8))
+(pv-step nil)
+(progn (rp-fresh) (goto-char (rp-line 100)) (rp-force (rp-line 20)))
+(pv-step nil)
+(progn (rp-refaced) (goto-char (rp-line 90)) (rp-force (rp-line 30)))
+(pv-step nil)
+(progn (rp-fresh) (goto-char (rp-line 25)) (rp-force (rp-line 20)))
 (pv-step nil)
 (progn (rp-fresh) (goto-char (rp-line 2)) (rp-recenter -1))
 (pv-step nil)
@@ -72,6 +80,10 @@
 (progn (rp-fresh) (goto-char (rp-line 60)) (rp-recenter 40))
 (pv-step nil)
 (progn (rp-refaced) (goto-char (rp-line 80)) (rp-recenter -40))
+(pv-step nil)
+(progn (rp-fresh) (goto-char (rp-line 41)) (rp-force (rp-line 40)))
+(pv-step nil)
+(progn (rp-refaced) (goto-char (rp-line 52)) (rp-force (rp-line 40)))
 (pv-step nil)
 ;; numbers
 (progn (rp-begin '((set scroll-conservatively 101) (set scroll-margin 0) (setq-local truncate-lines nil) (setq-local display-line-numbers t) split-window-right split-window-right) 120) (pv-step nil))
@@ -106,4 +118,8 @@
 (progn (rp-fresh) (goto-char (rp-line 30)) (rp-shrink 0.8) (rp-recenter -1))
 (pv-step nil)
 (progn (rp-fresh) (goto-char (rp-line 35)) (rp-shrink 0.8) (rp-recenter nil))
+(pv-step nil)
+(progn (rp-fresh) (rp-shrink 0.4) (goto-char (rp-line 29)) (rp-force (rp-line 20)))
+(pv-step nil)
+(progn (rp-fresh) (rp-shrink 0.4) (goto-char (rp-line 30)) (rp-force (rp-line 20)))
 (pv-step nil)

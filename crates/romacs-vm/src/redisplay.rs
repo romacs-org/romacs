@@ -5,9 +5,11 @@
 //! 101 in Lisp, independently of the redisplay mechanism.
 //!
 //! Without a host layout, rows are logical lines of the frame's line
-//! height. Over a host's layout, which continues and truncates lines, the
-//! display iterator counts screen lines and chooses the start, which may
-//! begin a continuation line (DIVERGENCES.md VM2-RD1).
+//! height. Over a host's layout, which continues and truncates lines, rows
+//! are the screen lines painting lays out, painted yet or not, and the
+//! start they choose may begin a continuation line (DIVERGENCES.md
+//! VM2-RD1); the display iterator chooses only for a vertically scrolled
+//! window.
 //!
 //! The rows a window shows are what its redisplay fontifies
 //! ([`Vm::displayed_range`]), counted the same way.
@@ -166,9 +168,9 @@ impl Vm {
         // Over a host's layout, which continues lines, rows are screen
         // lines: the rows painting lays out. Point on a fully visible row
         // keeps the start (GNU's try_cursor_movement and try_window); else
-        // those rows around point choose another (try_scrolling, recenter).
-        // Before a window's first paint the display iterator chooses,
-        // unless it refuses the text.
+        // those rows around point choose another (try_scrolling, recenter),
+        // painted yet or not. A vertically scrolled window leaves the
+        // choice to the display iterator.
         if !forced && self.display_state.hosted && self.has_layout_host() {
             if self.point_on_visible_rows(window, start_byte, point_byte)? {
                 if clamped != start { self.set_marker_object(start_marker, Value::integer(clamped as i64)?, buffer)?; }
