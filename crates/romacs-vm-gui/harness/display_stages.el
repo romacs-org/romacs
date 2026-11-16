@@ -240,6 +240,12 @@ line's end; return it."
   :body (display-stages--delta it i))
 
 ;; A folded Org buffer is opened: its first paint fontifies what it shows.
+;; Its bar holds three layouts (TODO(#265): one): the window's rows for
+;; point's visibility before jit-lock fontifies them (A), point's line for
+;; hscroll (B), and the rows again for the range shown once jit-lock has
+;; changed their properties (C).  Before romacs#221 A and C were glyph
+;; walks: 694 M display instructions with 1 layout and 4 walks, against
+;; 499 M with 3 layouts and 1 walk after.
 (display-stages-scenario fontify-open-org-folded :paints t
   :setup (display-stages--counting-fontified)
   :body (switch-to-buffer (display-stages--org (format "stages-%d.org" i) 15)))
