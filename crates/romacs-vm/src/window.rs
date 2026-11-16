@@ -891,6 +891,27 @@ impl Vm {
         self.refit_mini_window(root, geometry.width, geometry.height)?;
         Ok(true)
     }
+    /// window.c `Fresize_mini_window_internal`: give mini-window WINDOW the
+    /// height `window--resize-mini-window` prepared (its new pixel size)
+    /// while it and the root window's prepared size still fill their
+    /// height. The mini-window's height is a number of lines of its
+    /// top-level frame here, and the root window's children take the change
+    /// as a frame resize gives it them (`set_top_frame_geometry`).
+    pub(crate) fn resize_mini_window_internal(&mut self, window: Value) -> Result<()> {
+        let w = self.decode_window(window, true, false)?;
+        let frame = self.window(w)?.frame;
+        let (minibuffer, root) = { let f = self.frame(frame)?; (f.minibuffer, f.root) };
+        if minibuffer != w { return Err("Not a valid minibuffer window".into()); }
+        if root == w { return Err("Cannot resize a minibuffer-only frame".into()); }
+        let (r, m) = (self.window(root)?, self.window(w)?);
+        let fits = m.new_pixel > 0 && r.height + m.height == r.new_pixel + m.new_pixel;
+        if !fits || !self.prepared_check(root, false, Value::NIL)? { return Err("Cannot resize mini window".into()); }
+        let lines = (m.new_pixel / self.window_state.line.max(1)).max(1);
+        let top = self.top_frame(frame);
+        self.top_geometry_mut(top)?.mini_lines = lines;
+        let geometry = self.top_geometry(top)?;
+        self.refit_mini_window(top, geometry.width, geometry.height)
+    }
     /// Lay out again after top-level frame ROOT's mini-window's height
     /// changed: a hosted mini-window's hosting frame takes its new height,
     /// else ROOT's windows, WIDTH by HEIGHT, make room for it.
@@ -2750,6 +2771,14 @@ impl<'a> Windows<'a> {
         let changed = self.vm.resize_mini_window_now().map_err(internal)?;
         if changed { self.vm.display_state.version += 1; }
         Ok(if changed { Value::TRUE } else { Value::NIL })
+    }
+    /// window.c `Fresize_mini_window_internal`: t once the mini-window has
+    /// its prepared height.
+    pub(crate) fn resize_mini_window_internal(&mut self, window: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        self.vm.resize_mini_window_internal(window).map_err(Fault::Error)?;
+        self.vm.display_state.version += 1;
+        Ok(Value::TRUE)
     }
     /// minibuf.c:215: the minibuffer window while a minibuffer is active.
     pub(crate) fn active_minibuffer_window(&mut self) -> Out {

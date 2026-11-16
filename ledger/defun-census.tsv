@@ -261,7 +261,6 @@ redirect-debugging-output	absent	GNU C core debugging aid: Romacs's diagnostics 
 register-code-conversion-map	absent	no shipped Lisp calls it and it is no command
 remember-mouse-glyph	needed	lane A (editing, windows, frames, minibuffer readers, display)
 remove-pos-from-symbol	needed	lane A (editing, windows, frames, minibuffer readers, display)
-resize-mini-window-internal	needed	lane A (editing, windows, frames, minibuffer readers, display)
 serial-process-configure	needed	lane builtins-b (fonts, coding, images, system, processes, threads, bytecode, internals)
 set-cursor-size	absent	no shipped Lisp calls it and it is no command
 set-frame-size-and-position-pixelwise	needed	lane A (editing, windows, frames, minibuffer readers, display)

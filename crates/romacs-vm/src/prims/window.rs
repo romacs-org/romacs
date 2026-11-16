@@ -184,6 +184,11 @@ fn window_resize_apply_total(cx; optional frame: Value, horizontal: Value) {
     cx.windows().window_resize_apply_total(frame)
 }}
 
+defsubr! { name = "resize-mini-window-internal", gnu = "window.c:5971", effect = Global,
+fn resize_mini_window_internal(cx, window: Value) {
+    cx.windows().resize_mini_window_internal(window)
+}}
+
 defsubr! { name = "window-fringes", gnu = "window.c:8639", effect = Reads,
 fn window_fringes(cx; optional window: Value) {
     cx.windows().window_fringes(window)

@@ -290,6 +290,18 @@ impl Vm {
             None => Ok(Value::NIL),
         }
     }
+    /// buffer.c `Foverlays_in` asks its overlay tree with BEG and END as
+    /// given, so positions outside BUFFER find what the walk from BEG finds:
+    /// nothing from past Z or up to before BEG, everything to Z from past Z,
+    /// and from before BEG what BEG finds but an empty overlay there when END
+    /// is at it. The positions to ask within the buffer, or None for nothing.
+    fn overlays_in_bounds(&self, buffer: Value, beg: Value, end: Value) -> Result<Option<(Value, Value)>> {
+        let (s, e) = (self.scalar_position(beg)?, self.scalar_position(end)?);
+        let z = i64::try_from(self.annotated(buffer)?.len_chars()).map_err(|_| "buffer too large")? + 1;
+        if s > e || (s >= 1 && e <= z) { return Ok(Some((beg, end))); }
+        if s > z || e < 1 || (e == 1 && z > 1) { return Ok(None); }
+        Ok(Some((Value::integer(s.max(1))?, Value::integer(e.min(z))?)))
+    }
     pub(super) fn scalar_position(&self, v: Value) -> Result<i64> {
         if let Ok(n) = v.as_integer() {
             return Ok(n);
@@ -1074,6 +1086,10 @@ impl Vm {
                             self.overlay_position(buffer, args[1], false)?
                         },
                     )
+                } else if p == OverlaysIn {
+                    let Some((beg, end)) = self.overlays_in_bounds(buffer, x, args[1])? else { return Ok(Value::NIL) };
+                    let (a, b) = (self.overlay_position(buffer, beg, false)?, self.overlay_position(buffer, end, false)?);
+                    (a.min(b), a.max(b))
                 } else {
                     let a = match self.overlay_position(buffer, x, false) {
                         // Any position may be asked; none outside the
@@ -1081,12 +1097,7 @@ impl Vm {
                         Err(e) if p == OverlaysAt && e == "index out of range" => return Ok(Value::NIL),
                         a => a?,
                     };
-                    let b = if p == OverlaysIn {
-                        self.overlay_position(buffer, args[1], false)?
-                    } else {
-                        a
-                    };
-                    (a.min(b), a.max(b))
+                    (a, a)
                 };
                 let (a, b) = (a.min(b), a.max(b));
                 let target = self.annotated(buffer)?;

@@ -20,6 +20,19 @@
 ;; level it was entered at (minibuf_c_loop_level); innermost first.
 (defvar romacs--minibuf-prompts nil)
 (defvar romacs--minibuf-loop-levels nil)
+(defvar romacs--minibuffer-list nil
+  "minibuf.c Vminibuffer_list: the minibuffer of each depth, *Minibuf-0*
+first, so `minibufferp' knows one that no window shows.")
+
+(defun romacs--minibuffer-made (buffer level)
+  "Record BUFFER as the minibuffer of depth LEVEL (minibuf.c get_minibuffer),
+those of the depths below it by their names."
+  (let ((depth (length romacs--minibuffer-list)))
+    (while (<= depth level)
+      (setq romacs--minibuffer-list
+            (append romacs--minibuffer-list (list (get-buffer-create (format " *Minibuf-%d*" depth))))
+            depth (1+ depth))))
+  (setcar (nthcdr level romacs--minibuffer-list) buffer))
 ;; simple.el:2008; read_minibuf binds it while the prompt is active.
 (defvar minibuffer-default nil)
 
@@ -102,6 +115,7 @@ INHERIT is INHERIT-INPUT-METHOD."
          val)
     ;; minibuf.c:794: an unbound history variable starts as nil.
     (unless (boundp histvar) (set histvar nil))
+    (romacs--minibuffer-made buffer level)
     (setq minibuffer-default default current-minibuffer-command this-command
           romacs--minibuf-level level
           romacs--minibuf-prompts (cons (copy-sequence prompt) outer-prompts)
