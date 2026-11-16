@@ -190,6 +190,37 @@ connection of its own, as the writer's process has."
         (should (equal (reverse romacs-agent-writer-tests--made) '(0 1 2)))
         (should (zerop (romacs-agent-writer-pending-count)))))))
 
+(ert-deftest romacs-agent-writer-a-failed-commit-is-not-saved ()
+  ;; A kept state whose commit fails (a full disk) signals: the drain's
+  ;; last resort keeps it and says it was not saved, never "done".
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (let* ((root (make-temp-file "romacs-writer-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root "/state") process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-turns--made nil) (romacs-agent-events--made nil)
+         (romacs-agent-writer-start-functions nil) (said nil))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "romacs/agents" (concat root "/state")) t)
+          (let ((execute (symbol-function 'sqlite-execute)))
+            (cl-letf (((symbol-function 'sqlite-execute)
+                       (lambda (db query &rest args)
+                         (if (equal query "commit") (signal 'sqlite-error '("disk I/O error")) (apply execute db query args)))))
+              (let ((romacs-agent-writer-queued nil))
+                (should-error (romacs-agent-turns-fold-put "s" "(:a 1)")))
+              (romacs-agent-writer-tests--with
+                (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                          ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
+                          ((symbol-function 'sleep-for) #'ignore)
+                          ((symbol-function 'redisplay) #'ignore)
+                          ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+                  (romacs-agent-write 'romacs-agent-turns-fold-put '("s" "(:a 2)"))
+                  (romacs-agent-writer-drain)
+                  (should (= (romacs-agent-writer-pending-count) 1))
+                  (should (member "Saving 1 agent records...failed: 1 not saved" said)))))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory root t))))
+
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
   ;; once the writer has answered a write behind them, the launch.

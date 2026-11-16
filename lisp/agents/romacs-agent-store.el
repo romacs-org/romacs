@@ -194,14 +194,13 @@ when the database cannot be written."
 
 (defun romacs-agent-store--write-values (values absent)
   "Put VALUES, a row's columns in order, in place of its session's, or only
-when it has none with ABSENT; non-nil when it was written."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err
-        (> (sqlite-execute db (format "insert or %s into sessions values (%s)" (if absent "ignore" "replace")
-                                      (mapconcat (lambda (_) "?") romacs-agent-store--columns ","))
-                           values)
-           0)
-      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
+when it has none with ABSENT; non-nil when it was written.  A failure
+signals: the writer sees it."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to write a row in"))))
+    (> (sqlite-execute db (format "insert or %s into sessions values (%s)" (if absent "ignore" "replace")
+                                  (mapconcat (lambda (_) "?") romacs-agent-store--columns ","))
+                       values)
+       0)))
 
 (defun romacs-agent-store-put (session &optional state again)
   "Write SESSION's row, its state STATE when given (as its records left it);
@@ -333,10 +332,18 @@ manifest."
                                         (condition-case err (romacs-agent-store--recorded-row dir)
                                           (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil)))
                                       dirs))))
-          (when (and rows (ignore-errors (sqlite-execute db "begin immediate") t))
-            (unwind-protect
-                (dolist (row rows) (when (romacs-agent-store-write row t) (cl-incf count)))
-              (ignore-errors (sqlite-execute db "commit"))))))
+          ;; A chunk not written (the lock held past its wait) is said,
+          ;; and left to the next fill: the rows are a cache of records.
+          (when rows
+            (condition-case err
+                (let ((written 0))
+                  (sqlite-execute db "begin immediate")
+                  (dolist (row rows) (when (romacs-agent-store-write row t) (cl-incf written)))
+                  (sqlite-execute db "commit")
+                  (cl-incf count written))
+              (error (ignore-errors (sqlite-execute db "rollback"))
+                     (message "romacs-agent-store: %d rows not written, left to the next fill: %s"
+                              (length rows) (error-message-string err)))))))
       count)))
 
 (defvar romacs-agent-events-store)
@@ -484,13 +491,12 @@ quietly nothing when the database cannot be written."
   (romacs-agent-write 'romacs-agent-store--fold-row (list project folded)))
 
 (defun romacs-agent-store--fold-row (project folded)
-  "Keep PROJECT FOLDED on the board or not, here."
-  (when-let* ((db (romacs-agent-store--open)))
-    (condition-case err
-        (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
-                             "delete from board_folds where project = ?")
-                        (list project))
-      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
+  "Keep PROJECT FOLDED on the board or not, here.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep the board's folds in"))))
+    (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
+                         "delete from board_folds where project = ?")
+                    (list project))
+    t))
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.
