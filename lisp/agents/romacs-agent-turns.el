@@ -399,11 +399,14 @@ they came.  The number written."
         (remhash scratch romacs-agent-turns--open)
         (- (romacs-agent-turns-count session) before)))))
 
+(defvar romacs-agent-events-store)
+
 (defun romacs-agent-turns-fill-batch ()
   "`romacs-agent-turns-fill' for the sessions the command line names (all
 recorded ones, with none), in a batch process: each fills from where its
-rows end, nothing when its records end there too."
-  (let ((written 0) (t0 (float-time))
+rows end, nothing when its records end there too.  It moves no
+session's records to SQLite: the editor alone does."
+  (let ((written 0) (romacs-agent-events-store nil) (t0 (float-time))
         (ids (prog1 command-line-args-left (setq command-line-args-left nil))))
     (dolist (dir (if ids (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
                    (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
