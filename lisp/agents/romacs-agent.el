@@ -874,7 +874,11 @@ instances) is derived again when it changes.")
       :find (DIRECTORY ID), the transcript of conversation ID or nil,
       :keep, :describe and :events (`romacs-agent-history').
 
+The file defining it is kept (:file): a process of this build that reads
+every harness's transcripts (`romacs-agent-history-index-soon') loads it.
 Defining it again replaces it."
+  (when-let* ((file (and (not (plist-member driver :file)) (or load-file-name buffer-file-name))))
+    (setq driver (append driver (list :file file))))
   (let ((cell (gethash harness romacs-agent--driver-table)))
     (if cell
         (setcdr cell driver)
@@ -3384,6 +3388,9 @@ its directory would otherwise tell every later import that another
 Romacs is resuming THREAD.  Once started, the supervisor owns it."
   (unless (funcall (or (plist-get (romacs-agent--driver-of harness) :native-id-p) #'stringp) thread)
     (user-error "Not a conversation id: %s" thread))
+  ;; Its transcript is what it goes on from: none, nothing is made.
+  (unless (and (stringp transcript) (file-readable-p transcript))
+    (user-error "No transcript of conversation %s to go on from: %s" thread (or transcript "none given")))
   (romacs-agent--check-config-dir provider config-dir)
   (romacs-agent--check-companions)
   (let ((id (romacs-agent--import-id harness config-dir thread))
