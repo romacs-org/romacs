@@ -337,6 +337,35 @@ connection of its own, as the writer's process has."
         (should (= (romacs-agent-writer-pending-count) 1))
         (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
 
+(ert-deftest romacs-agent-writer-a-cancelled-restart-leaves-its-writes-to-the-writer ()
+  ;; No writer to be had, a restart drains here, and C-g cancels it in a
+  ;; retry's pause: the writes are queued again, and made once a writer
+  ;; can be had, in the background.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
+        (romacs-agent-writer--retry-timer nil) (available nil) (soon nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf* ((spawn (symbol-function 'isolate-spawn))
+                 ((symbol-function 'isolate-spawn)
+                  (lambda (&rest args) (if available (apply spawn args) (signal 'isolate-world-unavailable '("stale")))))
+                 ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (push (cons f args) soon) 'timer))
+                 ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
+                 ((symbol-function 'romacs-agent-writer-tests--flaky) (lambda (&rest _) (error "Locked")))
+                 ((symbol-function 'sleep-for) (lambda (&rest _) (signal 'quit nil)))
+                 ((symbol-function 'redisplay) #'ignore)
+                 ((symbol-function 'message) #'ignore))
+        (romacs-agent-write 'romacs-agent-writer-tests--flaky '(1))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(2))
+        (should (eq (condition-case nil (progn (romacs-agent-writer--before-handover) 'restarted) (quit 'cancelled))
+                    'cancelled))
+        (should (> (romacs-agent-writer-pending-count) 0))
+        ;; A writer can be had again: the background sends what is left.
+        (setq available t)
+        (cl-letf (((symbol-function 'romacs-agent-writer-tests--flaky) #'romacs-agent-writer-tests--make))
+          (dolist (call soon) (apply (car call) (cdr call)))
+          (serve))
+        (should (zerop (romacs-agent-writer-pending-count)))
+        (should (equal (sort (copy-sequence romacs-agent-writer-tests--made) #'<) '(1 2)))))))
+
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
   ;; once the writer has answered a write behind them, the launch.

@@ -364,7 +364,13 @@ quitting now would lose them."
   "A restart begins: every queued write is made before its image and its
 successor, which reads them; \[keyboard-quit] cancels the restart, and
 the session goes on with its writes still queued."
-  (let ((inhibit-quit nil)) (romacs-agent-writer-drain t)))
+  (condition-case err (let ((inhibit-quit nil)) (romacs-agent-writer-drain t))
+    (quit
+     ;; Cancelled: what is still to be made is queued again, in order, and
+     ;; sent as soon as a writer can be had.
+     (romacs-agent-writer--unsend)
+     (run-with-timer 0 nil #'romacs-agent-writer--flush)
+     (signal (car err) (cdr err)))))
 
 (defun romacs-agent-writer--obstacle ()
   "Why a requested restart waits (`warm-restart-obstacle-functions'): the
