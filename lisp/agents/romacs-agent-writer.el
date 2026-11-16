@@ -141,33 +141,58 @@ queued to be: its value when it ran here."
 (defun romacs-agent-writer--flush ()
   "Send the unsent writes, in order, a batch at a time, while fewer than
 `romacs-agent-writer--window' batches are unanswered."
-  (while (and romacs-agent-writer--unsent (< romacs-agent-writer--in-flight romacs-agent-writer--window))
-    (let ((isolate (condition-case err (romacs-agent-writer--isolate)
-                     (error (romacs-agent-writer--here err) nil)))
-          (batch nil) (n 0))
-      (while (and isolate romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
-        (pcase-let ((`(,id ,function ,args ,_) (pop romacs-agent-writer--unsent)))
-          (push (list id function args) batch)
-          (cl-incf n)))
+  (let ((isolate t))
+    (while (and isolate romacs-agent-writer--unsent (< romacs-agent-writer--in-flight romacs-agent-writer--window))
+      (setq isolate (condition-case err (romacs-agent-writer--isolate)
+                      ;; None to be had: the rest stays unsent, tried later.
+                      (error (romacs-agent-writer--unavailable err) nil)))
       (when isolate
-        (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
-        (isolate-send isolate (list 'romacs-agent-write-batch (nreverse batch)))
-        (cl-incf romacs-agent-writer--in-flight)))))
+        (let ((batch nil) (n 0))
+          (while (and romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
+            (pcase-let ((`(,id ,function ,args ,_) (pop romacs-agent-writer--unsent)))
+              (push (list id function args) batch)
+              (cl-incf n)))
+          (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
+          (isolate-send isolate (list 'romacs-agent-write-batch (nreverse batch)))
+          (cl-incf romacs-agent-writer--in-flight))))))
 
-(defun romacs-agent-writer--here (why)
-  "No writer can be had (WHY): every unanswered write is made here, in
-order, rather than lost.  A commit in the editor, only when it is that
-or losing records (a world gone stale under a running editor)."
-  (message "romacs-agent-writer: no writer (%s): %d writes made here"
-           (error-message-string why) (romacs-agent-writer-pending-count))
+(defconst romacs-agent-writer--retry 5
+  "The seconds before a writer that could not be started is tried again.")
+
+(defvar romacs-agent-writer--retry-timer nil "The timer trying a writer again.")
+
+(defun romacs-agent-writer--unavailable (why)
+  "No writer could be started (WHY): the writes stay queued, and a writer
+is tried again in `romacs-agent-writer--retry' seconds.  The editor still
+commits nothing; an exit or a restart makes them here at the last
+\(`romacs-agent-writer-drain')."
+  (unless (timerp romacs-agent-writer--retry-timer)
+    (message "romacs-agent-writer: no writer (%s): %d writes wait" (error-message-string why)
+             (romacs-agent-writer-pending-count))
+    (setq romacs-agent-writer--retry-timer
+          (run-with-timer romacs-agent-writer--retry nil
+                          (lambda () (setq romacs-agent-writer--retry-timer nil) (romacs-agent-writer--flush))))))
+
+(defconst romacs-agent-writer--here-tries 3 "How many times a write made here is tried.")
+
+(defun romacs-agent-writer--here ()
+  "The editor is ending and no writer answers: make every unanswered write
+here, in order, opened as a writer opens the store (long waits for its
+lock).  A write is let go only once it is made; one that fails every
+try stays queued, and the drain says so.  Only an ending editor commits."
   (let ((entries nil) (romacs-agent-writer-queued nil))
+    (with-demoted-errors "romacs-agent-writer: opening here: %S" (run-hooks 'romacs-agent-writer-start-functions))
     (maphash (lambda (_id entry) (push entry entries)) romacs-agent-writer--pending)
     (setq romacs-agent-writer--unsent nil romacs-agent-writer--unsent-tail nil romacs-agent-writer--in-flight 0)
-    (clrhash romacs-agent-writer--pending)
     (dolist (entry (sort entries (lambda (a b) (< (car a) (car b)))))
-      (pcase-let* ((`(,_ ,function ,args ,done) entry)
-                   (answer (condition-case err (list 'ok (apply function args)) (error (list 'error err)))))
-        (when done (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer)))))))
+      (pcase-let ((`(,id ,function ,args ,done) entry) (answer nil) (tries 0))
+        (while (progn (setq answer (condition-case err (list 'ok (apply function args)) (error (list 'error err))))
+                      (and (eq (car answer) 'error) (< (cl-incf tries) romacs-agent-writer--here-tries)))
+          (sleep-for 1))
+        (if (eq (car answer) 'error)
+            (message "romacs-agent-writer: not saved: %s: %S" function (cadr answer))
+          (remhash id romacs-agent-writer--pending)
+          (when done (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer))))))))
 
 (defun romacs-agent-writer--unsend ()
   "Mark every unanswered write unsent: its writer is gone."
@@ -252,9 +277,9 @@ answer.  The writer then stops; a later write starts another."
             (unless (isolate-future-done-p job)
               (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
               (ignore-errors (isolate-await job))))))
-      ;; No writer would answer: made here.
+      ;; No writer would answer: made here, the editor ending.
       (when (> (romacs-agent-writer-pending-count) 0)
-        (romacs-agent-writer--here '(error "the writer did not answer")))
+        (romacs-agent-writer--here))
       (message (if (> (romacs-agent-writer-pending-count) 0) "Saving %d agent records...failed: %d not saved"
                  "Saving %d agent records...done")
                count (romacs-agent-writer-pending-count)))))

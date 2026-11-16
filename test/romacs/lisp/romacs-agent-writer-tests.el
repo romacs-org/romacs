@@ -141,23 +141,42 @@ connection of its own, as the writer's process has."
       ;; Nothing left: the writer only stops.
       (serve))))
 
-(ert-deftest romacs-agent-writer-no-writer-writes-here ()
+(defvar romacs-agent-writer-tests--flaky 0 "Failures left for the flaky write.")
+(defun romacs-agent-writer-tests--flaky (x)
+  (if (> romacs-agent-writer-tests--flaky 0)
+      (progn (cl-decf romacs-agent-writer-tests--flaky) (error "Database is locked"))
+    (romacs-agent-writer-tests--make x)))
+(defun romacs-agent-writer-tests--broken (_x) (error "Disk full"))
+
+(ert-deftest romacs-agent-writer-no-writer-waits-then-the-end-writes-here ()
   ;; No writer can be started (its world gone stale under the editor):
-  ;; the writes are made in the editor, in order, rather than lost.
-  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (answers nil))
+  ;; the editor commits nothing, the writes wait and a writer is tried
+  ;; again; an ending editor makes them itself, each tried again while it
+  ;; fails, one that never succeeds kept and said.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
+        (romacs-agent-writer--retry-timer nil) (romacs-agent-writer-tests--flaky 2) (said nil) (retried nil))
     (romacs-agent-writer-tests--with
       (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
-                ((symbol-function 'message) #'ignore))
-        (romacs-agent-write 'romacs-agent-writer-tests--make '(1) (lambda (answer) (push answer answers)))
-        (romacs-agent-write 'romacs-agent-writer-tests--make '(2))
+                ((symbol-function 'run-with-timer) (lambda (&rest _) (setq retried t) 'timer))
+                ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
+                ((symbol-function 'sleep-for) #'ignore)
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(1))
+        (romacs-agent-write 'romacs-agent-writer-tests--flaky '(2))
+        (romacs-agent-write 'romacs-agent-writer-tests--broken '(3))
+        (should-not romacs-agent-writer-tests--made)
+        (should (= (romacs-agent-writer-pending-count) 3))
+        (should retried)
+        (should-not sent)
+        (romacs-agent-writer-drain)
         (should (equal (reverse romacs-agent-writer-tests--made) '(1 2)))
-        (should (equal answers '((ok 1))))
-        (should (zerop (romacs-agent-writer-pending-count)))
-        (should-not sent)))))
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (should (member "Saving 3 agent records...failed: 1 not saved" said))))))
 
 (ert-deftest romacs-agent-writer-a-drain-outlasts-writers-that-die ()
   ;; Every writer the drain starts dies before it answers: past its tries
-  ;; the drain makes the writes in the editor; none is left, none lost.
+  ;; the ending editor makes the writes itself; none is left, none lost.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (spawned 0))
     (romacs-agent-writer-tests--with
       (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (cl-incf spawned) (vector 'doomed)))
