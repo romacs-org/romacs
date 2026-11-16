@@ -705,15 +705,27 @@ def tour(work, delegate_target):
         ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
         ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
         ('romacs_task_renew', {'taskId': '<the same taskId>', 'why': 'the tour'}, lambda t: '"taskId"' in t),
-        ('romacs_orchestration_issues', {'hours': 1}, lambda t: t.lstrip().startswith('{')),
+        ('romacs_orchestration_issues', {'hours': 1}, issues_summary),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
         # Refused, and says why: the tour's session received no message.
-        ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'}, lambda t: 'message' in t.lower()),
+        ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
+         lambda t: 'No message m-none among the ones this session received' in t),
     ]
 
 
 # Tour steps whose call is refused, its refusal checked.
 REFUSED_IN_TOUR = {'romacs_task_reply'}
+
+
+def issues_summary(text):
+    """Whether TEXT is romacs_orchestration_issues's summary: how many, by
+    kind, and where they are logged."""
+    try:
+        summary = json.loads(text)
+    except ValueError:
+        return False
+    return (isinstance(summary, dict) and isinstance(summary.get('total'), int)
+            and isinstance(summary.get('kinds'), list) and isinstance(summary.get('log'), str))
 
 
 DIFF = """--- a/greet.py
@@ -2390,7 +2402,8 @@ def real(args, base):
                         text = block.get('content')
                         text = ''.join(c.get('text', '') for c in text) if isinstance(text, list) else str(text)
                         outputs.setdefault(uses.get(block['tool_use_id']), (text, block.get('is_error')))
-        checked = {tool: tool in outputs and not outputs[tool][1] and check(outputs[tool][0]) for tool, _, check in steps}
+        checked = {tool: tool in outputs and bool(outputs[tool][1]) == (tool in REFUSED_IN_TOUR) and check(outputs[tool][0])
+                   for tool, _, check in steps}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         cost = [r['out'].get('total_cost_usd') for r in a.journal(sid)
                 if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
