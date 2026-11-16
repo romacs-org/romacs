@@ -35,6 +35,7 @@
 (require 'romacs-agent-ask)
 (require 'romacs-markdown)
 (require 'romacs-agent-turns)
+(require 'romacs-agent-drawn)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -581,6 +582,11 @@ much it gave when it is big.  Point is on the row."
   (when (or (plist-get payload :ref) (not (string-empty-p (string-trim (or (plist-get payload :output) "")))))
     (unless romacs-agent-ui--payloads (setq romacs-agent-ui--payloads (make-hash-table :test #'equal)))
     (puthash id payload romacs-agent-ui--payloads)
+    ;; The row names it too, as data: a turn kept as drawn opens it from
+    ;; its turn's row (`romacs-agent-ui--payload-at').
+    (let ((inhibit-read-only t))
+      (put-text-property (line-beginning-position) (line-end-position) 'romacs-agent-payload
+                         (list :id id :bytes (plist-get payload :bytes) :failed (plist-get payload :failed))))
     (let ((bytes (plist-get payload :bytes)))
       (when (and bytes (>= bytes romacs-agent-ui--big-output))
         (save-excursion
@@ -631,12 +637,40 @@ by its seq in the whole journal."
                            (funcall (romacs-agent--harness-get session :events) (romacs-agent--scratch session) out))
                :output)))
 
+(defun romacs-agent-ui--tool-mark (id)
+  "Where call ID's row has its mark: as drawn here, else found back from
+the transcript's end by its row's text (a turn kept as drawn)."
+  (or (and romacs-agent-ui--tool-lines (gethash id romacs-agent-ui--tool-lines))
+      (save-excursion
+        (goto-char romacs-agent-ui--end)
+        (when-let* ((found (text-property-search-backward 'romacs-agent-tool id #'equal)))
+          (let ((start (prop-match-beginning found)))
+            (goto-char start)
+            ;; The row's text follows its mark.
+            (while (and (> (point) (point-min)) (equal (get-text-property (1- (point)) 'romacs-agent-tool) id))
+              (backward-char))
+            (copy-marker (1- (point))))))))
+
+(defun romacs-agent-ui--payload-at (id mark)
+  "Call ID's payload as its row at MARK names it (`romacs-agent-payload'):
+read through its turn's row when opened."
+  (when-let* ((kept (get-text-property (save-excursion (goto-char mark) (line-beginning-position)) 'romacs-agent-payload))
+              ((equal (plist-get kept :id) id)))
+    (list :call (get-text-property (1+ mark) 'romacs-agent-call) :failed (plist-get kept :failed)
+          :bytes (plist-get kept :bytes) :ref (list :session romacs-agent-ui--session :id id :row t))))
+
 (defun romacs-agent-ui--open-payload (id &optional folded)
   "Draw call ID's kept payload under its row, shown or FOLDED, and forget
 it; nil when it has none, or no row any more."
-  (when-let* ((payload (and romacs-agent-ui--payloads (gethash id romacs-agent-ui--payloads)))
-              ((progn (remhash id romacs-agent-ui--payloads) t))
-              (mark (gethash id romacs-agent-ui--tool-lines)))
+  (when-let* ((kept (list (prog1 (and romacs-agent-ui--payloads (gethash id romacs-agent-ui--payloads))
+                             (when romacs-agent-ui--payloads (remhash id romacs-agent-ui--payloads)))))
+              (mark (romacs-agent-ui--tool-mark id))
+              (payload (or (car kept) (romacs-agent-ui--payload-at id mark)))
+              ((progn (let ((inhibit-read-only t))
+                        (save-excursion (goto-char mark)
+                                        (remove-text-properties (line-beginning-position) (line-end-position)
+                                                                '(romacs-agent-payload nil))))
+                      t)))
     (let* ((call (plist-get payload :call))
            (whole (romacs-agent-ui--payload-call payload))
            (body (romacs-agent-ui--call-body (romacs-agent-rows-get (car call)) (romacs-agent-ui--input (car whole))
@@ -649,7 +683,10 @@ it; nil when it has none, or no row any more."
              (goto-char mark)
              (forward-line 1)
              (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
-                                     'invisible (and folded '(romacs-agent-output)))))
+                                     'invisible (and folded '(romacs-agent-output))
+                                     ;; Its row's pointer, put back when its turn is kept.
+                                     'romacs-agent-opened (list :id id :bytes (plist-get payload :bytes)
+                                                                :failed (plist-get payload :failed)))))
                (add-face-text-property 0 (length text) 'romacs-agent-dim t text)
                (romacs-agent-ui--insert-at (point) (romacs-agent-ui--like mark text)))))))
       t)))
@@ -658,10 +695,17 @@ it; nil when it has none, or no row any more."
   "Draw, folded, the kept payloads of the calls whose rows are between
 START and END: what reads the transcript's text there (copy, quote)
 finds them as it found every output."
-  (when romacs-agent-ui--payloads
-    (dolist (id (hash-table-keys romacs-agent-ui--payloads))
-      (when-let* ((mark (gethash id romacs-agent-ui--tool-lines)))
-        (when (and (>= mark start) (< mark end)) (romacs-agent-ui--open-payload id t))))))
+  (dolist (id (romacs-agent-ui--payload-ids start end))
+    (romacs-agent-ui--open-payload id t)))
+
+(defun romacs-agent-ui--payload-ids (start end)
+  "The calls whose rows between START and END name a kept payload
+\(`romacs-agent-payload')."
+  (let ((ids nil) (at start))
+    (while (and at (< at end))
+      (when-let* ((kept (get-text-property at 'romacs-agent-payload))) (push (plist-get kept :id) ids))
+      (setq at (next-single-property-change at 'romacs-agent-payload nil end)))
+    (delete-dups (nreverse ids))))
 
 (defun romacs-agent-ui--tool-end (event failed)
   "EVENT ends its call, FAILED or not: the row's mark settles and the row
@@ -889,6 +933,8 @@ quiet calls as QUIET, a function, makes them anew in a copy."
   (when-let* ((bounds (romacs-agent-ui--run-bounds position))
               (head (car bounds))
               (run (get-text-property head 'romacs-agent-run-head))
+              ;; A run kept as drawn says only that it is one: long settled.
+              ((consp run))
               ((gethash id (plist-get run :quiet))))
     (let* ((calls (copy-hash-table (plist-get run :quiet)))
            (run (progn (funcall quiet calls) (plist-put (copy-sequence run) :quiet calls)))
@@ -1013,7 +1059,7 @@ name and a marker at its reply hint, nil where nothing can answer it.")
 
 (defun romacs-agent-ui--reply-hint (answered &optional reply)
   "A message's reply hint: ↩, dim, or ↩ ✓ when ANSWERED, a link to the
-REPLY's row, a marker, when this chat shows it."
+REPLY's row, the id of its call, when this chat shows it."
   (propertize (if answered "↩ ✓" "↩") 'face (if answered 'romacs-agent-done 'romacs-agent-dim)
               'romacs-agent-reply t
               'help-echo (cond (reply (substitute-command-keys
@@ -1063,7 +1109,8 @@ marker at the reply's row, when this chat shows it."
   (when-let* ((hint (cdr (gethash id (romacs-agent-ui--received)))))
     (save-excursion
       (let* ((inhibit-read-only t) (start (marker-position hint))
-             (answered (romacs-agent-ui--reply-hint t reply)))
+             (answered (romacs-agent-ui--reply-hint
+                        t (and reply (get-text-property (min (1+ reply) (point-max)) 'romacs-agent-tool)))))
         (delete-region start (next-single-property-change start 'romacs-agent-reply nil (point-max)))
         (romacs-agent-ui--insert-at start answered)
         (set-marker hint start)))))
@@ -1280,7 +1327,7 @@ prompt's does."
                    (dolist (file images)
                      (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file))))))
              (setq romacs-agent-ui--staying (delq start romacs-agent-ui--staying))
-             (romacs-agent-ui--mark-input start)
+             (romacs-agent-ui--mark-input start (and (not (plist-get event :steer)) (plist-get event :seq)))
              (set-marker start nil)))
          ;; The first prompt names the session: its buffer follows.
          (let ((name (format "*agent: %s*" (romacs-agent-title session))))
@@ -1359,6 +1406,8 @@ prompt's does."
                ;; Its turn over, nothing waits for its questions' answers;
                ;; a turn replayed is long over, and leaves today's alone.
                (unless romacs-agent-ui--replaying (romacs-agent-ask-close-all session))
+               ;; Ended here, it is kept as it was drawn.
+               (unless romacs-agent-ui--replaying (romacs-agent-ui--keep-drawn session))
                (unless romacs-agent-ui--replaying (romacs-agent-ui--trim))
                (when (get-buffer-window buffer 'visible) (romacs-agent-mark-seen session)))
         ;; Its supervisor never came up: an end, failed, seen as `done' is.
@@ -2247,16 +2296,19 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
                'face 'romacs-agent-dim 'mouse-face 'highlight 'romacs-agent-earlier t
                'keymap romacs-agent-ui--earlier-map 'help-echo "Draw earlier turns from the journal")))
 
-(defun romacs-agent-ui--mark-input (start)
+(defun romacs-agent-ui--mark-input (start &optional seq)
   "Mark the first character the current chat drew after START for an
 input, a prompt or a task's result arriving: what a journal's tail counts
-in turns (`romacs-agent--journal-tail'), the chat counts in its marks."
+in turns (`romacs-agent--journal-tail'), the chat counts in its marks; a
+prompt's SEQ, its turn's first, names the turn kept as drawn
+\(`romacs-agent-ui--keep-drawn')."
   (save-excursion
     (goto-char start)
     (skip-chars-forward "\n" romacs-agent-ui--end)
     (when (< (point) romacs-agent-ui--end)
       (let ((inhibit-read-only t))
-        (put-text-property (point) (1+ (point)) 'romacs-agent-input t)))))
+        (put-text-property (point) (1+ (point)) 'romacs-agent-input t)
+        (when seq (put-text-property (point) (1+ (point)) 'romacs-agent-first-seq seq))))))
 
 (defun romacs-agent-ui--input-starts (&optional most)
   "Where the current chat's drawn inputs start (`romacs-agent-ui--mark-input'),
@@ -2460,16 +2512,104 @@ row is before them.  Nil, drawing nothing, when it has no row."
           ;; Up to its first prompt, read from its start: its first row's.
           (when (> first 1)
             (romacs-agent-ui--replay-from session nil (romacs-agent--journal-head session)))))
-      (let ((romacs-agent-ui--replaying t))
-        (dolist (row rows)
-          (dolist (event (romacs-agent-ui--row-events session row))
-            (romacs-agent-ui--track-children session event)
-            (romacs-agent-ui--render session event))))
+      (romacs-agent-ui--insert-turns session rows)
       ;; The records after its rows: the turn under way, or turns ended
       ;; since their rows were last written.
       (when-let* ((after (plist-get page :after)) (from (romacs-agent--journal-after session after)))
         (romacs-agent-ui--replay-from session from)))
     t))
+
+(defvar romacs-agent-drawn-wanted-functions nil
+  "Functions called with a session's id and the first seqs of its turns
+with no form at this version (`romacs-agent-drawn-version'): a chat
+showing them waits for them, so they are drawn first.  The workers that
+draw turns call `romacs-agent-ui-drawn-ready' once kept.")
+
+(defface romacs-agent-placeholder '((t :inherit romacs-agent-dim :slant italic))
+  "A turn a worker is drawing.")
+
+(defun romacs-agent-ui--placeholder (first-seq)
+  "Put a row for the turn from FIRST-SEQ, not drawn yet, at the current
+chat's transcript end: it is a turn (`romacs-agent-input'), and its form
+takes its place (`romacs-agent-ui-drawn-ready')."
+  (romacs-agent-ui--insert-at
+   romacs-agent-ui--end
+   (propertize "⋯ drawing this turn\n" 'face 'romacs-agent-placeholder 'romacs-agent-placeholder first-seq
+               'romacs-agent-input t 'romacs-agent-first-seq first-seq)))
+
+(defun romacs-agent-ui--insert-turns (session rows)
+  "Insert SESSION's finished turns, ROWS, oldest first, as they were kept
+drawn (`romacs-agent-drawn-get'): a renderer runs for none.  A turn with
+no form, or one drawn by an older version, is wanted
+\(`romacs-agent-drawn-wanted-functions'): one with none shows a row
+saying so until its form comes."
+  (let* ((id (romacs-agent-id session))
+         (db (romacs-agent-turns--db))
+         (forms (if db (romacs-agent-drawn-get db id (mapcar (lambda (row) (plist-get row :first-seq)) rows))
+                  (make-hash-table)))
+         (wanted nil))
+    (dolist (row rows)
+      (let* ((first (plist-get row :first-seq)) (kept (gethash first forms)))
+        (if kept (romacs-agent-ui--insert-drawn (cdr kept)) (romacs-agent-ui--placeholder first))
+        (unless (and kept (>= (car kept) romacs-agent-drawn-version)) (push first wanted))))
+    (when (> (hash-table-count forms) 0) (romacs-agent-ui--fit-inserted))
+    (when wanted (run-hook-with-args 'romacs-agent-drawn-wanted-functions id (nreverse wanted)))))
+
+(defun romacs-agent-ui-drawn-ready (id first-seqs)
+  "The turns of session ID from FIRST-SEQS were kept drawn: where its chat
+shows a row waiting for one, it shows the turn.  An edit to no undo."
+  (when-let* ((session (romacs-agent-get id))
+              (buffer (romacs-agent-buffer session))
+              ((buffer-live-p buffer))
+              (db (romacs-agent-turns--db)))
+    (with-current-buffer buffer
+      (let ((forms (romacs-agent-drawn-get db id first-seqs)))
+        (romacs-agent-ui--unrecorded
+         (lambda ()
+           (save-excursion
+             (dolist (first first-seqs)
+               (goto-char (point-min))
+               (when-let* ((kept (gethash first forms))
+                           (found (text-property-search-forward 'romacs-agent-placeholder first #'eql)))
+                 ;; In before the row, then the row out: what marks the
+                 ;; transcript's end stays after the turn.
+                 (let ((inhibit-read-only t) (start (prop-match-beginning found))
+                       (length (- (prop-match-end found) (prop-match-beginning found))))
+                   (goto-char start)
+                   (romacs-agent-drawn-insert (cdr kept))
+                   (delete-region (point) (+ (point) length))
+                   (romacs-agent-ui--note-fills start (point)))))
+             (romacs-agent-ui--fit-inserted))))))))
+
+(defun romacs-agent-ui--drawn-form (start end)
+  "The transcript from START to END as a drawn form, the outputs opened
+there folded back to their rows' pointers (`romacs-agent-opened'): a
+kept turn holds no output."
+  (let ((text (buffer-substring start end)))
+    (with-temp-buffer
+      (insert text)
+      (let ((at (point-min)) (inhibit-read-only t))
+        (while (setq at (text-property-not-all at (point-max) 'romacs-agent-opened nil))
+          (let ((payload (get-text-property at 'romacs-agent-opened))
+                (next (next-single-property-change at 'romacs-agent-opened nil (point-max))))
+            (delete-region at next)
+            (when (> at (point-min))
+              (save-excursion
+                (goto-char (1- at))
+                (put-text-property (line-beginning-position) (line-end-position) 'romacs-agent-payload payload))))))
+      (romacs-agent-drawn-form (point-min) (point-max)))))
+
+(defun romacs-agent-ui--keep-drawn (session)
+  "Keep SESSION's turn that just ended in the current chat as it is drawn
+here, from its prompt (`romacs-agent-first-seq') to the transcript's end,
+beside its turn row: a chat opened later inserts it."
+  (when-let* ((db (romacs-agent-turns--db))
+              (found (save-excursion (goto-char romacs-agent-ui--end)
+                                     (text-property-search-backward 'romacs-agent-first-seq nil (lambda (_ v) v)))))
+    (condition-case err
+        (romacs-agent-drawn-put db (romacs-agent-id session) (prop-match-value found)
+                                (romacs-agent-ui--drawn-form (prop-match-beginning found) romacs-agent-ui--end))
+      (error (message "romacs-agent-ui: a turn not kept as drawn: %s" (error-message-string err))))))
 
 (defun romacs-agent-ui--item-questions (questions)
   "A turn row's QUESTIONS, a vector of tables (question, header, options,
@@ -2549,6 +2689,67 @@ Pure: it reads no record."
              :time (and time duration (+ time duration)) :reason (plist-get row :reason)
              :error (equal status "failed") :interrupted (equal status "interrupted"))))
     (nreverse events)))
+
+(defun romacs-agent-ui--insert-drawn (form)
+  "Insert FORM, a turn kept as drawn, at the current chat transcript's
+end: its text and properties as drawn, the composer after them."
+  (save-excursion
+    (goto-char romacs-agent-ui--end)
+    (let ((start (point)) (inhibit-read-only t))
+      (romacs-agent-drawn-insert form t)
+      (romacs-agent-ui--note-fills start (point)))))
+
+(defun romacs-agent-ui--note-fills (start end)
+  "The rules between START and END fit the window as the others do
+\(`romacs-agent-ui--refit-rules'), once the turns inserted with them are
+in (`romacs-agent-ui--fit-inserted')."
+  (let ((at start))
+    (while (setq at (text-property-any at end 'romacs-agent-rule-fill t))
+      (push (copy-marker at) romacs-agent-ui--fills)
+      (setq at (or (next-single-property-change at 'romacs-agent-rule-fill nil end) end)))))
+
+(defun romacs-agent-ui--fit-inserted ()
+  "Fit the current chat's rules to its window once, turns drawn elsewhere
+inserted: they came at the width they were drawn at."
+  (setq romacs-agent-ui--fitted nil)
+  (romacs-agent-ui--refit-rules))
+
+(defun romacs-agent-ui--turn-events (session turn)
+  "TURN as the events a turn kept as drawn is drawn from: a turn row
+\(`romacs-agent-turns-page''s, :items) unfolded, or its events from its
+input to its end, a call whose row is drawn without its output keeping
+only a pointer to it (`romacs-agent-ui--later-p')."
+  (if (and (consp turn) (keywordp (car turn))) (romacs-agent-ui--row-events session turn)
+    (mapcar (lambda (event)
+              (if (and (eq (plist-get event :type) 'tool) (memq (plist-get event :state) '(completed failed))
+                       (plist-get event :output) (romacs-agent-ui--later-p (plist-get event :name)))
+                  (let ((event (copy-sequence event)))
+                    (setq event (plist-put event :output-bytes (string-bytes (plist-get event :output))))
+                    (setq event (plist-put event :output-ref (list :session session :id (plist-get event :id) :row t)))
+                    (plist-put event :output nil))
+                event))
+            turn)))
+
+(defun romacs-agent-ui-draw-turn (session turn)
+  "SESSION's TURN drawn as its chat draws it, as a drawn form
+\(`romacs-agent-drawn-form'): TURN a turn row or its events
+\(`romacs-agent-ui--turn-events'), drawn in a buffer of its own,
+SESSION's chat untouched and no record read, for a worker that writes
+turn rows to keep with them (`romacs-agent-drawn-put')."
+  (let ((scratch (romacs-agent--scratch session))
+        (buffer (generate-new-buffer " *agent turn drawn*" t)))
+    (unwind-protect
+        (with-current-buffer buffer
+          (romacs-agent-chat-mode)
+          (setf (romacs-agent-buffer scratch) buffer)
+          (setq romacs-agent-ui--session scratch)
+          (romacs-agent-ui--reset)
+          (setq romacs-agent-ui--end (point-marker))
+          (let ((romacs-agent-ui--replaying t))
+            (dolist (event (romacs-agent-ui--turn-events scratch turn))
+              (romacs-agent-ui--editing (romacs-agent-ui--draw scratch event buffer))))
+          (romacs-agent-drawn-form (point-min) romacs-agent-ui--end))
+      (kill-buffer buffer))))
 
 (defun romacs-agent-ui--replay-from (session from &optional end)
   "Render SESSION's journal from place FROM (a record's, or nil for its
@@ -2733,8 +2934,9 @@ strings, compared by value."
 (defun romacs-agent-chat-goto-reply ()
   "Go to the reply that answered the message on this row."
   (interactive nil romacs-agent-chat-mode)
-  (let ((reply (or (get-text-property (point) 'romacs-agent-reply-at)
-                   (user-error "No reply to go to here"))))
+  (let ((reply (or (romacs-agent-ui--tool-mark (or (get-text-property (point) 'romacs-agent-reply-at)
+                                                   (user-error "No reply to go to here")))
+                   (user-error "The reply is no longer in this chat"))))
     (goto-char reply)
     (romacs-agent-ui--reveal (point))
     (when (eq (window-buffer) (current-buffer)) (recenter))))
@@ -3142,10 +3344,10 @@ what was there."
   "Fold (HIDE) or show every run's steps and every output: a run's thinking
 too where the run left no row.  An open run is left as it is: it settles
 folded.  Shown, the outputs kept for their rows are drawn first."
-  (when (and (not hide) romacs-agent-ui--payloads)
+  (unless hide
     ;; But the open run's: it settles folded, as the sweep below leaves it.
-    (dolist (id (hash-table-keys romacs-agent-ui--payloads))
-      (let ((mark (gethash id romacs-agent-ui--tool-lines)))
+    (dolist (id (romacs-agent-ui--payload-ids (point-min) romacs-agent-ui--end))
+      (let ((mark (romacs-agent-ui--tool-mark id)))
         (unless (and mark romacs-agent-ui--run
                      (equal (get-text-property mark 'romacs-agent-run) (plist-get romacs-agent-ui--run :id)))
           (romacs-agent-ui--open-payload id)))))
@@ -3618,6 +3820,11 @@ HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
   (buffer-live-p (romacs-agent-buffer session)))
 
 (add-hook 'romacs-agent-events-held-functions #'romacs-agent-ui--holds-journal-p)
+
+;; The keymaps a chat puts in its text, which a turn kept as drawn names.
+(mapc #'romacs-agent-drawn-keymap '(romacs-agent-chat-transcript-map romacs-agent-ui--link-map
+                                    romacs-agent-ui--compaction-map romacs-agent-ui--earlier-map
+                                    romacs-agent-ui--asked-map romacs-agent-ui--reply-link-map))
 
 (provide 'romacs-agent-ui)
 ;;; romacs-agent-ui.el ends here

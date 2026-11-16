@@ -24,6 +24,8 @@
 (require 'romacs-agent)
 (require 'romacs-agent-store)
 
+(defvar romacs-agent-turns-draw-function)
+
 (defconst romacs-agent-events--schema
   '("create table if not exists events (
        session text not null, seq integer not null, t real, kind text, record text not null)"
@@ -664,7 +666,7 @@ loop: a worker's start is the editor's time."
                           (isolate-spawn 'romacs-agent-events--migrate-job batch
                                          :name "romacs-agent migrate"
                                          :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
-                                                                 romacs-agent-turns cl-extra help-mode)
+                                                                 romacs-agent-turns romacs-agent-ui cl-extra help-mode)
                                          :bindings (romacs-agent--fold-bindings))
                         (error (list 'error err)))))
           (if (eq (car-safe future) 'error) (romacs-agent-events--migrated batch future)
@@ -676,8 +678,10 @@ loop: a worker's start is the editor's time."
 them and fill their turn rows.  The ids moved."
   (when-let* ((db (romacs-agent-events--db)))
     (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-events--worker-busy))
-    ;; It writes records; it never makes them a session's own.
-    (let ((romacs-agent-events-store nil))
+    ;; It writes records; it never makes them a session's own.  The turn
+    ;; rows it writes are drawn here, off the editor.
+    (let ((romacs-agent-events-store nil)
+          (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
       (delq nil (mapcar #'romacs-agent-events--migrate-one dirs)))))
 
 (defun romacs-agent-events--migrate-one (dir)
