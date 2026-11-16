@@ -49,7 +49,8 @@ fn world_build_prepares_the_store_once_and_needs_no_display() {
 /// A GUI world's key and records come from what a session reads, not from
 /// the environment `--world-build` ran in: one prepared with a launch
 /// font, SHELL and the runtime tree named outright restores for a session
-/// started with none of them (`--world-census` restores it read only). The
+/// started with none of them, or naming the tree through a symlink
+/// (`--world-census` restores it read only). The
 /// build says its key and recipe, and a launch whose recipe differs names
 /// the line that did.
 #[test]
@@ -84,6 +85,12 @@ fn a_gui_world_serves_a_session_however_it_was_started() {
     let restored = session(&["--world-census"]);
     assert!(restored.status.success(), "the world does not serve a session started without them: {}",
             String::from_utf8_lossy(&restored.stderr));
+    // The same tree named through a symlink, as a launcher's `current' link names it.
+    let link = home.join("current");
+    std::os::unix::fs::symlink(tree, &link).unwrap();
+    let linked = command(&["--world-census"]).env("ROMACS_RUNTIME_ROOT", &link).output().unwrap();
+    assert!(linked.status.success(), "the world does not serve a session naming its tree through a link: {}",
+            String::from_utf8_lossy(&linked.stderr));
     let missed = session(&["--world-census", "--geometry", "900x700"]);
     let said = String::from_utf8_lossy(&missed.stderr);
     assert!(!missed.status.success() && said.contains(r#""now":"geometry 900 700""#) && said.contains(r#""was":"geometry "#), "{said}");
