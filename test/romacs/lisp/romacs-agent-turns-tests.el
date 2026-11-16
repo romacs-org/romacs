@@ -178,7 +178,19 @@ call and result, an answer and a result a turn."
       (should-not (gethash "plan" tool))
       (should (equal (gethash "images" input) ["/a.png"]))
       (should (equal (gethash "from" (aref (gethash "messages" input) 0)) "parent"))
-      (should (equal (gethash "kind" (aref (gethash "messages" input) 0)) "message")))))
+      (should (equal (gethash "kind" (aref (gethash "messages" input) 0)) "message"))))
+  ;; Written and read back: a sender and a wake, plists, as objects.
+  (let* ((turn (list :items nil :by-id (make-hash-table :test #'equal)))
+         (message (list :id "m" :kind 'message :text "hi"
+                        :from (list :session "s1" :name "lead" :address "a@b")
+                        :wake (list :when 'end :after 3))))
+    (romacs-agent-turns--item turn (list :type 'input :seq 2 :text "x" :messages (list message)))
+    (let* ((text (romacs-agent--json (romacs-agent-turns--ended-items turn)))
+           (read (aref (gethash "messages" (aref (romacs-agent-turns--parse text) 0)) 0)))
+      (should (equal (gethash "name" (gethash "from" read)) "lead"))
+      (should (equal (gethash "address" (gethash "from" read)) "a@b"))
+      (should (equal (gethash "when" (gethash "wake" read)) "end"))
+      (should (= (gethash "after" (gethash "wake" read)) 3)))))
 
 (ert-deftest romacs-agent-turns-a-tool-keeps-its-rows-texts ()
   ;; Its row's texts made from its whole input and output, while the fill

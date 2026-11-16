@@ -98,6 +98,13 @@ under KEY in `romacs-agent-turns--bodies' replaced by its size in bytes."
         ((vectorp value) (vconcat (mapcar (lambda (v) (romacs-agent-turns--bounded v editing)) value)))
         ((null value) :null)
         ((or (numberp value) (memq value '(t :null :false))) value)
+        ;; A plist (a message's sender, its wake): an object of its fields.
+        ((and (consp value) (keywordp (car value)) (proper-list-p value))
+         (let ((object (romacs-mcp--object)))
+           (cl-loop for (key field) on value by #'cddr
+                    when (keywordp key)
+                    do (puthash (substring (symbol-name key) 1) (romacs-agent-turns--bounded field editing) object))
+           object))
         ;; Nothing else is JSON: said as text.
         (t (format "%S" value))))
 
