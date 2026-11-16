@@ -809,8 +809,14 @@ instances) is derived again when it changes.")
   :streamed-skip ()   optional: called in a buffer of journal lines, a
       function of a line's start and end saying whether it only streams
       what a whole record among them says again (Claude's `stream_event'
-      deltas before their `assistant' record): a chat's replay passes over
-      it unparsed (`romacs-agent--read-journal');
+      deltas before their `assistant' record), or what a chat never draws
+      (Codex's output deltas): a chat's replay passes over it unparsed
+      (`romacs-agent--read-journal');
+  :result-summary (START END)   optional: in a buffer of journal lines,
+      the calls the line from START to END ends, read from its text
+      unparsed, when it says nothing else: a list of (:id :failed :parent
+      :bytes :seq :time), else nil.  A chat's replay draws such calls'
+      ends from it and parses their outputs only when they are opened;
   :suggestions WORDS   optional: the words its command line asks for a
       predicted next prompt by (`romacs-agent--suggestion-words'), each a
       `suggestion' event (:text) after a turn's end;
