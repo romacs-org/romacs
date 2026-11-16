@@ -15,6 +15,10 @@
 ;; session no process has loaded gets its row from its manifest and kept
 ;; state (`romacs-agent-store-fill'), no journal read: a batch process
 ;; does it once (`romacs-agent-store-fill-soon').
+;;
+;; It also keeps which projects the board shows folded (`board_folds'),
+;; the one thing in it no record holds: a table of its own, kept when the
+;; sessions' table is made again; lost with the file, every project shows.
 
 ;;; Code:
 
@@ -36,7 +40,8 @@
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
-    "create index if not exists sessions_parent on sessions (parent)")
+    "create index if not exists sessions_parent on sessions (parent)"
+    "create table if not exists board_folds (project text primary key)")
   "The table and its indexes, made when the database is opened.")
 
 (defconst romacs-agent-store--version 2
@@ -154,11 +159,13 @@ moment later, unless AGAIN says this is that try."
 state (`romacs-agent--kept-text'); no journal is read.  Nil with no
 manifest."
   (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
-    (let* ((kept (let ((file (expand-file-name "state.eld" dir)))
-                   (and (file-readable-p file)
-                        (with-temp-buffer
-                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                          (ignore-errors (plist-get (read (current-buffer)) :fields))))))
+    (let* ((kept (let ((text (or (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))
+                                 (let ((file (expand-file-name "state.eld" dir)))
+                                   (and (file-readable-p file)
+                                        (with-temp-buffer
+                                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                          (buffer-string)))))))
+                   (and text (ignore-errors (plist-get (car (read-from-string text)) :fields)))))
            (field (lambda (slot) (cdr (assq slot kept))))
            (options (gethash "options" manifest))
            (harness (gethash "harness" manifest))
@@ -235,7 +242,7 @@ manifest."
 (defun romacs-agent-store-fill-soon ()
   "Fill the database in a batch process of this build, off the editor, when
 no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
-  (when (and (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open))
+  (when (and (not noninteractive) (not (process-live-p romacs-agent-store--filling)) (romacs-agent-store--open))
     (setq romacs-agent-store--filling
           (make-process
            :name "romacs-agent-store-fill" :noquery t :connection-type 'pipe
@@ -296,6 +303,25 @@ on one loads it, `romacs-agent-find')."
                   (sqlite-select db (concat "select id, dir, harness, provider, model, title, cwd, parent, state,"
                                             " last_time, cost, input_seq, done_seq, seen_seq, settled_seq"
                                             " from sessions order by last_time desc"))))))
+
+;;; The board's folds
+
+(defun romacs-agent-store-folded ()
+  "The projects the board shows folded, their directories; nil when
+there is no database."
+  (when-let* ((db (romacs-agent-store--open)))
+    (condition-case err (mapcar #'car (sqlite-select db "select project from board_folds"))
+      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
+
+(defun romacs-agent-store-fold (project folded)
+  "Keep PROJECT, a directory, FOLDED on the board or not; quietly nothing
+when the database cannot be written."
+  (when-let* ((db (romacs-agent-store--open)))
+    (condition-case err
+        (sqlite-execute db (if folded "insert or ignore into board_folds values (?)"
+                             "delete from board_folds where project = ?")
+                        (list project))
+      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
 (add-hook 'romacs-agent-kept-functions #'romacs-agent-store-put)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.

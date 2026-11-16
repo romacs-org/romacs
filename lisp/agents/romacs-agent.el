@@ -28,6 +28,8 @@
 (require 'json)
 (require 'romacs-mcp)
 (declare-function romacs-agent-show "romacs-agent-ui")
+(declare-function romacs-agent-turns-fold-put "romacs-agent-turns" (id text))
+(declare-function romacs-agent-turns-fold "romacs-agent-turns" (id))
 
 (defgroup romacs-agent nil
   "Agent sessions in Romacs."
@@ -3384,9 +3386,10 @@ neither callback runs after it."
 
 ;;; A session's state, kept
 
-;; A server restoring a session reads its journal only after the state
-;; it kept: what the journal's records had folded the session into, as of
-;; one of them (state.eld in its directory).  It is written once the editor
+;; A server restoring a session reads its records only after the state
+;; it kept: what its records had folded the session into, as of one of
+;; them, kept in its rows of the agents' database, one copy a session
+;; (romacs-agent-turns; an earlier build's state.eld is moved in once).  It is written once the editor
 ;; is idle after a record ending a turn or a run where its records are the
 ;; live ones, and after a restore or an attachment has caught up with the
 ;; journal: a record is handled whole before any timer runs, so the state
@@ -3414,7 +3417,26 @@ The others are what its journal's records fold into.")
 wrote or read it: it is not written again for the same seq.")
 
 (defun romacs-agent--kept-file (session)
+  "Where an earlier build kept SESSION's state: read once, then removed
+\(`romacs-agent--kept-get')."
   (expand-file-name "state.eld" (romacs-agent-dir session)))
+
+(defun romacs-agent--kept-put (session text)
+  "Keep TEXT as SESSION's state (`romacs-agent--kept-text'), its only copy,
+in its rows (`romacs-agent-turns-fold-put'); non-nil when kept."
+  (romacs-agent-turns-fold-put (romacs-agent-id session) text))
+
+(defun romacs-agent--kept-get (session)
+  "SESSION's state as kept, as text, or nil.  One an earlier build kept in
+its directory is moved into its rows, the first time, and its file removed."
+  (or (romacs-agent-turns-fold (romacs-agent-id session))
+      (let ((file (romacs-agent--kept-file session)))
+        (when (file-readable-p file)
+          (let ((text (with-temp-buffer
+                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                        (buffer-string))))
+            (when (romacs-agent--kept-put session text) (delete-file file))
+            text)))))
 
 (defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a
@@ -3453,14 +3475,28 @@ its records left it (`romacs-agent--keep-soon')."
                (eq (romacs-agent-get (romacs-agent-id session)) session)
                (not (eql seq (gethash session romacs-agent--kept))))
       (when-let* ((text (romacs-agent--kept-text session state)))
-        (let ((file (romacs-agent--kept-file session)) (coding-system-for-write 'utf-8-unix))
-          ;; Its own: a worker folding it may write it too.
-          (let ((temp (format "%s.%d.tmp" file (emacs-pid))))
-            (with-temp-file temp (insert text))
-            (set-file-modes temp #o600)
-            (rename-file temp file t)))
-        (puthash session seq romacs-agent--kept)
-        (run-hook-with-args 'romacs-agent-kept-functions session state)))))
+        (if (not (romacs-agent--kept-put session text))
+            ;; Not kept (the database another writer's a while): tried again
+            ;; at the next idle moment, a few times, as of the same record.
+            (when (< (cl-incf (alist-get session romacs-agent--keep-tries 0)) romacs-agent--keep-retries)
+              (romacs-agent--keep-again session seq state))
+          (setf (alist-get session romacs-agent--keep-tries nil t) nil)
+          (puthash session seq romacs-agent--kept)
+          (run-hook-with-args 'romacs-agent-kept-functions session state))))))
+
+(defun romacs-agent--keep-again (session seq state)
+  "Keep SESSION's state at the editor's next idle moment as of record SEQ,
+STATE its state as its records left it: what failed to be kept, unless a
+record since is waiting to be kept in its place."
+  (unless (assq session romacs-agent--keeping)
+    (unless romacs-agent--keeping (run-with-idle-timer 0.5 nil #'romacs-agent--keep-pending))
+    (push (list session seq state) romacs-agent--keeping)))
+
+(defconst romacs-agent--keep-retries 20
+  "How many times a session's state that could not be kept is tried again.")
+
+(defvar romacs-agent--keep-tries nil
+  "Each session whose state could not be kept, to the times it was tried.")
 
 (defvar romacs-agent--keeping nil
   "The sessions whose state is kept at the editor's next idle moment,
@@ -3517,12 +3553,12 @@ finds any seq at once: never `beyond'."
   (if (romacs-agent-events-p session) (romacs-agent-events-after session seq)
     (romacs-agent--journal-file-after session seq limit)))
 
-(defun romacs-agent--journal-file-after (session seq &optional limit)
-  "The byte at which SESSION's journal goes on after its record SEQ, looked
-for from the journal's end in growing spans; nil when no line there is
-record SEQ (`romacs-agent--record-line-end').  With LIMIT, a number of
-bytes, `beyond' when the journal's last LIMIT bytes hold no such line: it
-is further back, if anywhere."
+(defun romacs-agent--journal-file-after (session seq &optional limit at)
+  "The byte at which SESSION's journal goes on after its record SEQ (with
+AT, the byte it begins at), looked for from the journal's end in growing
+spans; nil when no line there is record SEQ (`romacs-agent--record-line-end').
+With LIMIT, a number of bytes, `beyond' when the journal's last LIMIT bytes
+hold no such line: it is further back, if anywhere."
   (let* ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
          (size (file-attribute-size (file-attributes journal)))
          (span 16384) (found nil))
@@ -3539,7 +3575,7 @@ is further back, if anywhere."
               (goto-char (point-min))
               (narrow-to-region (min (point-max) (1+ (line-end-position))) (point-max)))
             (setq found (let ((end (romacs-agent--record-line-end seq)))
-                          (cond (end (min size (+ start end)))
+                          (cond (end (min size (if at (+ start (line-beginning-position) -1) (+ start end))))
                                 ((= start 0) 'none)
                                 ((and limit (<= start (- size limit))) 'beyond))))
             (setq span (* 4 span))))))
@@ -3647,9 +3683,36 @@ read.")
   "Where to replay SESSION's records from to draw its last TURNS prompts
 between places BEGIN and END: (FROM . PROMPTS), as
 `romacs-agent--journal-file-tail' says (BUDGET its), of whichever holds
-them."
-  (if (romacs-agent-events-p session) (romacs-agent-events-tail session turns end begin)
+them.  SQLite's records' last turns, when it has rows for them, are where
+its turns' rows say they begin (romacs-agent-turns): no record is read to
+find it.  A journal's tail is read from its end, within BUDGET: its rows
+would only name a seq to search the same bytes for, further back when
+they lag."
+  (if (romacs-agent-events-p session)
+      (or (and (not end) (not begin) (romacs-agent--turns-tail session turns budget))
+          (romacs-agent-events-tail session turns end begin))
     (romacs-agent--journal-file-tail session turns end begin budget)))
+
+(defun romacs-agent--turns-tail (session turns &optional budget)
+  "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
+record, from its turns' rows; nil when it has fewer rows than that, none
+earlier (all of it is then drawn), or for a journal when it begins more
+than BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
+by default; `none', no bound)."
+  ;; Bounded as the journal's own tail is (`none', not at all): looked for
+  ;; only within the bound's bytes.
+  (let ((bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes))))
+    (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
+                (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+                ;; One turn more than drawn: what is before it is earlier turns.
+                ((> (length seqs) turns))
+                (seq (nth (1- turns) seqs))
+                (from (if (romacs-agent-events-p session) seq
+                        (romacs-agent--journal-file-after session seq bound t)))
+                ((integerp from))
+                ((or (romacs-agent-events-p session) (not bound)
+                     (<= (- (romacs-agent--journal-end session) from) bound))))
+      (cons from turns))))
 
 (defun romacs-agent--journal-file-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
@@ -3745,11 +3808,8 @@ no string in a record can hold, and only those are parsed."
 
 (defun romacs-agent--read-kept (session)
   "SESSION's kept state as written, or nil when there is none it can read."
-  (let ((file (romacs-agent--kept-file session)))
-    (when (file-readable-p file)
-      (with-temp-buffer
-        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-        (ignore-errors (read (current-buffer)))))))
+  (when-let* ((text (romacs-agent--kept-get session)))
+    (ignore-errors (car (read-from-string text)))))
 
 (defun romacs-agent--restore-kept (session &optional limit)
   "Put SESSION's kept state back, when this build's session record has
@@ -3867,8 +3927,9 @@ folds every journal in the editor."
   :type '(choice (const :tag "Always in the editor" nil) integer)
   :group 'romacs-agent)
 
-(defcustom romacs-agent-fold-jobs 4
-  "How many journals worker VMs fold at once."
+(defcustom romacs-agent-fold-jobs (max 4 (- (num-processors) 4))
+  "How many journals worker VMs fold at once: by default all but four of
+this machine's processors, at least four."
   :type 'natnum
   :group 'romacs-agent)
 
@@ -4062,11 +4123,11 @@ is not loaded: non-nil when something waits on it (a watch kept, a
 resume due), so it is loaded as a restore runs.")
 
 (defun romacs-agent--unloaded-p (dir)
-  "Whether the session recorded in DIR is left unloaded: listed, with
-neither its kept state nor its supervisor's socket, and nothing waiting
-on it (`romacs-agent-pending-functions')."
+  "Whether the session recorded in DIR is left unloaded at a start: listed,
+no supervisor's socket (a live one reattaches), and nothing waiting on it
+\(`romacs-agent-pending-functions').  Its kept state, if any, is read when
+it is first asked for: a start reads rows only."
   (and romacs-agent-listed-p
-       (not (file-exists-p (expand-file-name "state.eld" dir)))
        (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
        (funcall romacs-agent-listed-p dir)
        (not (and romacs-agent-pending-functions
@@ -4312,4 +4373,5 @@ started: a request repeated after a lost reply finds its session.")
 (require 'romacs-agent-watch)
 (require 'romacs-agent-store)
 (require 'romacs-agent-events)
+(require 'romacs-agent-turns)
 ;;; romacs-agent.el ends here

@@ -40,6 +40,9 @@
   "The database, its records' tables made; nil without SQLite."
   (when-let* ((db (romacs-agent-store--open)))
     (unless (eq romacs-agent-events--made db)
+      ;; Before any record is in it: a database made to give back its
+      ;; freed pages while it is small, as it is when first opened here.
+      (romacs-agent-events--compact-schema db)
       (dolist (statement romacs-agent-events--schema) (sqlite-execute db statement))
       (setq romacs-agent-events--made db))
     db))
@@ -166,11 +169,20 @@ them, which hold PROMPTS prompts."
 ;;; Writing, with no supervisor running
 
 (defun romacs-agent-events-append (session record)
-  "Add RECORD (a table with its seq and time) to SESSION's records."
+  "Add RECORD (a table with its seq and time) to SESSION's records, waiting
+a while for a database another writer holds (a compaction) rather than
+losing it."
   (when-let* ((db (romacs-agent-events--db)))
-    (sqlite-execute db "insert into events values (?, ?, ?, ?, ?)"
-                    (list (romacs-agent-id session) (gethash "seq" record) (gethash "t" record)
-                          (romacs-agent-events--kind record) (romacs-agent--json record)))))
+    (let ((tries 0) (done nil))
+      (while (not done)
+        (condition-case err
+            (progn (sqlite-execute db "insert into events values (?, ?, ?, ?, ?)"
+                                   (list (romacs-agent-id session) (gethash "seq" record) (gethash "t" record)
+                                         (romacs-agent-events--kind record) (romacs-agent--json record)))
+                   (setq done t))
+          (error (if (and (< (cl-incf tries) 50) (string-match-p "locked\\|busy" (error-message-string err)))
+                     (sleep-for 0.1)
+                   (signal (car err) (cdr err)))))))))
 
 ;;; Importing a journal
 
@@ -235,6 +247,114 @@ goes to the backup directory.  Non-nil when SESSION is imported."
         (make-directory dir t)
         (set-file-modes dir #o700)
         (rename-file journal (expand-file-name (concat (romacs-agent-id session) ".jsonl") dir) t)))))
+
+;;; Compaction
+
+;; A harness streams a message's text as deltas, then sends the whole
+;; message: once that has come, its deltas say nothing it does not.  A
+;; session no supervisor runs has them removed, here, off the editor; a
+;; message that never came whole (an interrupted turn) keeps its deltas.
+;; Claude tags a delta's stream event with its message's id
+;; (`api_message_id'), the whole message an `assistant' record of that id;
+;; Codex a delta with its item's id, the whole item `item/completed'.
+
+(defconst romacs-agent-events--compact-statements
+  '("create temp table if not exists whole (id text primary key, seq integer) without rowid"
+    "delete from temp.whole"
+    ;; Each message that came whole, and the last of its whole records.
+    "insert or replace into temp.whole
+       select json_extract(record, '$.out.message.id'), max(seq) from events
+       where session = ?1 and kind = 'out' and seq < ?2 and json_extract(record, '$.out.type') = 'assistant'
+         and json_extract(record, '$.out.message.id') is not null
+       group by 1"
+    "insert or replace into temp.whole
+       select json_extract(record, '$.out.params.item.id'), max(seq) from events
+       where session = ?1 and kind = 'out' and seq < ?2 and json_extract(record, '$.out.method') = 'item/completed'
+         and json_extract(record, '$.out.params.item.id') is not null
+       group by 1"
+    ;; The deltas of those messages, from before their whole record.
+    "delete from events where session = ?1 and kind = 'out' and seq < ?2
+       and ((json_extract(record, '$.out.type') = 'stream_event'
+             and json_extract(record, '$.out.event.type') = 'content_block_delta'
+             and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.api_message_id')))
+            or (json_extract(record, '$.out.method') = 'item/agentMessage/delta'
+                and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.params.itemId'))))")
+  "What compacting a session removes, its records before seq ?2: the
+deltas of each message whose whole message came after them.  The last
+statement's count is the records removed.")
+
+(defconst romacs-agent-events--vacuum-limit (* 64 1024 1024)
+  "The largest database made to give back its freed pages by itself: making
+it so rewrites it once, holding every writer meanwhile.")
+
+(defun romacs-agent-events--compact-schema (db)
+  "Make DB's tables for compaction: what each session is compacted to, and,
+while it is still small (`romacs-agent-events--vacuum-limit'), its pages
+given back as they free (auto_vacuum incremental, set once, one rewrite)."
+  (sqlite-execute db "create table if not exists compacted (session text primary key, seq integer) without rowid")
+  (unless (or (equal (caar (sqlite-select db "pragma auto_vacuum")) 2)
+              (> (* (caar (sqlite-select db "pragma page_count")) (caar (sqlite-select db "pragma page_size")))
+                 romacs-agent-events--vacuum-limit))
+    (sqlite-pragma db "auto_vacuum = incremental")
+    (sqlite-execute db "vacuum")))
+
+(defun romacs-agent-events-compact (id)
+  "Compact the session ID names, its records up to its last, in one
+transaction; the number of records removed."
+  (when-let* ((db (romacs-agent-events--db)))
+    (romacs-agent-events--compact-schema db)
+    (let ((end (1+ (or (caar (sqlite-select db "select max(seq) from events where session = ?" (list id))) 0)))
+          (removed 0))
+      (sqlite-execute db "begin immediate")
+      (condition-case err
+          (progn
+            ;; Checked holding the write lock: a supervisor started after it
+            ;; writes nothing until this commits, and what this removes is
+            ;; from before it.
+            (when (file-exists-p (romacs-agent--host-socket id))
+              (error "Its supervisor runs"))
+            (dolist (statement romacs-agent-events--compact-statements)
+              (setq removed (sqlite-execute db statement
+                                            (and (string-search "?" statement) (list id end)))))
+            (sqlite-execute db "insert or replace into compacted values (?, ?)" (list id (1- end)))
+            (sqlite-execute db "commit"))
+        (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
+      removed)))
+
+(defun romacs-agent-events--compactable ()
+  "The ids of imported sessions with records since they were last
+compacted and no supervisor running: none is writing to them."
+  (when-let* ((db (romacs-agent-events--db)))
+    (romacs-agent-events--compact-schema db)
+    (cl-remove-if (lambda (id) (file-exists-p (romacs-agent--host-socket id)))
+                  (mapcar #'car (sqlite-select
+                                 db (concat "select imported.session from imported"
+                                            " left join compacted on compacted.session = imported.session"
+                                            " where coalesce(compacted.seq, 0) <"
+                                            " (select max(seq) from events where events.session = imported.session)"))))))
+
+(defun romacs-agent-events-compact-all ()
+  "Compact every compactable session, then give back the freed pages when
+over a quarter of the database is free; the records removed."
+  (let ((removed 0))
+    (dolist (id (romacs-agent-events--compactable))
+      (setq removed (+ removed (condition-case err (romacs-agent-events-compact id)
+                                (error (message "romacs-agent-events: compacting %s: %s" id (error-message-string err)) 0)))))
+    (when-let* ((db (romacs-agent-events--db))
+                ;; Only a database made to give its pages back can: one left
+                ;; as it was reuses them.
+                ((equal (caar (sqlite-select db "pragma auto_vacuum")) 2))
+                (free (caar (sqlite-select db "pragma freelist_count")))
+                (pages (caar (sqlite-select db "pragma page_count")))
+                ((> (* 4 free) pages)))
+      ;; In steps, outside any session's transaction: others write meanwhile.
+      (while (> (caar (sqlite-select db "pragma freelist_count")) 0)
+        (sqlite-execute db "pragma incremental_vacuum(2000)")))
+    removed))
+
+(defun romacs-agent-events-compact-batch ()
+  "`romacs-agent-events-compact-all' in a batch process, its count printed."
+  (princ (format "romacs-agent-events: compacted, %d records removed\n" (romacs-agent-events-compact-all))))
 
 (provide 'romacs-agent-events)
 ;;; romacs-agent-events.el ends here

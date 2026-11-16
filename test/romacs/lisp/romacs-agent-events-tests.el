@@ -210,4 +210,97 @@ turns, and its journal's file; a state root of its own."
           (should-error (romacs-agent-events-async session #'ignore)))
         (should (= closed 2))))))
 
+(defun romacs-agent-events-tests--delta (seq id text)
+  (romacs-agent-events-tests--line
+   seq "out" (romacs-mcp--object "api_message_id" id "type" "stream_event"
+                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" text)))))
+
+(defun romacs-agent-events-tests--reply (session)
+  "SESSION's reply as a fold of its records leaves it."
+  (let ((scratch (romacs-agent--scratch session)) (romacs-agent-event-functions nil))
+    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
+    (romacs-agent-reply scratch)))
+
+(ert-deftest romacs-agent-events-compaction-keeps-what-a-fold-needs ()
+  ;; Compacted: a completed message's deltas are gone, an interrupted
+  ;; one's kept, and a fold leaves the same reply.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--line 2 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "q" "role" "user")
+                                                                                          "romacsRequest" 1 "type" "user"))
+                             (romacs-agent-events-tests--delta 3 "m1" "Hel")
+                             (romacs-agent-events-tests--delta 4 "m1" "lo")
+                             (romacs-agent-events-tests--line
+                              5 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content"
+                                                                                        (vector (romacs-mcp--object "type" "text" "text" "Hello")))))
+                             (romacs-agent-events-tests--line 6 "out" (romacs-mcp--object "type" "result" "result" "Hello"))
+                             (romacs-agent-events-tests--line 7 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "q2" "role" "user")
+                                                                                          "romacsRequest" 2 "type" "user"))
+                             (romacs-agent-events-tests--delta 8 "m2" "Interrupt")
+                             (romacs-agent-events-tests--delta 9 "m2" "ed"))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (let ((before (romacs-agent-events-tests--reply session)))
+         (should (= (romacs-agent-events-compact (romacs-agent-id session)) 2))
+         (should (equal (romacs-agent-events-tests--seqs session) '(1 2 5 6 7 8 9)))
+         (should (equal (romacs-agent-events-tests--reply session) before))
+         ;; Compacted to its last record: not compacted again until it has more.
+         (should-not (member (romacs-agent-id session) (romacs-agent-events--compactable))))))))
+
+(ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
+  ;; Its supervisor's socket there when compacting holds the write lock:
+  ;; nothing is removed.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--delta 2 "m1" "Hi")
+                             (romacs-agent-events-tests--line
+                              3 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content" []))))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (let ((socket (romacs-agent--host-socket (romacs-agent-id session))))
+         (make-directory (file-name-directory socket) t)
+         (write-region "" nil socket nil 'silent)
+         (should-error (romacs-agent-events-compact (romacs-agent-id session)))
+         (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
+         (delete-file socket))))))
+
+(ert-deftest romacs-agent-events-a-large-database-is-compacted-as-it-is ()
+  ;; Too large to be made to give pages back: compacted all the same, its
+  ;; freed pages left for reuse, and done.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--vacuum-limit 0))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--delta 2 "m1" (make-string 20000 ?x))
+                             (romacs-agent-events-tests--line
+                              3 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content" []))))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (should (= (romacs-agent-events-compact-all) 1))
+       (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 0))))))
+
+(ert-deftest romacs-agent-events-a-new-database-gives-pages-back ()
+  ;; Its first opening for records, before any is in it, makes it one that
+  ;; gives back its freed pages.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil))
+    (romacs-agent-events-tests--with-session
+     0 (lambda (_session _journal)
+         (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 2))))))
+
 ;;; romacs-agent-events-tests.el ends here
