@@ -89,7 +89,7 @@ records alone with RECORDS-ONLY, and the buffer."
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-drawn-tests--with 12
     (should (= (romacs-agent-turns-fill session) 12))
-    (let* ((drawn (romacs-agent-drawn-tests--drawn session))
+    (let* ((drawn (romacs-agent-drawn-tests--drawn session t))
            (forms (romacs-agent-drawn-tests--forms session 5))
            (chat (cdr drawn)))
       (dolist (form forms)
@@ -140,5 +140,48 @@ records alone with RECORDS-ONLY, and the buffer."
     (sqlite-execute db "update turn_drawn set version = 0 where first_seq = 9")
     (should (equal (romacs-agent-drawn-stale db) '(("s" 9))))
     (sqlite-close db)))
+
+(ert-deftest romacs-agent-drawn-gaps-wait-then-swap-in ()
+  ;; A chat opened with turns no worker drew yet: a row each, wanted
+  ;; first; kept, each takes its row's place, as drawn.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 3
+    (should (= (romacs-agent-turns-fill session) 3))
+    (let* ((wanted nil)
+           (romacs-agent-drawn-wanted-functions (list (lambda (id seqs) (push (cons id seqs) wanted))))
+           (rows (plist-get (romacs-agent-turns-page session nil 10) :rows))
+           (drawn (romacs-agent-drawn-tests--drawn session)))
+      (should (equal (cdar wanted) (sort (mapcar (lambda (row) (plist-get row :first-seq)) rows) #'<)))
+      (should (= (cl-count ?⋯ (car drawn)) 3))
+      ;; Kept by a worker: they take the rows' places.
+      (dolist (row rows)
+        (romacs-agent-drawn-put (romacs-agent-turns--db) id (plist-get row :first-seq) (romacs-agent-ui-draw-turn session row)))
+      (setf (romacs-agent-buffer session) (cdr drawn))
+      (romacs-agent-ui-drawn-ready id (mapcar (lambda (row) (plist-get row :first-seq)) rows))
+      (with-current-buffer (cdr drawn)
+        (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+          (should-not (string-search "⋯" text))
+          (should (equal text (car (romacs-agent-drawn-tests--drawn session t))))))
+      (kill-buffer (cdr drawn)))))
+
+(ert-deftest romacs-agent-drawn-a-live-turn-is-kept-as-drawn ()
+  ;; A turn drawn live is kept as it was drawn at its end, by its prompt's
+  ;; seq, and a chat opened later inserts it.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-drawn-tests--with 1
+    (should (= (romacs-agent-turns-fill session) 1))
+    (let ((buffer (romacs-agent-ui--make-chat session)))
+      (with-current-buffer buffer
+        (setq romacs-agent-ui--unfilled nil)
+        (dolist (event (list (list :type 'input :text "live one" :request 2 :seq 40 :last t)
+                             (list :type 'delta :text "said live" :message "m9" :seq 41 :last t)
+                             (list :type 'done :duration 1.0 :seq 42 :last t)))
+          (romacs-agent-ui--render session event)))
+      (let ((kept (gethash 40 (romacs-agent-drawn-get (romacs-agent-turns--db) id '(40)))))
+        (should kept)
+        (with-temp-buffer
+          (romacs-agent-drawn-insert (cdr kept))
+          (should (string-prefix-p "> live one\nsaid live\n" (buffer-string)))))
+      (kill-buffer buffer))))
 
 ;;; romacs-agent-drawn-tests.el ends here
