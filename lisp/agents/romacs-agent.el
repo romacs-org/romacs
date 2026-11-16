@@ -517,7 +517,7 @@ the user, not a tool call to approve."
 (defun romacs-agent--live-p (session)
   "Whether SESSION's records are its live ones: the registered session,
 its replay over.  A copy drawn again, or a replay, answers nothing."
-  (and (eq (romacs-agent-get (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
+  (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
 
 (defun romacs-agent--allow-tool-calls (session)
   "Answer every request SESSION's harness waits on that no user is asked
@@ -1979,7 +1979,7 @@ goes."
   (when-let* ((next (romacs-agent--harness-get session :next))
               ;; The live session only: a copy replaying the journal
               ;; (a chat drawn again) writes nothing.
-              ((eq (romacs-agent-get (romacs-agent-id session)) session))
+              ((eq (romacs-agent-loaded (romacs-agent-id session)) session))
               ((not (romacs-agent-startup-pending session)))
               ((process-live-p (romacs-agent-connection session)))
               (step (funcall next session)))
@@ -2335,7 +2335,7 @@ says: one that has ended its journal, or been cancelled, is left as it is."
 
 (defun romacs-agent--reattach (session)
   "Attach SESSION again, unless something has meanwhile."
-  (when (and (eq (romacs-agent-get (romacs-agent-id session)) session)
+  (when (and (eq (romacs-agent-loaded (romacs-agent-id session)) session)
              (not (romacs-agent-cancelled session))
              (not (process-live-p (romacs-agent-connection session)))
              (eq (romacs-agent-state session) 'detached))
@@ -3461,7 +3461,7 @@ SESSION's last fork note, a new one says how far the fork now goes."
   (when-let* ((forking (romacs-agent--harness-get session :forks))
               ((funcall forking session))
               (forked (plist-get (romacs-agent-options session) :forked))
-              (source (romacs-agent-find (car forked)))
+              (source (romacs-agent-get (car forked)))
               ((> (romacs-agent-seq source) (cadr forked))))
     (romacs-agent--note session (romacs-agent--fork-note source (cadr forked)))))
 
@@ -3771,7 +3771,7 @@ not again for the seq it was kept at.  STATE, when given, is its state as
 its records left it (`romacs-agent--keep-soon')."
   (let ((seq (romacs-agent-seq session)))
     (when (and (> seq 0) (romacs-agent-dir session) (file-directory-p (romacs-agent-dir session))
-               (eq (romacs-agent-get (romacs-agent-id session)) session)
+               (eq (romacs-agent-loaded (romacs-agent-id session)) session)
                (not (eql seq (gethash session romacs-agent--kept))))
       (when-let* ((text (romacs-agent--kept-text session state)))
         (if (not (romacs-agent--kept-put session text))
@@ -4422,7 +4422,7 @@ binds, is restored anew.")
   "When non-nil, a function of a session's directory saying whether a
 listing has it (romacs-agent-store): such a session with no kept state
 and no supervisor running is left unloaded, its journal unread, until it
-is asked for (`romacs-agent-find').")
+is asked for (`romacs-agent-get').")
 
 (defvar romacs-agent-pending-functions nil
   "Called with a session's directory and its manifest (a table) while it
@@ -4460,16 +4460,6 @@ when any was loaded."
           (romacs-agent--load dir)
           (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))))
     loaded))
-
-(defun romacs-agent-find (id)
-  "The session ID names, loaded from its record when it was left unloaded;
-nil when none is recorded."
-  (or (romacs-agent-get id)
-      (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f-]+\\'" id)
-           (let ((dir (expand-file-name id (romacs-agent--state-root))))
-             (when (file-exists-p (expand-file-name "manifest.json" dir))
-               (romacs-agent--load dir)
-               (romacs-agent-get id))))))
 
 (defun romacs-agent-know-sessions ()
   "Know every recorded session, cheaply after the first time: restored
@@ -4616,11 +4606,21 @@ listening, serve their relays, sweep what ended processes left, and say so."
         (lambda (a b) (string> (or (romacs-agent-dir a) "") (or (romacs-agent-dir b) "")))))
 
 (defun romacs-agent-get (id)
-  "The session ID names.  While `romacs-agent-restore-soon' loads them, one
-it has not reached yet is loaded at once: a session attached meanwhile may
-ask for its children."
-  (or (gethash id romacs-agent--sessions)
-      (and romacs-agent--restore-pending (romacs-agent-load-session id))))
+  "The session ID names, loaded from its record the first time it is asked
+for when this process does not have it loaded yet (one a start left a row,
+or has not reached): every caller that names a session by its id gets it.
+Nil when none is recorded."
+  (or (gethash id romacs-agent--sessions) (romacs-agent-load-session id)))
+
+(defun romacs-agent-loaded (id)
+  "The session ID names when this process has it loaded, else nil: for a
+check of whether a session in hand is the registered one, and for labels
+that should not load a session to be drawn.  `romacs-agent-get' is the
+lookup that finds any session."
+  (gethash id romacs-agent--sessions))
+
+(put 'romacs-agent-loaded 'romacs-lint-hint
+     "only a session already loaded: for identity checks and labels; `romacs-agent-get' finds any session, loading a row")
 
 (defvar romacs-agent--requests (make-hash-table :test #'equal)
   "A delegating session's id and a client request id, to the session it
@@ -4631,7 +4631,7 @@ started: a request repeated after a lost reply finds its session.")
 
 (defun romacs-agent-children (session)
   "The sessions SESSION delegated."
-  (cl-remove-if-not (lambda (child) (eq (romacs-agent-get (romacs-agent-id child)) child))
+  (cl-remove-if-not (lambda (child) (eq (romacs-agent-loaded (romacs-agent-id child)) child))
                     (gethash (romacs-agent-id session) romacs-agent--children)))
 
 (defun romacs-agent--index (session)
@@ -4644,7 +4644,7 @@ started: a request repeated after a lost reply finds its session.")
 
 (defun romacs-agent-requested (parent request)
   "The session PARENT started with client request id REQUEST, or nil."
-  (when-let* ((id (gethash (cons parent request) romacs-agent--requests))) (romacs-agent-find id)))
+  (when-let* ((id (gethash (cons parent request) romacs-agent--requests))) (romacs-agent-get id)))
 
 (romacs-mcp-register-method
  "romacs/hello"
@@ -4656,10 +4656,10 @@ started: a request repeated after a lost reply finds its session.")
    ;; A session's own: not one of the endpoint's anonymous peers.
    ;; One a start left a row (its harness idle meanwhile): loaded now,
    ;; its first use.
-   (when (romacs-agent-find (gethash "session" params)) (romacs-mcp-own-peer peer))
+   (when (romacs-agent-get (gethash "session" params)) (romacs-mcp-own-peer peer))
    ;; A known session another process is attached to: its relay belongs
    ;; there, through its route, and retries until the route leads there.
-   (when-let* ((session (romacs-agent-find (gethash "session" params))))
+   (when-let* ((session (romacs-agent-get (gethash "session" params))))
      (unless (process-live-p (romacs-agent-connection session))
        ;; Its harness runs and this editor is where its relay is led, yet
        ;; it is not attached here: attached now, so the relay's next try
