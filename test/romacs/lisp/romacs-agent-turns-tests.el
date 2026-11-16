@@ -136,6 +136,60 @@ call and result, an answer and a result a turn."
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
+;; A fill draws the rows it writes where rows are drawn, not in the editor;
+;; a redraw draws what has no form of this version.
+(ert-deftest romacs-agent-turns-a-fill-draws-its-rows-off-the-editor ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-ui)
+  (let* ((root (make-temp-file "romacs-turns-" t))
+         (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state") (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                      process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-turns--made nil) (romacs-agent-drawn--made nil)
+         (romacs-agent-events-store nil)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (id "a1a1a1a1-2222-4333-8444-5555666677dd")
+         (dir (expand-file-name id (romacs-agent--state-root))))
+    (unwind-protect
+        (progn
+          (make-directory dir t)
+          (romacs-agent--write-json (expand-file-name "manifest.json" dir)
+                                    (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "cwd" root "title" "turns"
+                                                        "titleAuto" :false "argv" [] "options" (romacs-mcp--object)))
+          (cl-flet ((journal (turns)
+                      (let ((coding-system-for-write 'utf-8-unix))
+                        (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) (romacs-agent-turns-tests--records turns) "")
+                                      nil (expand-file-name "journal.jsonl" dir) nil 'silent)))
+                    (session () (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root
+                                                    :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+                    (forms () (sqlite-select (romacs-agent-turns--db) "select first_seq, version from turn_drawn where session = ? order by first_seq" (list id))))
+            ;; In the editor: rows, no forms.
+            (journal 1)
+            (should (= (romacs-agent-turns-fill (session)) 1))
+            (should-not (ignore-errors (forms)))
+            ;; Where rows are drawn: each row its form, in its transaction.
+            (journal 3)
+            (let ((romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
+              (should (= (romacs-agent-turns-fill (session)) 2))
+              (should (equal (forms) `((7 ,romacs-agent-drawn-version) (12 ,romacs-agent-drawn-version))))
+              (let ((form (caar (sqlite-select (romacs-agent-turns--db) "select form from turn_drawn where session = ? and first_seq = 7" (list id)))))
+                (with-temp-buffer
+                  (romacs-agent-drawn-insert form)
+                  (should (string-search "answer 2 about zebras" (buffer-string)))))
+              ;; The first, drawn by none, and one of an older drawing: drawn again.
+              (sqlite-execute (romacs-agent-turns--db) "update turn_drawn set version = 0 where session = ? and first_seq = 12" (list id))
+              (should (= (romacs-agent-turns-redraw (session)) 2))
+              (should (equal (mapcar #'car (forms)) '(2 7 12)))
+              (should (cl-every (lambda (row) (eql (cadr row) romacs-agent-drawn-version)) (forms)))
+              (should (= (romacs-agent-turns-redraw (session)) 0)))
+            ;; A drawing that fails leaves its row, with no form.
+            (sqlite-execute (romacs-agent-turns--db) "delete from turn_drawn")
+            (let ((romacs-agent-turns-draw-function (lambda (&rest _) (error "Broken"))))
+              (should (= (romacs-agent-turns-redraw (session)) 0))
+              (should-not (forms))
+              (should (= (romacs-agent-turns-count (session)) 3)))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory root t))))
+
 (ert-deftest romacs-agent-turns-an-item-keeps-a-bounded-input ()
   ;; Long strings cut; an edit's bodies held as their sizes, at any depth.
   (let* ((long (make-string 3000 ?a))

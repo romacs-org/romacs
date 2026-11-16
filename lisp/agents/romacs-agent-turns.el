@@ -19,6 +19,7 @@
 (require 'cl-lib)
 (require 'romacs-agent)
 (require 'romacs-agent-store)
+(require 'romacs-agent-drawn)
 
 (defconst romacs-agent-turns--schema
   '("create table if not exists turns (
@@ -283,9 +284,44 @@ interrupted."
 read of records in SQLite holds a snapshot no write can be made inside.
 `:none' outside a fill.")
 
+(defvar romacs-agent-turns-draw-function nil
+  "Called with a session and one of its turn rows, as
+`romacs-agent-turns-page' gives them, for the row's drawn form
+\(`romacs-agent-drawn-form'): bound where turn rows are written off the
+editor, by a worker VM or the fill's batch process, to
+`romacs-agent-ui-draw-turn'.  Nil in the editor, which draws no finished
+turn but the one it just showed.")
+
+(defun romacs-agent-turns--page-row (row)
+  "ROW, a turn's columns first_seq, last_seq, t, prompt, reply, items, cost,
+images, messages, duration, status, reason and request, as
+`romacs-agent-turns-page' gives it."
+  (pcase-let ((`(,first ,last ,time ,prompt ,reply ,items ,cost ,images ,messages ,duration ,status ,reason ,request) row))
+    (list :first-seq first :last-seq last :t time :prompt prompt :reply reply
+          :items (romacs-agent-turns--parse items) :cost cost
+          :images (romacs-agent-turns--parse images) :messages (romacs-agent-turns--parse messages)
+          :duration duration :status status :reason reason :request request)))
+
+(defconst romacs-agent-turns--page-columns
+  "first_seq, last_seq, t, prompt, reply, items, cost, images, messages, duration, status, reason, request"
+  "The columns of a row `romacs-agent-turns--page-row' reads.")
+
+(defun romacs-agent-turns--draw (session row)
+  "SESSION's turn ROW (as `romacs-agent-turns--put' writes it) drawn, or nil:
+no drawing here, or the drawing failed (the chat then shows the turn as
+not drawn yet)."
+  (when romacs-agent-turns-draw-function
+    (pcase-let ((`(,_ ,first ,last ,time ,prompt ,reply ,_tools ,cost ,items ,images ,messages ,duration ,status ,reason ,request) row))
+      (condition-case err
+          (funcall romacs-agent-turns-draw-function session
+                   (romacs-agent-turns--page-row (list first last time prompt reply items cost images messages
+                                                       duration status reason request)))
+        (error (message "romacs-agent-turns: drawing %s %s: %s" (car row) first (error-message-string err)) nil)))))
+
 (defun romacs-agent-turns--write (session last)
-  "Write SESSION's turn under way, ended at seq LAST, as its row: at once,
-or as a fill ends (`romacs-agent-turns--held')."
+  "Write SESSION's turn under way, ended at seq LAST, as its row, drawn
+where rows are drawn (`romacs-agent-turns-draw-function'): at once, or as
+a fill ends (`romacs-agent-turns--held')."
   (when-let* ((turn (gethash session romacs-agent-turns--open)))
     (remhash session romacs-agent-turns--open)
     (let* ((done (plist-get turn :done))
@@ -299,17 +335,19 @@ or as a fill ends (`romacs-agent-turns--held')."
                       (and started (plist-get done :time) (- (plist-get done :time) started))
                       (romacs-agent-turns--status done) (plist-get done :reason)
                       (plist-get turn :request))))
-      (if (listp romacs-agent-turns--held) (push row romacs-agent-turns--held)
-        (romacs-agent-turns--put (list row))))))
+      (let ((entry (cons row (romacs-agent-turns--draw session row))))
+        (if (listp romacs-agent-turns--held) (push entry romacs-agent-turns--held)
+          (romacs-agent-turns--put (list entry)))))))
 
-(defun romacs-agent-turns--put (rows)
-  "Write ROWS, each a turn's row and its text's index, in one transaction:
-never two of one."
+(defun romacs-agent-turns--put (entries)
+  "Write ENTRIES, each (ROW . FORM): a turn's row, its text's index and its
+drawn form when it has one (`romacs-agent-drawn-put'), in one
+transaction: never two of one, nor a form without its row."
   (when-let* ((db (romacs-agent-turns--db)))
     (condition-case err
         (progn
           (sqlite-execute db "begin immediate")
-          (dolist (row rows)
+          (pcase-dolist (`(,row . ,form) entries)
             ;; Its folded state, on it, is left as it is.
             (sqlite-execute db (concat "insert into turns (session, first_seq, last_seq, t, prompt, reply, tools, cost,"
                                        " items, images, messages, duration, status, reason, request)"
@@ -323,7 +361,8 @@ never two of one."
             (when (sqlite-select db "select 1 from sqlite_master where name = 'turns_fts'")
               (sqlite-execute db "delete from turns_fts where session = ? and first_seq = ?" (list (nth 0 row) (nth 1 row)))
               (sqlite-execute db "insert into turns_fts values (?, ?, ?, ?, ?)"
-                              (list (nth 0 row) (nth 1 row) (nth 4 row) (nth 5 row) (nth 6 row)))))
+                              (list (nth 0 row) (nth 1 row) (nth 4 row) (nth 5 row) (nth 6 row))))
+            (when form (romacs-agent-drawn-put db (nth 0 row) (nth 1 row) form)))
           (sqlite-execute db "commit"))
       (error (ignore-errors (sqlite-execute db "rollback"))
              (message "romacs-agent-turns: %s" (error-message-string err))))))
@@ -401,12 +440,52 @@ they came.  The number written."
 
 (defvar romacs-agent-events-store)
 
+(defconst romacs-agent-turns--redraw-chunk 50
+  "The forms a redraw writes a transaction.")
+
+(defun romacs-agent-turns-redraw (session)
+  "Draw SESSION's turn rows that have no form of this drawing's version
+\(`romacs-agent-drawn-version'), from their rows, where rows are drawn
+\(`romacs-agent-turns-draw-function'), `romacs-agent-turns--redraw-chunk'
+forms a transaction.  The number drawn."
+  (let ((db (romacs-agent-turns--db)) (id (romacs-agent-id session)) (drawn 0))
+    (when (and db romacs-agent-turns-draw-function)
+      (let* ((firsts (mapcar #'car (sqlite-select db "select first_seq from turns where session = ? and first_seq > 0 order by first_seq" (list id))))
+             (kept (romacs-agent-drawn-get db id firsts))
+             (todo (cl-remove-if (lambda (first) (eql (car (gethash first kept)) romacs-agent-drawn-version)) firsts)))
+        (while todo
+          (let* ((chunk (seq-take todo romacs-agent-turns--redraw-chunk))
+                 (rows (sqlite-select db (format "select %s from turns where session = ? and first_seq in (%s)"
+                                                 romacs-agent-turns--page-columns (mapconcat (lambda (_) "?") chunk ","))
+                                      (cons id chunk)))
+                 (forms (delq nil (mapcar (lambda (row)
+                                            (when-let* ((form (condition-case err
+                                                                  (funcall romacs-agent-turns-draw-function session (romacs-agent-turns--page-row row))
+                                                                (error (message "romacs-agent-turns: drawing %s %s: %s" id (car row) (error-message-string err))
+                                                                       nil))))
+                                              (cons (car row) form)))
+                                          rows))))
+            (setq todo (nthcdr romacs-agent-turns--redraw-chunk todo))
+            (when forms
+              (condition-case err
+                  (progn
+                    (sqlite-execute db "begin immediate")
+                    (pcase-dolist (`(,first . ,form) forms) (romacs-agent-drawn-put db id first form))
+                    (sqlite-execute db "commit")
+                    (cl-incf drawn (length forms)))
+                (error (ignore-errors (sqlite-execute db "rollback"))
+                       (message "romacs-agent-turns: %s" (error-message-string err)))))))))
+    drawn))
+
 (defun romacs-agent-turns-fill-batch ()
   "`romacs-agent-turns-fill' for the sessions the command line names (all
 recorded ones, with none), in a batch process: each fills from where its
-rows end, nothing when its records end there too.  It moves no
-session's records to SQLite: the editor alone does."
-  (let ((written 0) (romacs-agent-events-store nil) (t0 (float-time))
+rows end, nothing when its records end there too, and its rows with no
+form of this drawing's version are drawn (`romacs-agent-turns-redraw').
+It moves no session's records to SQLite: the editor alone does."
+  (require 'romacs-agent-ui)
+  (let ((written 0) (drawn 0) (romacs-agent-events-store nil) (t0 (float-time))
+        (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn)
         (ids (prog1 command-line-args-left (setq command-line-args-left nil))))
     (dolist (dir (if ids (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
                    (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
@@ -418,8 +497,10 @@ session's records to SQLite: the editor alone does."
           ;; session loaded beside its running supervisor has an older seq.
           (setq written (+ written (condition-case err (romacs-agent-turns-fill session)
                                      (error (message "romacs-agent-turns: %s: %s" dir (error-message-string err)) 0))))
+          (setq drawn (+ drawn (condition-case err (romacs-agent-turns-redraw session)
+                                 (error (message "romacs-agent-turns: %s: %s" dir (error-message-string err)) 0))))
           (remhash (romacs-agent-id session) romacs-agent--sessions))))
-    (princ (format "romacs-agent-turns: %d turns written in %.0f s\n" written (- (float-time) t0)))))
+    (princ (format "romacs-agent-turns: %d turns written, %d drawn again, in %.0f s\n" written drawn (- (float-time) t0)))))
 
 (defvar romacs-agent-turns--filling nil "The batch process catching the rows up, while it runs.")
 
@@ -494,17 +575,11 @@ which its records are the turn under way, drawn from them; and :more,
 whether it has rows before this page's."
   (when-let* ((db (romacs-agent-turns--db)))
     (let* ((id (romacs-agent-id session)) (limit (or limit 20))
-           (rows (sqlite-select db (concat "select first_seq, last_seq, t, prompt, reply, items, cost, images, messages, duration,"
-                                           " status, reason, request from turns where session = ? and first_seq > 0"
+           (rows (sqlite-select db (concat "select " romacs-agent-turns--page-columns
+                                           " from turns where session = ? and first_seq > 0"
                                            (if before " and first_seq < ?" "") " order by first_seq desc limit ?")
                                 (append (list id) (and before (list before)) (list (1+ limit))))))
-      (list :rows (mapcar (lambda (row)
-                            (pcase-let ((`(,first ,last ,time ,prompt ,reply ,items ,cost ,images ,messages ,duration ,status ,reason ,request) row))
-                              (list :first-seq first :last-seq last :t time :prompt prompt :reply reply
-                                    :items (romacs-agent-turns--parse items) :cost cost
-                                    :images (romacs-agent-turns--parse images) :messages (romacs-agent-turns--parse messages)
-                                    :duration duration :status status :reason reason :request request)))
-                          (seq-take rows limit))
+      (list :rows (mapcar #'romacs-agent-turns--page-row (seq-take rows limit))
             :after (romacs-agent-turns--last session)
             :more (> (length rows) limit)))))
 
