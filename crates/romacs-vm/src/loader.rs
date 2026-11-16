@@ -248,6 +248,43 @@ impl Vm {
         }
         Ok(found)
     }
+    /// The directories `load-path` names, as a load searches them (lread.c
+    /// openp expands the name against each entry): an entry under `~'
+    /// through the user's home, nil and a relative entry against
+    /// `default-directory`, expanded; an absolute one as written. A compile
+    /// gets these, so it searches what this session would, and an
+    /// artifact's library resolutions are checked against the same names.
+    pub(crate) fn load_path_roots(&mut self) -> Result<Vec<String>> {
+        let slot = self.names["load-path"];
+        let entries = self.list_values(self.slots[slot].value)?;
+        let mut roots = Vec::with_capacity(entries.len());
+        let mut directory = None;
+        for entry in entries {
+            if entry != Value::NIL {
+                let dir = self.source_string(entry)?.to_owned();
+                let dir = self.expand_home_name(&dir)?.unwrap_or(dir);
+                if Path::new(&dir).is_absolute() {
+                    roots.push(dir);
+                    continue;
+                }
+            }
+            let directory = match directory {
+                Some(directory) => directory,
+                None => {
+                    let slot = self.slot("default-directory");
+                    *directory.insert(self.variable_value(slot)?)
+                }
+            };
+            let name = if entry == Value::NIL { directory } else { entry };
+            // A name only a file name handler expands is kept as written.
+            let expanded = self.expand_file_name_legacy(name, directory).unwrap_or_else(|_| {
+                self.propagated_escape = None;
+                name
+            });
+            roots.push(self.source_string(expanded)?.to_owned());
+        }
+        Ok(roots)
+    }
     fn resolve_source(&mut self, name: &str, nosuffix: bool) -> Result<Option<(PathBuf, bool)>> {
         // lread.c openp: a name under `~' is absolute, expanded through
         // the user's home, never looked up along `load-path'.
@@ -257,19 +294,7 @@ impl Vm {
         let roots = if path.is_absolute() {
             vec![PathBuf::new()]
         } else {
-            let slot = self.names["load-path"];
-            self.list_values(self.slots[slot].value)?
-                .into_iter()
-                .map(|v| {
-                    if v == Value::NIL {
-                        return Ok(PathBuf::from("."));
-                    }
-                    // openp expands the name against each entry, so an
-                    // entry under `~' searches the home directory.
-                    let dir = self.source_string(v)?.to_owned();
-                    Ok(PathBuf::from(self.expand_home_name(&dir)?.unwrap_or(dir)))
-                })
-                .collect::<Result<Vec<_>>>()?
+            self.load_path_roots()?.into_iter().map(PathBuf::from).collect()
         };
         for root in roots {
             let base = root.join(path);
