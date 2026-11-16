@@ -314,15 +314,21 @@ written; an error, what it wrote removed, when its last line is cut short."
          (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
          (size (or (file-attribute-size (file-attributes journal)) 0))
          (count 0) (rows nil) (offset 0))
-    (when (sqlite-select db "select 1 from imported where session = ?" (list id))
-      (error "Importing %s: imported already" id))
     (cl-flet ((add (row)
                 (push row rows)
                 (cl-incf count)
                 (when (>= (length rows) romacs-agent-events--chunk)
                   (romacs-agent-events--write db romacs-agent-events--insert (nreverse rows))
                   (setq rows nil))))
-      (romacs-agent-events--write db "delete from events where session = ?" (list (list id)))
+      ;; Not imported, and what an earlier one wrote removed: in one
+      ;; transaction, so no import lands between them.
+      (sqlite-execute db "begin immediate")
+      (condition-case err
+          (progn (when (sqlite-select db "select 1 from imported where session = ?" (list id))
+                   (error "Importing %s: imported already" id))
+                 (sqlite-execute db "delete from events where session = ?" (list id))
+                 (sqlite-execute db "commit"))
+        (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
       (condition-case err
           (progn
             ;; A slice of lines at a time, each kept as it is: only one not
@@ -521,8 +527,10 @@ over a quarter of the database is free; the records removed."
     removed))
 
 (defun romacs-agent-events-compact-batch ()
-  "`romacs-agent-events-compact-all' in a batch process, its count printed."
-  (princ (format "romacs-agent-events: compacted, %d records removed\n" (romacs-agent-events-compact-all))))
+  "`romacs-agent-events-compact-all' in a batch process, its count printed.
+It moves no session's records to SQLite: the editor alone does."
+  (let ((romacs-agent-events-store nil))
+    (princ (format "romacs-agent-events: compacted, %d records removed\n" (romacs-agent-events-compact-all)))))
 
 ;;; Migration, in worker VMs
 
@@ -659,7 +667,9 @@ loop: a worker's start is the editor's time."
 them and fill their turn rows.  The ids moved."
   (when-let* ((db (romacs-agent-events--db)))
     (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-events--worker-busy))
-    (delq nil (mapcar #'romacs-agent-events--migrate-one dirs))))
+    ;; It writes records; it never makes them a session's own.
+    (let ((romacs-agent-events-store nil))
+      (delq nil (mapcar #'romacs-agent-events--migrate-one dirs)))))
 
 (defun romacs-agent-events--migrate-one (dir)
   "Move the session recorded in DIR to SQLite; its id, or nil when it is

@@ -366,6 +366,30 @@ turns, and its journal's file; a state root of its own."
          (should-not (file-exists-p journal))
          (should-not (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id))))))))
 
+(ert-deftest romacs-agent-events-a-background-fill-moves-nothing ()
+  ;; A turn fill in its batch process loads a session whose load writes a
+  ;; note (a pending selection settled): the note goes to its journal; the
+  ;; session is not moved to SQLite, which the editor alone does.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events-store t))
+    (romacs-agent-events-tests--with-session
+     2
+     (lambda (session journal)
+       (let ((id (romacs-agent-id session)) (size (file-attribute-size (file-attributes journal))))
+         (remhash id romacs-agent--sessions)
+         (cl-letf (((symbol-function 'romacs-agent--load)
+                    (lambda (_dir)
+                      (puthash id session romacs-agent--sessions)
+                      (romacs-agent--note session (romacs-mcp--object "type" "selection"))))
+                   ((symbol-function 'princ) #'ignore))
+           (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
+         (should-not (romacs-agent-events-p session))
+         (should (file-exists-p journal))
+         (should (> (file-attribute-size (file-attributes journal)) size)))))))
+
 (ert-deftest romacs-agent-events-a-flip-finds-the-journal-as-written ()
   ;; Made its own only if its journal is as it was written from and no
   ;; supervisor runs; else what was written is removed, the session in its

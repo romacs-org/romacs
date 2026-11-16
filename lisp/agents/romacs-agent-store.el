@@ -223,9 +223,13 @@ manifest."
               (ignore-errors (sqlite-execute db "commit"))))))
       count)))
 
+(defvar romacs-agent-events-store)
+
 (defun romacs-agent-store-fill-batch ()
-  "`romacs-agent-store-fill' in a batch process, its count printed."
-  (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill))))
+  "`romacs-agent-store-fill' in a batch process, its count printed.  It
+moves no session's records to SQLite: the editor alone does."
+  (let ((romacs-agent-events-store nil))
+    (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill)))))
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
 
