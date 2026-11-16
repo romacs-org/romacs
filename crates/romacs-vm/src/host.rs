@@ -660,24 +660,29 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    static FOUND: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
-    let (root, truename) = FOUND.get_or_init(|| {
-        let root = located_runtime().unwrap_or_else(|why| {
-            eprintln!("romacs: no usable runtime tree: {why}\n  \
-                       Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
-                       or name one in a file `{RUNTIME_RECORD}' beside the executable.");
-            std::process::exit(2)
-        });
+    found_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    })
+}
+
+/// [`runtime_root`], or why there is none, for a lookup that has a
+/// fallback: a process with no runtime tree goes on.  Found once.
+fn found_runtime() -> Result<PathBuf, String> {
+    static FOUND: std::sync::OnceLock<Result<(PathBuf, PathBuf), String>> = std::sync::OnceLock::new();
+    let (root, truename) = FOUND.get_or_init(|| located_runtime().map(|root| {
         let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
         (root, truename)
-    });
+    })).as_ref().map_err(String::clone)?;
     if building() {
         host_fact("runtime-root", path_json(truename));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
-    root.clone()
+    Ok(root.clone())
 }
 
 /// [`runtime_root`], or why there is none.
@@ -759,29 +764,46 @@ fn runtime_tree(root: &Path) -> Result<(), String> {
     }
 }
 
+/// The link in a runtime tree naming the Romacs source tree it was
+/// installed from: an installed runtime holds Lisp, not Rust.
+pub const SOURCE_LINK: &str = "source";
+
+/// The Romacs source tree this build came from, `source-directory':
+/// `ROMACS_SOURCE_DIRECTORY` when set, read as each process's own as SHELL
+/// is (`per_process_env`: a world build reads and records none, and a
+/// restored VM asks again, `Vm::world_reinit`), none if it names no tree;
+/// else the tree the runtime tree's [`SOURCE_LINK`] names, else the build's
+/// own root while it is a git checkout of one, else none.  A gate's build
+/// slot mirrors a checkout without `.git`, so a build made there names no
+/// tree it would not find again.  Every way of starting a session finds the
+/// same one, as the link belongs to the runtime tree.  The checks are kinds
+/// of entry, not stats: a world built while the tree is edited stays valid
+/// when a file under it is added or renamed, or a commit touches `.git`.
+pub fn source_directory() -> Option<PathBuf> {
+    source_directory_from(per_process_env("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
+}
+
+/// [`source_directory`] from the variable's VALUE, the runtime tree RUNTIME
+/// gives if there is one, and the build's ROOT.
+fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Option<PathBuf>, root: &Path) -> Option<PathBuf> {
+    let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
+    if let Some(dir) = value.filter(|d| !d.is_empty()).map(PathBuf::from) {
+        // Absolute, so a buffer's own directory never resolves it.
+        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
+    }
+    // The tree itself, so its files are visited under their own names.
+    if let Some(linked) = runtime().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
+        return canonicalize(&linked).ok();
+    }
+    (tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
+}
+
 /// The checkout this crate was built from: a compile-time path that no
 /// installed system has, kept for development binaries under `target/`.
 /// It is the manifest directory's grandparent itself, not `DIR/../..`:
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
-/// The Romacs source tree this build came from, `source-directory':
-/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
-/// build's own root while it is a git checkout of one, else none.  A gate's
-/// build slot mirrors a checkout without `.git`, so a build made there
-/// names no tree it would not find again.  Both checks are kinds of entry,
-/// not stats: a world built while the tree is edited stays valid when a
-/// file under it is added or renamed, or a commit touches `.git`.
-pub fn source_directory() -> Option<PathBuf> {
-    let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
-    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
-        // Absolute, so a buffer's own directory never resolves it.
-        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
-    }
-    let root = build_root();
-    (tree(&root) && entry_type(&root.join(".git")).is_ok()).then_some(root)
-}
-
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -3050,6 +3072,33 @@ mod tests {
             .collect();
         assert!(!probes.is_empty(), "the tree checks are recorded");
         assert!(probes.iter().all(|p| p == "IsDir" || p == "entry-type"), "{probes:?}, found {found:?}");
+    }
+    /// An installed runtime holds no Rust: its `source` link names the
+    /// tree, before the build's own checkout; the variable comes first.
+    #[test]
+    fn source_directory_follows_the_runtime_trees_link() {
+        let dir = std::env::temp_dir().join(format!("romacs-source-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tree = |name: &str| {
+            let tree = dir.join(name);
+            std::fs::create_dir_all(tree.join("crates/romacs-vm/src/prims")).unwrap();
+            std::fs::canonicalize(tree).unwrap()
+        };
+        let (checkout, build, named) = (tree("checkout"), tree("build"), tree("named"));
+        std::fs::create_dir(build.join(".git")).unwrap();
+        let runtime = dir.join("runtime");
+        std::fs::create_dir(&runtime).unwrap();
+        std::os::unix::fs::symlink(&checkout, runtime.join(SOURCE_LINK)).unwrap();
+        let found = |value: Option<&Path>, runtime: &Path| {
+            source_directory_from(value.map(|v| v.as_os_str().to_owned()), || Some(runtime.to_path_buf()), &build)
+        };
+        assert_eq!(found(None, &runtime), Some(checkout.clone()), "the link before the build's checkout");
+        assert_eq!(found(Some(&named), &runtime), Some(named.clone()), "the variable before the link");
+        assert_eq!(found(None, &dir.join("unlinked")), Some(build.clone()), "no link: the build's checkout");
+        assert_eq!(source_directory_from(None, || None, &build), Some(build.clone()), "no runtime tree: the build's checkout");
+        std::fs::remove_dir_all(&checkout).unwrap();
+        assert_eq!(found(None, &runtime), Some(build.clone()), "a link to no tree: the build's checkout");
+        let _ = std::fs::remove_dir_all(&dir);
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]
