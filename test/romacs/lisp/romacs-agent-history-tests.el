@@ -50,7 +50,7 @@
                 (should (equal (plist-get item :path) path))
                 (should (equal (plist-get item :id) (plist-get (car scanned) :id)))))
             ;; In an editor: the rows, the next scan aside.
-            (let ((noninteractive nil) (asked 0))
+            (let ((noninteractive nil) (romacs-agent-writer-queued nil) (asked 0))
               (cl-letf (((symbol-function 'romacs-agent-history-index-soon) (lambda () (cl-incf asked)))
                         ((symbol-function 'romacs-agent-history--scan) (lambda () (error "Scanned here"))))
                 (romacs-agent-history-list))

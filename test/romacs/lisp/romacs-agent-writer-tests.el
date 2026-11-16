@@ -93,6 +93,11 @@ connection of its own, as the writer's process has."
             (should db)
             (should (romacs-agent-store-readonly-p))
             (should-error (sqlite-execute db "insert into board_folds values ('/p')")))
+          ;; Opened to write before writes were queued (early in a start):
+          ;; opened again, to read, once they are.
+          (let ((romacs-agent-writer-queued nil)) (should (romacs-agent-store--open)) (should-not (romacs-agent-store-readonly-p)))
+          (should (romacs-agent-store--open))
+          (should (romacs-agent-store-readonly-p))
           ;; A launch waits for the writer's import.
           (let ((ran nil))
             (romacs-agent-events-then session (lambda () (push (romacs-agent-events-p session) ran)))

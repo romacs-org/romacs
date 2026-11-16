@@ -53,7 +53,8 @@
 as a cache is.")
 
 (defvar romacs-agent-store--db nil
-  "The open database, as (FILE . DB), or nil.")
+  "The open database, as ((FILE . QUEUED) . DB), or nil: QUEUED when it
+was opened to read, its writes queued to the writer.")
 
 (defun romacs-agent-store--file ()
   (expand-file-name "sessions.sqlite" (romacs-agent--state-root)))
@@ -72,13 +73,14 @@ the writer's to make.")
 this build has no SQLite or it cannot be opened.  In the editor, whose
 writes are queued to the writer, it is opened to read, once the writer
 has made it."
-  (let ((file (romacs-agent-store--file)))
-    (if (equal (car romacs-agent-store--db) file) (cdr romacs-agent-store--db)
+  (let* ((file (romacs-agent-store--file)) (queued (romacs-agent-writer-queued-p))
+         ;; Opened as this process writes: one opened to write before its
+         ;; writes were queued (early in a start) is opened again, to read.
+         (key (cons file queued)))
+    (if (equal (car romacs-agent-store--db) key) (cdr romacs-agent-store--db)
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (setq romacs-agent-store--db nil)
-      (if (romacs-agent-writer-queued-p)
-          (romacs-agent-store--open-to-read file)
-        (romacs-agent-store--open-to-write file)))))
+      (if queued (romacs-agent-store--open-to-read file) (romacs-agent-store--open-to-write file)))))
 
 (defun romacs-agent-store--open-to-read (file)
   "FILE opened to read, or nil while the writer has not made it as this
@@ -96,7 +98,7 @@ never waits on a writer."
                            4)))
               (progn (sqlite-close db) (romacs-agent-store--make-soon) nil)
             (setq romacs-agent-store--readonly t)
-            (setq romacs-agent-store--db (cons file db))
+            (setq romacs-agent-store--db (cons (cons file t) db))
             db))
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
@@ -144,7 +146,7 @@ editor, so it waits for a worker rather than lose a write.")
             (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version)))
           (dolist (statement romacs-agent-store--schema) (sqlite-execute db statement))
           (set-file-modes file #o600)
-          (setq romacs-agent-store--db (cons file db))
+          (setq romacs-agent-store--db (cons (cons file nil) db))
           db)
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
