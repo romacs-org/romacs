@@ -217,6 +217,40 @@ journal one turn long."
         (should-not romacs-agent--quiet-timer)))
     (when (timerp romacs-agent--quiet-timer) (cancel-timer romacs-agent--quiet-timer))))
 
+(ert-deftest romacs-agent-store-quiet-sessions-in-sqlite-take-one-query-and-one-watch ()
+  ;; Quiet sessions whose records are in SQLite: one timer, each look one
+  ;; query for all of them; the one that wrote is loaded; with none left,
+  ;; no timer.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((ids (list "aaaaaaaa-0000-4000-8000-00000000000a" "aaaaaaaa-0000-4000-8000-00000000000b"
+                     "aaaaaaaa-0000-4000-8000-00000000000c"))
+          (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+          (romacs-agent-events--made nil) (romacs-agent-events--imported (make-hash-table :test #'equal))
+          (loaded nil))
+      (dolist (id ids) (record id id))
+      (dolist (id ids) (romacs-agent-events-import (romacs-agent--quiet-session (expand-file-name id root))))
+      ;; Their supervisors running since.
+      (make-directory (expand-file-name "run" root) t)
+      (dolist (id ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
+        (dolist (id ids) (romacs-agent--quiet-watch (expand-file-name id root)))
+        (should (timerp romacs-agent--quiet-timer))
+        (let ((queries 0) (select (symbol-function 'sqlite-select)))
+          (cl-letf (((symbol-function 'sqlite-select)
+                     (lambda (db query &rest args) (when (string-search "max(seq)" query) (cl-incf queries)) (apply select db query args))))
+            (romacs-agent--quiet-tick)
+            (should (= queries 1))
+            (should-not loaded)
+            (romacs-agent-events-append (romacs-agent--quiet-session (expand-file-name (cadr ids) root))
+                                        (romacs-mcp--object "seq" 9 "t" 9.0 "note" (romacs-mcp--object "type" "late")))
+            (romacs-agent--quiet-tick)
+            (should (= queries 2))
+            (should (equal loaded (list (cadr ids))))))
+        (clrhash romacs-agent--quiet)
+        (romacs-agent--quiet-tick)
+        (should-not romacs-agent--quiet-timer)))))
+
 (ert-deftest romacs-agent-store-a-row-session-has-its-headers-facts ()
   ;; Kept, a session's row has what its chat's header says; the session
   ;; made from the row alone says the same, nothing else read.

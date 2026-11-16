@@ -4259,7 +4259,12 @@ state, if any, is read when it is loaded: a start reads rows only."
 
 ;; A quiet session whose supervisor runs is left a row; what its supervisor
 ;; writes meanwhile (a message come in, a task's end, an ask) is seen in its
-;; records, and loads it: attached, it reads them as it would have live.
+;; records, and loads it: attached, it reads them as it would have live.  A
+;; timer looks while any is left, one query for every quiet session in
+;; SQLite (a file's size for one still in a journal), and stops when none
+;; is: the editor at rest does nothing.  (A watch on the database's log was
+;; tried instead: this build delivered it no file-notify event in a batch
+;; process, so the timer is what can be relied on.)
 
 (defvar romacs-agent--quiet (make-hash-table :test #'equal)
   "The quiet sessions left unloaded whose supervisor runs: id to how far
@@ -4268,6 +4273,8 @@ their records went then (`romacs-agent--journal-end').")
 (defvar romacs-agent--quiet-timer nil "The timer looking at the quiet sessions' records.")
 
 (defconst romacs-agent--quiet-every 2 "Seconds between looks at the quiet sessions' records.")
+
+(declare-function romacs-agent-events-ends "romacs-agent-events" (ids))
 
 (defun romacs-agent--quiet-session (dir)
   "A session record for DIR, to ask its records about: no state read."
@@ -4283,24 +4290,40 @@ its supervisor running, until it is loaded or its supervisor ends."
       (setq romacs-agent--quiet-timer
             (run-with-timer romacs-agent--quiet-every romacs-agent--quiet-every #'romacs-agent--quiet-tick)))))
 
+(defun romacs-agent--quiet-ends ()
+  "How far each quiet session's records go now, id to place: one query
+for those in SQLite, a journal's size for the others."
+  (let ((ends (make-hash-table :test #'equal)) (in-sqlite nil))
+    (maphash (lambda (id _mark)
+               (let ((session (romacs-agent--quiet-session (expand-file-name id (romacs-agent--state-root)))))
+                 (if (romacs-agent-events-p session) (push id in-sqlite)
+                   (puthash id (romacs-agent--journal-end session) ends))))
+             romacs-agent--quiet)
+    (when in-sqlite
+      (pcase-dolist (`(,id . ,end) (romacs-agent-events-ends in-sqlite)) (puthash id end ends)))
+    ends))
+
 (defun romacs-agent--quiet-tick ()
   "Load each quiet session whose supervisor wrote more since it was left:
 attached, it reads what came.  One loaded otherwise, or whose supervisor
 ended, is no longer looked at; with none left, the timer stops."
-  (maphash (lambda (id mark)
-             (let* ((dir (expand-file-name id (romacs-agent--state-root)))
-                    (session (romacs-agent--quiet-session dir)))
+  (let ((ends (romacs-agent--quiet-ends)) (due nil))
+    (maphash (lambda (id mark)
                (cond ((or (gethash id romacs-agent--sessions)
                           (not (file-exists-p (romacs-agent--host-socket id))))
-                      (remhash id romacs-agent--quiet))
-                     ((> (romacs-agent--journal-end session) mark)
-                      (remhash id romacs-agent--quiet)
-                      (with-demoted-errors "romacs-agent: loading a quiet session: %S"
-                        (romacs-agent-load-session id))))))
-           romacs-agent--quiet)
-  (when (and (zerop (hash-table-count romacs-agent--quiet)) (timerp romacs-agent--quiet-timer))
-    (cancel-timer romacs-agent--quiet-timer)
-    (setq romacs-agent--quiet-timer nil)))
+                      (push (cons id nil) due))
+                     ((> (or (gethash id ends) mark) mark) (push (cons id t) due))))
+             romacs-agent--quiet)
+    (pcase-dolist (`(,id . ,load) due)
+      (remhash id romacs-agent--quiet)
+      (when load
+        (with-demoted-errors "romacs-agent: loading a quiet session: %S" (romacs-agent-load-session id)))))
+  (when (zerop (hash-table-count romacs-agent--quiet)) (romacs-agent--quiet-stop)))
+
+(defun romacs-agent--quiet-stop ()
+  "Nothing is quiet: no timer."
+  (when (timerp romacs-agent--quiet-timer) (cancel-timer romacs-agent--quiet-timer))
+  (setq romacs-agent--quiet-timer nil))
 
 (defun romacs-agent--restore-load (dir)
   "Load the session recorded in DIR as a restore does: unless it is left
