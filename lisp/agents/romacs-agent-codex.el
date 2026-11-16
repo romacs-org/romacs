@@ -237,12 +237,29 @@ answer, or a message a steer missed its turn with, as a new turn."
        (puthash "clientUserMessageId" steer (gethash "params" line))
        line))))
 
+(defun romacs-agent--codex-owed-now (session)
+  "The line SESSION's harness is owed first now: a refusal always; a
+missed steer's turn not while something holds the session (a renewal's
+note, a rollback): that one waits, and goes with the conversation it is
+left to (`romacs-agent--codex-owed-turns')."
+  (let ((owed (plist-get (romacs-agent-driver-state session) :owed)))
+    (if (romacs-agent--held-p session)
+        (cl-find :reply owed :key #'car)
+      (car owed))))
+
+(defun romacs-agent--codex-owed-turns (session)
+  "The messages SESSION's harness is owed as turns of their own (missed
+steers): each (TEXT IMAGES), oldest first."
+  (cl-loop for owed in (plist-get (romacs-agent-driver-state session) :owed)
+           when (eq (car owed) :turn) collect (list (nth 2 owed) (nth 3 owed))))
+
 (defun romacs-agent--codex-next (session)
   "SESSION's next line from this run's state: what it owes, else its
 startup's next step."
   (let* ((state (romacs-agent-driver-state session))
          (sent (plist-get state :sent)))
-    (cond ((plist-get state :owed) (romacs-agent--codex-owed-line session (car (plist-get state :owed))))
+    (cond ((when-let* ((owed (romacs-agent--codex-owed-now session)))
+             (romacs-agent--codex-owed-line session owed)))
           ((plist-get state :thread) :ready)
           ((null sent)
            (romacs-agent--codex-request
@@ -621,6 +638,10 @@ thread: its rollout, wherever its day put it."
   :lifetime 'persistent :forks #'romacs-agent--codex-forking
   :conversation-files #'romacs-agent--codex-conversation-files
   :rollback #'romacs-agent--codex-rollback
+  :owed-turns #'romacs-agent--codex-owed-turns
+  ;; A renewed conversation is a new thread, named once Codex starts it
+  ;; (`romacs-agent--codex-thread').
+  :renew #'ignore
   :select #'romacs-agent--codex-select
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next

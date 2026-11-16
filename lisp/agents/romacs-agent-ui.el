@@ -1352,6 +1352,10 @@ prompt's does."
         ('error (romacs-agent-ui--line session event (format "! %s" (plist-get event :text)) 'face 'romacs-agent-error))
         ('forked (romacs-agent-ui--draw-source session event))
         ('rolled-back (romacs-agent-ui--rolled-back session event))
+        ('renewed (romacs-agent-ui--line session event
+                                         (format "── renewed: a new conversation%s ──"
+                                                 (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))
+                                         'face 'romacs-agent-dim))
         ('selection
          (romacs-agent-ui--note session event
                                 (format "%s → %s" (romacs-agent-ui--selection-label (plist-get event :from))
@@ -3026,6 +3030,19 @@ this one goes on too (`romacs-agent-fork')."
   (interactive nil romacs-agent-chat-mode)
   (romacs-agent-show (romacs-agent-fork romacs-agent-ui--session)))
 
+(defun romacs-agent-chat-renew ()
+  "Go on in a new conversation of this session's harness, its next message
+carrying a brief of this one (`romacs-agent-renew'): its context is freed,
+the session stays."
+  (interactive nil romacs-agent-chat-mode)
+  (let ((session romacs-agent-ui--session))
+    (romacs-agent-renew session "by hand"
+                        (lambda (outcome)
+                          (run-at-time 0 nil (lambda ()
+                                               (pcase outcome
+                                                 (`(:done ,_) (message "Renewed: a new conversation"))
+                                                 (`(:error ,why) (message "Not renewed: %s" why)))))))))
+
 (defun romacs-agent-chat-rename (title)
   "Name this session TITLE."
   (interactive (list (read-string "Title: " (romacs-agent-title romacs-agent-ui--session)))
@@ -3270,6 +3287,7 @@ and changes nothing; its plan comes as a card to implement."
 (require 'keymap-popup)
 (require 'romacs-agent-diff)
 (require 'romacs-agent-rollback)
+(require 'romacs-agent-renew)
 (require 'romacs-agent-handoff)
 (require 'romacs-agent-idle)
 
@@ -3392,6 +3410,9 @@ view."
   "R" ("Rename" romacs-agent-chat-rename)
   "f" ("Fork" romacs-agent-chat-fork
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-ui--session))))
+  "F" ("Fresh conversation: renew, briefed" romacs-agent-chat-renew
+       :inapt-if (lambda () (not (and (romacs-agent--harness-get romacs-agent-ui--session :renew)
+                                      (romacs-agent--harness-free-p romacs-agent-ui--session)))))
   "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-ui--running-p)
   "x" ("Stop" romacs-agent-chat-stop :inapt-if (lambda () (eq (romacs-agent-state romacs-agent-ui--session) 'ended)))
   :group (#'romacs-agent-ui--children-title :if #'romacs-agent-ui--children-here)

@@ -393,7 +393,16 @@ loading it would undo that one's changes; merge it first")
   subagents children-rows children-summary
   ;; When its last turn ended at its instance's usage limit: the report,
   ;; a plist of :provider :text :window :resets.
-  limited)
+  limited
+  ;; A renewal's brief (romacs-agent-renew.el), carried by its next
+  ;; message to the new conversation: folded from the note, the message
+  ;; written clears it.  And the seq of a renewal journaled that no run of
+  ;; its harness has followed yet: until one does, messages wait.
+  brief renewing
+  ;; What Romacs asked of it itself, when its last turn began with such a
+  ;; prompt (`romacs-agent--input''s OWN, e.g. a renewal's note): that
+  ;; turn's end is no one's answer.
+  own-turn)
 
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
@@ -844,6 +853,12 @@ instances) is derived again when it changes.")
       (relaunch [BEFORE]), its next run starting there, BEFORE (when
       given) called once the rollback is journaled and before that run;
       a `user-error' when it cannot;
+  :owed-turns (SESSION)   optional: the messages SESSION's harness is owed
+      as turns of their own, each (TEXT IMAGES), that its next run would
+      lose (a missed steer's): a renewal sends them to the new one;
+  :renew (SESSION)   present when SESSION can go on in a new conversation
+      (romacs-agent-renew.el): the id its next run begins it under, or
+      nil when the harness names it as it starts;
   :conversation-files (HOME SESSION)   the files, relative to its
       configuration directory HOME, that hold SESSION's conversation:
       what moves with it to another instance of the harness;
@@ -1323,22 +1338,33 @@ it waits.  A file left out is said, as its message goes on without it."
 for its driver.  Only what was attached: nothing is ever read from a
 message's text, which a child's result or a quote can fill.")
 
-(defun romacs-agent--input (session text &optional images)
+(defun romacs-agent--input (session text &optional images own)
   "Write TEXT to SESSION's persistent harness as the user's message, with
-the attached IMAGES.  The journal keeps the message as it would be without
-them, and their files: a replay reads every record, and no image's bytes.
-Both are made with one request id: the journal's is the one written."
+the attached IMAGES.  OWN, when given, names what Romacs asks of it itself
+\(a string kept as the record's romacsOwn): no one's message, and its
+turn's end no one's answer (`romacs-agent-own-turn').  The journal keeps
+the message as it would be without them, and their files: a replay reads
+every record, and no image's bytes.  Both are made with one request id:
+the journal's is the one written."
   (romacs-agent--fold-now session)
   (let* ((input (romacs-agent--harness-get session :input))
          (images (romacs-agent--sendable-images images))
          (id (romacs-agent-request-id session))
-         (record (funcall input session text id)))
+         (record (funcall input session text id))
+         ;; A renewal's brief goes with the message; the journal has it in
+         ;; the renewal's note, and the message as the user wrote it.
+         (brief (and (not own) (romacs-agent-brief session))))
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
+    (when own (puthash "romacsOwn" own record))
     (when images (puthash "images" (vconcat images) record))
+    (when brief (puthash "romacsBrief" t record))
     (romacs-agent--line session
-                        (let ((romacs-agent--message-images images)) (funcall input session text id))
+                        (let ((romacs-agent--message-images images))
+                          (funcall input session (if brief (concat brief text) text) id))
                         record)
+    ;; Written: the next message carries no brief (a failed write keeps it).
+    (when brief (setf (romacs-agent-brief session) nil))
     (run-hook-with-args 'romacs-agent-input-functions session id)))
 
 (defun romacs-agent--uuid-p (id)
@@ -1418,6 +1444,11 @@ itself, so the turn goes on whatever becomes of this server."
                   (plist-put (romacs-agent-driver-state session) :cache-expires
                              (and (plist-get event :ttl) (plist-get event :time)
                                   (+ (plist-get event :time) (plist-get event :ttl))))))
+    ;; Renewed: a new conversation, named by its harness when nil, its
+    ;; brief to go with its next message.
+    ('renewed (setf (romacs-agent-harness-session session) (plist-get event :to)
+                    (romacs-agent-brief session) (plist-get event :brief)
+                    (romacs-agent-renewing session) (or (plist-get event :seq) t)))
     ;; What a fork was last forked from, folded from its journal.
     ('forked (setf (romacs-agent-options session)
                    (plist-put (copy-sequence (romacs-agent-options session))
@@ -1436,6 +1467,8 @@ itself, so the turn goes on whatever becomes of this server."
     ;; A run starts on its driver as defined now: one loaded since speaks
     ;; to the next run, never to the one going on.
     ('run (setf (romacs-agent-driver session) nil
+                ;; A renewal's new conversation runs now.
+                (romacs-agent-renewing session) nil
                 (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run (plist-get event :seq))
                 ;; The mode is the run's: unknown till its harness says.
                 (romacs-agent-permission-mode session) nil
@@ -1455,11 +1488,16 @@ itself, so the turn goes on whatever becomes of this server."
                                    (and (string-match-p "\\`[ \t\n]*/compact\\(?:[ \t\n]\\|\\'\\)"
                                                         (or (plist-get event :text) ""))
                                         t)))))
+            ;; A turn it begins is Romacs's own, or not (a steer leaves it).
+            (unless (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
+              (setf (romacs-agent-own-turn session) (plist-get event :own)))
             (setf (romacs-agent-state session) 'running
                   (romacs-agent-activity session) nil
                   (romacs-agent-turn-start session) (plist-get event :time)
                   (romacs-agent-input-seq session) (or (plist-get event :seq) (romacs-agent-input-seq session)))
-            (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text))))
+            (unless (plist-get event :own)
+              (setf (romacs-agent-brief session) nil)
+              (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text)))))
     ;; A plan presented: captured, its call told to stop (T3 Code's way);
     ;; the plan is the user's to take up.  A tool call the policy answers
     ;; waits on no one: its answer goes now, or on catching up.
@@ -1638,8 +1676,9 @@ next activity, in its manifest too.  UNDO: it is no longer settled."
   (romacs-agent--raise session (list :type 'settled)))
 
 (defun romacs-agent--note-end (session)
-  "Keep SESSION's turn end for its parent, when it has one."
-  (when (plist-get (romacs-agent-options session) :parent)
+  "Keep SESSION's turn end for its parent, when it has one, unless the turn
+was Romacs's own (`romacs-agent-own-turn')."
+  (when (and (plist-get (romacs-agent-options session) :parent) (not (romacs-agent-own-turn session)))
     (push (list (romacs-agent-done-seq session) (romacs-agent-reply session) (romacs-agent-failed session))
           (romacs-agent-ends session))))
 
@@ -1654,9 +1693,9 @@ keeps across runs (`:rolled-back', when known)."
   (let ((seq (gethash "seq" record)))
     (when (and (integerp seq) (> seq (romacs-agent-seq session)))
       (setf (romacs-agent-seq session) seq)
-      ;; Whether it was rolled back with nothing said since, kept as its
+      ;; Whether it was rolled back or renewed with nothing said since, kept as its
       ;; records come, so a resume need not read them all to know.
-      (cond ((romacs-agent--rollback-note-p record)
+      (cond ((or (romacs-agent--rollback-note-p record) (romacs-agent--note-p record "renew"))
              (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolled-back t)))
             ((romacs-agent--record-request record)
              (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :rolled-back nil))))
@@ -1679,11 +1718,13 @@ keeps across runs (`:rolled-back', when known)."
                                          :images (append (gethash "images" in) nil))))
                             ((hash-table-p in)
                              (let ((request (gethash "romacsRequest" in))
+                                   (own (romacs-agent--value (gethash "romacsOwn" in)))
                                    ;; Written into a turn under way: a steer.
                                    (steer (> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
                                (mapcar (lambda (event)
                                          (if (and request (eq (plist-get event :type) 'input))
-                                             (append event (list :request request) (and steer (list :steer t)))
+                                             (append event (list :request request) (and own (list :own own))
+                                                     (and steer (list :steer t)))
                                            event))
                                        (funcall (or (romacs-agent--harness-get session :input-events) #'ignore)
                                                 session in))))
@@ -1698,6 +1739,10 @@ keeps across runs (`:rolled-back', when known)."
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
+                               ("renew" (list (list :type 'renewed :why (romacs-agent--value (gethash "why" note))
+                                                    :from (romacs-agent--value (gethash "from" note))
+                                                    :to (romacs-agent--value (gethash "to" note))
+                                                    :brief (gethash "brief" note))))
                                ("attachments" (list (list :type 'attachments :id (gethash "id" note)
                                                           :attachments (romacs-agent--attachments-of (gethash "items" note))
                                                           :compare (append (romacs-agent--value (gethash "compare" note)) nil))))
@@ -1835,36 +1880,43 @@ each line is decoded, so offsets are the file's own."
                         (split-string (buffer-substring-no-properties (point-min) found) "\n" t))
                 (and (< (+ offset found) size) (+ offset found))))))))
 
-(defun romacs-agent-events-async (session then &optional batch)
+(defun romacs-agent-events-async (session then &optional batch fail)
   "Call THEN with SESSION's journal as the events it raised (as
 `romacs-agent-events' gives them), replayed BATCH records (200 by default)
 at a time between the editor's other work: a long journal never holds it,
-and is read a slice at a time, never whole."
+and is read a slice at a time, never whole, as its records are when the
+replay begins.  FAIL, when given, is called with the error's message
+instead should reading or replaying fail in a step; else the error is
+signalled."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
          ;; Its pages as they are now: what it gains meanwhile is not waited for.
          (pager (romacs-agent--journal-pager session))
          (offset 0) (lines nil) (step nil))
     (setq step (lambda ()
-                 (let ((scheduled nil))
+                 (let ((scheduled nil) (failed nil))
                    ;; Its pages let go of unless another step is to read them:
                    ;; done, or a quit or an error in this one.
                    (unwind-protect
-                       (progn
-                         (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-                           (dotimes (_ (or batch 200))
-                             (when (and (null lines) offset)
-                               (pcase (funcall (car pager) offset)
-                                 (`(,read . ,next) (setq lines read offset next))
-                                 (_ (setq offset nil))))
-                             (when lines
-                               (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
-                                                                               :null-object :null :false-object :false))))
-                                 (when (hash-table-p record) (romacs-agent--record scratch record))))))
-                         (when (or lines offset)
-                           (run-at-time 0 nil step)
-                           (setq scheduled t)))
+                       (condition-case err
+                           (progn
+                             (let ((romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
+                               (dotimes (_ (or batch 200))
+                                 (when (and (null lines) offset)
+                                   (pcase (funcall (car pager) offset)
+                                     (`(,read . ,next) (setq lines read offset next))
+                                     (_ (setq offset nil))))
+                                 (when lines
+                                   (let ((record (ignore-errors (json-parse-string (pop lines) :object-type 'hash-table
+                                                                                   :null-object :null :false-object :false))))
+                                     (when (hash-table-p record) (romacs-agent--record scratch record))))))
+                             (when (or lines offset)
+                               (run-at-time 0 nil step)
+                               (setq scheduled t)))
+                         (error (if (not fail) (signal (car err) (cdr err))
+                                  (setq failed t)
+                                  (funcall fail (error-message-string err)))))
                      (unless scheduled (funcall (cdr pager))))
-                   (unless scheduled (funcall then (nreverse events))))))
+                   (unless (or scheduled failed) (funcall then (nreverse events))))))
     (funcall step)))
 
 (defun romacs-agent--journal-pager (session)
@@ -1892,9 +1944,13 @@ event carries them: plists of :path :kind (image, file or capture) :alt
                   :sha (romacs-agent--value (gethash "sha" item))))
           (append items nil)))
 
-(defun romacs-agent--rollback-note-p (record)
+(defun romacs-agent--note-p (record type)
+  "Whether RECORD is a journal note of TYPE."
   (let ((note (gethash "note" record)))
-    (and (hash-table-p note) (equal (gethash "type" note) "rollback"))))
+    (and (hash-table-p note) (equal (gethash "type" note) type))))
+
+(defun romacs-agent--rollback-note-p (record)
+  (romacs-agent--note-p record "rollback"))
 
 (defun romacs-agent--journal-records (session)
   "SESSION's journal records, oldest first."
@@ -1935,9 +1991,11 @@ far back as that record."
 (defun romacs-agent--live-records (records)
   "RECORDS, a journal's, without the turns rolled back: each rollback note
 drops its prompt's record and every one after it, up to the note, which
-stays.  The journal itself keeps them all."
+stays.  A renewal's note drops every record before it: its conversation
+begins there.  The journal itself keeps them all."
   (let ((kept nil))
     (dolist (record records (nreverse kept))
+      (when (romacs-agent--note-p record "renew") (setq kept nil))
       (when (romacs-agent--rollback-note-p record)
         (when-let* ((cell (cl-member (gethash "to" (gethash "note" record)) kept
                                      :key #'romacs-agent--record-request :test #'equal)))
@@ -2028,6 +2086,7 @@ what came meanwhile."
                    (romacs-agent--raise session (list :type 'status :text "attached")))
                  ;; The replay is over: what comes now is live.
                  (setf (romacs-agent-caught-up session) t)
+                 (run-hook-with-args 'romacs-agent-caught-up-functions session)
                  (romacs-agent--keep-soon session)
                  (romacs-agent--seen-caught-up session)
                  (romacs-agent--allow-tool-calls session)
@@ -2250,7 +2309,10 @@ PROVIDER when given (one of its harness: the same conversation goes on
 there, `romacs-agent--move-conversation'); nil for model or effort leaves
 it to the harness.  A running turn ends as it began, and messages wait
 until the change is in effect.  The last selection asked for wins.
-Return whether anything changes."
+Return whether anything changes.  Refused while a rollback or a renewal
+holds SESSION: its harness is run anew by those."
+  (when (romacs-agent--held-p session)
+    (user-error "Session %s is rolling back or renewing: change it after" (romacs-agent-title session)))
   (let* ((provider (or provider (plist-get (romacs-agent--wanted session) :provider)))
          (target (progn (romacs-agent--check-move session provider)
                         (list :model model :effort effort :provider provider)))
@@ -2753,6 +2815,22 @@ next run takes the unit's name; at once when it ran detached."
     (romacs-agent-stop session)
     (funcall then)))
 
+(defun romacs-agent--relaunch (session &optional before)
+  "Run SESSION's harness anew, its conversation where its journal now has
+it (a rollback's, a renewal's): stopped first when it runs.  BEFORE, when
+given, is called just before the resume."
+  (if (not (process-live-p (romacs-agent-connection session)))
+      (progn (when before (funcall before)) (romacs-agent-resume session))
+    (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))))
+
+(defun romacs-agent--resume-when-gone (session tries &optional before)
+  "Resume SESSION once its connection to the stopped supervisor is gone,
+looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
+  (if (and (process-live-p (romacs-agent-connection session)) (> tries 0))
+      (run-at-time 0.1 nil #'romacs-agent--resume-when-gone session (1- tries) before)
+    (when before (funcall before))
+    (romacs-agent-resume session)))
+
 (defun romacs-agent--restarted (session)
   "Resume SESSION on its selection, once its harness and its unit are gone."
   (when (and (plist-get (romacs-agent-pending-selection session) :stopped)
@@ -2763,6 +2841,21 @@ next run takes the unit's name; at once when it ran detached."
     (romacs-agent--changed session)
     (romacs-agent-resume session)))
 
+(defvar romacs-agent-caught-up-functions nil
+  "Functions of a session whose journal's replay is over: what its records
+say is all there, what comes now is live.")
+
+(defvar romacs-agent-hold-functions nil
+  "Functions of a session saying whether something holds its messages:
+any true holds them (`romacs-agent--held-p').")
+
+(defun romacs-agent--held-p (session)
+  "Whether SESSION's messages wait whatever its harness does: a rollback
+or a renewal (romacs-agent-renew.el) holds them for the conversation it
+leaves them to, a renewal until its new conversation's run starts."
+  (or (plist-get (romacs-agent-driver-state session) :rolling-back) (romacs-agent-renewing session)
+      (run-hook-with-args-until-success 'romacs-agent-hold-functions session)))
+
 (defun romacs-agent--send-next (session &optional force)
   "Send the first message waiting for SESSION's turn to end, unless a
 turn runs again (FORCE: none can, the harness just resumed): a per-turn
@@ -2771,9 +2864,9 @@ its message is being sent (a run that ends before it is attached) asks
 for the next, sent once this one is off the queue."
   (cond
    ;; Nothing reaches a harness while its selection changes, or while a
-   ;; rollback holds it.
+   ;; rollback or a renewal holds it.
    ((or (romacs-agent-pending-selection session)
-        (plist-get (romacs-agent-driver-state session) :rolling-back)))
+        (romacs-agent--held-p session)))
    ((romacs-agent-dispatch session)
     (setf (romacs-agent-dispatch session) 'again))
    (t
@@ -2809,9 +2902,8 @@ ends, now when none runs; FIRST puts it ahead of the messages already
 waiting.  VALID, when given, is asked before it goes: nil drops it."
   (if (not (memq (romacs-agent-state session) '(starting running waiting-approval)))
       (romacs-agent-send session text nil valid images)
-    (if (and first (romacs-agent-queue session))
-        (progn (push (list text nil valid images) (romacs-agent-queue session))
-               (cl-incf (romacs-agent-queue-length session)))
+    (if first
+        (romacs-agent--enqueue-first session (list text nil valid images))
       (romacs-agent--enqueue session (list text nil valid images)))))
 
 ;;; Lifecycle
@@ -3205,9 +3297,9 @@ attached to it."
   ;; What it is sent as (a new turn, a steer) is told by its folded state.
   (romacs-agent--fold-now session)
   (cond ((or (romacs-agent-pending-selection session)
-             ;; A rollback holds it: the message goes to the conversation
-             ;; as the rollback leaves it.
-             (plist-get (romacs-agent-driver-state session) :rolling-back))
+             ;; A rollback or a renewal holds it: the message goes to the
+             ;; conversation it leaves.
+             (romacs-agent--held-p session))
          (romacs-agent--enqueue session (list text delivered valid images)))
         ;; Stopped (`romacs-agent-stop'): never to the harness going away;
         ;; it waits for the harness resumed, now when it has gone, else
@@ -3230,6 +3322,12 @@ attached to it."
          (romacs-agent--enqueue session (list text delivered valid images)))
         (t (romacs-agent--turn session text images)
            (when delivered (funcall delivered)))))
+
+(defun romacs-agent--enqueue-first (session item)
+  "Put ITEM ahead of what waits for SESSION's harness."
+  (push item (romacs-agent-queue session))
+  (cl-incf (romacs-agent-queue-length session))
+  (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session))))
 
 (defun romacs-agent--enqueue (session item)
   (cl-incf (romacs-agent-queue-length session))

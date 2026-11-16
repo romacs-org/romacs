@@ -35,8 +35,9 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
 (defun romacs-agent--claude-head (session)
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
-start; else nil.  Its records are read only when it was rolled back since
-it was last spoken to, which its fold keeps (`:rolled-back'); a session
+start or was renewed (a new conversation, under its new id); else nil.
+Its records are read only when it was rolled back or renewed since it was
+last spoken to, which its fold keeps (`:rolled-back'); a session
 whose kept state predates that is read once to know."
   (let ((state (romacs-agent-driver-state session)))
     (if (plist-member state :rolled-back)
@@ -48,12 +49,13 @@ whose kept state predates that is read once to know."
 
 (defun romacs-agent--claude-head-read (session)
   "`romacs-agent--claude-head', from SESSION's records: its journal's last
-prompt or rollback, read from its end (only as far back as that), and all
-of them only after a rollback."
+prompt, rollback or renewal, read from its end (only as far back as that),
+and all of them only after a rollback or renewal."
   (when-let* ((last (romacs-agent--journal-last
-                     session '("romacsRequest" "\"rollback\"")
-                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)))))
-              ((romacs-agent--rollback-note-p last)))
+                     session '("romacsRequest" "\"rollback\"" "\"renew\"")
+                     (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)
+                                          (romacs-agent--note-p record "renew")))))
+              ((or (romacs-agent--rollback-note-p last) (romacs-agent--note-p last "renew"))))
     (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh)))
 
 (cl-defun romacs-agent--claude-rollback (session records request)
@@ -74,6 +76,11 @@ conversation anew under a new id."
                           (setf (romacs-agent-harness-session session) native)
                           (romacs-agent--manifest-put session "harnessSession" native))))))
   '(relaunch))
+
+(defun romacs-agent--claude-renew (_session)
+  "The id of a renewed conversation: Claude Code begins it under the one
+its command line gives (`romacs-agent--claude-head')."
+  (romacs-agent--uuid))
 
 (defun romacs-agent--claude-argv (session resume)
   "Claude Code's command line for SESSION, resuming its conversation when
@@ -110,7 +117,7 @@ RESUME is non-nil."
                     ((eq head 'fresh) (list "--session-id" (romacs-agent--native-id session)))
                     (head (list "--resume" (romacs-agent--native-id session) "--resume-session-at" head))
                     (resume (list "--resume" (romacs-agent--native-id session)))
-                    (t (list "--session-id" (romacs-agent-id session)))))
+                    (t (list "--session-id" (romacs-agent--native-id session)))))
             (romacs-agent--option-words session "--model" "--effort")
             (romacs-agent--suggestion-words session)
             (plist-get instance :arguments))))
@@ -699,6 +706,8 @@ environment."
   :result-summary #'romacs-agent--claude-result-summary
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
+  ;; A renewed conversation is named by Romacs, as a first one is.
+  :renew #'romacs-agent--claude-renew
   :next #'romacs-agent--claude-next
   :plan #'romacs-agent--claude-plan
   :select #'romacs-agent--claude-select
