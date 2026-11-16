@@ -185,7 +185,11 @@ Leaving \"Default\" unchecked is equivalent with specifying a default of
 	     ;; callint.c
 	     (mark-even-if-inactive editing-basics boolean)
 	     ;; callproc.c
-	     (shell-file-name execute file)
+	     ;; Set from SHELL in each process (init_callproc): the standard
+	     ;; value is that process's, never the one the image was made in.
+	     (shell-file-name execute file nil
+			      :standard
+			      (or (getenv-internal "SHELL" initial-environment) "/bin/sh"))
 	     (exec-path execute
 			(repeat (choice (const :tag "default directory" nil)
 					(directory :format "%v")))

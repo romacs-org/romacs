@@ -116,8 +116,8 @@ struct Cell {
 impl Vm {
     /// The VM is made: the recipe starts, and per-process host facts may no
     /// longer be read outside startup. In build mode the environment lists,
-    /// `default-directory` and the random state are tracked. A no-op outside
-    /// build mode.
+    /// `shell-file-name` (each process's SHELL), `default-directory` and the
+    /// random state are tracked. A no-op outside build mode.
     pub fn world_begin(&mut self) {
         if host::mode() == host::Mode::Build {
             self.tracking = Some(Box::default());
@@ -126,7 +126,8 @@ impl Vm {
             let roots = [("process-environment", Root::Environment), ("initial-environment", Root::Environment),
                          // HOST(slot:exec-path): tracks the environment lists by name; reads no
                          // slot
-                         ("exec-path", Root::Environment), ("default-directory", Root::Directory)];
+                         ("exec-path", Root::Environment), ("shell-file-name", Root::Environment),
+                         ("default-directory", Root::Directory)];
             for (name, root) in roots {
                 // A build interns nothing a source boot does not, or symbols
                 // would number differently: a root not interned yet is

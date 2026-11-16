@@ -193,7 +193,7 @@ fn launch(store: &Path) {
             return;
         }
     };
-    match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, || println!("WAITING-FOR-BUILD")) {
+    match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, |_| println!("WAITING-FOR-BUILD")) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
             let value = vm.eval_source("(world-image-probe)").and_then(|v| v.display()).unwrap();
@@ -336,7 +336,7 @@ static STRAY_BYTE: u8 = 7;
 /// where the range is reserved, a load from the address faults.
 fn stray(store: &Path) {
     use std::io::Write;
-    let Launch::Restored { carry, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+    let Launch::Restored { carry, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
         println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
         return;
     };
@@ -552,7 +552,7 @@ fn resident() -> usize {
 /// whether the arena's used span stayed as it was over a large block's
 /// life and the VM's drop.
 fn heap(store: &Path) {
-    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
         println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
         return;
     };
@@ -621,7 +621,7 @@ const HEAP_FILE: &str = "a_restored_process_that_asks_for_the_file_heap_allocate
 /// blocks, while the next rounds run.
 fn heap_file(store: &Path) {
     use romacs_allocator::file_heap;
-    let Launch::Restored { mut vm, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+    let Launch::Restored { mut vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
         println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
         return;
     };

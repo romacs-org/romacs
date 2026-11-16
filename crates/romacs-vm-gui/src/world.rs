@@ -2,9 +2,11 @@
 //! VM at the end of the GNU-loadup chain and the bundled packages'
 //! autoloads, with the chain's report beside it. The steps before that point
 //! are the launch's own and depend only on its recipe (the launch mode, the
-//! window geometry, the launch font and the collection floor) and on keyed
-//! host facts. A restored launch attaches its hosts, runs
-//! `romacs-world-restart` and continues with the interactive session
+//! window geometry and the collection floor) and on keyed host facts. Each
+//! recipe input is what a session reads, not what the caller of a build
+//! had: the launch font is each process's (`LaunchFont`), as GNU's
+//! `--font' is. A restored launch attaches its hosts, sets its launch font,
+//! runs `romacs-world-restart` and continues with the interactive session
 //! (`startup::start_session`) and the workspace.
 //!
 //! A live `--loadup` launch uses a world unless ROMACS_WORLD=off: in
@@ -42,21 +44,48 @@ pub struct Carry {
 }
 romacs_snapshot::snapshot_struct!(Carry { loadup });
 
-/// The source of the launch font's face, and its size in points, from
-/// ROMACS_GUI_FONT and ROMACS_GUI_FONT_SIZE.
-pub fn launch_font() -> Result<Option<(String, u32)>, String> {
-    let Ok(family) = std::env::var("ROMACS_GUI_FONT") else { return Ok(None) };
-    if family.chars().any(char::is_control) { return Err("font family contains a control character".into()); }
-    let points = std::env::var("ROMACS_GUI_FONT_SIZE").unwrap_or_else(|_| "14".into())
-        .parse::<u32>().map_err(|e| e.to_string())?;
-    if !(6..=72).contains(&points) { return Err("font size must be 6..72 points".into()); }
-    // As GNU's `--font FAMILY-POINTS': the default face's font, and the
-    // frame's `font-parameter' naming the font as given.
-    let source = format!("(progn (defface default '((t (:family {} :height {}))) \"Launch font\")
-  (modify-frame-parameters nil '((font-parameter . {}))))",
-                         serde_json::to_string(&family).map_err(|e| e.to_string())?, points * 10,
-                         serde_json::to_string(&format!("{family}-{points}")).map_err(|e| e.to_string())?);
-    Ok(Some((source, points)))
+/// The launch font, from ROMACS_GUI_FONT and ROMACS_GUI_FONT_SIZE: this
+/// process's, as GNU's `--font FAMILY-POINTS' is, so no world holds it and
+/// a world serves every launch font.
+pub struct LaunchFont {
+    pub family: String,
+    pub points: u32,
+}
+
+impl LaunchFont {
+    pub fn from_env() -> Result<Option<LaunchFont>, String> {
+        let Ok(family) = std::env::var("ROMACS_GUI_FONT") else { return Ok(None) };
+        if family.chars().any(char::is_control) { return Err("font family contains a control character".into()); }
+        let points = std::env::var("ROMACS_GUI_FONT_SIZE").unwrap_or_else(|_| "14".into())
+            .parse::<u32>().map_err(|e| e.to_string())?;
+        if !(6..=72).contains(&points) { return Err("font size must be 6..72 points".into()); }
+        Ok(Some(LaunchFont { family, points }))
+    }
+
+    /// The default face's spec, and the frame's `font-parameter' naming
+    /// the font as given, each as Lisp.
+    fn parts(&self) -> (String, String) {
+        let family = lisp_string(&self.family);
+        (format!("((t (:family {family} :height {})))", self.points * 10),
+         format!("(modify-frame-parameters nil '((font-parameter . {})))", lisp_string(&format!("{}-{}", self.family, self.points))))
+    }
+
+    /// The font declared before GNU's Lisp, whose own `defface' (custom.el)
+    /// then leaves the default face's spec alone.
+    pub fn declaration(&self) -> String {
+        let (spec, frame) = self.parts();
+        format!("(progn (defface default '{spec} \"Launch font\") {frame})")
+    }
+
+    /// The font set in a restored session, where GNU's Lisp declared the
+    /// default face: its spec becomes the launch font's, as the declaration
+    /// leaves it, and the face takes the font on every frame, whatever theme
+    /// the world enabled.
+    pub fn restored(&self) -> String {
+        let (spec, frame) = self.parts();
+        format!("(progn (put 'default 'face-defface-spec '{spec}) (set-face-attribute 'default nil :family {} :height {}) {frame})",
+                lisp_string(&self.family), self.points * 10)
+    }
 }
 
 /// The steps a live `--loadup` launch takes before the chain, which its
@@ -71,20 +100,19 @@ pub fn open(store: PathBuf, width: u32, height: u32, floor: Option<usize>) -> Re
 
 /// The recipe of a live `--loadup` launch of WIDTH by HEIGHT with FLOOR.
 fn recipe(width: u32, height: u32, floor: Option<usize>) -> Result<Vec<String>, String> {
-    let font = launch_font()?.map_or("font default".to_owned(), |(source, _)| format!("font {source}"));
     let dir = startup::lisp_root(&startup::lisp_dir())?;
     Ok(vec![
         "consumer romacs-vm-gui".to_owned(), "launch loadup live".into(), format!("geometry {width} {height}"),
-        format!("floor {floor:?}"), font, format!("lisp {}", dir.display()),
+        format!("floor {floor:?}"), format!("lisp {}", dir.display()),
         font_environment(|name| std::env::var_os(name)),
     ])
 }
 
-/// What chooses Fontconfig's configuration and the launch font, from GET:
-/// its own variables and the directories it finds its per-user files in.
-/// No host fact records them, since Fontconfig reads them itself.
-const FONT_ENVIRONMENT: [&str; 8] = ["FONTCONFIG_FILE", "FONTCONFIG_PATH", "FONTCONFIG_SYSROOT", "HOME",
-                                     "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "ROMACS_GUI_FONT_SIZE"];
+/// What chooses Fontconfig's configuration, from GET: its own variables
+/// and the directories it finds its per-user files in. No host fact
+/// records them, since Fontconfig reads them itself.
+const FONT_ENVIRONMENT: [&str; 7] = ["FONTCONFIG_FILE", "FONTCONFIG_PATH", "FONTCONFIG_SYSROOT", "HOME",
+                                     "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
 
 fn font_environment(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> String {
     let values: Vec<serde_json::Value> = FONT_ENVIRONMENT.iter()
@@ -119,11 +147,12 @@ pub fn default_store(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option
 /// This launch with WORLD: the restored VM and its carry, or None to boot
 /// from source. A missing or stale world is built first, or the build
 /// another launch runs waited for, which costs about what a boot from
-/// source does, and the launch then boots from it; ON_WAIT runs before it
-/// blocks for that. One whose build could not capture these very inputs, or
-/// failed lately (`romacs_vm::world::store`), boots from source. A builder
-/// process builds and exits here.
-pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce()) -> Option<(Box<Vm>, Carry)> {
+/// source does, and the launch then boots from it; ON_WAIT runs, with why
+/// the world was not usable, before it blocks for that. One whose build
+/// could not capture these very inputs, or failed lately
+/// (`romacs_vm::world::store`), boots from source. A builder process builds
+/// and exits here.
+pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_wait: impl FnOnce(&serde_json::Value)) -> Option<(Box<Vm>, Carry)> {
     match world.launch::<Carry>(|| builder_args(world, width, height, floor, None), true, on_wait) {
         Launch::Restored { vm, carry, manifest } => {
             eprintln!("romacs-world: {}", json!({"mode": "restored", "key": manifest["key"], "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
@@ -144,7 +173,7 @@ pub fn launch(world: &World, width: u32, height: u32, floor: Option<usize>, on_w
 /// resolved it is not built under its key. The configurations EXCLUDED
 /// left to the session stay deferred in this build too (`Vm::world_layer_load`).
 pub fn build_here(base: &World, width: u32, height: u32, floor: Option<usize>, init: Option<&InitLayerArgs>) -> Result<(), String> {
-    let Launch::Build = base.launch::<Carry>(Vec::new, false, || {}) else { return Err("not a world builder".into()) };
+    let Launch::Build = base.launch::<Carry>(Vec::new, false, |_| {}) else { return Err("not a world builder".into()) };
     let Some(args) = init else { build_and_exit(base, width, height, floor, None) };
     let full = Plan::read(&base.store, &args.init).ok_or_else(|| format!("no plan for {}", args.init.display()))?;
     let plan = full.without(&args.excluded);
@@ -439,7 +468,7 @@ fn build_ahead(base: &World, full: Plan, width: u32, height: u32, floor: Option<
         }
         let key: String = layer.world.key.iter().map(|b| format!("{b:02x}")).collect();
         eprintln!("romacs-world: {}", json!({"event": "layer-build", "key": key, "entries": layer.plan.entries.len()}));
-        match layer.world.prepare(|| builder_args(&layer.world, width, height, floor, Some(&layer.args()))) {
+        match layer.world.prepare(|| builder_args(&layer.world, width, height, floor, Some(&layer.args())), |_| {}) {
             Ok(_) => {
                 eprintln!("romacs-world: {}", json!({"event": "layer-built", "key": key}));
                 keep_last(&layer);
@@ -482,12 +511,14 @@ pub fn prepare_layer(base: &World, init: &Path, width: u32, height: u32, floor: 
 }
 
 /// WORLD made usable for this launch's recipe, with no window: built here,
-/// or waited for, when it is missing or stale (`World::prepare`). Says how
-/// it ended on stderr as a launch says how it booted.
+/// or waited for, when it is missing or stale (`World::prepare`). Says on
+/// stderr why it builds, and how it ended with the key and the recipe, as
+/// a launch says how it booted.
 pub fn prepare(world: &World, width: u32, height: u32, floor: Option<usize>) -> Result<(), String> {
-    match world.prepare(|| builder_args(world, width, height, floor, None)) {
+    let building = |reason: &serde_json::Value| eprintln!("romacs-world: {}", json!({"event": "world-build", "reason": reason}));
+    match world.prepare(|| builder_args(world, width, height, floor, None), building) {
         Ok(manifest) => {
-            eprintln!("romacs-world: {}", json!({"mode": "prepared", "key": manifest["key"]}));
+            eprintln!("romacs-world: {}", json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe}));
             Ok(())
         }
         Err(reason) => Err(format!("world not prepared: {reason}")),
@@ -542,8 +573,7 @@ fn build_world(width: u32, height: u32, floor: Option<usize>, dir: &std::path::P
     let (line_height, column_width) = romacs_layout::frame_metrics(&vm.display_default_face()?)?;
     vm.set_frame_geometry(width, height, line_height, column_width)?;
     vm.eval_source(INTERPROGRAM)?;
-    let font = launch_font()?;
-    let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, font.as_ref().map(|(s, _)| s.as_str()), dir)?;
+    let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, None, dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
     let events = match plan {
         Some((plan, deferred)) => {
