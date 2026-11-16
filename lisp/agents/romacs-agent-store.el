@@ -187,10 +187,11 @@ as keywords), in place of its session's, or only when it has none with
 ABSENT; non-nil when it was written or queued to the writer, quietly nil
 when the database cannot be written."
   (romacs-agent-written-p
-   (romacs-agent-write 'romacs-agent-store--write-values
-                       (list (mapcar (lambda (column) (plist-get row (intern (format ":%s" column))))
-                                     romacs-agent-store--columns)
-                             absent))))
+   (romacs-agent-write 'romacs-agent-store--write-values (list (romacs-agent-store--row-values row) absent))))
+
+(defun romacs-agent-store--row-values (row)
+  "ROW, a plist of the columns' values, as the columns' values in order."
+  (mapcar (lambda (column) (plist-get row (intern (format ":%s" column)))) romacs-agent-store--columns))
 
 (defun romacs-agent-store--write-values (values absent)
   "Put VALUES, a row's columns in order, in place of its session's, or only
@@ -338,7 +339,10 @@ manifest."
             (condition-case err
                 (let ((written 0))
                   (sqlite-execute db "begin immediate")
-                  (dolist (row rows) (when (romacs-agent-store-write row t) (cl-incf written)))
+                  ;; Written here, in this transaction: a row that fails
+                  ;; fails the chunk.
+                  (dolist (row rows)
+                    (when (romacs-agent-store--write-values (romacs-agent-store--row-values row) t) (cl-incf written)))
                   (sqlite-execute db "commit")
                   (cl-incf count written))
               (error (ignore-errors (sqlite-execute db "rollback"))

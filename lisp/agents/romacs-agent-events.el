@@ -241,8 +241,8 @@ writer, from the editor (`romacs-agent-write')."
 (defun romacs-agent-events--insert (row)
   "Insert ROW, a record's (SESSION SEQ T KIND RECORD), into `events',
 waiting a while for a database another writer holds (a compaction)
-rather than losing it."
-  (when-let* ((db (romacs-agent-events--db)))
+rather than losing it.  No store, or a write that fails, signals."
+  (let ((db (or (romacs-agent-events--db) (error "No agents store to keep a record in"))))
     (let ((tries 0) (done nil))
       (while (not done)
         (condition-case err

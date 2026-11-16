@@ -221,6 +221,22 @@ connection of its own, as the writer's process has."
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
+(ert-deftest romacs-agent-writer-no-store-is-not-saved ()
+  ;; A record whose store cannot be opened signals: the drain keeps it
+  ;; and says it was not saved.
+  (let ((romacs-agent-writer-start-functions nil) (said nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                ((symbol-function 'romacs-agent-events--db) #'ignore)
+                ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
+                ((symbol-function 'sleep-for) #'ignore)
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (romacs-agent-write 'romacs-agent-events--insert (list (list "s" 1 1.0 "note" "{}")))
+        (romacs-agent-writer-drain)
+        (should (= (romacs-agent-writer-pending-count) 1))
+        (should (member "Saving 1 agent records...failed: 1 not saved" said))))))
+
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
   ;; once the writer has answered a write behind them, the launch.

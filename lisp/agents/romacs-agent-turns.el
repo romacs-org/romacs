@@ -376,7 +376,7 @@ transaction: never two of one, nor a form without its row."
 (defun romacs-agent-turns-drawn-keep (id first-seq form)
   "Keep FORM as session ID's turn from FIRST-SEQ drawn (`romacs-agent-drawn-put'):
 the writer's, for a turn the editor just drew."
-  (when-let* ((db (romacs-agent-turns--db)))
+  (let ((db (or (romacs-agent-turns--db) (error "No agents store to keep a drawn turn in"))))
     (romacs-agent-drawn-put db id first-seq form)
     t))
 

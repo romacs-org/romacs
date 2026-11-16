@@ -324,6 +324,26 @@ journal one turn long."
         (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
         (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
 
+(ert-deftest romacs-agent-store-a-fill-chunk-fails-whole ()
+  ;; A row of a fill's chunk that fails to be written fails the chunk:
+  ;; none of it is kept, it is said, and the next fill has it again.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((said nil) (execute (symbol-function 'sqlite-execute)) (romacs-agent-writer-queued nil))
+      (cl-letf (((symbol-function 'romacs-agent-store--missing) (lambda () '("/r/a" "/r/b" "/r/c")))
+                ((symbol-function 'romacs-agent-store--recorded-row)
+                 (lambda (dir) (list :id (file-name-nondirectory dir) :dir dir :title "t")))
+                ((symbol-function 'sqlite-execute)
+                 (lambda (db query &optional values)
+                   (if (and (string-prefix-p "insert or ignore into sessions" query) (equal (car values) "b"))
+                       (signal 'sqlite-error '("disk I/O error"))
+                     (funcall execute db query values))))
+                ((symbol-function 'message) (lambda (format &rest args) (push (apply #'format format args) said))))
+        (should (= (romacs-agent-store-fill) 0))
+        (should-not (sqlite-select (romacs-agent-store--open) "select id from sessions"))
+        (should (cl-some (lambda (line) (string-search "3 rows not written" line)) said))))))
+
 (ert-deftest romacs-agent-store-a-row-session-has-its-headers-facts ()
   ;; Kept, a session's row has what its chat's header says; the session
   ;; made from the row alone says the same, nothing else read.
