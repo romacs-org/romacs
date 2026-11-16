@@ -269,6 +269,30 @@ turns, and its journal's file; a state root of its own."
          ;; Compacted to its last record: not compacted again until it has more.
          (should-not (member (romacs-agent-id session) (romacs-agent-events--compactable))))))))
 
+(ert-deftest romacs-agent-events-compaction-drops-a-codex-commands-streamed-output ()
+  ;; A Codex command whose completed item came: its streamed output is gone
+  ;; (the item holds it); one never completed keeps its own.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (cl-flet ((codex (seq method params)
+                   (romacs-agent-events-tests--line seq "out" (romacs-mcp--object "method" method "params" params))))
+         (write-region (concat (codex 2 "item/started" (romacs-mcp--object "item" (romacs-mcp--object "id" "c1" "type" "commandExecution")))
+                               (codex 3 "item/commandExecution/outputDelta" (romacs-mcp--object "itemId" "c1" "delta" "a"))
+                               (codex 4 "item/commandExecution/outputDelta" (romacs-mcp--object "itemId" "c1" "delta" "b"))
+                               (codex 5 "item/fileChange/outputDelta" (romacs-mcp--object "itemId" "c1" "delta" "c"))
+                               (codex 6 "item/completed" (romacs-mcp--object "item" (romacs-mcp--object "id" "c1" "type" "commandExecution"
+                                                                                                        "aggregatedOutput" "abc")))
+                               (codex 7 "item/started" (romacs-mcp--object "item" (romacs-mcp--object "id" "c2" "type" "commandExecution")))
+                               (codex 8 "item/commandExecution/outputDelta" (romacs-mcp--object "itemId" "c2" "delta" "cut")))
+                       nil journal t 'silent))
+       (romacs-agent-events-import session)
+       (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
+       (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))))))
+
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
   ;; Its supervisor's socket there when compacting holds the write lock:
   ;; nothing is removed.
