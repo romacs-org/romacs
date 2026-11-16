@@ -845,10 +845,15 @@ fn run() -> Result<Option<exit::Exit>, String> {
     // kind, as JSON on standard output; the store is only read.
     if world_census {
         if !(live && launch == startup::Launch::Loadup) { return Err("--world-census needs a live --loadup launch".into()); }
-        // As a launch finds its world: the store named, the installation's, the user's.
-        let store = world_store.or_else(world::installed_store).or_else(|| world::default_store(|name| std::env::var_os(name)))
-            .ok_or("no world store")?;
-        println!("{}", world::census(&store)?);
+        // As a launch finds its world: the store named, else the
+        // installation's when it holds this launch's, else the user's.
+        let user = || world::default_store(|name| std::env::var_os(name)).ok_or_else(|| "no world store".to_owned())
+            .and_then(|store| world::census(&store));
+        let census = match world_store {
+            Some(store) => world::census(&store),
+            None => world::installed_store().map(|store| world::census(&store)).filter(Result::is_ok).unwrap_or_else(user),
+        };
+        println!("{}", census?);
         return Ok(None);
     }
     // --world-build: the world this launch would boot from, made usable

@@ -152,6 +152,23 @@ pub fn installed() -> Option<(World, Box<Vm>, Carry)> {
     }
 }
 
+/// In a worker isolate: the world of KEY in STORE, restored as its session
+/// restored it. From the installation's store ([`installed_store`]) read
+/// only, its records not asked again and nothing written there, as a launch
+/// reads it ([`installed`]), when this executable and Lisp tree key it as
+/// KEY; from any other store checked and used as `World::restore_only` does.
+pub fn adopt(store: PathBuf, key: [u8; 32]) -> Result<(Box<Vm>, Carry), String> {
+    let installed = installed_store().and_then(|installed| std::fs::canonicalize(installed).ok());
+    if installed.is_some() && std::fs::canonicalize(&store).ok() == installed {
+        let (world, vm, carry) = World::restore_read_only::<Carry>(&store, recipe()?).map_err(|reason| reason.to_string())?;
+        if world.key != key {
+            return Err(format!("the installation's world is {}, not {}", hex(&world.key), hex(&key)));
+        }
+        return Ok((vm, carry));
+    }
+    World { store, key, recipe: Vec::new() }.restore_only::<Carry>().map_err(|reason| reason.to_string())
+}
+
 /// KEY in hexadecimal, as a manifest names it.
 fn hex(key: &[u8; 32]) -> String {
     key.iter().map(|b| format!("{b:02x}")).collect()

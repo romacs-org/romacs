@@ -269,5 +269,24 @@ fn an_installed_gui_world_serves_any_home_without_asking_its_records() {
     assert!(census.status.success(), "the installed world did not serve: {}", String::from_utf8_lossy(&census.stderr));
     assert_eq!(files(&installed), before, "a launch wrote to the installation's store");
     assert!(!b.join("cache/romacs/worlds").exists(), "a launch made a store of its own");
+    // The installer asks every record again before it keeps a world: a
+    // recorded fact that changed builds the batch world anew, as the GUI's.
+    let again = command(&a).env("EMACS_TEST_DIRECTORY", "/elsewhere").arg("--loadup").arg("--world-store").arg(&installed)
+        .arg("--world-build").output().unwrap();
+    let said = String::from_utf8_lossy(&again.stderr);
+    assert!(again.status.success() && said.contains(r#""launch":"batch","mode":"prepared""#) && !said.contains("skipped"), "{said}");
+    // An installation's store without this launch's world: the census, as a
+    // launch, goes on to the user's store.
+    let c = root.join("home-c");
+    let user = c.join("cache/romacs/worlds");
+    std::fs::create_dir_all(&user).unwrap();
+    std::fs::set_permissions(&user, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let built = command(&c).arg("--loadup").arg("--world-store").arg(&user).arg("--world-build").output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    for entry in std::fs::read_dir(&installed).unwrap().map(Result::unwrap) {
+        if entry.path().extension().is_some_and(|x| x == "json") { std::fs::remove_file(entry.path()).unwrap(); }
+    }
+    let census = command(&c).args(["--loadup", "--world-census"]).output().unwrap();
+    assert!(census.status.success(), "the user's world did not serve: {}", String::from_utf8_lossy(&census.stderr));
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -430,22 +430,26 @@ impl World {
     }
 
     /// Whether RECIPE's world in STORE, a store this process only reads,
-    /// would restore now (`restore_read_only`), writing nothing there.
+    /// is current, writing nothing there: what an installer asks before it
+    /// keeps an installation's world, so every record is asked again, as a
+    /// build would (a Lisp tree updated in place stales it). A launch only
+    /// restores it (`restore_read_only`).
     #[must_use]
     pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
-        World::read_only(store, recipe).is_ok()
+        World::read_only(store, recipe, true).is_ok()
     }
 
     /// RECIPE's world in STORE, read only, and its image opened, when it was
     /// published for this executable and RECIPE and the image is the one
-    /// bound. Its records are not asked again (`restore_read_only`).
-    fn read_only(store: &Path, recipe: Vec<String>) -> Result<(World, std::fs::File), Json> {
+    /// bound; with REPLAY, when its records also still hold.
+    fn read_only(store: &Path, recipe: Vec<String>, replay: bool) -> Result<(World, std::fs::File), Json> {
         let fail = |e: std::io::Error| json!({"store": e.to_string()});
         let store = store_path(store).map_err(fail)?;
         checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
         let key = world_key(&store, &recipe, false).map_err(fail)?;
         let world = World { store, key, recipe };
-        let manifest = world.published_manifest().map_err(|reason| world.explained(reason))?;
+        let manifest = if replay { world.valid_manifest() } else { world.published_manifest() }
+            .map_err(|reason| world.explained(reason))?;
         let image = world.checked_image(&manifest, false)?;
         Ok((world, image))
     }
@@ -470,7 +474,7 @@ impl World {
         if !arena::active() {
             return Err(json!("no arena"));
         }
-        let (world, image) = World::read_only(store, recipe)?;
+        let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
                 .ok_or_else(|| json!({"image": "made for another key"})),
