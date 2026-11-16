@@ -118,13 +118,16 @@ harness's: it keeps its colour as the row settles and dims.")
   "Task ID's title, while the session is known."
   (or (and (stringp id) (and-let* ((session (romacs-agent-get id))) (romacs-agent-title session))) "a task"))
 
-(defun romacs-agent-rows-quoted (text)
-  "TEXT quoted: each of its lines behind a bar, which is decoration
-\(`romacs-agent-decor'), never part of the text one copies."
-  (mapconcat (lambda (line)
-               (concat (propertize "┃ " 'face 'romacs-agent-message-bar 'romacs-agent-decor t) line))
-             (split-string (string-trim-right (or text "")) "\n")
-             "\n"))
+(defun romacs-agent-rows-quoted (text &optional face)
+  "TEXT quoted, in FACE when given: a bar before each of its lines, which
+is decoration (`romacs-agent-decor'), never part of the text one copies,
+and before each line a long one wraps onto (`wrap-prefix')."
+  (let ((bar (propertize "┃ " 'face 'romacs-agent-message-bar)))
+    (mapconcat (lambda (line)
+                 (concat (propertize bar 'romacs-agent-decor t 'wrap-prefix bar)
+                         (propertize (if face (propertize line 'face face) line) 'wrap-prefix bar)))
+               (split-string (string-trim-right (or text "")) "\n")
+               (propertize "\n" 'wrap-prefix bar))))
 
 (defun romacs-agent-rows--instance (model harness provider)
   "MODEL@PROVIDER, the model without its HARNESS's prefix; what of it is
@@ -135,7 +138,10 @@ known."
 ;;; Messages and delegations: cards
 
 (defun romacs-agent-rows--message-body (input _output)
-  (romacs-agent-rows-quoted (or (romacs-agent-rows--field input "message") (romacs-agent-rows--field input "text"))))
+  "A message this chat sent another thread, quoted and dim
+\(`romacs-agent-ui-sent'): not words for the user."
+  (romacs-agent-rows-quoted (or (romacs-agent-rows--field input "message") (romacs-agent-rows--field input "text"))
+                            'romacs-agent-ui-sent))
 
 (romacs-agent-rows-define
  "romacs_task_send"
