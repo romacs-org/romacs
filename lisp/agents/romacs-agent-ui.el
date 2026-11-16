@@ -627,8 +627,13 @@ read through its turn's row when opened."
               ((equal (plist-get kept :id) id)))
     (list :call (get-text-property (1+ mark) 'romacs-agent-call) :failed (plist-get kept :failed)
           :bytes (plist-get kept :bytes) :output (plist-get kept :output)
-          ;; Kept as drawn, it is read through its turn's row.
-          :ref (or (plist-get kept :ref) (list :session romacs-agent-ui--session :id id :row t)))))
+          ;; Kept as drawn, it is read through its turn's row: its own
+          ;; session's, a fork's source's for a turn the fork shows of it.
+          :ref (or (plist-get kept :ref)
+                   (list :session (if-let* ((from (get-text-property mark 'romacs-agent-from)))
+                                      (or (romacs-agent-get from) (romacs-agent-store-row-session from))
+                                    romacs-agent-ui--session)
+                         :id id :row t)))))
 
 (defun romacs-agent-ui--row-mark (id at)
   "The mark of call ID's row on the line AT is in, a marker, or nil."
@@ -2397,7 +2402,10 @@ attach it when its supervisor listens (`romacs-agent-load-session')."
                    (and (markerp romacs-agent-ui--end) (>= (point) romacs-agent-ui--end))))
               (live (romacs-agent-load-session id)))
     (setq romacs-agent-ui--session live)
-    (setf (romacs-agent-buffer live) (current-buffer))))
+    (setf (romacs-agent-buffer live) (current-buffer))
+    ;; Its row knew it less than its record: drawn again with all of it.
+    (unless (equal (romacs-agent-imported live) (romacs-agent-imported session))
+      (romacs-agent-ui--redraw))))
 
 (defun romacs-agent-ui-desktop-restore (_file _name misc)
   "The chat of MISC's session with its draft, drawn the first time a
@@ -2453,9 +2461,10 @@ drawn."
 
 (add-hook 'romacs-agent-events-migrated-functions #'romacs-agent-ui--moved)
 
-(defvar romacs-agent-ui--source-budget nil
-  "While a chat draws what came before its first turn, how many turns its
-fork's sources may still draw (`romacs-agent-ui--draw-source').")
+(defvar romacs-agent-ui--source-shares nil
+  "While a chat draws what came before its first turn, how many turns each
+of its fork's sources' parts draws: an alist from (FROM AFTER UPTO), a
+fork note's, to a count (`romacs-agent-ui--plan-shares').")
 
 (defun romacs-agent-ui--replay-rows (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns as kept drawn
@@ -2470,8 +2479,9 @@ under way.  Places are its records' seqs."
       (when (romacs-agent-imported session)
         (require 'romacs-agent-history)
         (romacs-agent-history-draw session (romacs-agent-imported session)))
-      (let ((romacs-agent-ui--source-budget
-             (and romacs-agent-ui--turns (max 0 (- romacs-agent-ui--turns (length rows))))))
+      (let ((romacs-agent-ui--source-shares
+             (romacs-agent-ui--plan-shares
+              session (if romacs-agent-ui--turns (max 0 (- romacs-agent-ui--turns (length rows))) most-positive-fixnum))))
         (romacs-agent-ui--replay-from session nil (romacs-agent--journal-head session))))
     (romacs-agent-ui--insert-turns (romacs-agent-id session) (mapcar (lambda (row) (plist-get row :first-seq)) rows))
     ;; After its rows: the turn under way, or turns ended since their rows
@@ -2510,7 +2520,7 @@ saying so until its form comes."
          (wanted nil))
     (dolist (first first-seqs)
       (let ((kept (gethash first forms)))
-        (if kept (romacs-agent-ui--insert-drawn (cdr kept)) (romacs-agent-ui--placeholder id first))
+        (if kept (romacs-agent-ui--insert-drawn (cdr kept) id) (romacs-agent-ui--placeholder id first))
         (unless (and kept (>= (car kept) romacs-agent-drawn-version)) (push first wanted))))
     (when (> (hash-table-count forms) 0) (romacs-agent-ui--fit-inserted))
     (when wanted (run-hook-with-args 'romacs-agent-drawn-wanted-functions id (nreverse wanted)))))
@@ -2538,6 +2548,7 @@ edit to no undo."
                          (length (- (prop-match-end found) (prop-match-beginning found))))
                      (goto-char start)
                      (romacs-agent-drawn-insert (cdr kept))
+                     (romacs-agent-ui--mark-from start (point) id)
                      (delete-region (point) (+ (point) length)))))
                (romacs-agent-ui--fit-inserted)))))))))
 
@@ -2650,13 +2661,23 @@ Pure: it reads no record."
              :error (equal status "failed") :interrupted (equal status "interrupted"))))
     (nreverse events)))
 
-(defun romacs-agent-ui--insert-drawn (form)
+(defun romacs-agent-ui--insert-drawn (form &optional id)
   "Insert FORM, a turn kept as drawn, at the current chat transcript's
-end: its text and properties as drawn, the composer after them."
+end: its text and properties as drawn, the composer after them.  ID, its
+session's, when it is not the chat's own (a fork's source): its text
+names it (`romacs-agent-ui--mark-from')."
   (save-excursion
     (goto-char romacs-agent-ui--end)
-    (let ((inhibit-read-only t))
-      (romacs-agent-drawn-insert form t))))
+    (let ((inhibit-read-only t) (start (point)))
+      (romacs-agent-drawn-insert form t)
+      (romacs-agent-ui--mark-from start (point) id))))
+
+(defun romacs-agent-ui--mark-from (start end id)
+  "Say the text from START to END is session ID's turns, when ID is not
+the current chat's own session (`romacs-agent-from'): what opens its
+calls reads them through ID's rows."
+  (when (and id romacs-agent-ui--session (not (equal id (romacs-agent-id romacs-agent-ui--session))))
+    (let ((inhibit-read-only t)) (put-text-property start end 'romacs-agent-from id))))
 
 (defun romacs-agent-ui--fit-inserted ()
   "Fit the current chat's rules to its window once, turns drawn elsewhere
@@ -2730,27 +2751,50 @@ body shown), and it starts no subagent."
          (not (or (plist-get renderer :ended) (plist-get renderer :card)
                   (plist-get renderer :answers) (plist-get renderer :shown))))))
 
+(defun romacs-agent-ui--fork-span (source after upto)
+  "SOURCE's turns a fork took after seq AFTER to seq UPTO: (FIRST-SEQS
+. LAST), its rows' first seqs there, the latest first, and the last seq
+of the latest of them, or nil when it has none."
+  (let ((seqs (seq-filter (lambda (seq) (> seq after))
+                          (romacs-agent-turns-first-seqs source most-positive-fixnum (1+ upto)))))
+    (cons seqs (and seqs (plist-get (car (plist-get (romacs-agent-turns-page source (1+ upto) 1) :rows)) :last-seq)))))
+
+(defun romacs-agent-ui--plan-shares (session budget)
+  "How SESSION's chat shares BUDGET turns among the parts of its fork's
+sources it draws before its first turn: the latest part first, the parts
+before it what it leaves.  An alist as `romacs-agent-ui--source-shares'
+holds; nil when it is no fork."
+  (let ((shares nil))
+    (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session))) shares)
+      (let* ((from (gethash "from" note))
+             (after (or (romacs-agent--value (gethash "after" note)) 0))
+             (upto (or (romacs-agent--value (gethash "seq" note)) 0))
+             (source (or (romacs-agent-get from) (romacs-agent-store-row-session from)))
+             (count (if source (length (car (romacs-agent-ui--fork-span source after upto))) 0))
+             (share (min count budget)))
+        (push (cons (list from after upto) share) shares)
+        (setq budget (- budget share))))))
+
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the
 source's turns after the last fork's (EVENT's :after) to EVENT's
-:seq-from, as they were kept drawn, the latest within the turns the chat
-draws (`romacs-agent-ui--source-budget') under a row that draws earlier
-ones; when it took them all, what came before the source's first turn
-first (its own source, the transcript it was imported from); then a
-note."
+:seq-from, as they were kept drawn, as many of the latest as the chat's
+plan gives it (`romacs-agent-ui--source-shares'), under a row that draws
+earlier ones when it has more; when it took them all, what came before
+the source's first turn first; then its records after its latest row to
+the fork, turns no row has yet; then a note."
   (let* ((id (plist-get event :from))
          (source (or (romacs-agent-get id) (romacs-agent-store-row-session id)))
-         (after (or (plist-get event :after) 0)) (upto (or (plist-get event :seq-from) 0))
-         (budget (or romacs-agent-ui--source-budget most-positive-fixnum)))
+         (after (or (plist-get event :after) 0)) (upto (or (plist-get event :seq-from) 0)))
     (if (not source)
         (romacs-agent-ui--line session event "  · its source is no longer recorded" 'face 'romacs-agent-dim)
-      (let* ((latest (seq-filter (lambda (row) (> (plist-get row :first-seq) after))
-                                 (plist-get (romacs-agent-turns-page source (1+ upto) (min (1+ budget) most-positive-fixnum))
-                                            :rows)))
-             (more (> (length latest) budget))
-             (rows (seq-take latest budget))
-             (seqs (reverse (mapcar (lambda (row) (plist-get row :first-seq)) rows))))
-        (setq romacs-agent-ui--source-budget (- budget (length seqs)))
+      (let* ((span (romacs-agent-ui--fork-span source after upto))
+             (share (or (alist-get (list id after upto) romacs-agent-ui--source-shares nil nil #'equal)
+                        (length (car span))))
+             (more (> (length (car span)) share))
+             (moved (romacs-agent-events-p source))
+             ;; Where its records to the fork end.
+             (end (and moved (romacs-agent--journal-after source upto))))
         (if more
             (unless (get-text-property (point-min) 'romacs-agent-earlier) (romacs-agent-ui--earlier-row))
           (when (= after 0)
@@ -2758,47 +2802,30 @@ note."
               (require 'romacs-agent-history)
               ;; Drawn as the fork's: its rows name the fork, its facts are the fork's.
               (romacs-agent-history-draw session (romacs-agent-imported source)))
-            (when (romacs-agent-events-p source)
-              (romacs-agent-ui--draw-source-head session source upto))))
-        (romacs-agent-ui--insert-turns id seqs)
-        ;; Its turns to the fork that have no row yet: from its records.
-        (when (romacs-agent-events-p source)
-          (romacs-agent-ui--draw-source-records
-           session source (cond (rows (plist-get (car rows) :last-seq))
-                                ;; Its head is drawn, to the fork at most.
-                                ((= after 0) (min upto (romacs-agent-ui--source-head-seq source)))
-                                (t after))
-           upto))))
+            (when moved
+              (romacs-agent-ui--draw-source-span session source nil (romacs-agent--journal-head source end)))))
+        (romacs-agent-ui--insert-turns id (reverse (seq-take (car span) share)))
+        ;; Its turns to the fork that no row has yet, from its records:
+        ;; after its latest row, else after the last fork, else from its
+        ;; first prompt.
+        (when-let* ((moved)
+                    (from (cond ((cdr span) (romacs-agent--journal-after source (cdr span)))
+                                ((> after 0) (romacs-agent--journal-after source after))
+                                (t (romacs-agent--journal-head source end)))))
+          (romacs-agent-ui--draw-source-span session source from end))))
     (romacs-agent-ui--note session event
                            (format (if (> after 0) "Forked again from %s, now at its turn %s" "Forked from %s at its turn %s")
                                    (plist-get event :title) (plist-get event :turns)))))
 
-(defun romacs-agent-ui--draw-source-head (session source upto)
-  "Draw in SESSION's chat what came before SOURCE's first turn, from its
-records by seq, to its record UPTO at most: its own fork's source, its
-notes."
-  (romacs-agent-ui--draw-source-span
-   session source nil (romacs-agent--journal-head source (romacs-agent--journal-after source upto))))
-
-(defun romacs-agent-ui--source-head-seq (source)
-  "The seq of the record before SOURCE's first prompt, or 0."
-  (let ((head (romacs-agent--journal-head source)))
-    (if (integerp head) (max 0 (1- head)) 0)))
-
-(defun romacs-agent-ui--draw-source-records (session source after upto)
-  "Draw in SESSION's chat SOURCE's records after seq AFTER to seq UPTO:
-its turns to the fork that have no row yet."
-  (when-let* (((< after upto)) (from (romacs-agent--journal-after source after)))
-    (romacs-agent-ui--draw-source-span session source from (romacs-agent--journal-after source upto))))
-
 (defun romacs-agent-ui--draw-source-span (session source from end)
   "Draw in SESSION's chat SOURCE's records from place FROM to END, as the
 fork's (`romacs-agent-ui--draw-as')."
-  (let ((scratch (romacs-agent--scratch source)) (buffer (current-buffer)) (romacs-agent-ui--replaying t))
-    (let ((romacs-agent-event-functions
-           ;; Read in a buffer of its own: drawn in the chat's.
-           (list (lambda (_ drawn) (with-current-buffer buffer (romacs-agent-ui--draw-as session scratch drawn))))))
-      (romacs-agent--read-journal source (lambda (record) (romacs-agent--record scratch record)) from end))))
+  (when (or (null from) (null end) (not (equal from end)))
+    (let ((scratch (romacs-agent--scratch source)) (buffer (current-buffer)) (romacs-agent-ui--replaying t))
+      (let ((romacs-agent-event-functions
+             ;; Read in a buffer of its own: drawn in the chat's.
+             (list (lambda (_ drawn) (with-current-buffer buffer (romacs-agent-ui--draw-as session scratch drawn))))))
+        (romacs-agent--read-journal source (lambda (record) (romacs-agent--record scratch record)) from end)))))
 
 (defun romacs-agent-ui--draw-as (session source event)
   "Draw SOURCE's EVENT in SESSION's chat, SOURCE's turn start and tool

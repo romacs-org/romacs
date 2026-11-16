@@ -35,6 +35,8 @@ a worker keeps them.  Non-nil when its records are in SQLite."
   ;; Its id may have been another test's session's, imported elsewhere.
   (remhash (romacs-agent-id session) romacs-agent-events--imported)
   (when (romacs-agent-events-import session t)
+    ;; Its row, which a chat restored shows it from.
+    (romacs-agent-store-put session)
     (romacs-agent-turns-fill session)
     (dolist (row (plist-get (romacs-agent-turns-page session nil most-positive-fixnum) :rows))
       (romacs-agent-drawn-put (romacs-agent-turns--db) (romacs-agent-id session) (plist-get row :first-seq)

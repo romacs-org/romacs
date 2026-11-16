@@ -59,13 +59,17 @@
           (remhash romacs-agent-restored-chat-tests--id romacs-agent-events--imported)
           (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
             (romacs-agent-test-stored (romacs-agent-load-session romacs-agent-restored-chat-tests--id)))
+          ;; As a start finds it: not loaded, its row alone known.
+          (remhash romacs-agent-restored-chat-tests--id romacs-agent--sessions)
           (cl-letf* ((replay (symbol-function 'romacs-agent-ui--replay))
                      ((symbol-function 'romacs-agent-ui--replay)
                       (lambda (session) (cl-incf replays) (funcall replay session)))
                      ((symbol-function 'romacs-agent--keep-models) #'ignore))
             (let* ((buffer (romacs-agent-ui-desktop-restore
                             nil nil (list :session romacs-agent-restored-chat-tests--id :draft "half a question")))
-                   (session (romacs-agent-get romacs-agent-restored-chat-tests--id)))
+                   ;; Its row alone, no session loaded.
+                   (session (buffer-local-value 'romacs-agent-ui--session buffer)))
+              (should-not (romacs-agent-get romacs-agent-restored-chat-tests--id))
               ;; Restored: its draft, no journal read for its transcript.
               (should (= replays 0))
               (should (equal (with-current-buffer buffer (romacs-agent-ui--composer-text)) "half a question"))
@@ -80,6 +84,11 @@
                 (should (string-search "first question" (buffer-string)))
                 (should (string-search "first answer" (buffer-string)))
                 (should (equal (romacs-agent-ui--composer-text) "half a question")))
+              ;; Its first use loads it, the chat its live session's.
+              (with-current-buffer buffer
+                (let ((this-command 'romacs-agent-chat-send)) (romacs-agent-ui--ensure-live)))
+              (setq session (romacs-agent-get romacs-agent-restored-chat-tests--id))
+              (should (eq (buffer-local-value 'romacs-agent-ui--session buffer) session))
               ;; Live events draw as before.
               (romacs-agent-ui--render session (list :type 'input :text "third question" :seq 5 :last t))
               (should (string-search "third question" (with-current-buffer buffer (buffer-string))))

@@ -206,6 +206,65 @@ start launched, its manifest written."
                 (should (string-search "Forked from Plan" text))))
           (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-fork-draws-a-source-turn-with-no-row ()
+  ;; The source's turn has no row yet (no end): from its first prompt,
+  ;; seq 1, its records draw it in the fork.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (write-region (concat (json-serialize
+                           (romacs-mcp--object
+                            "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "unended ask" "role" "user")
+                                                     "romacsRequest" 1 "type" "user")
+                            "seq" 1 "t" 1))
+                          "\n"
+                          (json-serialize
+                           (romacs-mcp--object
+                            "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                      "message" (romacs-mcp--object "id" "m1" "content"
+                                                                                    (vector (romacs-mcp--object "type" "text" "text" "half said"))))
+                            "seq" 2 "t" 2))
+                          "\n")
+                  nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
+    (setf (romacs-agent-seq source) 2)
+    (let* ((fork (romacs-agent-fork source))
+           (buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                          (save-window-excursion (romacs-agent-show fork)))))
+      (unwind-protect
+          (let ((text (with-current-buffer buffer (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
+            (should (string-search "unended ask" text))
+            (should (string-search "half said" text)))
+        (kill-buffer buffer)))))
+
+(ert-deftest romacs-agent-fork-opens-a-source-turn-s-output ()
+  ;; A call of the source's, shown in the fork kept as drawn, opens
+  ;; through the source's rows.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (let ((seq 0) (long (make-string 3000 ?q)))
+      (cl-flet ((line (key value) (concat (json-serialize (romacs-mcp--object key value "seq" (cl-incf seq) "t" seq)) "\n")))
+        (write-region
+         (concat (line "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "list" "role" "user")
+                                                "romacsRequest" 1 "type" "user"))
+                 (line "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                 "message" (romacs-mcp--object "id" "a1" "content"
+                                                                               (vector (romacs-mcp--object "type" "tool_use" "id" "s1" "name" "Bash"
+                                                                                                           "input" (romacs-mcp--object "command" "ls"))))))
+                 (line "out" (romacs-mcp--object "type" "user" "parent_tool_use_id" :null
+                                                 "message" (romacs-mcp--object "content" (vector (romacs-mcp--object "type" "tool_result" "tool_use_id" "s1"
+                                                                                                                     "content" long)))))
+                 (line "out" (romacs-mcp--object "type" "result" "result" "ok")))
+         nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent))
+      (setf (romacs-agent-seq source) seq)
+      (let* ((fork (romacs-agent-fork source))
+             (buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                            (save-window-excursion (romacs-agent-show fork)))))
+        (unwind-protect
+            (with-current-buffer buffer
+              (should-not (string-search long (buffer-string)))
+              (should (romacs-agent-ui--open-payload "s1"))
+              (should (string-search long (buffer-string))))
+          (kill-buffer buffer))))))
+
 (ert-deftest romacs-agent-fork-made-again-draws-the-latest-turns ()
   ;; Forked at the source's turn 5, then again at its turn 10 (the fork
   ;; had not spoken): its last two turns are the source's 9 and 10.
