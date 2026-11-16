@@ -47,7 +47,7 @@ commands, or a task it delegated."
     (and romacs-agent-idle-compaction
          (eq (romacs-agent-harness session) 'claude)
          (not (plist-get (romacs-agent-options session) :parent))
-         (eq (romacs-agent-get (romacs-agent-id session)) session)
+         (eq (romacs-agent-loaded (romacs-agent-id session)) session)
          (romacs-agent-caught-up session)
          (process-live-p (romacs-agent-connection session))
          (romacs-agent--ready-p session)

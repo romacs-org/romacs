@@ -329,5 +329,18 @@ start launched, its manifest written."
     (should (string-match-p "send it a message first"
                             (cadr (should-error (romacs-agent-fork source) :type 'user-error))))))
 
+(ert-deftest romacs-agent-fork-a-source-folding-aside-is-folded-before-forking-again ()
+  ;; The source a start left to a worker to fold has no seq of its records
+  ;; yet: folded here first, its fork note is written all the same.
+  (let ((source (romacs-agent--make :id "src" :seq 0)) (noted nil)
+        (session (romacs-agent--make :id "fork" :options (list :forked (list "src" 5)))))
+    (cl-letf (((symbol-function 'romacs-agent--harness-get) (lambda (_s key) (and (eq key :forks) (lambda (_) t))))
+              ((symbol-function 'romacs-agent-get) (lambda (id) (and (equal id "src") source)))
+              ((symbol-function 'romacs-agent--fold-now) (lambda (s) (setf (romacs-agent-seq s) 9)))
+              ((symbol-function 'romacs-agent--fork-note) (lambda (_s after) (list 'fork after)))
+              ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note noted))))
+      (romacs-agent--refork session)
+      (should (equal noted '((fork 5)))))))
+
 (provide 'romacs-agent-fork-tests)
 ;;; romacs-agent-fork-tests.el ends here

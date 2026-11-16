@@ -55,7 +55,7 @@ stands in the way of what it logs."
          (id (if (stringp session) session (and session (romacs-agent-id session))))
          (object (romacs-mcp--object "t" (float-time) "kind" (symbol-name kind) "session" (or id :null)))
          (fields (romacs-mcp--object)))
-    (when-let* ((session (if (stringp session) (romacs-agent-get session) session))
+    (when-let* ((session (if (stringp session) (romacs-agent-loaded session) session))
                 (title (romacs-agent-title session)))
       (puthash "title" (romacs-agent-issues--value title) object))
     (cl-loop for (name value) on details by #'cddr
@@ -126,7 +126,7 @@ text is kept: only its size."
       (cond
        ;; Raised by a launch, never journaled: never a replay's.
        ((eq type 'unstarted)
-        (when (eq (romacs-agent-get (romacs-agent-id session)) session)
+        (when (eq (romacs-agent-loaded (romacs-agent-id session)) session)
           (romacs-agent-issues-record 'resume-failed session :text (plist-get event :text))))
        ;; A turn end replayed answered its prompt: never judged again.
        ((not (romacs-agent--live-p session))
