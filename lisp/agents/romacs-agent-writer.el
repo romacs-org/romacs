@@ -142,14 +142,32 @@ queued to be: its value when it ran here."
   "Send the unsent writes, in order, a batch at a time, while fewer than
 `romacs-agent-writer--window' batches are unanswered."
   (while (and romacs-agent-writer--unsent (< romacs-agent-writer--in-flight romacs-agent-writer--window))
-    (let ((isolate (romacs-agent-writer--isolate)) (batch nil) (n 0))
-      (while (and romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
+    (let ((isolate (condition-case err (romacs-agent-writer--isolate)
+                     (error (romacs-agent-writer--here err) nil)))
+          (batch nil) (n 0))
+      (while (and isolate romacs-agent-writer--unsent (< n romacs-agent-writer--batch))
         (pcase-let ((`(,id ,function ,args ,_) (pop romacs-agent-writer--unsent)))
           (push (list id function args) batch)
           (cl-incf n)))
-      (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
-      (isolate-send isolate (list 'romacs-agent-write-batch (nreverse batch)))
-      (cl-incf romacs-agent-writer--in-flight))))
+      (when isolate
+        (unless romacs-agent-writer--unsent (setq romacs-agent-writer--unsent-tail nil))
+        (isolate-send isolate (list 'romacs-agent-write-batch (nreverse batch)))
+        (cl-incf romacs-agent-writer--in-flight)))))
+
+(defun romacs-agent-writer--here (why)
+  "No writer can be had (WHY): every unanswered write is made here, in
+order, rather than lost.  A commit in the editor, only when it is that
+or losing records (a world gone stale under a running editor)."
+  (message "romacs-agent-writer: no writer (%s): %d writes made here"
+           (error-message-string why) (romacs-agent-writer-pending-count))
+  (let ((entries nil) (romacs-agent-writer-queued nil))
+    (maphash (lambda (_id entry) (push entry entries)) romacs-agent-writer--pending)
+    (setq romacs-agent-writer--unsent nil romacs-agent-writer--unsent-tail nil romacs-agent-writer--in-flight 0)
+    (clrhash romacs-agent-writer--pending)
+    (dolist (entry (sort entries (lambda (a b) (< (car a) (car b)))))
+      (pcase-let* ((`(,_ ,function ,args ,done) entry)
+                   (answer (condition-case err (list 'ok (apply function args)) (error (list 'error err)))))
+        (when done (with-demoted-errors "romacs-agent-writer: after a write: %S" (funcall done answer)))))))
 
 (defun romacs-agent-writer--unsend ()
   "Mark every unanswered write unsent: its writer is gone."
@@ -234,6 +252,9 @@ answer.  The writer then stops; a later write starts another."
             (unless (isolate-future-done-p job)
               (isolate-send (isolate-future-isolate job) (list 'romacs-agent-writer-stop))
               (ignore-errors (isolate-await job))))))
+      ;; No writer would answer: made here.
+      (when (> (romacs-agent-writer-pending-count) 0)
+        (romacs-agent-writer--here '(error "the writer did not answer")))
       (message (if (> (romacs-agent-writer-pending-count) 0) "Saving %d agent records...failed: %d not saved"
                  "Saving %d agent records...done")
                count (romacs-agent-writer-pending-count)))))

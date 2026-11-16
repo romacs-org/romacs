@@ -124,9 +124,12 @@ the writer once it has opened it (`romacs-agent-store--made').")
 editor, so it waits for a worker rather than lose a write.")
 
 (defun romacs-agent-store--writer-start ()
-  "The writer's start: the store opened, its tables made, its waits long."
+  "The writer's start: the store opened, its tables made, its waits long,
+its commits not synced one by one (`synchronous=NORMAL', as a supervisor's
+are): what a crash may lose of them is the writer's queue's window."
   (when-let* ((db (romacs-agent-store--open)))
     (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-store--writer-busy))
+    (sqlite-pragma db "synchronous = NORMAL")
     (romacs-agent-store--made)))
 
 (add-hook 'romacs-agent-writer-start-functions #'romacs-agent-store--writer-start)

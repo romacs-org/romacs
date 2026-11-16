@@ -38,6 +38,8 @@ connection of its own, as the writer's process has."
                  (serve ()
                    (setq sent (append sent (list '(romacs-agent-writer-stop))))
                    (serve-only)))
+         ;; Not every test runs the writer.
+         (ignore #'serve #'serve-only)
          ,@body))))
 
 (ert-deftest romacs-agent-writer-writes-in-order-and-answers ()
@@ -138,6 +140,20 @@ connection of its own, as the writer's process has."
       (should (equal (reverse romacs-agent-writer-tests--made) (number-sequence 0 19999)))
       ;; Nothing left: the writer only stops.
       (serve))))
+
+(ert-deftest romacs-agent-writer-no-writer-writes-here ()
+  ;; No writer can be started (its world gone stale under the editor):
+  ;; the writes are made in the editor, in order, rather than lost.
+  (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil) (answers nil))
+    (romacs-agent-writer-tests--with
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                ((symbol-function 'message) #'ignore))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(1) (lambda (answer) (push answer answers)))
+        (romacs-agent-write 'romacs-agent-writer-tests--make '(2))
+        (should (equal (reverse romacs-agent-writer-tests--made) '(1 2)))
+        (should (equal answers '((ok 1))))
+        (should (zerop (romacs-agent-writer-pending-count)))
+        (should-not sent)))))
 
 (ert-deftest romacs-agent-writer-notes-are-made-before-a-launch ()
   ;; After a move, what waits runs in two steps: the notes' writes, then,
