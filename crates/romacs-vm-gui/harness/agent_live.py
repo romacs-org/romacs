@@ -106,6 +106,43 @@ HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
 RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
+# What every process a run starts inherits, its value the run's private
+# tree: supervisors start detached (setsid) or as user units, out of the
+# harness's process tree, so they are found by it.
+MARK = 'AGENT_LIVE_RUN'
+
+
+def marked_processes(prefix):
+    """The processes whose MARK lies under PREFIX, a path."""
+    found = []
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            entries = (proc / 'environ').read_bytes().split(b'\0')
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.startswith(MARK.encode() + b'='):
+                value = entry[len(MARK) + 1:].decode(errors='replace')
+                if value == prefix or value.startswith(prefix.rstrip('/') + '/'):
+                    found.append(int(proc.name))
+    return found
+
+
+def end_marked(prefix, seconds=10):
+    """End every process marked under PREFIX, those started meanwhile too;
+    the pids it ended, all gone when it returns, else it raises."""
+    ended, deadline = [], time.time() + seconds
+    while (found := marked_processes(prefix)):
+        if time.time() > deadline:
+            raise RuntimeError(f'processes of {prefix} not ended: {found}')
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        ended += [pid for pid in found if pid not in ended]
+        time.sleep(0.05)
+    return ended
 
 
 class Agents(Server):
@@ -113,6 +150,7 @@ class Agents(Server):
         super().__init__(args, base, name, env_extra)
         self.calls = self.root / 'harness-calls.jsonl'
         self.env['FAKE_HARNESS_LOG'] = str(self.calls)
+        self.env[MARK] = str(self.root.resolve())
         self.work = self.root / 'work'
         # The default instance's directory, as a user who has run Claude Code has.
         (self.home / '.claude').mkdir()
@@ -181,8 +219,13 @@ class Agents(Server):
         until(lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
 
     def journal(self, sid):
-        path = self.home / '.local/state/romacs/agents' / sid / 'journal.jsonl'
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        """SID's records, as the editor reads them wherever they are kept:
+        its journal, or the agents' database once they are moved there."""
+        text = parity_live.read_sexp(self.eval(
+            f'(let ((session {self.s(sid)}) (records nil)) '
+            '(when session (romacs-agent--read-journal session (lambda (record) (push record records)))) '
+            '(decode-coding-string (json-serialize (vconcat (nreverse records))) (quote utf-8)))'))
+        return json.loads(text) if text else []
 
     def results(self, sid):
         return [r['out'].get('result') for r in self.journal(sid)
@@ -207,36 +250,14 @@ class Agents(Server):
                   "(romacs-agent-restore) t)")
 
     def close(self):
-        # Sessions started detached: end their supervisors and harnesses,
-        # found by their sessions' directories under this tree too, so a
-        # session whose directory went (and its host.json) is ended as well.
-        agents = str(self.home / '.local/state/romacs/agents').encode()
-        hosts, parents = set(), {}
-        for proc in Path('/proc').iterdir():
-            try:
-                argv = (proc / 'cmdline').read_bytes().split(b'\0')
-                parents[int(proc.name)] = int((proc / 'stat').read_text().rsplit(')', 1)[1].split()[1])
-                if argv[0].endswith(b'romacs-agent-host') and agents in b' '.join(argv):
-                    hosts.add(int(proc.name))
-            except (OSError, ValueError, IndexError):
-                pass
-        for pid in [p for p, parent in parents.items() if parent in hosts] + sorted(hosts):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-        for host in (self.home / '.local/state/romacs/agents').glob('*/host.json'):
-            info = json.loads(host.read_text())
-            for pid in (info.get('harness'), info.get('pid')):
-                # Only while the pid is still this tree's process: an ended
-                # one's number may be another's now.
-                try:
-                    if str(self.root) in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace') \
-                            or 'romacs-agent-host' in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace'):
-                        os.kill(pid, signal.SIGKILL)
-                except (OSError, TypeError):
-                    pass
-        super().close()
+        # Every process this tree started carries MARK: the editor, its
+        # sessions' supervisors (detached or user units), their harnesses
+        # and MCP relays.  They end with it, whatever host.json still names
+        # (a workflow may remove a session's directory).
+        try:
+            end_marked(str(self.root.resolve()))
+        finally:
+            super().close()
 
 
 def lisp_text(text):
@@ -531,9 +552,11 @@ def host(args, base):
     root = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / f'anh{os.getpid()}'
     root.mkdir(mode=0o700)
     sock, journal_dir = root / 'host.sock', base / 'host-session'
+    # Started here, not by an editor: marked as this run's all the same.
+    marked = {**os.environ, MARK: str((base / 'host').resolve())}
     process = subprocess.Popen([str(binary), '--dir', str(journal_dir), '--socket', str(sock), '--',
                                 'sh', '-c', 'sleep 0.5; yes line | head -c 4000000; exit 3'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
     try:
         until(lambda: sock.exists(), 10, 'supervisor listening')
         reader = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
@@ -553,7 +576,7 @@ def host(args, base):
         second, go = base / 'host-stuck', base / 'host-go'
         process = subprocess.Popen([str(binary), '--dir', str(second), '--socket', str(sock), '--',
                                     'sh', '-c', f'(sleep 30 <&0 >/dev/null &); while [ ! -e {go} ]; do sleep 0.05; done; exit 4'],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
         until(lambda: sock.exists(), 10, 'second supervisor listening')
 
         def quietly(work):
@@ -595,6 +618,8 @@ def host(args, base):
     finally:
         if process.poll() is None:
             process.kill()
+        # And the stuck harness's descendant, left holding its stdin.
+        end_marked(marked[MARK])
         for leftover in (sock,):
             if leftover.exists():
                 leftover.unlink()
@@ -1504,7 +1529,7 @@ def unicode(args, base):
              'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
             encoding='utf-8')
         a.providers([('claude', claude_dir)])
-        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) '
+        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
                                               '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
         view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
                                             f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
@@ -1867,7 +1892,7 @@ def rpc(args, base):
 
         # Its history: listed, viewed, imported; one id in two homes.
         items = parity_live.read_sexp(a.eval(
-            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
+            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
             "(plist-get i :title)) \"|\")) (seq-filter (lambda (i) (eq (plist-get i :harness) 'fakerpc)) (romacs-agent-history-items))))")) or []
         items = [i.split('|') for i in items]
         item = lambda ident, provider: (f"(seq-find (lambda (i) (and (equal (plist-get i :id) {lisp_text(ident)}) "
@@ -2333,12 +2358,12 @@ def history(args, base):
         claude_run = [e for e in a.logged() if e.get('started') == cid]
         codex_run = [e for e in a.codex_runs() if e.get('codex') == tid]
         chats = {ident: a.chat(sid) for ident, sid in resumed.items()}
-        listed = text('(progn (romacs-agent-history-list) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
+        listed = text('(progn (romacs-agent-history-list t) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
         a.restart()
         a.providers(setting)
-        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list) '
+        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list t) '
                      f'(list (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)) '
                      f'(plist-get (romacs-agent-imported {a.s(resumed[cid])}) :path) '
                      f'(romacs-agent-harness-session {a.s(resumed[tid])})))')
@@ -2366,7 +2391,7 @@ def history(args, base):
         # Its directory, named by the conversation's identity.
         busy_dir = text(f'(romacs-agent--import-id \'codex {lisp_text(str(codex_home))} {lisp_text(busy)})')
         (a.home / '.local/state/romacs/agents' / busy_dir).mkdir()
-        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} "/nonexistent" {lisp(a.work)} '
+        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} {lisp_text(str(transcript))} {lisp(a.work)} '
                        f'"x" "codex" {lisp_text(str(codex_home))}) (user-error (cadr err)))')
         # Two conversations whose time-ordered ids share their first
         # characters run overlapping turns, each with its own supervisor.
@@ -2567,6 +2592,10 @@ def board_keys(args, base):
 
         steps = {}
         open_board()
+        # The transcripts are listed once their scan, aside, ends: the
+        # board is drawn again then.
+        until(lambda: a.eval(f'(with-selected-window {board} (save-excursion (goto-char (point-min)) '
+                             '(and (re-search-forward "^transcripts  " nil t) t)))') == 't', 30, 'transcripts listed')
         ret_on('^transcripts  ')
         steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
@@ -3244,6 +3273,13 @@ def main():
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
+        # No process a workflow started outlives it: one left fails it.
+        try:
+            outlived = end_marked(str(out.resolve()))
+        except RuntimeError as error:
+            outlived = repr(error)
+        if outlived:
+            results[name] = {**results[name], 'ok': False, 'outlived': outlived}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
     ok = all(r.get('ok') is not False for r in results.values())

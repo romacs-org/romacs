@@ -161,7 +161,7 @@ fn world(store: &Path) -> World {
 /// published: what the walk met, by kind and by note, beside the image's
 /// own arena, as long as the file.
 fn census(store: &Path) {
-    let (vm, carry) = World::restore_read_only::<u64>(store, vec!["consumer world-image-test".into()]).unwrap();
+    let (_, vm, carry) = World::restore_read_only::<u64>(store, vec!["consumer world-image-test".into()]).unwrap();
     let census = romacs_vm::world::image::census(&vm, &carry);
     let count = |kind: &str| census["kinds"].as_array().unwrap().iter().find(|k| k["type"] == kind).map(|k| k["count"].clone());
     let published = std::fs::metadata(image(store)).unwrap().len();

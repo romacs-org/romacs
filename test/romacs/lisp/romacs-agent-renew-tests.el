@@ -16,15 +16,27 @@
   (require 'romacs-agent-ui))
 
 (defun romacs-agent-renew-tests--journal (session &rest records)
-  "Write RECORDS, objects without their seq, as SESSION's journal."
+  "Make RECORDS, objects without their seq, SESSION's records: in SQLite
+when its records are there, else its journal."
   (let ((seq 0) (coding-system-for-write 'utf-8-unix))
-    (write-region (mapconcat (lambda (record)
-                               (puthash "seq" (cl-incf seq) record)
-                               (puthash "t" (float seq) record)
-                               (concat (romacs-agent--json record) "\n"))
-                             records "")
-                  nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) nil 'silent)
+    (dolist (record records)
+      (puthash "seq" (cl-incf seq) record)
+      (puthash "t" (float seq) record))
+    (if (romacs-agent-events-p session)
+        (progn (sqlite-execute (romacs-agent-events--db) "delete from events where session = ?" (list (romacs-agent-id session)))
+               (dolist (record records) (romacs-agent-events-append session record)))
+      (write-region (mapconcat (lambda (record) (concat (romacs-agent--json record) "\n")) records "")
+                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) nil 'silent))
     (setf (romacs-agent-seq session) seq)))
+
+(defun romacs-agent-renew-tests--append (session &rest records)
+  "Add RECORDS, with their seqs, to SESSION's records: in SQLite when they
+are there, else its journal."
+  (if (romacs-agent-events-p session)
+      (dolist (record records) (romacs-agent-events-append session record))
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region (mapconcat (lambda (record) (concat (romacs-agent--json record) "\n")) records "")
+                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))))
 
 (defun romacs-agent-renew-tests--prompt (request text)
   (romacs-mcp--object "in" (romacs-mcp--object "type" "user" "romacsRequest" request
@@ -45,6 +57,11 @@ state root that has said two things, its writes to its harness in
                                              (concat "XDG_RUNTIME_DIR=" run))
                                        process-environment))
           (romacs-agent--sessions (make-hash-table :test #'equal))
+          ;; Its timers its own: a renewal it leaves mid-read ends with it,
+          ;; not in the next test.
+          (timer-list nil)
+          ;; Its database its own, its state root's.
+          (romacs-agent-store--db nil)
           (written nil) (relaunched 0)
           (session (romacs-agent--create :id (romacs-agent--uuid) :harness ,harness
                                          :provider (symbol-name ,harness) :cwd root
@@ -62,6 +79,7 @@ state root that has said two things, its writes to its harness in
                      ((symbol-function 'romacs-agent--relaunch)
                       (lambda (_s &optional before) (when before (funcall before)) (cl-incf relaunched))))
              ,@body))
+       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
        (delete-directory root t)
        (delete-directory run t))))
 
@@ -202,13 +220,10 @@ state root that has said two things, its writes to its harness in
     (romacs-agent-renew-tests--ran session)
     (let ((first (romacs-agent-brief session)))
       (romacs-agent--input session "write the docs")
-      (let ((seq (romacs-agent-seq session)) (coding-system-for-write 'utf-8-unix))
-        (write-region (mapconcat (lambda (record) (concat (romacs-agent--json record) "\n"))
-                                 (list (romacs-mcp--object "seq" (+ seq 1) "t" 50.0 "in" (cdr (car written)))
-                                       (romacs-mcp--object "seq" (+ seq 2) "t" 51.0 "out"
-                                                           (romacs-mcp--object "type" "result" "result" "docs written")))
-                                 "")
-                      nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+      (let ((seq (romacs-agent-seq session)))
+        (romacs-agent-renew-tests--append
+         session (romacs-mcp--object "seq" (+ seq 1) "t" 50.0 "in" (cdr (car written)))
+         (romacs-mcp--object "seq" (+ seq 2) "t" 51.0 "out" (romacs-mcp--object "type" "result" "result" "docs written")))
         (setf (romacs-agent-seq session) (+ seq 2))
         ;; Read back, as its journal now says.
         (remhash session romacs-agent-renew--written))
