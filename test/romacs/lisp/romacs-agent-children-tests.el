@@ -184,8 +184,6 @@
               (romacs-agent-chat-mode)
               (let ((inhibit-read-only t))
                 (setq romacs-agent-ui--session session
-                      romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-                      romacs-agent-ui--tasks (make-hash-table :test #'equal)
                       romacs-agent-ui--messages (make-hash-table :test #'equal)
                       romacs-agent-ui--end (point-marker))
                 (romacs-agent-ui--replay session)))
@@ -261,11 +259,10 @@
 (ert-deftest romacs-agent-children-a-subagent-row-goes-to-its-card ()
   (romacs-agent-children-tests--with
     (with-temp-buffer
-      (insert "before\ncard\n")
-      (let ((romacs-agent-ui--session parent)
-            (romacs-agent-ui--tool-lines (make-hash-table :test #'equal))
-            (mark (copy-marker 8)))
-        (puthash "t1" mark romacs-agent-ui--tool-lines)
+      ;; The card's row: its mark, then its text naming its call.
+      (insert "before\n●" (propertize "card\n" 'romacs-agent-tool "t1"))
+      (setq-local romacs-agent-ui--end (point-max-marker))
+      (let ((romacs-agent-ui--session parent))
         (setf (romacs-agent-children-rows parent) (list (list :tool "t1" :key 'working :state "running" :title "x")))
         (cl-letf (((symbol-function 'recenter) #'ignore))
           (let ((last-command-event ?1)) (romacs-agent-chat-open-child)))
