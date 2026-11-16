@@ -66,7 +66,9 @@ the store keeps them (`romacs-agent-store-folded').")
   (list :settled romacs-agent-board--settled :words romacs-agent-board--words
         :folds (or romacs-agent-board--folds (setq romacs-agent-board--folds (make-hash-table :test #'equal)))
         :projects (romacs-agent-board--folded)
-        :all-history romacs-agent-board--all-history))
+        :all-history romacs-agent-board--all-history
+        ;; No transcript listed yet, their first scan under way.
+        :reading (and (null romacs-agent-history--listing) (romacs-agent-history-indexing-p))))
 
 ;;; Rows
 
@@ -78,7 +80,7 @@ the store keeps them (`romacs-agent-store-folded').")
 (defun romacs-agent-board--parent (session)
   "The known session SESSION was delegated by, or nil."
   (let ((parent (plist-get (romacs-agent-options session) :parent)))
-    (or (romacs-agent-get parent)
+    (or (romacs-agent-loaded parent)
         (and romacs-agent-board--unloaded (gethash parent (car romacs-agent-board--unloaded))))))
 
 (defun romacs-agent-board--children (session)
@@ -205,8 +207,9 @@ its transcripts.  A thread shows in the section it is in, a thread above
 it dim for context.  A project VIEW folds (its :projects) shows its row
 alone, saying how many threads it has and what they are at, unless a
 filter is on; its :first is the row it would show first.  Each row is a
-plist of :kind (`project', `thread', `history' or `more') and :id, which
-names it across redraws."
+plist of :kind (`project', `thread', `history', `more' or `reading', the
+transcripts' first scan under way) and :id, which names it across
+redraws."
   (let ((keys (make-hash-table :test #'eq)) (order nil)
         (roots (make-hash-table :test #'equal)) (items (make-hash-table :test #'equal)))
     (dolist (session sessions) (puthash session (romacs-agent-board--key session) keys))
@@ -221,7 +224,8 @@ names it across redraws."
           (let ((cwd (romacs-agent-board--project (plist-get item :cwd))))
             (unless (or (gethash cwd roots) (gethash cwd items)) (push cwd order))
             (push item (gethash cwd items)))))
-      (mapcan (lambda (cwd)
+      (append
+       (mapcan (lambda (cwd)
                 (let* ((threads (nreverse (gethash cwd roots)))
                        (rows (append (mapcan (lambda (session) (romacs-agent-board--thread session 0 keys marks view))
                                              threads)
@@ -235,7 +239,9 @@ names it across redraws."
                         (t (cons (list :kind 'project :id cwd :cwd cwd
                                        :keys (mapcar (lambda (s) (gethash s keys)) threads))
                                  rows)))))
-              (nreverse order)))))
+              (nreverse order))
+       (and (not (plist-get view :settled)) (null history) (plist-get view :reading)
+            (list (list :kind 'reading :id 'reading)))))))
 
 ;;; Columns
 
@@ -377,7 +383,8 @@ takes what the others and the gaps between them leave."
                             'face 'romacs-agent-dim)))
     ('more (romacs-key-hint (format "  ◇ %d more  (\\<romacs-agent-board-mode-map>\\[romacs-agent-board-history] shows all)"
                                     (plist-get row :count))
-                            'romacs-agent-dim))))
+                            'romacs-agent-dim))
+    ('reading (propertize (romacs-truncate "  ◇ Reading harness transcripts…" width) 'face 'romacs-agent-dim))))
 
 (defun romacs-agent-board--title-line (width)
   "The board's first line: which section, and the filter."
@@ -590,6 +597,8 @@ window; with none, or no room, hide the card."
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-board--refresh)
 ;; The sessions' rows made: those left unloaded show.
 (add-hook 'romacs-agent-store-filled-hook #'romacs-agent-board--refresh)
+;; The transcripts listed anew, aside: the board shows them.
+(add-hook 'romacs-agent-history-indexed-hook #'romacs-agent-board--refresh)
 
 (defun romacs-agent-board--redraw ()
   "Draw the board, from one of its commands."
@@ -645,10 +654,10 @@ newest thread; on \"more\", list every transcript."
 (defun romacs-agent-board--live (session)
   "SESSION, loaded first when it was shown from its row alone, unless no
 longer known: then the board is drawn again."
-  (or (and (eq (romacs-agent-get (romacs-agent-id session)) session) session)
+  (or (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) session)
       (and romacs-agent-board--unloaded
            (eq (gethash (romacs-agent-id session) (car romacs-agent-board--unloaded)) session)
-           (romacs-agent-find (romacs-agent-id session)))
+           (romacs-agent-get (romacs-agent-id session)))
       (progn (romacs-agent-board--redraw)
              (user-error "That thread is gone: the board is drawn again"))))
 
@@ -787,7 +796,7 @@ its next activity.  A settled one, bring back."
       ;; Each by its id, loaded first when shown from its row alone; one
       ;; gone is skipped, and the board drawn once, after.
       (dolist (session finished)
-        (when-let* ((live (romacs-agent-find (romacs-agent-id session))))
+        (when-let* ((live (romacs-agent-get (romacs-agent-id session))))
           (romacs-agent-settle live)))
       (romacs-agent-board--redraw))))
 

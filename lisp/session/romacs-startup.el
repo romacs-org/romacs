@@ -13,11 +13,12 @@
 ;;; Code:
 
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
-;; The default face's font: Iosevka, which Romacs ships and registers for
-;; itself (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED); its colours, and
-;; every other face's, are the stock theme's (etc/themes/default-theme.el,
-;; lisp/ui/romacs-theme.el).
-(defface default '((t (:family "Iosevka"))) "The launch font.")
+;; The default face's font: Iosevka at 14 points, which Romacs ships and
+;; registers for itself (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED), so
+;; every way of starting a session gets it without a launcher saying so;
+;; its colours, and every other face's, are the stock theme's
+;; (etc/themes/default-theme.el, lisp/ui/romacs-theme.el).
+(defface default '((t (:family "Iosevka" :height 140))) "The launch font.")
 (defface romacs-comment '((t (:inherit font-lock-comment-face))) "A dim annotation.")
 (defface romacs-code '((t (:inherit font-lock-string-face))) "Source shown as text.")
 (defface romacs-result '((t (:inherit font-lock-constant-face))) "An evaluation's result.")

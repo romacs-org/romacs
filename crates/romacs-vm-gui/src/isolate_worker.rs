@@ -6,7 +6,6 @@
 //! store its spawner loads from. It then serves the spawner on descriptor
 //! FD until the spawner's bye, its death, or SIGTERM.
 use romacs_vm::Vm;
-use romacs_vm::world::store::World;
 use std::path::PathBuf;
 
 enum Boot { World(PathBuf, [u8; 32]), Source, Bare }
@@ -68,12 +67,11 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 (vm, "source")
             }
             Boot::World(store, key) => {
-                let world = World { store, key, recipe: Vec::new() };
-                let (vm, _carry) = world.restore_only::<super::world::Carry>().map_err(|reason| format!("isolate world unavailable: {reason}"))?;
+                let (vm, _carry) = super::world::adopt(store, key).map_err(|reason| format!("isolate world unavailable: {reason}"))?;
                 let mut vm = *vm;
                 vm.world_reinit();
                 vm.eval_source("(romacs-world-restart)")?;
-                // A worker is batch, whatever its world (an init layer loads as a live session).
+                // A worker is batch, whatever its world.
                 vm.eval_source("(setq noninteractive t)")?;
                 (vm, "world")
             }

@@ -55,16 +55,6 @@ pub enum Mode {
 thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static BUILD: RefCell<Option<Build>> = const { RefCell::new(None) };
-    static LAYER: RefCell<Option<LayerState>> = const { RefCell::new(None) };
-    /// A secret was asked for (`note_secret_asked`): in a build, by the form
-    /// loading, a secret reader or a credential file read; while the init's
-    /// plan is recorded, a credential file read by the init.
-    static CREDENTIAL_READ: Cell<bool> = const { Cell::new(false) };
-    /// How many secret reader calls a layer build deferred
-    /// (`romacs--world-secret-asked`).
-    static READER_ASKS: Cell<usize> = const { Cell::new(0) };
-    /// The init's plan is being recorded (`watch_credentials`).
-    static WATCH_CREDENTIALS: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn mode() -> Mode {
@@ -225,123 +215,6 @@ const RESEED: [(&str, &str, &str, Option<&str>); 6] = [
     ("/net/tramp.el", "(run-hooks 'tramp--startup-hook)", "default-directory", None),
 ];
 
-/// A layer build's state while an init's libraries load (`world::layer`):
-/// the definition form being loaded, when the top-level form is one, and
-/// whether it read a per-process fact, which makes it a re-seed form
-/// (re-evaluated at restore); and whether the startup function may run
-/// again, after the libraries.
-#[derive(Default)]
-struct LayerState {
-    form: Option<(&'static str, String)>,
-    tainted: bool,
-    /// An effect not performed inside the definition form: the form is cut short
-    /// and deferred whole to restore (`layer_form_cut`).
-    cut: bool,
-    rerun: bool,
-    /// The entry loading is a library the init only declared
-    /// (`layer::Entry::declared`): its re-seed forms may wait for their
-    /// variable's first read (`romacs--world-pend`).
-    declared: bool,
-}
-
-/// The definition forms a layer re-seeds: the head's kind and the name it
-/// defines, for `(KIND NAME ...`.
-const DEFINITIONS: [&str; 5] = ["defcustom", "defvar", "defconst", "defvar-local", "defimage"];
-
-fn definition(head: &str) -> Option<(&'static str, String)> {
-    let mut words = head.strip_prefix('(')?.split(|c: char| c.is_whitespace() || c == ')').filter(|w| !w.is_empty());
-    let first = words.next()?;
-    let kind = DEFINITIONS.iter().find(|k| **k == first)?;
-    Some((kind, words.next()?.to_owned()))
-}
-
-/// The libraries of a layer load from here (`world::layer`).
-pub(crate) fn layer_begin() {
-    LAYER.with(|l| *l.borrow_mut() = Some(LayerState::default()));
-}
-
-pub(crate) fn layer_end() {
-    LAYER.with(|l| *l.borrow_mut() = None);
-}
-
-pub(crate) fn layer_active() -> bool {
-    LAYER.with(|l| l.borrow().is_some())
-}
-
-/// The top-level form with HEAD begins, in a layer build.
-fn layer_form(head: &str) {
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = definition(head); layer.tainted = false; layer.cut = false; });
-}
-
-/// An effect inside a layer's definition form: not done, and the form
-/// is deferred whole to restore, where it is. True when so taken. A
-/// network connection is never deferred: its entry runs live.
-fn layer_cut(what: &str) -> bool {
-    if ["connect ", "listen ", "resolve "].iter().any(|network| what.starts_with(network)) {
-        return false;
-    }
-    LAYER.with(|l| match l.borrow_mut().as_mut() {
-        Some(layer) if layer.form.is_some() => { layer.tainted = true; layer.cut = true; true }
-        _ => false,
-    }).then(|| record("layer-effect", json!({"what": what}))).is_some()
-}
-
-/// The definition form that signalled was cut short by an effect a build does not perform:
-/// its name, for the loader to define it as nil and go on; the form is
-/// kept for restore (`layer_form_done`).
-pub(crate) fn layer_form_cut() -> Option<String> {
-    LAYER.with(|l| l.borrow().as_ref().filter(|layer| layer.cut).and_then(|layer| layer.form.as_ref().map(|(_, name)| name.clone())))
-}
-
-/// A read of a per-process fact or a tracked value in a layer build: taken
-/// when the form being loaded is a definition, which the layer re-seeds
-/// at restore; false when it is not, and the read is noted as usual.
-pub(crate) fn layer_taint() -> bool {
-    LAYER.with(|l| match l.borrow_mut().as_mut() {
-        Some(layer) if layer.form.is_some() => { layer.tainted = true; true }
-        _ => false,
-    })
-}
-
-/// Whether the top-level form being loaded is a definition of NAME: a
-/// file loaded again (circular `require`s) defines its variables again.
-pub(crate) fn layer_defines(name: &str) -> bool {
-    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.as_ref().is_some_and(|(_, defined)| defined == name)))
-}
-
-/// The top-level form ends: the definition it was, when it read a
-/// per-process fact (`layer_taint`), and whether an effect cut it short.
-pub(crate) fn layer_form_done() -> Option<(&'static str, String, bool)> {
-    LAYER.with(|l| {
-        let mut layer = l.borrow_mut();
-        let layer = layer.as_mut()?;
-        let tainted = std::mem::take(&mut layer.tainted);
-        let cut = std::mem::take(&mut layer.cut);
-        layer.form.take().filter(|_| tainted).map(|(kind, name)| (kind, name, cut))
-    })
-}
-
-/// The layer's next entries are libraries the init only declared (ON),
-/// or ones it loaded.
-pub(crate) fn layer_declared(on: bool) {
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.declared = on; });
-}
-
-/// Whether the entry loading is a declared library's.
-pub(crate) fn layer_in_declared() -> bool {
-    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.declared))
-}
-
-/// Whether the startup function may run again now: after a layer's
-/// libraries, as a restored process runs it after them.
-pub(crate) fn layer_rerun(on: bool) {
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.rerun = on; });
-}
-
-fn layer_rerun_allowed() -> bool {
-    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.rerun))
-}
-
 /// The re-seed entry of the form being loaded, if it is one.
 fn reseed_entry() -> Option<(&'static str, Option<&'static str>)> {
     with_build(|b| b.site.as_deref().and_then(|site| RESEED.iter().find(|r| site.at((r.0, r.1)))).map(|r| (r.2, r.3)))
@@ -361,12 +234,6 @@ pub(crate) fn reseed_reads(what: &str) -> bool {
 /// Whether the form being loaded is the baked build host's (`BAKED_HOST`).
 pub(crate) fn at_baked_host() -> bool {
     with_build(|b| b.site.as_deref().is_some_and(|s| s.at(BAKED_HOST))).unwrap_or(false)
-}
-
-/// The variables the built-in re-seed forms set (`RESEED`), which restore
-/// sets again by evaluating those forms.
-pub(crate) fn reseed_variables() -> impl Iterator<Item = &'static str> {
-    RESEED.iter().filter_map(|r| r.3)
 }
 
 /// The variable the form being loaded re-seeds, if it is a re-seed entry.
@@ -474,7 +341,7 @@ pub(crate) fn switch_startup(on: bool) -> bool {
         let from = match on { true => Phase::Recipe, false => Phase::Startup };
         let run = if on { b.startups } else { b.startups.saturating_sub(1) };
         let allowed = b.phase == from
-            && (layer_rerun_allowed() || b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file))));
+            && b.site.as_ref().is_some_and(|s| STARTUP.get(run).is_some_and(|file| s.file.ends_with(file)));
         if allowed {
             b.phase = if on { Phase::Startup } else { Phase::Recipe };
             b.startups += usize::from(on);
@@ -486,25 +353,12 @@ pub(crate) fn switch_startup(on: bool) -> bool {
 }
 
 /// Restores the enclosing site when a top-level form ends.
-pub struct SiteGuard(Option<Option<Rc<Site>>>, Option<LayerForm>, Option<bool>);
-
-/// A layer build's state of the top-level form loading: the definition it
-/// is, if one, and whether it read a per-process fact or an effect cut it.
-type LayerForm = (Option<(&'static str, String)>, bool, bool);
+pub struct SiteGuard(Option<Option<Rc<Site>>>);
 
 impl Drop for SiteGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.0.take() {
             with_build(|b| b.site = previous);
-        }
-        // A file a form loads has forms of its own: once it is loaded, the
-        // form that loaded it goes on as it was, a definition still one.
-        if let Some((form, tainted, cut)) = self.1.take() {
-            LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() { layer.form = form; layer.tainted = tainted; layer.cut = cut; });
-        }
-        // So is whether it asked for a secret: the file's forms kept theirs.
-        if let Some(asked) = self.2.take() {
-            CREDENTIAL_READ.with(|c| c.set(asked));
         }
     }
 }
@@ -520,13 +374,10 @@ pub fn form_site(file: &Path, line: usize, head: &str) -> SiteGuard {
 /// drops. SITE is built only in build mode.
 pub(crate) fn enter_site(site: impl FnOnce() -> Site) -> SiteGuard {
     if !building() {
-        return SiteGuard(None, None, None);
+        return SiteGuard(None);
     }
     let site = Rc::new(site());
-    let outer = LAYER.with(|l| l.borrow().as_ref().map(|layer| (layer.form.clone(), layer.tainted, layer.cut)));
-    let asked = layer_active().then(|| CREDENTIAL_READ.with(|c| c.replace(false)));
-    layer_form(&site.head);
-    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))), outer, asked)
+    SiteGuard(with_build(|b| std::mem::replace(&mut b.site, Some(site))))
 }
 
 /// Whether a query of PATH is keyed. A relative PATH resolves against the
@@ -548,14 +399,8 @@ pub(crate) fn record(kind: &str, fields: Json) {
     });
 }
 
-/// How many things the build has noted it cannot capture so far; 0 outside a build.
-pub(crate) fn uncaptured_count() -> usize {
-    with_build(|b| b.uncaptured.len()).unwrap_or(0)
-}
-
 /// Note what the build cannot capture: KIND with FIELDS and the current site.
-/// What met it runs live in the session (an init layer's entry), or the
-/// world is not published and the launch boots without it.
+/// The world is not published, and the launch boots without it.
 pub(crate) fn note_uncaptured(kind: &str, fields: Json) {
     if !capturing() {
         return;
@@ -582,7 +427,6 @@ fn p_read(fact: Fact<'_>, what: String) {
             (Phase::Startup, _) => Some("startup"),
             (Phase::Recipe, Class::B) => Some("baked"),
             (Phase::Recipe, _) if reseed => Some("reseed"),
-            (Phase::Recipe, _) if layer_taint() => Some("layer"),
             _ => None,
         };
         let item = json!({"kind": "p-read", "site": b.site(), "what": what, "allowed": allowed});
@@ -665,10 +509,7 @@ fn effect(what: impl FnOnce() -> String) -> io::Result<()> {
     if !capturing() {
         return Ok(());
     }
-    let what = what();
-    if !layer_cut(&what) {
-        note_uncaptured("effect", json!({"what": what}));
-    }
+    note_uncaptured("effect", json!({"what": what()}));
     Err(io::Error::from_raw_os_error(libc::EPERM))
 }
 
@@ -819,24 +660,29 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    static FOUND: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
-    let (root, truename) = FOUND.get_or_init(|| {
-        let root = located_runtime().unwrap_or_else(|why| {
-            eprintln!("romacs: no usable runtime tree: {why}\n  \
-                       Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
-                       or name one in a file `{RUNTIME_RECORD}' beside the executable.");
-            std::process::exit(2)
-        });
+    found_runtime().unwrap_or_else(|why| {
+        eprintln!("romacs: no usable runtime tree: {why}\n  \
+                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+        std::process::exit(2)
+    })
+}
+
+/// [`runtime_root`], or why there is none, for a lookup that has a
+/// fallback: a process with no runtime tree goes on.  Found once.
+fn found_runtime() -> Result<PathBuf, String> {
+    static FOUND: std::sync::OnceLock<Result<(PathBuf, PathBuf), String>> = std::sync::OnceLock::new();
+    let (root, truename) = FOUND.get_or_init(|| located_runtime().map(|root| {
         let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
         (root, truename)
-    });
+    })).as_ref().map_err(String::clone)?;
     if building() {
         host_fact("runtime-root", path_json(truename));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
     }
-    root.clone()
+    Ok(root.clone())
 }
 
 /// [`runtime_root`], or why there is none.
@@ -918,29 +764,46 @@ fn runtime_tree(root: &Path) -> Result<(), String> {
     }
 }
 
+/// The link in a runtime tree naming the Romacs source tree it was
+/// installed from: an installed runtime holds Lisp, not Rust.
+pub const SOURCE_LINK: &str = "source";
+
+/// The Romacs source tree this build came from, `source-directory':
+/// `ROMACS_SOURCE_DIRECTORY` when set, read as each process's own as SHELL
+/// is (`per_process_env`: a world build reads and records none, and a
+/// restored VM asks again, `Vm::world_reinit`), none if it names no tree;
+/// else the tree the runtime tree's [`SOURCE_LINK`] names, else the build's
+/// own root while it is a git checkout of one, else none.  A gate's build
+/// slot mirrors a checkout without `.git`, so a build made there names no
+/// tree it would not find again.  Every way of starting a session finds the
+/// same one, as the link belongs to the runtime tree.  The checks are kinds
+/// of entry, not stats: a world built while the tree is edited stays valid
+/// when a file under it is added or renamed, or a commit touches `.git`.
+pub fn source_directory() -> Option<PathBuf> {
+    source_directory_from(per_process_env("ROMACS_SOURCE_DIRECTORY"), || found_runtime().ok(), &build_root())
+}
+
+/// [`source_directory`] from the variable's VALUE, the runtime tree RUNTIME
+/// gives if there is one, and the build's ROOT.
+fn source_directory_from(value: Option<OsString>, runtime: impl FnOnce() -> Option<PathBuf>, root: &Path) -> Option<PathBuf> {
+    let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
+    if let Some(dir) = value.filter(|d| !d.is_empty()).map(PathBuf::from) {
+        // Absolute, so a buffer's own directory never resolves it.
+        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
+    }
+    // The tree itself, so its files are visited under their own names.
+    if let Some(linked) = runtime().map(|dir| dir.join(SOURCE_LINK)).filter(|linked| tree(linked)) {
+        return canonicalize(&linked).ok();
+    }
+    (tree(root) && entry_type(&root.join(".git")).is_ok()).then(|| root.to_path_buf())
+}
+
 /// The checkout this crate was built from: a compile-time path that no
 /// installed system has, kept for development binaries under `target/`.
 /// It is the manifest directory's grandparent itself, not `DIR/../..`:
 /// `data-directory' and the other runtime directories are directory names
 /// as GNU's are, so file names built from them compare equal to their
 /// expansions (find-func's library completion, bug#43393's test).
-/// The Romacs source tree this build came from, `source-directory':
-/// `ROMACS_SOURCE_DIRECTORY` when set (none if it names no tree), else the
-/// build's own root while it is a git checkout of one, else none.  A gate's
-/// build slot mirrors a checkout without `.git`, so a build made there
-/// names no tree it would not find again.  Both checks are kinds of entry,
-/// not stats: a world built while the tree is edited stays valid when a
-/// file under it is added or renamed, or a commit touches `.git`.
-pub fn source_directory() -> Option<PathBuf> {
-    let tree = |dir: &Path| probe(Probe::IsDir, dir.join("crates/romacs-vm/src/prims"));
-    if let Some(dir) = getenv("ROMACS_SOURCE_DIRECTORY").filter(|d| !d.is_empty()).map(PathBuf::from) {
-        // Absolute, so a buffer's own directory never resolves it.
-        return std::path::absolute(&dir).ok().filter(|dir| tree(dir));
-    }
-    let root = build_root();
-    (tree(&root) && entry_type(&root.join(".git")).is_ok()).then_some(root)
-}
-
 pub(crate) fn build_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().and_then(Path::parent).map_or_else(|| manifest.join("../.."), Path::to_path_buf)
@@ -996,8 +859,6 @@ pub fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b)));
     if building() {
         file_read(path.as_ref(), &result);
-    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
-        note_credential(path.as_ref());
     }
     result
 }
@@ -1007,8 +868,6 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     let result = crate::flight::checked("read-file", || bytes(path.as_ref()), || std::fs::read_to_string(&path), |r| crate::flight::outcome(r, |b| crate::flight::digest(b.as_bytes())));
     if building() {
         file_read(path.as_ref(), &result);
-    } else if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
-        note_credential(path.as_ref());
     }
     result
 }
@@ -1112,9 +971,6 @@ pub fn open_input(path: impl AsRef<Path>, flags: i32) -> io::Result<Input> {
     credential_in_build(path.as_ref())?;
     let result = crate::flight::checked("open", || bytes(path.as_ref()), || OpenOptions::new().read(true).custom_flags(flags).open(&path), |r| crate::flight::outcome(r, |_| 0));
     if !building() {
-        if result.is_ok() && WATCH_CREDENTIALS.with(Cell::get) {
-            note_credential(path.as_ref());
-        }
         return result.map(|file| Input(file, None, None, Source::file(path.as_ref())));
     }
     let path = path.as_ref();
@@ -1157,71 +1013,15 @@ fn credential_path(path: &Path) -> bool {
     file || tree || gnupg
 }
 
-/// A read of PATH's content: a credential file's is noted, in a build and
-/// while the init's plan is recorded (`take_credential_read`). True when
-/// PATH is one.
-fn note_credential(path: &Path) -> bool {
-    let credential = credential_path(path);
-    if credential {
-        note_secret_asked();
-    }
-    credential
-}
-
-/// A secret was asked for: by a reader in a build (`romacs--world-secret-asked`)
-/// or a credential file read. A definition form that asked is cut short and
-/// kept whole for restore, as one an effect cut is (`layer_form_cut`); any
-/// other top-level form is kept whole too (`Vm::layer_form_finished`).
-pub(crate) fn note_secret_asked() {
-    CREDENTIAL_READ.with(|c| c.set(true));
-    LAYER.with(|l| if let Some(layer) = l.borrow_mut().as_mut() && layer.form.is_some() { layer.tainted = true; layer.cut = true; });
-}
-
-/// A secret reader's call deferred in a build (`romacs--world-secret-asked`).
-pub(crate) fn note_reader_asked() {
-    READER_ASKS.with(|n| n.set(n.get() + 1));
-    note_secret_asked();
-}
-
-/// How many secret reader calls this thread's builds deferred.
-pub(crate) fn reader_asks() -> usize {
-    READER_ASKS.with(Cell::get)
-}
-
-/// Whether the top-level form loading in a layer build is a definition.
-pub(crate) fn layer_form_is_definition() -> bool {
-    LAYER.with(|l| l.borrow().as_ref().is_some_and(|layer| layer.form.is_some()))
-}
-
 /// A build reads no credential file: it fails with EPERM, as an effect
-/// does, so no secret reaches a builder's heap, log or manifest, and the
-/// form that asked is kept, as code, for the session (`note_secret_asked`),
-/// where the read is made. Ok outside a build or for any other file.
+/// does, so no secret reaches a builder's heap, log or manifest. Ok outside
+/// a build or for any other file.
 fn credential_in_build(path: &Path) -> io::Result<()> {
-    if !capturing() || !note_credential(path) {
+    if !capturing() || !credential_path(path) {
         return Ok(());
     }
     record("secret-read", json!({"path": path_json(path)}));
     Err(io::Error::from_raw_os_error(libc::EPERM))
-}
-
-/// The init's plan is recorded from here (ON) or no longer: its reads of
-/// credential files are noted (`credential_read`). Either way, none is
-/// noted yet.
-pub(crate) fn watch_credentials(on: bool) {
-    WATCH_CREDENTIALS.with(|w| w.set(on));
-    CREDENTIAL_READ.with(|c| c.set(false));
-}
-
-/// Whether a secret was asked for since the last `take_secret_asked` or
-/// `watch_credentials`.
-pub(crate) fn secret_asked() -> bool {
-    CREDENTIAL_READ.with(Cell::get)
-}
-
-/// `secret_asked`, forgetting it.
-pub(crate) fn take_secret_asked() -> bool {
-    CREDENTIAL_READ.with(|c| c.replace(false))
 }
 
 /// The kernel's random source, `/dev/urandom`.
@@ -3272,6 +3072,33 @@ mod tests {
             .collect();
         assert!(!probes.is_empty(), "the tree checks are recorded");
         assert!(probes.iter().all(|p| p == "IsDir" || p == "entry-type"), "{probes:?}, found {found:?}");
+    }
+    /// An installed runtime holds no Rust: its `source` link names the
+    /// tree, before the build's own checkout; the variable comes first.
+    #[test]
+    fn source_directory_follows_the_runtime_trees_link() {
+        let dir = std::env::temp_dir().join(format!("romacs-source-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tree = |name: &str| {
+            let tree = dir.join(name);
+            std::fs::create_dir_all(tree.join("crates/romacs-vm/src/prims")).unwrap();
+            std::fs::canonicalize(tree).unwrap()
+        };
+        let (checkout, build, named) = (tree("checkout"), tree("build"), tree("named"));
+        std::fs::create_dir(build.join(".git")).unwrap();
+        let runtime = dir.join("runtime");
+        std::fs::create_dir(&runtime).unwrap();
+        std::os::unix::fs::symlink(&checkout, runtime.join(SOURCE_LINK)).unwrap();
+        let found = |value: Option<&Path>, runtime: &Path| {
+            source_directory_from(value.map(|v| v.as_os_str().to_owned()), || Some(runtime.to_path_buf()), &build)
+        };
+        assert_eq!(found(None, &runtime), Some(checkout.clone()), "the link before the build's checkout");
+        assert_eq!(found(Some(&named), &runtime), Some(named.clone()), "the variable before the link");
+        assert_eq!(found(None, &dir.join("unlinked")), Some(build.clone()), "no link: the build's checkout");
+        assert_eq!(source_directory_from(None, || None, &build), Some(build.clone()), "no runtime tree: the build's checkout");
+        std::fs::remove_dir_all(&checkout).unwrap();
+        assert_eq!(found(None, &runtime), Some(build.clone()), "a link to no tree: the build's checkout");
+        let _ = std::fs::remove_dir_all(&dir);
     }
     /// A late wake samples once, at the next deadline after it.
     #[test]

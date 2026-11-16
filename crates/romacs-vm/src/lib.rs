@@ -1414,6 +1414,9 @@ pub struct Vm {
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// A host wait in progress, its host moved out of `host_input`.
     host_wait: Option<host_input::HostWait>,
+    /// A host event a `switch-frame' event went before, and the id of the
+    /// top-level frame it came from: the next read's (host_input.rs).
+    deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
     /// The embedder's layout while one is attached (layout_host.rs).
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
@@ -1657,9 +1660,6 @@ pub struct Vm {
     random: random::Random,
     /// A world build's P tracking (`world`); None outside build mode.
     tracking: Option<Box<world::Tracking>>,
-    /// The re-seed definitions waiting for their variable's first access
-    /// (`world::pending`), by slot.
-    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1888,7 +1888,6 @@ romacs_snapshot::snapshot_fields!(Vm {
     quit_slots,
     face_keys,
     debug_event_slots,
-    pending,
 } at_rest {
     site_leaf,
     regexp_cache,
@@ -1904,6 +1903,7 @@ romacs_snapshot::snapshot_fields!(Vm {
     suspended,
     host_input,
     host_wait,
+    deferred_event,
     layout_host,
     display,
     visual,
@@ -2004,6 +2004,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
+            deferred_event: None,
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -2107,7 +2108,6 @@ impl Vm {
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
             tracking: None,
-            pending: std::collections::BTreeMap::new(),
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,

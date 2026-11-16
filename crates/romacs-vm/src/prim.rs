@@ -2051,9 +2051,9 @@ pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, 
     Leaf::new(vm).window_text_shows_glyphs(window, from, to)
 }
 
-/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
-pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
-    Leaf::new(vm).window_line_numbers(window)
+/// The line numbers WINDOW shows from position FIRST (`Leaf::window_line_numbers`).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value, first: i64) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window, first)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary

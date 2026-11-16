@@ -104,3 +104,33 @@ fn labeled_restrictions() {
         "(with-temp-buffer (insert \"abcdef\") (with-restriction 2 5 :label 'outermost-restriction (list (progn (widen) (list (point-min) (point-max))) (progn (widen) (list (point-min) (point-max))))))",
     ]);
 }
+
+/// window.c `resize-mini-window-internal`, as `window--resize-mini-window`
+/// prepares and calls it (ivy).
+#[test]
+fn resize_mini_window_internal() {
+    same_as_gnu("mini-window", &[
+        "(list (fboundp 'resize-mini-window-internal) (condition-case e (resize-mini-window-internal (selected-window)) (error e)))",
+        "(let ((w (minibuffer-window))) (window--resize-mini-window w 2) (prog1 (list (window-pixel-height w) (window-pixel-height (frame-root-window)) (window-total-height w)) (window--resize-mini-window w -2)))",
+    ]);
+}
+
+/// minibuf.c `minibufferp`: every minibuffer made is one, shown or not, and
+/// only an active one is live; evil's `evil-initialize` asks it of
+/// *Minibuf-1* as it takes its mode.
+#[test]
+fn minibufferp_knows_every_minibuffer() {
+    same_as_gnu("minibufferp", &[
+        "(progn (defun my-read () (interactive) (read-from-minibuffer \"x: \")) (global-set-key (kbd \"C-c r\") #'my-read) (execute-kbd-macro (vconcat (kbd \"C-c r\") \"abc\" [return])) (let ((b (get-buffer \" *Minibuf-1*\"))) (list (minibufferp b) (minibufferp b t) (with-current-buffer b (minibufferp)) (minibufferp (get-buffer \" *Minibuf-0*\")) (minibufferp (get-buffer-create \" *Minibuf-9*\")))))",
+    ]);
+}
+
+/// buffer.c `overlays-in` with positions outside the buffer, empty overlays
+/// at its edges (yasnippet's `yas-active-snippets` asks from 0).
+#[test]
+fn overlays_in_outside_the_buffer() {
+    same_as_gnu("overlays-in", &[
+        "(with-temp-buffer (insert \"abcdefgh\") (let ((a (make-overlay 2 4)) (z (make-overlay 9 9)) (e (make-overlay 1 1))) (overlay-put a 'n 'a) (overlay-put z 'n 'z) (overlay-put e 'n 'e) (narrow-to-region 3 5) (mapcar (lambda (r) (sort (mapcar (lambda (o) (overlay-get o 'n)) (apply #'overlays-in r)) #'string<)) '((0 10) (-5 3) (1 100) (0 0) (100 200) (9 9) (0 1) (3 20)))))",
+        "(with-temp-buffer (let ((e (make-overlay 1 1))) (list (overlays-in 0 1) (overlays-in -3 5) (overlays-in 2 9))))",
+    ]);
+}

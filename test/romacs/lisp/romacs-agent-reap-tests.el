@@ -16,11 +16,12 @@
 (defmacro romacs-agent-reap-tests--with (&rest body)
   "BODY with `review', an idle reviewer task under a unit, and `lane', an
 idle task of another role; `scheduled' collects each look's (SESSION
-DELAY), `stopped' each session stopped."
+DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
+`working' says a shell runs among a task's processes."
   (declare (indent 0))
   `(let* ((romacs-agent--sessions (make-hash-table :test #'equal))
           (romacs-agent-tools--reaping (make-hash-table :test #'equal))
-          (romacs-agent-reap-after '(("review" . 300)))
+          (romacs-agent-reap-after 300)
           (review (romacs-agent--make :id "r" :harness 'codex :state 'idle :unit "romacs-agent-r"
                                       :dir (make-temp-file "romacs-reap-" t)
                                       :last-time (- (float-time) 1000)
@@ -28,22 +29,27 @@ DELAY), `stopped' each session stopped."
           (lane (romacs-agent--make :id "l" :harness 'claude :state 'idle :unit "romacs-agent-l"
                                     :last-time (- (float-time) 1000)
                                     :options '(:parent "lead" :role "implementation")))
-          (scheduled nil) (stopped nil))
+          (scheduled nil) (stopped nil) (asleep nil) (working nil))
      (dolist (s (list review lane)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
      (cl-letf (((symbol-function 'run-at-time)
                 (lambda (delay _repeat function session &rest _)
                   (when (eq function #'romacs-agent-tools--reap) (push (list session delay) scheduled))))
-               ((symbol-function 'romacs-agent-stop) (lambda (s) (push s stopped))))
+               ((symbol-function 'romacs-agent-stop) (lambda (s &optional reaped) (push s stopped) (when reaped (push s asleep))))
+               ((symbol-function 'romacs-agent-tools--working-p) (lambda (_s) working)))
        (unwind-protect (progn ,@body) (delete-directory (romacs-agent-dir review) t)))))
 
-(ert-deftest romacs-agent-reap-a-reviewer-after-its-turn ()
+(ert-deftest romacs-agent-reap-a-delegated-task-after-its-turn ()
   (romacs-agent-reap-tests--with
-    ;; Its ends, replayed or live, schedule one look; another role's none.
+    ;; Its ends, replayed or live, schedule one look, whatever its role;
+    ;; a user's own session's none.
     (dotimes (_ 3) (romacs-agent-tools--reap-on-event review (list :type 'done)))
     (romacs-agent-tools--reap-on-event lane (list :type 'done))
-    (should (equal scheduled (list (list review 300))))
+    (romacs-agent-tools--reap-on-event (romacs-agent--make :id "u" :state 'idle :options nil) (list :type 'done))
+    (should (equal scheduled (list (list lane 300) (list review 300))))
+    ;; Stopped to sleep, not ended.
     (romacs-agent-tools--reap review)
-    (should (equal stopped (list review)))))
+    (should (equal stopped (list review)))
+    (should (equal asleep (list review)))))
 
 (ert-deftest romacs-agent-reap-keeps-a-task-at-work ()
   (romacs-agent-reap-tests--with
@@ -62,6 +68,12 @@ DELAY), `stopped' each session stopped."
       (should-not (reaped-p (lambda () (puthash "q" t (romacs-agent-approvals review)))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-cancelled review) t))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-state review) 'ended))))
+      ;; A shell it started still runs (a build in the background): kept,
+      ;; looked at again a reap time later.
+      (setq scheduled nil)
+      (should-not (reaped-p (lambda () (setq working t))))
+      (setq working nil)
+      (should (equal (mapcar (lambda (look) (list (romacs-agent-id (car look)) (cadr look))) scheduled) '(("r" 300))))
       ;; Spoken to lately: looked at again when its time is up.
       (setq scheduled nil)
       (should-not (reaped-p (lambda () (setf (romacs-agent-last-time review) (- (float-time) 100)))))
@@ -196,17 +208,64 @@ DELAY), `stopped' each session stopped."
       (delete-directory root t)
       (delete-directory run t))))
 
-(ert-deftest romacs-agent-reap-by-role-and-on-restore ()
+(ert-deftest romacs-agent-reap-any-delegated-task-and-on-restore ()
   (romacs-agent-reap-tests--with
-    ;; Any role, when t names a time.
-    (let ((romacs-agent-reap-after '(("review" . 300) (t . 1800))))
-      (should (= (romacs-agent-tools--reap-delay lane) 1800)))
-    ;; A user's own session (no role): kept, whatever t says.
-    (let ((romacs-agent-reap-after '((t . 60))))
-      (should-not (romacs-agent-tools--reap-delay (romacs-agent--make :id "u" :options nil))))
+    ;; A task some session delegated, whatever its role, or none.
+    (should (= (romacs-agent-tools--reap-delay lane) 300))
+    (should (= (romacs-agent-tools--reap-delay (romacs-agent--make :id "n" :options '(:parent "lead"))) 300))
+    ;; A user's own session: never.
+    (should-not (romacs-agent-tools--reap-delay (romacs-agent--make :id "u" :options nil)))
+    (let ((romacs-agent-reap-after nil)) (should-not (romacs-agent-tools--reap-delay lane)))
     ;; A restart looks at the tasks already idle.
     (romacs-agent-tools--reap-restored)
-    (should (equal (mapcar #'car scheduled) (list review)))))
+    (should (equal (sort (mapcar (lambda (look) (romacs-agent-id (car look))) scheduled) #'string<) '("l" "r")))))
+
+(ert-deftest romacs-agent-reap-a-reaped-task-sleeps-idle-and-resumes-its-conversation ()
+  ;; Reaped, its harness gone: idle, not ended, here and after a restart,
+  ;; its task still completed; its next message (task_send, or what a
+  ;; watch tells it) runs its harness again on its own conversation.
+  (let* ((root (make-temp-file "romacs-reaped-" t))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "ssssssss-0000-4000-8000-000000000000" :harness 'claude :state 'idle
+                                      :dir root :cwd root :host-socket (expand-file-name "host.sock" root)
+                                      :turns 1 :options '(:parent "lead")))
+         (process (make-process :name "romacs-reaped-fixture" :command '("cat") :noquery t))
+         (launched nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 0))
+                  ((symbol-function 'signal-process) #'ignore)
+                  ((symbol-function 'run-at-time) #'ignore))
+          (puthash (romacs-agent-id session) session romacs-agent--sessions)
+          (process-put process 'romacs-agent session)
+          (setf (romacs-agent-connection session) process (romacs-agent-unit session) "romacs-agent-s")
+          (write-region "" nil (romacs-agent-host-socket session))
+          (romacs-agent-stop session t)
+          (delete-process process)
+          (romacs-agent--sentinel process "killed")
+          (should (romacs-agent-reaped-p session))
+          (should (eq (romacs-agent-state session) 'idle))
+          (should (equal (romacs-agent-tools--status session) "completed"))
+          ;; Its supervisor's socket left behind is no harness running unseen.
+          (should-not (romacs-agent--harness-unseen-p session))
+          ;; A restart reads it asleep too.
+          (romacs-agent--write-json (expand-file-name "manifest.json" root)
+                                    (romacs-mcp--object "id" "tttttttt-0000-4000-8000-000000000000" "harness" "claude"
+                                                        "hostSocket" (expand-file-name "none.sock" root)))
+          (write-region "" nil (expand-file-name "journal.jsonl" root))
+          (should (eq (romacs-agent-state (romacs-agent--load root)) 'idle))
+          ;; Its next message resumes it on its conversation, then goes.
+          (cl-letf (((symbol-function 'romacs-agent--launch) (lambda (_s argv &rest _) (push argv launched)))
+                    ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+                    ((symbol-function 'romacs-agent--check-companions) #'ignore)
+                    ((symbol-function 'romacs-agent--attach) #'ignore))
+            (romacs-agent-send session "and a second round"))
+          (should (equal (length launched) 1))
+          (should (equal (car launched) (romacs-agent--argv session t)))
+          (should (member "--resume" (car launched)))
+          (should (eq (romacs-agent-state session) 'starting))
+          (should (= (romacs-agent-queue-length session) 1)))
+      (when (process-live-p process) (delete-process process))
+      (delete-directory root t))))
 
 (ert-deftest romacs-agent-reap-a-stopped-session-reads-ended ()
   (let* ((root (make-temp-file "romacs-stopped-" t))
@@ -243,6 +302,32 @@ DELAY), `stopped' each session stopped."
           (should-not (file-exists-p (expand-file-name "stopped" root))))
       (when (process-live-p process) (delete-process process))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-reap-works-out-a-tasks-own-processes ()
+  ;; A supervisor run detached shares the cgroup it was started in (a
+  ;; test's editor inside a lane's unit): its own processes are its
+  ;; descendants, never what else runs in that cgroup.  A shell among them
+  ;; is work going on; a harness's other processes are not.
+  (let* ((idle (make-process :name "romacs-reap-idle" :command '("sleep" "30") :noquery t))
+         (busy (make-process :name "romacs-reap-busy" :noquery t
+                             :command '("python3" "-c" "import subprocess, time; subprocess.Popen(['sh', '-c', 'sleep 30; :']); time.sleep(30)")))
+         (host nil)
+         (session (romacs-agent--make :id "w" :state 'idle :unit nil :options '(:parent "lead"))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--host-pid) (lambda (_s) host)))
+          (setq host (process-id idle))
+          (should-not (romacs-agent-tools--working-p session))
+          (setq host (process-id busy))
+          ;; Its shell, once started.
+          (let ((end (+ (float-time) 10)))
+            (while (and (not (romacs-agent-tools--working-p session)) (< (float-time) end)) (sleep-for 0.1)))
+          (should (romacs-agent-tools--working-p session))
+          ;; A unit that is not the cgroup it runs in: its descendants still.
+          (setf (romacs-agent-unit session) "romacs-agent-not-this-one")
+          (setq host (process-id idle))
+          (should-not (romacs-agent-tools--working-p session)))
+      (delete-process idle)
+      (delete-process busy))))
 
 (provide 'romacs-agent-reap-tests)
 ;;; romacs-agent-reap-tests.el ends here

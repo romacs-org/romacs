@@ -53,7 +53,7 @@ fn scratch(name: &str) -> PathBuf {
 
 /// GNU's override list substitutes the library and symbol for a language,
 /// so an override never falls back to the bundled grammar; the bundled
-/// grammar shadows the system's (markdown, which distributions ship);
+/// grammar shadows the system's (python, which distributions ship);
 /// every bundled grammar loads, parses, and reports the executable as its
 /// location. In this order: a loaded grammar is cached for the process, as
 /// GNU keeps its libraries open.
@@ -66,7 +66,7 @@ fn bundled_grammars_load_unless_overridden_and_before_the_systems() {
         vec![
             printed(&mut vm, "(let ((treesit-load-name-override-list '((rust \"libtree-sitter-nosuch\" \"tree_sitter_rust\"))))
                 (list (treesit-language-available-p 'rust) (car (cdr (treesit-language-available-p 'rust t)))))"),
-            printed(&mut vm, &format!("(equal (treesit-grammar-location 'markdown) {exe:?})")),
+            printed(&mut vm, &format!("(equal (treesit-grammar-location 'python) {exe:?})")),
             printed(&mut vm, "(mapcar (lambda (g) (plist-get g :name)) (romacs-treesit-bundled-grammars))"),
             printed(&mut vm, &format!("(delq nil (mapcar (lambda (g)
                 (let ((name (plist-get g :name)))
@@ -83,7 +83,7 @@ fn bundled_grammars_load_unless_overridden_and_before_the_systems() {
     assert_eq!(report, [
         "(nil not-found)",
         "t",
-        "(bash c cpp css go html javascript jsdoc json markdown markdown-inline python rust toml tsx typescript yaml)",
+        "(bash c cpp css go html javascript jsdoc json python rust toml tsx typescript yaml)",
         "nil",
         "t",
     ]);

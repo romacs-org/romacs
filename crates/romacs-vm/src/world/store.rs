@@ -111,6 +111,14 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(data).into()
 }
 
+/// Ok when MANIFEST's build captured everything it read, else what it did not.
+fn captured(manifest: &Json) -> Result<(), Json> {
+    match manifest["uncaptured"].as_array().filter(|r| !r.is_empty()) {
+        Some(uncaptured) => Err(json!({"uncaptured": uncaptured})),
+        None => Ok(()),
+    }
+}
+
 /// The content digest of FILE (`content_digest`), cached in STORE by the
 /// file's identity and change times: hashing tens or hundreds of megabytes
 /// at every launch would cost more than the rest of a restore. A write, a
@@ -422,70 +430,60 @@ impl World {
     }
 
     /// Whether RECIPE's world in STORE, a store this process only reads,
-    /// would restore now (`restore_read_only`), writing nothing there.
+    /// is current, writing nothing there: what an installer asks before it
+    /// keeps an installation's world, so every record is asked again, as a
+    /// build would (a Lisp tree updated in place stales it). A launch only
+    /// restores it (`restore_read_only`).
     #[must_use]
     pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
-        World::read_only(store, recipe).is_ok()
+        World::read_only(store, recipe, true).is_ok()
     }
 
-    /// RECIPE's world in STORE, read only, and its image opened, when its
-    /// manifest holds and the image is the one bound.
-    fn read_only(store: &Path, recipe: Vec<String>) -> Result<(World, std::fs::File), Json> {
+    /// RECIPE's world in STORE, read only, and its image opened, when it was
+    /// published for this executable and RECIPE and the image is the one
+    /// bound; with REPLAY, when its records also still hold.
+    fn read_only(store: &Path, recipe: Vec<String>, replay: bool) -> Result<(World, std::fs::File), Json> {
         let fail = |e: std::io::Error| json!({"store": e.to_string()});
         let store = store_path(store).map_err(fail)?;
         checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
         let key = world_key(&store, &recipe, false).map_err(fail)?;
         let world = World { store, key, recipe };
-        let manifest = world.valid_manifest().map_err(|reason| world.explained(reason))?;
+        let manifest = if replay { world.valid_manifest() } else { world.published_manifest() }
+            .map_err(|reason| world.explained(reason))?;
         let image = world.checked_image(&manifest, false)?;
         Ok((world, image))
     }
 
-    /// RECIPE's world restored from STORE, a store this process only reads
-    /// (an installation's, which its installer built): when it is usable
-    /// now, with nothing made or written there, no lock taken, no use
-    /// stamped and its digest cache never filled. No launch prunes such a
-    /// store or builds in it.
+    /// RECIPE's world restored from STORE, a store this process only reads:
+    /// an installation's (`EXECUTABLE.worlds`), which its installer built
+    /// with the executable and the copy of the Lisp tree beside it. Its key
+    /// binds the executable, its libraries and RECIPE; what else its build
+    /// read is the installation's own, so its records are kept in its
+    /// manifest (`lisp_identity` reads them) but not asked again. Nothing is
+    /// made or written there, no lock taken, no use stamped and the digest
+    /// cache, which the installer's build filled, is only read. No launch
+    /// prunes such a store or builds in it.
     ///
     /// # Errors
     ///
     /// Why the world is not usable: worlds unavailable to this process, a
-    /// store that is no private one of this user's, a stale or missing
-    /// manifest, or an image the arena cannot adopt.
+    /// store that is no private one of this user's, a missing manifest, or
+    /// an image the arena cannot adopt.
     pub fn restore_read_only<T: super::safe::SnapshotSafe + 'static>(store: &Path, recipe: Vec<String>)
-        -> Result<(Box<Vm>, T), Json> {
+        -> Result<(World, Box<Vm>, T), Json> {
         if !arena::active() {
             return Err(json!("no arena"));
         }
-        let (world, image) = World::read_only(store, recipe)?;
+        let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
-            arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (Box::new(vm), carry))
+            arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
                 .ok_or_else(|| json!({"image": "made for another key"})),
             failed => Err(arena_reason(failed)),
         }
     }
 
-    /// The world LINES add to this one's recipe: keyed by this world's key
-    /// and LINES, so it binds all this one does (an init layer,
-    /// `super::layer`).
-    pub fn layered(&self, lines: Vec<String>) -> World {
-        let text = format!("{FORMAT}\nbase {}\n{}\n", hex(&self.key), lines.join("\n"));
-        let mut recipe = self.recipe.clone();
-        recipe.extend(lines);
-        World { store: self.store.clone(), key: sha256(text.as_bytes()), recipe }
-    }
-
     fn file(&self, suffix: &str) -> PathBuf {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
-    }
-
-    /// What a build on these very inputs could not capture, when that
-    /// stands: its records all hold, so building again would capture no more.
-    pub fn standing_uncaptured(&self) -> Option<Vec<Json>> {
-        match self.valid_manifest() {
-            Err(reason) => reason.get("uncaptured")?.as_array().cloned(),
-            Ok(_) => None,
-        }
     }
 
     /// The identity of this world's Lisp, from its published manifest
@@ -512,18 +510,23 @@ impl World {
         self.usable().is_ok()
     }
 
-    /// Hold this world in use for the process's life (`prune` keeps it),
-    /// as a restored launch holds the world it restored: for a world a
-    /// launch boots beside, its layer's base.
-    pub fn keep(&self) {
-        self.mark_use();
+    /// The manifest as its build published it.
+    fn published(&self) -> Result<Json, Json> {
+        let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
+        serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))
+    }
+
+    /// The manifest, when its build captured everything it read.
+    fn published_manifest(&self) -> Result<Json, Json> {
+        let manifest = self.published()?;
+        captured(&manifest)?;
+        Ok(manifest)
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
     /// read, asked again, gives the same answer.
     fn valid_manifest(&self) -> Result<Json, Json> {
-        let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
-        let manifest: Json = serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))?;
+        let manifest = self.published()?;
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let mut expected = record.clone();
             if let Some(fields) = expected.as_object_mut() { fields.remove("site"); }
@@ -532,9 +535,7 @@ impl World {
                 now => return Err(json!({"stale": expected, "now": now})),
             }
         }
-        if let Some(uncaptured) = manifest["uncaptured"].as_array().filter(|r| !r.is_empty()) {
-            return Err(json!({"uncaptured": uncaptured}));
-        }
+        captured(&manifest)?;
         Ok(manifest)
     }
 
@@ -1053,7 +1054,7 @@ struct Stored {
     /// A builder or a restored process holds it.
     busy: bool,
     /// It has a manifest and no image: what a build on its inputs could not
-    /// capture, which a launch resolving a layer reads (romacs-vm-gui world.rs).
+    /// capture, which keeps a launch from building it again.
     uncaptured: bool,
 }
 
@@ -1074,8 +1075,7 @@ fn prune_plan(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<St
 /// stays within MOST worlds (`MOST_WORLDS` but for a test's) and
 /// `MOST_BYTES` bytes. A manifest of what was not captured is
 /// kept while it is within `UNUSED`, outside the bounds: forgotten, the
-/// next launch would build its inputs again, as an init layer's
-/// resolution does after each one it forgets.
+/// next launch would build its inputs again.
 fn plan_family(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
     let uncaptured = |w: &&Stored| w.uncaptured && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
@@ -1159,7 +1159,11 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         if real_dir(&plans) {
             for entry in host::read_dir(&plans)? {
                 let name = entry?.file_name().to_string_lossy().into_owned();
-                if super::layer::plan_file(&name) && regular(&plans.join(&name)) {
+                // The plans of the init layers Romacs once kept: a hex
+                // digest and `.json`, or `.last.json`.
+                let key = name.strip_suffix(".last.json").or_else(|| name.strip_suffix(".json"));
+                let plan = key.is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()));
+                if plan && regular(&plans.join(&name)) {
                     host::remove_file(plans.join(&name))?;
                     removed += 1;
                 }

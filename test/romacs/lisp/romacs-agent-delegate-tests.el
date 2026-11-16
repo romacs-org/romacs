@@ -5,6 +5,7 @@
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
+(require 'romacs-test-notes)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -667,11 +668,12 @@ message's record for TEXT, `interrupted' each interrupted."
          (run (romacs-test-socket-directory "note-"))
          (socket (expand-file-name "host.sock" run))
          (romacs-agent--sessions (make-hash-table :test #'equal))
-         (session (romacs-agent--make :id "n" :harness 'claude :state 'detached :dir root :host-socket socket)))
+         (session (romacs-agent--make :id "n" :harness 'claude :state 'detached :dir root :host-socket socket))
+         (listener nil))
     (puthash "n" session romacs-agent--sessions)
     (unwind-protect
         (progn
-          (write-region "" nil socket nil 'silent)
+          (setq listener (make-network-process :name "detached" :server t :family 'local :service socket :noquery t))
           (should-error (romacs-agent--note session (romacs-mcp--object "type" "replied")) :type 'user-error)
           (should-not (file-exists-p (expand-file-name "journal.jsonl" root)))
           (let ((sent nil) (asked (romacs-agent-tools--message "sibling" (romacs-agent--make :id "s" :title "s"))))
@@ -681,10 +683,12 @@ message's record for TEXT, `interrupted' each interrupted."
             (cl-letf (((symbol-function 'romacs-agent-tools--message-to) (lambda (&rest _) (setq sent t))))
               (should-error (romacs-agent-answer session (plist-get asked :id) "a" nil t) :type 'user-error))
             (should-not sent))
-          ;; With no supervisor's socket: the journal is this server's.
-          (delete-file socket)
+          ;; No supervisor listening: a host started for the note writes it.
+          (delete-process listener)
+          (when (file-exists-p socket) (delete-file socket))
           (romacs-agent--note session (romacs-mcp--object "type" "replied"))
           (should (file-exists-p (expand-file-name "journal.jsonl" root))))
+      (when listener (delete-process listener))
       (delete-directory root t)
       (delete-directory run t))))
 
@@ -698,12 +702,13 @@ message's record for TEXT, `interrupted' each interrupted."
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (session (romacs-agent--make :id "l" :harness 'claude :state 'detached :dir root :host-socket socket
                                       :options '(:model "old")))
-         (resumed nil))
+         (resumed nil) (listener nil))
     (puthash "l" session romacs-agent--sessions)
     (unwind-protect
         (progn
-          (write-region "" nil socket nil 'silent)
+          (setq listener (make-network-process :name "left" :server t :family 'local :service socket :noquery t))
           (should-error (romacs-agent-set-plan session t) :type 'user-error)
+          (delete-process listener)
           (should-not (plist-get (romacs-agent-options session) :plan))
           (cl-letf (((symbol-function 'romacs-agent-resume) (lambda (s) (push (plist-get (romacs-agent-options s) :model) resumed)))
                     ((symbol-function 'romacs-agent--manifest-put) #'ignore))
@@ -711,6 +716,7 @@ message's record for TEXT, `interrupted' each interrupted."
             (romacs-agent--restarted session))
           (should (equal resumed '("new")))
           (should (eq (romacs-agent-state session) 'ended)))
+      (when listener (delete-process listener))
       (delete-directory root t)
       (delete-directory run t))))
 

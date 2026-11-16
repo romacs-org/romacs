@@ -46,8 +46,9 @@ fn recenter(cx; optional arg: Value, redisplay: Value) -> Step {
     enter(cx, "romacs--recenter", vec![arg, redisplay], Value::NIL)
 }}
 
-// The pixel branches of Frecenter and window_scroll_pixel_based, over rows
-// a host lays out: nil where the Lisp half's lines serve.
+// The display branches of Frecenter and window_scroll_pixel_based, over
+// rows a host lays out: nil where the Lisp half's lines serve; for
+// `romacs--recenter-start' t where the start stays.
 defsubr! { name = "romacs--recenter-start", gnu = "romacs:display", effect = Reads,
 fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
     let window = cx.vm_selected_window()?;

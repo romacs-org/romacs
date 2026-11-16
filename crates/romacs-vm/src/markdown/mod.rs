@@ -10,20 +10,24 @@
 //!   editing;
 //! - [`restart`]: where a document's last blocks begin, so a text that
 //!   grows at its end is refaced from there;
-//! - [`grid`]: a pipe table drawn as a grid within a width.
+//! - [`grid`]: a pipe table drawn as a grid within a width;
+//! - [`Index`]: a document's top-level blocks kept across its edits, so a
+//!   buffer is parsed by the blocks a region needs.
 //!
 //! The buffer side (reading a region, writing faces) is
 //! `crate::prim::leaf::markdown`; the kinds' faces are Lisp's
 //! (`romacs-markdown-faces`, lisp/textmodes/romacs-markdown.el).
 mod blocks;
+mod index;
 mod runs;
 mod spans;
 mod table;
 
 pub(crate) use blocks::{blocks, BlockKind};
 pub(crate) use runs::runs;
-pub(crate) use spans::{spans, Span};
-pub(crate) use table::grid;
+pub(crate) use index::Index;
+pub(crate) use spans::{spans, spans_with, Code, Parsed, Span};
+pub(crate) use table::{align, grid};
 
 /// What a stretch of Markdown is, for its face.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
