@@ -2762,10 +2762,17 @@ of the latest of them, or nil when it has none."
 (defun romacs-agent-ui--plan-shares (session budget)
   "How SESSION's chat shares BUDGET turns among the parts of its fork's
 sources it draws before its first turn: the latest part first, the parts
-before it what it leaves.  An alist as `romacs-agent-ui--source-shares'
-holds; nil when it is no fork."
+before it what it leaves, and a part that took its source from its start
+leaving the rest to that source's own sources, down the chain.  An alist
+as `romacs-agent-ui--source-shares' holds, every part in it: one it does
+not name draws none."
+  (car (romacs-agent-ui--plan-shares-from session budget)))
+
+(defun romacs-agent-ui--plan-shares-from (session budget)
+  "`romacs-agent-ui--plan-shares' of SESSION's parts with BUDGET turns:
+\(SHARES . LEFT), LEFT what they leave."
   (let ((shares nil))
-    (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session))) shares)
+    (dolist (note (reverse (romacs-agent--journal-notes session "fork" (romacs-agent--journal-head session))))
       (let* ((from (gethash "from" note))
              (after (or (romacs-agent--value (gethash "after" note)) 0))
              (upto (or (romacs-agent--value (gethash "seq" note)) 0))
@@ -2773,7 +2780,12 @@ holds; nil when it is no fork."
              (count (if source (length (car (romacs-agent-ui--fork-span source after upto))) 0))
              (share (min count budget)))
         (push (cons (list from after upto) share) shares)
-        (setq budget (- budget share))))))
+        (setq budget (- budget share))
+        ;; Taken from its start, the source's own sources come before it.
+        (when (and source (= after 0))
+          (pcase-let ((`(,deeper . ,left) (romacs-agent-ui--plan-shares-from source budget)))
+            (setq shares (append deeper shares) budget left)))))
+    (cons shares budget)))
 
 (defun romacs-agent-ui--draw-source (session event)
   "Draw in SESSION's chat what its fork EVENT took from its source: the
@@ -2789,12 +2801,15 @@ the fork, turns no row has yet; then a note."
     (if (not source)
         (romacs-agent-ui--line session event "  · its source is no longer recorded" 'face 'romacs-agent-dim)
       (let* ((span (romacs-agent-ui--fork-span source after upto))
-             (share (or (alist-get (list id after upto) romacs-agent-ui--source-shares nil nil #'equal)
-                        (length (car span))))
+             ;; Planned, a part the plan does not name draws none.
+             (share (if romacs-agent-ui--source-shares
+                        (alist-get (list id after upto) romacs-agent-ui--source-shares 0 nil #'equal)
+                      (length (car span))))
              (more (> (length (car span)) share))
-             (moved (romacs-agent-events-p source))
-             ;; Where its records to the fork end.
-             (end (and moved (romacs-agent--journal-after source upto))))
+             ;; Its records to the fork, read only to where they end: a
+             ;; fork at seq 0, or one whose end is not found, reads none.
+             (end (and (> upto 0) (romacs-agent-events-p source) (romacs-agent--journal-after source upto)))
+             (moved (and end t)))
         (if more
             (unless (get-text-property (point-min) 'romacs-agent-earlier) (romacs-agent-ui--earlier-row))
           (when (= after 0)
