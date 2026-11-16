@@ -1,0 +1,155 @@
+;;; romacs-agent-chat-rows-tests.el --- A chat drawn from its turns' rows -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-mcp)
+(let ((romacs-mcp-call-function romacs-mcp-call-function)
+      (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
+  (require 'romacs-agent)
+  (require 'romacs-agent-claude)
+  (require 'romacs-agent-turns)
+  (require 'romacs-agent-ui))
+
+(defconst romacs-agent-chat-rows-tests--long (make-string 3000 ?x)
+  "An output longer than a row keeps.")
+
+(defun romacs-agent-chat-rows-tests--records (turns)
+  "TURNS Claude turns' records: a run note, then a prompt, a call with its
+result (the last turn's long), a reply and its end a turn."
+  (let ((seq 0) (records nil))
+    (cl-flet ((add (key value) (push (romacs-mcp--object key value "seq" (cl-incf seq) "t" (+ 1794600000.0 (* 2 seq))) records)))
+      (add "note" (romacs-mcp--object "type" "run"))
+      (dotimes (i turns)
+        (let ((n (1+ i)))
+          (add "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                        "romacsRequest" n "type" "user"))
+          (add "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                         "message" (romacs-mcp--object "id" (format "t%d" n)
+                                                                       "content" (vector (romacs-mcp--object "type" "tool_use" "id" (format "u%d" n) "name" "Bash"
+                                                                                                             "input" (romacs-mcp--object "command" (format "grep %d" n)))))))
+          (add "out" (romacs-mcp--object "type" "user" "parent_tool_use_id" :null
+                                         "message" (romacs-mcp--object "content" (vector (romacs-mcp--object "type" "tool_result" "tool_use_id" (format "u%d" n)
+                                                                                                             "content" (if (= n turns) romacs-agent-chat-rows-tests--long "found"))))))
+          (add "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                         "message" (romacs-mcp--object "id" (format "m%d" n)
+                                                                       "content" (vector (romacs-mcp--object "type" "text" "text" (format "answer %d" n))))))
+          (add "out" (romacs-mcp--object "type" "result" "result" (format "answer %d" n))))))
+    (nreverse records)))
+
+(defmacro romacs-agent-chat-rows-tests--with (turns &rest body)
+  "BODY with `session', a Claude session of TURNS turns in a state root of
+its own, its records in its journal and `records' them all."
+  (declare (indent 1))
+  `(let* ((root (make-temp-file "romacs-chat-rows-" t))
+          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state") (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                       process-environment))
+          (romacs-agent-store--db nil) (romacs-agent-turns--made nil)
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (romacs-agent-event-functions nil)
+          (id "b1b1b1b1-2222-4333-8444-555566667777")
+          (dir (expand-file-name id (romacs-agent--state-root)))
+          (records (romacs-agent-chat-rows-tests--records ,turns)))
+     (unwind-protect
+         (progn
+           (make-directory dir t)
+           (romacs-agent--write-json (expand-file-name "manifest.json" dir)
+                                     (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "cwd" root "title" "rows"
+                                                         "titleAuto" :false "argv" [] "options" (romacs-mcp--object)))
+           (let ((coding-system-for-write 'utf-8-unix))
+             (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) records "")
+                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+           (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root :title "rows"
+                                              :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
+             (puthash id session romacs-agent--sessions)
+             ,@body))
+       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+       (delete-directory root t))))
+
+(defun romacs-agent-chat-rows-tests--drawn (session &optional records-only)
+  "SESSION's chat transcript as a first show draws it (5 turns), from its
+records alone with RECORDS-ONLY, and the buffer."
+  (let ((buffer (romacs-agent-ui--make-chat session)))
+    (with-current-buffer buffer
+      (setq romacs-agent-ui--turns 5)
+      (cl-letf (((symbol-function 'romacs-agent-turns-page)
+                 (if records-only #'ignore (symbol-function 'romacs-agent-turns-page))))
+        (romacs-agent-ui--fill buffer))
+      (setf (romacs-agent-buffer session) nil)
+      (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
+
+(ert-deftest romacs-agent-chat-from-rows-reads-as-from-records ()
+  ;; Drawn from its rows, a chat reads as drawn from its records, its
+  ;; finished turns' records never read; a long output opens from its
+  ;; row's pointer; a turn with no row yet is drawn from its records.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-chat-rows-tests--with 12
+    (should (= (romacs-agent-turns-fill session) 12))
+    (let* ((from-records (romacs-agent-chat-rows-tests--drawn session t))
+           (reads nil)
+           (from-rows (cl-letf* ((read (symbol-function 'romacs-agent--read-journal-file))
+                                 ((symbol-function 'romacs-agent--read-journal-file)
+                                  (lambda (session function from end skip)
+                                    (push (cons from end) reads)
+                                    (funcall read session function from end skip))))
+                        (romacs-agent-chat-rows-tests--drawn session))))
+      (should (string-prefix-p "▴ Earlier turns" (car from-rows)))
+      (should (equal (car from-rows) (car from-records)))
+      (should (string-search "answer 12" (car from-rows)))
+      (should-not (string-search "answer 7" (car from-rows)))
+      ;; Only what comes after the rows was read: from the journal's end.
+      (should (equal reads (list (cons (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir))) nil))))
+      ;; The long output is read from the row's pointer when opened: its
+      ;; call's records alone.
+      (with-current-buffer (cdr from-rows)
+        (setq reads nil)
+        (cl-letf* ((read (symbol-function 'romacs-agent--read-journal-file))
+                   ((symbol-function 'romacs-agent--read-journal-file)
+                    (lambda (session function from end skip)
+                      (push (cons from end) reads)
+                      (funcall read session function from end skip))))
+          (should (equal (romacs-agent-ui--payload-output (gethash "u12" romacs-agent-ui--payloads))
+                         romacs-agent-chat-rows-tests--long)))
+        (should (= (length reads) 1))
+        (should (> (caar reads) 0))
+        (should (integerp (cdar reads))))
+      (kill-buffer (cdr from-rows))
+      (kill-buffer (cdr from-records)))
+    ;; A turn ended after its row was written: drawn from its records,
+    ;; after the rows' turns, which are as many as ever.
+    (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq > 52" (list id))
+    (let ((drawn (romacs-agent-chat-rows-tests--drawn session)))
+      (should (string-search "> question 7\n" (car drawn)))
+      (should-not (string-search "> question 6\n" (car drawn)))
+      (should (string-search "answer 11\n" (car drawn)))
+      (should (string-suffix-p (substring (car (romacs-agent-chat-rows-tests--drawn session t))
+                                          (string-search "> question 12" (car (romacs-agent-chat-rows-tests--drawn session t))))
+                               (car drawn)))
+      (kill-buffer (cdr drawn)))))
+
+(ert-deftest romacs-agent-chat-from-rows-of-a-short-session ()
+  ;; Fewer turns than a chat draws: no earlier row, what came before its
+  ;; first turn drawn from its records, the same chat.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-chat-rows-tests--with 3
+    (should (= (romacs-agent-turns-fill session) 3))
+    (let ((rows (romacs-agent-chat-rows-tests--drawn session))
+          (records (romacs-agent-chat-rows-tests--drawn session t)))
+      (should-not (string-search "Earlier turns" (car rows)))
+      (should (string-search "question 1" (car rows)))
+      (should (equal (car rows) (car records)))
+      (kill-buffer (cdr rows))
+      (kill-buffer (cdr records)))))
+
+(ert-deftest romacs-agent-chat-row-questions-as-asked ()
+  ;; A row's questions come back as the layer asks them.
+  (let ((question (make-hash-table :test #'equal)) (notes (make-hash-table :test #'equal)))
+    (puthash "Tail" "the last turns" notes)
+    (puthash "question" "Which way?" question)
+    (puthash "header" "Approach" question)
+    (puthash "options" ["Tail" "Virtual"] question)
+    (puthash "notes" notes question)
+    (should (equal (romacs-agent-ui--item-questions (vector question))
+                   '(("Which way?" :header "Approach" :options ("Tail" "Virtual") :notes (("Tail" . "the last turns")) :multi nil))))))
+
+;;; romacs-agent-chat-rows-tests.el ends here
