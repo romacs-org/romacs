@@ -527,3 +527,19 @@ its end in STATE."
              "todos" (vector (romacs-agent-cards-tests--table "content" "a" "activeForm" "Fixing parser\nand tests"
                                                               "status" "in_progress"))))
     (should (string-search "Fixing parser and tests" (buffer-string)))))
+
+(ert-deftest romacs-agent-a-steer-is-its-own-quiet-row ()
+  ;; A message written into a turn under way: ↪ and its words, dim, no
+  ;; prompt band; it is an input as a prompt is.
+  (romacs-agent-cards-tests--with-chat session
+    (romacs-agent-cards-tests--draw session :type 'input :text "do X first" :request 3 :seq 1)
+    (romacs-agent-cards-tests--draw session :type 'delta :text "On it." :seq 2)
+    (romacs-agent-cards-tests--draw session :type 'input :text "also Y" :request 4 :steer t :seq 3)
+    (let ((text (buffer-string)))
+      (should (string-search "\n↪ also Y\n" text))
+      (should-not (string-search "> also Y" text)))
+    (goto-char (point-min))
+    (search-forward "also Y")
+    (should (eq (get-text-property (1- (point)) 'face) 'romacs-agent-steer))
+    (should-not (memq 'romacs-agent-prompt (ensure-list (get-text-property (1- (point)) 'face))))
+    (should (= (length (romacs-agent-ui--input-starts)) 2))))

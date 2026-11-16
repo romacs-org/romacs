@@ -1145,6 +1145,22 @@ or a repeat."
       (when (plist-get event :last) (setq romacs-agent-ui--shown (plist-get event :seq)))
       (romacs-agent-ui--draw session event buffer))))
 
+(defface romacs-agent-steer '((t :inherit romacs-agent-dim))
+  "A message written into a turn under way, steering it.")
+
+(defun romacs-agent-ui--steer (session event)
+  "Draw EVENT, a message that steered SESSION's turn under way: ↪ and its
+words, quiet, a row of its own; its request id names its turn, as a
+prompt's does."
+  (let ((request (or (plist-get event :request) t)))
+    (romacs-agent-ui--line session event
+                           (concat (propertize "↪ " 'face 'romacs-agent-steer)
+                                   (propertize (string-trim (or (plist-get event :text) ""))
+                                               'face 'romacs-agent-steer 'romacs-agent-images (plist-get event :images)))
+                           'romacs-agent-turn request 'help-echo "Steered the turn under way")
+    (dolist (file (plist-get event :images))
+      (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--image-rows file)))))
+
 (defun romacs-agent-ui--selection-label (selection)
   "SELECTION, a model and effort, for a person: unnamed, the harness's own."
   (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
@@ -1169,6 +1185,9 @@ or a repeat."
                        (romacs-agent-ui--arrival session event (romacs-agent-ui--message-wake message))
                      (romacs-agent-ui--message-card session event message))))
                 (wakes (dolist (wake wakes) (romacs-agent-ui--arrival session event wake)))
+                ;; Written into a turn under way: a steer, its own quiet
+                ;; row, not a prompt's band.
+                ((plist-get event :steer) (romacs-agent-ui--steer session event))
                 (t
                  (romacs-agent-ui--line session event "")
                  (save-excursion (let ((inhibit-read-only t)) (goto-char romacs-agent-ui--end) (delete-char -1)))
