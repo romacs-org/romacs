@@ -141,8 +141,8 @@ journal one turn long."
           (romacs-agent-store--filling nil) (romacs-agent-store--filled nil) (fills 0)
           (romacs-agent--restore-pending nil) (romacs-agent--restoring nil)
           (romacs-agent--restored nil) (romacs-agent--restore-count 0)
-          ;; An editor's start, not a batch run's.
-          (noninteractive nil))
+          ;; An editor's start, not a batch run's; its writes made here.
+          (noninteractive nil) (romacs-agent-writer-queued nil))
       (record old "old")
       (record live "live" t)
       (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))

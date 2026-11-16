@@ -937,6 +937,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
     };
     let worker = spawn_evaluator(move || {
         if let Some(start) = start { startup::begin_phases(start); }
+        // The main VM's one-second rule, watched from its start (watchdog.rs).
+        if live { romacs_vm_gui::watchdog::start(romacs_vm_gui::watchdog::threshold()); }
         let sender = std::sync::Arc::new(sender);
         let mut first_presentation = 1;
         // The launch screen, from the window's first moment until the

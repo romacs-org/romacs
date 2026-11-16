@@ -63,7 +63,23 @@
       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
         (goto-char (point-min))
         (romacs-agent-chat-open-task))
-      (should (equal (romacs-agent-id shown) romacs-agent-cards-tests--child)))))
+      (should (equal (romacs-agent-id shown) romacs-agent-cards-tests--child)))
+    ;; The task only listed (a row, not loaded): loaded as it opens.
+    (let* ((child (romacs-agent-get romacs-agent-cards-tests--child))
+           (root (make-temp-file "romacs-cards-" t)) (shown nil) (loaded nil))
+      (unwind-protect
+          (progn
+            (remhash romacs-agent-cards-tests--child romacs-agent--sessions)
+            (make-directory (expand-file-name romacs-agent-cards-tests--child root))
+            (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
+                      ((symbol-function 'romacs-agent--load)
+                       (lambda (dir) (setq loaded dir) (puthash romacs-agent-cards-tests--child child romacs-agent--sessions) child))
+                      ((symbol-function 'romacs-agent-show) (lambda (s) (setq shown s))))
+              (goto-char (point-min))
+              (romacs-agent-chat-open-task))
+            (should (equal (file-name-nondirectory loaded) romacs-agent-cards-tests--child))
+            (should (eq shown child)))
+        (delete-directory root t)))))
 
 (ert-deftest romacs-agent-wake-of-a-turn-that-left-work-running ()
   ;; Its turn ended with a command still running in the background (an

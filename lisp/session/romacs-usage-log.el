@@ -48,6 +48,12 @@
 ;;       until its release is seen, so a release seen late shows as repeats
 ;;       the user never held the key for.  Written with the counts, when a
 ;;       key was pressed and released or repeated.
+;;   {"kind":"stall","ms":MS,"during":D,"buffer":B,"samples":[[F...]...]}
+;;       a span of the main VM's work (a command, a timer, process output,
+;;       a request, or startup when D is "startup") that ran MS ms, past
+;;       ROMACS_STALL_MS (one second), with the call stacks the watchdog took
+;;       once a second, innermost function first (romacs-vm-gui watchdog.rs);
+;;       written with the counts, and on stderr as it ends;
 ;;   {"kind":"collection","collection":K,"pause_ms":MS,"t":T,"live_objects":O,"live_bytes_est":B,"late_objects":L,"met":M,"command":C}
 ;;       a garbage collection MS long, a float read to the microsecond, K
 ;;       `idle' (the idle pass's or a
@@ -326,6 +332,18 @@ The first of its kind carries the backtrace its signal left, if one was taken."
                (cdr taken))
        (and (> (car taken) 0) (list (json-serialize (list :kind "collection" :dropped (car taken)))))))))
 
+(defvar romacs-usage-log--ending nil
+  "Non-nil while the session's last flush runs (`romacs-usage-log--kill').")
+
+(defun romacs-usage-log--stalls ()
+  "The lines of the main VM's stalls since the last call, oldest first
+\(romacs-vm-gui watchdog.rs: each already a `stall' record); the one
+still going too when the session ends inside it."
+  (when (fboundp 'romacs--take-stalls)
+    (let ((taken (romacs--take-stalls romacs-usage-log--ending)))
+      (nconc (copy-sequence (cdr taken))
+             (and (> (car taken) 0) (list (json-serialize (list :kind "stall" :dropped (car taken)))))))))
+
 (defun romacs-usage-log--key-repeats ()
   "The `repeat' line for what the display saw of native key repeat since
 the last write (`romacs--take-key-repeats'), or nil when it saw no key held
@@ -370,7 +388,8 @@ or repeated, or there is no display."
                                     :counts (copy-sequence romacs-usage-log--gaps)))
               counts)
         (fillarray romacs-usage-log--gaps 0))
-      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts) (romacs-usage-log--collections))))
+      (let ((lines (nconc (nreverse romacs-usage-log--pending) (nreverse counts) (romacs-usage-log--collections)
+                          (romacs-usage-log--stalls))))
         (setq romacs-usage-log--pending nil)
         (when lines (romacs-usage-log--append lines))))))
 
@@ -398,7 +417,8 @@ or repeated, or there is no display."
   (romacs-usage-log--event "kill")
   ;; No redisplay comes now.
   (romacs-usage-log--charge)
-  (romacs-usage-log-flush))
+  (let ((romacs-usage-log--ending t))
+    (romacs-usage-log-flush)))
 
 (defun romacs-usage-log--enable (file)
   "Log this session's commands to FILE."

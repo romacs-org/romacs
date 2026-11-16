@@ -610,7 +610,8 @@ parent at work while ends pile up costs nothing per end."
             (cl-remove-if-not (lambda (end) (romacs-agent-tools--wanted-p child (car end))) (romacs-agent-ends child))))))
 
 (defun romacs-agent-tools--hand-on (child)
-  (let ((parent (romacs-agent-get (plist-get (romacs-agent-options child) :parent)))
+  ;; Its parent, loaded when only listed: a task's end reaches it all the same.
+  (let ((parent (romacs-agent-load-session (plist-get (romacs-agent-options child) :parent)))
         (handed (gethash child romacs-agent-tools--handed 0))
         (ends (romacs-agent-tools--unhanded child))
         (answered nil))
@@ -1456,7 +1457,7 @@ once its running turn ends (`romacs-agent-renew-soon')."
   (romacs-mcp--instance arguments)
   (let* ((caller (romacs-agent-tools--caller))
          (id (or (gethash "taskId" arguments) caller (user-error "taskId is required: you are no session")))
-         (task (or (romacs-agent-get id) (user-error "No task %s" id)))
+         (task (or (romacs-agent-load-session id) (user-error "No task %s" id)))
          (own (equal id caller)))
     (unless own (romacs-agent-tools--own task caller "renew it"))
     (let ((when (romacs-agent-renew-soon task (or (gethash "why" arguments) (if own "its own" "its parent's"))))

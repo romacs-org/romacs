@@ -1540,15 +1540,17 @@ on whatever becomes of this server."
     (let ((coding-system-for-write 'utf-8-unix))
       (write-region text nil input nil 'silent))
     (set-file-modes input #o600)
-    ;; Moved to SQLite first, if it is to be: the start is a place of
-    ;; where its records will be.
-    (romacs-agent-events-own session)
-    (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
-    (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
-                          input images))
-  (setf (romacs-agent-state session) 'starting)
-  (romacs-agent--changed session)
-  (romacs-agent--attach session romacs-agent--launch-tries))
+    (setf (romacs-agent-state session) 'starting)
+    (romacs-agent--changed session)
+    ;; Moved to SQLite first, in a worker when it is long: the start is a
+    ;; place of where its records will be.
+    (romacs-agent-events-then
+     session
+     (lambda ()
+       (setf (romacs-agent-journal-start session) (romacs-agent--journal-end session))
+       (romacs-agent--launch session (let ((romacs-agent--message-images images)) (romacs-agent--argv session t))
+                             input images)
+       (romacs-agent--attach session romacs-agent--launch-tries)))))
 
 ;;; Journal records
 
@@ -2971,21 +2973,26 @@ attached (another may be)."
     (user-error "Session %s is detached: attach to it (show its chat) first" (romacs-agent-title session))))
 
 (defun romacs-agent--note (session note)
-  "Journal NOTE in SESSION's journal, in its place: through its supervisor
-when one runs and is attached here; with none, the journal is the
-server's to add to.  Refused while detached from a supervisor that may
-run (`romacs-agent--check-note')."
+  "Record NOTE in SESSION's records, in its place: through its supervisor
+when one runs and is attached here; with none, the records are the
+server's to add to.  One still in its journal is moved to SQLite first
+\(`romacs-agent-events-then'): the note is folded here at once and
+written once it is moved.  Refused while detached from a supervisor that
+may run (`romacs-agent--check-note')."
   (romacs-agent--check-note session)
   (let ((connection (romacs-agent-connection session)))
     (if (process-live-p connection)
         (process-send-string connection (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
-      (romacs-agent-events-own session)
-      (let* ((seq (1+ (romacs-agent-seq session)))
-             (record (romacs-mcp--object "seq" seq "t" (float-time) "note" note))
-             (coding-system-for-write 'utf-8-unix))
-        (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
-          (write-region (concat (romacs-agent--json record) "\n") nil
-                        (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))
+      (let ((record (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "t" (float-time) "note" note)))
+        ;; Written before a launch that waits too: its records come after.
+        (romacs-agent-events-then
+         session
+         (lambda ()
+           (if (romacs-agent-events-p session) (romacs-agent-events-append session record)
+             (let ((coding-system-for-write 'utf-8-unix))
+               (write-region (concat (romacs-agent--json record) "\n") nil
+                             (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent))))
+         t)
         (romacs-agent--record session record)))))
 
 (defun romacs-agent--restart (session)
@@ -3607,6 +3614,9 @@ forked, or one a message was sent to."
   (or (romacs-agent-imported session) (plist-get (romacs-agent-options session) :fork)
       (romacs-agent-input-seq session) (> (romacs-agent-turns session) 0)))
 
+(defvar romacs-agent--resuming (make-hash-table :test #'equal)
+  "The ids of the sessions resumed whose launch waits for their move.")
+
 (defun romacs-agent-resume (session)
   "Run SESSION's harness again on its conversation, after it ended, in the
 configuration directory its instance had when it started: the harness
@@ -3616,24 +3626,37 @@ keeps the conversation there."
     (user-error "Session %s is still attached" (romacs-agent-title session)))
   (when (romacs-agent--per-turn-p session)
     (user-error "Session %s continues with its next message" (romacs-agent-title session)))
+  ;; Resumed already, waiting for its move: that launch drains the queue.
+  (unless (gethash (romacs-agent-id session) romacs-agent--resuming)
+    (romacs-agent--resume-now session)))
+
+(defun romacs-agent--resume-now (session)
+  "Resume SESSION (`romacs-agent-resume'), its launch once it is moved."
   (romacs-agent--check-config-dir (romacs-agent-provider session) (romacs-agent-config-dir session))
   (romacs-agent--check-companions)
   (romacs-agent--refork session)
-  ;; A turn the harness's end cut short goes on (Claude Code's own switch).
-  (let ((process-environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
-    ;; A conversation that never began (its first run never started) is
-    ;; begun, under its own id: there is none to resume.
-    (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
   (setf (romacs-agent-state session) 'starting (romacs-agent-driver-state session) (romacs-agent--driver-anew session)
         (romacs-agent-startup-pending session) nil)
   (romacs-agent--changed session)
-  (romacs-agent--attach session romacs-agent--launch-tries)
-  ;; What waited for its turn's end when the harness went goes now, unless
-  ;; the harness ended in the middle of a turn: the resumed harness takes
-  ;; that turn up again, and the queue goes at its end (a done), as known
-  ;; from how the last run ended, not from when attaching completes.
-  (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
-    (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t)))))
+  ;; A turn the harness's end cut short goes on (Claude Code's own switch).
+  (let ((environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
+    ;; Moved to SQLite first, in a worker when it is long.
+    (puthash (romacs-agent-id session) t romacs-agent--resuming)
+    (romacs-agent-events-then
+     session
+     (lambda ()
+       (remhash (romacs-agent-id session) romacs-agent--resuming)
+       (let ((process-environment environment))
+         ;; A conversation that never began (its first run never started) is
+         ;; begun, under its own id: there is none to resume.
+         (romacs-agent--launch session (romacs-agent--argv session (romacs-agent--conversation-p session))))
+       (romacs-agent--attach session romacs-agent--launch-tries)
+       ;; What waited for its turn's end when the harness went goes now, unless
+       ;; the harness ended in the middle of a turn: the resumed harness takes
+       ;; that turn up again, and the queue goes at its end (a done), as known
+       ;; from how the last run ended, not from when attaching completes.
+       (when (and (romacs-agent-queue session) (not (romacs-agent-interrupted session)))
+         (romacs-agent--when-attached session (lambda () (romacs-agent--send-next session t))))))))
 
 ;;; One question
 
@@ -3722,20 +3745,33 @@ wrote or read it: it is not written again for the same seq.")
 
 (defun romacs-agent--kept-put (session text)
   "Keep TEXT as SESSION's state (`romacs-agent--kept-text'), its only copy,
-in its rows (`romacs-agent-turns-fold-put'); non-nil when kept."
-  (romacs-agent-turns-fold-put (romacs-agent-id session) text))
+in its rows (`romacs-agent-turns-fold-put'), by the writer from the
+editor; non-nil when kept or queued to be."
+  (romacs-agent-written-p (romacs-agent-write 'romacs-agent-turns-fold-put (list (romacs-agent-id session) text))))
 
 (defun romacs-agent--kept-get (session)
   "SESSION's state as kept, as text, or nil.  One an earlier build kept in
-its directory is moved into its rows, the first time, and its file removed."
+its directory is read from there.  It is moved into its rows, and its
+file removed, only off the editor's main VM (`romacs-agent--kept-moves-p'):
+the editor reads it as it is and writes nothing."
   (or (romacs-agent-turns-fold (romacs-agent-id session))
       (let ((file (romacs-agent--kept-file session)))
         (when (file-readable-p file)
-          (let ((text (with-temp-buffer
-                        (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                        (buffer-string))))
-            (when (romacs-agent--kept-put session text) (delete-file file))
-            text)))))
+          ;; Gone since: moved in meanwhile, read from the rows below.
+          (when-let* ((text (ignore-error file-missing
+                              (with-temp-buffer
+                                (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                (buffer-string)))))
+            (when (and (romacs-agent--kept-moves-p) (romacs-agent--kept-put session text)) (delete-file file))
+            text)))
+      ;; Moved in meanwhile, by a process off the editor.
+      (romacs-agent-turns-fold (romacs-agent-id session))))
+
+(defun romacs-agent--kept-moves-p ()
+  "Whether this process moves a kept state from its file into its rows: a
+batch process (the turns' fill) or a worker VM, never the editor's main
+VM, whose start writes no state of the sessions it restores."
+  (or noninteractive (and (fboundp 'isolate-main-p) (not (isolate-main-p)))))
 
 (defun romacs-agent--kept-text (session &optional state)
   "SESSION's state to keep, as text that reads back as it is; nil when a

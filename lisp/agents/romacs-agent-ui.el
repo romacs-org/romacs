@@ -2574,12 +2574,12 @@ kept turn holds no output."
   "Keep SESSION's turn that just ended in the current chat as it is drawn
 here, from its prompt (`romacs-agent-first-seq') to the transcript's end,
 beside its turn row: a chat opened later inserts it."
-  (when-let* ((db (romacs-agent-turns--db))
-              (found (save-excursion (goto-char romacs-agent-ui--end)
+  (when-let* ((found (save-excursion (goto-char romacs-agent-ui--end)
                                      (text-property-search-backward 'romacs-agent-first-seq nil (lambda (_ v) v)))))
     (condition-case err
-        (romacs-agent-drawn-put db (romacs-agent-id session) (prop-match-value found)
-                                (romacs-agent-ui--drawn-form (prop-match-beginning found) romacs-agent-ui--end))
+        (romacs-agent-write 'romacs-agent-turns-drawn-keep
+                            (list (romacs-agent-id session) (prop-match-value found)
+                                  (romacs-agent-ui--drawn-form (prop-match-beginning found) romacs-agent-ui--end)))
       (error (message "romacs-agent-ui: a turn not kept as drawn: %s" (error-message-string err))))))
 
 (defun romacs-agent-ui--item-questions (questions)
@@ -2911,7 +2911,8 @@ strings, compared by value."
          (at (if (get-text-property start 'romacs-agent-task) start
                (next-single-property-change start 'romacs-agent-task nil (line-end-position))))
          (id (get-text-property at 'romacs-agent-task))
-         (session (and id (romacs-agent-get id))))
+         ;; A task only listed (its row) is loaded as it opens.
+         (session (and id (romacs-agent-load-session id))))
     (cond (session (romacs-agent-show session))
           (id (user-error "Task %s is gone" id))
           (t (user-error "No delegated task on this row")))))
@@ -3779,6 +3780,14 @@ HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
 ;; Loaded into a running session, its open chats' headers are this file's:
 ;; an older version's form names functions this one has changed.
 (romacs-agent-ui--headers-remake)
+
+;; A chat's replays and pages keep places in its session's journal while
+;; it is still in one: the session is not moved to SQLite under it.
+(defun romacs-agent-ui--holds-journal-p (session)
+  "Whether a chat shows SESSION, which is still in its journal."
+  (buffer-live-p (romacs-agent-buffer session)))
+
+(add-hook 'romacs-agent-events-held-functions #'romacs-agent-ui--holds-journal-p)
 
 ;; The keymaps a chat puts in its text, which a turn kept as drawn names.
 (mapc #'romacs-agent-drawn-keymap '(romacs-agent-chat-transcript-map romacs-agent-ui--link-map

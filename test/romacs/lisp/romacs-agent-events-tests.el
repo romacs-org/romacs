@@ -366,6 +366,104 @@ turns, and its journal's file; a state root of its own."
          (should-not (file-exists-p journal))
          (should-not (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id))))))))
 
+(defmacro romacs-agent-events-tests--workers (&rest body)
+  "Run BODY with worker VMs that run each job here, at once."
+  `(cl-letf (((symbol-function 'isolate-main-p) (lambda () t))
+             ((symbol-function 'isolate-spawn) (lambda (function arg &rest _) (list 'done (funcall function arg))))
+             ((symbol-function 'isolate-on-done) (lambda (future then) (funcall then future)))
+             ((symbol-function 'isolate-await) #'cadr)
+             ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+     ,@body))
+
+(ert-deftest romacs-agent-events-a-loaded-session-waits-for-its-move ()
+  ;; A launch or a note on a loaded session too long to move here waits
+  ;; for a worker to move it, ahead of the rest, and then goes to SQLite:
+  ;; the note folded at once, written after.  One a chat shows goes on in
+  ;; its journal at once.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
+  (require 'romacs-agent-turns)
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal))
+        (romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--flip-queue nil) (romacs-agent-events--migrate-queue (list "/elsewhere"))
+        (romacs-agent-events--migrate-running 1) (romacs-agent-events-migrate-jobs 1)
+        (romacs-agent-events-store t))
+    (romacs-agent-events-tests--with-session
+     3
+     (lambda (session journal)
+       (let ((id (romacs-agent-id session)) (size (file-attribute-size (file-attributes journal))) (ran nil)
+             ;; Loaded whole; too long to move here from now on.
+             (romacs-agent-fold-bytes 10))
+         ;; Shown in a chat: in its journal, at once.
+         (let ((romacs-agent-events-held-functions (list (lambda (s) (eq s session)))))
+           (romacs-agent-events-then session (lambda () (push 'shown ran)))
+           (should (equal ran '(shown)))
+           (should-not (romacs-agent-events-p session)))
+         ;; No job may run yet: it waits, ahead of the rest.  A launch,
+         ;; then two notes: the notes are written first, the launch's
+         ;; supervisor numbering after them.
+         (setf (romacs-agent-journal-start session) size)
+         (romacs-agent-events-then
+          session (lambda () (push (and (romacs-agent-events-p session)
+                                        (caar (sqlite-select (romacs-agent-events--db) "select max(seq) from events where session = ?" (list id))))
+                                   ran)))
+         (romacs-agent--note session (romacs-mcp--object "type" "selection"))
+         (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+         (should (equal ran '(shown)))
+         (should (romacs-agent-events-waiting-p id))
+         (should (= (romacs-agent-seq session) 12))
+         (should (equal (car romacs-agent-events--migrate-queue) (romacs-agent-dir session)))
+         (should (= (file-attribute-size (file-attributes journal)) size))
+         ;; A job runs: moved, flipped though loaded, then what waited.
+         (romacs-agent-events-tests--workers
+          (let ((romacs-agent-events--migrate-running 0)
+                (romacs-agent-events--migrate-queue (list (romacs-agent-dir session))))
+            (romacs-agent-events--migrate-next)))
+         (should (equal ran '(12 shown)))
+         (should-not (romacs-agent-events-waiting-p id))
+         (should (romacs-agent-events-p session))
+         (should (equal (sqlite-select (romacs-agent-events--db) "select seq, kind from events where session = ? and seq > 10 order by seq" (list id))
+                        '((11 "note") (12 "note"))))
+         ;; Where its next supervisor starts: a seq, no longer the journal's byte.
+         (should (= (romacs-agent-journal-start session) 11))
+         (should (= (file-attribute-size (file-attributes journal)) size)))))))
+
+;; Sent to twice while its move waits: one resume, one launch.
+(ert-deftest romacs-agent-events-a-resume-waiting-for-its-move-is-one ()
+  (let ((romacs-agent--resuming (make-hash-table :test #'equal))
+        (session (romacs-agent--make :id "r" :harness 'claude :state 'ended))
+        (waiting nil) (launched 0) (reforks 0))
+    (cl-letf (((symbol-function 'romacs-agent--per-turn-p) #'ignore)
+              ((symbol-function 'romacs-agent--check-config-dir) #'ignore)
+              ((symbol-function 'romacs-agent--check-companions) #'ignore)
+              ((symbol-function 'romacs-agent--refork) (lambda (_) (cl-incf reforks)))
+              ((symbol-function 'romacs-agent--changed) #'ignore)
+              ((symbol-function 'romacs-agent--argv) #'ignore)
+              ((symbol-function 'romacs-agent--launch) (lambda (&rest _) (cl-incf launched)))
+              ((symbol-function 'romacs-agent--attach) #'ignore)
+              ((symbol-function 'romacs-agent-events-then) (lambda (_s then &optional _) (push then waiting))))
+      (romacs-agent-resume session)
+      (romacs-agent-resume session)
+      (should (= (length waiting) 1))
+      (should (= reforks 1))
+      (mapc #'funcall waiting)
+      (should (= launched 1))
+      (should-not (gethash "r" romacs-agent--resuming)))))
+
+(ert-deftest romacs-agent-events-a-failed-move-lets-its-waiters-go-on ()
+  ;; A job that moves nothing: what waited goes on, in the journal.
+  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal))
+        (romacs-agent-events--migrate-running 1) (romacs-agent-events--migrate-queue nil)
+        (ran nil))
+    (puthash "s" (list (cons nil (lambda () (push 1 ran))) (cons nil (lambda () (push 2 ran)))) romacs-agent-events--waiting)
+    (cl-letf (((symbol-function 'romacs-agent-events--flip-soon) #'ignore)
+              ((symbol-function 'isolate-await) (lambda (_) nil)))
+      (romacs-agent-events--migrated (list "/root/s") 'done))
+    (should (equal ran '(2 1)))
+    (should-not (romacs-agent-events-waiting-p "s"))))
+
 (ert-deftest romacs-agent-events-a-background-fill-moves-nothing ()
   ;; A turn fill in its batch process loads a session whose load writes a
   ;; note (a pending selection settled): the note goes to its journal; the
@@ -391,21 +489,25 @@ turns, and its journal's file; a state root of its own."
          (should (> (file-attribute-size (file-attributes journal)) size)))))))
 
 (ert-deftest romacs-agent-events-a-flip-the-lock-holds-off-is-tried-again ()
-  ;; A worker holding the lock: the flip waits for a later turn, not lost.
-  (let ((romacs-agent-events--flip-queue nil) (flips 0) (later nil)
+  ;; A worker holding the lock: the flip is tried again a moment later,
+  ;; not lost, and what waits for it waits on.
+  (let ((romacs-agent-events--flip-queue nil) (flips 0) (later nil) (waited nil)
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (&rest _) '((10 3))))
               ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+              ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-events--flip)
                (lambda (&rest _) (if (= (cl-incf flips) 1) (signal 'sqlite-locked-error '("database is locked")) t)))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
-              ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest _) (setq later f))))
+              ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (setq later (cons f args)))))
       (romacs-agent-events--flip-soon '("s"))
-      (should (equal romacs-agent-events--flip-queue '("s")))
+      (should (= flips 1))
       (should later)
-      (funcall later)
+      (should-not waited)
+      (apply (car later) (cdr later))
       (should (= flips 2))
+      (should (equal waited '("s")))
       (should-not romacs-agent-events--flip-queue))))
 
 (ert-deftest romacs-agent-events-a-flip-finds-the-journal-as-written ()
