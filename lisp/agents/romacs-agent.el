@@ -4235,18 +4235,72 @@ is asked for (`romacs-agent-find').")
 is not loaded: non-nil when something waits on it (a watch kept, a
 resume due), so it is loaded as a restore runs.")
 
+(defvar romacs-agent-quiet-p nil
+  "Called with a session's directory: non-nil when its row says it wants
+nothing now, its supervisor or not: idle, nothing asked of the user, no
+error, nothing owed to its parent.  Nil: none is.")
+
 (defun romacs-agent--unloaded-p (dir)
   "Whether the session recorded in DIR is left unloaded at a start: listed,
-no supervisor's socket (a live one reattaches), and nothing waiting on it
-\(`romacs-agent-pending-functions').  Its kept state, if any, is read when
-it is first asked for: a start reads rows only."
-  (and romacs-agent-listed-p
-       (not (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir))))
-       (funcall romacs-agent-listed-p dir)
-       (not (and romacs-agent-pending-functions
-                 (run-hook-with-args-until-success
-                  'romacs-agent-pending-functions dir
-                  (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))))
+nothing waiting on it (`romacs-agent-pending-functions'), and either no
+supervisor's socket or its row quiet (`romacs-agent-quiet-p'): a quiet
+session whose supervisor runs attaches when it is first asked for, or
+when its supervisor writes more (`romacs-agent--quiet-watch').  Its kept
+state, if any, is read when it is loaded: a start reads rows only."
+  (let ((live (file-exists-p (romacs-agent--host-socket (file-name-nondirectory dir)))))
+    (and romacs-agent-listed-p
+         (funcall romacs-agent-listed-p dir)
+         (or (not live) (and romacs-agent-quiet-p (funcall romacs-agent-quiet-p dir)))
+         (not (and romacs-agent-pending-functions
+                   (run-hook-with-args-until-success
+                    'romacs-agent-pending-functions dir
+                    (or (romacs-agent--read-json (expand-file-name "manifest.json" dir)) (make-hash-table)))))
+         (progn (when live (romacs-agent--quiet-watch dir)) t))))
+
+;; A quiet session whose supervisor runs is left a row; what its supervisor
+;; writes meanwhile (a message come in, a task's end, an ask) is seen in its
+;; records, and loads it: attached, it reads them as it would have live.
+
+(defvar romacs-agent--quiet (make-hash-table :test #'equal)
+  "The quiet sessions left unloaded whose supervisor runs: id to how far
+their records went then (`romacs-agent--journal-end').")
+
+(defvar romacs-agent--quiet-timer nil "The timer looking at the quiet sessions' records.")
+
+(defconst romacs-agent--quiet-every 2 "Seconds between looks at the quiet sessions' records.")
+
+(defun romacs-agent--quiet-session (dir)
+  "A session record for DIR, to ask its records about: no state read."
+  (romacs-agent--make :id (file-name-nondirectory dir) :dir dir))
+
+(defun romacs-agent--quiet-watch (dir)
+  "Look at the records of the session recorded in DIR, left unloaded with
+its supervisor running, until it is loaded or its supervisor ends."
+  (let ((id (file-name-nondirectory dir)))
+    (unless (gethash id romacs-agent--quiet)
+      (puthash id (romacs-agent--journal-end (romacs-agent--quiet-session dir)) romacs-agent--quiet))
+    (unless (timerp romacs-agent--quiet-timer)
+      (setq romacs-agent--quiet-timer
+            (run-with-timer romacs-agent--quiet-every romacs-agent--quiet-every #'romacs-agent--quiet-tick)))))
+
+(defun romacs-agent--quiet-tick ()
+  "Load each quiet session whose supervisor wrote more since it was left:
+attached, it reads what came.  One loaded otherwise, or whose supervisor
+ended, is no longer looked at; with none left, the timer stops."
+  (maphash (lambda (id mark)
+             (let* ((dir (expand-file-name id (romacs-agent--state-root)))
+                    (session (romacs-agent--quiet-session dir)))
+               (cond ((or (gethash id romacs-agent--sessions)
+                          (not (file-exists-p (romacs-agent--host-socket id))))
+                      (remhash id romacs-agent--quiet))
+                     ((> (romacs-agent--journal-end session) mark)
+                      (remhash id romacs-agent--quiet)
+                      (with-demoted-errors "romacs-agent: loading a quiet session: %S"
+                        (romacs-agent-load-session id))))))
+           romacs-agent--quiet)
+  (when (and (zerop (hash-table-count romacs-agent--quiet)) (timerp romacs-agent--quiet-timer))
+    (cancel-timer romacs-agent--quiet-timer)
+    (setq romacs-agent--quiet-timer nil)))
 
 (defun romacs-agent--restore-load (dir)
   "Load the session recorded in DIR as a restore does: unless it is left
@@ -4376,28 +4430,36 @@ aside, ends: its tail runs, and its progress says done."
 
 (defun romacs-agent-load-session (id)
   "The session ID names, loaded from its record when this editor does not
-know it yet, without loading every other one."
+know it yet, without loading every other one; attached when its
+supervisor listens (one a start left a row, quiet: its first use)."
   (or (gethash id romacs-agent--sessions)
       (and (stringp id) (string-match-p "\\`[0-9a-f]\\{8\\}-[^/]*\\'" id)
            (let ((dir (expand-file-name id (romacs-agent--state-root))))
-             (and (file-directory-p dir) (romacs-agent--load dir))))))
+             (when-let* (((file-directory-p dir)) (session (romacs-agent--load dir)))
+               (romacs-agent--attach-listening session)
+               session)))))
+
+(defun romacs-agent--attach-listening (session)
+  "Attach SESSION when it is detached and its supervisor listens."
+  (when (and (romacs-agent-p session) (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
+             (not (process-live-p (romacs-agent-connection session)))
+             (not (gethash (romacs-agent-id session) romacs-agent--folding))
+             (file-exists-p (romacs-agent-host-socket session)))
+    (remhash session romacs-agent--reattaching)
+    (romacs-agent--attach session 0)))
 
 (defun romacs-agent--restore-tail ()
   "Every recorded session is known: attach to the supervisors still
 listening, serve their relays, sweep what ended processes left, and say so."
   ;; Known and detached, its supervisor still listening: attached again.
+  ;; One folded aside attaches once its kept state is back.
   (dolist (session (hash-table-values romacs-agent--sessions))
-    (when (and (eq (romacs-agent-state session) 'detached) (not (romacs-agent-cancelled session))
-               (not (process-live-p (romacs-agent-connection session)))
-               ;; One folded aside attaches once its kept state is back.
-               (not (gethash (romacs-agent-id session) romacs-agent--folding))
-               (file-exists-p (romacs-agent-host-socket session)))
-      (remhash session romacs-agent--reattaching)
-      (romacs-agent--attach session 0)))
-  ;; A session whose supervisor runs may call a tool any moment: the
-  ;; endpoint listens now, where its relay looks.
-  (when (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
-                 (hash-table-values romacs-agent--sessions))
+    (romacs-agent--attach-listening session))
+  ;; A session whose supervisor runs may call a tool any moment, a quiet
+  ;; one left a row too: the endpoint listens now, where its relay looks.
+  (when (or (> (hash-table-count romacs-agent--quiet) 0)
+            (cl-some (lambda (session) (file-exists-p (romacs-agent-host-socket session)))
+                     (hash-table-values romacs-agent--sessions)))
     (romacs-agent--endpoint))
   (romacs-agent--sweep)
   (setq romacs-agent--restored romacs-agent--sessions)

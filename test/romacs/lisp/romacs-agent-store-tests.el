@@ -78,8 +78,8 @@ journal one turn long."
 
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()
   ;; Restored: a listed session with no kept state and no supervisor is
-  ;; not loaded (its journal unread), one whose supervisor runs is; the
-  ;; board shows both, and asking for the first loads it.
+  ;; not loaded (its journal unread), one whose supervisor runs a turn is;
+  ;; the board shows both, and asking for the first loads it.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-board)
   (romacs-agent-store-tests--with
@@ -88,6 +88,8 @@ journal one turn long."
       (record old "old")
       (record live "live" t)
       (romacs-agent-store-fill)
+      ;; Its supervisor at work on a turn.
+      (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
       (cl-letf* ((read (symbol-function 'romacs-agent--read-journal))
                  ((symbol-function 'romacs-agent--read-journal)
                   (lambda (session &rest args) (push (romacs-agent-id session) journals) (apply read session args)))
@@ -116,6 +118,8 @@ journal one turn long."
       (record old "old")
       (record live "live" t)
       (romacs-agent-store-fill)
+      ;; Its supervisor at work on a turn.
+      (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'running' where id = ?" (list live))
       (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
                 ((symbol-function 'romacs-agent--endpoint) #'ignore)
                 ((symbol-function 'romacs-agent--sweep) #'ignore)
@@ -169,6 +173,49 @@ journal one turn long."
         (romacs-agent-store--load-missing)
         (should (romacs-agent-get old))
         (should-not romacs-agent--restore-pending)))))
+
+(ert-deftest romacs-agent-store-a-quiet-live-session-stays-a-row-until-it-writes ()
+  ;; Its supervisor running but its row quiet (idle, nothing wanted): a
+  ;; start leaves it a row.  When its supervisor writes more (a message
+  ;; come in, a task's end), it is loaded, so attached, and reads what
+  ;; came.  A live one whose row says a turn runs, or that wants the user
+  ;; or its parent, is loaded at once.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((quiet "aaaaaaaa-0000-4000-8000-000000000001") (busy "aaaaaaaa-0000-4000-8000-000000000002")
+          (wanting "aaaaaaaa-0000-4000-8000-000000000003")
+          (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+          (attached nil))
+      (record quiet "quiet" t)
+      (record busy "busy" t)
+      (record wanting "wanting" t)
+      (romacs-agent-store-fill)
+      (let ((db (romacs-agent-store--open)))
+        (sqlite-execute db "update sessions set state = 'idle', attention = 0 where id = ?" (list quiet))
+        (sqlite-execute db "update sessions set state = 'running', attention = 0 where id = ?" (list busy))
+        (sqlite-execute db "update sessions set state = 'idle', attention = 1 where id = ?" (list wanting)))
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (session &rest _) (push (romacs-agent-id session) attached)))
+                ((symbol-function 'romacs-agent--endpoint) #'ignore)
+                ((symbol-function 'romacs-agent--sweep) #'ignore)
+                ((symbol-function 'romacs-agent-store-fill-soon) #'ignore))
+        (romacs-agent-restore)
+        (should-not (romacs-agent-get quiet))
+        (should (romacs-agent-get busy))
+        (should (romacs-agent-get wanting))
+        (should (gethash quiet romacs-agent--quiet))
+        ;; Nothing written: still a row.
+        (romacs-agent--quiet-tick)
+        (should-not (romacs-agent-get quiet))
+        ;; Its supervisor writes: loaded, attached.
+        (write-region (concat (json-serialize (romacs-mcp--object "seq" 3 "t" 102.0 "in" (romacs-mcp--object "prompt" "from its parent"))) "\n")
+                      nil (expand-file-name (concat quiet "/journal.jsonl") root) t 'silent)
+        (romacs-agent--quiet-tick)
+        (should (romacs-agent-get quiet))
+        (should (member quiet attached))
+        (should-not (gethash quiet romacs-agent--quiet))
+        ;; None left to look at: the timer stops.
+        (should-not romacs-agent--quiet-timer)))
+    (when (timerp romacs-agent--quiet-timer) (cancel-timer romacs-agent--quiet-timer))))
 
 (ert-deftest romacs-agent-store-what-waits-is-loaded ()
   ;; A session with watches kept, or a resume due, is loaded as a restore

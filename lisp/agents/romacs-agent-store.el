@@ -29,14 +29,15 @@
 
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
-       input_seq done_seq seen_seq settled_seq)
+       input_seq done_seq seen_seq settled_seq attention)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
   '("create table if not exists sessions (
        id text primary key, dir text not null, harness text, provider text, model text,
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
-       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer)"
+       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
+       attention integer)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
@@ -44,7 +45,7 @@
     "create table if not exists board_folds (project text primary key)")
   "The table and its indexes, made when the database is opened.")
 
-(defconst romacs-agent-store--version 2
+(defconst romacs-agent-store--version 3
   "The table's form (`user_version'): a database of another is made again,
 as a cache is.")
 
@@ -137,7 +138,12 @@ moment later, unless AGAIN says this is that try."
          :transcript (romacs-agent-store--transcript (romacs-agent-harness session) (romacs-agent-config-dir session)
                                                      (romacs-agent-harness-session session))
          :input_seq (romacs-agent-input-seq session) :done_seq (romacs-agent-done-seq session)
-         :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session))))
+         :seen_seq (romacs-agent-seen-seq session) :settled_seq (romacs-agent-settled-seq session)
+         ;; Wanting the user or its parent: its last turn failed, or a task
+         ;; holding ends its parent may not have had yet.
+         :attention (if (or (romacs-agent-failed session)
+                            (and (plist-get (romacs-agent-options session) :parent) (romacs-agent-ends session)))
+                        1 0))))
 
 ;;; Filling it
 
@@ -196,7 +202,13 @@ manifest."
             :input_seq (if kept (funcall field 'input-seq) (romacs-agent-store--last-seq journal))
             :done_seq (if kept (funcall field 'done-seq) (romacs-agent-store--last-seq journal))
             :seen_seq (let ((seen (gethash "seenSeq" manifest))) (and (integerp seen) seen))
-            :settled_seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))))))
+            :settled_seq (let ((settled (gethash "settledSeq" manifest))) (and (integerp settled) settled))
+            ;; Its last turn failed, or a task's ends for its parent, as
+            ;; kept; unknown with no kept state, so wanted.
+            :attention (if (or (funcall field 'failed)
+                               (and (hash-table-p options) (romacs-agent--value (gethash "parent" options))
+                                    (or (not kept) (funcall field 'ends))))
+                           1 0)))))
 
 (defun romacs-agent-store--missing ()
   "The directories of recorded sessions that have no row."
@@ -289,6 +301,17 @@ one still missing a row after a fill is loaded as it is."
                       (with-demoted-errors "romacs-agent-store: filling: %S" (romacs-agent-store-fill-soon)))
                     (process-live-p romacs-agent-store--filling))))))
 
+(defconst romacs-agent-store--quiet-states '("idle" "detached" "unstarted")
+  "The states a session's row may be in for it to want nothing now.")
+
+(defun romacs-agent-store-quiet-p (dir)
+  "Whether the session recorded in DIR wants nothing now, as its row says:
+idle (or detached, unstarted), so nothing asked of the user, and no
+error nor anything owed to its parent (`romacs-agent-quiet-p')."
+  (when-let* ((db (romacs-agent-store--open))
+              (row (car (sqlite-select db "select state, attention from sessions where id = ?" (list (file-name-nondirectory dir))))))
+    (and (member (car row) romacs-agent-store--quiet-states) (eql (cadr row) 0))))
+
 (defun romacs-agent-store-unloaded ()
   "The sessions that have a row but are not loaded, newest first, each a
 session record made from its row alone: to show, not to act on (acting
@@ -331,6 +354,7 @@ when the database cannot be written."
 ;; Restored: the rows of sessions recorded with none are made, off the editor.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
 (setq romacs-agent-listed-p #'romacs-agent-store-listed-p)
+(setq romacs-agent-quiet-p #'romacs-agent-store-quiet-p)
 
 (provide 'romacs-agent-store)
 ;;; romacs-agent-store.el ends here
