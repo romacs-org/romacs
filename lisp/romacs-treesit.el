@@ -123,25 +123,32 @@ comment pattern."
         (pcase-let ((`(,d . ,ts) (romacs-treesit--stopgap-patterns
                                   (treesit-query-source (nth 0 setting)))))
           (setq doc (or doc d) tokens (append ts tokens)))))
-    (let (by-face)
-      (pcase-dolist (`(,token . ,face) tokens)
-        (push token (alist-get face by-face)))
-      (cons doc
-            (mapcar (lambda (entry)
-                      (cons (romacs-treesit--tokens-regexp (cdr entry)) (car entry)))
-                    by-face)))))
+    (cons doc
+          (mapcar (lambda (entry)
+                    (cons (romacs-treesit--tokens-regexp (cdr entry)) (car entry)))
+                  (romacs-treesit--group-by #'cdr #'car tokens)))))
+
+(defun romacs-treesit--group-by (key value items)
+  "ITEMS grouped as an alist of (KEY . VALUES), VALUE of each item kept.
+Keys compare with `equal'."
+  (let (groups)
+    (dolist (item items)
+      (let* ((k (funcall key item)) (group (assoc k groups)))
+        (if group
+            (setcdr group (cons (funcall value item) (cdr group)))
+          (push (list k (funcall value item)) groups))))
+    groups))
 
 (defun romacs-treesit--tokens-regexp (tokens)
   "A regexp for any of TOKENS as a whole token: a symbol boundary at each
 end of a token that is a word character there."
-  (let (groups)
-    (dolist (token tokens)
-      (push token (alist-get (cons (string-match-p "\\`\\w" token)
-                                   (string-match-p "\\w\\'" token))
-                             groups nil nil #'equal)))
-    (mapconcat (pcase-lambda (`((,starts . ,ends) . ,group))
-                 (concat (and starts "\\_<") (regexp-opt group t) (and ends "\\_>")))
-               groups "\\|")))
+  (mapconcat (lambda (group)
+               (concat (and (car (car group)) "\\_<") (regexp-opt (cdr group) t)
+                       (and (cdr (car group)) "\\_>")))
+             (romacs-treesit--group-by
+              (lambda (token) (cons (string-match-p "\\`\\w" token) (string-match-p "\\w\\'" token)))
+              #'identity tokens)
+             "\\|"))
 
 (defun romacs-treesit--stopgap (window start end)
   "Stopgap faces from START to END of WINDOW's buffer, its first parse out."
