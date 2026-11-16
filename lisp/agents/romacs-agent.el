@@ -2314,6 +2314,9 @@ what came meanwhile."
   (unless (process-live-p process)
     (let ((session (process-get process 'romacs-agent)))
       (when (eq (romacs-agent-connection session) process)
+        ;; Ended before it acknowledged, the supervisor launched for it is
+        ;; no longer awaited; what follows may launch the next.
+        (remhash (romacs-agent-id session) romacs-agent--launched)
         (setf (romacs-agent-connection session) nil)
         (romacs-agent--drop-relays session)
         ;; A run so short its supervisor left before answering the

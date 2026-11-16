@@ -771,3 +771,28 @@ connection of its own, as the writer's process has."
             (should (zerop (romacs-agent-held-notes-count)))
             (should (member "Saving 1 agent records...done" said))))
       (delete-directory dir t))))
+
+(ert-deftest romacs-agent-writer-a-supervisor-gone-before-acknowledging-leaves-no-note-stranded ()
+  ;; A launched supervisor that connected and ended before acknowledging
+  ;; the attachment, nothing launched after it: no longer awaited, and the
+  ;; notes held for it go through a notes-only host.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--note-hosts (make-hash-table :test #'equal))
+         (romacs-agent--launched (make-hash-table :test #'equal))
+         (romacs-agent-events--waiting (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "g" :harness 'claude :dir temporary-file-directory :seq 3 :state 'starting))
+         (process (make-pipe-process :name "g" :noquery t)) (hosts 0))
+    (process-put process 'romacs-agent session)
+    (setf (romacs-agent-connection session) process)
+    (puthash "g" t romacs-agent--launched)
+    (puthash "g" (list (romacs-mcp--object "type" "plan" "romacsNote" 1)) romacs-agent--held-notes)
+    (delete-process process)
+    (cl-letf (((symbol-function 'romacs-agent--reattach-later) #'ignore)
+              ((symbol-function 'romacs-agent--raise) #'ignore)
+              ((symbol-function 'romacs-agent--changed) #'ignore)
+              ((symbol-function 'romacs-agent-events-own) #'ignore)
+              ((symbol-function 'romacs-agent-host-socket) (lambda (_) "/nonexistent/g.sock"))
+              (romacs-agent--notes-host (lambda (_s) (cl-incf hosts))))
+      (romacs-agent--sentinel process "deleted")
+      (should-not (gethash "g" romacs-agent--launched))
+      (should (= hosts 1)))))
