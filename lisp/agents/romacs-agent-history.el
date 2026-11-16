@@ -350,40 +350,183 @@ a longer head while it names no title."
 (declare-function romacs-agent-t3-thread-titles "romacs-agent-t3" (store))
 (declare-function romacs-agent-t3-title-key "romacs-agent-t3" (instance native))
 
-(defun romacs-agent-history-list ()
-  "List the harnesses' transcripts anew: the newest of each directory,
-described (from their heads, once per size and time).  A transcript of
-an instance T3 Code configures takes the title T3 gave its thread, when
-T3 ran it: its first prompt is then T3's preamble."
-  (setq romacs-agent-history--listing
-        (cl-loop with from-t3 = (let ((table (make-hash-table :test #'equal)))
-                                  ;; Each T3 instance's id and thread store, by name.
-                                  (dolist (i (romacs-agent-instances) table)
-                                    (when (plist-get i :t3-store)
-                                      (puthash (plist-get i :name) (cons (plist-get i :t3-id) (plist-get i :t3-store)) table))))
-                 with stores = (make-hash-table :test #'equal)
-                 for (dir harness provider config-dir) in (romacs-agent-history--places)
-                 for t3 = (gethash provider from-t3)
-                 ;; One read of each store a refresh, failed or not.
-                 for titles = (and t3 (let ((kept (gethash (cdr t3) stores 'unread)))
-                                        (if (not (eq kept 'unread)) kept
-                                          (require 'romacs-agent-t3)
-                                          (puthash (cdr t3) (romacs-agent-t3-thread-titles (cdr t3)) stores))))
-                 append
-                 (let ((files (sort (funcall (romacs-agent-history--get harness :files) dir romacs-agent-history-limit)
-                                    (lambda (a b) (> (nth 2 a) (nth 2 b))))))
-                   (cl-loop for (path size mtime) in (seq-take files romacs-agent-history-limit)
-                            for description = (romacs-agent-history--describe path size mtime harness)
-                            when (plist-get description :title)
-                            collect (append (let ((title (and titles
-                                                              (gethash (romacs-agent-t3-title-key (car t3) (plist-get description :id))
-                                                                       titles))))
-                                              ;; T3's title as T3 shows it, cut to fit.
-                                              (and title (not (string-empty-p (string-trim title)))
-                                                   (list :title (truncate-string-to-width (string-trim title) 60 nil nil t))))
-                                            (list :path path :size size :mtime mtime
-                                                  :provider provider :config-dir config-dir)
-                                            description))))))
+(defun romacs-agent-history--scan ()
+  "The harnesses' transcripts: the newest of each directory, described
+\(from their heads, once per size and time).  A transcript of an
+instance T3 Code configures takes the title T3 gave its thread, when T3
+ran it: its first prompt is then T3's preamble."
+  (cl-loop with from-t3 = (let ((table (make-hash-table :test #'equal)))
+                          ;; Each T3 instance's id and thread store, by name.
+                          (dolist (i (romacs-agent-instances) table)
+                            (when (plist-get i :t3-store)
+                              (puthash (plist-get i :name) (cons (plist-get i :t3-id) (plist-get i :t3-store)) table))))
+         with stores = (make-hash-table :test #'equal)
+         for (dir harness provider config-dir) in (romacs-agent-history--places)
+         for t3 = (gethash provider from-t3)
+         ;; One read of each store a refresh, failed or not.
+         for titles = (and t3 (let ((kept (gethash (cdr t3) stores 'unread)))
+                                (if (not (eq kept 'unread)) kept
+                                  (require 'romacs-agent-t3)
+                                  (puthash (cdr t3) (romacs-agent-t3-thread-titles (cdr t3)) stores))))
+         append
+         (let ((files (sort (funcall (romacs-agent-history--get harness :files) dir romacs-agent-history-limit)
+                            (lambda (a b) (> (nth 2 a) (nth 2 b))))))
+           (cl-loop for (path size mtime) in (seq-take files romacs-agent-history-limit)
+                    for description = (romacs-agent-history--describe path size mtime harness)
+                    when (plist-get description :title)
+                    collect (append (let ((title (and titles
+                                                      (gethash (romacs-agent-t3-title-key (car t3) (plist-get description :id))
+                                                               titles))))
+                                      ;; T3's title as T3 shows it, cut to fit.
+                                      (and title (not (string-empty-p (string-trim title)))
+                                           (list :title (truncate-string-to-width (string-trim title) 60 nil nil t))))
+                                    (list :path path :size size :mtime mtime
+                                          :provider provider :config-dir config-dir)
+                                    description)))))
+
+;;; The listing, as rows
+
+;; The scan reads a head of every new or changed transcript: seconds for
+;; a few hundred.  So the listing is rows of the agents' sessions.sqlite,
+;; `transcripts', written by a batch process of this build
+;; (`romacs-agent-history-index-soon'); a listing reads the rows, and
+;; starts the next scan aside.
+
+(defconst romacs-agent-history--schema
+  '("create table if not exists transcripts (path text primary key, harness text, provider text,
+       config_dir text, id text, cwd text, title text, size integer, mtime real) without rowid")
+  "The transcripts' table, made with the database.")
+
+(defvar romacs-agent-history--made nil "The database the transcripts' table was made in.")
+
+(defun romacs-agent-history--db ()
+  "The database, its transcripts' table made; nil without SQLite."
+  (when-let* ((db (and (fboundp 'romacs-agent-store--open) (romacs-agent-store--open))))
+    (unless (eq romacs-agent-history--made db)
+      (dolist (statement romacs-agent-history--schema) (sqlite-execute db statement))
+      (setq romacs-agent-history--made db))
+    db))
+
+(defun romacs-agent-history-index ()
+  "Scan the transcripts (`romacs-agent-history--scan') and make the rows
+theirs: one a transcript listed, the others' removed, in one
+transaction.  How many rows it holds."
+  (let ((items (romacs-agent-history--scan)) (db (romacs-agent-history--db)))
+    (when db
+      (sqlite-execute db "begin immediate")
+      (condition-case err
+          (progn
+            (sqlite-execute db "delete from transcripts")
+            (dolist (item items)
+              (sqlite-execute db "insert or replace into transcripts values (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                              (list (plist-get item :path) (symbol-name (plist-get item :harness))
+                                    (plist-get item :provider) (plist-get item :config-dir) (plist-get item :id)
+                                    (plist-get item :cwd) (plist-get item :title)
+                                    (plist-get item :size) (plist-get item :mtime))))
+            (sqlite-execute db "commit"))
+        (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
+      (length items))))
+
+(defun romacs-agent-history-index-batch ()
+  "`romacs-agent-history-index' in a batch process, its count printed."
+  (princ (format "romacs-agent-history: %d transcripts\n" (romacs-agent-history-index))))
+
+(defvar romacs-agent-history--indexing nil "The batch process scanning the transcripts, while it runs.")
+
+(defun romacs-agent-history-indexing-p ()
+  "Whether a batch process is writing the transcripts' rows anew."
+  (process-live-p romacs-agent-history--indexing))
+
+(defvar romacs-agent-history-indexed-hook nil
+  "Run once a batch process has written the transcripts' rows anew.")
+
+(defun romacs-agent-history--settings ()
+  "The form giving a batch process this editor's settings the scan reads:
+its providers, T3's settings file and the listing's size."
+  (format "(setq romacs-agent-providers '%S romacs-agent-history-limit %S%s)"
+          romacs-agent-providers romacs-agent-history-limit
+          ;; T3's, when set here: unset, the process keeps its own default.
+          (if (boundp 'romacs-agent-t3-settings) (format " romacs-agent-t3-settings %S" romacs-agent-t3-settings) "")))
+
+(defun romacs-agent-history--driver-files ()
+  "The files defining this editor's harnesses but for those of Romacs's
+own two, each once."
+  (let ((own (delq nil (mapcar (lambda (feature) (locate-library (symbol-name feature)))
+                               '(romacs-agent-claude romacs-agent-codex)))))
+    (seq-uniq (seq-remove (lambda (file) (member (file-name-sans-extension file)
+                                                  (mapcar #'file-name-sans-extension own)))
+                          (delq nil (mapcar (lambda (cell) (plist-get (cdr cell) :file)) romacs-agent--drivers))))))
+
+(defun romacs-agent-history--drivers-form ()
+  "The form loading this editor's harnesses' own files in a batch
+process: with this editor's `load-path', so what they require is found;
+each alone, so one failing to load leaves the others listed."
+  (format "(progn (setq load-path (delete-dups (append '%S load-path))) (dolist (file '%S) (with-demoted-errors \"romacs-agent-history: %%S\" (load file nil t))))"
+          load-path (romacs-agent-history--driver-files)))
+
+(defun romacs-agent-history-index-soon ()
+  "Write the transcripts' rows anew in a batch process of this build, off
+the editor, when none runs; `romacs-agent-history-indexed-hook' runs once
+it ends."
+  (when (and (not noninteractive) (not (process-live-p romacs-agent-history--indexing)) (romacs-agent-history--db))
+    (setq romacs-agent-history--indexing
+          (make-process
+           :name "romacs-agent-history-index" :noquery t :connection-type 'pipe
+           :buffer (generate-new-buffer " *romacs-agent-history-index*" t)
+           :command (append (list (expand-file-name invocation-name invocation-directory) "--batch"
+                                  "-l" "romacs-agent-claude" "-l" "romacs-agent-codex")
+                            ;; Every harness defined here, from its own file
+                            ;; (an init's, a package's): its transcripts too.
+                            (and (romacs-agent-history--driver-files)
+                                 (list "--eval" (romacs-agent-history--drivers-form)))
+                            (list "-l" "romacs-agent-history"
+                                  "--eval" (romacs-agent-history--settings)
+                                  "-f" "romacs-agent-history-index-batch"))
+           :sentinel (lambda (process _event)
+                       (unless (process-live-p process)
+                         (let ((buffer (process-buffer process)))
+                           ;; Failed: said, its last line; the rows as they were.
+                           (unless (eql (process-exit-status process) 0)
+                             (message "romacs-agent-history: listing the transcripts failed: %s"
+                                      (if (buffer-live-p buffer)
+                                          (with-current-buffer buffer
+                                            (car (last (split-string (buffer-string) "\n" t))))
+                                        (process-exit-status process))))
+                           (when (buffer-live-p buffer) (kill-buffer buffer)))
+                         (romacs-agent-history--from-rows)
+                         (run-hooks 'romacs-agent-history-indexed-hook)))))))
+
+(defun romacs-agent-history--from-rows ()
+  "The listing, from the transcripts' rows: nil without them."
+  (when-let* ((db (romacs-agent-history--db)))
+    (setq romacs-agent-history--listing
+          (mapcar (lambda (row)
+                    (pcase-let ((`(,path ,harness ,provider ,config-dir ,id ,cwd ,title ,size ,mtime) row))
+                      (list :title title :path path :size size :mtime mtime :provider provider
+                            :config-dir config-dir :harness (intern harness) :id id :cwd cwd)))
+                  (sqlite-select db (concat "select path, harness, provider, config_dir, id, cwd, title, size, mtime"
+                                            " from transcripts where title is not null order by mtime desc"))))))
+
+(defun romacs-agent-history-list (&optional wait)
+  "List the harnesses' transcripts: from their rows, the next scan of
+them started aside (`romacs-agent-history-index-soon'), which lists them
+anew as it ends.  Without the rows' database, or in a batch process,
+scanned here (`romacs-agent-history--scan').  WAIT, for a program that
+reads the listing at once: list what is on disk now, waiting for a scan
+started after this call, up to WAIT seconds (t: 30)."
+  (if (and (not noninteractive) (romacs-agent-history--db))
+      ;; One running already may have started before what is to be listed
+      ;; was written: waited for, then one more.
+      (let ((earlier (romacs-agent-history-indexing-p))
+            (end (+ (float-time) (if (numberp wait) wait 30))))
+        (romacs-agent-history--from-rows)
+        (romacs-agent-history-index-soon)
+        (when wait
+          (dotimes (_ (if earlier 2 1))
+            (romacs-agent-history-index-soon)
+            (while (and (romacs-agent-history-indexing-p) (< (float-time) end))
+              (accept-process-output romacs-agent-history--indexing 0.05)))))
+    (setq romacs-agent-history--listing (romacs-agent-history--scan))))
 
 (defun romacs-agent-history-find (harness config-dir id)
   "HARNESS's conversation ID kept in CONFIG-DIR (nil: its default), as
