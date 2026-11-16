@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
@@ -54,6 +55,10 @@
                                             3 "out" (romacs-mcp--object "type" "result" "result" "first answer")))
                                      "")
                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+          ;; As a chat finds it: its records in SQLite, kept as drawn.
+          (remhash romacs-agent-restored-chat-tests--id romacs-agent-events--imported)
+          (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
+            (romacs-agent-test-stored (romacs-agent-load-session romacs-agent-restored-chat-tests--id)))
           (cl-letf* ((replay (symbol-function 'romacs-agent-ui--replay))
                      ((symbol-function 'romacs-agent-ui--replay)
                       (lambda (session) (cl-incf replays) (funcall replay session)))

@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 
@@ -161,7 +162,8 @@ start launched, its manifest written."
       (should (eql (gethash "seq" note) 1))
       (should (eql (gethash "turns" note) 1))
       ;; Its chat shows the source's transcript to the fork, then the rule.
-      (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -192,7 +194,8 @@ start launched, its manifest written."
                     nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
       (setf (romacs-agent-seq source) 10)
       (let* ((fork (romacs-agent-fork source))
-             (buffer (save-window-excursion (romacs-agent-show fork))))
+             (buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -234,7 +237,8 @@ start launched, its manifest written."
                                                "seq" 2 "t" 2))
                               "\n")
                       nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)
-        (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+        (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
           (unwind-protect
               (with-current-buffer buffer
                 (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -281,7 +285,8 @@ start launched, its manifest written."
       (setf (romacs-agent-state fork) 'ended)
       (romacs-agent-resume fork)
       (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
-      (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -305,7 +310,8 @@ start launched, its manifest written."
     (let* ((fork (romacs-agent-fork source)) (drawn nil))
       (cl-letf (((symbol-function 'romacs-agent-history-draw)
                  (lambda (session imported) (push (list session imported) drawn))))
-        (kill-buffer (save-window-excursion (romacs-agent-show fork))))
+        (kill-buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
       (should (equal drawn (list (list fork '(:path "/x.jsonl" :size 10))))))))
 
 (ert-deftest romacs-agent-fork-draws-the-source-s-rows-with-its-state ()

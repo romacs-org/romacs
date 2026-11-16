@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
@@ -53,6 +54,8 @@ result."
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (dir (expand-file-name romacs-agent-tail-tests--id (romacs-agent--state-root)))
          (journal (expand-file-name "journal.jsonl" dir)))
+    ;; Its id is every test's: no other's session is taken as moved.
+    (remhash romacs-agent-tail-tests--id romacs-agent-events--imported)
     (unwind-protect
         (progn
           (make-directory dir t)
@@ -69,6 +72,7 @@ result."
           (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
             (romacs-agent-restore)
             (funcall body (romacs-agent-get romacs-agent-tail-tests--id) journal)))
+      (remhash romacs-agent-tail-tests--id romacs-agent-events--imported)
       (delete-directory root t)
       (delete-directory run t))))
 
@@ -118,7 +122,9 @@ result."
                               "{\"out\":{\"text\":\"\\\"romacsRequest\\\":7},\"},\"seq\":13,\"t\":1.5}")))
 
 (defun romacs-agent-tail-tests--open (session)
-  "SESSION's chat, drawn, point at its end."
+  "SESSION's chat, drawn as a chat finds it (`romacs-agent-test-stored'),
+point at its end."
+  (romacs-agent-test-stored session)
   (let ((buffer (romacs-agent-ui--make-chat session)))
     (with-current-buffer buffer
       (romacs-agent-ui--fill buffer)
@@ -255,6 +261,7 @@ unless CUT, then its turn's end."
      (let ((coding-system-for-write 'utf-8-unix))
        (write-region (concat (romacs-agent-tail-tests--streamed 1 2) (romacs-agent-tail-tests--streamed 2 8 t))
                      nil journal nil 'silent))
+     (romacs-agent-test-stored session)
      (let* ((streamed nil)
             (record (symbol-function 'romacs-agent--record))
             (buffer (cl-letf (((symbol-function 'romacs-agent--record)
@@ -271,10 +278,8 @@ unless CUT, then its turn's end."
                  (let ((said (format "streamed answer %d" n)))
                    (should (string-search said text))
                    (should-not (string-search said text (1+ (string-search said text)))))))
-             ;; The one said whole: its start alone read, none of its
-             ;; deltas; the cut one's, all.
-             (should (= (cl-count "msg_1" streamed :test #'equal) 1))
-             (should (= (cl-count "msg_2" streamed :test #'equal) 3)))
+             ;; Kept as drawn: opened, no record of its turns is read.
+             (should-not streamed))
          (kill-buffer buffer))))))
 
 ;; Claude writes a record as each block of a message ends: a block done
@@ -443,13 +448,11 @@ unless CUT, then its turn's end."
          (should (memq (cdr tail) '(2 3)))
          ;; Asked for by hand, earlier turns are past it.
          (should (equal (romacs-agent--journal-tail session 12 nil nil 'none) '(nil . 5))))
-       ;; In a chat: its first show keeps to it, its earlier row pages past.
+       ;; A chat draws its turns kept as drawn: as many as it draws, however
+       ;; long they are.
        (let* ((romacs-agent-chat-turns 12) (buffer (romacs-agent-tail-tests--open session)))
          (unwind-protect
-             (with-current-buffer buffer
-               (should (memq (length (romacs-agent-tail-tests--questions buffer)) '(2 3)))
-               (romacs-agent-chat-earlier)
-               (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5))))
+             (should (equal (romacs-agent-tail-tests--questions buffer) '(1 2 3 4 5)))
            (kill-buffer buffer)))))))
 
 ;; What comes before a session's first prompt (its fork notes): only that.
@@ -468,6 +471,7 @@ unless CUT, then its turn's end."
   (romacs-agent-tail-tests--with-session
    5 0
    (lambda (session _journal)
+     (romacs-agent-test-stored session)
      (let* ((romacs-agent-chat-turns 2) (froms nil)
             (read (symbol-function 'romacs-agent--read-journal))
             (buffer (romacs-agent-ui--make-chat session)))
@@ -477,8 +481,10 @@ unless CUT, then its turn's end."
                         (push from froms)
                         (apply read session function from rest))))
              (with-current-buffer buffer (romacs-agent-ui--shown-again))
-             (should froms)
-             (should (cl-every #'integerp froms))
+             ;; Its finished turns are kept as drawn: what is read is only
+             ;; what follows them, by seq.
+             (should (cl-every (lambda (from) (or (null from) (integerp from))) froms))
+             (should (<= (length froms) 1))
              (should (equal (romacs-agent-tail-tests--questions buffer) '(4 5))))
          (kill-buffer buffer))))))
 
