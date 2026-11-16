@@ -30,7 +30,7 @@
 (defconst romacs-agent-store--columns
   '(id dir harness provider model title cwd parent state last_time cost transcript
        input_seq done_seq seen_seq settled_seq attention
-       effort plan permission_mode context_used context_window resume_time)
+       effort plan permission_mode context_used context_window resume_time seq)
   "The table's columns, in order.")
 
 (defconst romacs-agent-store--schema
@@ -39,7 +39,7 @@
        title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
        input_seq integer, done_seq integer, seen_seq integer, settled_seq integer,
        attention integer, effort text, plan integer, permission_mode text, context_used integer,
-       context_window integer, resume_time real)"
+       context_window integer, resume_time real, seq integer)"
     "create index if not exists sessions_state on sessions (state)"
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
@@ -151,7 +151,9 @@ moment later, unless AGAIN says this is that try."
          :plan (if (plist-get (romacs-agent-options session) :plan) 1 0)
          :permission_mode (and (romacs-agent-permission-mode session) (format "%s" (romacs-agent-permission-mode session)))
          :context_used (romacs-agent-context-used session) :context_window (romacs-agent-context-window session)
-         :resume_time (and (fboundp 'romacs-agent-resume-time) (romacs-agent-resume-time session)))))
+         :resume_time (and (fboundp 'romacs-agent-resume-time) (romacs-agent-resume-time session))
+         ;; The last record its kept state folded.
+         :seq (romacs-agent-seq session))))
 
 ;;; Filling it
 
@@ -173,13 +175,14 @@ moment later, unless AGAIN says this is that try."
 state (`romacs-agent--kept-text'); no journal is read.  Nil with no
 manifest."
   (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
-    (let* ((kept (let ((text (or (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))
-                                 (let ((file (expand-file-name "state.eld" dir)))
-                                   (and (file-readable-p file)
-                                        (with-temp-buffer
-                                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                                          (buffer-string)))))))
-                   (and text (ignore-errors (plist-get (car (read-from-string text)) :fields)))))
+    (let* ((state (let ((text (or (and (fboundp 'romacs-agent-turns-fold) (romacs-agent-turns-fold (gethash "id" manifest)))
+                                  (let ((file (expand-file-name "state.eld" dir)))
+                                    (and (file-readable-p file)
+                                         (with-temp-buffer
+                                           (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                                           (buffer-string)))))))
+                    (and text (ignore-errors (car (read-from-string text))))))
+           (kept (plist-get state :fields))
            (field (lambda (slot) (cdr (assq slot kept))))
            (options (gethash "options" manifest))
            (harness (gethash "harness" manifest))
@@ -221,7 +224,8 @@ manifest."
             :plan (if (and (hash-table-p options) (eq (gethash "plan" options) t)) 1 0)
             :permission_mode (let ((mode (funcall field 'permission-mode))) (and mode (format "%s" mode)))
             :context_used (funcall field 'context-used) :context_window (funcall field 'context-window)
-            :resume_time (let ((at (gethash "resumeAt" manifest))) (and (numberp at) at))))))
+            :resume_time (let ((at (gethash "resumeAt" manifest))) (and (numberp at) at))
+            :seq (let ((seq (plist-get state :seq))) (and (integerp seq) seq))))))
 
 (defun romacs-agent-store--missing ()
   "The directories of recorded sessions that have no row."
@@ -317,13 +321,27 @@ one still missing a row after a fill is loaded as it is."
 (defconst romacs-agent-store--quiet-states '("idle" "detached" "unstarted")
   "The states a session's row may be in for it to want nothing now.")
 
+(declare-function romacs-agent-events--db "romacs-agent-events" ())
+
 (defun romacs-agent-store-quiet-p (dir)
   "Whether the session recorded in DIR wants nothing now, as its row says:
 idle (or detached, unstarted), so nothing asked of the user, and no
-error nor anything owed to its parent (`romacs-agent-quiet-p')."
-  (when-let* ((db (romacs-agent-store--open))
-              (row (car (sqlite-select db "select state, attention from sessions where id = ?" (list (file-name-nondirectory dir))))))
-    (and (member (car row) romacs-agent-store--quiet-states) (eql (cadr row) 0))))
+error nor anything owed to its parent (`romacs-agent-quiet-p'); and
+nothing came since its state was kept: its records in SQLite go no
+further than the seq that state folded.  One still in a journal is not
+quiet: whether more came cannot be told there without reading it."
+  (when-let* (((fboundp 'romacs-agent-events--db))
+              ;; Its records' tables, made with the database.
+              (db (romacs-agent-events--db))
+              (id (file-name-nondirectory dir))
+              (row (car (sqlite-select db (concat "select state, attention, seq,"
+                                                  " (select 1 from imported where imported.session = sessions.id),"
+                                                  " (select max(seq) from events where events.session = sessions.id)"
+                                                  " from sessions where id = ?")
+                                       (list id)))))
+    (pcase-let ((`(,state ,attention ,seq ,imported ,last) row))
+      (and (member state romacs-agent-store--quiet-states) (eql attention 0)
+           imported (integerp seq) (or (null last) (<= last seq))))))
 
 (defun romacs-agent-store-row-session (id)
   "The session ID names, made from its row alone (none of its kept state

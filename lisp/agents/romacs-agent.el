@@ -4309,10 +4309,11 @@ attached, it reads what came.  One loaded otherwise, or whose supervisor
 ended, is no longer looked at; with none left, the timer stops."
   (let ((ends (romacs-agent--quiet-ends)) (due nil))
     (maphash (lambda (id mark)
-               (cond ((or (gethash id romacs-agent--sessions)
-                          (not (file-exists-p (romacs-agent--host-socket id))))
-                      (push (cons id nil) due))
-                     ((> (or (gethash id ends) mark) mark) (push (cons id t) due))))
+               ;; Wrote more: loaded, though its supervisor ended since
+               ;; (its last records, its exit, come with it).
+               (cond ((gethash id romacs-agent--sessions) (push (cons id nil) due))
+                     ((> (or (gethash id ends) mark) mark) (push (cons id t) due))
+                     ((not (file-exists-p (romacs-agent--host-socket id))) (push (cons id nil) due))))
              romacs-agent--quiet)
     (pcase-dolist (`(,id . ,load) due)
       (remhash id romacs-agent--quiet)
