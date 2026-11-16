@@ -110,10 +110,9 @@ pub(super) fn walk(cx: &mut Leaf<'_>, saved: &[Value], fixed: usize, then: crate
 fn keymap_spines(cx: &mut Leaf<'_>, maps: Value) -> Value {
     let keymap = cx.intern("keymap");
     if cx.pair(maps).is_some_and(|(head, _)| head == keymap) { return copy_spine(cx, maps); }
-    let mut elements = Vec::new();
-    let mut tail = maps;
+    let (mut elements, mut tail, limit) = (Vec::new(), maps, cx.list_limit());
     while let Some((map, rest)) = cx.pair(tail) {
-        if elements.len() > cx.list_limit() { return maps; }
+        if elements.len() > limit { return maps; }
         elements.push(if cx.pair(map).is_some_and(|(head, _)| head == keymap) { copy_spine(cx, map) } else { map });
         tail = rest;
     }
@@ -121,10 +120,9 @@ fn keymap_spines(cx: &mut Leaf<'_>, maps: Value) -> Value {
 }
 // LIST's conses copied, its final cdr kept; a circular LIST as it is.
 fn copy_spine(cx: &mut Leaf<'_>, list: Value) -> Value {
-    let mut elements = Vec::new();
-    let mut tail = list;
+    let (mut elements, mut tail, limit) = (Vec::new(), list, cx.list_limit());
     while let Some((element, rest)) = cx.pair(tail) {
-        if elements.len() > cx.list_limit() { return list; }
+        if elements.len() > limit { return list; }
         elements.push(element);
         tail = rest;
     }
