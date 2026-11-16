@@ -1075,6 +1075,14 @@ impl Properties {
         let layers = keys.into_iter().filter_map(|key| Some((key, self.tree(key)?))).collect();
         KeyRuns { layers, at: range.start, end: range.end }
     }
+    /// Every value the text holds, once a run: what storing all of it stores.
+    pub(crate) fn stored_values(&self) -> Vec<Value> {
+        let mut values = Vec::new();
+        for tree in self.trees() {
+            tree.walk(0, &mut |_, run| values.extend(run.observed()));
+        }
+        values
+    }
     /// Whether any text has the property KEY.
     pub fn has_key(&self, key: Key) -> bool {
         self.layers.contains_key(&key)

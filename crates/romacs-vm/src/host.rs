@@ -813,20 +813,25 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// from then on: a target directory cleaned or a variable changed under a
 /// running session moves nothing and ends nothing. A build that records what
 /// it reads has the session's tree in its record, read again as it is now:
-/// the tree a session finds, however it was found (`ROMACS_RUNTIME_ROOT`
-/// naming the tree the executable's place gives is the same tree), and its
+/// the tree a session finds by its true name, however it was found or
+/// spelled (`ROMACS_RUNTIME_ROOT` naming the tree through a symlink, or the
+/// tree the executable's place gives, is the same tree), and its
 /// generation. A tree that has stopped being this executable's is noted,
 /// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
-    static FOUND: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    let root = FOUND.get_or_init(|| located_runtime().unwrap_or_else(|why| {
-        eprintln!("romacs: no usable runtime tree: {why}\n  \
-                   Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
-                   or name one in a file `{RUNTIME_RECORD}' beside the executable.");
-        std::process::exit(2)
-    }));
+    static FOUND: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+    let (root, truename) = FOUND.get_or_init(|| {
+        let root = located_runtime().unwrap_or_else(|why| {
+            eprintln!("romacs: no usable runtime tree: {why}\n  \
+                       Set ROMACS_RUNTIME_ROOT to a Romacs tree (the directory holding lisp/ and etc/), \
+                       or name one in a file `{RUNTIME_RECORD}' beside the executable.");
+            std::process::exit(2)
+        });
+        let truename = canonicalize(&root).unwrap_or_else(|_| root.clone());
+        (root, truename)
+    });
     if building() {
-        host_fact("runtime-root", path_json(root));
+        host_fact("runtime-root", path_json(truename));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
@@ -3489,9 +3494,10 @@ pub fn inspect_pending() -> bool {
     INSPECT_SERVED.load(Relaxed) != INSPECT_REQUESTED.load(Relaxed)
         && INSPECT_HERE.with(std::cell::Cell::get) == INSPECT_TARGET.load(Relaxed)
 }
-/// Whether a listener runs, so that a native loop should poll for requests.
+/// Whether a listener runs or the stall watchdog watches, so that a native
+/// loop should poll for requests.
 pub fn inspect_enabled() -> bool {
-    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+    INSPECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed) || INSPECT_WATCHED.load(std::sync::atomic::Ordering::Relaxed)
 }
 /// Raise a request, as a client does, for this thread's evaluator to answer.
 #[cfg(test)]
@@ -3509,6 +3515,59 @@ pub fn inspect_enable(on: bool) {
 pub fn inspect_answer() -> Option<String> {
     inspect_lock(&INSPECT_SLOT).as_ref().map(|snapshot| snapshot.json.to_string())
 }
+/// The stall watchdog watches the calling thread, the evaluator's: it
+/// answers inspections, unless a listener already named one
+/// (`inspect_listen'), and native loops poll for them (`inspect_enabled'),
+/// with a listener or without, for as long as the process runs.
+pub fn inspect_watch() {
+    if INSPECT_TARGET.load(std::sync::atomic::Ordering::SeqCst) == 0 { inspect_target_here(); }
+    INSPECT_WATCHED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+/// The stall watchdog asks for inspections (`inspect_watch').
+static INSPECT_WATCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Raise a request, as the stall watchdog does from its own thread, for
+/// the target's evaluator to answer at its next safe point: its generation.
+pub fn inspect_raise() -> u64 {
+    INSPECT_REQUESTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+/// The newest answer's JSON, once it answers GENERATION or a later request.
+pub fn inspect_answer_since(generation: u64) -> Option<String> {
+    inspect_lock(&INSPECT_SLOT).as_ref().filter(|s| s.generation >= generation).map(|s| s.json.to_string())
+}
+
+/// The main VM's stalls the watchdog recorded, as JSON lines, until the
+/// usage log takes them (`romacs--take-stalls'), at most [`STALLS_KEPT`].
+static STALLS: std::sync::Mutex<(Vec<String>, u64)> = std::sync::Mutex::new((Vec::new(), 0));
+/// The record of a stall still going, while one is.
+static ONGOING_STALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Keep LINE as the record of the stall still going, or none.
+pub fn note_ongoing_stall(line: Option<String>) {
+    *inspect_lock(&ONGOING_STALL) = line;
+}
+const STALLS_KEPT: usize = 256;
+/// Keep LINE, a stall's record, for the usage log.
+pub fn note_stall(line: String) {
+    let mut stalls = inspect_lock(&STALLS);
+    if stalls.0.len() < STALLS_KEPT { stalls.0.push(line); } else { stalls.1 += 1; }
+}
+/// What brings the stall records up to date at once (the watchdog's look),
+/// for a take while the session ends.
+static STALL_LOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+/// Let LOOK bring the stall records up to date before the session's last
+/// take (`take_stalls').
+pub fn on_stall_take(look: fn()) { let _ = STALL_LOOK.set(look); }
+
+/// The stalls kept since the last call, oldest first, and, when the
+/// session is ENDING, the records brought up to date first and the stall
+/// still going last (it ends inside it), and how many were dropped
+/// meanwhile.
+pub fn take_stalls(ending: bool) -> (Vec<String>, u64) {
+    if ending && let Some(look) = STALL_LOOK.get() { look(); }
+    let (mut lines, dropped) = std::mem::take(&mut *inspect_lock(&STALLS));
+    if ending { lines.extend(inspect_lock(&ONGOING_STALL).take()); }
+    (lines, dropped)
+}
+
 /// The newest request, which a snapshot taken now answers.
 pub fn inspect_generation() -> u64 {
     INSPECT_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
