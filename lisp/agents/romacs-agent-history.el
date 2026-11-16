@@ -544,7 +544,8 @@ nil when its head names no prompt; nil when no transcript has it."
                 (romacs-agent-history--describe path size mtime harness))))))
 
 (defun romacs-agent-history-items ()
-  "The listed transcripts no Romacs session continues, newest first."
+  "The listed transcripts no Romacs session continues, loaded or a row,
+newest first."
   (let ((known (make-hash-table :test #'equal)))
     ;; A conversation by its identity: two configuration directories can
     ;; hold the same id.
@@ -554,6 +555,11 @@ nil when its head names no prompt; nil when no transcript has it."
                         t known)
                (when-let* ((imported (romacs-agent-imported session))) (puthash (plist-get imported :path) t known)))
              romacs-agent--sessions)
+    ;; And a session kept as its row alone (quiet, or ended), by the
+    ;; transcript its row names.
+    (when-let* ((db (romacs-agent-history--db)))
+      (dolist (row (ignore-errors (sqlite-select db "select transcript from sessions where transcript is not null")))
+        (puthash (car row) t known)))
     (sort (cl-remove-if (lambda (item)
                           (or (gethash (romacs-agent--native-key (plist-get item :harness) (plist-get item :config-dir)
                                                                  (plist-get item :id))
