@@ -1672,8 +1672,12 @@ restarts."
   "The restart command and environment for TARGET: a build directory (its
 romacs-vm-gui with its own runtime) or a binary (its runtime its own).
 A build finds its Lisp in its runtime root itself, so an older or newer
-layout of that tree restarts as well."
-  (let ((target (expand-file-name target)))
+layout of that tree restarts as well.  TARGET is taken by its true name:
+a link to a build (an installer's `current') names the build it points
+to now, so the session stays on that build when the link moves, and its
+runtime root is spelled as a launcher that resolves the link spells it,
+whose worlds it then boots from."
+  (let ((target (file-truename target)))
     (cond ((file-directory-p target)
            (let ((binary (expand-file-name "romacs-vm-gui" target)))
              (dolist (path (list binary (expand-file-name "etc" target)))
