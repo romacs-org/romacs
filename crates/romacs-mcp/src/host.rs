@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] -- PROGRAM [ARG...]";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] [--store FILE] -- PROGRAM [ARG...]";
 
 struct Config {
     dir: PathBuf,
@@ -51,12 +51,15 @@ struct Config {
     input: Option<PathBuf>,
     note: Option<Json>,
     input_images: Option<Json>,
+    /// The SQLite database the session's records go to, instead of its
+    /// journal (`--store FILE`): a session Romacs has imported.
+    store: Option<PathBuf>,
     argv: Vec<String>,
 }
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
-    let (mut dir, mut socket, mut input, mut note, mut input_images) = (None, None, None, None, None);
+    let (mut dir, mut socket, mut input, mut note, mut input_images, mut store) = (None, None, None, None, None, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
@@ -64,13 +67,14 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
             "--input" => input = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
             "--input-images" => input_images = Some(args.next().and_then(|text| serde_json::from_str(&text).ok()).ok_or(USAGE)?),
             "--note" => note = Some(args.next().and_then(|text| serde_json::from_str::<Json>(&text).ok()).ok_or(USAGE)?),
+            "--store" => store = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
             "--" => break,
             _ => return Err(USAGE.into()),
         }
     }
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
-        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, input_images, argv }),
+        (Some(dir), Some(socket)) if !argv.is_empty() && socket.is_absolute() => Ok(Config { dir, socket, input, note, input_images, store, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -79,8 +83,7 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
 /// journaled and sent in the same order for every reader.
 struct Shared {
     seq: u64,
-    journal: File,
-    path: PathBuf,
+    store: Store,
     attached: Option<(u64, UnixStream)>,
     next_attachment: u64,
     /// The harness's stdin, its own lock: a slow harness never holds up
@@ -102,14 +105,153 @@ fn record(seq: u64, key: &str, line: &str) -> String {
     json!({"seq": seq, "t": now(), key: value}).to_string()
 }
 
-impl Shared {
-    /// Journal TEXT (a whole record) and send it to the attached server.
-    fn append(&mut self, text: &str, sync: bool) {
-        let line = format!("{text}\n");
-        if let Err(error) = self.journal.write_all(line.as_bytes()) {
-            eprintln!("romacs-agent-host: journal: {error}");
+/// How long a record waits before it is tried again while the database is
+/// busy, and how long before the attached server is told storage fails.
+const STORE_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+const STORE_FAILING: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether harness output LINE is a thinking-token counter: a count the next
+/// one supersedes, which no reader folds, sent but not kept.
+fn counter(line: &str) -> bool {
+    line.contains("\"subtype\":\"thinking_tokens\"") && line.contains("\"type\":\"system\"")
+}
+
+/// The records' tables, as lisp/agents/romacs-agent-events.el makes them.
+const EVENTS_SCHEMA: &str = "create table if not exists events (
+       session text not null, seq integer not null, t real, kind text, record text not null);
+     create index if not exists events_seq on events (session, seq);
+     create index if not exists events_kind on events (session, kind, seq);
+     create table if not exists imported (session text primary key, at real) without rowid;";
+
+/// Where a session's records are kept: its journal file, or the events
+/// table of the agents' SQLite database once Romacs has imported it.
+enum Store {
+    /// CUT, when set, is where a failed write's line began, not yet cut
+    /// back to: nothing is appended before it is.
+    Journal { file: File, path: PathBuf, cut: Option<u64> },
+    Sqlite { db: rusqlite::Connection, session: String },
+}
+
+impl Store {
+    fn open(dir: &Path, database: Option<&Path>) -> Result<Store, String> {
+        match database {
+            None => {
+                let path = dir.join("journal.jsonl");
+                let file = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                Ok(Store::Journal { file, path, cut: None })
+            }
+            Some(database) => {
+                let session = dir.file_name().and_then(|n| n.to_str()).ok_or("--dir names no session")?.to_owned();
+                let db = rusqlite::Connection::open(database).map_err(|e| format!("{}: {e}", database.display()))?;
+                db.busy_timeout(std::time::Duration::from_millis(200)).map_err(|e| e.to_string())?;
+                db.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
+                db.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+                // As lisp/agents/romacs-agent-events.el makes them.
+                db.execute_batch(EVENTS_SCHEMA).map_err(|e| e.to_string())?;
+                Ok(Store::Sqlite { db, session })
+            }
         }
-        if sync { let _ = self.journal.sync_data(); }
+    }
+
+    /// Keep record TEXT, its seq SEQ; on disk before this returns when SYNC.
+    fn keep(&mut self, seq: u64, text: &str, sync: bool) -> Result<(), String> {
+        match self {
+            Store::Journal { file, cut, .. } => {
+                // A write that fails part way (a full disk) is undone, so its
+                // retry appends a whole line, never one after a fragment; a
+                // cut that failed too is made before anything more is written.
+                if let Some(start) = *cut {
+                    file.set_len(start).map_err(|e| e.to_string())?;
+                    *cut = None;
+                }
+                let start = file.metadata().map_err(|e| e.to_string())?.len();
+                let written = file.write_all(format!("{text}\n").as_bytes());
+                if let Err(error) = written {
+                    if file.set_len(start).is_err() { *cut = Some(start); }
+                    return Err(error.to_string());
+                }
+                if sync { let _ = file.sync_data(); }
+                Ok(())
+            }
+            Store::Sqlite { db, session } => {
+                let kind = serde_json::from_str::<Json>(text).ok().and_then(|record| {
+                    record.as_object()?.keys().find(|k| *k != "seq" && *k != "t").cloned()
+                });
+                let time = serde_json::from_str::<Json>(text).ok().and_then(|r| r.get("t")?.as_f64());
+                // A turn's end, an exit, a note: as durable as the journal's sync.
+                if sync { db.pragma_update(None, "synchronous", "FULL").map_err(|e| e.to_string())?; }
+                let kept = db.execute("insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)",
+                                      rusqlite::params![&*session, seq as i64, time, kind, text]);
+                if sync { let _ = db.pragma_update(None, "synchronous", "NORMAL"); }
+                kept.map(|_| ()).map_err(|e| e.to_string())
+            }
+        }
+    }
+
+    /// The seq of the last record kept, 0 for none.
+    fn last_seq(&self) -> u64 {
+        match self {
+            Store::Journal { path, .. } => last_seq(path),
+            Store::Sqlite { db, session } => db
+                .query_row("select coalesce(max(seq), 0) from events where session = ?1", [session], |row| row.get::<_, i64>(0))
+                .map_or(0, |seq| seq as u64),
+        }
+    }
+
+    /// Call EACH with every kept record from seq FROM on, in order; false
+    /// when EACH does.
+    fn replay(&mut self, from: u64, mut each: impl FnMut(&str) -> bool) -> bool {
+        match self {
+            Store::Journal { file, path, .. } => {
+                let _ = file.flush();
+                let Ok(read) = File::open(&*path) else { return true };
+                for line in BufReader::new(read).lines().map_while(Result::ok) {
+                    let seq = serde_json::from_str::<Json>(&line).ok().and_then(|r| r.get("seq")?.as_u64()).unwrap_or(0);
+                    if seq >= from && !each(&line) { return false; }
+                }
+                true
+            }
+            Store::Sqlite { db, session } => {
+                let Ok(mut statement) = db.prepare("select record from events where session = ?1 and seq >= ?2 order by seq, rowid") else { return true };
+                let Ok(rows) = statement.query_map(rusqlite::params![&*session, from as i64], |row| row.get::<_, String>(0)) else { return true };
+                for line in rows.map_while(Result::ok) {
+                    if !each(&line) { return false; }
+                }
+                true
+            }
+        }
+    }
+}
+
+impl Shared {
+    /// Keep TEXT (a whole record, its seq the current one) and send it to
+    /// the attached server: kept first (on disk when SYNC), so whatever is
+    /// sent can be replayed.
+    fn append(&mut self, text: &str, sync: bool) {
+        {
+            let seq = self.seq;
+            let mut waited = std::time::Duration::ZERO;
+            let mut told = false;
+            // Kept before it is sent, whatever fails: a busy database, a full
+            // disk or an I/O error holds up the harness's output (its pipe
+            // fills) until the record is kept, never sends one it could not
+            // replay.
+            while let Err(error) = self.store.keep(seq, text, sync) {
+                if waited.is_zero() { eprintln!("romacs-agent-host: store: {error}"); }
+                std::thread::sleep(STORE_RETRY);
+                waited += STORE_RETRY;
+                if waited >= STORE_FAILING && !told {
+                    told = true;
+                    self.send(&json!({"storage": "failing"}).to_string());
+                }
+            }
+        }
+        self.send(text);
+    }
+
+    /// Send TEXT, a line, to the attached server.
+    fn send(&mut self, text: &str) {
+        let line = format!("{text}\n");
         if let Some((_, stream)) = &mut self.attached
             && stream.write_all(line.as_bytes()).is_err() {
             // Closed, so the server sees its attachment end and attaches again.
@@ -124,13 +266,18 @@ impl Shared {
         if self.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return false; }
         self.seq += 1;
         let entry = json!({"seq": self.seq, "t": now(), "note": note}).to_string();
-        self.append(&entry, false);
+        // Romacs's own record: as durable as a turn's end.
+        self.append(&entry, true);
         true
     }
 
     fn output(&mut self, line: &str) {
+        // A session kept in SQLite drops its thinking-token counters, which
+        // no reader folds: numbered, they would leave a seq kept nowhere,
+        // which a resumed host would number again.
+        if matches!(self.store, Store::Sqlite { .. }) && counter(line) { return; }
         self.seq += 1;
-        let sync = line.contains("\"type\":\"result\"");
+        let sync = line.contains("\"type\":\"result\"") || line.contains("\"method\":\"turn/completed\"");
         self.append(&record(self.seq, "out", line), sync);
     }
 }
@@ -154,14 +301,8 @@ fn attach(shared: &Arc<Mutex<Shared>>, mut stream: UnixStream, request: &Json) -
         let _ = writeln!(stream, "{}", json!({"refused": "attached", "pid": std::process::id()}));
         return None;
     }
-    let _ = shared.journal.flush();
     if stream.set_write_timeout(Some(ATTACHED_WRITE)).is_err() { return None; }
-    if let Ok(file) = File::open(&shared.path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok) {
-            let seq = serde_json::from_str::<Json>(&line).ok().and_then(|r| r.get("seq")?.as_u64()).unwrap_or(0);
-            if seq >= from && writeln!(stream, "{line}").is_err() { return None; }
-        }
-    }
+    if !shared.store.replay(from, |line| writeln!(stream, "{line}").is_ok()) { return None; }
     let id = shared.next_attachment + 1;
     // Kept: the server may now act as this session's (its relays' route).
     // Told first, then published: a server gone before it hears this is
@@ -254,9 +395,8 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
 fn run(config: Config) -> Result<i32, String> {
     create_private(&config.dir)?;
     let listener = listen(&config.socket)?;
-    let path = config.dir.join("journal.jsonl");
-    let seq = last_seq(&path);
-    let journal = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let store = Store::open(&config.dir, config.store.as_deref())?;
+    let seq = store.last_seq();
     let stderr = OpenOptions::new().create(true).append(true).open(config.dir.join("harness.stderr")).map_err(|e| e.to_string())?;
     let mut child = Command::new(&config.argv[0]).args(&config.argv[1..])
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr)
@@ -265,7 +405,7 @@ fn run(config: Config) -> Result<i32, String> {
         "socket": config.socket, "started": now(), "argv": config.argv}).to_string())?;
     let stdout = child.stdout.take().ok_or("harness stdout")?;
     let mut stdin = child.stdin.take();
-    let mut shared = Shared { seq, journal, path, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
+    let mut shared = Shared { seq, store, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
     // The run's first record: its output is read only from here on.
     if let Some(note) = &config.note {
         shared.seq += 1;
@@ -363,7 +503,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 1, journal, path: path.clone(), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -388,7 +528,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, journal, path: path.clone(), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
@@ -416,7 +556,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, journal, path: path.clone(), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -466,7 +606,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
-        let mut shared = Shared { seq: 4, journal, path: path.clone(), attached: Some((1, server)), next_attachment: 1,
+        let mut shared = Shared { seq: 4, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: Some((1, server)), next_attachment: 1,
                                   stdin: Arc::new(Mutex::new(None)) };
         let note = json!({"type": "selection"});
         assert!(shared.note(1, &note));
@@ -476,6 +616,77 @@ mod tests {
         assert_eq!(last_seq(&path), 5);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn records_kept_in_sqlite_number_on_replay_and_skip_counters() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-sqlite-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000001");
+        std::fs::create_dir_all(&session).unwrap();
+        let database = dir.join("sessions.sqlite");
+        let mut shared = Shared { seq: 0, store: Store::open(&session, Some(&database)).unwrap(), attached: None,
+                                  next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
+        shared.output(r#"{"type":"assistant","message":{"id":"m1"}}"#);
+        shared.output(r#"{"type":"system","subtype":"thinking_tokens","tokens":5}"#);
+        shared.output(r#"{"type":"result","result":"done"}"#);
+        // The counter is dropped: no seq is left kept nowhere.
+        assert_eq!(shared.seq, 2);
+        assert_eq!(shared.store.last_seq(), 2);
+        let mut replayed = Vec::new();
+        assert!(shared.store.replay(2, |line| { replayed.push(line.to_owned()); true }));
+        assert_eq!(replayed.len(), 1);
+        assert!(replayed[0].contains("\"result\":\"done\""));
+        // A new host for the same session numbers on.
+        let again = Store::open(&session, Some(&database)).unwrap();
+        assert_eq!(again.last_seq(), 2);
+        let kinds: Vec<String> = rusqlite::Connection::open(&database).unwrap()
+            .prepare("select kind from events order by seq").unwrap()
+            .query_map([], |row| row.get(0)).unwrap().map_while(Result::ok).collect();
+        assert_eq!(kinds, ["out", "out"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_kept_is_not_sent_until_it_is() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-unkept-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000002");
+        std::fs::create_dir_all(&session).unwrap();
+        let database = dir.join("sessions.sqlite");
+        let store = Store::open(&session, Some(&database)).unwrap();
+        // The table gone: every insert fails until it is made again.
+        rusqlite::Connection::open(&database).unwrap().execute_batch("drop table events").unwrap();
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let mut shared = Shared { seq: 0, store, attached: Some((1, server)), next_attachment: 1,
+                                  stdin: Arc::new(Mutex::new(None)) };
+        let started = std::time::Instant::now();
+        let fixer = { let database = database.clone(); std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            rusqlite::Connection::open(&database).unwrap().execute_batch(EVENTS_SCHEMA).unwrap();
+        }) };
+        shared.output(r#"{"type":"assistant"}"#);
+        fixer.join().unwrap();
+        // Sent only once kept.
+        assert!(started.elapsed() >= std::time::Duration::from_millis(400));
+        assert_eq!(shared.store.last_seq(), 1);
+        client.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut client).read_line(&mut line).unwrap();
+        assert!(line.contains("\"seq\":1"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_journal_line_cut_short_is_undone_before_the_next() {
+        let path = std::env::temp_dir().join(format!("romacs-host-partial-{}.jsonl", std::process::id()));
+        std::fs::write(&path, "{\"seq\":1}\n").unwrap();
+        let file = OpenOptions::new().append(true).open(&path).unwrap();
+        // A write that took part of its line, its cut failing too: the cut is
+        // pending, and the next keep makes it before it appends.
+        std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{\"seq\":2,\"out").unwrap();
+        let mut store = Store::Journal { file, path: path.clone(), cut: Some(10) };
+        store.keep(2, r#"{"seq":2}"#, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n{\"seq\":2}\n");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
