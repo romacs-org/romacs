@@ -49,11 +49,12 @@ one with nothing to resume.")
 
 ;;; Reading
 
-(defun romacs-agent-history--read (file beg end keep)
+(defun romacs-agent-history--read (file beg end keep &optional offsets)
   "The JSON objects of FILE's complete lines between bytes BEG and END, in
 order, that KEEP accepts: it is called with a line's first \"type\" and
 the line's end, point after that type, so it may look further.  A line
-BEG or END cuts is left out."
+BEG or END cuts is left out.  With OFFSETS, each is (OFFSET . OBJECT),
+OFFSET the byte its line starts at."
   (with-temp-buffer
     (set-buffer-multibyte nil)
     ;; From the byte before BEG: a line starting at BEG is whole.
@@ -71,7 +72,8 @@ BEG or END cuts is left out."
                             (json-parse-string (decode-coding-string (buffer-substring-no-properties line-start line-end)
                                                                      'utf-8)
                                                :object-type 'hash-table :null-object :null :false-object :false))))
-              (when (hash-table-p object) (push object objects))))
+              (when (hash-table-p object)
+                (push (if offsets (cons (+ (max 0 (1- beg)) (- line-start (point-min))) object) object) objects))))
           (goto-char (1+ line-end))))
       (nreverse objects))))
 
@@ -137,8 +139,22 @@ project it was run, or nil."
     (when cwd
       (list :harness 'claude :id (file-name-base path) :cwd cwd :title title))))
 
+(defun romacs-agent-history--stamp (events before line offset)
+  "Give the EVENTS pushed since BEFORE (a tail of EVENTS) the place of the
+LINE they came from, its byte OFFSET plus one (a row's seqs start at 1),
+and its time, as :seq and :time: where a turn's row points into its
+transcript."
+  (when offset
+    (let ((time (romacs-agent-history--time (gethash "timestamp" line))))
+      (while (and events (not (eq events before)))
+        (unless (plist-member (car events) :seq)
+          (setcar events (append (car events) (list :seq (1+ offset)) (and time (list :time time)))))
+        (setq events (cdr events))))))
+
 (defun romacs-agent-history--claude-events (objects)
-  "A Claude Code transcript's OBJECTS as chat events."
+  "A Claude Code transcript's OBJECTS as chat events; an object may be
+\(OFFSET . OBJECT), its events then stamped with its place
+\(`romacs-agent-history--stamp')."
   (let ((scratch (romacs-agent--make :harness 'claude)) (events nil) (turn nil) (last nil) (model nil))
     (cl-flet ((close ()
                 (when turn
@@ -147,7 +163,8 @@ project it was run, or nil."
                                                       (and end start (max 0 (- end start)))))
                         events)
                   (setq turn nil))))
-      (dolist (line objects)
+      (dolist (entry objects)
+       (let ((line (if (consp entry) (cdr entry) entry)) (before events))
         (unless (or (eq (gethash "isSidechain" line) t) (eq (gethash "isMeta" line) t))
           (pcase (gethash "type" line)
             ((and "user" (guard (eq (gethash "isCompactSummary" line) t)))
@@ -170,7 +187,8 @@ project it was run, or nil."
                  (setq model name)
                  (push (list :type 'meta :model name) events)))
              (dolist (event (romacs-agent--claude-events scratch line)) (push event events))))
-          (setq last (or (gethash "timestamp" line) last))))
+          (setq last (or (gethash "timestamp" line) last)))
+        (romacs-agent-history--stamp events before line (car-safe entry))))
       (close))
     (nreverse events)))
 
@@ -251,7 +269,8 @@ project it was run, or nil."
         (t "")))
 
 (defun romacs-agent-history--codex-events (objects)
-  "A Codex rollout's OBJECTS as chat events."
+  "A Codex rollout's OBJECTS as chat events, as
+`romacs-agent-history--claude-events'."
   (let ((events nil) (turn nil) (last nil) (model nil) (messages 0))
     (cl-flet ((close ()
                 (when turn
@@ -260,8 +279,9 @@ project it was run, or nil."
                                                       (and end start (max 0 (- end start)))))
                         events)
                   (setq turn nil))))
-      (dolist (line objects)
-        (let ((payload (gethash "payload" line)))
+      (dolist (entry objects)
+       (let* ((line (if (consp entry) (cdr entry) entry)) (before events)
+              (payload (gethash "payload" line)))
           (when (hash-table-p payload)
             (setq last (or (gethash "timestamp" line) last))
             (pcase (list (gethash "type" line) (gethash "type" payload))
@@ -305,7 +325,8 @@ project it was run, or nil."
               (`("response_item" ,type)
                (let ((id (or (romacs-agent--value (gethash "call_id" payload)) (romacs-agent--value (gethash "id" payload)))))
                  (push (list :type 'tool :state 'started :id id :name type :input nil) events)
-                 (push (list :type 'tool :state 'completed :id id :output "") events)))))))
+                 (push (list :type 'tool :state 'completed :id id :output "") events)))))
+          (romacs-agent-history--stamp events before line (car-safe entry))))
       (close))
     (nreverse events)))
 
@@ -394,7 +415,10 @@ ran it: its first prompt is then T3's preamble."
 
 (defconst romacs-agent-history--schema
   '("create table if not exists transcripts (path text primary key, harness text, provider text,
-       config_dir text, id text, cwd text, title text, size integer, mtime real) without rowid")
+       config_dir text, id text, cwd text, title text, size integer, mtime real) without rowid"
+    ;; How far a transcript's turns are rows: its size then, and where its
+    ;; last turn begins, which the next pass reads again.
+    "create table if not exists transcript_turns (path text primary key, size integer, from_byte integer) without rowid")
   "The transcripts' table, made with the database.")
 
 (defvar romacs-agent-history--made nil "The database the transcripts' table was made in.")
@@ -425,7 +449,90 @@ transaction.  How many rows it holds."
                                     (plist-get item :size) (plist-get item :mtime))))
             (sqlite-execute db "commit"))
         (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
+      ;; Their turns as rows, each listed one changed since read so.
+      (when (require 'romacs-agent-turns nil t)
+        (dolist (item items)
+          (when (plist-get item :title)
+            (with-demoted-errors "romacs-agent-history: turns: %S" (romacs-agent-history--index-turns item)))))
       (length items))))
+
+;;; A transcript's turns, as rows
+
+;; Its turns are rows of `turns' (romacs-agent-turns) under its key, made
+;; as a session's are, from the events its harness's history reads in it,
+;; each stamped with the place of its line: an item's `seq' is a range of
+;; bytes of the transcript, its pointer.  So a transcript's view is a page
+;; of rows, and a tool's input and output are read from the lines its
+;; item names, the transcript only ever read.
+
+(defun romacs-agent-history--key (path)
+  "The key PATH's turns are rows under."
+  (concat "transcript:" path))
+
+(defun romacs-agent-history--session (item)
+  "A session record standing for transcript ITEM, to read its rows by."
+  (romacs-agent--make :id (romacs-agent-history--key (plist-get item :path))
+                      :dir (file-name-directory (plist-get item :path)) :harness (plist-get item :harness)))
+
+(defun romacs-agent-history--index-turns (item)
+  "Make transcript ITEM's turns rows, from where its last pass found its
+last turn beginning (its whole when none): that turn, still growing,
+read again.  Nothing when its size is what was read last."
+  (let* ((db (romacs-agent-history--db)) (path (plist-get item :path))
+         (size (or (file-attribute-size (file-attributes path)) 0))
+         (kept (car (sqlite-select db "select size, from_byte from transcript_turns where path = ?" (list path)))))
+    (unless (eql (car kept) size)
+      (let* ((from (or (cadr kept) 0))
+             (harness (plist-get item :harness))
+             (session (romacs-agent-history--session item))
+             (objects (romacs-agent-history--read path from size (romacs-agent-history--get harness :keep) t))
+             (events (funcall (romacs-agent-history--get harness :events) objects))
+             (last from) (reply nil))
+        (let ((romacs-agent-turns--held nil))
+          (dolist (event events)
+            ;; The last turn's end, the transcript's.
+            (when (and (eq (plist-get event :type) 'done) (not (plist-get event :seq)))
+              (setq event (append event (list :seq (1+ size)))))
+            (pcase (plist-get event :type)
+              ('input (setq reply nil last (if (plist-get event :seq) (1- (plist-get event :seq)) last)))
+              ('delta (setq reply (concat reply (plist-get event :text))))
+              ('done (setf (romacs-agent-reply session) (and reply (string-trim reply)))))
+            (romacs-agent-turns--event session event))
+          (when romacs-agent-turns--held (romacs-agent-turns--put (nreverse romacs-agent-turns--held))))
+        (romacs-agent-events--write db "insert or replace into transcript_turns values (?, ?, ?)" (list (list path size last)))))))
+
+(defun romacs-agent-history-page (item &optional before limit)
+  "Transcript ITEM's finished turns, as `romacs-agent-turns-page' gives a
+session's: from their rows, nothing read of the transcript."
+  (romacs-agent-turns-page (romacs-agent-history--session item) before limit))
+
+(defun romacs-agent-history--line (path offset harness)
+  "The events transcript PATH's line at byte OFFSET gives, as HARNESS's
+history reads it (a row's seq is its line's OFFSET plus one)."
+  (let ((size (or (file-attribute-size (file-attributes path)) 0)) (span 65536) (objects nil))
+    (while (and (null objects) (< offset size))
+      (setq objects (romacs-agent-history--read path offset (min size (+ offset span))
+                                                (romacs-agent-history--get harness :keep) t)
+            objects (and objects (eql (caar objects) offset) (list (car objects))))
+      (when (and (null objects) (>= (+ offset span) size)) (setq offset size))
+      (setq span (* 4 span)))
+    (and objects (funcall (romacs-agent-history--get harness :events) objects))))
+
+(defun romacs-agent-history-tool (item id)
+  "Transcript ITEM's tool ID as its row opens: (:input INPUT :output
+OUTPUT), read from the lines its item names; nil when no row has it."
+  (when-let* ((tool (romacs-agent-turns--tool (romacs-agent-history--session item) id)))
+    (cl-flet ((pick (events state key)
+                (let ((found (seq-filter (lambda (e) (and (eq (plist-get e :type) 'tool) (memq (plist-get e :state) state)
+                                                          (plist-member e key)))
+                                         events)))
+                  (plist-get (or (cl-find id found :key (lambda (e) (plist-get e :id)) :test #'equal)
+                                 (and (= (length found) 1) (car found)))
+                             key))))
+      (let ((seqs (gethash "seq" tool)) (path (plist-get item :path)) (harness (plist-get item :harness)))
+        (list :input (pick (romacs-agent-history--line path (1- (aref seqs 0)) harness) '(started) :input)
+              :output (or (gethash "output" tool)
+                          (pick (romacs-agent-history--line path (1- (aref seqs 1)) harness) '(completed failed) :output)))))))
 
 (defun romacs-agent-history-index-batch ()
   "`romacs-agent-history-index' in a batch process, its count printed."
