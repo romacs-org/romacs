@@ -2303,6 +2303,15 @@ fn native_stack_failure(e: &mut Engine<'_>, message: &str) -> Value {
 }
 #[cold]
 #[inline(always)]
+/// The symbol a call of SLOT names: nil and t themselves for the interned
+/// slots of those names, else the slot's own symbol (an uninterned one too).
+fn called_symbol(e: &Engine<'_>, slot: usize) -> Value {
+    match e.vm.names.get(e.vm.symbol_names[slot].as_str()) {
+        Some(&interned) if interned == slot && e.vm.symbol_names[slot] == "nil" => Value::NIL,
+        Some(&interned) if interned == slot && e.vm.symbol_names[slot] == "t" => Value::TRUE,
+        _ => Value::reference(slot + 1, 7),
+    }
+}
 fn raise(e: &mut Engine<'_>, condition: &str, values: &[Value]) -> Value {
     let slot = e.vm.slot(condition);
     let data = e.vm.list_value(values);
@@ -3075,7 +3084,8 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         }
         let target = cache.target;
         if target == Value::UNBOUND || target == Value::NIL {
-            return raise(en, "void-function", &[Value::reference(i.b + 1, 7)]);
+            let symbol = called_symbol(en, i.b);
+            return raise(en, "void-function", &[symbol]);
         }
         // An autoload cell is resolved from its symbol, which it must name.
         if target.tag() == 7 || target.tag() == 3 && (en.vm.autoload_object(target) || lambda_list(en, target)) {
@@ -3084,7 +3094,8 @@ unsafe fn direct_generic(mut e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> 
         // GNU eval.c:3158-3160 names the called SYMBOL, not its cell's value.
         if !matches!(target.tag(), 4 | 6) {
             let condition = uncallable_condition(en, target);
-            return raise(en, condition, &[Value::reference(i.b + 1, 7)]);
+            let symbol = called_symbol(en, i.b);
+            return raise(en, condition, &[symbol]);
         }
         // Refresh an invalidated speculation lazily; ineligible closures retain
         // the existing function-id cache instead of resolving on every call.
