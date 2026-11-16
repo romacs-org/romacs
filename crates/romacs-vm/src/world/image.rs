@@ -111,6 +111,7 @@ impl Vm {
         // HOST(slot:process-environment): rebuilds the environment lists from this process
         // environment after restore, as Vm::new builds them
         self.initialize_environment_slot("process-environment");
+        self.reseed_environment_variables();
         // GNU init_buffer: every buffer starts in the startup directory.
         let directory = {
             let current = self.slots[self.buffer_slot].value;

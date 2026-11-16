@@ -968,9 +968,10 @@ fn run() -> Result<Option<exit::Exit>, String> {
         startup::mark_phase("world-open");
         let restored_layer = layer.as_ref().and_then(world::restore_layer);
         let from_layer = restored_layer.is_some();
-        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, || {
-            // Said on stderr too, so a launcher sees it whether or not a window can.
-            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START}));
+        let restored = restored_layer.or_else(|| world.as_ref().and_then(|world| world::launch(world, width, height, floor, |reason| {
+            // Said on stderr too, so a launcher sees it whether or not a
+            // window can, with why the world was not usable.
+            eprintln!("romacs-world: {}", serde_json::json!({"event": "preparing", "message": loading::FIRST_START, "reason": reason}));
             loading::step("world-build", loading::FIRST_START);
         })));
         // The world this launch booted from, which its worker isolates adopt.
@@ -1397,19 +1398,23 @@ fn evaluate(
         }
         // The launch font's face, as source: declared BEFORE GNU's Lisp, so
         // GNU's own `defface' (custom.el) leaves the declared face alone, and
-        // after the workspace's own faces otherwise, exactly as before.
-        let font = world::launch_font()?;
+        // after the workspace's own faces otherwise, exactly as before. A
+        // session restored from a base world sets it first, as no base world
+        // holds it; a layer was built with it (world.rs `layer_world`).
+        let font = world::LaunchFont::from_env()?;
+        let from_layer = worlds.as_ref().is_some_and(|worlds| worlds.from_layer);
         let started = if launch == startup::Launch::Workspace {
             let started = startup::initialize(&mut vm)?;
-            if let Some((source, _)) = &font { vm.eval_source(source)?; }
+            if let Some(font) = &font { vm.eval_source(&font.declaration())?; }
             started
         } else if let Some(carry) = carry {
+            if let Some(font) = font.as_ref().filter(|_| !from_layer) { vm.eval_source(&font.restored())?; }
             // As a fresh process takes the per-process startup steps.
             vm.eval_source("(romacs-world-restart)")?;
             startup::mark_phase("world-restart");
             startup::resume_loadup(&mut vm, launch, carry.loadup)?
         } else {
-            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(|(source, _)| source.as_str()))?
+            startup::initialize_loadup(&mut vm, launch, font.as_ref().map(world::LaunchFont::declaration).as_deref())?
         };
         startup::mark_phase("session-lisp");
         if let Err(error) = echo::install(&mut vm) { eprintln!("romacs: echo area: {error}"); }
@@ -1507,8 +1512,8 @@ fn evaluate(
             }
         }
         let face = vm.display_default_face()?;
-        if let Some((_, points)) = font {
-            eprintln!("romacs: font family={} points={} pixels={}", face.family, points, face.pixel_size);
+        if let Some(font) = font {
+            eprintln!("romacs: font family={} points={} pixels={}", face.family, font.points, face.pixel_size);
         } else {
             eprintln!("romacs: font family={} pixels={}", face.family, face.pixel_size);
         }

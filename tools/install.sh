@@ -6,12 +6,13 @@
 # Arguments, after `bash -s --' when piped:
 #
 #   --nightly     the rolling build of beta, not the latest stable release
-#   --no-compile  skip compiling the Lisp ahead of use; Romacs compiles
-#                 what it loads as you go, so early sessions are slower
 #   --uninstall   remove the installation; your init and data stay
 #
 # It verifies the release against its SHA256SUMS and installs under
-# ~/.local. It asks before using sudo, and only to install missing system
+# ~/.local: it downloads, checks and unpacks, nothing more.  Romacs's
+# first start prepares its startup image, which its window shows as it
+# goes, and its Lisp compiles in the background while it is idle
+# (lisp/session/romacs-precompile.el). It asks before using sudo, and only to install missing system
 # libraries. The whole script is inside `main', so a truncated download
 # runs nothing.
 set -euo pipefail
@@ -149,32 +150,6 @@ place_release() {
     fi
 }
 
-# Build the worlds, so the first launch and the first batch session
-# restore: the installation's batch world beside the binary, which a batch
-# session of the same user under any HOME reads, then the GUI's, which
-# finds that batch world and builds no second one. Without the batch
-# world, batch sessions boot from source: a warning, not a failed install.
-build_world() {
-    say 'Building the startup images'
-    "$prefix/bin/romacs" --world-store "$prefix/bin/romacs-vm-gui.worlds" --world-build --batch ||
-        warn "the batch startup image was not built; batch sessions start from source."
-    "$prefix/bin/romacs" -Q --loadup --world-build
-}
-
-# Fill the compiled-Lisp store, so the first session already runs at full
-# speed. Status 2 means some files stay source, which still load.
-compile_lisp() {
-    local status=0
-    mkdir -p "$cache"
-    say 'Compiling the Lisp ahead of use: a few minutes, and Ctrl-C skips it safely'
-    nice -n 10 "$prefix/bin/romacs" --compile-lisp-tree --jobs "$(nproc)" \
-         >"$cache/compile-lisp.log" 2>&1 || status=$?
-    case $status in
-        0 | 2) ;;
-        *) warn "compiling failed (log: $cache/compile-lisp.log); Romacs still runs, and compiles as it loads." ;;
-    esac
-}
-
 report_session() {
     case :$PATH: in
         *":$bin:"*) ;;
@@ -194,11 +169,13 @@ uninstall() {
 }
 
 main() {
-    local channel=stable compile=yes
+    local channel=stable
     while [ $# -gt 0 ]; do
         case $1 in
             --nightly) channel=nightly ;;
-            --no-compile) compile=no ;;
+            # Nothing is compiled at install any more: accepted, so
+            # commands that still pass it work.
+            --no-compile) ;;
             --uninstall) uninstall; return ;;
             *) die "unknown argument: $1" ;;
         esac
@@ -211,10 +188,8 @@ main() {
     trap 'rm -rf -- "$work" "$staging"' EXIT
     fetch_release "$channel" "$work"
     place_release "$work/$name.tar.gz"
-    build_world
     report_session
-    say "Romacs is installed. Run: romacs"
-    [ "$compile" = no ] || compile_lisp
+    say "Romacs is installed. Run: romacs (its first start prepares it, as its window shows)"
 }
 
 main "$@"

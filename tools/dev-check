@@ -316,6 +316,14 @@ def tests(root, names, threads):
             os.environ['PATH'] = before
 
 
+def test_environment(scratch, environ=os.environ):
+    """The tests' environment: ENVIRON less the gate's EDITOR_LAUNCH (a
+    running editor's own launch variables and a desktop session's, which
+    no test may see), its TMPDIR SCRATCH."""
+    launch = load_gate().EDITOR_LAUNCH
+    return {k: v for k, v in environ.items() if k not in launch} | {'TMPDIR': scratch}
+
+
 def run_tests(root, names, threads):
     """The tests stage on ROOT's tree, with the toolchain on PATH."""
     answer = impact.select(names, root, impact.metadata_of(root))
@@ -326,13 +334,14 @@ def run_tests(root, names, threads):
             'fix: none needed; submit, or run `python3 tools/gate full` for the whole suite here']
     log, started, status = log_path(root), time.monotonic(), 0
     with log.open('w') as sink, tempfile.TemporaryDirectory(prefix='rdc-', dir=log.parent) as scratch:
+        env = test_environment(scratch)
         for package, flags, rule in runs:
             command = ['cargo', 'nextest', 'run', '--cargo-profile', 'gate', '--locked', '--offline', '-p', package, *flags,
                        '--test-threads', str(threads), '--no-fail-fast', '--retries', '0', '--no-tests=fail',
                        '--status-level', 'fail', '--final-status-level', 'fail', '-E', rule]
             sink.write(f'$ {" ".join(command)}\n')
             sink.flush()
-            status |= subprocess.run(command, cwd=root, env=dict(os.environ, TMPDIR=scratch), stdin=subprocess.DEVNULL,
+            status |= subprocess.run(command, cwd=root, env=env, stdin=subprocess.DEVNULL,
                                      stdout=sink, stderr=subprocess.STDOUT).returncode
     reached = f'{len(answer["packages"])} package(s) and {len(answer["files"])} test file(s) reached'
     spent = f'{time.monotonic() - started:.0f} s, log {log}'

@@ -691,11 +691,13 @@ impl Vm {
                 self.set_forwarded_default(slot, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text)?;
                 Ok(value)
             }
+            // GNU Fdefvar (eval.c:944): nothing to set when the current
+            // default is bound and no let shadows an unbound toplevel value.
             DefvarBoundp => {
                 // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
                 // checks a tracked variable first (F2)
-                let value = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).map(|(_,v,_,_)| *v).unwrap_or(self.slots[slot].value);
-                Ok(truth(value != Value::UNBOUND))
+                let shadowed_unbound = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
+                Ok(truth(self.slots[slot].value != Value::UNBOUND && !shadowed_unbound))
             }
             // GNU Fdefvar without a value at a loading file's own level: the
             // name is special for the rest of the file, and macroexp.el's
@@ -710,13 +712,19 @@ impl Vm {
                 }
                 Ok(symbol)
             }
-            // GNU defvar: Fset_default, or a let-shadowed toplevel binding's
-            // saved value written in place, without notification.
+            // GNU defvar, after the value: Fset_default of a void current
+            // binding (a let's too), else a let-shadowed unbound toplevel
+            // binding's saved value written in place, without notification.
+            // A current binding the value itself bound is set, as GNU sets it
+            // where no let shadowed (DefvarBoundp decided before the value ran).
             DefvarSetDefault => {
                 let value = self.stack[start+1];
-                // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
-                // variable_primitive checks a tracked variable first (F2)
-                if let Some((_,old,_,_)) = self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot) { *old = value; }
+                let shadow = if self.slots[slot].value == Value::UNBOUND { None } else {
+                    // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
+                    // variable_primitive checks a tracked variable first (F2)
+                    self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND)
+                };
+                if let Some((_,old,_,_)) = shadow { *old = value; }
                 else {
                     self.notify_watchers_at(slot, value, "set", Some(Value::NIL))?;
                     self.slots[slot].value = value;

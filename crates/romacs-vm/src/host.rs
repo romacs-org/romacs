@@ -747,6 +747,14 @@ pub fn getenv(name: &str) -> Option<OsString> {
     value
 }
 
+/// Environment NAME for a variable each process sets from its own
+/// environment, which restore sets again (`Vm::world_reinit`): none in a
+/// world build, so a world holds no process's value and binds none; this
+/// process's otherwise.
+pub fn per_process_env(name: &str) -> Option<OsString> {
+    if capturing() { None } else { getenv(name) }
+}
+
 /// Whether this process runs one test alone, as nextest's process per test
 /// runs each (every check runs them so): a test's world may be mapped only
 /// then (`World::for_test`).
@@ -793,8 +801,10 @@ pub const RUNTIME_RECORD: &str = "romacs-runtime-root";
 /// from then on: a target directory cleaned or a variable changed under a
 /// running session moves nothing and ends nothing. A build that records what
 /// it reads has the session's tree in its record, read again as it is now:
-/// the variable that may have chosen it and its generation. A tree that has
-/// stopped being this executable's is noted, and that build is not published; the session goes on.
+/// the tree a session finds, however it was found (`ROMACS_RUNTIME_ROOT`
+/// naming the tree the executable's place gives is the same tree), and its
+/// generation. A tree that has stopped being this executable's is noted,
+/// and that build is not published; the session goes on.
 pub fn runtime_root() -> PathBuf {
     static FOUND: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     let root = FOUND.get_or_init(|| located_runtime().unwrap_or_else(|why| {
@@ -804,7 +814,7 @@ pub fn runtime_root() -> PathBuf {
         std::process::exit(2)
     }));
     if building() {
-        let _ = getenv("ROMACS_RUNTIME_ROOT");
+        host_fact("runtime-root", path_json(root));
         if let Err(why) = runtime_tree(root) {
             note_uncaptured("runtime-tree", json!({"path": path_json(root), "why": why}));
         }
@@ -1642,6 +1652,7 @@ pub fn replay(record: &Json) -> Option<Json> {
             }
             "host" => match record["fact"].as_str()? {
                 "exe" => { let _ = current_exe(); }
+                "runtime-root" => { let _ = runtime_root(); }
                 "uid" => { uid(); }
                 "euid" => { euid(); }
                 "gid" => { gid(); }

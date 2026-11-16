@@ -1552,7 +1552,9 @@ def mcp_tour(args, base):
                 return text
 
             on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
-            for name in [n for n in names if n not in on_task + ('romacs_restart_request', 'romacs_restart')]:
+            # A restart would end the tour's server: the `restart' workflows call it.
+            elsewhere = ('romacs_restart',)
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',) + elsewhere]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
@@ -1573,7 +1575,8 @@ def mcp_tour(args, base):
                   'instructions': instructions, 'help': helped[:600],
                   'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
                   'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
-                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent
+                                 and n not in elsewhere]}
         result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
                         and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
                         and helped.startswith('core:') and 'agents:' in helped
@@ -1583,11 +1586,11 @@ def mcp_tour(args, base):
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
                         # without a running unit or a calling task; romacs_dev_check where no Romacs
-                        # tree is (the tour's project); romacs_attach from a caller that is no
-                        # agent session (the tour's client).
+                        # tree is (the tour's project); romacs_attach and romacs_task_renew from a
+                        # caller that is no agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
                                                                   'romacs_task_watch', 'romacs_dev_check',
-                                                                  'romacs_attach')
+                                                                  'romacs_attach', 'romacs_task_renew')
                                 for n in errors)
                         and task is not None)
         return result
@@ -2294,8 +2297,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
@@ -2879,7 +2882,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
