@@ -164,7 +164,6 @@ a hash table of the files `load-history' named.")
 spawner to run on a worker with the features they were queued for.")
 
 (define-error 'isolate-error "Isolate error")
-(define-error 'isolate-world-unavailable "No world for a worker isolate" 'isolate-error)
 (define-error 'isolate-killed "Isolate killed" 'isolate-error)
 (define-error 'isolate-died "Isolate died" 'isolate-error)
 (define-error 'isolate-queue-full "Isolate queue full" 'isolate-error)
