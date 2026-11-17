@@ -1445,13 +1445,13 @@ impl Vm {
         self.conses.collector_compact(&maps[0], |p| {
             rewrite(&mut p.0);
             rewrite(&mut p.1);
-        }, || (Value::NIL, Value::NIL));
+        });
         self.closures.collector_compact(&maps[1], |c| {
             for v in c.captures.iter_mut().chain(c.metadata.iter_mut()) {
                 rewrite(v);
             }
             rewrite(&mut c.document);
-        }, || Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: Value::NIL });
+        });
         self.cell_pairs = std::mem::take(&mut self.cell_pairs).into_iter().filter_map(|(i, mut pair)| {
             if !self.cells.marked(i) { return None; }
             let mut cell = Value::reference(i, 5);
@@ -1459,7 +1459,7 @@ impl Vm {
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
         }).collect();
-        self.cells.collector_compact(&maps[2], |v| rewrite(v), || Value::NIL);
+        self.cells.collector_compact(&maps[2], |v| rewrite(v));
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
         let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
@@ -1562,7 +1562,7 @@ impl Vm {
                     | data::Object::Bytes(..)
                     | data::Object::SyntaxTable(_) => {}
                 }
-        }, || data::Object::Free);
+        });
         self.local_owners = None;
         for f in self.functions.collector_iter_mut() {
             // Function Arcs are private to this VM; no executable shares IR.

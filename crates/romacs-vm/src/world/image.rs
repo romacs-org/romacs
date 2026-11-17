@@ -144,6 +144,13 @@ impl Vm {
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     let mut vm = vm.at_rest_for_image()?;
+    // A restore makes the image's entries the indices below each table's
+    // length (`Vm::make_image_permanent`): a table with a free entry among
+    // them would hand it to a young one.
+    let tables = &vm.0;
+    if tables.conses.unused() + tables.closures.unused() + tables.cells.unused() + tables.objects.unused() != 0 {
+        return Err("world image: the tables are not dense (collect compacting first)".into());
+    }
     settle(&mut vm.0, &mut carry)?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
@@ -311,6 +318,25 @@ mod tests {
             vm = vm.at_rest_for_image().expect("a VM at rest").0;
             assert!(vm.generations_settled());
         }
+    }
+
+    /// An image's entries are the indices below each table's length, so a
+    /// capture refuses a table with a free entry among them, before it
+    /// writes anything.
+    #[test]
+    fn a_capture_refuses_a_table_with_a_hole() {
+        let mut vm = Vm::new();
+        let [a, _, c] = [(); 3].map(|()| vm.alloc_cons(Value::NIL, Value::NIL));
+        let mut roots = [a, c];
+        vm.collect(&mut roots);
+        assert!(vm.conses.unused() > 0, "a hole between two live conses");
+        let path = std::env::temp_dir().join(format!("romacs-dense-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let refused = super::capture(vm, (), &file, [0; 32]).unwrap_err();
+        let written = file.metadata().unwrap().len();
+        let _ = std::fs::remove_file(&path);
+        assert!(refused.contains("not dense"), "{refused}");
+        assert_eq!(written, 0, "nothing written");
     }
 
     /// A census meets the VM once and counts what it names by this build's

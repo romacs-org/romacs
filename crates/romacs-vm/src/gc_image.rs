@@ -128,15 +128,21 @@ mod tests {
     }
 
     /// A VM whose heap is made the image's, as a restore makes it, after
-    /// SETUP and a collection; verify on, so every full's mark is held to
-    /// the reference walk, which reads through permanent entries.
+    /// SETUP and a compacting collection (a world is captured dense); verify
+    /// on, so every full's mark is held to the reference walk, which reads
+    /// through permanent entries.
     fn imaged(setup: &str) -> Vm {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         eval(&mut vm, setup);
-        vm.collect(&mut []);
+        dense(&mut vm, &mut []);
         vm.make_image_permanent();
         vm
+    }
+    /// A compacting collection keeping ROOTS: the tables dense, as a world's.
+    fn dense(vm: &mut Vm, roots: &mut [Value]) {
+        vm.allocation.compact = true;
+        vm.collect(roots);
     }
 
     /// A full's mark leaves an untouched image entry unread, reads the ones
@@ -234,7 +240,8 @@ mod tests {
         vm.set_gc_verify(true);
         let cell = vm.alloc_cell(Value::TRUE);
         let mut roots = [Value::reference(cell, 5)];
-        vm.collect(&mut roots);
+        dense(&mut vm, &mut roots);
+        let cell = roots[0].index_if(5).unwrap();
         vm.make_image_permanent();
         assert!(vm.cells.permanent(cell));
         let young = vm.alloc_cons(Value::integer(5).unwrap(), Value::NIL);
@@ -260,7 +267,7 @@ mod tests {
         let index = vm.closures.len();
         vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![], document: Value::NIL });
         let mut roots = [Value::reference(index, 4)];
-        vm.collect(&mut roots);
+        dense(&mut vm, &mut roots);
         vm.make_image_permanent();
         let young = vm.alloc_cons(Value::integer(7).unwrap(), Value::NIL);
         std::sync::Arc::get_mut(vm.functions.change(id)).unwrap().code = vec![Op::Const(0, young)];
@@ -303,7 +310,7 @@ mod tests {
     fn the_census_counts_the_untraced_image() {
         let mut vm = Vm::new();
         eval(&mut vm, "(progn (setq img-strings nil img-vec (make-vector 100 nil) img-wide (string #x3b2 ?b)) (dotimes (i 500) (setq img-strings (cons (number-to-string i) img-strings))))");
-        vm.collect(&mut []);
+        dense(&mut vm, &mut []);
         vm.collect(&mut []);
         let traced = vm.gc_census;
         vm.make_image_permanent();
