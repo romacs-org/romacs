@@ -1,6 +1,6 @@
 //! window-body-width and window-body-height against pinned GNU (window.c),
 //! as relations to the window's total size: VM2's batch frame keeps its
-//! pixel backend geometry (DIVERGENCES.md VM2-WIN5), not GNU's 80x25
+//! pixel backend geometry (ledger/divergences VM2-WIN5), not GNU's 80x25
 //! terminal, so absolute sizes differ.
 use romacs_vm::Vm;
 

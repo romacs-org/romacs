@@ -2,7 +2,7 @@
 //! writes in the same order as `face-spec-recalc', on the live lface
 //! vector, so intermediate states, frame parameters, re-entry and errors
 //! land where GNU's do; what goes is the Lisp around each write
-//! (DIVERGENCES.md VM2-FACE-ENGINE).
+//! (ledger/divergences VM2-FACE-ENGINE).
 use super::*;
 use super::face::{carries_effects, display_supports, graphic_record, make_lisp_face, note_height, resolve, signal, slot, slot_effects, validate};
 use crate::prim::{FaceKeys, FaceProps, Kind};

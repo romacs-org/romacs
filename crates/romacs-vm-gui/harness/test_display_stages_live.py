@@ -41,6 +41,16 @@ class Figures(unittest.TestCase):
         self.assertEqual((calm['display_instructions_p90'], d.quantile([1, 2, 3, 4], .5), d.quantile([1], .9)), (4000, 3, 1))
         self.assertEqual(d.figures(d.steps(readings(*[STEP] * 19, heavy)))['display_instructions_p90'], 500)
 
+    def test_characters_fontified_are_taken_over_every_step(self):
+        # A typing scenario: the line grows a character a step.  Leaving out
+        # an odd step moves no figure the step's change alone decides.
+        grown = [dict(r, **{'fontified-chars': 40 * i + i * (i + 1) // 2}) for i, r in enumerate(readings(*[STEP] * 6))]
+        deltas = d.steps(grown)
+        self.assertEqual([x['fontified-chars'] for x in deltas], [41, 42, 43, 44, 45, 46])
+        kept = [x for i, x in enumerate(deltas) if i != 4]
+        self.assertEqual((d.figures(deltas)['chars_fontified'], d.figures(kept, deltas)['chars_fontified']), (44, 44))
+        self.assertEqual(d.figures(kept)['chars_fontified'], 43)
+
     def test_a_count_only_some_scenarios_keep_is_a_figure_where_kept(self):
         counted = [dict(r, **{'fontified-chars': 40 * i}) for i, r in enumerate(readings(STEP, STEP, STEP))]
         self.assertEqual(d.figures(d.steps(counted))['chars_fontified'], 40)
@@ -51,6 +61,11 @@ class Refusals(unittest.TestCase):
     def test_a_whole_measurement_is_not_refused(self):
         self.assertIsNone(d.refusal(PAINTS, {'readings': readings(STEP, STEP)}, 2))
         self.assertIsNone(d.refusal(IDLE, {'readings': readings(QUIET, QUIET)}, 2))
+
+    def test_a_step_that_waited_is_refused(self):
+        waited = {'readings': readings(STEP, STEP), 'waited': "a step's change or timer redisplayed: it waited"}
+        self.assertIn('a step waited', d.refusal(PAINTS, waited, 2))
+        self.assertIsNone(d.refusal(PAINTS, {'readings': readings(STEP, STEP), 'waited': None}, 2))
 
     def test_missing_steps_and_counters_are_refused(self):
         self.assertIn('2 readings for 2 steps', d.refusal(PAINTS, {'readings': readings(STEP)}, 2))
@@ -119,6 +134,17 @@ class Bars(unittest.TestCase):
         self.assertEqual((row['status'], row['reason']), ('FAIL', 'windows_rebuilt 1, under 2'))
         cheaper = {**self.bars, 'display_instructions': 10**6, 'display_conses': 10**6, 'step_instructions': 10**6}
         self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': cheaper})['status'], 'PASS')
+
+    def test_a_count_marked_a_ceiling_passes_under_it(self):
+        bars = {**self.bars, 'windows_rebuilt': 3, 'windows_rebuilt_ceiling': True}
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': bars})['status'], 'PASS')
+        over = {**bars, 'windows_rebuilt': 0}
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': over})['reason'], 'windows_rebuilt 1, over 0')
+
+    def test_a_recording_keeps_notes_and_ceilings(self):
+        old = {'typed': {'layouts': 3, 'layouts_ceiling': True, 'layouts_note': 'why'}, 'other': {'layouts': 1}}
+        self.assertEqual(d.rebarred(old, {'typed': {'layouts': 2}}),
+                         {'typed': {'layouts': 2, 'layouts_ceiling': True, 'layouts_note': 'why'}, 'other': {'layouts': 1}})
 
     def test_a_scenario_or_figure_without_a_bar_fails(self):
         self.assertIn('no bars', d.verdict(PAINTS, self.result, 2, {})['reason'])

@@ -13,7 +13,7 @@
 ;; exactly where GNU's would be: the completion prompt, or the xref buffer.
 ;; The candidate list and the matches are the same functions over the same
 ;; project, so they are what GNU shows; only the moment the prompt or buffer
-;; appears differs (DIVERGENCES.md VM2-PROJECT-ISOLATE).  Keys typed
+;; appears differs (ledger/divergences VM2-PROJECT-ISOLATE).  Keys typed
 ;; meanwhile run their commands instead of waiting.
 ;;
 ;; A worker is used only when it is already prepared and idle, or is the
@@ -127,7 +127,7 @@ A worker that cannot start (no world, the pool full) is simply not there:
 the commands then run GNU's definitions."
   (when (romacs-project--isolate-available-p project)
     (condition-case nil
-        (isolate-warm (romacs-project--features project) (eq isolate-boot 'source))
+        (isolate-warm (romacs-project--features project))
       (error nil))))
 
 (defun romacs-project--warm-when-idle (project)
@@ -176,7 +176,7 @@ buffer list, and the keys read next are looked up in that buffer."
 ;;;; The jobs, run in the worker
 
 ;; Lambda forms, not symbols: a worker adopts the session's world or boots
-;; as it did, and neither holds this module (DIVERGENCES.md
+;; as it did, and neither holds this module (ledger/divergences
 ;; VM2-ISOLATE-GLOBALS), so each job carries its definition.
 
 (defconst romacs-project--files-job

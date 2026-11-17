@@ -13,8 +13,14 @@ evaluator's instruction counter and `romacs--display-stats' at the start of
 every step and after the last one's redisplay, all before it serializes
 anything, so a step's figures are differences of two readings:
 
-  step_instructions     everything the step ran: its timer, its change and
-                        its redisplays
+  step_instructions     what Romacs ran for the step: its change, the
+                        timers it set off and its redisplays, each once,
+                        not the loop's own polls nor the host's wait for a
+                        frame to render (`display-stages--work'), nor the
+                        host's passes for process output and the echo
+                        area's sync, which no scenario sets work for; a
+                        step that waits inside its change makes no
+                        measurement
   cycles                redisplays the step ran: its own, and any after a
                         timer it set off (jit-lock's `jit-lock-force-redisplay')
   display_instructions  the part inside redisplays (the frame frozen and
@@ -39,7 +45,10 @@ usually run (their median), with a frame submitted in every step of a
 scenario that changes what the frame shows, and in none of one that does
 not.  The host redisplays for reasons of its
 own now and then, so the figures are taken over the steps that kept the
-rule, and the report names the odd ones.  A measurement is refused when
+rule, and the report names the odd ones; characters fontified, which the
+step's change alone decides and an extra redisplay adds nothing to, over
+every step: in a typing scenario they grow a character a step, so a
+median over the steps kept would move with which were left out.  A measurement is refused when
 the thread has no instruction counter, or when more than a tenth of the
 steps are odd.  Each step's counts, `collections' among them, are in the
 report.
@@ -85,8 +94,8 @@ COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
 OPTIONAL = {'chars_fontified': 'fontified-chars'}
-# The figures whose 90th percentile is held too (a whole step's varies
-# with the timers that poll for its redisplay), the figures held under a
+# The figures whose 90th percentile is held too (a redisplay's: the
+# streamed deltas that add a row), the figures held under a
 # ceiling and the margin --write-bars gives them, and the share of steps
 # that may be odd.
 PEAKS = ('display_instructions',)
@@ -108,11 +117,13 @@ def quantile(values, share):
     return sorted(values)[min(len(values) - 1, int(len(values) * share))]
 
 
-def figures(deltas):
+def figures(deltas, every=None):
     """A scenario's figures from its steps' counts, with the optional ones
-    its steps counted."""
-    counted = {**COUNTS, **{figure: count for figure, count in OPTIONAL.items() if all(count in d for d in deltas)}}
-    out = {figure: quantile([d[count] for d in deltas], .5) for figure, count in counted.items()}
+    its steps counted: those, which the step's change alone decides, over
+    EVERY step when given."""
+    every = every or deltas
+    counted = {**COUNTS, **{figure: count for figure, count in OPTIONAL.items() if all(count in d for d in every)}}
+    out = {figure: quantile([d[count] for d in (every if figure in OPTIONAL else deltas)], .5) for figure, count in counted.items()}
     out.update({f'{figure}_p90': quantile([d[COUNTS[figure]] for d in deltas], .9) for figure in PEAKS})
     return out
 
@@ -129,6 +140,8 @@ def refusal(scenario, result, wanted):
     """Why RESULT, a session's readings, is no measurement of SCENARIO over
     WANTED steps; None when it is one."""
     readings = result.get('readings') or []
+    if result.get('waited'):
+        return f"a step waited, counting its waiting as its work: {result['waited']}"
     if len(readings) != wanted + 1:
         return f'{len(readings)} readings for {wanted} steps'
     if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):
@@ -143,9 +156,11 @@ def refusal(scenario, result, wanted):
 def off(measured, bars):
     """The figures of MEASURED off their bar or without one: (figure,
     value, bar or None).  Instructions and conses are off over their bar,
-    any other count when it differs."""
+    and so is a count whose bars mark it a ceiling (FIGURE_ceiling); any
+    other count when it differs."""
     return [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure))]
+            if bars.get(figure) is None or value > bars[figure]
+            or (value < bars[figure] and not (margined(figure) or bars.get(f'{figure}_ceiling')))]
 
 
 def verdict(scenario, result, wanted, bars):
@@ -157,7 +172,7 @@ def verdict(scenario, result, wanted, bars):
     deltas = steps(result['readings'])
     odd = odd_steps(scenario, deltas)
     kept = [d for i, d in enumerate(deltas) if i not in odd]
-    row.update(chars=result.get('chars'), figures=figures(kept), odd=odd, steps=deltas)
+    row.update(chars=result.get('chars'), figures=figures(kept, deltas), odd=odd, steps=deltas)
     if scenario['name'] not in bars:
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['off'] = off(row['figures'], bars[scenario['name']])
@@ -166,6 +181,14 @@ def verdict(scenario, result, wanted, bars):
                            for figure, value, bar in row['off'])
         return {**row, 'status': 'FAIL', 'reason': reason}
     return {**row, 'status': 'PASS'}
+
+
+def rebarred(bars, new):
+    """BARS with each scenario's figures from NEW, its notes and ceilings
+    (FIGURE_note, FIGURE_ceiling) kept: why a bar is what it is outlives a
+    recording."""
+    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith(('_note', '_ceiling'))}
+    return {**bars, **{name: {**figures, **kept(name)} for name, figures in new.items()}}
 
 
 def margined(figure):
@@ -302,7 +325,7 @@ def main():
         report['rows'] = run(binary, home, selected, bars, args)
         report['status'] = overall(report['rows'])
         if args.write_bars:
-            args.write_bars.write_text(json.dumps({**bars, **bars_of(report['rows'])}, indent=1) + '\n')
+            args.write_bars.write_text(json.dumps(rebarred(bars, bars_of(report['rows'])), indent=1) + '\n')
     except (Refused, subprocess.SubprocessError, OSError, ValueError) as error:
         report['error'] = str(error)
     # The worlds are the bulk of HOME, and no part of the report.

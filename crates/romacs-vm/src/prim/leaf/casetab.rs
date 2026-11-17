@@ -68,6 +68,25 @@ mod tests {
     }
 
     #[test]
+    fn casetab_a_rootless_buffer_keeps_the_standard_it_stood_for() {
+        // A buffer with no roots of its own (made before the standard tables
+        // existed) stands for the standard ones.  Another buffer's own table
+        // leaves it so; a new standard has it take the old one first.
+        let mut vm = Vm::new();
+        let first = vm.eval_source_raw("(current-buffer)").unwrap();
+        match vm.objects.entry_mut(first.index(0).unwrap() - 1) {
+            Object::Buffer(b) => b.case_tables = [Value::NIL; 4],
+            _ => unreachable!(),
+        }
+        let result = vm.eval_source_raw(
+            "(let ((old (standard-case-table)))
+               (with-temp-buffer (set-case-table (make-char-table 'case-table)))
+               (set-standard-case-table (make-char-table 'case-table))
+               (list (eq old (current-case-table)) (eq old (standard-case-table))))").unwrap();
+        assert_eq!(vm.display(result).unwrap(), "(t nil)");
+    }
+
+    #[test]
     fn casetab_canonicalization_invalid_up_mapping_requires_character() {
         for invalid in ["nil", "-1", "4194304", "'bad"] {
             let mut vm = Vm::new();
@@ -131,8 +150,12 @@ impl Leaf<'_> {
         Ok(roots)
     }
 
-    // Snapshot all pre-existing buffers before the standard roots can change.
-    fn initialize_case_roots(&mut self) -> std::result::Result<(), Fault> {
+    // A buffer made before the standard tables existed has no roots of its
+    // own: it stands for the standard roots, whatever they are now.  So only
+    // a change of the standard roots needs every such buffer to take them
+    // first, by this walk of the heap; installing a buffer's own table, the
+    // hot path, changes no other buffer and walks nothing.
+    fn snapshot_case_roots(&mut self) -> std::result::Result<(), Fault> {
         self.standard_case_table()?;
         let roots = self.vm.standard_case_tables;
         for i in 0..self.vm.objects.len() {
@@ -158,12 +181,14 @@ impl Leaf<'_> {
             Object::ByteBuffer(b) => b.case_tables[0] == Value::NIL,
             _ => unreachable!(),
         };
-        if uninitialized { self.initialize_case_roots()?; }
+        if uninitialized { self.standard_case_table()?; }
+        let standard = self.vm.standard_case_tables;
         let roots = match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => &mut b.case_tables,
             Object::ByteBuffer(b) => &mut b.case_tables,
             _ => unreachable!(),
         };
+        if uninitialized { *roots = standard; }
         Ok(roots[if down { 0 } else { 1 }])
     }
 
@@ -304,7 +329,11 @@ impl Leaf<'_> {
         if !self.case_table_p(table) {
             return Err(Fault::Wrong("case-table-p", table));
         }
-        self.initialize_case_roots()?;
+        if standard {
+            self.snapshot_case_roots()?;
+        } else {
+            self.standard_case_table()?;
+        }
         let Object::CharTable(t) = self.vm.object_if(table).unwrap() else {
             unreachable!()
         };

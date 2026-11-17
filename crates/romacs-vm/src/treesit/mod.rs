@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-/// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
+/// A grammar linked into the executable (ledger/divergences VM2-TREESIT-BUNDLED):
 /// GNU's language symbol name, its `tree_sitter_LANG` function, and the
 /// repository and commit of its sources.
 #[derive(Clone, Copy)]

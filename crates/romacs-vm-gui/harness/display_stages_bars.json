@@ -1,6 +1,6 @@
 {
  "plain-idle": {
-  "step_instructions": 667000,
+  "step_instructions": 378000,
   "cycles": 1,
   "display_instructions": 348000,
   "display_conses": 0,
@@ -13,7 +13,7 @@
   "display_instructions_p90": 352000
  },
  "image-idle": {
-  "step_instructions": 660000,
+  "step_instructions": 379000,
   "cycles": 1,
   "display_instructions": 349000,
   "display_conses": 0,
@@ -26,9 +26,9 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 895000,
+  "step_instructions": 737000,
   "cycles": 1,
-  "display_instructions": 573000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -36,12 +36,13 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 578000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick": {
-  "step_instructions": 1650000,
+  "step_instructions": 1030000,
   "cycles": 1,
-  "display_instructions": 574000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -49,10 +50,11 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 574000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick-second": {
-  "step_instructions": 21300000,
+  "step_instructions": 19100000,
   "cycles": 1,
   "display_instructions": 20100000,
   "display_conses": 0,
@@ -65,7 +67,7 @@
   "display_instructions_p90": 20200000
  },
  "chat-cursor": {
-  "step_instructions": 11400000,
+  "step_instructions": 10300000,
   "cycles": 1,
   "display_instructions": 10900000,
   "display_conses": 0,
@@ -78,20 +80,23 @@
   "display_instructions_p90": 10900000
  },
  "chat-collected": {
-  "step_instructions": 170000000,
+  "step_instructions": 164000000,
   "cycles": 1,
   "display_instructions": 24200000,
   "display_conses": 174,
-  "windows_rebuilt": 2,
+  "windows_rebuilt": 3,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 3,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 24300000
+  "display_instructions_p90": 24300000,
+  "windows_rebuilt_ceiling": true,
+  "layouts_ceiling": true,
+  "layouts_note": "a live writer worker (the chat's session in the store) costs a window rebuild and layout after a collection in some runs and not others: measured 2 or 3 of each from run to run, the same on a beta build after one unrelated writer write; both held to a ceiling of 3, not exactly. TODO(#269): back to exactly 2 once a live writer costs nothing idle"
  },
  "cursor-move": {
-  "step_instructions": 2340000,
+  "step_instructions": 1860000,
   "cycles": 1,
   "step_instructions_note": "set over a spread of runs: the step includes the timers around redisplay; the display bars hold this row's claim",
   "display_instructions": 1790000,
@@ -105,7 +110,7 @@
   "display_instructions_p90": 1800000
  },
  "typed": {
-  "step_instructions": 3800000,
+  "step_instructions": 3390000,
   "cycles": 1,
   "display_instructions": 3170000,
   "display_conses": 0,
@@ -118,7 +123,7 @@
   "display_instructions_p90": 3210000
  },
  "append-unseen": {
-  "step_instructions": 2060000,
+  "step_instructions": 1760000,
   "cycles": 1,
   "display_instructions": 1700000,
   "display_conses": 0,
@@ -131,7 +136,7 @@
   "display_instructions_p90": 1710000
  },
  "typed-elements": {
-  "step_instructions": 17700000,
+  "step_instructions": 14500000,
   "cycles": 1,
   "display_instructions": 17100000,
   "display_conses": 0,
@@ -144,7 +149,7 @@
   "display_instructions_p90": 17200000
  },
  "chat-stream-1k": {
-  "step_instructions": 19200000,
+  "step_instructions": 17600000,
   "cycles": 1,
   "display_instructions": 17400000,
   "display_conses": 0,
@@ -157,7 +162,7 @@
   "display_instructions_p90": 50000000
  },
  "chat-stream-10k": {
-  "step_instructions": 43600000,
+  "step_instructions": 41500000,
   "cycles": 1,
   "display_instructions": 41800000,
   "display_conses": 0,
@@ -170,7 +175,7 @@
   "display_instructions_p90": 251000000
  },
  "fontify-open-org-folded": {
-  "step_instructions": 1290000000,
+  "step_instructions": 890000000,
   "cycles": 2,
   "display_instructions": 1010000000,
   "display_conses": 33600,
@@ -184,7 +189,7 @@
   "display_instructions_p90": 1470000000
  },
  "fontify-typed-org-folded": {
-  "step_instructions": 184000000,
+  "step_instructions": 139000000,
   "cycles": 1,
   "display_instructions": 161000000,
   "display_conses": 61,
@@ -198,7 +203,7 @@
   "display_instructions_p90": 162000000
  },
  "fontify-unfold-org": {
-  "step_instructions": 983000000,
+  "step_instructions": 805000000,
   "cycles": 2,
   "display_instructions": 968000000,
   "display_conses": 9550,
@@ -212,7 +217,7 @@
   "display_instructions_p90": 1070000000
  },
  "fontify-typed-elisp": {
-  "step_instructions": 44700000,
+  "step_instructions": 15100000,
   "cycles": 1,
   "display_instructions": 42900000,
   "display_conses": 219,

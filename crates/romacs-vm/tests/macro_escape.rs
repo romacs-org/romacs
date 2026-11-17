@@ -5,7 +5,7 @@
 //! (macroexp.el `internal-macroexpand-for-load'), so an error there is
 //! "Eager macro-expansion failure" and a quit passes as it is. Romacs
 //! expands `eval''s macro calls as it compiles and defers only an
-//! expansion that fails to its reach (DIVERGENCES.md VM2-EVAL-EXPAND1).
+//! expansion that fails to its reach (ledger/divergences VM2-EVAL-EXPAND1).
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
 

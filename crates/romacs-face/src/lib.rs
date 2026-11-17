@@ -17,7 +17,7 @@
 //!
 //! This crate depends on no evaluator and no layout engine. It holds no
 //! Lisp handles: the moving collector has nothing here to trace.
-//! GNU-DIVERGENCES.md lists every deliberate behavioural difference.
+//! ledger/divergences lists every deliberate behavioural difference.
 //!
 //! The evaluator keeps faces in GNU's lface vectors and realises them through
 //! this crate's merge on demand ([`LiveView`]). [`Theme`] and spec collapse

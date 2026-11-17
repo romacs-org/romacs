@@ -12,9 +12,9 @@
 ;; the spawner's later state, and is seeded once with
 ;; `isolate-inherited-variables'.  Every value that crosses is frozen
 ;; (`freeze'); closures cannot cross, a symbol or a lambda form with
-;; `:bindings' can (DIVERGENCES.md VM2-ISOLATE-CLOSURES).
+;; `:bindings' can (ledger/divergences VM2-ISOLATE-CLOSURES).
 ;;
-;; Not in GNU (DIVERGENCES.md VM2-ISOLATE).  `isolate-await' re-signals a
+;; Not in GNU (ledger/divergences VM2-ISOLATE).  `isolate-await' re-signals a
 ;; worker's error where GNU's `thread-join' would store it in
 ;; `thread-last-error'.
 ;;
@@ -228,17 +228,15 @@ spawner to run on a worker with the features they were queued for.")
 
 ;;;; Spawning
 
-(defun romacs--isolate-boot-arguments (allow-source-boot)
-  "The worker's boot arguments for this VM's boot, or a refusal."
-  (cond ((eq isolate-boot 'world)
-         (unless isolate-world
-           (signal 'isolate-world-unavailable (list "This VM has no world a worker could adopt")))
+(defun romacs--isolate-boot-arguments ()
+  "The worker's boot arguments for this VM's boot: the world it adopts,
+else the chain from source (a VM that booted from source, or whose world
+is gone), else a bare VM.  A worker always starts: one with no world boots
+slower, never refused while its callers wait."
+  (cond ((and (eq isolate-boot 'world) isolate-world)
          (append (list "--world" (car isolate-world) (cdr isolate-world))
                  (and isolate-compiled-store (list "--compiled-store" isolate-compiled-store))))
-        ((eq isolate-boot 'source)
-         (unless allow-source-boot
-           (signal 'isolate-world-unavailable (list "This VM booted from source; pass :allow-source-boot t")))
-         (list "--source"))
+        ((memq isolate-boot '(world source)) (list "--source"))
         (t (list "--bare"))))
 
 (defun romacs--isolate-seeds ()
@@ -265,13 +263,13 @@ spawner to run on a worker with the features they were queued for.")
   t)
 
 (defun isolate-create (&rest keys)
-  "Start a long-lived worker isolate; KEYS are :name, :require, :allow-source-boot.
+  "Start a long-lived worker isolate; KEYS are :name and :require.
 The worker boots as this VM did, is seeded with `isolate-inherited-variables'
 and has the features of :require loaded."
   (let* ((name (plist-get keys :name))
          (require (plist-get keys :require))
          (arguments (append (list "--parent" (number-to-string (emacs-pid)))
-                            (romacs--isolate-boot-arguments (plist-get keys :allow-source-boot))
+                            (romacs--isolate-boot-arguments)
                             isolate-worker-arguments))
          (program (or isolate-worker-program (romacs--isolate-executable)))
          (id (romacs--isolate-start program arguments))
@@ -289,7 +287,7 @@ milliseconds of the editor's under load."
     (when (and (isolate-live-p isolate) (aref isolate 6) (null (aref isolate 5)))
       (isolate-retire isolate))))
 
-(defun romacs--isolate-acquire (require fresh allow-source-boot)
+(defun romacs--isolate-acquire (require fresh)
   "A pooled worker for jobs requiring REQUIRE: an idle one with the same
 features, else the least loaded one with them, else a new one while
 `isolate-pool-size' allows, making room by killing an idle worker of other
@@ -309,14 +307,14 @@ features.  FRESH asks for a new worker outside the pool's bound."
     (cond (forked forked)
           ;; A live zygote with no room: the job waits for it.
           ((and (not fresh) (romacs--isolate-zygote-live-p require)) 'queued)
-          (fresh (romacs--isolate-pool-create require allow-source-boot))
+          (fresh (romacs--isolate-pool-create require))
           ((and best (null (aref best 5))) best)
           ((< (length live) (isolate--pool-size))
-           (romacs--isolate-pool-create require allow-source-boot))
+           (romacs--isolate-pool-create require))
           (best best)
           ((setq idle (let (found) (dolist (i live) (when (null (aref i 5)) (setq found i))) found))
            (isolate-kill idle)
-           (romacs--isolate-pool-create require allow-source-boot))
+           (romacs--isolate-pool-create require))
           (t (signal 'isolate-queue-full (list require))))))
 
 (defun isolate-pending (isolate)
@@ -327,9 +325,9 @@ features.  FRESH asks for a new worker outside the pool's bound."
   "The live pooled workers: neither zygotes nor their children, nor retiring."
   (delq nil (mapcar (lambda (i) (and (isolate-live-p i) (not (aref i 6)) (memq (aref i 10) '(nil pool)) i)) romacs--isolates)))
 
-(defun romacs--isolate-pool-create (require allow-source-boot)
+(defun romacs--isolate-pool-create (require)
   "A worker the pool makes for REQUIRE's features."
-  (let ((isolate (isolate-create :require require :allow-source-boot allow-source-boot)))
+  (let ((isolate (isolate-create :require require)))
     (aset isolate 10 'pool)
     isolate))
 
@@ -343,28 +341,28 @@ the spare child of REQUIRE's zygote, else an idle pooled worker."
             (setq found isolate)))
         found)))
 
-(defun isolate-warm (require &optional allow-source-boot)
+(defun isolate-warm (require)
   "Prepare a worker with REQUIRE's features ahead of its first job: its
 zygote when pooled jobs run on forked workers (`isolate-zygotes'), else a
 pooled worker, unless one is live (prepared or preparing) or the pool is at
 `isolate-pool-size'; the isolate started, or nil."
   (let ((zygote (and (romacs--isolate-zygotes-p) (gethash require romacs--isolate-zygotes))))
-    (cond ((not (romacs--isolate-zygotes-p)) (romacs--isolate-warm-pooled require allow-source-boot))
+    (cond ((not (romacs--isolate-zygotes-p)) (romacs--isolate-warm-pooled require))
           ((null zygote) (aref (romacs--isolate-zygote-make require) 1))
           ;; Features no zygote can hold run on pooled workers.
-          ((eq (aref zygote 3) 'refused) (romacs--isolate-warm-pooled require allow-source-boot))
+          ((eq (aref zygote 3) 'refused) (romacs--isolate-warm-pooled require))
           (t (romacs--isolate-zygote-worker require t) nil))))
 
-(defun romacs--isolate-warm-pooled (require allow-source-boot)
+(defun romacs--isolate-warm-pooled (require)
   "Start a pooled worker with REQUIRE's features unless one is live or the
 pool is full; the isolate started, or nil."
   (romacs--isolate-recycle)
   (let ((live (romacs--isolate-pooled)))
     (and (not (romacs--isolate-with-features live require))
          (< (length live) (isolate--pool-size))
-         (romacs--isolate-pool-create require allow-source-boot))))
+         (romacs--isolate-pool-create require))))
 
-(defun isolate-pooled-worker (require &optional allow-source-boot)
+(defun isolate-pooled-worker (require)
   "A worker for background work with REQUIRE's features: an idle prepared
 one (a zygote's spare child first), else a pooled one started now while the
 pool has room, else the least loaded live pooled one with those features;
@@ -373,7 +371,7 @@ other features to make room."
   (or (isolate-idle-worker require)
       (romacs--isolate-zygote-worker require t)
       (and (not (romacs--isolate-zygote-live-p require))
-           (condition-case nil (romacs--isolate-warm-pooled require allow-source-boot) (error nil)))
+           (condition-case nil (romacs--isolate-warm-pooled require) (error nil)))
       (let (best)
         (dolist (isolate (romacs--isolate-pooled) best)
           (when (and (equal (aref isolate 4) require)
@@ -421,7 +419,7 @@ other features to make room."
 for: its worker retired before running it."
   (let* ((job (aref future 6))
          (require (thaw (nth 3 job)))
-         (isolate (romacs--isolate-acquire require nil t)))
+         (isolate (romacs--isolate-acquire require nil)))
     (if (eq isolate 'queued)
         (progn (aset future 1 nil)
                (setq romacs--isolate-waiting (cons future romacs--isolate-waiting)))
@@ -459,12 +457,12 @@ FUNCTION is a symbol the worker calls its own definition of, or a lambda
 form whose free variables come from :bindings, an alist of (SYMBOL . VALUE).
 A closure object is refused.  The keyword tail of ARGS: :name, :bindings,
 :require FEATURES, :directory, :isolate ISOLATE (run there), :fresh t (a
-new worker), :allow-source-boot t.  With no room in the pool the job waits:
+new worker).  With no room in the pool the job waits:
 its future has no isolate until it is dispatched."
   (let (keys plain)
     (while args
       (if (and (keywordp (car args))
-               (memq (car args) '(:name :bindings :require :directory :isolate :allow-source-boot :fresh)))
+               (memq (car args) '(:name :bindings :require :directory :isolate :fresh)))
           (progn (push (car args) keys) (push (car (cdr args)) keys) (setq args (cdr (cdr args))))
         (push (car args) plain)
         (setq args (cdr args))))
@@ -473,7 +471,7 @@ its future has no isolate until it is dispatched."
       (signal 'error (list "Cannot send closure" function)))
     (let* ((require (plist-get keys :require))
            (isolate (or (plist-get keys :isolate)
-                        (romacs--isolate-acquire require (plist-get keys :fresh) (plist-get keys :allow-source-boot)))))
+                        (romacs--isolate-acquire require (plist-get keys :fresh)))))
       (if (eq isolate 'queued)
           (romacs--isolate-enqueue function plain (plist-get keys :bindings) require (plist-get keys :directory))
         (romacs--isolate-submit isolate function plain (plist-get keys :bindings) require (plist-get keys :directory))))))
@@ -535,7 +533,7 @@ copied (`setenv' changes an entry in place)."
   (let* ((inputs (romacs--isolate-inputs))
          (directories (romacs--isolate-load-directories))
          (stamp (romacs--isolate-stamp directories))
-         (isolate (isolate-create :require require :allow-source-boot t))
+         (isolate (isolate-create :require require))
          (zygote (record 'isolate-zygote isolate require 'preparing nil inputs nil nil
                          directories stamp (float-time) nil nil isolate-job-memory-headroom nil)))
     (aset isolate 10 'zygote)

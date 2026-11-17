@@ -2,7 +2,7 @@
 //! and a table of text blobs, each the raw internal bytes of one buffer's
 //! whole text. Lisp prints and reads the form; only the text, which is the
 //! bulk, crosses here, as memory copies, never through a coding system.
-//! Not in GNU (DIVERGENCES.md VM2-SESSION-IMAGE).
+//! Not in GNU (ledger/divergences VM2-SESSION-IMAGE).
 //!
 //! The file is `ROMACS-SESSION 1`, one header line per part (`FORM` first,
 //! then one `BLOB` per buffer: its byte length, 1 when multibyte, and the

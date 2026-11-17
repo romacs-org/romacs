@@ -1,5 +1,5 @@
 //! `backquote-process', whose walk is the compiler's (expand.rs): every
-//! load expands its templates (DIVERGENCES.md VM2-BACKQUOTE).
+//! load expands its templates (ledger/divergences VM2-BACKQUOTE).
 use super::*;
 use crate::expand::{BadTemplate, Kind, Walk};
 

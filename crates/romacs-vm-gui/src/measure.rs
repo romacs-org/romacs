@@ -1,4 +1,4 @@
-//! The VM's host layout hook (DIVERGENCES.md VM2-WTPS1) over the engine
+//! The VM's host layout hook (ledger/divergences VM2-WTPS1) over the engine
 //! that paints: `window-text-pixel-size', `pos-visible-in-window-p' and
 //! `posn-at-point' measure a displayed window with the fonts, advances
 //! and row heights the painter uses, inside the call, presenting nothing.

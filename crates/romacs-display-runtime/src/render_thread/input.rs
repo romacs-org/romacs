@@ -145,8 +145,7 @@ impl RenderApp {
                 // `eisu-shift`), XKeysymToString's spelling otherwise
                 // (`XF86AudioRaiseVolume`, `3270_Attn`).  So both
                 // `(kbd "<XF86AudioRaiseVolume>")` and `(kbd "<henkan>")` are
-                // what a GNU config would write.  Derivation:
-                // docs/design/input-keysyms.md.
+                // what a GNU config would write.
                 NamedKey::AllCandidates => 0x00ff3d, // MultipleCandidate
                 NamedKey::Alphanumeric => 0x00ff2f,  // eisu-shift
                 NamedKey::Attn => 0x00fd0e,          // 3270_Attn

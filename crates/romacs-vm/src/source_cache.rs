@@ -266,7 +266,7 @@ impl Vm {
     /// has changed since (`world_version', which every `defun', `defmacro',
     /// `defalias' and `fset' advances): its macros, its inner lambdas' too,
     /// expand once per definition, as GNU expands a closure's, not on every
-    /// call as GNU's interpreter does with a list (DIVERGENCES.md
+    /// call as GNU's interpreter does with a list (ledger/divergences
     /// VM2-LAMBDA-LIST-EXPAND). In that dialect every binding is dynamic,
     /// so special declarations change nothing it compiled.
     pub(super) fn lambda_list_closure(&mut self, list: Value) -> Result<Value> {

@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-socket)
@@ -70,7 +71,10 @@ failed, Grep (whose row counts what it found)."
           (cl-letf (((symbol-function 'romacs-agent--keep-models) #'ignore))
             (romacs-agent-restore)
             (let* ((session (romacs-agent-get romacs-agent-lazy-tests--id))
-                   (buffer (romacs-agent-ui--make-chat session)))
+                   (buffer (progn (remhash romacs-agent-lazy-tests--id romacs-agent-events--imported)
+                                  ;; As a chat finds it: in SQLite, kept as drawn.
+                                  (romacs-agent-test-stored session)
+                                  (romacs-agent-ui--make-chat session))))
               (unwind-protect (with-current-buffer buffer (funcall body session))
                 (kill-buffer buffer)))))
       (delete-directory root t)
@@ -86,15 +90,15 @@ failed, Grep (whose row counts what it found)."
                     (when (string-search "tool_result" string) (push string parsed))
                     (apply parse string args))))
          (romacs-agent-ui--fill (current-buffer)))
-       ;; Only Grep's result was parsed: its row counts what it found.
-       (should (= (length parsed) 1))
-       (should (string-search "\"t3\"" (car parsed)))
+       ;; Kept as drawn: no result is parsed to open it, Grep's row counts
+       ;; what it found all the same.
+       (should-not parsed)
        (let ((text (buffer-string)))
          (should (string-search "⌕ x · 2 lines" text))
          ;; The Bash outputs are not in the chat until opened.
          (should-not (string-search "alpha" text))
          (should-not (string-search "exit 1" text)))
-       ;; TAB on a row opens its output, drawn from its record now.
+       ;; TAB on a row opens its output, read through its turn's row now.
        (goto-char (point-min))
        (search-forward "$ ls")
        (romacs-agent-chat-toggle)
@@ -112,13 +116,6 @@ failed, Grep (whose row counts what it found)."
        ;; Expand all draws the rest.
        (romacs-agent-chat-expand-all)
        (should (string-search "exit 1" (buffer-string)))))))
-
-(ert-deftest romacs-agent-lazy-pointer-finds-its-record ()
-  ;; A pointer whose bytes are off finds its record by its seq.
-  (romacs-agent-lazy-tests--with-chat
-   (lambda (session)
-     (should (equal (plist-get (romacs-agent-ui--ref-call (list :session session :id "t1" :seq 3 :from 0 :to 10)) :output)
-                    "alpha é\nbeta")))))
 
 (ert-deftest romacs-agent-lazy-results-told-from-text ()
   ;; A result's own text blocks (an MCP tool's) are its; a block of the

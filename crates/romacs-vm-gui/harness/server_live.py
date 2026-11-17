@@ -774,7 +774,7 @@ DND_PROBE = '''(let ((f (car (filtered-frame-list #'display-graphic-p))))
 def daemon(args, base):
     """GNU's daemon and Romacs's server, asked the same before and after a
     client's frame; `ding' rings in both states.  The frame counts are
-    recorded, not compared: Romacs's frames are its own (DIVERGENCES.md)."""
+    recorded, not compared: Romacs's frames are its own (ledger/divergences)."""
     s = Server(args, base, 'dm')
     try:
         ask = lambda form: s.emacsclient('-e', form).stdout.strip()
@@ -803,7 +803,7 @@ def daemon(args, base):
         romacs_states = states("(romacs--native-window 'query)")
         # A worker isolate is batch Lisp, but its output is no one's: the
         # line ends so a written BEL would reach the server's log.
-        worker = ask("(isolate-await (isolate-spawn '(lambda () (ding) (terpri) noninteractive) :fresh t :allow-source-boot t) 120)")
+        worker = ask("(isolate-await (isolate-spawn '(lambda () (ding) (terpri) noninteractive) :fresh t) 120)")
         gnu_bells, romacs_bells = gnu_out.read_bytes().count(b'\x07'), s.log().count('\x07')
         # As a daemon, server.el's `server-stop-automatically' applies: `empty'
         # stops a session left with no client frame; one showing its window
