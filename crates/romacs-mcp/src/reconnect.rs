@@ -9,8 +9,11 @@
 //!   `notifications/initialized';
 //! - when the server goes away, each call it had sent and not seen answered
 //!   is answered `outcome unknown' (it may have run: the harness asks
-//!   `romacs_call_outcome'), and a call made while no server listens is
-//!   answered `not executed' (safe to repeat);
+//!   `romacs_call_outcome'); a call made while no server listens, or queued
+//!   to one that went away before taking it, is held and sent once a server
+//!   does listen (a restart's successor, a resumed session's route), and
+//!   answered `not executed' (safe to repeat) only if none has by the reply
+//!   timeout, the bound every harness already gives a Romacs tool call;
 //! - a call unanswered past the reply timeout (the editor busy) is
 //!   withdrawn with `romacs/cancel': answered `not executed' when the
 //!   server says it was still queued, else `outcome unknown'; a reply that
@@ -83,6 +86,10 @@ struct Call {
     token: u64,
     /// `initialize''s requested protocol version.
     version: Option<Json>,
+    /// Its line, sent again when it is held (`queued' false).
+    text: String,
+    /// In a connection's queue; false while held for the next connection.
+    queued: bool,
 }
 
 impl Call {
@@ -298,12 +305,21 @@ impl Relay {
         state.tokens += 1;
         let token = state.tokens;
         let version = message.as_ref().and_then(|m| m.pointer("/params/protocolVersion")).cloned();
-        let call = Call { id, method, sent: Instant::now(), cancel: None, written: false, token, version };
+        let mut call = Call { id, method, sent: Instant::now(), cancel: None, written: false, token, version,
+                              text: line.to_owned(), queued: true };
         // `initialize' reaches the server even when answered here first:
         // the calls after it need the handshake.
         let tracked = (call.method != "initialize").then(|| (key(&call.id), token));
         if Self::send(&state, line.to_owned(), tracked) {
             // Under the lock the writer needs, so it finds the call.
+            state.inflight.insert(key(&call.id), call);
+            return;
+        }
+        // No server listening: held for the next one (`hold'), but for
+        // discovery, answered here, and a call past a full queue (a server
+        // that stops reading), refused.
+        if state.upstream.is_none() && !call.discovery() {
+            call.queued = false;
             state.inflight.insert(key(&call.id), call);
             return;
         }
@@ -313,6 +329,20 @@ impl Relay {
             if call.method == "tools/list" { self.listed_locally(); }
         } else {
             self.to_harness(&refusal(&call.id, &call.method, NOT_EXECUTED));
+        }
+    }
+
+    /// Send the held calls to the server now listening, in the order they
+    /// came; those its queue has no room for stay held for the next tick.
+    fn send_held(state: &mut State) {
+        let mut held: Vec<(u64, String)> = state.inflight.iter()
+            .filter(|(_, call)| !call.queued)
+            .map(|(k, call)| (call.token, k.clone())).collect();
+        held.sort();
+        for (token, call_key) in held {
+            let text = state.inflight[&call_key].text.clone();
+            if !Self::send(state, text, Some((call_key.clone(), token))) { return; }
+            if let Some(call) = state.inflight.get_mut(&call_key) { call.queued = true; }
         }
     }
 
@@ -373,13 +403,16 @@ impl Relay {
         }
         // A full queue refused the last probe: try again while it matters.
         Self::probe(&mut state);
+        Self::send_held(&mut state);
         let late: Vec<String> = state.inflight.iter()
             .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && now.duration_since(call.sent) >= self.config.reply_timeout)
             .map(|(k, _)| k.clone()).collect();
         for call_key in late {
-            // Still queued: the writer finds it gone and never sends it.
+            // Still queued, or held: never sent, the writer finds it gone.
             if !state.inflight[&call_key].written {
-                if let Some(call) = state.inflight.remove(&call_key) { answers.push(refusal(&call.id, &call.method, WITHDRAWN)); }
+                if let Some(call) = state.inflight.remove(&call_key) {
+                    answers.push(refusal(&call.id, &call.method, if call.queued { WITHDRAWN } else { NOT_EXECUTED }));
+                }
                 continue;
             }
             let cancel_id = format!("romacs-relay-cancel-{call_key}");
@@ -419,15 +452,19 @@ impl Relay {
             state.cancels.clear();
             state.probe = None;
             let left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
-            for call in left {
+            for mut call in left {
                 listed |= call.method == "tools/list";
-                answers.push(if call.discovery() {
-                    Self::settled(&call)
+                if call.discovery() {
+                    answers.push(Self::settled(&call));
                 } else if call.written {
-                    refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran"))
+                    answers.push(refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran")));
                 } else {
-                    refusal(&call.id, &call.method, NOT_EXECUTED)
-                });
+                    // Never taken: held for the next server, under a new
+                    // token, so the old connection's writer skips it.
+                    state.tokens += 1;
+                    (call.token, call.queued) = (state.tokens, false);
+                    state.inflight.insert(key(&call.id), call);
+                }
             }
         }
         for answer in answers { self.to_harness(&answer); }
@@ -475,6 +512,7 @@ impl Relay {
         }
         state.upstream = Some(Upstream { number, since: Instant::now(), queue, control });
         Self::probe(&mut state);
+        Self::send_held(&mut state);
         drop(state);
         let relay = self.clone();
         std::thread::spawn(move || relay.write_lines(waiting, stream));
@@ -508,7 +546,8 @@ pub fn main(config: Config) -> ! {
                 }
             }
             let connected = keeper.connected();
-            if connected { keeper.watch(); }
+            // Held calls expire with no server too.
+            keeper.watch();
             std::thread::sleep(if connected { TICK } else { TICK.min(retry_after(failures, keeper.lock().refusals)) });
         }
     });
