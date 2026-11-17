@@ -125,6 +125,17 @@ class Bars(unittest.TestCase):
         cheaper = {**self.bars, 'display_instructions': 10**6, 'display_conses': 10**6, 'step_instructions': 10**6}
         self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': cheaper})['status'], 'PASS')
 
+    def test_a_count_marked_a_ceiling_passes_under_it(self):
+        bars = {**self.bars, 'windows_rebuilt': 3, 'windows_rebuilt_ceiling': True}
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': bars})['status'], 'PASS')
+        over = {**bars, 'windows_rebuilt': 0}
+        self.assertEqual(d.verdict(PAINTS, self.result, 2, {'typed': over})['reason'], 'windows_rebuilt 1, over 0')
+
+    def test_a_recording_keeps_notes_and_ceilings(self):
+        old = {'typed': {'layouts': 3, 'layouts_ceiling': True, 'layouts_note': 'why'}, 'other': {'layouts': 1}}
+        self.assertEqual(d.rebarred(old, {'typed': {'layouts': 2}}),
+                         {'typed': {'layouts': 2, 'layouts_ceiling': True, 'layouts_note': 'why'}, 'other': {'layouts': 1}})
+
     def test_a_scenario_or_figure_without_a_bar_fails(self):
         self.assertIn('no bars', d.verdict(PAINTS, self.result, 2, {})['reason'])
         partial = {k: v for k, v in self.bars.items() if k != 'layouts'}

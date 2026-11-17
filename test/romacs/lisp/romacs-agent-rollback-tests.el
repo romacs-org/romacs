@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-notes)
@@ -281,6 +282,7 @@ rollback: a long history before them is not parsed."
      (romacs-agent-rollback-tests--prompt 9 "dropped prompt") (romacs-agent-rollback-tests--assistant "u2")
      (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 9 "turns" 1 "prompt" "dropped prompt"
                                                     "files" t)))
+    (romacs-agent-test-stored session)
     (let ((buffer (save-window-excursion (romacs-agent-show session))))
       (unwind-protect
           (with-current-buffer buffer
