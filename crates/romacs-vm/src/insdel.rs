@@ -38,7 +38,7 @@ pub(crate) struct Prepared {
 }
 
 /// The variables (and the one function) the bracket reads on every change.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 pub(crate) struct ChangeSlots {
     pub(crate) read_only: usize,
     pub(crate) inhibit_read_only: usize,
@@ -56,7 +56,6 @@ pub(crate) struct ChangeSlots {
     /// `overriding-plist-environment', which textget reads for a `category'.
     pub(crate) environment: usize,
 }
-romacs_snapshot::snapshot_struct!(ChangeSlots { read_only, inhibit_read_only, inhibit_hooks, before, after, first, truename, filename, mark_active, select_regions, deactivate, undoable, inhibit_record_point, environment });
 
 /// An insertion that may skip the bracket (`Vm::quiet_insertion'): whether
 /// modification hooks are inhibited, and buffer, point and modified state

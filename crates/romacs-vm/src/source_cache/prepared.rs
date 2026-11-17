@@ -2,13 +2,12 @@ use super::*;
 /// Opaque and VM-local. Dropping/clearing caches never recycles a handle.
 #[derive(Clone, Copy, Debug)]
 pub struct PreparedHandle(pub usize);
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Prepared {
     source: String,
     pub(super) function: usize,
     guard: Option<Entry>,
 }
-romacs_snapshot::snapshot_struct!(Prepared { source, function, guard });
 impl Vm {
     fn prepared_function(&mut self, source: &str) -> Result<Prepared> {
         let (value, used) = self.read_source_raw(source)?.ok_or("lambda required")?;

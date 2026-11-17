@@ -10,6 +10,11 @@ use std::path::Path;
 /// Write, into Cargo's `OUT_DIR`, each of OUTPUTS: the module declarations
 /// of the files of TESTS that PLACE (given a file's source) puts in it.
 /// Cargo runs the script again on any edit under TESTS.
+///
+/// TESTS is relative to the package, the directory Cargo runs the script
+/// in: a path baked in by `env!` would be the checkout that compiled the
+/// script, which a target directory shared between checkouts runs for the
+/// others, listing that checkout's tests.
 pub fn write(tests: &Path, outputs: &[&str], place: impl Fn(&str) -> &'static str) {
     // The directory, which Cargo scans whole: any edit under it lists again.
     println!("cargo::rerun-if-changed={}", tests.display());

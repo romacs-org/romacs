@@ -117,14 +117,13 @@ pub(crate) struct Options {
 }
 
 /// GNU's find_start_* cache, valid for the buffer being scanned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct DefunStart {
     pub pos: i64,
     pub value: i64,
     pub begv: i64,
     pub modiff: u64,
 }
-romacs_snapshot::snapshot_struct!(DefunStart { pos, value, begv, modiff });
 
 /// Why a scan stopped short of a result.
 #[derive(Debug, PartialEq, Eq)]

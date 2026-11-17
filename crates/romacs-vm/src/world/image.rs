@@ -241,7 +241,7 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     let mut root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     // The at-rest fields are this process's to make, before anything runs.
-    // Only the VM, the image's root, has them (`snapshot_fields!`).
+    // Only the VM, the image's root, has them (`#[snapshot(root)]`).
     root.0.renew();
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.

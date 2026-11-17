@@ -35,9 +35,7 @@
   (list "-c" (format "mcp_servers.romacs.command=%S" (romacs-agent--program "romacs-mcp"))
         "-c" (format "mcp_servers.romacs.args=[%s]"
                      (mapconcat (lambda (word) (format "%S" word))
-                                (list "--socket" (romacs-agent--route session) "--reconnect"
-                                      "--session" (romacs-agent-id session)
-                                      "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
+                                (romacs-agent--relay-args session)
                                 ","))
         ;; Codex's own limit on a call.
         "-c" (format "mcp_servers.romacs.tool_timeout_sec=%d" (+ (truncate romacs-agent-reply-timeout) 15))))

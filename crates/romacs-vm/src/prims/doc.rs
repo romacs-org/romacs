@@ -20,13 +20,13 @@ fn doc_file(cx: &mut Leaf<'_>) -> std::result::Result<Option<std::path::PathBuf>
 /// primitive, the byte after its "\037FNAME\n" record header. The positions
 /// are found in one walk when the file is read: found by a scan at each
 /// lookup, a docstring cost a read of the whole file.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct DocFile {
     pub(crate) bytes: Vec<u8>,
     subrs: std::collections::HashMap<Vec<u8>, usize>,
 }
 // The VM keeps the file it read, and a world image holds every field of the
 // VM: both fields are plain data (the image leaves the file out all the same).
-romacs_snapshot::snapshot_struct!(DocFile { bytes, subrs });
 
 impl DocFile {
     pub(crate) fn new(bytes: Vec<u8>) -> Self {
