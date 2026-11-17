@@ -93,13 +93,6 @@ pub(super) struct Place {
     over: bool,
 }
 
-impl Place {
-    /// Whether a mapping in this span replaces the reservation.
-    pub(super) fn over_reservation(&self) -> bool {
-        self.over
-    }
-}
-
 /// How to map within the span at AT, LEN bytes: over the reservation where
 /// the span is within it and reaches no published arena, else only where
 /// nothing is mapped.

@@ -149,6 +149,9 @@ pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut c
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
     let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
+    // UNSAFE(write_image's root is a promise only this caller can keep)
+    // SAFETY: ROOT is the Box `image_root` leaked for this capture, which the
+    // image owns from here and `restore` takes back.
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
     whole_in_memory(file, written).map(|()| written)
@@ -239,6 +242,10 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
+    // UNSAFE(an image's root is a Box another process leaked: no type carries it across)
+    // SAFETY: the image KEY names was made by this binary for this embedder
+    // (KEY binds both), so its root is the `Box<(Vm, T)>` `image_root` leaked,
+    // mapped where it was made; TAKEN lets it be taken once.
     let mut root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     // The at-rest fields are this process's to make, before anything runs.
     // Only the VM, the image's root, has them (`#[snapshot(root)]`).
