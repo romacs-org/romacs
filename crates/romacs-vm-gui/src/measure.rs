@@ -624,6 +624,84 @@ mod tests {
         assert!(calls.windows(2).all(|w| w[0] < w[1]), "{calls:?}: no text is walked twice");
     }
 
+    /// A window fontified ahead of its layout through where its last layout
+    /// ended, which a character typed before it leaves inside a multibyte
+    /// character: that end is taken at the character's start, and
+    /// redisplay goes on.
+    #[test]
+    fn fontifying_ahead_takes_a_stale_end_at_a_character() {
+        let mut h = hosted();
+        h.eval(r"(progn (erase-buffer) (insert (make-string 3000 ?α)) (goto-char 1) (set-window-start nil 1)
+          (setq fontification-functions (list (lambda (pos) (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)))))");
+        h.paint();
+        h.eval(r"(progn (goto-char 1) (insert ?a) (put-text-property 1 (point-max) 'fontified nil))");
+        h.paint();
+        assert_eq!(h.eval("(get-text-property 1 'fontified)"), "t");
+    }
+
+    /// A function that, fontifying ahead of a layout, shows another buffer
+    /// in the window: that buffer is walked from the window's start, not
+    /// from where the first buffer's walk ended.
+    #[test]
+    fn a_buffer_shown_while_fontifying_ahead_is_walked_from_its_start() {
+        let mut h = hosted();
+        h.eval(r#"(progn (erase-buffer) (insert (make-string 3000 ?x)) (goto-char 1) (set-window-start nil 1)
+          (with-current-buffer (get-buffer-create "other") (insert (make-string 3000 ?y)))
+          (set-default 'fontification-functions (list (lambda (pos) (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)))))"#);
+        h.paint();
+        h.eval(r#"(progn (put-text-property 1 (point-max) 'fontified nil)
+          (setq hosted-calls nil)
+          (set-default 'fontification-functions
+            (list (lambda (pos)
+                    (push (cons (buffer-name) pos) hosted-calls)
+                    (if (equal (buffer-name) "other")
+                        (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)
+                      (set-window-buffer (selected-window) "other" t)
+                      (set-window-start (selected-window) 1 t))))))"#);
+        h.paint();
+        let calls = h.eval("(reverse hosted-calls)");
+        assert!(calls.contains(r#"("other" . 1)"#), "{calls}");
+    }
+
+    /// A function that, fontifying ahead of a layout, inserts text before
+    /// what that walk fontified: the range shown is walked again from the
+    /// start, so the new text is fontified.
+    #[test]
+    fn text_inserted_while_fontifying_ahead_is_fontified() {
+        let mut h = hosted();
+        h.eval(r"(progn (erase-buffer) (insert (make-string 3000 ?x)) (goto-char 1) (set-window-start nil 1)
+          (setq fontification-functions (list (lambda (pos) (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)))))");
+        h.paint();
+        h.eval(r#"(progn (put-text-property 1 (point-max) 'fontified nil)
+          (setq hosted-inserted nil)
+          (setq fontification-functions
+            (list (lambda (pos)
+                    (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)
+                    (unless hosted-inserted
+                      (setq hosted-inserted t)
+                      (save-excursion (goto-char 1) (insert "zz")))))))"#);
+        h.paint();
+        assert_eq!(h.eval("(get-text-property 1 'fontified)"), "t");
+    }
+
+    /// A collection while fontifying ahead of a layout: redisplay goes on
+    /// from the window's traced copy, wherever the collection moved it.
+    #[test]
+    fn a_collection_while_fontifying_ahead_leaves_the_window_current() {
+        let mut h = hosted();
+        h.eval(r"(progn (erase-buffer) (insert (make-string 3000 ?x)) (goto-char 1) (set-window-start nil 1)
+          (setq fontification-functions (list (lambda (pos) (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)))))");
+        h.paint();
+        h.eval(r"(progn (put-text-property 1 (point-max) 'fontified nil)
+          (setq fontification-functions
+            (list (lambda (pos)
+                    (dotimes (_ 2000) (make-string 16 ?g))
+                    (garbage-collect)
+                    (put-text-property pos (min (point-max) (+ pos 100)) 'fontified t)))))");
+        h.paint();
+        assert_eq!(h.eval("(get-text-property 1 'fontified)"), "t");
+    }
+
     /// A row a plain newline starts measures alone, whatever the line
     /// before holds: gnosis's review centres each line with an overlay
     /// string, then measures the next line.  The line holding the string

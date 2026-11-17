@@ -337,6 +337,20 @@ impl DisplayState {
             self.version = self.version.wrapping_add(1);
         }
     }
+    /// Whether no window's layout is recorded: an image holds none, as
+    /// what a layout found is this process's (`world_quiescent`).
+    pub(crate) fn laid_empty(&self) -> bool {
+        self.laid.is_empty()
+    }
+    /// A layout record of no window: what an image must refuse.
+    #[cfg(test)]
+    pub(crate) fn record_laid_for_test(&mut self) {
+        let key = ShownKey { collections: 0, overlays: 0, hosted: false, buffer: Value::NIL, shows: 0, selected_id: 0, selected: Value::NIL,
+            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
+            suspended: false, chrome: ([0; 2], [0; 2], false, false), root: (0, 0), metrics: (0, 0), faces: 0, table: 0,
+            variables: vec![], header: Value::NIL };
+        self.laid.insert(0, (key, Laid { end: 0, visible_end: 0, body_height: 0.0, point: None }));
+    }
     /// Republish window ID in full next time (force-window-update).
     pub(super) fn repaint_window(&mut self, id: u64) {
         self.previous.remove(&id);
@@ -2718,16 +2732,27 @@ impl Vm {
         };
         let Ok(b) = self.shown_text(buffer) else { return Ok(Ahead::Not) };
         let start = usize::try_from(key.start).unwrap_or(1).max(1);
-        let end = b.char_of_byte(ByteOffset(end.min(b.accessible().end.0)))?.0 + 1;
+        // A byte of the text the record laid out: an edit since can leave
+        // it inside a character.
+        let mut byte = end.min(b.accessible().end.0);
+        while !b.as_str().is_char_boundary(byte) { byte -= 1; }
+        let end = b.char_of_byte(ByteOffset(byte))?.0 + 1;
         let point = usize::try_from(self.window_point_value(window)?.as_integer()?).unwrap_or(0);
         if start >= end || !(forced || (start..=end).contains(&point)) { return Ok(Ahead::Not); }
+        let before = self.window_text_state(root)?;
         self.fontify_range(window, start, end)?;
-        let w = self.window(window)?;
+        // Its Lisp may have collected and moved the window and its buffer:
+        // only ROOT's and BUFFER_SLOT's traced copies are current.
+        let w = self.window(self.slots[root].value)?;
         if !w.live() { return Ok(Ahead::Gone); }
-        let buffer = w.buffer;
-        self.slots[buffer_slot].value = buffer;
-        self.slots[self.buffer_slot].value = buffer;
-        Ok(Ahead::Done { start, end, state: self.window_text_state(root)? })
+        let (shown, switched) = (w.buffer, w.buffer != self.slots[buffer_slot].value);
+        self.slots[buffer_slot].value = shown;
+        self.slots[self.buffer_slot].value = shown;
+        let after = self.window_text_state(root)?;
+        // A walk whose Lisp showed another buffer, or changed the text or
+        // the start, is no first pass: the range shown is walked afresh.
+        if switched || (after.1, after.2) != (before.1, before.2) { return Ok(Ahead::Not); }
+        Ok(Ahead::Done { start, end, state: after })
     }
     /// The window in ROOT, waiting for its first parse, takes the stopgap
     /// faces of the rows it shows (`romacs-treesit--stopgap`,
