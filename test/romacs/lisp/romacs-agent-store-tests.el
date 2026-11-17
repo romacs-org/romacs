@@ -327,7 +327,7 @@ journal one turn long."
 
 (ert-deftest romacs-agent-store-an-older-table-is-made-again-and-the-rest-kept ()
   ;; A database whose sessions table an earlier build made: made again with
-  ;; this build's columns, its records and the board's folds kept.
+  ;; this build's columns, its rows, records and the board's folds kept.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
     (ignore #'record)
@@ -345,7 +345,7 @@ journal one turn long."
       (let ((db (romacs-agent-store--open)))
         (should (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version))
         (should (member "seq" (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)"))))
-        (should-not (sqlite-select db "select 1 from sessions"))
+        (should (equal (sqlite-select db "select id, dir, state, seq from sessions") '(("old" "/x" "idle" nil))))
         (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
         (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
 
@@ -370,9 +370,10 @@ writes: the sessions table made again in its form, the rest left.")
 
 (ert-deftest romacs-agent-store-a-downgrade-and-back-keep-every-record ()
   ;; A store this build migrated, opened by an earlier build (a rollback),
-  ;; then by this one again: only the sessions table, a cache, is made
-  ;; again each time; the records, what is imported, the turns and the
-  ;; board's folds are kept, and an imported session reads as it did.
+  ;; then by this one again: the earlier one makes its sessions table
+  ;; again, this one reforms it with the rows it holds; the records, what
+  ;; is imported, the turns and the board's folds are kept, and an
+  ;; imported session reads as it did.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-events)
   (romacs-agent-store-tests--with
@@ -403,7 +404,7 @@ writes: the sessions table made again in its form, the rest left.")
           (setq romacs-agent-events--made nil)
           (let ((db (romacs-agent-store--open)))
             (should (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version))
-            (should-not (sqlite-select db "select 1 from sessions where id = 'older'"))
+            (should (sqlite-select db "select 1 from sessions where id = 'older'"))
             (should (equal (romacs-agent-store-tests--tables db) kept))
             (should (equal (funcall seqs) '(1 2)))))))))
 
@@ -653,3 +654,24 @@ has it: in a transaction of its own, after the statement FIRST when given."
       (romacs-agent-store-fill)
       (should-not (romacs-agent--unloaded-p (expand-file-name asked root)))
       (should (romacs-agent--unloaded-p (expand-file-name quiet root))))))
+
+(ert-deftest romacs-agent-store-a-version-bump-keeps-every-row ()
+  ;; A populated store of another version: its sessions table is made in
+  ;; this build's form, every row kept with every column both have, in one
+  ;; transaction, its indexes made again.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (dotimes (i 120)
+      (record (format "aaaaaaaa-0000-4000-8000-%012d" i) (format "row %d" i)))
+    (romacs-agent-store-fill)
+    (let* ((db (romacs-agent-store--open))
+           (rows (sqlite-select db "select * from sessions order by id")))
+      (should (= (length rows) 120))
+      (sqlite-pragma db (format "user_version = %d" (1- romacs-agent-store--version)))
+      (sqlite-close db)
+      (setq romacs-agent-store--db nil)
+      (let ((db (romacs-agent-store--open)))
+        (should (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version))
+        (should (equal (sqlite-select db "select * from sessions order by id") rows))
+        (should (sqlite-select db "select 1 from sqlite_master where type = 'index' and name = 'sessions_parent'"))
+        (should-not (sqlite-select db "select 1 from sqlite_master where name = 'sessions_reformed'"))))))
