@@ -145,6 +145,24 @@ turns, and its journal's file; a state root of its own."
                                 (seq-filter (lambda (e) (eq (plist-get e :type) 'input)) result))
                         '("question 1" "question 2" "question 3" "question 4" "question 5"))))))))
 
+(ert-deftest romacs-agent-events-replay-a-page-of-seqs-at-a-time ()
+  ;; A whole replay from SQLite (a renewal's worker's) reads a page of seqs
+  ;; at a time, each a short read, and gives what its journal gave.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     5
+     (lambda (session _journal)
+       (let ((from-journal (romacs-agent-events session)) (reads 0))
+         (romacs-agent-events-import session)
+         (should (romacs-agent-events-p session))
+         (cl-letf* ((romacs-agent--events-page 3)
+                    (read (symbol-function 'romacs-agent-events-read))
+                    ((symbol-function 'romacs-agent-events-read) (lambda (&rest args) (cl-incf reads) (apply read args))))
+           (should (equal (romacs-agent-events session) from-journal)))
+         (should (> reads 1)))))))
+
 (ert-deftest romacs-agent-events-a-line-is-kept-as-written ()
   ;; As the supervisor writes it: its row read from its ends, the line as
   ;; it is; a counter left out; another order parsed.

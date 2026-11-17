@@ -410,11 +410,15 @@ def renew(args, base):
                "(advice-add f :before (lambda (&rest _) (setq rn-reads (1+ rn-reads))) '((name . rn)))) "
                "(advice-add 'isolate-spawn :before (lambda (f &rest _) (when (eq f 'romacs-agent-renew--thread) "
                "(setq rn-workers (1+ rn-workers)))) '((name . rn))) t)")
+        isolates = int(a.eval('(length (isolate-list))'))
         a.eval(f'(progn (setq romacs-agent-renew-summary (quote selection)) (defvar rn-outcome nil) '
                f'(romacs-agent-renew {a.s(sid)} "harness" (lambda (r) (setq rn-outcome r))) t)')
         until(lambda: a.eval('(car rn-outcome)') in (':done', ':error'), 60, 'renewed')
         outcome = a.eval('(prin1-to-string rn-outcome)')
         main_reads, workers = int(a.eval('rn-reads')), int(a.eval('rn-workers'))
+        # Its worker of its own let go once it answered: no more live
+        # workers than before the renewal.
+        until(lambda: int(a.eval('(length (isolate-list))')) <= isolates, 15, 'the renewal worker let go')
         a.eval("(progn (dolist (f '(romacs-agent-events romacs-agent--journal-pager romacs-agent-events-async isolate-spawn)) "
                "(advice-remove f 'rn)) t)")
         a.until(sid, lambda: len(runs()) > before, 60, 'a run after the renewal')
@@ -423,7 +427,14 @@ def renew(args, base):
         a.idle(sid, 60)
         a.send(sid, 'say after')
         a.idle(sid, 60)
-        briefed = [r for r in a.journal(sid) if isinstance(r.get('in'), dict) and r['in'].get('romacsBrief')]
+        # The record of the message the brief went with, once written to
+        # the store (the writer's, a moment after).
+        briefed = lambda: [r for r in a.journal(sid) if isinstance(r.get('in'), dict) and r['in'].get('romacsBrief')]
+        try:
+            until(lambda: briefed(), 15, 'the briefed message recorded')
+        except RuntimeError:
+            pass
+        briefed = briefed()
         result = {'outcome': outcome, 'native': native, 'new_conversation': native != sid,
                   'session_id': argv[argv.index('--session-id') + 1] if '--session-id' in argv else None,
                   'resumed_old': '--resume' in argv, 'briefed': len(briefed), 'main_reads': main_reads, 'workers': workers}

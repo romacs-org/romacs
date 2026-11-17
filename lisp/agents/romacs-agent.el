@@ -2060,13 +2060,23 @@ nothing that waits."
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     scratch))
 
+(defconst romacs-agent--events-page 2000
+  "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
+page a short read, so a long replay holds no snapshot of the store.")
+
 (defun romacs-agent-events (session &optional end)
   "SESSION's journal as the events it raised, in order, replayed on a
 copy (`romacs-agent--scratch'): SESSION is left as it is.  To place END
-\(`romacs-agent--journal-end'), when given."
+\(`romacs-agent--journal-end'), when given.  Records in SQLite are read a
+page of seqs at a time (`romacs-agent--events-page')."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
-         (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) nil end)
+         (romacs-agent-event-functions (list (lambda (_ event) (push event events))))
+         (fold (lambda (record) (romacs-agent--record scratch record))))
+    (if (not (romacs-agent-events-p session))
+        (romacs-agent--read-journal session fold nil end)
+      (let ((end (or end (romacs-agent-events-end session))))
+        (cl-loop for from from 0 below end by romacs-agent--events-page
+                 do (romacs-agent--read-journal session fold from (min end (+ from romacs-agent--events-page))))))
     (nreverse events)))
 
 (defconst romacs-agent--journal-slice (* 1024 1024)
@@ -3352,23 +3362,26 @@ attached, or to start once its session is moved."
                              (romacs-agent--restarted session))))
 
 (defcustom romacs-agent-start-deadline 120
-  "Seconds a session launching may stay `starting' with no run of its
-harness begun (its supervisor's `run' record) before it is ended failed,
-saying so: a launch never leaves a session starting for ever.  Counted
-from the launch itself: the wait for a worker VM moving its records to
-SQLite first ends by itself, moved or not."
+  "Seconds a session launching may stay `starting' before it is ended
+failed, saying so: a launch never leaves a session starting for ever,
+whether no run of its harness began (no `run' record from its
+supervisor) or one began and never came up (its startup unanswered),
+which is left to come up later or be stopped by hand.  Counted from the
+launch itself: the wait for a worker VM moving its records to SQLite
+first ends by itself, moved or not."
   :type 'number :group 'romacs-agent)
 
 (defvar romacs-agent--attempts (make-hash-table :test #'eq :weakness 'key)
-  "Each session launching to its attempt, (TOKEN . TIMER): TIMER the
+  "Each session launching to its attempt, (TOKEN TIMER RAN): TIMER the
 attempt's deadline (`romacs-agent-start-deadline'), nil until it
-launches.  One at a time: a new attempt replaces an earlier one.")
+launches; RAN non-nil once its run began.  One at a time: a new attempt
+replaces an earlier one.")
 
 (defun romacs-agent--attempt (session)
   "Begin a launch attempt of SESSION: its token."
   (romacs-agent--attempt-over session)
   (let ((token (list 'attempt)))
-    (puthash session (list token) romacs-agent--attempts)
+    (puthash session (list token nil nil) romacs-agent--attempts)
     token))
 
 (defun romacs-agent--attempt-current-p (session token)
@@ -3379,36 +3392,45 @@ and its deadline has not ended it."
 (defun romacs-agent--attempt-over (session &optional _event)
   "SESSION's launch attempt is over: its deadline disarmed."
   (when-let* ((attempt (gethash session romacs-agent--attempts)))
-    (when (timerp (cdr attempt)) (cancel-timer (cdr attempt)))
+    (when (timerp (nth 1 attempt)) (cancel-timer (nth 1 attempt)))
     (remhash session romacs-agent--attempts)))
 
 (defun romacs-agent--attempt-ended (session event)
-  "A run of SESSION began, or its launch failed (EVENT): its attempt is over."
-  (when (memq (plist-get event :type) '(run unstarted))
-    (romacs-agent--attempt-over session)))
+  "Its launch failed (EVENT): SESSION's attempt is over.  A run of it began:
+its deadline now waits for the run to come up."
+  (pcase (plist-get event :type)
+    ('unstarted (romacs-agent--attempt-over session))
+    ('run (when-let* ((attempt (gethash session romacs-agent--attempts))) (setf (nth 2 attempt) t)))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent--attempt-ended)
 
 (defun romacs-agent--attempt-due (session token)
-  "The deadline of SESSION's launch attempt TOKEN: one with no run begun,
-still `starting' or `detached' (its new supervisor never attached: a
-session with records of an earlier run is taken for detached), ends
-failed."
+  "The deadline of SESSION's launch attempt TOKEN.  Still `starting', or
+`detached' with no run begun (its new supervisor never attached: a
+session with records of an earlier run is taken for detached), it ends
+failed.  A run that began and never came up is said failed and left
+running: stopped here, its queue would resume it at once, and it may yet
+come up."
   (when (romacs-agent--attempt-current-p session token)
-    (cond ((not (memq (romacs-agent-state session) '(starting detached))) (romacs-agent--attempt-over session))
-          (t (romacs-agent--attempt-over session)
-             (remhash (romacs-agent-id session) romacs-agent--resuming)
-             (romacs-agent--unstarted
-              session (format "no run of its harness began within %s s of its launch" romacs-agent-start-deadline))))))
+    (let ((ran (nth 2 (gethash session romacs-agent--attempts))))
+      (romacs-agent--attempt-over session)
+      (when (or (eq (romacs-agent-state session) 'starting)
+                (and (eq (romacs-agent-state session) 'detached) (not ran)))
+        (remhash (romacs-agent-id session) romacs-agent--resuming)
+        (romacs-agent--unstarted
+         session (format (if ran "its harness began but did not come up within %s s of its launch: stop it to try again"
+                           "no run of its harness began within %s s of its launch")
+                         romacs-agent-start-deadline)
+         ran)))))
 
-(defun romacs-agent--unstarted (session why)
+(defun romacs-agent--unstarted (session why &optional running)
   "End SESSION unstarted and failed, WHY its reason: shown in its view,
 logged (`romacs-agent-issues-record', the usage log), its held notes
-sent through another host."
+sent through another host, unless its supervisor is RUNNING."
   (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session)) :text why))
   (when (fboundp 'romacs-usage-log-note)
     (romacs-usage-log-note "agent-unstarted" :session (romacs-agent-id session) :reason why))
-  (romacs-agent--no-supervisor session))
+  (unless running (romacs-agent--no-supervisor session)))
 
 (defun romacs-agent--launch-when-placed (session launch)
   "Call LAUNCH, which launches SESSION, once its records' place is known
@@ -3427,8 +3449,8 @@ for its start would wait for ever.  NOW, called from where the attempt
 began: the error then reaches that caller too."
   (when (romacs-agent--attempt-current-p session token)
     ;; Its deadline from now, the launch's start.
-    (setcdr (gethash session romacs-agent--attempts)
-            (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token))
+    (setf (nth 1 (gethash session romacs-agent--attempts))
+          (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token))
     (condition-case err (funcall launch)
       ((error quit)
        (when (eq (romacs-agent-state session) 'starting)

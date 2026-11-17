@@ -210,6 +210,9 @@ however long its journal, the editor reads none of them."
   (let ((future (condition-case err
                     (isolate-spawn 'romacs-agent-renew--thread (romacs-agent-dir session) (romacs-agent--journal-end session)
                                    :name "romacs-agent renew"
+                                   ;; A worker of its own: one the user waits for
+                                   ;; never queues behind background moves.
+                                   :fresh t
                                    :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
                                                            romacs-agent-renew)
                                    :bindings (romacs-agent--fold-bindings))
@@ -218,6 +221,8 @@ however long its journal, the editor reads none of them."
       (isolate-on-done
        future
        (lambda (done)
+         ;; Its own worker, done with: let go, answered or not.
+         (when-let* ((worker (ignore-errors (isolate-future-isolate done)))) (ignore-errors (isolate-retire worker)))
          (pcase (condition-case err (cons 'read (isolate-await done))
                   (error (cons 'failed (error-message-string err))))
            (`(read ,summary ,items) (funcall then summary items))
