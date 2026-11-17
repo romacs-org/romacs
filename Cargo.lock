@@ -3917,6 +3917,7 @@ dependencies = [
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "crossbeam-deque",
  "flate2",
  "foldhash",

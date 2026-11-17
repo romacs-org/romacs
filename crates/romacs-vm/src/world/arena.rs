@@ -56,6 +56,7 @@
 //! page-table entry of them (`start_heap_file`).
 use romacs_allocator::file_heap;
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 /// Where an arena may start: a GiB-aligned address in this window, far from
@@ -91,8 +92,10 @@ const TRIM_SLACK: usize = 16 << 20;
 const TRIM_KEEP: usize = 4 << 20;
 
 /// The allocator's state, at the arena's start. An image carries it, and
-/// the fields a restore needs.
+/// the fields a restore needs. Plain words throughout, with no padding, so
+/// an image's header is read from its bytes (`map_image_fd`).
 #[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Header {
     magic: u64,
     /// Where the arena starts.
@@ -116,7 +119,7 @@ struct Header {
 
 /// What an image records beside the allocator's state.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ImageFields {
     /// The image's length: the used prefix of the arena.
     pub len: usize,
@@ -167,14 +170,15 @@ static BASE: AtomicUsize = AtomicUsize::new(0);
 /// Where the process's first arena starts, once an image replaced it.
 static FORMER: AtomicUsize = AtomicUsize::new(0);
 /// A builder's arena is a shared mapping of this unlinked file, and an
-/// image is copied from the file (`write_image`); -1 elsewhere.
-static BACKING: AtomicI32 = AtomicI32::new(-1);
+/// image is copied from the file (`write_image`); unset elsewhere.
+static BACKING: std::sync::OnceLock<OwnedFd> = std::sync::OnceLock::new();
 /// The libraries loaded as the arena started (`libraries`): for each, its
 /// name, where it loaded and its program headers, the loader's own, which
-/// stay for the process's life; and whether they all fit.
-static mut LOADED: [(usize, usize, usize, usize); 256] = [(0, 0, 0, 0); 256];
-static mut LOADED_COUNT: usize = 0;
-static mut LOADED_COMPLETE: bool = false;
+/// stay for the process's life; and whether they all fit. Written once,
+/// under the allocator's lock, before STATE publishes the arena.
+static LOADED: [[AtomicUsize; 4]; 256] = [const { [const { AtomicUsize::new(0) }; 4] }; 256];
+static LOADED_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LOADED_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 /// What became of the image this process adopted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,7 +210,7 @@ fn lock() {
     let mut spins = 0u32;
     while LOCK.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         spins += 1;
-        if spins < 64 { std::hint::spin_loop() } else { unsafe { libc::sched_yield(); } }
+        if spins < 64 { std::hint::spin_loop() } else { std::thread::yield_now() }
     }
 }
 
@@ -406,7 +410,7 @@ fn state() -> u8 {
 /// it is: under one that holds less than the arenas themselves nothing is
 /// tried, and the chunks stop where the limit is reached.
 unsafe fn reserve_window() {
-    if unsafe { reserve() } != Some(RESERVE) {
+    if reserve() != Some(RESERVE) {
         return;
     }
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
@@ -486,22 +490,26 @@ unsafe fn start() -> u8 {
     // allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
-    let Some(reserve) = (unsafe { reserve() }) else { return SYSTEM };
-    let backing = if building { unsafe { backing_file(reserve) } } else { -1 };
-    let flags = libc::MAP_NORESERVE | if backing >= 0 { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
+    let Some(reserve) = reserve() else { return SYSTEM };
+    let mut backing = if building { backing_file(reserve) } else { None };
+    let raw_backing = backing.as_ref().map_or(-1, AsRawFd::as_raw_fd);
+    let flags = libc::MAP_NORESERVE | if backing.is_some() { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
     let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
-        let mut random = 0usize;
-        // HOST(libc::getrandom): the world allocator picks a random arena address at its first
+        let mut random = [0u8; size_of::<usize>()];
+        // HOST(rustix::query): the world allocator picks a random arena address at its first
         // allocation; no Lisp value depends on it
-        let read = unsafe { libc::getrandom((&raw mut random).cast(), size_of::<usize>(), 0) };
-        if read != size_of::<usize>() as isize {
+        if rustix::rand::getrandom(&mut random, rustix::rand::GetRandomFlags::empty()) != Ok(random.len()) {
             break;
         }
+        let random = usize::from_ne_bytes(random);
         let base = base_in(low, high, reserve, random);
-        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags | place(base, reserve), backing, 0) };
+        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags | place(base, reserve), raw_backing, 0) };
         if at == base as *mut libc::c_void {
-            BACKING.store(backing, Ordering::Relaxed);
+            if let Some(backing) = backing.take() {
+                // Set once: STATE starts the arena once, under the lock.
+                let _ = BACKING.set(backing);
+            }
             BASE.store(base, Ordering::Relaxed);
             let h = unsafe { &mut *header() };
             h.magic = MAGIC;
@@ -520,32 +528,28 @@ unsafe fn start() -> u8 {
 }
 
 /// A builder's backing file: unlinked, in memory, RESERVE bytes long and
-/// sparse, so only pages the arena touched hold blocks. -1 when there is
-/// none: a builder without one cannot publish (`write_image`).
-unsafe fn backing_file(reserve: usize) -> i32 {
-    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+/// sparse, so only pages the arena touched hold blocks. None when there is
+/// none: a builder without one cannot publish (`write_image`). The path is
+/// a C string, so the open allocates nothing.
+fn backing_file(reserve: usize) -> Option<OwnedFd> {
+    let flags = rustix::fs::OFlags::TMPFILE | rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC;
+    // HOST(rustix::file): a builder backs its arena with an unlinked memory file at its first
     // allocation, before host.rs can run; no Lisp value depends on it
-    let fd = unsafe { libc::open(c"/dev/shm".as_ptr(), libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC, 0o600) };
-    if fd < 0 {
-        return -1;
-    }
-    // HOST(libc::file): a builder backs its arena with an unlinked memory file at its first
+    let fd = rustix::fs::open(c"/dev/shm", flags, rustix::fs::Mode::from_raw_mode(0o600)).ok()?;
+    // HOST(rustix::file): a builder backs its arena with an unlinked memory file at its first
     // allocation, before host.rs can run; no Lisp value depends on it
-    if unsafe { libc::ftruncate(fd, reserve as i64) } != 0 {
-        unsafe { libc::close(fd) };
-        return -1;
-    }
-    fd
+    rustix::fs::ftruncate(&fd, reserve as u64).ok()?;
+    Some(fd)
 }
 
 /// Give the pages from AT, LEN bytes, back to the system. Their content is
 /// the allocator's no longer: memory below the zero mark is zeroed when a
 /// zeroed block is asked for.
 unsafe fn release(at: usize, len: usize) {
-    let backing = BACKING.load(Ordering::Relaxed);
-    if backing >= 0 && in_backing(at) {
-        let offset = (at - BASE.load(Ordering::Relaxed)) as i64;
-        unsafe { libc::fallocate(backing, libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE, offset, len as i64) };
+    if let Some(backing) = BACKING.get().filter(|_| in_backing(at)) {
+        let offset = (at - BASE.load(Ordering::Relaxed)) as u64;
+        let punch = rustix::fs::FallocateFlags::PUNCH_HOLE | rustix::fs::FallocateFlags::KEEP_SIZE;
+        let _ = rustix::fs::fallocate(backing, punch, offset, len as u64);
     } else {
         unsafe { libc::madvise(at as *mut libc::c_void, len, libc::MADV_DONTNEED) };
     }
@@ -560,13 +564,17 @@ fn in_backing(at: usize) -> bool {
 /// How much address space an arena of this process reserves: RESERVE, or
 /// a GiB-aligned quarter of the address-space limit, when that is at least
 /// a GiB.
-unsafe fn reserve() -> Option<usize> {
-    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) } != 0 || limit.rlim_cur == libc::RLIM_INFINITY {
-        return Some(RESERVE);
-    }
-    let quarter = (limit.rlim_cur as usize / 4).min(RESERVE) / ALIGN * ALIGN;
+fn reserve() -> Option<usize> {
+    let Some(limit) = address_space_limit() else { return Some(RESERVE) };
+    let quarter = (usize::try_from(limit).unwrap_or(usize::MAX) / 4).min(RESERVE) / ALIGN * ALIGN;
     (quarter >= ALIGN).then_some(quarter)
+}
+
+/// The process's address-space limit (`RLIMIT_AS`), None for none.
+fn address_space_limit() -> Option<u64> {
+    // HOST(rustix::query): the world allocator sizes its reservation by the address-space limit
+    // at its first allocation, before host.rs can run; no Lisp value depends on it
+    rustix::process::getrlimit(rustix::process::Resource::As).current
 }
 
 /// Allocate from the image in FILE from now on: map it where it was made,
@@ -575,7 +583,6 @@ unsafe fn reserve() -> Option<usize> {
 /// format. Once per process; the first arena keeps the blocks allocated
 /// before. Refused, `map_failure` says at which step and why.
 pub fn adopt(file: &std::fs::File) -> Restore {
-    use std::os::fd::AsRawFd;
     if state() != ARENA {
         return refuse(1, 0, false);
     }
@@ -583,7 +590,7 @@ pub fn adopt(file: &std::fs::File) -> Restore {
     if FORMER.load(Ordering::Acquire) != 0 {
         return refuse(2, 0, false);
     }
-    let outcome = unsafe { map_image_fd(file.as_raw_fd()) };
+    let outcome = unsafe { map_image_fd(file.as_fd()) };
     RESTORE.store(outcome as u8, Ordering::Release);
     outcome
 }
@@ -614,18 +621,17 @@ fn overlaps(at: usize, len: usize, other: usize, other_len: usize) -> bool {
     at < other + other_len && other < at + len
 }
 
-unsafe fn map_image_fd(fd: i32) -> Restore {
+unsafe fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     let mut bytes = [0u8; size_of::<Header>()];
-    let read = unsafe { libc::pread(fd, bytes.as_mut_ptr().cast(), bytes.len(), 0) };
-    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
+    let read = rustix::io::pread(fd, &mut bytes, 0);
+    // HOST(rustix::file): the world allocator checks an image is whole before it adopts it; the
     // launcher checked that image
-    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-    // HOST(libc::file): the world allocator checks an image is whole before it adopts it; the
-    // launcher checked that image
-    if read != bytes.len() as isize || unsafe { libc::fstat(fd, &mut stat) } != 0 {
+    let stat = rustix::fs::fstat(fd);
+    let (Ok(read), Ok(stat)) = (read, stat) else { return Restore::Unreadable };
+    if read != bytes.len() {
         return Restore::Unreadable;
     }
-    let image = unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<Header>()) };
+    let image: Header = bytemuck::pod_read_unaligned(&bytes);
     let (base, len) = (image.base, image.image.len);
     // A truncated or extended file is no image: mapped, it would fault.
     if image.magic != MAGIC || len == 0 || len % PAGE != 0 || stat.st_size as usize != len
@@ -633,7 +639,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     {
         return Restore::Format;
     }
-    let reserve = match unsafe { reserve() } {
+    let reserve = match reserve() {
         Some(reserve) if len < reserve && base + reserve <= WINDOW.1 => reserve,
         _ => return refuse(3, 0, false),
     };
@@ -643,7 +649,7 @@ unsafe fn map_image_fd(fd: i32) -> Restore {
     let first = unsafe { &*header() };
     let placed = if overlaps(base, reserve, first.base, first.reserve) { libc::MAP_FIXED_NOREPLACE } else { place(base, reserve) };
     let file = libc::MAP_PRIVATE | placed;
-    let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd, 0) };
+    let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd.as_raw_fd(), 0) };
     // What a failure leaves is given up (`unplace`): only what this
     // module mapped, never what refused it, which the launch's source boot
     // may be using.
@@ -713,21 +719,19 @@ unsafe fn take_inventory() {
         if name.is_empty() || name.starts_with(b"linux-vdso") {
             return 0;
         }
-        let count = unsafe { LOADED_COUNT };
-        if count == 256 {
-            unsafe { LOADED_COMPLETE = false };
+        let count = LOADED_COUNT.load(Ordering::Relaxed);
+        let Some(slot) = LOADED.get(count) else {
+            LOADED_COMPLETE.store(false, Ordering::Relaxed);
             return 1;
+        };
+        for (word, value) in slot.iter().zip([info.dlpi_name as usize, info.dlpi_addr as usize, info.dlpi_phdr as usize, info.dlpi_phnum as usize]) {
+            word.store(value, Ordering::Relaxed);
         }
-        unsafe {
-            LOADED[count] = (info.dlpi_name as usize, info.dlpi_addr as usize, info.dlpi_phdr as usize, info.dlpi_phnum as usize);
-            LOADED_COUNT = count + 1;
-        }
+        LOADED_COUNT.store(count + 1, Ordering::Relaxed);
         0
     }
-    unsafe {
-        LOADED_COMPLETE = true;
-        libc::dl_iterate_phdr(Some(each), std::ptr::null_mut());
-    }
+    LOADED_COMPLETE.store(true, Ordering::Relaxed);
+    unsafe { libc::dl_iterate_phdr(Some(each), std::ptr::null_mut()) };
 }
 
 /// A library loaded before the first allocation, as the loader mapped it.
@@ -743,12 +747,12 @@ pub struct Library {
 /// None when there were more than the inventory holds.
 pub fn libraries() -> Option<Vec<Library>> {
     state();
-    if !unsafe { LOADED_COMPLETE } {
+    if !LOADED_COMPLETE.load(Ordering::Relaxed) {
         return None;
     }
-    let loaded: &[(usize, usize, usize, usize); 256] = unsafe { &*std::ptr::addr_of!(LOADED) };
-    let loaded = &loaded[..unsafe { LOADED_COUNT }];
-    Some(loaded.iter().map(|&(name, base, phdr, phnum)| unsafe { Library::at(name as *const libc::c_char, base, phdr, phnum) }).collect())
+    let loaded = &LOADED[..LOADED_COUNT.load(Ordering::Relaxed)];
+    Some(loaded.iter().map(|slot| slot.each_ref().map(|word| word.load(Ordering::Relaxed)))
+        .map(|[name, base, phdr, phnum]| unsafe { Library::at(name as *const libc::c_char, base, phdr, phnum) }).collect())
 }
 
 impl Library {
@@ -927,13 +931,13 @@ pub fn restore_outcome() -> Restore {
 /// builder's, the only heap `write_image` will write. What goes into it goes
 /// into the world, so nothing that depends on the moment belongs there.
 pub fn heap_is_image() -> bool {
-    BACKING.load(Ordering::Relaxed) >= 0 && !ADOPTED.load(Ordering::Acquire)
+    BACKING.get().is_some() && !ADOPTED.load(Ordering::Acquire)
 }
 
 /// Whether the arena is a shared mapping (a builder's, `backing_file`): a
 /// forked child then shares its blocks with the parent instead of copying them.
 pub fn heap_is_shared() -> bool {
-    BACKING.load(Ordering::Relaxed) >= 0
+    BACKING.get().is_some()
 }
 
 /// Whether a heap table may take its one large reservation (`table.rs`): not
@@ -943,9 +947,7 @@ pub fn may_reserve() -> bool {
     if heap_is_image() {
         return false;
     }
-    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-    // SAFETY: getrlimit writes only the local it is given.
-    unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) == 0 && limit.rlim_cur == libc::RLIM_INFINITY }
+    address_space_limit().is_none()
 }
 
 /// Give the system the whole pages between FROM and TO bytes past BASE, the
@@ -1130,21 +1132,19 @@ pub fn mapped_image() -> Option<ImageFields> {
 /// FIELDS.root must be the address of a live allocation the image's reader
 /// takes ownership of.
 pub unsafe fn write_image(file: &std::fs::File, mut fields: ImageFields) -> std::io::Result<usize> {
-    use std::os::fd::AsRawFd;
     if !active() {
         return Err(std::io::Error::other("the arena is not this process's heap"));
     }
-    let backing = BACKING.load(Ordering::Relaxed);
-    if backing < 0 || FORMER.load(Ordering::Relaxed) != 0 {
+    let Some(backing) = BACKING.get().filter(|_| FORMER.load(Ordering::Relaxed) == 0) else {
         return Err(std::io::Error::other("only a builder's file-backed arena can be written as an image"));
-    }
+    };
     lock();
     let h = unsafe { &mut *header() };
     unsafe { scrub(h) };
     fields.len = h.top - base();
     let saved = h.image;
     h.image = fields;
-    let result = unsafe { copy_extents(backing, file.as_raw_fd(), fields.len) };
+    let result = copy_extents(backing.as_fd(), file.as_fd(), fields.len);
     h.image = saved;
     unlock();
     result.map(|()| fields.len)
@@ -1178,69 +1178,59 @@ unsafe fn scrub(h: &mut Header) {
 
 /// Copy the data extents of FROM's first LEN bytes to the same offsets
 /// of TO, and make TO LEN bytes long: its holes stay holes.
-unsafe fn copy_extents(from: i32, to: i32, len: usize) -> std::io::Result<()> {
-    let last = || std::io::Error::last_os_error();
-    let mut at = 0i64;
-    while (at as usize) < len {
-        let data = unsafe { libc::lseek(from, at, libc::SEEK_DATA) };
-        if data < 0 {
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENXIO) {
-                break;
-            }
-            return Err(last());
-        }
-        if data as usize >= len {
+fn copy_extents(from: BorrowedFd<'_>, to: BorrowedFd<'_>, len: usize) -> std::io::Result<()> {
+    let len = len as u64;
+    let mut at = 0u64;
+    while at < len {
+        let data = match rustix::fs::seek(from, rustix::fs::SeekFrom::Data(at)) {
+            Ok(data) => data,
+            Err(rustix::io::Errno::NXIO) => break,
+            Err(error) => return Err(error.into()),
+        };
+        if data >= len {
             break;
         }
-        let hole = unsafe { libc::lseek(from, data, libc::SEEK_HOLE) };
-        if hole < 0 {
-            return Err(last());
-        }
-        let end = (hole as usize).min(len) as i64;
-        unsafe { copy_range(from, to, data, end) }?;
+        let end = rustix::fs::seek(from, rustix::fs::SeekFrom::Hole(data))?.min(len);
+        copy_range(from, to, data, end)?;
         at = end;
     }
-    // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+    // HOST(rustix::file): copies the builder arena's backing file into the image file the builder
     // opened through host
-    if unsafe { libc::ftruncate(to, len as i64) } != 0 {
-        return Err(last());
-    }
-    Ok(())
+    Ok(rustix::fs::ftruncate(to, len)?)
 }
 
 /// Bytes START..END of FROM to the same offsets of TO: by the kernel, or
 /// through a buffer of this module's where it cannot copy between them.
-unsafe fn copy_range(from: i32, to: i32, start: i64, end: i64) -> std::io::Result<()> {
-    static mut BUFFER: [u8; 1 << 20] = [0; 1 << 20];
+/// The caller holds the allocator's lock, so nothing here may allocate.
+fn copy_range(from: BorrowedFd<'_>, to: BorrowedFd<'_>, start: u64, end: u64) -> std::io::Result<()> {
+    static BUFFER: std::sync::Mutex<[u8; 1 << 20]> = std::sync::Mutex::new([0; 1 << 20]);
+    let ended = || std::io::Error::other("the backing file ended early");
     let mut at = start;
     while at < end {
         let (mut input, mut output) = (at, at);
-        // HOST(libc::file): copies the builder arena's backing file into the image file the builder
+        let want = usize::try_from(end - at).unwrap_or(usize::MAX);
+        // HOST(rustix::file): copies the builder arena's backing file into the image file the builder
         // opened through host
-        let n = unsafe { libc::copy_file_range(from, &mut input, to, &mut output, (end - at) as usize, 0) };
-        if n > 0 {
-            at += n as isize as i64;
-            continue;
+        match rustix::fs::copy_file_range(from, Some(&mut input), to, Some(&mut output), want) {
+            Ok(0) => return Err(ended()),
+            Ok(n) => {
+                at += n as u64;
+                continue;
+            }
+            Err(rustix::io::Errno::XDEV | rustix::io::Errno::INVAL | rustix::io::Errno::NOSYS | rustix::io::Errno::OPNOTSUPP) => {}
+            Err(error) => return Err(error.into()),
         }
-        let error = std::io::Error::last_os_error();
-        if n == 0 || !matches!(error.raw_os_error(), Some(libc::EXDEV | libc::EINVAL | libc::ENOSYS | libc::EOPNOTSUPP)) {
-            return Err(if n == 0 { std::io::Error::other("the backing file ended early") } else { error });
-        }
-        let buffer = unsafe { &mut *std::ptr::addr_of_mut!(BUFFER) };
-        let want = buffer.len().min((end - at) as usize);
-        let read = unsafe { libc::pread(from, buffer.as_mut_ptr().cast(), want, at) };
-        if read <= 0 {
-            return Err(if read == 0 { std::io::Error::other("the backing file ended early") } else { std::io::Error::last_os_error() });
+        let mut buffer = BUFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let want = buffer.len().min(want);
+        let read = rustix::io::pread(from, &mut buffer[..want], at)?;
+        if read == 0 {
+            return Err(ended());
         }
         let mut done = 0;
-        while done < read as usize {
-            let wrote = unsafe { libc::pwrite(to, buffer[done..].as_ptr().cast(), read as usize - done, at + done as i64) };
-            if wrote < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            done += wrote as usize;
+        while done < read {
+            done += rustix::io::pwrite(to, &buffer[done..read], at + done as u64)?;
         }
-        at += read as i64;
+        at += read as u64;
     }
     Ok(())
 }

@@ -25,7 +25,7 @@ stacker.workspace = true
 libc.workspace = true
 # The safe system-call layer host.rs calls through; host/sys.rs holds the
 # C library calls it lacks.
-rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "pty", "system", "thread", "time"] }
+rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "pty", "rand", "system", "thread", "time"] }
 sha2 = "0.11"
 # xxh3: the fast content hash of mapped library segments (world::arena).
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128", "std"] }
@@ -69,6 +69,8 @@ tree-sitter = "=0.27.0"
 tree-sitter-language.workspace = true
 # dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
 libloading = "0.8"
+# A world image's header read from its bytes (world/arena.rs).
+bytemuck.workspace = true
 
 [build-dependencies]
 sha2 = "0.11"
