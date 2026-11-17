@@ -70,7 +70,7 @@ tree-sitter-language.workspace = true
 # dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
 libloading = "0.8"
 # A world image's header read from its bytes (world/arena.rs).
-bytemuck.workspace = true
+bytemuck = { workspace = true, features = ["min_const_generics"] }
 
 [build-dependencies]
 sha2 = "0.11"

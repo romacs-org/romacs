@@ -565,16 +565,21 @@ fn in_backing(at: usize) -> bool {
 /// a GiB-aligned quarter of the address-space limit, when that is at least
 /// a GiB.
 fn reserve() -> Option<usize> {
-    let Some(limit) = address_space_limit() else { return Some(RESERVE) };
+    let Ok(Some(limit)) = address_space_limit() else { return Some(RESERVE) };
     let quarter = (usize::try_from(limit).unwrap_or(usize::MAX) / 4).min(RESERVE) / ALIGN * ALIGN;
     (quarter >= ALIGN).then_some(quarter)
 }
 
-/// The process's address-space limit (`RLIMIT_AS`), None for none.
-fn address_space_limit() -> Option<u64> {
-    // HOST(rustix::query): the world allocator sizes its reservation by the address-space limit
-    // at its first allocation, before host.rs can run; no Lisp value depends on it
-    rustix::process::getrlimit(rustix::process::Resource::As).current
+/// The process's address-space limit (`RLIMIT_AS`), None for none; an
+/// error when the query is refused (a syscall filter may refuse it).
+fn address_space_limit() -> std::io::Result<Option<u64>> {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // UNSAFE(rustix's getrlimit takes the call as infallible, and a refused one would read garbage)
+    // SAFETY: getrlimit writes only the local it is given.
+    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((limit.rlim_cur != libc::RLIM_INFINITY).then_some(limit.rlim_cur))
 }
 
 /// Allocate from the image in FILE from now on: map it where it was made,
@@ -947,7 +952,7 @@ pub fn may_reserve() -> bool {
     if heap_is_image() {
         return false;
     }
-    address_space_limit().is_none()
+    matches!(address_space_limit(), Ok(None))
 }
 
 /// Give the system the whole pages between FROM and TO bytes past BASE, the
