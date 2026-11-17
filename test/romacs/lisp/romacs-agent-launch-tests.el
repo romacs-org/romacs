@@ -89,6 +89,19 @@ whatever TMPDIR is); `delivered' collects wakes."
       (romacs-agent-tools--flush parent)
       (should-not delivered))))
 
+(ert-deftest romacs-agent-launch-a-delegate-answers-once-its-brief-is-had ()
+  ;; A task started with its brief is answered once its supervisor has the
+  ;; brief, not only once attached: an editor stopped right after leaves no
+  ;; task that never had it.
+  (romacs-agent-launch-tests--with
+    (let ((poll (cadr (romacs-agent-tools--started child (lambda () 'answered) t))))
+      ;; Attached, idle, the brief not yet journaled back: no answer yet.
+      (setf (romacs-agent-state child) 'idle)
+      (should-not (funcall poll))
+      ;; Had: answered.
+      (setf (romacs-agent-input-seq child) 4)
+      (should (equal (funcall poll) '(answered))))))
+
 (ert-deftest romacs-agent-launch-each-failure-wakes-and-says-failed ()
   (romacs-agent-launch-tests--with
     ;; The first failure the delegate's caller had; a retry's fails again.

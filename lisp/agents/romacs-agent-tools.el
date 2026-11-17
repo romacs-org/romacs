@@ -915,12 +915,13 @@ with resume it goes on with that conversation of the instance's
                   (romacs-agent-start
                    cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
                    (gethash "title" arguments) provider (append start-options worktree))))
-         (answer (lambda (child)
+         (answer (lambda (child &optional prompted)
                    (romacs-agent-tools--started
                     child (lambda ()
                             (if (equal (gethash "mode" arguments) "wait")
                                 (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
-                              (romacs-agent-tools--task child))))))
+                              (romacs-agent-tools--task child)))
+                    prompted)))
          (known (and request (romacs-agent-requested parent request))))
     (cond (known (funcall answer known))
           ((gethash "resume" arguments)
@@ -928,8 +929,9 @@ with resume it goes on with that conversation of the instance's
           ((equal (gethash "isolation" arguments) "worktree")
            ;; A child that cannot start leaves no worktree behind.
            (romacs-agent--start-instance provider)
-           (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start) answer))
-          (t (funcall answer (funcall start cwd))))))
+           (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start)
+                                         (lambda (child) (funcall answer child t))))
+          (t (funcall answer (funcall start cwd) t)))))
 
 (defun romacs-agent-tools--own (session caller what)
   "SESSION, when CALLER delegated it (a caller that is no agent session
@@ -1185,11 +1187,13 @@ sessions' own on disk: a restarted server lists them all."
                               (sort tasks (lambda (a b) (> (or (romacs-agent-last-time a) 0)
                                                            (or (romacs-agent-last-time b) 0)))))))))
 
-(defun romacs-agent-tools--started (child then)
+(defun romacs-agent-tools--started (child then &optional prompted)
   "A deferred answer: THEN's, once CHILD's supervisor is attached (or a
-per-turn harness, which has none between turns, is created); the call's
-failure when it never started, an end then answered, so it wakes no one
-besides."
+per-turn harness, which has none between turns, is created), and, when
+PROMPTED (a task started with its brief), once its supervisor has the
+brief: an editor stopped right after leaves no task that never had it.
+The call's failure when it never started, an end then answered, so it
+wakes no one besides."
   (let ((next nil))
     (romacs-mcp-defer
      (lambda ()
@@ -1198,8 +1202,9 @@ besides."
               (romacs-agent-tools--answer child (romacs-agent-done-seq child))
               (user-error "Task %s (%s) did not start: %s" (romacs-agent-id child) (romacs-agent-title child)
                           (romacs-agent-reply child)))
-             ((or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
-                  (not (eq (romacs-agent-state child) 'starting)))
+             ((and (or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
+                       (not (eq (romacs-agent-state child) 'starting)))
+                   (or (not prompted) (romacs-agent--per-turn-p child) (romacs-agent-input-seq child)))
               (let ((value (funcall then)))
                 (if (eq (car-safe value) 'romacs-mcp--deferred)
                     (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
