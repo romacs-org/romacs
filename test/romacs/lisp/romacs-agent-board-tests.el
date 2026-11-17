@@ -156,18 +156,17 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (should (= (string-width line) 60))
       (should (string-search "claude · opus" line)))))
 
-;;; Keys, on the board's buffer (the layer is the popup's)
+;;; Keys, on the board's buffer
 
 (defmacro romacs-agent-board-tests--board (&rest body)
-  "BODY in the board's buffer, drawn, with `romacs-popup-show' and
-`romacs-popup-then' recorded instead of shown or deferred."
+  "BODY in the board's buffer, drawn 100 columns wide, with the chats
+`romacs-agent-show' would show recorded in `shown', each (SESSION ACTION)."
   (declare (indent 0))
-  `(let ((then nil))
+  `(let ((shown nil))
      (with-temp-buffer
        (romacs-agent-board-mode)
-       (cl-letf (((symbol-function 'romacs-popup-show) #'ignore)
-                 ((symbol-function 'romacs-popup-then) (lambda (function) (push function then)))
-                 ((symbol-function 'romacs-agent-board--columns) (lambda () 100)))
+       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action) (push (list session action) shown)))
+                 ((symbol-function 'romacs-agent-board--columns) (lambda (_) 100)))
          (romacs-agent-board--redraw)
          ,@body))))
 
@@ -225,13 +224,9 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (romacs-agent-board-close-fold)
         (should (equal (romacs-agent-board-tests--ids (romacs-agent-board--shown-rows)) '("/p/one" "lead")))
         (should (equal (romacs-agent-board-tests--at) "lead"))
-        ;; RET opens its chat, in the user's window, after the board hides.
+        ;; RET opens its chat in the board's window.
         (romacs-agent-board-open)
-        (should (= (length then) 1))
-        (let ((shown nil))
-          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq shown session))))
-            (funcall (car then)))
-          (should (eq shown lead)))))))
+        (should (equal shown (list (list lead '(display-buffer-same-window)))))))))
 
 (ert-deftest romacs-agent-board-keys-open-what-is-there ()
   (romacs-agent-board-tests--with
@@ -241,14 +236,14 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
         (goto-char (point-min))
         (romacs-agent-board-next 1)
         (romacs-agent-board-open)
-        (should (= (length then) 1))
+        (should (= (length shown) 1))
         ;; A thread no longer known: the board is drawn again.
         (remhash "a" romacs-agent--sessions)
         (romacs-agent-board-next 1)
         (should (eq (plist-get (romacs-agent-board--row) :session) a))
         (should-error (romacs-agent-board-open) :type 'user-error)
         (should-not (romacs-agent-board--shown-rows))
-        (should (= (length then) 1))))))
+        (should (= (length shown) 1))))))
 
 (ert-deftest romacs-agent-board-keys-approve ()
   (romacs-agent-board-tests--with
@@ -265,7 +260,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (romacs-agent-board-next 1)
           (romacs-agent-board-approve)
           (should (= (length answered) 1))
-          (should (= (length then) 1)))))))
+          (should (= (length shown) 1)))))))
 
 (ert-deftest romacs-agent-board-filter-follows-typing ()
   (romacs-agent-board-tests--with
@@ -285,7 +280,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   (romacs-agent-board-tests--with
     (mk "a" "a" 'idle 10)
     (let ((drawn 0))
-      (cl-letf (((symbol-function 'romacs-agent-board--show) (lambda (_) (cl-incf drawn))))
+      (cl-letf (((symbol-function 'romacs-agent-board--render) (lambda (&rest _) (cl-incf drawn))))
         (cl-letf (((symbol-function 'romacs-agent-board--shown) #'ignore))
           (run-hooks 'romacs-agent-ui-changed-hook))
         (should (= drawn 0))
@@ -367,26 +362,6 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
             (romacs-agent-board--tick))
           (should-not romacs-agent-board--ticker))))))
 
-(ert-deftest romacs-agent-board-preview-shows-the-last-reply ()
-  (romacs-agent-board-tests--with
-    (mk "a" "Port the theme" 'idle 10 :reply "The switcher is **done**.")
-    (mk "b" "Quiet" 'idle 20)
-    (romacs-agent-board-tests--board
-      (let ((shown nil) (hidden 0))
-        (cl-letf (((symbol-function 'romacs-agent-board--preview-place) (lambda () '(400 10 40 12)))
-                  ((symbol-function 'romacs-popup-show) (lambda (kind buffer &rest args) (push (list kind buffer args) shown)))
-                  ((symbol-function 'romacs-popup-hide) (lambda (_) (cl-incf hidden))))
-          (romacs-agent-board--preview)
-          (should (eq (car (car shown)) 'card))
-          (should (equal (plist-get (nth 2 (car shown)) :anchor) '(400 . 10)))
-          (with-current-buffer (nth 1 (car shown))
-            (should (string-search "Port the theme" (buffer-string)))
-            (should (string-search "The switcher is" (buffer-string))))
-          ;; A thread with nothing to say: no card.
-          (romacs-agent-board-next 1)
-          (romacs-agent-board--preview)
-          (should (= hidden 1)))))))
-
 (ert-deftest romacs-agent-board-says-few-words ()
   (romacs-agent-board-tests--with
     (mk "a" "a" 'waiting-approval 10 :driver-state '(:asks ("r")))
@@ -395,10 +370,37 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
       (goto-char (point-min))
       (should (equal (buffer-substring-no-properties (point) (line-end-position)) "Agents"))
       (goto-char (point-max))
-      (should (string-search "? keys" (buffer-substring-no-properties (line-beginning-position) (point-max))))
-      (romacs-agent-board-keys)
-      (should (string-search "Thread" (buffer-string)))
-      (should (string-search "settle finished" (buffer-string))))))
+      (should (string-search "? keys" (buffer-substring-no-properties (line-beginning-position) (point-max)))))))
+
+;;; In a window
+
+(ert-deftest romacs-agent-board-shows-in-the-selected-window ()
+  ;; A buffer of its own in the selected window, as wide as it; drawn again,
+  ;; each window keeps the row at its point and at its start.
+  (romacs-agent-board-tests--with
+    (dotimes (i 40) (mk (format "s%02d" i) (format "thread %d" i) 'idle (* 10 (1+ i))))
+    (cl-letf (((symbol-function 'romacs-agent-know-sessions) #'ignore)
+              ((symbol-function 'romacs-agent-history-list) #'ignore)
+              ((symbol-function 'romacs-agent-history-items) #'ignore))
+      (save-window-excursion
+        (delete-other-windows)
+        (unwind-protect
+            (progn
+              (romacs-agents)
+              (should (eq (window-buffer) (get-buffer "*romacs-agents*")))
+              (should (derived-mode-p 'romacs-agent-board-mode))
+              (should (= romacs-agent-board--width (- (window-body-width) 3)))
+              (romacs-agent-board-next 30)
+              (set-window-start nil (save-excursion (forward-line -10) (point)))
+              (let ((at (plist-get (romacs-agent-board--row) :id))
+                    (start (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))))
+                ;; A newer thread lands above both.
+                (mk "new" "new" 'idle 1)
+                (romacs-agent-board--render (current-buffer))
+                (should (equal (plist-get (romacs-agent-board--row) :id) at))
+                (should (equal (save-excursion (goto-char (window-start)) (plist-get (romacs-agent-board--row) :id))
+                               start))))
+          (kill-buffer "*romacs-agents*"))))))
 
 (provide 'romacs-agent-board-tests)
 (ert-deftest romacs-agent-board-a-folded-project-shows-its-heading ()
@@ -487,10 +489,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
           (romacs-agent-board-next 1)
           (should (plist-get (romacs-agent-board--row) :folded))
           (romacs-agent-board-open)
-          (let ((shown nil))
-            (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq shown session))))
-              (funcall (car then)))
-            (should (equal (romacs-agent-id shown) "a")))
+          (should (equal (romacs-agent-id (car (car shown))) "a"))
           ;; Filtered, both projects show their threads; S-TAB twice folds
           ;; then shows, as kept, and TAB on a kept-folded one shows it.
           (setq romacs-agent-board--words '("a"))

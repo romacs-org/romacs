@@ -243,14 +243,12 @@ affixation it saw pushed on the list in cell ASKED."
       (with-temp-buffer
         (insert (propertize "row\n" 'romacs-agent-board-row (list :kind 'project :cwd (directory-file-name sub))))
         (goto-char (point-min))
-        ;; The board hides first; then the prompt, where the user was.
-        (cl-letf (((symbol-function 'romacs-popup-then) #'funcall))
-          (romacs-agent-board-new)
-          (should (equal offered sub))
-          (should started)
-          ;; Off every section: the current project's.
-          (goto-char (point-max))
-          (romacs-agent-board-new))
+        (romacs-agent-board-new)
+        (should (equal offered sub))
+        (should started)
+        ;; Off every section: the current project's.
+        (goto-char (point-max))
+        (romacs-agent-board-new)
         (should (equal offered (expand-file-name "repository/" root))))
       (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)

@@ -83,30 +83,41 @@ taking keys, and `home', the window the user was in."
     (should (eq (romacs-popup--menu-command [tab] map) #'forward-char))
     (should-not (romacs-popup--menu-command [f5] map))))
 
-(ert-deftest romacs-popup-keys-then-runs-where-the-user-was ()
+(ert-deftest romacs-popup-keys-a-shown-buffer-goes-where-the-user-was ()
+  ;; A command of the menu shows another buffer: in the user's window, the
+  ;; menu hidden; its own buffer stays in the menu.
   (romacs-popup-keys-tests--with
-    (let ((where nil))
-      (cl-letf (((symbol-function 'romacs-popup-keys-tests--down)
-                 (lambda () (interactive)
-                   (romacs-popup-then (lambda () (setq where (list (selected-window) romacs-popup--keys-buffer)))))))
-        (romacs-popup--menu-key (kbd "n")))
-      (should (equal where (list home nil)))
-      (should (equal hidden (list menu))))))
+    (let ((other (generate-new-buffer " *other*")) (where nil))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'romacs-popup-keys-tests--down)
+                       (lambda () (interactive) (setq where (display-buffer menu)))))
+              (romacs-popup--menu-key (kbd "n")))
+            (should (eq where window))
+            (should-not hidden)
+            (cl-letf (((symbol-function 'romacs-popup-keys-tests--down)
+                       (lambda () (interactive) (pop-to-buffer other) (setq where (selected-window)))))
+              (romacs-popup--menu-key (kbd "n")))
+            (should (eq where home))
+            (should (eq (window-buffer home) other))
+            (should (equal hidden (list menu)))
+            (should-not romacs-popup--keys-buffer))
+        (kill-buffer other)))))
 
-(ert-deftest romacs-popup-keys-then-outside-the-menu-runs-now ()
-  ;; A menu's command run with no menu taking keys (its buffer shown in a
-  ;; window of its own): what it would have run after the menu hid runs
-  ;; now, never left waiting for a menu key that does not come.
-  (let ((ran nil) (romacs-popup--keys-then nil))
-    (romacs-popup-then (lambda () (setq ran t)))
-    (should ran)
-    (should-not romacs-popup--keys-then)))
+(ert-deftest romacs-popup-keys-quit-window-hides ()
+  (romacs-popup-keys-tests--with
+    (with-current-buffer menu
+      (use-local-map (let ((map (make-sparse-keymap))) (define-key map "q" #'quit-window) map)))
+    (romacs-popup--menu-key (kbd "q"))
+    (should (equal hidden (list menu)))
+    (should (eq (window-buffer window) menu))
+    (should-not romacs-popup--keys-buffer)))
 
-(ert-deftest romacs-popup-keys-the-hook-follows-each-key ()
+(ert-deftest romacs-popup-keys-its-post-command-hook-follows-each-key ()
   (romacs-popup-keys-tests--with
     (let ((seen nil))
       (with-current-buffer menu
-        (add-hook 'romacs-popup-key-hook (lambda () (push (point) seen)) nil t))
+        (add-hook 'post-command-hook (lambda () (push (point) seen)) nil t))
       (romacs-popup--menu-key (kbd "n"))
       (romacs-popup--menu-key (kbd "n"))
       (should (equal seen '(9 5))))))
