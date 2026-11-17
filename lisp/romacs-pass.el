@@ -49,6 +49,7 @@
 (defvar warm-restart-blocker-functions)
 (defvar yank-menu)
 (declare-function romacs-pass "romacs-pass-menu" ())
+(declare-function romacs-usage-log-note "romacs-usage-log" (kind &rest plist))
 
 (defgroup romacs-pass nil
   "Passwords in the password store, pass(1)'s."
@@ -112,14 +113,38 @@ value its definition gives it: PASSWORD_STORE_DIR, or ~/.password-store."
 
 ;;;; Decryption
 
+(defvar romacs-pass-slow-decrypt-seconds 1.0
+  "Seconds from gpg's start to its answer that put a decryption on record.
+The usage log then gets {\"kind\":\"pass-decrypt\",\"ms\":MS,
+\"output_ms\":O,\"status\":S,\"t\":T}: MS from the start to the
+sentinel that answers, O to gpg's first output (absent when it wrote
+none), S \"ok\" or \"failed\", T when it answered, as `float-time'
+reads, to join with the log's stall records.  O is gpg's own time,
+gpg-agent's and pinentry's included; MS - O is the time its answer
+waited for the main VM.  The entry is not named.")
+
+(defun romacs-pass--note-decrypt (start output answered ok)
+  "Put a decryption on the usage log's record if it was slow.
+START, OUTPUT (gpg's first output, or nil) and ANSWERED are `float-time'
+readings; OK whether gpg succeeded.  See `romacs-pass-slow-decrypt-seconds'."
+  (when (and (>= (- answered start) romacs-pass-slow-decrypt-seconds)
+             (fboundp 'romacs-usage-log-note))
+    (apply #'romacs-usage-log-note "pass-decrypt"
+           :ms (round (* 1000 (- answered start)))
+           (append (and output (list :output_ms (round (* 1000 (- output start)))))
+                   (list :status (if ok "ok" "failed") :t answered)))))
+
 (defun romacs-pass--gpg (entry done)
   "Start gpg decrypting ENTRY and return its process.
 DONE is called with the text, decoded, and nil when gpg succeeds, or
 with nil and gpg's own message when it fails; the text is DONE's own.
 gpg asks gpg-agent for the key, which asks for its passphrase through
 the configured pinentry.  This is the one place that decrypts an
-entry."
+entry; a slow one goes on the usage log's record
+\(`romacs-pass-slow-decrypt-seconds')."
   (let ((file (romacs-pass--file entry))
+        (start (float-time))
+        (output nil)
         (chunks nil)
         (errors (generate-new-buffer " *romacs-pass gpg*")))
     (unless (file-readable-p file)
@@ -129,7 +154,9 @@ entry."
      :name "romacs-pass-gpg"
      :command (list epg-gpg-program "--batch" "--quiet" "--decrypt" "--" file)
      :connection-type 'pipe :coding 'binary :noquery t :buffer nil :stderr errors
-     :filter (lambda (_process chunk) (push chunk chunks))
+     :filter (lambda (_process chunk)
+               (unless output (setq output (float-time)))
+               (push chunk chunks))
      :sentinel
      (lambda (process _event)
        (unless (process-live-p process)
@@ -139,13 +166,18 @@ entry."
            (mapc #'clear-string chunks)
            (setq chunks nil)
            (romacs-pass--kill-buffer errors)
-           (if (and (eq (process-status process) 'exit) (zerop (process-exit-status process)))
+           (romacs-pass--note-decrypt start output (float-time) (romacs-pass--succeeded-p process))
+           (if (romacs-pass--succeeded-p process)
                (let ((text (decode-coding-string raw 'utf-8)))
                  (clear-string raw)
                  (funcall done text nil))
              (clear-string raw)
              (funcall done nil (format "gpg could not decrypt %s%s" entry
                                        (if (string-empty-p (or why "")) "" (concat ": " why)))))))))))
+
+(defun romacs-pass--succeeded-p (process)
+  "Whether PROCESS, ended, exited with status 0."
+  (and (eq (process-status process) 'exit) (zerop (process-exit-status process))))
 
 (defun romacs-pass--kill-buffer (buffer)
   "Kill BUFFER and the stderr pipe still reading into it, asking nothing."
@@ -157,7 +189,8 @@ entry."
 (defun romacs-pass-with-entry (entry function)
   "Call FUNCTION with ENTRY's decrypted text once gpg has it, then wipe it.
 Return at once: gpg runs, and its passphrase prompt waits, without
-blocking.  A failure is reported in the echo area."
+blocking; the echo area says so meanwhile.  A failure is reported there."
+  (message "Decrypting %s..." entry)
   (romacs-pass--gpg entry (lambda (text why)
                             (if (null text)
                                 (message "%s" why)
@@ -438,6 +471,9 @@ is replaced, after confirmation."
 
 (defvar-local romacs-pass--edited nil "The entry the buffer edits.")
 
+(defvar-local romacs-pass--decrypting nil
+  "The gpg process decrypting the entry, while the buffer waits for it.")
+
 (defvar-keymap romacs-pass-edit-mode-map
   "C-c C-c" #'romacs-pass-edit-save
   "C-c C-k" #'romacs-pass-edit-cancel)
@@ -454,42 +490,102 @@ by a session image."
   (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-pass--secret)
   (add-hook 'kill-buffer-hook #'romacs-pass--wipe-buffer nil t)
   (add-hook 'warm-restart-blocker-functions #'romacs-pass--restart-blocker nil t)
-  (setq header-line-format
-        (substitute-command-keys
-         "\\<romacs-pass-edit-mode-map>\\[romacs-pass-edit-save] store  \\[romacs-pass-edit-cancel] cancel")))
+  (setq header-line-format (romacs-pass--edit-header)))
+
+(defun romacs-pass--edit-header ()
+  "The header line of a buffer editing an entry."
+  (substitute-command-keys
+   "\\<romacs-pass-edit-mode-map>\\[romacs-pass-edit-save] store  \\[romacs-pass-edit-cancel] cancel"))
+
+(defvar-keymap romacs-pass-decrypting-mode-map
+  :doc "Keys of a buffer waiting for its entry's text: C-g stops the wait."
+  "<remap> <keyboard-quit>" #'romacs-pass-edit-cancel)
+
+(define-minor-mode romacs-pass-decrypting-mode
+  "A buffer that will edit an entry waits for gpg to decrypt it.
+It is empty and read-only meanwhile; \\[keyboard-quit] kills it and stops gpg."
+  :lighter nil
+  (setq buffer-read-only romacs-pass-decrypting-mode))
 
 ;;;###autoload
 (defun romacs-pass-edit (entry)
   "Edit ENTRY in a buffer, created if the store lacks it.
-A buffer already editing ENTRY with changes is shown as it is."
+The buffer shows at once; an existing entry's text fills it when gpg
+answers, and until then \\[keyboard-quit] or
+\\<romacs-pass-edit-mode-map>\\[romacs-pass-edit-cancel] stops gpg.
+A buffer already editing ENTRY, with changes or still waiting, is
+shown as it is."
   (interactive (list (romacs-pass-read-entry "Edit entry: " t)))
   (let ((buffer (get-buffer (romacs-pass--edit-name entry))))
-    (cond ((and buffer (buffer-modified-p buffer)) (pop-to-buffer buffer))
-          ((romacs-pass-entry-p entry)
-           (romacs-pass-with-entry entry (lambda (text) (romacs-pass--edit-buffer entry text))))
-          (t (romacs-pass--edit-buffer entry "")))))
+    (pop-to-buffer
+     (cond ((and buffer (or (buffer-modified-p buffer)
+                            (buffer-local-value 'romacs-pass--decrypting buffer)))
+            buffer)
+           ((romacs-pass-entry-p entry) (romacs-pass--edit-decrypting entry))
+           (t (romacs-pass--edit-fill (romacs-pass--edit-buffer entry) ""))))))
 
 (defun romacs-pass--edit-name (entry)
   "The name of the buffer editing ENTRY."
   (format "*pass: %s*" entry))
 
-(defun romacs-pass--edit-buffer (entry text)
-  "Show a buffer editing ENTRY, holding a copy of TEXT."
+(defun romacs-pass--edit-buffer (entry)
+  "An empty buffer editing ENTRY."
   (let ((buffer (get-buffer-create (romacs-pass--edit-name entry))))
     (with-current-buffer buffer
       (romacs-pass-edit-mode)
-      (let ((inhibit-read-only t)) (erase-buffer) (insert text))
-      (setq romacs-pass--edited entry
-            buffer-undo-list nil)
-      (set-buffer-modified-p nil)
-      (goto-char (point-min)))
-    (pop-to-buffer buffer)))
+      (let ((inhibit-read-only t)) (erase-buffer))
+      (setq romacs-pass--edited entry))
+    buffer))
+
+(defun romacs-pass--edit-fill (buffer text)
+  "Put a copy of TEXT in BUFFER, editing its entry from the start; BUFFER.
+Which window shows it is left as it is."
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t)) (erase-buffer) (insert text))
+    (setq buffer-undo-list nil)
+    (set-buffer-modified-p nil)
+    (goto-char (point-min)))
+  buffer)
+
+(defun romacs-pass--edit-decrypting (entry)
+  "A buffer editing ENTRY that waits for gpg, and fills when it answers."
+  (let ((buffer (romacs-pass--edit-buffer entry)))
+    (with-current-buffer buffer
+      (romacs-pass-decrypting-mode 1)
+      (setq header-line-format
+            (concat "Decrypting " entry "...  "
+                    (substitute-command-keys
+                     ;; C-g is named from the global map: here it is remapped.
+                     "\\<global-map>\\[keyboard-quit] or \\<romacs-pass-edit-mode-map>\\[romacs-pass-edit-cancel] stops")))
+      (condition-case err
+          (setq romacs-pass--decrypting
+                (romacs-pass--gpg entry (lambda (text why) (romacs-pass--edit-decrypted buffer text why))))
+        (error (kill-buffer buffer)
+               (signal (car err) (cdr err)))))
+    buffer))
+
+(defun romacs-pass--edit-decrypted (buffer text why)
+  "Fill BUFFER with TEXT, gpg's answer, or kill it and say WHY gpg failed.
+A buffer killed meanwhile, its gpg stopped, takes nothing and says
+nothing.  TEXT is wiped."
+  (unwind-protect
+      (when (and (buffer-live-p buffer) (buffer-local-value 'romacs-pass--decrypting buffer))
+        (if (null text)
+            (progn (kill-buffer buffer) (message "%s" why))
+          (with-current-buffer buffer
+            (setq romacs-pass--decrypting nil)
+            (romacs-pass-decrypting-mode -1)
+            (setq header-line-format (romacs-pass--edit-header)))
+          (romacs-pass--edit-fill buffer text)))
+    (when text (clear-string text))))
 
 (defun romacs-pass-edit-save ()
   "Store the buffer's text as its entry, and kill the buffer.
 The buffer is read-only while pass stores it, so what is stored is
 what it shows."
   (interactive nil romacs-pass-edit-mode)
+  (when romacs-pass--decrypting
+    (user-error "%s is still being decrypted" romacs-pass--edited))
   (let ((buffer (current-buffer))
         (entry romacs-pass--edited)
         (text (buffer-substring-no-properties (point-min) (point-max))))
@@ -509,12 +605,18 @@ what it shows."
     (setq buffer-read-only t)))
 
 (defun romacs-pass-edit-cancel ()
-  "Kill the buffer, leaving its entry unchanged."
+  "Kill the buffer, leaving its entry unchanged, and stop a gpg it waits for."
   (interactive nil romacs-pass-edit-mode)
   (kill-buffer))
 
 (defun romacs-pass--wipe-buffer ()
-  "Empty the buffer and its undo list before it is killed."
+  "Stop the gpg the buffer waits for, if any, then empty the buffer and its
+undo list before it is killed."
+  ;; The buffer stops waiting first: its gpg's sentinel may run as gpg is
+  ;; deleted, and must then find nothing to fill and nothing to report.
+  (let ((process romacs-pass--decrypting))
+    (setq romacs-pass--decrypting nil)
+    (when (process-live-p process) (delete-process process)))
   (let ((inhibit-read-only t)) (erase-buffer))
   (setq buffer-undo-list t))
 
