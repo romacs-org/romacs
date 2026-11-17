@@ -272,7 +272,10 @@ editor the import is the writer's (`romacs-agent-events--import-queued'):
 then `queued', and what waits for it (`romacs-agent-events-then') runs
 once it is done."
   (when (and romacs-agent-events-store (romacs-agent-dir session) (not (romacs-agent-events-p session))
-             (romacs-agent-events--db)
+             ;; Queued, the writer makes the store before it imports or
+             ;; marks: one not made yet (a first start) holds nothing up,
+             ;; and no supervisor starts on a journal meanwhile.
+             (or (romacs-agent-writer-queued-p) (romacs-agent-events--db))
              (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
              ;; A worker writing it meanwhile: it stays in its journal, and
              ;; the editor finds that journal grown when it would flip it.

@@ -609,4 +609,25 @@ turns, and its journal's file; a state root of its own."
      0 (lambda (_session _journal)
          (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 2))))))
 
+(ert-deftest romacs-agent-events-own-before-the-store-is-made ()
+  ;; A first start: the editor's writes are the writer's, the store not
+  ;; made yet, so not open to read.  A session launched then is still
+  ;; the store's: marked imported, its supervisor given the store, never
+  ;; left writing a journal.
+  (let* ((dir (make-temp-file "romacs-own-" t))
+         (session (romacs-agent--make :id "0a0a0a0a-1111-4222-8333-444455556666" :dir dir))
+         (romacs-agent-events-store t)
+         (romacs-agent-events--imported (make-hash-table :test #'equal))
+         (romacs-agent-events--migrating (make-hash-table :test #'equal))
+         (writes nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-writer-queued-p) (lambda () t))
+                  ((symbol-function 'romacs-agent-events--db) (lambda () nil))
+                  ((symbol-function 'romacs-agent-host-socket) (lambda (_) nil))
+                  ((symbol-function 'romacs-agent-write) (lambda (function args &rest _) (push (cons function args) writes) 'queued)))
+          (should (romacs-agent-events-own session))
+          (should (romacs-agent-events-p session))
+          (should (equal writes (list (list 'romacs-agent-events--mark (romacs-agent-id session))))))
+      (delete-directory dir t))))
+
 ;;; romacs-agent-events-tests.el ends here
