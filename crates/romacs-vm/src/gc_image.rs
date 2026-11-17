@@ -48,7 +48,7 @@ impl Vm {
     /// obarrays of their own, which a permanent obarray or list may hold
     /// untraced. Of the image's functions, which a permanent closure names
     /// untraced, it reads those changed since the restore; every other
-    /// starts reached in CODE_MARKS, as an old one does to a minor, and of
+    /// starts reached in the code marks, as an old one does to a minor, and of
     /// it only the lowered code made since is read.
     /// Whether there is an image: a process that restored none, as a
     /// builder, has nothing to read.
@@ -100,7 +100,7 @@ impl Vm {
         self.closures.make_permanent(|_| false);
         self.cells.make_permanent(|_| false);
         self.objects.make_permanent(remembered);
-        let holders = self.objects.iter().enumerate().filter(|&(_, object)| shares_storage(object)).map(|(i, _)| i as u32).collect();
+        let holders = self.objects.iter().enumerate().filter(|&(_, object)| shares_storage(object)).map(|(i, _)| u32::try_from(i).expect("an object's index fits a Value")).collect();
         self.functions.make_image(self.request_code.free_ids());
         let mut obarray_symbols: Vec<usize> = self.obarray_symbol_names.keys().copied().collect();
         obarray_symbols.sort_unstable();

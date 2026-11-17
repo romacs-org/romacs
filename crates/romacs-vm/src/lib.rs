@@ -1853,7 +1853,7 @@ impl Vm {
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
             gc_census: Default::default(),
-            world_image: Default::default(),
+            world_image: gc_image::WorldImage::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
