@@ -181,32 +181,19 @@ def scaling_lines(text):
     return [json.loads(line[len('SCALING '):]) for line in text.splitlines() if line.startswith('SCALING ')]
 
 
-def stderr_records(text):
-    """The JSON objects in TEXT, a session's stderr, wherever a line holds
-    them: another writer (a driver's thread, a report written a piece at a
-    time) can leave its line unended before one, which then follows it on
-    the same line."""
-    decoder = json.JSONDecoder()
-    for line in text.splitlines():
-        at = line.find('{"')
-        while at >= 0:
-            try:
-                record, end = decoder.raw_decode(line, at)
-            except json.JSONDecodeError:
-                at = line.find('{"', at + 1)
-                continue
-            if isinstance(record, dict):
-                yield record
-            at = line.find('{"', end)
-
-
 def step_paints(stderr_text):
     """Paints submitted after each step of a GUI probe: between its step mark
     and the next step mark, or the end mark for the last step.  Submission is
     the evaluator's layout of the step, the work counted; the render
     thread's completion (`paint') may land later under load."""
     counts, current = [], None
-    for record in stderr_records(stderr_text):
+    for line in stderr_text.splitlines():
+        if not line.startswith('{'):
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         mark = record.get('scaling')
         if mark == 'step':
             counts.append(0)

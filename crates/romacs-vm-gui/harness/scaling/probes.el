@@ -595,8 +595,11 @@ probe measures (`toasts-clear', `toasts-follow')."
   (when (fboundp 'romacs-layer-toast-clear) (romacs-layer-toast-clear)))
 
 (defun scaling--mark (plist)
-  "Append PLIST as a JSON line to stderr, among the host's paint diagnostics."
-  (write-region (concat (json-encode plist) "\n") nil "/dev/stderr" t 'silent))
+  "Append PLIST as a JSON line to stderr, among the host's paint diagnostics.
+It opens a line of its own: written on its own file description, outside
+the lock the host's writers share, it can follow a line another writer
+has not ended yet (its newline still to come), which would take it in."
+  (write-region (concat "\n" (json-encode plist) "\n") nil "/dev/stderr" t 'silent))
 
 (defun scaling--differences (readings)
   "The differences of consecutive READINGS as a vector, nil where one is nil."

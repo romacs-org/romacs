@@ -1,17 +1,19 @@
-//! Lines to stderr, each in one write. Unbuffered stderr takes a formatted
-//! line (`eprintln!`) a piece at a time, a syscall apiece, and another
-//! writer can come between the pieces: another thread, or Lisp's
-//! `write-region` to /dev/stderr (the harnesses' marks). A line written
-//! whole is never split by another, which the harnesses that read stderr
-//! line by line rely on.
+//! Lines to stderr, each handed over whole. Unbuffered stderr takes a
+//! formatted line (`eprintln!`) a piece at a time, a write apiece. The lock
+//! Rust's writers share keeps them apart, but a writer outside it, such as
+//! Lisp's `write-region` to /dev/stderr (the harnesses' marks, on their own
+//! file description) or C code, can come between the pieces. Handed over as
+//! one buffer, a line goes out in one write unless the kernel takes it in
+//! part: a pipe takes up to PIPE_BUF bytes whole, an append-only file each
+//! write whole, and `write_all` writes what a short write left.
 use std::io::Write;
 
-/// Write TEXT and a newline to stderr in one write.
+/// Write TEXT and a newline to stderr, handed over as one buffer.
 pub fn line(text: &str) {
     let _ = write_line(&mut std::io::stderr().lock(), text);
 }
 
-/// Write TEXT and a newline to OUT in one write.
+/// Write TEXT and a newline to OUT, handed over as one buffer.
 fn write_line(out: &mut impl Write, text: &str) -> std::io::Result<()> {
     let mut whole = Vec::with_capacity(text.len() + 1);
     whole.extend_from_slice(text.as_bytes());
