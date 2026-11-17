@@ -315,12 +315,26 @@ comment and string syntax, its summaries made by one parse to the end."
     (sqlite-close db)
     store))
 
+(defun scaling--store-read ()
+  "The agents' store made and read here, as in a home that has one: made
+by this process where its writes are its own (a batch one), else by the
+writer, waited for; an error when it does not read within half a minute."
+  (unless (romacs-agent-writer-queued-p) (romacs-agent-store--made))
+  (let ((deadline (+ (float-time) 30)))
+    (while (and (not (romacs-agent-events--db)) (< (float-time) deadline))
+      (accept-process-output nil 0.05)))
+  (unless (romacs-agent-events--db) (error "The agents' store did not read within half a minute")))
+
 ;; A chat of N characters over a fixed 100 turns.
 (defun scaling--big-chat (n)
   (scaling--agent)
   (let ((session (romacs-agent--make :id "scaling-big-chat" :harness 'claude :provider "claude" :title "big"
                                      :dir temporary-file-directory))
         (reply (concat (make-string (max 1 (/ n 100)) ?x) "\n")))
+    ;; The store read first, as in a home that has one: the chat is drawn
+    ;; from it at once, and not again once its records have moved there,
+    ;; over the transcript drawn below and while a scenario measures it.
+    (scaling--store-read)
     (romacs-agent-show session)
     (dotimes (i 100)
       (let ((seq (* 10 i)) (id (format "m%d" i)))
