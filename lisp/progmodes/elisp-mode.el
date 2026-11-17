@@ -789,9 +789,8 @@ be used instead.
 (defun elisp--font-lock-flush-elisp-buffers (&optional file)
   ;; We're only ever called from after-load-functions, load-in-progress can
   ;; still be t in case of nested loads.
-  (when (or (not load-in-progress) file)
-    ;; FIXME: If the loaded file did not define any macros, there shouldn't
-    ;; be any need to font-lock-flush all the Elisp buffers.
+  (when (and (or (not load-in-progress) file)
+             (elisp--load-defined-macro-p file))
     (dolist (buf (buffer-list))
       (with-current-buffer buf
         (when (and (derived-mode-p 'emacs-lisp-mode)
@@ -800,6 +799,18 @@ be used instead.
           ;; So as to take into account new macros that may have been defined
           ;; by the just-loaded file.
 	  (font-lock-flush))))))
+
+(defun elisp--load-defined-macro-p (file)
+  "Whether loading FILE defined a macro, as its `load-history' entry says.
+An Elisp buffer's faces depend on which names are macros, so a load that
+defined none leaves them as they were.  Without FILE, or an entry for it,
+assume it did."
+  (let ((entry (and file (assoc file load-history))))
+    (or (null entry)
+        (let (found)
+          (dolist (item (cdr entry) found)
+            (when (and (eq (car-safe item) 'defun) (macrop (cdr item)))
+              (setq found t)))))))
 
 ;;; Completion at point for Elisp
 
