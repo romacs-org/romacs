@@ -253,7 +253,7 @@ fn image_loaded_boolean_can_be_promoted_and_locals_cannot_be_published() {
         .unwrap();
     let entry = source.compile_source("nil").unwrap();
     let key = source.publish_code_image(&store, entry, [83; 32]).unwrap();
-    let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+    let image = ImageRegion::open(&store, &key).unwrap();
     let (mut loaded, _) = Vm::from_code_image(image, [83; 32]).unwrap();
     assert_eq!(
         shown(

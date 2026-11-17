@@ -2,7 +2,7 @@
 //! Indices are typed, never process pointers. Authenticated regions precede access.
 use super::*;
 use sha2::{Digest, Sha256};
-use std::{fs::File, os::fd::AsRawFd, path::Path, sync::Arc};
+use std::{fs::File, path::Path, sync::Arc};
 const PAGE: usize = 4096;
 const MANIFEST: &[u8; 8] = b"VM2PAGE1";
 struct PageIntegrity {
@@ -20,21 +20,23 @@ fn content_key(bytes: &[u8]) -> String {
     }
     key
 }
-unsafe extern "C" {
-    fn mmap(
-        addr: *mut std::ffi::c_void,
-        len: usize,
-        prot: i32,
-        flags: i32,
-        fd: i32,
-        offset: i64,
-    ) -> *mut std::ffi::c_void;
-    fn munmap(addr: *mut std::ffi::c_void, len: usize) -> i32;
-    fn madvise(addr: *mut std::ffi::c_void, len: usize, advice: i32) -> i32;
+/// The bytes of an image: a store entry mapped read-only and copy-on-write,
+/// or bytes the caller handed over (`from_bytes`).
+enum Bytes {
+    Mapped(memmap2::Mmap),
+    Owned(Box<[u8]>),
+}
+impl std::ops::Deref for Bytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Bytes::Mapped(map) => map,
+            Bytes::Owned(bytes) => bytes,
+        }
+    }
 }
 pub struct ImageRegion {
-    ptr: *const u8,
-    bytes: usize,
+    data: Bytes,
     offset: usize,
     legacy_fixnums: bool,
     len: usize,
@@ -43,39 +45,25 @@ pub struct ImageRegion {
     integrity: Option<PageIntegrity>,
     pub(super) symbol_slots: std::sync::atomic::AtomicUsize,
 }
-unsafe impl Send for ImageRegion {}
-unsafe impl Sync for ImageRegion {}
-impl Drop for ImageRegion {
-    fn drop(&mut self) {
-        unsafe {
-            munmap(self.ptr as *mut _, self.bytes);
-        }
-    }
-}
 impl ImageRegion {
-    /// # Safety
-    /// The backing inode must not change or be truncated for the mapping's lifetime.
-    pub unsafe fn map(file: &File) -> Result<Arc<Self>> {
-        unsafe { Self::map_inner(file, None) }
+    /// An image from BYTES, validated whole before it is returned: every
+    /// edge and string is checked, as no page manifest vouches for them.
+    ///
+    /// # Errors
+    /// A malformed header, record, string or edge.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Arc<Self>> {
+        Self::new(Bytes::Owned(bytes.into_boxed_slice()), None)
     }
-    unsafe fn map_inner(file: &File, integrity: Option<PageIntegrity>) -> Result<Arc<Self>> {
+    fn new(data: Bytes, integrity: Option<PageIntegrity>) -> Result<Arc<Self>> {
         if !cfg!(target_endian = "little") {
             return Err("image ABI requires little endian".into());
         }
-        // HOST(metadata): the code-image store, reached only through the vm2 adapter's --image,
-        // --code-image and --cache-store; world builds refuse images (M1)
-        let bytes = usize::try_from(file.metadata().map_err(|e| e.to_string())?.len())
-            .map_err(|_| "image too large")?;
+        let bytes = data.len();
         if bytes == 0 || bytes > isize::MAX as usize {
             return Err("empty or oversized image".into());
         }
-        let ptr = unsafe { mmap(std::ptr::null_mut(), bytes, 1, 2, file.as_raw_fd(), 0) };
-        if ptr as isize == -1 {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
         let mut image = Self {
-            ptr: ptr.cast(),
-            bytes,
+            data,
             offset: 0,
             legacy_fixnums: true,
             len: bytes / 16,
@@ -85,9 +73,6 @@ impl ImageRegion {
             symbol_slots: std::sync::atomic::AtomicUsize::new(0),
         };
         let result: Result<()> = (|| {
-            if image.integrity.is_some() && unsafe { madvise(image.ptr as *mut _, bytes, 1) } != 0 {
-                return Err(std::io::Error::last_os_error().to_string());
-            }
             image.verify(0, bytes.min(64))?;
             let data = image.data();
             if data.starts_with(MAGIC) || data.starts_with(LEGACY_MAGIC) {
@@ -158,12 +143,16 @@ impl ImageRegion {
         Ok(Arc::new(image))
     }
     fn data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr, self.bytes) }
+        &self.data
     }
     /// Content lookup is exact and fails closed; it never boots from source.
-    /// # Safety
-    /// Store entries must remain immutable, including against other processes.
-    pub unsafe fn open(store: &Path, key: &str) -> Result<Arc<Self>> {
+    /// Pages are mapped, not read: each is checked against the manifest's
+    /// hash the first time it is accessed.
+    ///
+    /// # Errors
+    /// A malformed key, a missing or tampered entry or manifest, a length
+    /// the manifest does not vouch for, or a header that fails validation.
+    pub fn open(store: &Path, key: &str) -> Result<Arc<Self>> {
         if key.len() != 64
             || !key
                 .bytes()
@@ -175,15 +164,19 @@ impl ImageRegion {
             // HOST(std::fs): the code-image store, reached only through the vm2 adapter's --image,
             // --code-image and --cache-store; world builds refuse images (M1)
             std::fs::read(store.join(format!("{key}.pages"))).map_err(|e| e.to_string())?;
-        if content_key(&manifest) != key || manifest.len() < 16 || &manifest[..8] != MANIFEST {
+        let header = manifest
+            .split_first_chunk::<8>()
+            .and_then(|(magic, rest)| Some((magic, rest.split_first_chunk::<8>()?)));
+        let Some((magic, (size, hashes))) = header else {
+            return Err("image page manifest hash mismatch".into());
+        };
+        if content_key(&manifest) != key || magic != MANIFEST {
             return Err("image page manifest hash mismatch".into());
         }
-        let bytes = usize::try_from(u64::from_le_bytes(manifest[8..16].try_into().unwrap()))
-            .map_err(|_| "image size overflow")?;
+        let bytes = usize::try_from(u64::from_le_bytes(*size)).map_err(|_| "image size overflow")?;
         let pages = bytes.div_ceil(PAGE);
-        if bytes == 0
-            || pages.checked_mul(32).and_then(|n| n.checked_add(16)) != Some(manifest.len())
-        {
+        let (hashes, partial) = hashes.as_chunks::<32>();
+        if bytes == 0 || hashes.len() != pages || !partial.is_empty() {
             return Err("invalid page manifest length".into());
         }
         // HOST(File::open): the code-image store, reached only through the vm2 adapter's --image,
@@ -195,20 +188,18 @@ impl ImageRegion {
             return Err("image length differs from authenticated manifest".into());
         }
         let integrity = PageIntegrity {
-            hashes: manifest[16..]
-                .chunks_exact(32)
-                .map(|h| h.try_into().unwrap())
-                .collect(),
+            hashes: hashes.to_vec(),
             verified: (0..pages)
                 .map(|_| std::sync::atomic::AtomicBool::new(false))
                 .collect(),
         };
-        let image = unsafe { Self::map_inner(&file, Some(integrity)) }?;
-        Ok(image)
+        let map = map_entry(&file)?;
+        map.advise(memmap2::Advice::Random).map_err(|e| e.to_string())?;
+        Self::new(Bytes::Mapped(map), Some(integrity))
     }
     fn verify(&self, start: usize, end: usize) -> Result<()> {
         use std::sync::atomic::Ordering;
-        if start > end || end > self.bytes {
+        if start > end || end > self.data.len() {
             return Err("image access outside mapping".into());
         }
         if let Some(integrity) = &self.integrity {
@@ -217,7 +208,7 @@ impl ImageRegion {
             }
             for page in start / PAGE..=(end - 1) / PAGE {
                 if !integrity.verified[page].load(Ordering::Acquire) {
-                    let bytes = &self.data()[page * PAGE..self.bytes.min((page + 1) * PAGE)];
+                    let bytes = &self.data()[page * PAGE..self.data.len().min((page + 1) * PAGE)];
                     let actual: [u8; 32] = Sha256::digest(bytes).into();
                     if actual != integrity.hashes[page] {
                         return Err(format!("image page {page} hash mismatch"));
@@ -266,7 +257,7 @@ impl ImageRegion {
         })
     }
     pub fn mapped_bytes(&self) -> usize {
-        self.bytes
+        self.data.len()
     }
     fn pair(&self, index: usize) -> Result<(Value, Value)> {
         if index >= self.len {
@@ -424,6 +415,16 @@ impl ImageBuilder {
         Ok(key)
     }
 }
+/// FILE, a published store entry, mapped read-only and private.
+fn map_entry(file: &File) -> Result<memmap2::Mmap> {
+    // UNSAFE(no crate maps a file safely: memmap2's map is unsafe, as the file may change)
+    // SAFETY: `publish` writes an entry to a temporary, makes it read-only, mode 0444, and
+    // links it into place, and nothing writes it again: entries are immutable, which is the
+    // store's contract with every process that shares it. `open` checks the length against
+    // the authenticated manifest before mapping, and `verify` hashes each page before its
+    // first read, so a corrupt entry fails closed instead of being read.
+    unsafe { memmap2::MmapOptions::new().map_copy_read_only(file) }.map_err(|e| e.to_string())
+}
 use std::os::unix::fs::PermissionsExt;
 impl Vm {
     pub fn attach_image(&mut self, image: Arc<ImageRegion>) -> Result<()> {
@@ -494,22 +495,27 @@ impl Vm {
 mod tests {
     use super::*;
     use std::io::Write;
-    unsafe extern "C" {
-        fn mprotect(addr: *mut std::ffi::c_void, len: usize, prot: i32) -> i32;
-    }
-    fn mapped(bytes: &[u8], label: &str) -> Result<Arc<ImageRegion>> {
-        let path = std::env::temp_dir().join(format!("vm2-{label}-{}", std::process::id()));
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-        file.write_all(bytes).unwrap();
-        file.flush().unwrap();
-        let result = unsafe { ImageRegion::map(&file) };
-        std::fs::remove_file(path).unwrap();
+    /// Run F with IMAGE's pages unreadable, so any read of them faults.
+    fn unreadable<T>(image: &ImageRegion, f: impl FnOnce() -> T) -> T {
+        let protect = |prot| {
+            let data = image.data();
+            // UNSAFE(no crate changes a mapping's protection safely: rustix's mprotect is unsafe)
+            // SAFETY: DATA is IMAGE's whole mapping, page-aligned as mmap returned it, and
+            // IMAGE outlives both calls; no reference into it is held while it is unreadable,
+            // and F must read none.
+            assert_eq!(unsafe { libc::mprotect(data.as_ptr() as *mut _, data.len(), prot) }, 0);
+        };
+        assert!(matches!(image.data, Bytes::Mapped(_)), "only a mapped image can be made unreadable");
+        protect(libc::PROT_NONE);
+        let result = f();
+        protect(libc::PROT_READ);
         result
+    }
+    /// BUILDER's image, published to a store of its own and opened from it.
+    fn stored(builder: &ImageBuilder, label: &str) -> (Arc<ImageRegion>, std::path::PathBuf) {
+        let store = std::env::temp_dir().join(format!("vm2-{label}-{}", std::process::id()));
+        let key = builder.publish(&store, [42; 32]).unwrap();
+        (ImageRegion::open(&store, &key).unwrap(), store)
     }
     #[test]
     fn invalid_image_edges_and_partial_records_fail_closed() {
@@ -524,31 +530,32 @@ mod tests {
         .enumerate()
         {
             let bytes: Vec<u8> = words.into_iter().flat_map(u64::to_le_bytes).collect();
-            assert!(mapped(&bytes, &format!("invalid-{i}")).is_err());
+            assert!(ImageRegion::from_bytes(bytes).is_err(), "case {i}");
         }
     }
     #[test]
     fn collector_never_reads_image_pages_even_on_first_collection() {
-        let words = [(1u64 << 63) | 3, 0];
-        let bytes: Vec<u8> = words.into_iter().flat_map(u64::to_le_bytes).collect();
-        let image = mapped(&bytes, "untraced").unwrap();
+        let mut b = ImageBuilder::default();
+        b.cons_raw(Value::reference(IMAGE, 3), Value::NIL);
+        let (image, store) = stored(&b, "untraced");
         let root = image.reference_raw(0).unwrap();
         let mut vm = Vm::new();
         vm.attach_image(image.clone()).unwrap();
         vm.declare_special_raw("world", root);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 0) }, 0);
-        vm.collect(&mut [root]);
-        vm.collect(&mut [root]);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 1) }, 0);
+        unreadable(&image, || {
+            vm.collect(&mut [root]);
+            vm.collect(&mut [root]);
+        });
         assert_eq!(vm.cons_pair(root).unwrap().0, root);
         assert_eq!(vm.heap_stats().collections, 2);
+        std::fs::remove_dir_all(store).unwrap();
     }
     #[test]
     fn strings_in_graphs_are_untraced_and_survive_private_compaction() {
         let mut b = ImageBuilder::default();
         let text = b.string_raw("Greek Ελληνικά 🦀");
         b.cons_raw(text, Value::NIL);
-        let image = mapped(&b.encode([42; 32]), "strings").unwrap();
+        let (image, store) = stored(&b, "strings");
         let root = image.reference_raw(0).unwrap();
         let mut vm = Vm::new();
         vm.attach_image(image.clone()).unwrap();
@@ -557,10 +564,10 @@ mod tests {
         vm.conses.push((Value::NIL, Value::NIL));
         vm.conses.push((root, text));
         let mut roots = [Value::reference(1, 3), text];
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 0) }, 0);
-        vm.collect(&mut roots);
-        vm.collect(&mut roots);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 1) }, 0);
+        unreadable(&image, || {
+            vm.collect(&mut roots);
+            vm.collect(&mut roots);
+        });
         assert_eq!(vm.cons_pair(roots[0]).unwrap(), (root, text));
         assert_eq!(vm.string_value(roots[1]).unwrap(), "Greek Ελληνικά 🦀");
         assert_eq!(vm.heap_stats().reclaimed, 1);
@@ -568,6 +575,7 @@ mod tests {
         assert!(image.string_reference_raw(1).is_err());
         assert!(vm.string_value(root).is_err());
         assert!(vm.cons_pair(text).is_err());
+        std::fs::remove_dir_all(store).unwrap();
     }
     #[test]
     fn string_bounds_utf8_and_header_validation() {
@@ -583,9 +591,9 @@ mod tests {
                 2 => bytes[88..96].copy_from_slice(&u64::MAX.to_le_bytes()),
                 _ => bytes[96] = 255,
             }
-            assert!(mapped(&bytes, &format!("bad-string-{i}")).is_err());
+            assert!(ImageRegion::from_bytes(bytes).is_err(), "case {i}");
         }
-        assert!(mapped(&valid[..63], "short-header").is_err());
+        assert!(ImageRegion::from_bytes(valid[..63].to_vec()).is_err());
         assert_eq!(b.encode([0; 32]), valid);
         assert_ne!(b.encode([1; 32]), valid);
     }
@@ -595,7 +603,7 @@ mod tests {
         let mut b = ImageBuilder::default();
         b.cons_raw(Value(7), Value::NIL);
         let key = b.publish(&store, [0; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         assert!(image.reference_raw(0).is_ok());
         assert!(image.pair(0).is_err());
         drop(image);
@@ -607,7 +615,7 @@ mod tests {
         use std::os::unix::fs::FileExt;
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.write_all_at(&[255], (PAGE * 2) as u64).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         assert!(image.string_reference_raw(0).is_ok());
         assert!(image.string(0).unwrap_err().contains("hash mismatch"));
         drop(image);
@@ -626,17 +634,17 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.write_all_at(&[255], 64 + 32767 * 16).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         assert_eq!(image.pair(0).unwrap(), (Value::NIL, Value::NIL));
         assert!(image.pair(32767).unwrap_err().contains("hash mismatch"));
         assert!(image.pair(32767).is_err());
         drop(image);
         file.set_len(8192).unwrap();
-        assert!(unsafe { ImageRegion::open(&store, &key) }.is_err());
+        assert!(ImageRegion::open(&store, &key).is_err());
         let manifest = store.join(format!("{key}.pages"));
         std::fs::remove_file(&manifest).unwrap();
         std::fs::write(&manifest, b"VM2PAGE1").unwrap();
-        assert!(unsafe { ImageRegion::open(&store, &key) }.is_err());
+        assert!(ImageRegion::open(&store, &key).is_err());
         std::fs::remove_dir_all(store).unwrap();
     }
     #[test]
@@ -647,8 +655,8 @@ mod tests {
             b.cons_raw(Value::NIL, Value::NIL);
         }
         let key = b.publish(&store, [9; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
-        let address = image.ptr as usize;
+        let image = ImageRegion::open(&store, &key).unwrap();
+        let address = image.data().as_ptr() as usize;
         let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
         let mut selected = false;
         let mut rss = None;
@@ -673,7 +681,7 @@ mod tests {
         }
         println!(
             "mapping bytes={} startup_rss_kib={}",
-            image.bytes,
+            image.mapped_bytes(),
             rss.unwrap()
         );
         assert!(
@@ -706,22 +714,20 @@ mod tests {
             )
             .unwrap();
         let key = source.publish_code_image(&store, entry, [0; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         let (mut vm, entry) = Vm::from_code_image(image.clone(), [0; 32]).unwrap();
         assert_eq!(vm.image_functions_materialized(), 0);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 0) }, 0);
-        vm.collect(&mut []);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 1) }, 0);
+        unreadable(&image, || vm.collect(&mut []));
         let root = vm.execute_raw(entry).unwrap();
         assert!(!Vm::image_value(root), "EXECUTABLE_ROOT_PRIVATE");
         vm.conses.push((Value::NIL, Value::NIL));
         let holder = Value::reference(vm.conses.len(), 3);
         vm.conses.push((root, Value::NIL));
         let mut roots = [holder, root];
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 0) }, 0);
-        vm.collect(&mut roots);
-        vm.collect(&mut roots);
-        assert_eq!(unsafe { mprotect(image.ptr as *mut _, image.bytes, 1) }, 0);
+        unreadable(&image, || {
+            vm.collect(&mut roots);
+            vm.collect(&mut roots);
+        });
         assert_eq!(vm.image_functions_materialized(), 1);
         assert_eq!(vm.cons_pair(roots[0]).unwrap().0, roots[1], "HOLDER_FORWARDED_CHILD");
         assert_eq!(vm.display(roots[1]).unwrap(), "(live-symbol \"live text\")");
@@ -736,14 +742,14 @@ mod tests {
         b.string_raw("sentinel");
         let key = b.publish(&store, [1; 32]).unwrap();
         assert_eq!(b.publish(&store, [1; 32]).unwrap(), key);
-        assert!(unsafe { ImageRegion::open(&store, "../escape") }.is_err());
-        assert!(unsafe { ImageRegion::open(&store, &"0".repeat(64)) }.is_err());
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        assert!(ImageRegion::open(&store, "../escape").is_err());
+        assert!(ImageRegion::open(&store, &"0".repeat(64)).is_err());
+        let image = ImageRegion::open(&store, &key).unwrap();
         assert_eq!(image.string(0).unwrap(), "sentinel");
         drop(image);
         std::fs::remove_file(store.join(&key)).unwrap();
         std::fs::write(store.join(&key), b.encode([2; 32])).unwrap();
-        assert!(unsafe { ImageRegion::open(&store, &key) }.is_err());
+        assert!(ImageRegion::open(&store, &key).is_err());
         assert!(b.publish(&store, [1; 32]).is_err());
         std::fs::remove_dir_all(store).unwrap();
     }

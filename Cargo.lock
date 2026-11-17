@@ -3918,6 +3918,7 @@ dependencies = [
  "libsqlite3-sys",
  "md-5",
  "memchr",
+ "memmap2",
  "num-bigint",
  "num-integer",
  "pulldown-cmark",
