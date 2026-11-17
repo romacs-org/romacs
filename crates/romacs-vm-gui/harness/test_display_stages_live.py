@@ -41,6 +41,16 @@ class Figures(unittest.TestCase):
         self.assertEqual((calm['display_instructions_p90'], d.quantile([1, 2, 3, 4], .5), d.quantile([1], .9)), (4000, 3, 1))
         self.assertEqual(d.figures(d.steps(readings(*[STEP] * 19, heavy)))['display_instructions_p90'], 500)
 
+    def test_characters_fontified_are_taken_over_every_step(self):
+        # A typing scenario: the line grows a character a step.  Leaving out
+        # an odd step moves no figure the step's change alone decides.
+        grown = [dict(r, **{'fontified-chars': 40 * i + i * (i + 1) // 2}) for i, r in enumerate(readings(*[STEP] * 6))]
+        deltas = d.steps(grown)
+        self.assertEqual([x['fontified-chars'] for x in deltas], [41, 42, 43, 44, 45, 46])
+        kept = [x for i, x in enumerate(deltas) if i != 4]
+        self.assertEqual((d.figures(deltas)['chars_fontified'], d.figures(kept, deltas)['chars_fontified']), (44, 44))
+        self.assertEqual(d.figures(kept)['chars_fontified'], 43)
+
     def test_a_count_only_some_scenarios_keep_is_a_figure_where_kept(self):
         counted = [dict(r, **{'fontified-chars': 40 * i}) for i, r in enumerate(readings(STEP, STEP, STEP))]
         self.assertEqual(d.figures(d.steps(counted))['chars_fontified'], 40)
