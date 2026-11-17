@@ -393,26 +393,34 @@ turns, and its journal's file; a state root of its own."
            (romacs-agent-events-then session (lambda () (push 'shown ran)))
            (should (equal ran '(shown)))
            (should-not (romacs-agent-events-p session)))
-         ;; No job may run yet: it waits, ahead of the rest.  A launch,
-         ;; then two notes, run as they came; the notes are numbered by
-         ;; the host that writes them.
+         ;; A launch, then two notes, run as they came; the notes are
+         ;; numbered by the host that writes them.  Its job starts at once
+         ;; though the one job allowed runs: alone, ahead of the rest, its
+         ;; records only.  Until it ends, all wait.
          (setf (romacs-agent-journal-start session) size)
-         (romacs-agent-events-then
-          session (lambda () (push (list (romacs-agent-events-p session) (1+ (romacs-agent-seq session))) ran)))
-         (romacs-agent--note session (romacs-mcp--object "type" "selection"))
-         (romacs-agent--note session (romacs-mcp--object "type" "plan"))
-         (should (equal ran '(shown)))
-         (should (romacs-agent-events-waiting-p id))
-         (should (= (romacs-agent-seq session) 10))
-         (should (= (romacs-agent-held-notes-count) 2))
-         (should (equal (car romacs-agent-events--migrate-queue) (romacs-agent-dir session)))
-         (should (= (file-attribute-size (file-attributes journal)) size))
-         ;; A job runs: moved, flipped though loaded, then what waited.
-         (romacs-agent-events-tests--workers
-          (let ((romacs-agent-events--migrate-running 0)
-                (romacs-agent-events--migrate-queue (list (romacs-agent-dir session))))
-            (romacs-agent-events--migrate-next)))
+         (let ((ended nil))
+           (romacs-agent-events-tests--workers
+            (cl-letf (((symbol-function 'isolate-on-done) (lambda (future then) (setq ended (lambda () (funcall then future))))))
+              (romacs-agent-events-then
+               session (lambda () (push (list (romacs-agent-events-p session) (1+ (romacs-agent-seq session))) ran)))
+              (romacs-agent--note session (romacs-mcp--object "type" "selection"))
+              (romacs-agent--note session (romacs-mcp--object "type" "plan"))
+              (should (equal romacs-agent-events--migrate-queue '("/elsewhere")))
+              (should (= romacs-agent-events--migrate-running 2))
+              (should (equal ran '(shown)))
+              (should (romacs-agent-events-waiting-p id))
+              (should (= (romacs-agent-seq session) 10))
+              (should (= (romacs-agent-held-notes-count) 2))
+              (should (= (file-attribute-size (file-attributes journal)) size))
+              ;; It ends: flipped though loaded, then what waited; the
+              ;; queue's next waits for the job allowed.
+              (funcall ended)
+              (should (equal romacs-agent-events--migrate-queue '("/elsewhere"))))))
          (should (equal ran '((t 11) shown)))
+         ;; Not compacted, no turn rows: those come after.
+         (dolist (table '("compacted" "turns"))
+           (should-not (and (sqlite-select (romacs-agent-events--db) "select 1 from sqlite_master where name = ?" (list table))
+                            (sqlite-select (romacs-agent-events--db) (format "select 1 from %s where session = ?" table) (list id)))))
          (should (zerop (romacs-agent-held-notes-count)))
          (should-not (romacs-agent-events-waiting-p id))
          (should (romacs-agent-events-p session))

@@ -627,8 +627,10 @@ It moves no session's records to SQLite: the editor alone does."
 ;; after a start's restore, once the editor is idle, a few sessions a job
 ;; go to worker VMs, `romacs-agent-events-migrate-jobs' jobs at once (one
 ;; database takes one writer at a time: more jobs only wait on it).  A job
-;; writes each session's records, compacts them and fills its turn rows,
-;; in short transactions on its own connection, and records them `staged':
+;; writes each session's records, compacts them and fills its turn rows
+;; (one something waits for, a resume, only its records: the rest would
+;; hold that wait up, and its rows are filled once it is moved), in short
+;; transactions on its own connection, and records them `staged':
 ;; written, not yet the session's own, so no reader reads them.  The
 ;; editor alone makes them its own (`romacs-agent-events--flip'), at idle,
 ;; for a session it does not have loaded, in one short transaction that
@@ -723,14 +725,22 @@ opened before its turn came."
   "Whether a running job is moving the session ID names to SQLite."
   (and (gethash id romacs-agent-events--migrating) t))
 
+(defun romacs-agent-events--waited-dir-p (dir)
+  "Whether something waits for the session recorded in DIR to move."
+  (and (gethash (file-name-nondirectory dir) romacs-agent-events--waiting) t))
+
 (defun romacs-agent-events--migrate-next ()
   "Give the next waiting sessions to a worker VM when fewer than
 `romacs-agent-events-migrate-jobs' jobs run, a job a turn of the command
-loop: a worker's start is the editor's time."
+loop: a worker's start is the editor's time.  One something waits for
+goes alone, at once, however many run: only its import is waited for."
   (when (and romacs-agent-events--migrate-queue
-             (< romacs-agent-events--migrate-running (max 1 romacs-agent-events-migrate-jobs)))
-    (let ((batch nil) (bytes 0))
+             (or (< romacs-agent-events--migrate-running (max 1 romacs-agent-events-migrate-jobs))
+                 (romacs-agent-events--waited-dir-p (car romacs-agent-events--migrate-queue))))
+    (let ((batch nil) (waited nil) (bytes 0))
       (while (and romacs-agent-events--migrate-queue (< (length batch) (car romacs-agent-events--migrate-batch))
+                  (not waited)
+                  (not (and batch (romacs-agent-events--waited-dir-p (car romacs-agent-events--migrate-queue))))
                   (let ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (car romacs-agent-events--migrate-queue))))
                                   0)))
                     (when (or (null batch) (<= (+ bytes size) (cdr romacs-agent-events--migrate-batch)))
@@ -740,12 +750,13 @@ loop: a worker's start is the editor's time."
           ;; unless that launch waits for it.
           (unless (and (gethash id romacs-agent--sessions) (not (gethash id romacs-agent-events--waiting)))
             (puthash id t romacs-agent-events--migrating)
+            (when (gethash id romacs-agent-events--waiting) (push id waited))
             (push dir batch))))
       (when batch
         (setq batch (nreverse batch))
         (cl-incf romacs-agent-events--migrate-running)
         (let ((future (condition-case err
-                          (isolate-spawn 'romacs-agent-events--migrate-job batch
+                          (isolate-spawn (if waited 'romacs-agent-events--stage-job 'romacs-agent-events--migrate-job) batch
                                          :name "romacs-agent migrate"
                                          :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
                                                                  romacs-agent-turns romacs-agent-ui cl-extra help-mode)
@@ -755,20 +766,28 @@ loop: a worker's start is the editor's time."
             (isolate-on-done future (lambda (done) (romacs-agent-events--migrated batch done))))))
       (run-at-time 0 nil #'romacs-agent-events--migrate-next))))
 
-(defun romacs-agent-events--migrate-job (dirs)
+(defun romacs-agent-events--stage-job (dirs)
+  "`romacs-agent-events--migrate-job' of sessions something waits for, a
+resume say: their records only, so it has them at once; their turn rows
+are filled once they are theirs (`romacs-agent-events--flip-step'), their
+compaction left for later."
+  (romacs-agent-events--migrate-job dirs t))
+
+(defun romacs-agent-events--migrate-job (dirs &optional staged-only)
   "In a worker VM: move the sessions recorded in DIRS to SQLite, compact
-them and fill their turn rows.  The ids moved."
+them and fill their turn rows, but STAGED-ONLY.  The ids moved."
   (let ((romacs-agent-store-patience romacs-agent-store-patient))
     (when (romacs-agent-events--db)
       ;; It writes records; it never makes them a session's own.  The
       ;; turn rows it writes are drawn here, off the editor.
       (let ((romacs-agent-events-store nil)
             (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
-        (delq nil (mapcar #'romacs-agent-events--migrate-one dirs))))))
+        (delq nil (mapcar (lambda (dir) (romacs-agent-events--migrate-one dir staged-only)) dirs))))))
 
-(defun romacs-agent-events--migrate-one (dir)
-  "Move the session recorded in DIR to SQLite; its id, or nil when it is
-left (its supervisor runs, it failed)."
+(defun romacs-agent-events--migrate-one (dir &optional staged-only)
+  "Move the session recorded in DIR to SQLite, compacted and its turn rows
+filled, but STAGED-ONLY; its id, or nil when it is left (its supervisor
+runs, it failed)."
   (let ((romacs-agent--sessions (make-hash-table :test #'equal))
         (romacs-agent-event-functions nil))
     (condition-case err
@@ -779,8 +798,8 @@ left (its supervisor runs, it failed)."
           ;; Its records written, not its own: the editor makes them so.
           (pcase-let* ((id (romacs-agent-id session))
                        (`(,size . ,count) (romacs-agent-events--stage session))
-                       (removed (romacs-agent-events-compact id)))
-            (when (fboundp 'romacs-agent-turns-fill) (romacs-agent-turns-fill session))
+                       (removed (if staged-only 0 (romacs-agent-events-compact id))))
+            (when (and (not staged-only) (fboundp 'romacs-agent-turns-fill)) (romacs-agent-turns-fill session))
             (romacs-agent-events--write (romacs-agent-events--db) "insert or replace into staged values (?, ?, ?)"
                                         (list (list id size (- count removed))))
             id))
@@ -844,6 +863,10 @@ tried again a moment later."
                   ;; seq now, not a journal's byte.
                   (when-let* ((session (gethash id romacs-agent--sessions)))
                     (setf (romacs-agent-journal-start session) (romacs-agent-events-end session)))
+                  ;; Waited for: moved without its turn rows, filled now,
+                  ;; off the editor, as a live turn's are.
+                  (when (and (gethash id romacs-agent-events--waiting) (fboundp 'romacs-agent-turns-fill-soon))
+                    (romacs-agent-turns-fill-soon (list id)))
                   (romacs-agent-events--waited id))
                  ;; A worker writing: tried again a moment later.
                  (`(error (sqlite-locked-error . ,_))
