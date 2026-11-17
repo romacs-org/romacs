@@ -82,7 +82,7 @@ in a store of its own."
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the
   ;; session loads (a watcher's, not a command's), and drawn again once
-  ;; its replay is over: what it said meanwhile is not missed.
+  ;; its supervisor's replay is over: what it said meanwhile is not missed.
   (let* ((id "r1r1r1r1-2222-4333-8444-555566667777")
          (row (romacs-agent--make :id id :harness 'claude :title "row"))
          (live (romacs-agent--make :id id :harness 'claude :title "live"))
@@ -90,7 +90,9 @@ in a store of its own."
          (romacs-agent-ui--row-chats (make-hash-table :test #'equal))
          (redraws 0))
     (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (_) row))
-              ((symbol-function 'romacs-agent-ui--redraw) (lambda () (cl-incf redraws))))
+              ((symbol-function 'romacs-agent-ui--redraw) (lambda () (cl-incf redraws)))
+              ;; Its supervisor listens: its replay comes after the load.
+              ((symbol-function 'romacs-agent-host-socket) (lambda (_) (or load-file-name buffer-file-name "/"))))
       (let ((buffer (romacs-agent-ui-desktop-restore nil nil (list :session id :draft ""))))
         (unwind-protect
             (progn

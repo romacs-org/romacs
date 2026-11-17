@@ -2460,14 +2460,18 @@ the session's replay is over (`romacs-agent-ui--caught-up').")
 
 (defun romacs-agent-ui--take-over (session _manifest)
   "SESSION, just loaded, takes over the chat restored from its row, so
-what it says from now on is drawn there; the chat is drawn again once
-its replay is over."
+what it says from now on is drawn there; the chat is drawn again from
+its records, now when nothing more replays (no supervisor listens for
+it), else once its supervisor's replay is over."
   (when-let* ((buffer (gethash (romacs-agent-id session) romacs-agent-ui--row-chats)))
     (remhash (romacs-agent-id session) romacs-agent-ui--row-chats)
     (when (and (buffer-live-p buffer) (not (buffer-live-p (romacs-agent-buffer session))))
       (with-current-buffer buffer
-        (setq romacs-agent-ui--session session romacs-agent-ui--taken t)
-        (setf (romacs-agent-buffer session) buffer)))))
+        (setq romacs-agent-ui--session session)
+        (setf (romacs-agent-buffer session) buffer)
+        (if (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket)))
+            (setq romacs-agent-ui--taken t)
+          (unless romacs-agent-ui--unfilled (romacs-agent-ui--redraw)))))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-ui--take-over)
 
