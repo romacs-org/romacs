@@ -710,6 +710,9 @@ impl Default for PrintOptions {
 
 /// A print a quit probe stopped (`print_object`): its caller polls.
 pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";
+/// The quit that poll raised, as the error text of a primitive whose errors
+/// are text (`Vm::primitive_condition` makes it `quit`).
+pub(crate) const PRINT_QUIT: &str = "quit at a print's poll";
 
 /// Objects printed between two looks at the quit probe; GNU's print_object
 /// looks at each (maybe_quit at print_obj).

@@ -108,13 +108,14 @@ impl<T: Text> Scanner<'_, T> {
         // back_comment's decode stopped for `syntax-ppss': it starts again,
         // then the loop goes on as after it.
         let mut decode = scan.at == ScanAt::Decode;
+        let mut steps = 0u32;
         while count < 0 {
             loop {
                 let ended = if std::mem::take(&mut decode) {
                     self.back_decode(from, comnested, comstyle, None)
                 } else {
                     // Backward, a poll stops where the scan starts again.
-                    self.poll()?;
+                    self.poll_counted(&mut steps)?;
                     if from.char <= stop { return Ok((self.begv, false)); }
                     from = self.text.dec(from);
                     let quoted = self.char_quoted(from)?;

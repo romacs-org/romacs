@@ -132,28 +132,34 @@ impl Leaf<'_> {
                 let [downcase, upcase] = tables.as_ref().expect("a set with [:upper:] or [:lower:] found its case tables");
                 if down { downcase.of(code) } else { upcase.of(code) }
             };
-            let mut stopped = false;
-            match &self.vm.objects[index] {
-                data::Object::Buffer(buffer) => {
-                    while if forward { at < bound } else { at > bound } {
-                        if at.is_multiple_of(POLL) && self.vm.native_stop_due() { stopped = true; break; }
-                        let character = if forward { at } else { at - 1 };
-                        let Some(code) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
-                        if !set.contains(code as u32, true, syntax, &case)? { break; }
-                        if forward { at += 1; } else { at -= 1; }
+            // A chunk at a time, the probe asked between chunks: the scan of
+            // a chunk checks nothing more than the unpolled scan did.
+            let past = |at: usize| if forward { at >= bound } else { at <= bound };
+            let mut ended = past(at);
+            while !ended {
+                let limit = if forward { bound.min(at + POLL) } else { bound.max(at.saturating_sub(POLL)) };
+                match &self.vm.objects[index] {
+                    data::Object::Buffer(buffer) => {
+                        while at != limit {
+                            let character = if forward { at } else { at - 1 };
+                            let Some(code) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { ended = true; break; };
+                            if !set.contains(code as u32, true, syntax, &case)? { ended = true; break; }
+                            if forward { at += 1; } else { at -= 1; }
+                        }
                     }
-                }
-                data::Object::ByteBuffer(buffer) => {
-                    while if forward { at < bound } else { at > bound } {
-                        if at.is_multiple_of(POLL) && self.vm.native_stop_due() { stopped = true; break; }
-                        let character = if forward { at } else { at - 1 };
-                        if !set.contains(buffer.bytes[character] as u32, false, syntax, &case)? { break; }
-                        if forward { at += 1; } else { at -= 1; }
+                    data::Object::ByteBuffer(buffer) => {
+                        while at != limit {
+                            let character = if forward { at } else { at - 1 };
+                            if !set.contains(buffer.bytes[character] as u32, false, syntax, &case)? { ended = true; break; }
+                            if forward { at += 1; } else { at -= 1; }
+                        }
                     }
+                    _ => unreachable!("checked above"),
                 }
-                _ => unreachable!("checked above"),
+                ended |= past(at);
+                if !ended && self.vm.native_stop_due() { break; }
             }
-            if !stopped { break; }
+            if ended { break; }
             self.native_poll()?;
         }
         match self.vm.objects.entry_mut(index) {

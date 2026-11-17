@@ -99,6 +99,11 @@ pub(crate) trait Text {
     fn stop_due(&self) -> bool {
         false
     }
+    /// Whether the scan should stop for a quit poll now, uncounted: for a
+    /// loop that counts its own steps (`Scanner::poll_counted`).
+    fn stop_uncounted(&self) -> bool {
+        false
+    }
 }
 
 /// What `Text::pass` passed: where it ended, and the syntax of the last
@@ -361,6 +366,13 @@ impl<T: Text> Scanner<'_, T> {
     fn poll(&self) -> R<()> {
         if self.text.stop_due() { Err(Halt::Poll) } else { Ok(()) }
     }
+    /// A quit poll for a loop that counts its steps in STEPS, a local the
+    /// compiler keeps in a register: the text is asked once in 1024 steps.
+    #[inline]
+    fn poll_counted(&self, steps: &mut u32) -> R<()> {
+        *steps = steps.wrapping_add(1);
+        if steps.is_multiple_of(1024) && self.text.stop_uncounted() { Err(Halt::Poll) } else { Ok(()) }
+    }
     fn update_forward(&self, charpos: i64) -> R<()> {
         // UPDATE_SYNTAX_TABLE_FORWARD's just-in-time parse_sexp_propertize.
         match self.options.propertize_done {
@@ -522,9 +534,10 @@ impl<T: Text> Scanner<'_, T> {
         let mut nesting = 1;
         let mut syntax = 0;
         let mut lossage = false;
+        let mut steps = 0u32;
         while from.char != stop {
             // A poll stops where the scan starts again.
-            self.poll()?;
+            self.poll_counted(&mut steps)?;
             from = self.text.dec(from);
             let prev_syntax = syntax;
             let mut c = self.text.char_at(from) as i32;

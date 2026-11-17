@@ -56,7 +56,7 @@ const LONG: &[(&str, &str)] = &[
 ];
 
 /// What a poll looks like in a loop's function.
-const POLLS: &[&str] = &["native_poll", ".due()", "stop_due()", "self.poll()", "pass.", "stop()"];
+const POLLS: &[&str] = &["native_poll", ".due()", "stop_due()", "self.poll()", "self.poll_counted(", "pass.", "stop()", "native_stop_due()"];
 
 const MARK: &str = "// NOPOLL:";
 

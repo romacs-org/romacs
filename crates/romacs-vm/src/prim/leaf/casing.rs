@@ -170,7 +170,7 @@ impl Leaf<'_> {
         let mut inword = false;
         let mut mappings = Vec::with_capacity(codes.len());
         // Nothing is changed yet: polled between chunks.
-        let chunk = super::quit_poll::POLL_STEPS as usize;
+        let chunk = super::quit_poll::POLL_STEPS as usize * 16;
         for start in (0..codes.len()).step_by(chunk) {
             if start > 0 { self.native_poll()?; }
             let table = table.reader(self.vm);
@@ -219,19 +219,22 @@ impl Leaf<'_> {
         }
         let mappings = self.case_mappings(&codes, source.multibyte, down, false)?;
         let mut bytes = Vec::with_capacity(source.bytes.len());
-        for (i, (code, mapped)) in codes.into_iter().zip(mappings).enumerate() {
-            if i.is_multiple_of(chunk) && i != 0 { self.native_poll()?; }
-            for &c in &mapped {
-                if source.multibyte {
-                    let mut buf = [0; 5];
-                    let len = crate::lstring::char_string(c, &mut buf);
-                    bytes.extend_from_slice(&buf[..len]);
-                } else {
-                    // A byte string cannot silently become Unicode or truncate
-                    // an unrepresentable override. Fall back to its byte default.
-                    bytes.push(Self::byte_case_result(c, code, down));
+        let mut pairs = codes.into_iter().zip(mappings);
+        while pairs.len() > 0 {
+            for (code, mapped) in pairs.by_ref().take(chunk) {
+                for &c in &mapped {
+                    if source.multibyte {
+                        let mut buf = [0; 5];
+                        let len = crate::lstring::char_string(c, &mut buf);
+                        bytes.extend_from_slice(&buf[..len]);
+                    } else {
+                        // A byte string cannot silently become Unicode or truncate
+                        // an unrepresentable override. Fall back to its byte default.
+                        bytes.push(Self::byte_case_result(c, code, down));
+                    }
                 }
             }
+            if pairs.len() > 0 { self.native_poll()?; }
         }
         let mut result = data::LispString::from_bytes(bytes, source.multibyte);
         // GNU's multibyte case path constructs fresh unpropertied text; its

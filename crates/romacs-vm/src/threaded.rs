@@ -4335,7 +4335,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         Vector | Aref | Aset | CopySequence => Vm::data_primitive,
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
-        Format => |vm, _, start, n| vm.format_string(start, n),
+        Format => |vm, _, start, n| vm.format_polled(start, n),
         // Traversal and Message retain their ordinary arity/error adapter.
         Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr => {
             Vm::traversal_primitive

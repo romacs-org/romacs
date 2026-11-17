@@ -102,45 +102,48 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
 /// every RUN merged elements. Nothing outside ORDER is written.
 fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
                         mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
-    use std::cmp::Ordering::{Greater, Less};
+    use std::cmp::Ordering::Less;
     for chunk in order.chunks_mut(run) {
         chunk.sort_by(|a, b| compare(cx, a, b));
         cx.native_poll()?;
     }
-    let mut merged = Vec::with_capacity(order.len().min(2 * run));
-    let mut width = run;
+    // Each level merges from one buffer into the other, so no level copies
+    // back; the last result is copied into ORDER if it ended in the other.
+    let mut other: Vec<T> = order.to_vec();
+    let (mut from_order, mut width) = (true, run);
     while width < order.len() {
-        for start in (0..order.len()).step_by(2 * width) {
-            let (mid, end) = ((start + width).min(order.len()), (start + 2 * width).min(order.len()));
-            // A pair already in order needs no merge.
-            if mid == end || compare(cx, &order[mid - 1], &order[mid]) != Greater { continue; }
-            merged.clear();
-            let (mut left, mut right) = (start, mid);
+        let (source, target): (&[T], &mut [T]) = if from_order { (&*order, &mut other[..]) } else { (&other[..], &mut *order) };
+        for start in (0..source.len()).step_by(2 * width) {
+            let (mid, end) = ((start + width).min(source.len()), (start + 2 * width).min(source.len()));
+            let (mut left, mut right, mut out) = (start, mid, start);
             while left < mid && right < end {
                 // Stable: the right element goes first only when strictly less.
-                if compare(cx, &order[right], &order[left]) == Less {
-                    merged.push(order[right]);
+                if compare(cx, &source[right], &source[left]) == Less {
+                    target[out] = source[right];
                     right += 1;
                 } else {
-                    merged.push(order[left]);
+                    target[out] = source[left];
                     left += 1;
                 }
-                if merged.len().is_multiple_of(run) { cx.native_poll()?; }
+                out += 1;
+                if (out - start).is_multiple_of(run) { cx.native_poll()?; }
             }
-            merged.extend_from_slice(&order[left..mid]);
-            merged.extend_from_slice(&order[right..end]);
-            order[start..end].copy_from_slice(&merged);
+            target[out..out + mid - left].copy_from_slice(&source[left..mid]);
+            out += mid - left;
+            target[out..end].copy_from_slice(&source[right..end]);
         }
+        from_order = !from_order;
         width *= 2;
     }
+    if !from_order { order.copy_from_slice(&other); }
     Ok(())
 }
 
-/// Fixnums a sort's run holds between two polls: about a millisecond.
-const SORT_RUN: usize = 1 << 15;
+/// Fixnums a sort's run holds between two polls: about 10 ms.
+const SORT_RUN: usize = 1 << 18;
 /// Strings a run holds: a comparison reads both strings' text, about six
-/// times a fixnum's.
-const STRING_RUN: usize = 1 << 12;
+/// times a fixnum's, so about 15 ms.
+const STRING_RUN: usize = 1 << 14;
 
 /// The native order of a predicate that resolves to a builtin subr, when
 /// every key is of a type it compares without signaling. GNU sort.c marks

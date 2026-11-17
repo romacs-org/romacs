@@ -668,25 +668,7 @@ impl Vm {
         if hash::is_hash_primitive(p) {
             return self.hash_call(p, start, argc, error_out, signal_out);
         }
-        // `format' prints with GNU's print_object, which polls (`PRINT_STOPPED`).
-        let quittable = p == Primitive::Format;
-        let outer = self.native_quit;
-        self.native_quit = outer || quittable;
-        let mut called = self.primitive(p, start, argc);
-        if quittable && called.as_ref().is_err_and(|error| error == crate::eval_data::PRINT_STOPPED) {
-            match self.native_poll() {
-                Ok(()) => called = self.primitive(p, start, argc),
-                Err(crate::prim::Fault::Signal(condition, data)) => {
-                    self.native_quit = outer;
-                    *signal_out = Some((condition, data));
-                    *error_out = Some("Quit".into());
-                    return None;
-                }
-                Err(_) => called = Err("Quit".into()),
-            }
-        }
-        self.native_quit = outer;
-        match called {
+        match self.primitive(p, start, argc) {
             Ok(value) => Some(value),
             Err(error) => {
                 *signal_out = self.primitive_condition(p, start, argc, &error);
@@ -717,6 +699,10 @@ impl Vm {
             let condition = self.intern("buffer-read-only");
             let data = self.list_value(&[self.slots[self.buffer_slot].value]);
             return Some((condition, data));
+        }
+        // A native poll's quit, raised from a primitive whose errors are text.
+        if error == crate::eval_data::PRINT_QUIT {
+            return Some((self.intern("quit"), Value::NIL));
         }
         if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {
             return Some((self.intern("overflow-error"), Value::NIL));

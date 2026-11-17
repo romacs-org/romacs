@@ -17,8 +17,8 @@ fn compare_buffer_substrings(cx, buffer1: Value, start1: Value, end1: Value, buf
     let common = first.len().min(second.len());
     for start in (0..common).step_by(CHUNK) {
         if start != 0 { cx.quittable(Leaf::native_poll)?; }
-        for n in start..(start + CHUNK).min(common) {
-            let (a, b) = (first[n], second[n]);
+        let end = (start + CHUNK).min(common);
+        for (n, (&a, &b)) in (start..).zip(first[start..end].iter().zip(&second[start..end])) {
             if a == b { continue; }
             let (a, b) = if fold {
                 if canon.is_none() { canon = Some(cx.case_canon_translation()?); }

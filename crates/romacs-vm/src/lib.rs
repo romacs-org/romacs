@@ -3801,7 +3801,7 @@ impl Vm {
             return self.process_lines(start, n);
         }
         if p == Format {
-            return self.format_string(start, n);
+            return self.format_polled(start, n);
         }
         if matches!(
             p,

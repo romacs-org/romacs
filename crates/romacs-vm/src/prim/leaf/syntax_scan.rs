@@ -156,6 +156,9 @@ impl<'a> View<'a> {
 }
 
 impl scan::Text for View<'_> {
+    fn stop_uncounted(&self) -> bool {
+        self.stop && self.vm.native_stop_due()
+    }
     #[inline]
     fn stop_due(&self) -> bool {
         let left = self.countdown.get();
@@ -195,7 +198,8 @@ impl scan::Text for View<'_> {
         };
         Pos { char: at.char + 1, byte: at.byte + width }
     }
-    #[inline]
+    #[expect(clippy::inline_always, reason = "the backward scans' step: LLVM stopped inlining it once those loops carried a quit poll, +5 % on forward-comment")]
+    #[inline(always)]
     fn dec(&self, at: Pos) -> Pos {
         let mut byte = at.byte.saturating_sub(1).min(self.len());
         if let Body::Multibyte(t, _) = self.body && byte < self.len() {

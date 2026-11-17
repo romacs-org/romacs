@@ -78,8 +78,12 @@ impl Leaf<'_> {
         // FROM..TO and the PREV-CHARS a rule looks ahead (3), decoded once.
         let mut text = self.characters(string, from, to - from + 3)?;
         let (mut width, mut i) = (0i64, 0);
+        let mut next_poll = POLL;
         while from + i < to {
-            if i.is_multiple_of(POLL) && i != 0 { self.native_poll()?; }
+            if i >= next_poll {
+                next_poll = i + POLL;
+                self.native_poll()?;
+            }
             if let Some(table) = compositions
                 && let Some((end, emoji)) = self.composition_at(table, string, &text, from, i)? {
                 // compose-gstring-and-emoji-for-terminal: two columns; another
@@ -116,12 +120,16 @@ impl Leaf<'_> {
         let mut at = total - view.bytes.len();
         let mut out = Vec::with_capacity(count.min(view.chars));
         let mut bytes = view.bytes;
+        // A chunk at a time, the probe asked between chunks.
         while out.len() < count && !bytes.is_empty() {
-            if out.len().is_multiple_of(POLL) && !out.is_empty() && stop && self.vm.native_stop_due() { return None; }
-            let (code, length) = if view.multibyte { crate::lstring::string_char(bytes) } else { (u32::from(bytes[0]), 1) };
-            out.push((code, at));
-            at += length;
-            bytes = &bytes[length..];
+            if !out.is_empty() && stop && self.vm.native_stop_due() { return None; }
+            let chunk = count.min(out.len() + POLL);
+            while out.len() < chunk && !bytes.is_empty() {
+                let (code, length) = if view.multibyte { crate::lstring::string_char(bytes) } else { (u32::from(bytes[0]), 1) };
+                out.push((code, at));
+                at += length;
+                bytes = &bytes[length..];
+            }
         }
         Some(out)
     }
