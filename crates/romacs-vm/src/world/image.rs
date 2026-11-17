@@ -41,7 +41,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 45] = [
+        let checks: [(&str, bool); 46] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -93,6 +93,9 @@ impl Vm {
             ("rooted_write", !self.rooted_write),
             ("deferred_writes", self.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
+            // What laying a window out found is this process's: derived,
+            // never carried (`DisplayState::laid_empty`).
+            ("laid", self.display_state.laid_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
             return Err(format!("no world captured: {field} is not at rest"));
@@ -340,6 +343,8 @@ mod tests {
         assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(not_captured(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
+        // A window's layout record, derived display state.
+        assert!(not_captured(|vm| vm.display_state.record_laid_for_test()).contains("laid"));
     }
 
     #[test]
