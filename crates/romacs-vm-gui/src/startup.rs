@@ -2239,17 +2239,19 @@ mod tests {
     }
 
     /// `--loadup` loads Romacs's own Lisp from its runtime tree as `load'
-    /// does: each file has its `load-history' entry, so a world keys what
-    /// it read and `find-function' reaches its definitions. The chain left no
+    /// does, none of it signalling: each file has its `load-history' entry,
+    /// so a world keys what it read and `find-function' reaches its
+    /// definitions. The chain left no
     /// GNU editing function to fill in, and the kill ring's are the tree's
     /// simple.el's, not the VM's native `kill-new'.
     #[test]
     fn loadup_loads_romacs_lisp_from_its_tree() {
         let dir = lisp_root(&lisp_dir()).unwrap();
-        let (unloaded, kill_ring) = on_evaluator(move || {
+        let (failed, unloaded, kill_ring) = on_evaluator(move || {
             let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
             private_home(&mut vm, "tree-lisp");
             resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
+            let failed = printed(&mut vm, &format!("(and (boundp '{LISP_ERRORS}) {LISP_ERRORS})"));
             let unloaded = launch_lisp().filter(|path| {
                 let file = lisp_string(&runtime_lisp(&dir, path).to_string_lossy());
                 printed(&mut vm, &format!("(and (assoc {file} load-history) t)")) != "t"
@@ -2260,8 +2262,9 @@ mod tests {
             let kill_ring = printed(&mut vm, &format!("(mapcar (lambda (f) (and (not (subrp (symbol-function f)))
                                                                                (equal (symbol-file f) {simple})))
                                                                '(kill-new current-kill))"));
-            (unloaded, kill_ring)
+            (failed, unloaded, kill_ring)
         });
+        assert_eq!(failed, "nil", "the tree's Romacs Lisp signalled");
         assert!(unloaded.is_empty(), "not loaded from the runtime tree: {unloaded:?}");
         assert_eq!(kill_ring, "(t t)", "kill-new and current-kill are not the tree's simple.el's");
     }
