@@ -280,6 +280,23 @@ mod tests {
         assert!(is_true(&mut vm, "(equal (list (aref img-chars ?a) (aref img-chars #x4e08) (aref img-chars ?z)) '((a) (range) (z)))"));
     }
 
+    /// Stores only a full depends on: a symbol interned since the restore
+    /// into an image obarray of its own, which only a full reclaims, and a
+    /// young value put as a text property on an image string, survive fulls,
+    /// alone and after a minor.
+    #[test]
+    fn a_full_keeps_a_symbol_interned_and_a_property_put_into_the_image() {
+        for minor_first in [false, true] {
+            let mut vm = imaged("(setq img-ob (obarray-make) img-str (copy-sequence \"abc\"))");
+            eval(&mut vm, "(progn (set (intern \"img-late\" img-ob) (list 'late)) (put-text-property 0 2 'img-prop (list 'young) img-str) \
+                (dotimes (_ 2000) (list 1)) nil)");
+            if minor_first { assert!(vm.collect_minor(&[])); }
+            for _ in 0..2 { vm.collect(&mut []); }
+            assert!(is_true(&mut vm, "(equal (list (symbol-value (intern-soft \"img-late\" img-ob)) (get-text-property 1 'img-prop img-str)) '((late) (young)))"),
+                "minor first: {minor_first}");
+        }
+    }
+
     /// `garbage-collect`'s statistics count the image as before: a full of
     /// the same heap counts the same, whether its image is traced or not.
     #[test]
