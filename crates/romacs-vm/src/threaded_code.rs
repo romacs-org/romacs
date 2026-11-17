@@ -32,7 +32,7 @@ pub(super) enum Refusal {
     Site { at: usize, site: usize, sites: usize },
     /// A branch or landing to TO, outside the LEN instructions.
     Target { at: usize, to: usize, len: usize },
-    /// A typed handler that validation did not install.
+    /// A typed handler, or the `&rest` wrapper, that validation did not install.
     Typed { at: usize },
 }
 
@@ -52,6 +52,11 @@ impl fmt::Display for Refusal {
 /// the terminator after them, or why not. In one pass, each instruction
 /// read in place; with room for the terminator in BODY, nothing moves.
 pub(super) fn validate(function: &Function, body: Vec<Inst>) -> Result<Code, Refusal> {
+    // A typed handler's window is 257 slots from its frame's base, which
+    // `frame_room` holds in the file for a frame one register wide or more.
+    if function.regs == 0 {
+        return Err(Refusal::Register { at: 0, register: 0, width: 0 });
+    }
     seal(body, |at, op| operands(function, at, op), |op| observes(function, op))
 }
 
@@ -65,12 +70,15 @@ fn seal(
     let len = body.len();
     for (at, inst) in body.iter_mut().enumerate() {
         check(at, &inst.op)?;
-        if !install_typed(inst) && (audited::is_typed(inst.handler) || audited::is_typed(inst.observed_handler)) {
+        // Validation alone installs a typed handler and the `&rest` wrapper,
+        // so the handler the wrapper runs is the one chosen here.
+        let observe: Handler = observe_then;
+        if std::ptr::fn_addr_eq(inst.handler, observe) || (!install_typed(inst) && audited::is_typed(inst.handler)) {
             return Err(Refusal::Typed { at });
         }
+        inst.observed_handler = inst.handler;
         if observes(&inst.op) {
-            inst.observed_handler = inst.handler;
-            inst.handler = observe_then;
+            inst.handler = observe;
         }
         let target = |to: usize| if to < len { Ok(to) } else { Err(Refusal::Target { at, to, len }) };
         inst.branch = match inst.op {
@@ -141,19 +149,20 @@ fn observes(function: &Function, op: &Op) -> bool {
     observes
 }
 /// The typed handler of INST's checked operation, if it has one, installed
-/// with the operands it reads taken from that operation: whether it did.
+/// with every operand its kind offers (`audited::Pc`) taken from that
+/// operation, an unused one the operation's own register: whether it did.
 fn install_typed(inst: &mut Inst) -> bool {
     match inst.op {
         Op::Const(a, _) => {
-            inst.a = a;
+            (inst.a, inst.b, inst.d) = (a, a, a);
             bytes(inst, audited::t_constant, audited::t_constant_wide);
         }
         Op::Move(a, b) => {
-            (inst.a, inst.b) = (a, b);
+            (inst.a, inst.b, inst.d) = (a, b, a);
             bytes(inst, audited::t_mov, audited::t_mov_wide);
         }
         Op::Unless(a, _) => {
-            inst.a = a;
+            (inst.a, inst.b, inst.d) = (a, a, a);
             bytes(inst, audited::t_unless, audited::t_unless_wide);
         }
         Op::Jump(_) => inst.handler = audited::t_jump,
@@ -310,8 +319,8 @@ mod tests {
         stray[0] = lower(&vm, Op::Return(0));
         stray[0].handler = audited::t_constant_wide;
         assert_eq!(validate(&f, stray.clone()).err(), Some(Refusal::Typed { at: 0 }));
-        stray[0].handler = lower(&vm, Op::Return(0)).handler;
-        stray[0].observed_handler = audited::t_mov_wide;
+        // Nor may lowering wrap one: the wrapper's handler is validation's.
+        (stray[0].handler, stray[0].observed_handler) = (observe_then, audited::t_mov_wide);
         assert_eq!(validate(&f, stray).err(), Some(Refusal::Typed { at: 0 }));
     }
 

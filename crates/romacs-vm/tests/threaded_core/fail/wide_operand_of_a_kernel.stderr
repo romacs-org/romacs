@@ -1,0 +1,12 @@
+error[E0599]: no method named `wide_b` found for struct `Pc<'f, Kernel>` in the current scope
+  --> tests/threaded_core/fail/wide_operand_of_a_kernel.rs:11:28
+   |
+11 |         *r.slot(&mut e, pc.wide_b()) = Value::NIL;
+   |                            ^^^^^^ method not found in `Pc<'f, Kernel>`
+   |
+  ::: tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) struct Pc<'f, K>(*const Inst, Brand<'f>, PhantomData<K>);
+   | --------------------------- method `wide_b` not found for this struct
+   |
+   = note: the method was found for `Pc<'f, Wides>`

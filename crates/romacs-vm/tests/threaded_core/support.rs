@@ -59,10 +59,11 @@ fn fail(_: &mut Engine<'_>, _: &str) -> Value {
     Value::NIL
 }
 
-/// A body as the core's entries take one: generic over its call's brand.
-fn check<F>(_: F)
+/// A body as the core's entries take one: generic over its call's brand,
+/// its `Pc` of one kind.
+fn check<K, F>(_: F)
 where
-    F: for<'f, 'x, 'a> FnOnce(audited::Hot<'f, 'x, 'a>, audited::Regs<'f>, audited::Pc<'f>) -> Value,
+    F: for<'f, 'x, 'a> FnOnce(audited::Hot<'f, 'x, 'a>, audited::Regs<'f>, audited::Pc<'f, K>) -> Value,
 {
 }
 

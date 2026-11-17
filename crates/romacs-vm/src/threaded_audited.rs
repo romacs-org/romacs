@@ -17,10 +17,13 @@
 //! - I2 and I5, windows: a view borrows its `Regs` and the `Hot` exclusively,
 //!   so nothing else reads or writes the file while it lives.
 //! - I3, validated code: a `Code` is made only by `threaded_code.rs`, which
-//!   holds every register operand inside its frame and every branch inside
-//!   the code, ends it with `terminator`, whose handler is here, and installs
-//!   every typed handler itself, from the operation it checked, so the
-//!   operands a typed handler reads are the ones validated.
+//!   holds every register operand inside its frame, one register wide or
+//!   more, and every branch inside the code, ends it with `terminator`, whose
+//!   handler is here, and installs every typed handler itself, from the
+//!   operation it checked. A handler's `Pc` offers only the operands its kind
+//!   names (`Bytes`, `Wides`, `Kernel`, `Branch`), and validation writes
+//!   each of those from that operation: registers of the frame, and for a
+//!   `Kernel` the fallback `legacy` runs.
 //! - I4, instruction pointers: a `Pc` points into a `Code` that outlives the
 //!   handler holding it: code is replaced or cleared only while no engine
 //!   runs it (`Program::retire_code`, `lower_function`), and `Hot` reaches
@@ -47,11 +50,27 @@ pub(super) struct Hot<'f, 'x, 'a> {
 #[repr(transparent)]
 pub(super) struct Regs<'f>(*mut Value, Brand<'f>);
 
-/// The running instruction. Operands are read by value, so no reference into
-/// the code outlives a read, and a collection may rewrite the code's Values.
+/// The running instruction, of a typed handler of kind K. Operands are read
+/// by value, so no reference into the code outlives a read, and a collection
+/// may rewrite the code's Values.
 #[repr(transparent)]
-#[derive(Clone, Copy)]
-pub(super) struct Pc<'f>(*const Inst, Brand<'f>);
+pub(super) struct Pc<'f, K>(*const Inst, Brand<'f>, PhantomData<K>);
+impl<K> Clone for Pc<'_, K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<K> Copy for Pc<'_, K> {}
+
+/// A handler whose three byte operands are registers of its frame.
+pub(super) enum Bytes {}
+/// A handler whose two wide operands are registers of its frame.
+pub(super) enum Wides {}
+/// A sealed kernel call's fast path: its result and first argument as byte
+/// registers, and the kernel's general path behind `legacy`.
+pub(super) enum Kernel {}
+/// A jump: no operand but its branch.
+pub(super) enum Branch {}
 
 /// A register operand of a frame wider than a byte, which validation
 /// proved lies inside the frame: made only from a `Pc`'s operand.
@@ -117,7 +136,7 @@ impl Next<'_> {
     }
 }
 
-impl<'f> Pc<'f> {
+impl<'f, K> Pc<'f, K> {
     #[inline]
     fn inst(&self) -> &Inst {
         // UNSAFE(a Pc is dispatch's raw instruction pointer: a reference would tie each handler to its code's lifetime)
@@ -125,28 +144,6 @@ impl<'f> Pc<'f> {
         // code that outlives its handler's call, and this reference never
         // leaves this module.
         unsafe { &*self.0 }
-    }
-    /// The byte operands, for typed handlers (`code::bytes`).
-    #[inline]
-    pub(super) fn a(self) -> usize {
-        self.inst().a8 as usize
-    }
-    #[inline]
-    pub(super) fn b(self) -> usize {
-        self.inst().b8 as usize
-    }
-    #[inline]
-    pub(super) fn d(self) -> usize {
-        self.inst().d8 as usize
-    }
-    /// The full operands, for frames wider than a byte (`Regs::slot`).
-    #[inline]
-    pub(super) fn wide_a(self) -> Wide<'f> {
-        Wide(self.inst().a, PhantomData)
-    }
-    #[inline]
-    pub(super) fn wide_b(self) -> Wide<'f> {
-        Wide(self.inst().b, PhantomData)
     }
     #[inline]
     pub(super) fn value(self) -> Value {
@@ -177,6 +174,46 @@ impl<'f> Pc<'f> {
     }
 }
 
+impl Pc<'_, Bytes> {
+    /// The byte operands, registers of the frame (`code::install_typed`).
+    #[inline]
+    pub(super) fn a(self) -> usize {
+        self.inst().a8 as usize
+    }
+    #[inline]
+    pub(super) fn b(self) -> usize {
+        self.inst().b8 as usize
+    }
+    #[inline]
+    pub(super) fn d(self) -> usize {
+        self.inst().d8 as usize
+    }
+}
+
+impl Pc<'_, Kernel> {
+    /// The result register and the first argument's, as bytes.
+    #[inline]
+    pub(super) fn a(self) -> usize {
+        self.inst().a8 as usize
+    }
+    #[inline]
+    pub(super) fn d(self) -> usize {
+        self.inst().d8 as usize
+    }
+}
+
+impl<'f> Pc<'f, Wides> {
+    /// The full operands, registers of a frame wider than a byte (`Regs::slot`).
+    #[inline]
+    pub(super) fn wide_a(self) -> Wide<'f> {
+        Wide(self.inst().a, PhantomData)
+    }
+    #[inline]
+    pub(super) fn wide_b(self) -> Wide<'f> {
+        Wide(self.inst().b, PhantomData)
+    }
+}
+
 /// HANDLER on the frame R and the instruction AT: every way out of a typed
 /// handler is this one call.
 #[inline]
@@ -198,7 +235,7 @@ pub(super) fn go<'f>(hot: Hot<'f, '_, '_>, r: Regs<'f>, to: Next<'f>) -> Value {
 /// dispatch does not merge with this one.
 #[inline(never)]
 #[cold]
-pub(super) fn legacy<'f>(hot: Hot<'f, '_, '_>, r: Regs<'f>, pc: Pc<'f>) -> Value {
+pub(super) fn legacy<'f>(hot: Hot<'f, '_, '_>, r: Regs<'f>, pc: Pc<'f, Kernel>) -> Value {
     call(pc.inst().kernel, hot, r, pc.0)
 }
 /// Poll, then run TO.
@@ -211,11 +248,11 @@ pub(super) fn poll<'f>(hot: Hot<'f, '_, '_>, r: Regs<'f>, to: Next<'f>) -> Value
 /// brand of this call alone (I7). BODY must be generic over the brand, so a
 /// body that names `'static` or keeps a capability does not compile.
 #[inline]
-fn enter<'x, 'a, F>(e: Eng<'x, 'a>, r: *mut Value, pc: *const Inst, body: F) -> Value
+fn enter<'x, 'a, K, F>(e: Eng<'x, 'a>, r: *mut Value, pc: *const Inst, body: F) -> Value
 where
-    F: for<'f> FnOnce(Hot<'f, 'x, 'a>, Regs<'f>, Pc<'f>) -> Value,
+    F: for<'f> FnOnce(Hot<'f, 'x, 'a>, Regs<'f>, Pc<'f, K>) -> Value,
 {
-    body(Hot { e, _f: PhantomData }, Regs(r, PhantomData), Pc(pc, PhantomData))
+    body(Hot { e, _f: PhantomData }, Regs(r, PhantomData), Pc(pc, PhantomData, PhantomData))
 }
 
 /// The handler of the instruction validated code ends with: reached only by
@@ -228,9 +265,10 @@ pub(super) fn terminator(mut e: Eng<'_, '_>, _: *mut Value, _: *const Inst) -> V
 /// Each typed handler as a `Handler`: an aligned entry of its own, which
 /// makes the capabilities from what dispatch passes. `link_section` needs
 /// `unsafe`, so the entries live here; the bodies are `threaded_hot.rs`'s.
-/// `is_typed` names them all, for validation (I3).
+/// Each names its kind, the `Pc` its body gets (I3); `is_typed` names them
+/// all, for validation.
 macro_rules! handlers {
-    ($($name:ident),* $(,)?) => {
+    ($($name:ident: $kind:ident),* $(,)?) => {
         // Each on its own 64-byte line, as `threaded::control_tests` checks:
         // packed handlers once cost a fifth more cycles (dispatch-spike.md §3).
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -250,7 +288,7 @@ macro_rules! handlers {
             /// instruction of the validated code of the function running in it.
             // UNSAFE(the Handler signature: raw frame and instruction pointers, the threaded calling convention)
             pub(super) unsafe fn $name(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
-                enter(e, r, pc, super::hot::$name)
+                enter::<$kind, _>(e, r, pc, super::hot::$name)
             }
         )*
         /// Whether HANDLER is a typed one: only validation may install it.
@@ -260,6 +298,8 @@ macro_rules! handlers {
     };
 }
 handlers!(
-    t_mov, t_mov_wide, t_constant, t_constant_wide, t_unless, t_unless_wide, t_jump,
-    t_car, t_cdr, t_add, t_sub, t_inc, t_dec, t_less, t_greater, t_equal, t_null, t_consp, t_eq,
+    t_mov: Bytes, t_mov_wide: Wides, t_constant: Bytes, t_constant_wide: Wides,
+    t_unless: Bytes, t_unless_wide: Wides, t_jump: Branch,
+    t_car: Kernel, t_cdr: Kernel, t_add: Kernel, t_sub: Kernel, t_inc: Kernel, t_dec: Kernel,
+    t_less: Kernel, t_greater: Kernel, t_equal: Kernel, t_null: Kernel, t_consp: Kernel, t_eq: Kernel,
 );

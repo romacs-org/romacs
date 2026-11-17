@@ -1,7 +1,7 @@
 error[E0505]: cannot move out of `e` because it is borrowed
   --> tests/threaded_core/fail/window_across_dispatch.rs:11:22
    |
- 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+ 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f, Bytes>) -> Value {
    |                            ----- binding `e` declared here
 10 |         let regs = r.window(&mut e);
    |                             ------ borrow of `e` occurs here
@@ -24,7 +24,7 @@ note: if `Hot<'_, '_, '_>` implemented `Clone`, you could clone the value
 error[E0505]: cannot move out of `r` because it is borrowed
   --> tests/threaded_core/fail/window_across_dispatch.rs:11:25
    |
- 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+ 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f, Bytes>) -> Value {
    |                                                    ----- binding `r` declared here
 10 |         let regs = r.window(&mut e);
    |                    - borrow of `r` occurs here

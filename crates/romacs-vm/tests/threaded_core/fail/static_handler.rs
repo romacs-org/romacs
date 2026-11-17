@@ -4,10 +4,10 @@ include!("../support.rs");
 
 #[forbid(unsafe_code)]
 mod misuse {
-    use crate::audited::{go, Hot, Pc, Regs};
+    use crate::audited::{go, Bytes, Hot, Pc, Regs};
     use crate::Value;
 
-    pub(super) fn body(e: Hot<'static, '_, '_>, r: Regs<'static>, pc: Pc<'static>) -> Value {
+    pub(super) fn body(e: Hot<'static, '_, '_>, r: Regs<'static>, pc: Pc<'static, Bytes>) -> Value {
         go(e, r, pc.next())
     }
 }

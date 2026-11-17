@@ -1,7 +1,7 @@
 error[E0382]: borrow of moved value: `r`
   --> tests/threaded_core/fail/regs_after_dispatch.rs:11:17
    |
- 9 |     pub(super) fn body<'f>(e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+ 9 |     pub(super) fn body<'f>(e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f, Bytes>) -> Value {
    |                                                ----- move occurs because `r` has type `Regs<'_>`, which does not implement the `Copy` trait
 10 |         let out = go(e, r, pc.next());
    |                         - value moved here

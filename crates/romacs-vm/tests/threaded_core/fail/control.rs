@@ -5,10 +5,10 @@ include!("../support.rs");
 
 #[forbid(unsafe_code)]
 mod misuse {
-    use crate::audited::{go, legacy, Hot, Pc, Regs};
+    use crate::audited::{go, legacy, Hot, Kernel, Pc, Regs};
     use crate::Value;
 
-    pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+    pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f, Kernel>) -> Value {
         marker();
         let x = r.window(&mut e)[pc.d()];
         if e.pair(0).is_none() {
