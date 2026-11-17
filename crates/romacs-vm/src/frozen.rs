@@ -105,11 +105,15 @@ impl Backing {
 /// The VM's frozen regions by id. Id 0 is the VM's own heap and never a
 /// region, so a VM starts with that slot alone, and holds that at rest:
 /// what a restored VM remakes (`romacs_snapshot::Schema::renew`).
-pub(crate) struct Regions(Vec<Option<Box<Region>>>);
+/// SPIKE(freeze residue, romacs#283): the second field is the conses of
+/// every attached region, kept as regions come and go, so `list_limit`
+/// (63 callers: memq, nth, the reader, keymap walks) does not walk every
+/// slot ever used.
+pub(crate) struct Regions(Vec<Option<Box<Region>>>, usize);
 
 impl Default for Regions {
     fn default() -> Self {
-        Self(vec![None])
+        Self(vec![None], 0)
     }
 }
 
@@ -705,7 +709,7 @@ impl Vm {
     }
 
     pub(crate) fn region_conses(&self) -> usize {
-        self.regions.iter().flatten().map(|r| r.conses.len()).sum()
+        self.regions.1
     }
 
     /// ROOT's graph as bytes of the encoding, or the first refusal.
@@ -778,6 +782,7 @@ impl Vm {
             Err(e) => { self.region_free.push(id); return Err(e); }
         };
         let root = place.value(decoded.root, &symbols);
+        self.regions.1 += conses.len();
         self.regions[id] = Some(Box::new(Region { conses, objects, symbols, root, bytes: length, backing }));
         // Hash tables hash their keys with this VM's function once their keys
         // are readable, which needs the region in place.
@@ -852,6 +857,7 @@ impl Vm {
     pub(crate) fn sweep_regions(&mut self, live: &[bool]) {
         for id in 1..self.regions.len() {
             if self.regions[id].is_some() && !live.get(id).copied().unwrap_or(false) {
+                self.regions.1 -= self.regions[id].as_ref().map_or(0, |r| r.conses.len());
                 self.regions[id] = None;
                 self.region_free.push(id);
             }
