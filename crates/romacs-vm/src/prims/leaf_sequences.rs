@@ -120,7 +120,9 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         // Validated above, so the comparison cannot fail.
         order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal));
     } else {
-        order.sort_by_key(|&i| keys[i].integer_value());
+        // Fixnum keys read once, not at each comparison.
+        let ints: Vec<i64> = keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect();
+        order.sort_by_key(|&i| ints[i]);
     }
     let items = cx.vector_values(state[5])?;
     for (to, &from) in order.iter().enumerate() {
