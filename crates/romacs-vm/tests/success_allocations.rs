@@ -1,45 +1,27 @@
 //! Count only allocations on this test thread, after lowering and storage warmup.
 use romacs_vm::Vm;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
-thread_local! {
-    static TRACK: Cell<bool> = const { Cell::new(false) };
-    static ALLOCS: Cell<usize> = const { Cell::new(0) };
-}
-struct Counting;
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        TRACK.with(|active| {
-            if active.get() {
-                ALLOCS.with(|n| n.set(n.get() + 1));
-            }
-        });
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        TRACK.with(|active| {
-            if active.get() {
-                ALLOCS.with(|n| n.set(n.get() + 1));
-            }
-        });
-        unsafe { System.realloc(ptr, layout, size) }
-    }
-}
+#[path = "support/counting_alloc.rs"]
+mod counting_alloc;
+use counting_alloc::{Counting, measure};
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
+
+/// The counter sees what it is shown, so a bound below holds of counts.
+#[test]
+fn the_counter_counts_allocations_and_the_bytes_they_keep() {
+    let (kept, thread, process, live) = measure(|| std::hint::black_box(vec![7u8; 4096]));
+    assert!(thread >= 1 && process >= thread, "{thread} on this thread, {process} in all");
+    assert_eq!(live, 4096);
+    let ((), _, _, live) = measure(|| drop(kept));
+    assert_eq!(live, -4096);
+}
 
 fn count(vm: &mut Vm, source: &str) -> usize {
     let f = vm.compile_source(source).unwrap();
     vm.execute(f).unwrap();
-    ALLOCS.with(|n| n.set(0));
-    TRACK.with(|active| active.set(true));
-    let result = std::hint::black_box(vm.execute(f));
-    TRACK.with(|active| active.set(false));
+    let (result, allocs, _, _) = measure(|| std::hint::black_box(vm.execute(f)));
     assert_eq!(result.unwrap().as_integer().unwrap(), 1000);
-    ALLOCS.with(Cell::get)
+    allocs
 }
 #[test]
 fn successful_accesses_do_not_allocate_errors() {
@@ -139,12 +121,9 @@ fn count_calls(vm: &mut Vm, body: &str, expected: &str) -> usize {
     let source = format!("(let ((i 0) (r nil)) (while (< i 1000) (setq r {body}) (setq i (1+ i))) r)");
     let f = vm.compile_source(&source).unwrap();
     vm.execute(f).unwrap();
-    ALLOCS.with(|n| n.set(0));
-    TRACK.with(|active| active.set(true));
-    let result = std::hint::black_box(vm.execute(f)).and_then(romacs_vm::Local::display);
-    TRACK.with(|active| active.set(false));
+    let (result, allocs, _, _) = measure(|| std::hint::black_box(vm.execute(f)).and_then(romacs_vm::Local::display));
     assert_eq!(result.as_deref(), Ok(expected), "{body}");
-    ALLOCS.with(Cell::get)
+    allocs
 }
 
 /// A search or a syntax scan that calls no Lisp allocates nothing, as
