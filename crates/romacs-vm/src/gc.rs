@@ -161,7 +161,6 @@ struct Marked {
     marking: gc_mark::Marking,
     own: gc_mark::Worker,
     doomed: Vec<Value>,
-    local_live: HashSet<usize>,
     code_marks: Vec<bool>,
     census: Census,
     /// The payload (`data::payload_bytes`) of everything it marked.
@@ -301,7 +300,7 @@ impl Census {
 }
 
 /// What `memory-use-counts' reports, in its units; symbols are counted from
-/// the symbol table, less its private binding slots, and VM2 has no intervals
+/// the symbol table, and VM2 has no intervals
 /// to count (VM2-MEMCOUNT1).
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Consed {
@@ -848,7 +847,7 @@ impl Vm {
         let Census { strings, string_bytes, vectors, vector_slots, vector_free, floats, buffers } = self.gc_census;
         let rows: [(&str, usize, usize, Option<usize>); 8] = [
             ("conses", size_of::<(Value, Value)>(), self.conses.live(), Some(self.conses.capacity() - self.conses.live())),
-            ("symbols", size_of::<Slot>(), self.slots.len() - self.obarray_free_slots.len() - self.local_binding_slots.len(), Some(self.obarray_free_slots.len())),
+            ("symbols", size_of::<Slot>(), self.slots.len() - self.obarray_free_slots.len(), Some(self.obarray_free_slots.len())),
             ("strings", size_of::<data::Object>() + size_of::<data::LispString>(), strings, Some(0)),
             ("string-bytes", 1, string_bytes, None),
             ("vectors", size_of::<data::Object>(), vectors, None),
@@ -974,7 +973,6 @@ impl Vm {
         lists: &mut std::collections::HashMap<u64, source_cache::LambdaList>,
         keep_all: bool,
         pending: &mut Vec<Value>,
-        local_live: &mut HashSet<usize>,
     ) -> bool {
         #[cfg(test)]
         { state.last_mark.0 += 1; }
@@ -988,16 +986,6 @@ impl Vm {
             { state.weak_visits += 1; }
             for (_, key, value) in table.entries() {
                 let (k, v) = (self.survives(symbols, regions, key), self.survives(symbols, regions, value));
-                // The buffer-keyed ephemeron owns a local value indirectly
-                // through a stable symbol-slot ID. The slot is NOT a global
-                // root: trace its moving Value only once its owner is live.
-                if (keep_all || k) && table.weakness == hash::Weakness::Key
-                    && let Some(slot) = value.index_if(7).and_then(|i| i.checked_sub(1))
-                    && self.local_binding_slots.contains(&slot)
-                    && local_live.insert(slot)
-                {
-                    pending.push(self.slots[slot].value);
-                }
                 if keep_all || table.weakness.keep(k, v) {
                     if !k {
                         pending.push(key);
@@ -1321,22 +1309,21 @@ impl Vm {
         self.clear_collection_caches();
         // Membership by slot, tested for every symbol and slot visited below.
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
-        let local_binding = self.slot_set(self.local_binding_slots.iter());
         lap.lap(&mut self.gc_times, Phase::Setup);
         let n = gc_mark::threads(self.gc_stress.threads);
-        let Some(mut marked) = self.mark_heap(roots, &in_obarray, &local_binding, MarkFor::Collection { until_key }, n, &mut lap) else { return false };
+        let Some(mut marked) = self.mark_heap(roots, &in_obarray, MarkFor::Collection { until_key }, n, &mut lap) else { return false };
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
         if self.gc_stress.verify && n > 1 {
-            marked = self.verify_mark(marked, n, roots, &in_obarray, &local_binding);
+            marked = self.verify_mark(marked, n, roots, &in_obarray);
         }
         // Before the reference walk, which follows the lists this leaves.
         self.apply_undo_edits(std::mem::take(&mut marked.state.undo.edits));
         if self.gc_stress.verify {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
-        let Marked { marking, own, doomed, local_live, code_marks, census, payload: _, state } = marked;
+        let Marked { marking, own, doomed, code_marks, census, payload: _, state } = marked;
         let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
@@ -1354,17 +1341,6 @@ impl Vm {
         #[cfg(test)]
         if before_scan {
             let _ = self.alloc_cons(Value::NIL, Value::NIL);
-        }
-        // Dead-owner entries have been swept. Discard only their unowned
-        // slot values before forwarding; every live-owner and active-binding
-        // value was marked above and is rewritten by the ordinary slot pass.
-        self.free_local_binding_slots.clear();
-        for &slot in &self.local_binding_slots {
-            if !local_live.contains(&slot) {
-                self.slots[slot].value = Value::UNBOUND;
-                self.slots[slot].plist = Value::NIL;
-                self.free_local_binding_slots.push(slot);
-            }
         }
         lap.lap(&mut self.gc_times, Phase::Weak);
         self.retire_code(&code_marks);
@@ -1823,7 +1799,7 @@ impl Vm {
         // Setup is the old marked and what is read again gathered; Roots and
         // Mark as a full's; Weak, all that is dropped; then the sweep.
         lap.lap(&mut self.gc_times, Phase::Setup);
-        let Some(marked) = self.mark_heap(&again, &none, &none, MarkFor::Minor, 1, &mut lap) else { unreachable!("no key ends a minor") };
+        let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, 1, &mut lap) else { unreachable!("no key ends a minor") };
         lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
             self.check_minor(roots);
@@ -1908,8 +1884,7 @@ impl Vm {
     /// returned.
     pub(crate) fn mark_only(&mut self, roots: &[Value], keep_weak: bool) -> MarkedSet {
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
-        let local_binding = self.slot_set(self.local_binding_slots.iter());
-        let marked = self.mark_heap(roots, &in_obarray, &local_binding, MarkFor::Only { keep_weak }, 1, &mut Lap(None)).expect("no key ends it");
+        let marked = self.mark_heap(roots, &in_obarray, MarkFor::Only { keep_weak }, 1, &mut Lap(None)).expect("no key ends it");
         let Marked { code_marks, state, .. } = marked;
         MarkedSet { code_marks, obarray_symbols_live: state.obarray_symbols_live, region_marks: state.region_marks,
                     #[cfg(test)] weak_visits: state.weak_visits }
@@ -1917,22 +1892,18 @@ impl Vm {
     /// Mark from ROOTS and everything the VM holds, on N threads, for FOR: what
     /// it reached, or None when a key press ended it, its marks left for the
     /// next mark to clear. Writes nothing but colours and its own state.
-    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], local_binding: &[bool], r#for: MarkFor, n: usize, lap: &mut Lap) -> Option<Marked> {
+    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], r#for: MarkFor, n: usize, lap: &mut Lap) -> Option<Marked> {
         let until_key = matches!(r#for, MarkFor::Collection { until_key: true });
         let keep_weak = matches!(r#for, MarkFor::Only { keep_weak: true });
         let keep = |v: &Value| traced(*v, in_obarray);
         self.undo_list_index();
         let undo_limits = self.undo_view();
         let mut pending = self.mark_roots(roots, in_obarray, matches!(r#for, MarkFor::Minor));
-        let mut local_live = HashSet::default();
         // HOST(dynamic:saved): collector: forwards the saved values
         for &(slot, old, buffer, _) in &self.dynamic {
             // Both saved and active values stay roots even if Lisp switches
             // away from their buffer during the dynamic extent.
             pending.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
-            if local_binding[slot] {
-                local_live.insert(slot);
-            }
         }
         let mut code_marks: Vec<std::sync::atomic::AtomicBool> = self.functions.iter().map(|_| false.into()).collect();
         let active = !self.stack.is_empty() || !self.suspended_stacks.is_empty();
@@ -1979,7 +1950,7 @@ impl Vm {
         let mut lists = std::mem::take(&mut self.lambda_lists);
         let this = &*self;
         let written_slots = minor_changed.is_some().then(|| this.slots.written().collect());
-        let view = this.mark_view(in_obarray, local_binding, &code_marks, written_slots);
+        let view = this.mark_view(in_obarray, &code_marks, written_slots);
         let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| marking.crew(&view, || {
             marking.publish_roots(&view, std::mem::take(&mut pending), std::mem::take(&mut code_pending));
             // Here while the threads start on the rest: suspended engines'
@@ -2004,7 +1975,7 @@ impl Vm {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
-                if this.weak_round(&mut state, &mut lists, keep_weak, &mut pending, &mut local_live) {
+                if this.weak_round(&mut state, &mut lists, keep_weak, &mut pending) {
                     marking.add(&mut own, &mut pending);
                     continue;
                 }
@@ -2020,7 +1991,7 @@ impl Vm {
         let census = marking.census(&own);
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();
         let payload = marking.marked_payload(&own);
-        Some(Marked { marking, own, doomed, local_live, code_marks, census, payload, state })
+        Some(Marked { marking, own, doomed, code_marks, census, payload, state })
     }
     /// The roots a mark starts from outside the heap's own entries, those it
     /// traces (`traced`): ROOTS and the external ones, suspended
@@ -2096,12 +2067,12 @@ impl Vm {
     /// The re-mark's state goes on, its colours being these: the tables were
     /// last taken by it (`RawTable::holds'). It sweeps on the threads' N, so
     /// verify keeps the threaded sweep and its graves.
-    fn verify_mark(&mut self, threads: Marked, n: usize, roots: &[Value], in_obarray: &[bool], local_binding: &[bool]) -> Marked {
+    fn verify_mark(&mut self, threads: Marked, n: usize, roots: &[Value], in_obarray: &[bool]) -> Marked {
         fn sorted<T: Ord + Clone>(list: &[T]) -> Vec<T> { let mut list = list.to_vec(); list.sort_unstable(); list }
         let colors = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         self.clear_marks();
         let mut lap = Lap(None);
-        let alone = self.mark_heap(roots, in_obarray, local_binding, MarkFor::Collection { until_key: false }, 1, &mut lap).expect("no key ends it");
+        let alone = self.mark_heap(roots, in_obarray, MarkFor::Collection { until_key: false }, 1, &mut lap).expect("no key ends it");
         let again = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         for (table, (colors, again)) in ["conses", "closures", "cells", "objects"].iter().zip(colors.iter().zip(&again)) {
             if let Some(i) = colors.iter().zip(again).position(|(a, b)| a != b) {
@@ -2112,7 +2083,6 @@ impl Vm {
         assert_eq!(threads.code_marks, alone.code_marks, "threads and one thread reached different code");
         assert_eq!(threads.census, alone.census, "threads and one thread counted different objects");
         assert_eq!(threads.doomed, alone.doomed, "threads and one thread doomed different finalizers");
-        assert_eq!(threads.local_live, alone.local_live, "threads and one thread kept different local bindings");
         assert_eq!(threads.state.obarray_symbols_live, alone.state.obarray_symbols_live, "threads and one thread kept different symbols");
         assert_eq!(threads.state.region_marks, alone.state.region_marks, "threads and one thread kept different regions");
         assert_eq!(sorted(&threads.state.weak_tables), sorted(&alone.state.weak_tables), "threads and one thread found different weak tables");
@@ -2886,10 +2856,6 @@ mod tests {
         }
         let mut vm = Vm::new();
         let symbol_count = vm.slots.len();
-        let private = vm.slots.len();
-        vm.slots.push(Slot::new());
-        vm.symbol_names.push("private".into());
-        vm.local_binding_slots.insert(private);
         vm.objects.push(data::Object::String(Box::new(data::LispString::new("abc"))));
         vm.objects.push(data::Object::Vector(vec![Value::NIL; 7]));
         vm.objects.push(data::Object::Float(1.0));

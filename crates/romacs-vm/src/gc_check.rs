@@ -147,13 +147,11 @@ impl Vm {
         for &(slot, old, buffer, _) in &self.dynamic {
             values.extend([old, self.slots[slot].value, buffer, Value::reference(slot + 1, 7)]);
         }
-        // Every symbol but those of an obarray of their own is a root, and a
-        // buffer-local value is its buffer's.
-        let local: HashSet<usize> = self.local_binding_slots.iter().copied().collect();
+        // Every symbol but those of an obarray of their own is a root; a
+        // buffer-local value is its buffer's (`PerBuffer`).
         for (slot, s) in self.slots.iter().enumerate() {
             if self.obarray_symbol_names.contains_key(&slot) { continue; }
-            values.extend([s.function, s.plist]);
-            if !local.contains(&slot) { values.push(s.value); }
+            values.extend([s.function, s.plist, s.value]);
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
                 values.push(Value::reference(target + 1, 7));
             }

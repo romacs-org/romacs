@@ -1241,8 +1241,8 @@ impl Vm {
         }
     }
     /// The C storage of a localized global built-in (GNU's blv over its
-    /// forwarding): its default lives there, its buffer-local values in the
-    /// local-binding table.
+    /// forwarding): its default lives there, its buffer-local values in each
+    /// buffer's own store.
     pub(super) fn localized_forwarded(&self, slot: usize) -> Option<Fwd> {
         match self.kept_redirect(slot) {
             Some(VariableRedirect::LocalizedForwarded(fwd @ (Fwd::Bool(_) | Fwd::Int(_) | Fwd::Obj(_)))) => Some(fwd),

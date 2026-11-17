@@ -1556,8 +1556,6 @@ pub struct Vm {
     /// `char-property-alias-alist' and `default-text-properties', which
     /// textget reads for every property a character does not have.
     textget_slots: [usize; 2],
-    local_binding_slots: HashSet<usize>,
-    free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     /// Where the last collection's time went (`romacs--gc-phases').
     gc_times: gc::GcTimes,
@@ -1865,8 +1863,6 @@ impl Vm {
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
             textget_slots: [usize::MAX; 2],
-            local_binding_slots: HashSet::default(),
-            free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
             gc_census: Default::default(),

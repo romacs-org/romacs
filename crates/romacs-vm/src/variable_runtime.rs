@@ -201,9 +201,8 @@ impl<const N: usize> Places<N> {
 
 impl Vm {
     /// GNU eval.c:747: search oldest-first for this exact symbol, without
-    /// following aliases. Local bindings are excluded; localized ordinary
-    /// variables use private slots, while forwarded buffer locals need the
-    /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
+    /// following aliases. A buffer's local's lets (SPECPDL_LET_LOCAL) are
+    /// excluded. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         self.dynamic.iter().position(|&(bound, _, _, kind)| bound == slot && kind != Let::Local)
@@ -211,9 +210,6 @@ impl Vm {
 
     /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
     /// in BUFFER, by the symbol each binding recorded and its owner buffer.
-    /// An ordinary or localized Boolean variable's local let was made on a
-    /// private slot; a per-buffer forwarded one on its own slot without the
-    /// LET_DEFAULT flag.
     pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
         let symbol = Value::reference(slot + 1, 7);
         self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
@@ -223,18 +219,6 @@ impl Vm {
         })
     }
 
-    pub(crate) fn allocate_local_binding_slot(&mut self) -> usize {
-        if let Some(slot) = self.free_local_binding_slots.pop() {
-            return slot;
-        }
-        // Internal slot IDs must not be interned public symbols: otherwise a
-        // Lisp reference could outlive the owner and alias a recycled binding.
-        let slot = self.slots.len();
-        self.symbol_names.push(format!("#:vm2-local-binding:{slot}"));
-        self.slots.push(Slot::new());
-        self.local_binding_slots.insert(slot);
-        slot
-    }
     // Shared with the assignment engine; this is its existing protection set.
     pub(super) fn protected_variable_slot(&self, slot: usize) -> bool {
         let base = self.indirect_variable(slot);
@@ -549,7 +533,8 @@ impl Vm {
         }
         Ok(())
     }
-    /// Give the forwarded global built-in at SLOT its local-binding table.
+    /// Declare the forwarded global built-in at SLOT one with buffer-local
+    /// values.
     pub(super) fn promote_forwarded_local(&mut self, slot: usize, explicit: bool) -> Result<()> {
         if matches!(self.forwarding(slot), Some(forwarded::Fwd::Bool(_)))
             // HOST(dynamic:saved): reads saved values of a localized Boolean, which the tracking never
