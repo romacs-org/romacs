@@ -720,7 +720,11 @@ turns, and its journal's file; a state root of its own."
           (should-not (romacs-agent-events--supervised-p id socket))
           (host-pid (emacs-pid))
           (should-not (romacs-agent-events--supervised-p id socket))
-          ;; Its host there.
+          ;; Its host there, once it runs as one.
+          (with-timeout (10 (error "The stand-in host never ran"))
+            (while (not (string-search "romacs-agent-host"
+                                       (or (cdr (assq 'args (process-attributes (process-id host)))) "")))
+              (accept-process-output nil 0.05)))
           (host-pid (process-id host))
           (should (romacs-agent-events--supervised-p id socket)))
       (delete-process host)
