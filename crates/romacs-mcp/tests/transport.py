@@ -1,5 +1,6 @@
 """Real OS pipes/sockets; fixture peer is transport-only, not MCP proof.
 Run: python3 transport.py /absolute/path/to/romacs-mcp
+(cargo test -p romacs-mcp runs it, against that build, from transport.rs.)
 """
 import json
 import os
