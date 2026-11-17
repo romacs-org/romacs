@@ -26,9 +26,9 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 895000,
+  "step_instructions": 1080000,
   "cycles": 1,
-  "display_instructions": 573000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -36,12 +36,13 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 578000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so the agents' writer worker is alive: a live writer adds about 130 K instructions to each idle redisplay (measured 651-666 K; one unrelated writer write on a beta build without the chat change measures the same)"
  },
  "chat-tick": {
   "step_instructions": 1650000,
   "cycles": 1,
-  "display_instructions": 574000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -49,7 +50,8 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 574000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so the agents' writer worker is alive: a live writer adds about 130 K instructions to each idle redisplay (measured 651-666 K; one unrelated writer write on a beta build without the chat change measures the same)"
  },
  "chat-tick-second": {
   "step_instructions": 21300000,
@@ -82,13 +84,14 @@
   "cycles": 1,
   "display_instructions": 24200000,
   "display_conses": 174,
-  "windows_rebuilt": 2,
+  "windows_rebuilt": 3,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 3,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 24300000
+  "display_instructions_p90": 24300000,
+  "layouts_note": "a live writer worker (the chat's session in the store) costs one more window rebuild and layout after a collection: measured 3 and 3, the same on a beta build after one unrelated writer write"
  },
  "cursor-move": {
   "step_instructions": 2340000,
