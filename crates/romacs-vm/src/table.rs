@@ -70,49 +70,9 @@ fn unreached(color: u8, sticky: u8) -> bool {
     color & (IN_USE | MARK | sticky) == IN_USE
 }
 
-/// The restored image's entries of a table: those below `len`, never freed
-/// or moved; of them, the remembered, by bit. Empty in a process that
-/// restored none, and in a builder.
-#[derive(Clone, Default, romacs_snapshot::Snapshot)]
-struct ImageSet {
-    len: usize,
-    remembered: Vec<u64>,
-}
-
-impl ImageSet {
-    /// Whether image entry I (below `len`) is remembered.
-    #[inline]
-    fn remembered(&self, i: usize) -> bool {
-        self.remembered[i / 64] >> (i % 64) & 1 != 0
-    }
-    /// Whether entry I is of the image and untouched since the restore.
-    #[inline]
-    fn permanent(&self, i: usize) -> bool {
-        i < self.len && !self.remembered(i)
-    }
-    /// Remember image entry I (below `len`).
-    #[inline]
-    fn remember(&mut self, i: usize) {
-        self.remembered[i / 64] |= 1 << (i % 64);
-    }
-    /// The permanent ones of the eight entries from BASE (a multiple of 8),
-    /// each as its byte's low bit, as a colour word holds IN_USE.
-    #[inline]
-    fn permanent_bytes(&self, base: usize) -> u64 {
-        if base >= self.len {
-            return 0;
-        }
-        let remembered = (self.remembered[base / 64] >> (base % 64)) as u8;
-        let within = if self.len - base >= 8 { 0xFF } else { (1u8 << (self.len - base)) - 1 };
-        spread(!remembered & within)
-    }
-}
-
-/// The eight bits of BITS, each as the low bit of its own byte.
-#[inline]
-fn spread(bits: u8) -> u64 {
-    (0..8).fold(0, |word, k| word | (u64::from(bits >> k & 1) << (8 * k)))
-}
+#[path = "table_image.rs"]
+mod image_set;
+use image_set::ImageSet;
 
 /// A table as a mark's threads see it (gc_mark.rs): entries one at a time, and
 /// atomic colours. Good only while the table neither grows nor is otherwise
@@ -503,7 +463,7 @@ impl<T> Table<T> {
     }
     /// As `store_at`, with the image's set beside: what a hash table's
     /// stores need.
-    #[inline(always)]
+    #[inline]
     fn store_parts(&mut self, i: usize) -> (&mut T, &mut u8, &mut Barrier, &mut ImageSet) {
         debug_assert!(self.colors.len() >= self.entries.len(), "a colour for every entry");
         let entry = &mut self.entries[i];
@@ -646,7 +606,7 @@ impl<T> Table<T> {
     }
     /// Whether entry I counts as reached by a full's mark standing as an
     /// untouched image entry.
-    #[inline(always)]
+    #[inline]
     fn reached_as_image(&self, i: usize) -> bool {
         self.image_reached && self.image.permanent(i)
     }
@@ -884,16 +844,19 @@ impl<T> Table<T> {
     /// DIRTY. A word of eight colours with none dirty is passed at one test.
     fn remember_dirty(&mut self) {
         let len = self.image.len.min(self.colors.len());
+        let (colors, image) = (&self.colors[..len], &mut self.image);
         let dirty = LOW_BITS * u64::from(DIRTY);
-        for w in 0..len.div_ceil(8) {
-            let (from, to) = (w * 8, (w * 8 + 8).min(len));
-            let mut bytes = [0u8; 8];
-            bytes[..to - from].copy_from_slice(&self.colors[from..to]);
-            if u64::from_le_bytes(bytes) & dirty == 0 { continue; }
-            for i in from..to {
-                if self.colors[i] & (IN_USE | DIRTY) == IN_USE | DIRTY { self.image.remember(i); }
+        let mut look = |from: usize, chunk: &[u8]| {
+            for (k, &color) in chunk.iter().enumerate() {
+                if color & (IN_USE | DIRTY) == IN_USE | DIRTY { image.remember(from + k); }
             }
+        };
+        let words = colors.chunks_exact(8);
+        let rest = words.remainder();
+        for (w, chunk) in words.enumerate() {
+            if u64::from_le_bytes(chunk.try_into().expect("eight colours")) & dirty != 0 { look(w * 8, chunk); }
         }
+        look(len - rest.len(), rest);
     }
     /// A full's roots in the image: every remembered entry, those stored
     /// into since the last collection first remembered.
