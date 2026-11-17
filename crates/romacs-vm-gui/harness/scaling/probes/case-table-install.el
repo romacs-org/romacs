@@ -7,6 +7,9 @@
 ;; their own, which only a change of the standard table needs: work in
 ;; the heap's size per call, where GNU's is constant.  Held by its slope,
 ;; instructions per live object, not by an exponent over a fixed cost.
+;; Measured 2026-11-17: 0.01 now, 3,900 with the walk (each of the 300
+;; installs touched every object, about 13 instructions apiece); a budget
+;; of 1 leaves the residue two orders of room and fails any walk.
 (defvar scaling--case-table-install nil)
 (scaling-probe case-table-install :n 50000 :k 4 :slope 1
   :setup (progn
