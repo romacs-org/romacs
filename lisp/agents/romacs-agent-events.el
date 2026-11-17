@@ -626,10 +626,6 @@ own writes up as they do."
   "At most how many sessions, and how many bytes of journals, a migration
 job moves; a journal past the bytes goes alone.")
 
-(defconst romacs-agent-events--worker-busy 60000
-  "The milliseconds a worker's writes wait for the database's lock: a
-worker waits for the editor, never the editor for long on a worker.")
-
 (defun romacs-agent-events-migrate-soon ()
   "Move every session still in a journal to SQLite, in worker VMs, once the
 editor is idle: with the store on, in an editor whose worker VMs run."
@@ -725,13 +721,13 @@ loop: a worker's start is the editor's time."
 (defun romacs-agent-events--migrate-job (dirs)
   "In a worker VM: move the sessions recorded in DIRS to SQLite, compact
 them and fill their turn rows.  The ids moved."
-  (when-let* ((db (romacs-agent-events--db)))
-    (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-events--worker-busy))
-    ;; It writes records; it never makes them a session's own.  The turn
-    ;; rows it writes are drawn here, off the editor.
-    (let ((romacs-agent-events-store nil)
-          (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
-      (delq nil (mapcar #'romacs-agent-events--migrate-one dirs)))))
+  (let ((romacs-agent-store-patience romacs-agent-store-patient))
+    (when (romacs-agent-events--db)
+      ;; It writes records; it never makes them a session's own.  The
+      ;; turn rows it writes are drawn here, off the editor.
+      (let ((romacs-agent-events-store nil)
+            (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
+        (delq nil (mapcar #'romacs-agent-events--migrate-one dirs))))))
 
 (defun romacs-agent-events--migrate-one (dir)
   "Move the session recorded in DIR to SQLite; its id, or nil when it is

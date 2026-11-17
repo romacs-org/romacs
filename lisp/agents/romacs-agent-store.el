@@ -82,6 +82,17 @@ has made it."
       (setq romacs-agent-store--db nil)
       (if queued (romacs-agent-store--open-to-read file) (romacs-agent-store--open-to-write file)))))
 
+(defconst romacs-agent-store-patient 60000
+  "The milliseconds a process off the editor waits for the store's lock:
+the writer, a migration worker, a batch fill wait for each other rather
+than lose a write.")
+
+(defvar romacs-agent-store-patience 200
+  "The milliseconds this process's connection waits for the store's lock,
+from its first statement: short in the editor, which must not stall,
+`romacs-agent-store-patient' off it.  A reader waits too: a WAL read is
+refused a moment while another connection checkpoints or vacuums.")
+
 (defun romacs-agent-store--open-to-read (file)
   "FILE opened to read, or nil while the writer has not made it as this
 build reads it: not there yet, or of another version.  The writer is
@@ -91,6 +102,7 @@ never waits on a writer."
       (progn (romacs-agent-store--make-soon) nil)
     (condition-case err
         (let ((db (sqlite-open file t)))
+          (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-store-patience))
           (if (not (and (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version)
                         ;; Every module's tables made: a store the writer is
                         ;; making this moment is not read yet.
@@ -119,16 +131,12 @@ the writer once it has opened it (`romacs-agent-store--made').")
   "In a writer: the store opened, every module's tables made."
   (when (romacs-agent-store--open) (run-hooks 'romacs-agent-store-made-functions) t))
 
-(defconst romacs-agent-store--writer-busy 60000
-  "The milliseconds the writer waits for the store's lock: it is off the
-editor, so it waits for a worker rather than lose a write.")
-
 (defun romacs-agent-store--writer-start ()
   "The writer's start: the store opened, its tables made, its waits long,
 its commits not synced one by one (`synchronous=NORMAL', as a supervisor's
 are): what a crash may lose of them is the writer's queue's window."
+  (setq romacs-agent-store-patience romacs-agent-store-patient)
   (when-let* ((db (romacs-agent-store--open)))
-    (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-store--writer-busy))
     (sqlite-pragma db "synchronous = NORMAL")
     (romacs-agent-store--made)))
 
@@ -142,8 +150,8 @@ are): what a crash may lose of them is the writer's queue's window."
              (file-directory-p (file-name-directory file)))
     (condition-case err
         (let ((db (sqlite-open file)))
+          (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-store-patience))
           (sqlite-pragma db "journal_mode = WAL")
-          (sqlite-pragma db "busy_timeout = 200")
           (unless (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version)
             (sqlite-execute db "drop table if exists sessions")
             (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version)))
@@ -331,34 +339,46 @@ manifest."
     ;; write lock as it begins.
     (when db
       (dolist (dirs (seq-partition (romacs-agent-store--missing) 50))
-        ;; Made first, the files read: the lock is held for the writes alone.
-        (let ((rows (delq nil (mapcar (lambda (dir)
-                                        (condition-case err (romacs-agent-store--recorded-row dir)
-                                          (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil)))
-                                      dirs))))
-          ;; A chunk not written (the lock held past its wait) is said,
-          ;; and left to the next fill: the rows are a cache of records.
-          (when rows
-            (condition-case err
-                (let ((written 0))
-                  (sqlite-execute db "begin immediate")
-                  ;; Written here, in this transaction: a row that fails
-                  ;; fails the chunk.
-                  (dolist (row rows)
-                    (when (romacs-agent-store--write-values (romacs-agent-store--row-values row) t) (cl-incf written)))
-                  (sqlite-execute db "commit")
-                  (cl-incf count written))
-              (error (ignore-errors (sqlite-execute db "rollback"))
-                     (message "romacs-agent-store: %d rows not written, left to the next fill: %s"
-                              (length rows) (error-message-string err)))))))
+        (cl-incf count (romacs-agent-store--fill-chunk db dirs)))
       count)))
+
+(defun romacs-agent-store--fill-chunk (db dirs)
+  "Write in DB the rows of the sessions recorded in DIRS, where none is;
+how many were written.  The lock held by another past this connection's
+wait, anywhere in it, it is all tried again until done: a row missing
+hides its session from the board.  A session whose row cannot be made
+otherwise is said and left out; a chunk that fails otherwise is said and
+left to the next fill, the rows being a cache of records."
+  (catch 'done
+    (while t
+      (condition-case err
+          ;; Made first, the files read: the lock is held for the writes alone.
+          (let ((rows (delq nil (mapcar (lambda (dir)
+                                          (condition-case err (romacs-agent-store--recorded-row dir)
+                                            (sqlite-locked-error (signal (car err) (cdr err)))
+                                            (error (message "romacs-agent-store: %s: %s" dir (error-message-string err)) nil)))
+                                        dirs)))
+                (written 0))
+            (when rows
+              (sqlite-execute db "begin immediate")
+              ;; Written here, in this transaction: a row that fails fails
+              ;; the chunk.
+              (dolist (row rows)
+                (when (romacs-agent-store--write-values (romacs-agent-store--row-values row) t) (cl-incf written)))
+              (sqlite-execute db "commit"))
+            (throw 'done written))
+        (sqlite-locked-error (ignore-errors (sqlite-execute db "rollback")))
+        (error (ignore-errors (sqlite-execute db "rollback"))
+               (message "romacs-agent-store: %d rows not written, left to the next fill: %s"
+                        (length dirs) (error-message-string err))
+               (throw 'done 0))))))
 
 (defvar romacs-agent-events-store)
 
 (defun romacs-agent-store-fill-batch ()
   "`romacs-agent-store-fill' in a batch process, its count printed.  It
 moves no session's records to SQLite: the editor alone does."
-  (let ((romacs-agent-events-store nil))
+  (let ((romacs-agent-events-store nil) (romacs-agent-store-patience romacs-agent-store-patient))
     (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill)))))
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
