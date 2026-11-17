@@ -324,26 +324,55 @@ impl Heap<'_> {
         }
     }
 
-    /// The word at AT, which this module stored.
+    /// The word at AT, unchecked: the allocator's own path (`take_small`,
+    /// `give_small`, `take_pages`, `push_run`). Checked, it cost 1.6% more
+    /// instructions:u on a boot from source (17.12 G against 17.39 G, the
+    /// binaries built from one checkout) and 1.2% more on a restored batch
+    /// session, measured 2026-11-17.
+    ///
+    /// # Safety
+    /// AT is a word this module keeps in the arena past its header: a free
+    /// block's link or a word of a free run's head.
+    // UNSAFE(a checked free-list read costs 1.6% instructions:u on a source boot, measured; see above)
     #[inline]
-    fn word(&self, at: usize) -> usize {
-        self.check_word(at);
+    unsafe fn link(&self, at: usize) -> usize {
         // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
-        // SAFETY: AT's word lies in the arena, mapped read-write (`check`),
-        // and this module wrote it: a free block's link or a free run's
-        // head. Read unaligned, so no alignment is assumed.
+        // SAFETY: by the contract, AT's word lies in the arena, mapped
+        // read-write, and this module wrote it. Read unaligned, so no
+        // alignment is assumed.
         unsafe { (at as *const usize).read_unaligned() }
     }
 
-    /// Store VALUE at AT: a free block's link or a free run's head.
+    /// Store VALUE at AT, unchecked, as `link` reads.
+    ///
+    /// # Safety
+    /// AT is a word of a free block or free run in the arena past its
+    /// header, which no caller holds.
+    // UNSAFE(a checked free-list write costs as `link`'s read does, measured; see `link`)
     #[inline]
+    unsafe fn set_link(&mut self, at: usize, value: usize) {
+        // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
+        // SAFETY: by the contract, AT's word lies in the arena, mapped
+        // read-write, in a free block or run no caller holds. Written
+        // unaligned, so no alignment is assumed.
+        unsafe { (at as *mut usize).write_unaligned(value) }
+    }
+
+    /// The word at AT, which this module stored, checked: what a census,
+    /// a trim or a scrub reads.
+    fn word(&self, at: usize) -> usize {
+        self.check_word(at);
+        // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
+        // SAFETY: AT's word lies in the arena past its header (`check_word`).
+        unsafe { self.link(at) }
+    }
+
+    /// Store VALUE at AT, checked, as `word` reads.
     fn set_word(&mut self, at: usize, value: usize) {
         self.check_word(at);
         // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
-        // SAFETY: AT's word lies in the arena, mapped read-write (`check`),
-        // in a free block or run no caller holds. Written unaligned, so no
-        // alignment is assumed.
-        unsafe { (at as *mut usize).write_unaligned(value) }
+        // SAFETY: AT's word lies in the arena past its header (`check_word`).
+        unsafe { self.set_link(at, value) }
     }
 
     /// Zero LEN bytes from AT, in a free block or run.
@@ -355,17 +384,31 @@ impl Heap<'_> {
         unsafe { std::ptr::write_bytes(at as *mut u8, 0, len) }
     }
 
-    /// The free run whose head is at AT.
+    /// The free run whose head is at AT, checked.
     fn run(&self, at: usize) -> Run {
         Run { pages: self.word(at), next: self.word(at + 8), released: self.word(at + 16) != 0 }
     }
 
-    /// Write RUN's head at AT.
+    /// Write RUN's head at AT, checked.
     fn set_run(&mut self, at: usize, run: Run) {
         self.set_word(at, run.pages);
         self.set_word(at + 8, run.next);
         self.set_word(at + 16, usize::from(run.released));
     }
+
+    /// The free run whose head is at AT, unchecked, as `link` reads.
+    ///
+    /// # Safety
+    /// AT is the head of a free run in the arena past its header.
+    // UNSAFE(a checked read costs as `link`'s does, measured; see `link`)
+    #[inline]
+    unsafe fn run_at(&self, at: usize) -> Run {
+        // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
+        // SAFETY: by the contract, AT and the two words after it are a free
+        // run's head.
+        unsafe { Run { pages: self.link(at), next: self.link(at + 8), released: self.link(at + 16) != 0 } }
+    }
+
 }
 
 /// The class of a request of SIZE bytes aligned to ALIGN, or None for a run.
@@ -427,7 +470,14 @@ const RUN_HEAD: usize = 3 * size_of::<usize>();
 #[inline]
 fn push_run(heap: &mut Heap<'_>, at: usize, pages: usize, released: bool) {
     let next = heap.runs[bin(pages)];
-    heap.set_run(at, Run { pages, next, released });
+    // UNSAFE(the allocator's own path takes no checked write, measured; see `Heap::link`)
+    // SAFETY: AT starts PAGES free pages of the arena past its header, which
+    // the caller gives up: a run's tail, a freed run or the gap at the top.
+    unsafe {
+        heap.set_link(at, pages);
+        heap.set_link(at + 8, next);
+        heap.set_link(at + 16, usize::from(released));
+    }
     heap.runs[bin(pages)] = at;
 }
 
@@ -441,11 +491,15 @@ fn take_pages(heap: &mut Heap<'_>, pages: usize, align: usize) -> usize {
             let mut at = heap.runs[b];
             let mut walked = 0;
             while at != 0 && walked < 32 {
-                let run = heap.run(at);
+                // UNSAFE(the allocator's own path takes no checked read, measured; see `Heap::link`)
+                // SAFETY: AT is in bin B's list, which holds free run heads only.
+                let run = unsafe { heap.run_at(at) };
                 if run.pages >= pages {
                     match before {
                         None => heap.runs[b] = run.next,
-                        Some(before) => heap.set_word(before + 8, run.next),
+                        // UNSAFE(the allocator's own path takes no checked write, measured; see `Heap::link`)
+                        // SAFETY: BEFORE is the free run before AT in the same list.
+                        Some(before) => unsafe { heap.set_link(before + 8, run.next) },
                     }
                     let rest = run.pages - pages;
                     if rest > 0 {
@@ -508,7 +562,10 @@ fn trim_top(heap: &mut Heap<'_>, slack: usize) {
 fn take_small(heap: &mut Heap<'_>, class: usize) -> usize {
     let head = heap.free[class];
     if head != 0 {
-        heap.free[class] = heap.word(head);
+        // UNSAFE(the allocator's own path takes no checked read, measured; see `Heap::link`)
+        // SAFETY: HEAD is the first of CLASS's free blocks, whose first word
+        // is the next one's address.
+        heap.free[class] = unsafe { heap.link(head) };
         return head;
     }
     let size = class_size(class);
@@ -529,7 +586,9 @@ fn take_small(heap: &mut Heap<'_>, class: usize) -> usize {
 #[inline]
 fn give_small(heap: &mut Heap<'_>, at: usize, class: usize) {
     let next = heap.free[class];
-    heap.set_word(at, next);
+    // UNSAFE(the allocator's own path takes no checked write, measured; see `Heap::link`)
+    // SAFETY: AT is a block of CLASS in this arena that its caller frees.
+    unsafe { heap.set_link(at, next) };
     heap.free[class] = at;
 }
 
