@@ -255,13 +255,14 @@ records; with no rows, from its records since that renewal."
                   ;; The renewal its rows come after, as its record would raise it.
                   (and rows note (list (list :type 'renewed :brief (gethash "brief" (gethash "note" note)))))
                   (mapcan #'romacs-agent-renew--row-events rows)
-                  (romacs-agent-renew--replayed
-                   session (cond (rows after) (note (romacs-agent-renew--place-of session from))) end))))
+                  (romacs-agent-events session end (cond (rows after) (note (romacs-agent-renew--place-of session from)))))))
     (list (romacs-agent-renew--compaction events) (romacs-agent-renew--items session events))))
 
 (defun romacs-agent-renew--last-note (session)
-  "The record of SESSION's last renewal note, or nil."
-  (romacs-agent--journal-last session '("\"renew\"") (lambda (record) (romacs-agent--note-p record "renew"))))
+  "The record of SESSION's last renewal note, or nil.  Only a record that
+holds the note's own type is parsed: text that speaks of renewals, its
+quotes escaped, never matches."
+  (romacs-agent--journal-last session '("\"type\":\"renew\"") (lambda (record) (romacs-agent--note-p record "renew"))))
 
 (defun romacs-agent-renew--rows (session from last)
   "The rows of SESSION's turns after seq FROM and to seq LAST, oldest
@@ -329,14 +330,6 @@ records raised, as far as a brief reads them (`romacs-agent-handoff-items')."
 (defun romacs-agent-renew--place-of (session seq)
   "The place at which SESSION's record SEQ begins, or nil."
   (if (romacs-agent-events-p session) seq (romacs-agent--journal-file-after session seq nil t)))
-
-(defun romacs-agent-renew--replayed (session from end)
-  "The events of SESSION's records from place FROM (from their start when
-nil) to place END, replayed on a copy."
-  (let* ((scratch (romacs-agent--scratch session)) (events nil)
-         (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from end)
-    (nreverse events)))
 
 (defun romacs-agent-renew--compaction (events)
   "The summary of the compaction its harness made since its last turn

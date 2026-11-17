@@ -389,6 +389,10 @@ def renew(args, base):
         a.idle(sid)
         a.send(sid, 'say before')
         a.idle(sid)
+        # Its finished turns' rows filled (a moment after each end), so the
+        # renewal reads them, not its records.
+        until(lambda: a.eval(f"(progn (require 'romacs-agent-turns) (romacs-agent-turns-count {a.s(sid)}))") == '2',
+              30, 'its turns rows filled')
         # Its only session: a renewed run is logged under its new conversation.
         runs = lambda: [e for e in a.logged() if 'started' in e]
         before = len(runs())
