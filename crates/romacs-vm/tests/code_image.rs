@@ -20,7 +20,7 @@ impl Store {
         Self(path)
     }
     fn open(&self, key: &str) -> Arc<ImageRegion> {
-        unsafe { ImageRegion::open(&self.0, key) }.unwrap()
+        ImageRegion::open(&self.0, key).unwrap()
     }
 }
 impl Drop for Store {
