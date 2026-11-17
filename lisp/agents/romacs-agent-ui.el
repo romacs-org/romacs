@@ -1293,11 +1293,14 @@ order: found by its text (`romacs-agent-rule-fill'), not remembered."
 (defun romacs-agent-ui--render (session event)
   "Show SESSION's EVENT in its chat buffer, when it has one and has not
 shown it: the journal's replay and the live records meet without a gap
-or a repeat."
+or a repeat.  An error of this editor's own, no record's (no seq), is
+shown as it comes: no replay would."
   (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer))
               ;; Not yet filled: its replay will draw it.
               ((not (buffer-local-value 'romacs-agent-ui--unfilled buffer)))
-              ((> (or (plist-get event :seq) 0) (buffer-local-value 'romacs-agent-ui--shown buffer))))
+              ((if (plist-get event :seq)
+                   (> (plist-get event :seq) (buffer-local-value 'romacs-agent-ui--shown buffer))
+                 (eq (plist-get event :type) 'error))))
     (with-current-buffer buffer
       (when (plist-get event :last) (setq romacs-agent-ui--shown (plist-get event :seq)))
       ;; Drawn live or replayed, the transcript is no edit to undo.
