@@ -695,11 +695,17 @@ asked first: nil drops the message.  MESSAGES say whose it is
 \(`romacs-agent--input')."
   (let ((deliver (lambda () (when (or (null valid) (funcall valid))
                               (romacs-agent-send session text delivered valid nil messages)))))
-    (if (romacs-agent--per-turn-p session) (funcall deliver)
+    (cond
+     ;; A worker folds it still: delivered once it is folded, its attach's
+     ;; wait counted from then.
+     ((romacs-agent--folding-p session)
+      (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages))))
+     ((romacs-agent--per-turn-p session) (funcall deliver))
+     (t
       ;; A parent whose harness was stopped or ended is resumed to take it.
       (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
         (romacs-agent--continue session))
-      (romacs-agent--when-attached session deliver))))
+      (romacs-agent--when-attached session deliver)))))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")

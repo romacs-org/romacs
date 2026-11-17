@@ -3951,10 +3951,12 @@ attached to it.  MESSAGES: it comes from other sessions
   ;; What it is sent as (a new turn, a steer) is told by its folded state:
   ;; a worker folding it still, it waits in its queue for that fold.
   (cond ((romacs-agent--folding-p session)
-         (let ((item (list text delivered valid images messages)))
+         (let ((item (list text delivered valid images messages)) (id (romacs-agent-id session)))
            (romacs-agent--enqueue session item)
+           (push item (gethash id romacs-agent--fold-parked))
            (romacs-agent--when-folded
             session (lambda ()
+                      (puthash id (delq item (gethash id romacs-agent--fold-parked)) romacs-agent--fold-parked)
                       (when (romacs-agent--dequeue session item)
                         (romacs-agent-send session text delivered valid images messages))))))
         ((or (romacs-agent-pending-selection session)
@@ -4931,6 +4933,10 @@ before its session is said unfolded.")
   "Each session id a worker folds to the functions waiting for its fold,
 oldest first (`romacs-agent--when-folded').")
 
+(defvar romacs-agent--fold-parked (make-hash-table :test #'equal)
+  "Each session id a worker folds to the messages sent to it meanwhile,
+waiting in its queue for the fold (`romacs-agent-send').")
+
 (defun romacs-agent--folded-one (session manifest failure)
   "SESSION, made from MANIFEST, folded by a worker (FAILURE, why its job
 failed, or nil): it loads on from the kept state written, and what waits
@@ -4957,6 +4963,9 @@ is folded here only when no worker could start (FAILURE `no-worker')."
         (remhash id romacs-agent--fold-tries)
         (let ((waiting (length (gethash id romacs-agent--fold-waiters))))
           (remhash id romacs-agent--fold-waiters)
+          ;; Its messages dropped with them, out of its queue.
+          (dolist (item (gethash id romacs-agent--fold-parked)) (romacs-agent--dequeue session item))
+          (remhash id romacs-agent--fold-parked)
           (romacs-agent--raise session (list :type 'error
                                              :text (format "Its records could not be read by a worker (%s): %s"
                                                            (or failure "it kept no state")
