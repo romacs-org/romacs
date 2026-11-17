@@ -199,35 +199,42 @@ fn regions_die_with_their_last_reference_and_ids_are_reused() {
     }
 }
 
-/// `list_limit` reads the attached regions' conses on every list walk, so
-/// they are kept as regions come and go rather than summed over the table,
-/// which keeps every slot ever used. The kept count must equal the sum
-/// through attach, a refusal, sweeps that free some ids, reuse of those
-/// ids, and a sweep of everything.
+/// `list_limit` reads the attached regions' conses on every list walk, and
+/// the collector's pacing their weight at every poll, so what they add up
+/// to is kept as regions come and go rather than summed over the table,
+/// which keeps every slot ever used. The kept totals must equal the sum
+/// through attach (a hash table's filled after placing), a refusal, sweeps
+/// that free some ids, reuse of those ids, and a sweep of everything.
 #[test]
-fn the_kept_region_cons_count_is_the_sum_over_every_slot() {
+fn the_kept_region_totals_are_the_sum_over_every_slot() {
     let mut vm = vm();
-    let held = |vm: &Vm| (vm.region_conses(), vm.regions.summed_conses());
-    let agrees = |vm: &Vm, step: &str| { let (kept, summed) = held(vm); assert_eq!(kept, summed, "{step}"); kept };
-    assert_eq!(agrees(&vm, "fresh"), 0);
-    eval(&mut vm, "(setq a (freeze (list 1 2 3)) b (freeze (list (list 4 5) 6)) c (freeze (vector (list 7))))");
+    let agrees = |vm: &Vm, step: &str| {
+        let kept = vm.regions.totals();
+        assert_eq!(kept, vm.regions.summed(), "{step}");
+        assert_eq!((vm.region_count(), vm.region_conses(), vm.region_weight()), (kept.regions, kept.conses, kept.weight), "{step}");
+        kept
+    };
+    assert_eq!(agrees(&vm, "fresh"), Totals::default());
+    eval(&mut vm, "(setq a (freeze (list 1 2 3)) b (freeze (list (list 4 5) 6)) c (freeze (let ((h (make-hash-table))) (puthash 'k (list 7) h) h)))");
     assert_eq!(eval(&mut vm, "(mapcar #'car (romacs--frozen-regions))"), "(1 2 3)");
     let three = agrees(&vm, "three attached");
-    assert!(three >= 6, "{three} conses for three regions holding at least six");
+    assert_eq!(three.regions, 3);
+    assert!(three.conses >= 6 && three.weight > three.conses, "{three:?}");
     assert_eq!(caught(&mut vm, "(freeze (list (make-marker)))").split(' ').next(), Some("(signalled"));
     assert_eq!(agrees(&vm, "after a refusal"), three);
     eval(&mut vm, "(setq a nil c nil)");
     vm.collect_garbage();
     assert_eq!(eval(&mut vm, "(mapcar #'car (romacs--frozen-regions))"), "(2)");
     let one = agrees(&vm, "two swept");
-    assert!(one > 0 && one < three, "{one} of {three} conses after two sweeps");
+    assert!(one.regions == 1 && one.conses > 0 && one.conses < three.conses, "{one:?} of {three:?}");
     eval(&mut vm, "(setq a (freeze (list 8 9 10 11)) c (freeze (list 12)))");
     assert_eq!(eval(&mut vm, "(sort (mapcar #'car (romacs--frozen-regions)) #'<)"), "(1 2 3)");
-    assert_eq!(agrees(&vm, "ids reused"), one + 5);
+    let reused = agrees(&vm, "ids reused");
+    assert_eq!((reused.regions, reused.conses), (3, one.conses + 5));
     eval(&mut vm, "(setq a nil b nil c nil)");
     vm.collect_garbage();
     assert!(vm.regions_empty());
-    assert_eq!(agrees(&vm, "all swept"), 0);
+    assert_eq!(agrees(&vm, "all swept"), Totals::default());
 }
 
 #[test]
@@ -244,13 +251,13 @@ fn id_exhaustion_signals_instead_of_corrupting() {
     let n = MAX_REGIONS - 1;
     assert_eq!(eval(&mut vm, &format!("(progn (setq all nil) (dotimes (i {n}) (push (freeze (list i)) all)) (length (romacs--frozen-regions)))")), n.to_string());
     assert_eq!(caught(&mut vm, "(freeze (list 'one-more))"), format!("(signalled error \"Too many frozen regions {n}\")"));
-    assert_eq!(vm.region_conses(), vm.regions.summed_conses());
+    assert_eq!(vm.regions.totals(), vm.regions.summed());
     // A dead register of the same run may still name a region: the
     // collection that frees it runs at the next entry.
     eval(&mut vm, "(setq all (cdr all))");
     vm.collect_garbage();
     assert_eq!(eval(&mut vm, "(frozen-p (freeze (list 'fits)))"), "t");
-    assert_eq!(vm.region_conses(), vm.regions.summed_conses());
+    assert_eq!(vm.regions.totals(), vm.regions.summed());
 }
 
 #[test]

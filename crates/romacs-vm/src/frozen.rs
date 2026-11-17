@@ -107,18 +107,48 @@ impl Backing {
 /// what a restored VM remakes (`romacs_snapshot::Schema::renew`).
 ///
 /// The table grows to the most regions ever live at once and is never
-/// truncated, so a sum over its slots costs every slot ever used. The
-/// conses of the attached regions are kept as regions are placed and
-/// removed instead: `Vm::list_limit` reads them on every list walk.
+/// truncated, so a sum over its slots costs every slot ever used. What
+/// the attached regions add up to is kept as regions are placed and
+/// removed instead: `Vm::list_limit` reads their conses on every list walk,
+/// and the collector's pacing their weight at every poll.
 /// Reads go through `Deref`; the table changes only here.
 pub(crate) struct Regions {
     slots: Vec<Option<Box<Region>>>,
-    conses: usize,
+    totals: Totals,
+}
+
+/// What the attached regions add up to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Totals {
+    pub(crate) regions: usize,
+    pub(crate) conses: usize,
+    /// The pressure they put on the collector, in objects (`Region::weight`).
+    pub(crate) weight: usize,
+}
+
+impl Totals {
+    fn of(region: &Region) -> Self {
+        Totals { regions: 1, conses: region.conses.len(), weight: region.weight() }
+    }
+}
+
+impl std::ops::Add for Totals {
+    type Output = Self;
+    fn add(self, o: Self) -> Self {
+        Totals { regions: self.regions + o.regions, conses: self.conses + o.conses, weight: self.weight + o.weight }
+    }
+}
+
+impl std::ops::Sub for Totals {
+    type Output = Self;
+    fn sub(self, o: Self) -> Self {
+        Totals { regions: self.regions - o.regions, conses: self.conses - o.conses, weight: self.weight - o.weight }
+    }
 }
 
 impl Default for Regions {
     fn default() -> Self {
-        Self { slots: vec![None], conses: 0 }
+        Self { slots: vec![None], totals: Totals::default() }
     }
 }
 
@@ -134,39 +164,39 @@ impl Regions {
     /// Put REGION in the free slot ID.
     fn place(&mut self, id: usize, region: Box<Region>) {
         debug_assert!(self.slots[id].is_none(), "region {id} placed over a live one");
-        self.conses += region.conses.len();
+        self.totals = self.totals + Totals::of(&region);
         self.slots[id] = Some(region);
-        self.check_conses();
+        self.check();
     }
 
     /// Drop the region at ID, if one is there.
     fn remove(&mut self, id: usize) {
         if let Some(region) = self.slots.get_mut(id).and_then(Option::take) {
-            self.conses -= region.conses.len();
-            self.check_conses();
+            self.totals = self.totals - Totals::of(&region);
+            self.check();
         }
     }
 
     /// Replace object I of the region at ID: a hash table filled once its
-    /// keys can be read. The region's conses do not change.
+    /// keys can be read. The region's totals do not change.
     fn set_object(&mut self, id: usize, i: usize, object: Object) {
         self.slots[id].as_mut().expect("placed region").objects[i] = object;
     }
 
-    /// The conses every attached region holds, kept as regions come and go.
-    pub(crate) fn conses(&self) -> usize {
-        self.conses
+    /// What the attached regions add up to, kept as regions come and go.
+    pub(crate) fn totals(&self) -> Totals {
+        self.totals
     }
 
-    /// The same, summed over every slot: what `conses` keeps.
-    pub(crate) fn summed_conses(&self) -> usize {
-        self.slots.iter().flatten().map(|r| r.conses.len()).sum()
+    /// The same, summed over every slot: what `totals` keeps.
+    pub(crate) fn summed(&self) -> Totals {
+        self.slots.iter().flatten().fold(Totals::default(), |t, r| t + Totals::of(r))
     }
 
-    /// Debug builds hold the kept count to the sum where the table changes,
-    /// never where it is read.
-    fn check_conses(&self) {
-        debug_assert_eq!(self.conses, self.summed_conses(), "frozen regions' cons count drifted");
+    /// Debug builds hold the kept totals to the sum where the table
+    /// changes, never where they are read.
+    fn check(&self) {
+        debug_assert_eq!(self.totals, self.summed(), "frozen regions' totals drifted");
     }
 }
 
@@ -187,6 +217,14 @@ pub(crate) struct Region {
     /// Encoded length: the pressure the region puts on the collector.
     pub(crate) bytes: usize,
     pub(crate) backing: Backing,
+}
+
+impl Region {
+    /// The pressure the region puts on the collector, in objects: its
+    /// conses and objects, plus one per 16 encoded bytes.
+    fn weight(&self) -> usize {
+        self.conses.len() + self.objects.len() + self.bytes / 16
+    }
 }
 
 /// A frozen value: `tag` 3 (cons) or 0 (object) in REGION at INDEX (objects
@@ -741,22 +779,21 @@ impl Vm {
     }
 
     pub(crate) fn regions_empty(&self) -> bool {
-        self.regions.iter().all(Option::is_none)
+        self.regions.totals().regions == 0
     }
 
     /// Live region ids, excluding the executable image.
     pub(crate) fn region_count(&self) -> usize {
-        self.regions.iter().skip(1).filter(|r| r.is_some()).count()
+        self.regions.totals().regions
     }
 
-    /// The pressure every region puts on the collector, in objects: its
-    /// conses and objects, plus one per 16 encoded bytes.
+    /// The pressure every region puts on the collector (`Region::weight`).
     pub(crate) fn region_weight(&self) -> usize {
-        self.regions.iter().flatten().map(|r| r.conses.len() + r.objects.len() + r.bytes / 16).sum()
+        self.regions.totals().weight
     }
 
     pub(crate) fn region_conses(&self) -> usize {
-        self.regions.conses()
+        self.regions.totals().conses
     }
 
     /// ROOT's graph as bytes of the encoding, or the first refusal.
