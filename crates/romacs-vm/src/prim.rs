@@ -1239,7 +1239,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.symbol_slot(v)?;
-            Ok(self.vm.local_table(slot).map_err(Fault::Error)?.is_some())
+            Ok(self.vm.localized(slot))
         }
         /// A live dynamic (`let`) binding of V, GNU's `specpdl` scan in
         /// `Fdefvaralias`. Bindings record the variable at the chain's end.

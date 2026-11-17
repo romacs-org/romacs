@@ -41,39 +41,28 @@ pub(super) fn native_stack_floor() -> usize {
 }
 
 impl Vm {
-    /// The private slot of the current buffer's local binding of
+    /// The current buffer's object index and its local value of
     /// `max-lisp-eval-depth', if it has one: GNU swaps that binding into the
     /// C variable at set-buffer, so evaluation reads it.
-    fn eval_limit_local(&mut self) -> Option<usize> {
+    fn eval_limit_local(&self) -> Option<(usize, Value)> {
         let symbol = self.forwarded.eval_limit_symbol;
         if symbol == usize::MAX {
             return None;
         }
-        let buffer = self.slots[self.buffer_slot].value;
-        let (seen, local, epoch) = self.forwarded.eval_limit_cache;
-        if seen == buffer.0 && epoch == self.forwarded.local_epoch {
-            return (local != usize::MAX).then_some(local);
-        }
-        let table = self.slots[symbol].local;
-        let local = (table != Value::NIL)
-            .then(|| self.declaration_hash_get(table, buffer).ok().flatten())
-            .flatten()
-            .and_then(|binding| binding.index(7).ok())
-            .map(|slot| slot - 1);
-        self.forwarded.eval_limit_cache = (buffer.0, local.unwrap_or(usize::MAX), self.forwarded.local_epoch);
-        local
+        let index = self.slots[self.buffer_slot].value.index_if(0)?.checked_sub(1)?;
+        Some((index, self.per_buffer(index)?.locals().get(Value::reference(symbol + 1, 7))?))
     }
     /// `max-lisp-eval-depth' as evaluation reads it: the current buffer's
     /// binding (its local one, else the C storage).
     pub(super) fn eval_limit(&mut self) -> i64 {
         match self.eval_limit_local() {
-            Some(local) => self.slots[local].value.integer_value().unwrap_or(0),
+            Some((_, local)) => local.integer_value().unwrap_or(0),
             None => self.forwarded.eval_limit(),
         }
     }
     fn set_eval_limit(&mut self, limit: i64) {
         match self.eval_limit_local() {
-            Some(local) => self.slots[local].value = Value::integer(limit).expect("eval depth limit is a fixnum"),
+            Some((index, _)) => self.store_local(index, self.forwarded.eval_limit_symbol, crate::variable_runtime::LocalStore::Set(Value::integer(limit).expect("eval depth limit is a fixnum"))),
             None => self.forwarded.set_integer(MAX_DEPTH, limit),
         }
     }

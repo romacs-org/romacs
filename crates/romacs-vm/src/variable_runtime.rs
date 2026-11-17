@@ -1,5 +1,6 @@
-//! Variable designation and per-buffer values, owned by the symbol's slot
-//! (`Slot::local`), never by its Lisp-visible plist.
+//! Variable designation, and where a variable's value is: its symbol's
+//! slot, a built-in's native storage, or the current buffer's own locals
+//! (`local_vars.rs`); never its Lisp-visible plist.
 
 #[cfg(test)]
 mod uninitialized_image_tests {
@@ -106,24 +107,20 @@ mod reclamation_tests {
     }
 
     #[test]
-    fn dead_buffer_private_slots_are_reused_after_counted_collection() {
+    fn a_killed_buffers_locals_go_with_it() {
         let mut vm = Vm::new();
-        vm.set_collection_floor(1);
         let mut counts = Vec::new();
         for _ in 0..3 {
             vm.eval_source_raw("(dotimes (i 1000) (with-temp-buffer (make-local-variable 's124-pool)))").unwrap();
             let slot = vm.slot("s124-pool");
             let redirect = vm.variable_redirects[slot];
             assert_eq!(redirect, Some(VariableRedirect::Localized));
-            let before = vm.heap_stats().collections;
             vm.collect(&mut []);
-            assert!(vm.heap_stats().collections > before);
-            assert!(!vm.free_local_binding_slots.is_empty(), "fixture must reclaim local owners");
-            assert_eq!(vm.variable_redirects[slot], redirect, "owner reclamation must retain the symbol redirect");
-            assert!(vm.local_table(slot).unwrap().is_some(), "empty localized table remains installed");
-            counts.push(vm.local_binding_slots.len());
+            assert_eq!(vm.variable_redirects[slot], redirect, "a kill retains the symbol redirect");
+            assert!(vm.localized(slot));
+            counts.push(vm.slots.len());
         }
-        assert!(counts[2] <= counts[0] + 2, "dead-buffer private slot metadata grows: {counts:?}");
+        assert_eq!(counts[0], counts[2], "locals take no symbol slots: {counts:?}");
     }
 }
 use super::*;
@@ -139,12 +136,33 @@ pub(crate) fn variable_reads() -> usize {
     VARIABLE_READS.with(std::cell::Cell::get)
 }
 
+/// Where the current buffer has a variable's value (`Vm::binding`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Binding {
+    /// The default: the symbol's value cell or a built-in's native storage.
+    Default,
+    /// The local in the buffer at this object index.
+    Local(usize),
+}
+
+/// A change to one buffer's local of a variable (`Vm::store_local`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LocalStore {
+    /// Give the buffer a local with this value, unless it has one.
+    Make(Value),
+    /// Store this value in the local it has.
+    Set(Value),
+    /// Drop the local it has.
+    Kill,
+}
+
 /// Where one buffer's value of a variable is read from.
 #[derive(Clone, Copy)]
 enum Place {
-    /// A symbol slot's value cell: the variable's own, or the buffer's
-    /// private binding of it.
+    /// A symbol slot's value cell: the variable's default.
     Slot(usize),
+    /// The buffer's local of the variable, this symbol.
+    Local(Value),
     /// A built-in's native storage.
     Native(forwarded::Fwd),
     /// Found at each read: an alias, a per-buffer or a tracked built-in.
@@ -154,14 +172,18 @@ enum Place {
 /// Variables a primitive reads at every call, and where their values in one
 /// buffer are (`Vm::read_places`): GNU reads a C variable, into which
 /// set-buffer swapped the buffer's binding. A place holds for its buffer
-/// until a local-binding table changes or a collection moves the buffer
-/// (`Forwarded::local_epoch`, as `Vm::eval_limit_local`), and while the
-/// variable's redirect is the one it was found under (an alias, a tracking
-/// and a first localization each change it).
+/// until the buffer's locals change which variables they hold
+/// (`LocalVars::version`) or a collection moves the buffer
+/// (`Forwarded::local_epoch`), and while the variable's redirect is the one
+/// it was found under (an alias, a tracking and a first localization each
+/// change it).
 #[derive(Clone, Copy)]
 pub(crate) struct Places<const N: usize> {
     symbols: [usize; N],
     buffer: Value,
+    /// The buffer's object index and its locals' version when found.
+    index: usize,
+    version: u32,
     epoch: u64,
     /// Each variable's redirect when found, and where it was found.
     found: [(Option<VariableRedirect>, Place); N],
@@ -169,7 +191,7 @@ pub(crate) struct Places<const N: usize> {
 impl<const N: usize> Places<N> {
     /// Of the variables at symbol slots SYMBOLS, none found yet.
     pub(crate) fn new(symbols: [usize; N]) -> Self {
-        Self { symbols, buffer: Value::UNBOUND, epoch: 0, found: [(None, Place::Each); N] }
+        Self { symbols, buffer: Value::UNBOUND, index: 0, version: 0, epoch: 0, found: [(None, Place::Each); N] }
     }
     /// The symbol slot of variable I.
     pub(crate) fn symbol(&self, i: usize) -> usize {
@@ -260,10 +282,8 @@ impl Vm {
     }
     // Redirects contain stable slot IDs, never untraced moving-heap Values.
     // Publication is set-only: GNU data.c:2385-2408 removes a local entry
-    // without reverting SYMBOL_LOCALIZED. GC owner reclamation must likewise
-    // never clear this redirect; future kill-local-variable must preserve it.
-    // The local table lives in the slot itself (`Slot::local`), never on the
-    // Lisp plist, so no plist operation can install or remove it.
+    // without reverting SYMBOL_LOCALIZED. Killing a buffer must never clear
+    // this redirect; nor does kill-local-variable.
     pub(super) fn initialize_variable_redirect(&mut self, name: &str, slot: usize) {
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
         if self.variable_redirects[slot].is_none() && self.names.get(name) == Some(&slot)
@@ -271,70 +291,95 @@ impl Vm {
             self.variable_redirects[slot] = Some(VariableRedirect::Forwarded(fwd));
         }
         if self.variable_redirects[slot].is_none() {
-            let localized = self.slots[slot].local != Value::NIL;
+            let localized = self.slots[slot].localness != Localness::Never;
             self.variable_redirects[slot] = Some(if localized { VariableRedirect::Localized } else { VariableRedirect::Plain });
         }
         if self.tracking.is_some() {
             self.observe_new_variable(slot);
         }
     }
-    /// Publish SLOT's local TABLE, retaining native Boolean forwarding.
-    pub(super) fn install_local_table(&mut self, slot: usize, table: Value, explicit: bool) {
-        self.slots[slot].local = table;
-        self.slots[slot].explicit_local = explicit;
+    /// Declare SLOT's variable one with buffer-local values, LOCALNESS
+    /// unless it was so declared before, retaining native forwarding: a
+    /// write of the symbol's declaration, once a variable.
+    pub(super) fn declare_local(&mut self, slot: usize, localness: Localness) {
+        if self.slots[slot].localness == Localness::Never {
+            self.slots[slot].localness = localness;
+        }
         self.variable_redirects.resize(self.variable_redirects.len().max(slot + 1), None);
         if let Some(VariableRedirect::Forwarded(fwd @ (forwarded::Fwd::Bool(_) | forwarded::Fwd::Int(_) | forwarded::Fwd::Obj(_)))) = self.variable_redirects[slot] {
             if fwd == forwarded::Fwd::Int(self.forwarded.eval_limit_index as u16) { self.forwarded.eval_limit_symbol = slot; }
             self.variable_redirects[slot] = Some(VariableRedirect::LocalizedForwarded(fwd));
-        } else if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Forwarded(_) | VariableRedirect::LocalizedForwarded(_) | VariableRedirect::Alias(_))) {
+        } else if !matches!(self.variable_redirects[slot], Some(VariableRedirect::Forwarded(_) | VariableRedirect::LocalizedForwarded(_) | VariableRedirect::Alias(_) | VariableRedirect::Localized)) {
             self.variable_redirects[slot] = Some(VariableRedirect::Localized);
         }
     }
-    pub(super) fn local_table(&mut self, slot: usize) -> Result<Option<Value>> {
+    /// Whether the variable at SLOT (the end of its alias chain) may have
+    /// buffer-local values: GNU's SYMBOL_LOCALIZED, as a tracking keeps it.
+    pub(super) fn localized(&mut self, slot: usize) -> bool {
         if self.variable_redirects.get(slot).copied().flatten().is_none() {
             // Code images rebuild slots without interning; uninterned slots
             // are never forwarded. Resolve the redirect once.
             let name = self.symbol_names[slot].clone();
             if self.names.get(&name) != Some(&slot) {
-                let table = self.slots[slot].local;
-                return Ok((table != Value::NIL).then_some(table));
+                return self.slots[slot].localness != Localness::Never;
             }
             self.initialize_variable_redirect(&name, slot);
         }
-        if !matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) { return Ok(None); }
-        let table = self.slots[slot].local;
-        Ok((table != Value::NIL).then_some(table))
+        matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)))
     }
-    // A table maps each buffer to an ordinary private symbol slot. Dynamic
-    // bindings save that slot, not the default or another buffer's value.
-    // A missing entry inherits the default; UNBOUND in an entry is locally void.
-    pub(super) fn variable_binding_slot(&mut self, slot: usize, create: bool) -> Result<usize> {
+    /// Where the variable at SLOT has its value in the current buffer: the
+    /// buffer's local, else the default. With CREATE, for a set: an
+    /// automatically local variable gets the buffer's local, made with its
+    /// default's value, unless a `let' of its default made in this buffer
+    /// is in effect (GNU `let_shadows_buffer_binding_p`).
+    pub(super) fn binding(&mut self, slot: usize, create: bool) -> Result<Binding> {
         // An alias has no binding of its own: GNU follows SYMBOL_VARALIAS in
         // every reader and writer (data.c:1629, 1719, ...).
         let slot = self.indirect_variable(slot);
-        // Built-in automatic locals stay heap-free until first lookup, as
-        // required by cold VM/code-image construction.
-        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot) && self.local_table(slot)?.is_none() {
-            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-            self.install_local_table(slot, table, false);
+        // Built-in automatic locals are declared at their first lookup, so
+        // cold VM and code-image construction see none.
+        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot) && self.slots[slot].localness == Localness::Never {
+            self.declare_local(slot, Localness::Automatic);
         }
-        let Some(table) = self.local_table(slot)? else { return Ok(slot) };
-        self.buffer_index()?;
-        let buffer = self.slots[self.buffer_slot].value;
-        if let Some(symbol) = self.declaration_hash_get(table, buffer)? { return Ok(symbol.index(7)? - 1); }
-        let explicit = self.slots[slot].explicit_local;
+        if !self.localized(slot) { return Ok(Binding::Default); }
+        let index = self.buffer_index()?;
+        let symbol = Value::reference(slot + 1, 7);
+        if self.per_buffer(index).is_some_and(|b| b.locals().contains(symbol)) { return Ok(Binding::Local(index)); }
+        if !create || self.slots[slot].localness == Localness::Explicit { return Ok(Binding::Default); }
         // Assignment within a default binding belongs to that binding in
         // its originating buffer, not to a newly created local entry.
+        let buffer = self.slots[self.buffer_slot].value;
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, kind)| {
             *kind == Let::Default && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
         });
-        if !create || explicit || shadowed { return Ok(slot); }
-        let local = self.allocate_local_binding_slot();
-        self.slots[local].value = if let Some(fwd) = self.localized_forwarded(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
-        self.declaration_hash_put(table, buffer, Value::reference(local+1, 7))?;
-        self.note_local_binding(buffer, slot);
-        Ok(local)
+        if shadowed { return Ok(Binding::Default); }
+        let value = if let Some(fwd) = self.localized_forwarded(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
+        self.store_local(index, slot, LocalStore::Make(value));
+        Ok(Binding::Local(index))
+    }
+    /// The local value of the variable at SLOT in the buffer at object
+    /// INDEX, which has one; UNBOUND when void.
+    pub(super) fn local_value(&self, index: usize, slot: usize) -> Value {
+        self.per_buffer(index).and_then(|b| b.locals().get(Value::reference(slot + 1, 7))).unwrap_or(Value::UNBOUND)
+    }
+    /// The one way a buffer's Lisp locals change, but for a kill's
+    /// wholesale clear (`PerBuffer::retain_locals`) and an indirect clone's
+    /// copy (`Vm::clone_indirect_state`): STORE to the local of the
+    /// variable at SLOT in the buffer at object INDEX. A store that would
+    /// change nothing writes nothing.
+    pub(crate) fn store_local(&mut self, index: usize, slot: usize, store: LocalStore) {
+        let symbol = Value::reference(slot + 1, 7);
+        let Some(has) = self.per_buffer(index).map(|b| b.locals().contains(symbol)) else { return };
+        if has == matches!(store, LocalStore::Make(_)) {
+            return;
+        }
+        let locals = self.per_buffer_mut(index).expect("a buffer").locals_mut();
+        match store {
+            LocalStore::Make(value) => { locals.insert(symbol, value); }
+            LocalStore::Set(value) => *locals.get_mut(symbol).expect("its local") = value,
+            LocalStore::Kill => { locals.remove(symbol); }
+        }
     }
     /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its
     /// buffer-local value there, else its default.  UNBOUND when void.
@@ -356,9 +401,9 @@ impl Vm {
                 _ => self.forwarded_value(fwd),
             };
         }
-        if let Some(table) = self.local_table(slot)? {
-            if let Some(local) = self.declaration_hash_get(table, buffer)? {
-                return Ok(self.slots[local.index(7)? - 1].value);
+        if self.localized(slot) {
+            if let Some(value) = self.per_buffer(buffer.index(0)? - 1).and_then(|b| b.locals().get(Value::reference(slot + 1, 7))) {
+                return Ok(value);
             }
             if let Some(fwd) = self.localized_forwarded(slot) {
                 return self.forwarded_default(fwd);
@@ -370,12 +415,14 @@ impl Vm {
         #[cfg(test)]
         VARIABLE_READS.with(|reads| reads.set(reads.get() + 1));
         let base = self.indirect_variable(slot);
-        if let Some(fwd) = self.native_forwarding(base) {
-            let local = self.variable_binding_slot(base, false)?;
-            return if local == base { self.forwarded_value(fwd) } else { Ok(self.slots[local].value) };
+        let binding = self.binding(base, false)?;
+        if let Binding::Local(index) = binding {
+            return Ok(self.local_value(index, base));
         }
-        let local = self.variable_binding_slot(slot, false)?;
-        Ok(self.slots[local].value)
+        match self.native_forwarding(base) {
+            Some(fwd) => self.forwarded_value(fwd),
+            None => Ok(self.slots[base].value),
+        }
     }
     /// The values of PLACES' variables in the current buffer, each as
     /// `variable_value` gives it, read where they were found: None when
@@ -384,6 +431,10 @@ impl Vm {
     #[inline]
     pub(crate) fn read_places<const N: usize>(&self, places: &Places<N>) -> Option<[Value; N]> {
         if places.buffer != self.slots[self.buffer_slot].value || places.epoch != self.forwarded.local_epoch {
+            return None;
+        }
+        let locals = self.per_buffer(places.index)?.locals();
+        if locals.version() != places.version {
             return None;
         }
         // By index: every call of a search or a scan comes through here.
@@ -396,6 +447,7 @@ impl Vm {
             }
             values[i] = match place {
                 Place::Slot(slot) => self.slots[slot].value,
+                Place::Local(symbol) => locals.get(symbol)?,
                 Place::Native(fwd) => self.forwarded.stored(fwd)?,
                 Place::Each => return None,
             };
@@ -414,7 +466,9 @@ impl Vm {
             // After the read, which resolves a lazy redirect.
             places.found[i] = (self.variable_redirects.get(symbol).copied().flatten(), self.variable_place(symbol)?);
         }
+        places.index = self.buffer_index()?;
         places.buffer = self.slots[self.buffer_slot].value;
+        places.version = self.per_buffer(places.index).map_or(0, |b| b.locals().version());
         places.epoch = self.forwarded.local_epoch;
         Ok(values)
     }
@@ -424,13 +478,11 @@ impl Vm {
         if self.indirect_variable(slot) != slot {
             return Ok(Place::Each);
         }
+        let local = matches!(self.binding(slot, false)?, Binding::Local(_)).then(|| Place::Local(Value::reference(slot + 1, 7)));
         Ok(match self.native_forwarding(slot) {
-            Some(fwd @ (Fwd::Obj(_) | Fwd::Bool(_) | Fwd::Int(_))) => {
-                let local = self.variable_binding_slot(slot, false)?;
-                if local == slot { Place::Native(fwd) } else { Place::Slot(local) }
-            }
+            Some(fwd @ (Fwd::Obj(_) | Fwd::Bool(_) | Fwd::Int(_))) => local.unwrap_or(Place::Native(fwd)),
             Some(Fwd::Buffer(_) | Fwd::Tracked(_)) => Place::Each,
-            None => Place::Slot(self.variable_binding_slot(slot, false)?),
+            None => local.unwrap_or(Place::Slot(slot)),
         })
     }
     pub(super) fn set_variable_value(&mut self, slot: usize, value: Value) -> Result<()> {
@@ -453,15 +505,17 @@ impl Vm {
             if value == Value::UNBOUND {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
             }
-            let local = self.variable_binding_slot(base, true)?;
-            if local == base {
+            let Binding::Local(index) = self.binding(base, true)? else {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
-            }
-            self.slots[local].value = Self::localized_value(fwd, value).map_err(forwarded::fault_text)?;
+            };
+            let value = Self::localized_value(fwd, value).map_err(forwarded::fault_text)?;
+            self.store_local(index, base, LocalStore::Set(value));
             return Ok(());
         }
-        let local = self.variable_binding_slot(slot, true)?;
-        self.slots[local].value = value;
+        match self.binding(base, true)? {
+            Binding::Local(index) => self.store_local(index, base, LocalStore::Set(value)),
+            Binding::Default => self.slots[base].value = value,
+        }
         Ok(())
     }
     /// GNU `default_value` (data.c:1960) of the variable at SLOT, the end of
@@ -503,9 +557,8 @@ impl Vm {
             && self.dynamic.iter().any(|(bound, old, _, _)| *bound == slot && *old != Value::NIL && *old != Value::TRUE) {
             return Err(format!("VM2 localized Boolean default requires nil or t: {}", self.symbol_names[slot]));
         }
-        if self.local_table(slot)?.is_none() {
-            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-            self.install_local_table(slot, table, explicit);
+        if !self.localized(slot) {
+            self.declare_local(slot, if explicit { Localness::Explicit } else { Localness::Automatic });
         }
         Ok(())
     }
@@ -522,13 +575,14 @@ impl Vm {
             self.tracked_watched(base);
             return self.untracked(cell as usize, |vm| vm.bind_variable(slot, value));
         }
-        let local = self.variable_binding_slot(base, false)?;
-        let forwarded = self.native_forwarding(base).filter(|_| local == base);
-        let binding = match forwarded {
-            Some(fwd) => self.forwarded_binding(base, fwd).map_err(forwarded::fault_text)?,
-            None => {
-                let kind = if local != base { Let::Local } else if self.local_table(base)?.is_some() { Let::Default } else { Let::Plain };
-                (local, self.slots[local].value, self.slots[self.buffer_slot].value, kind)
+        let mut local = self.binding(base, false)?;
+        let forwarded = self.native_forwarding(base).filter(|_| local == Binding::Default);
+        let binding = match (forwarded, local) {
+            (Some(fwd), _) => self.forwarded_binding(base, fwd).map_err(forwarded::fault_text)?,
+            (None, Binding::Local(index)) => (base, self.local_value(index, base), self.slots[self.buffer_slot].value, Let::Local),
+            (None, Binding::Default) => {
+                let kind = if self.localized(base) { Let::Default } else { Let::Plain };
+                (base, self.slots[base].value, self.slots[self.buffer_slot].value, kind)
             }
         };
         if base != self.buffer_slot {
@@ -536,7 +590,6 @@ impl Vm {
         }
         // HOST(dynamic:saved): specbind: pushes a new binding, saving the value it shadows
         self.dynamic.push(binding);
-        let mut local = local;
         let mut value = value;
         if self.variable_trapped(base) {
             // The value is rooted across its watchers and read back.
@@ -549,15 +602,19 @@ impl Vm {
             [value] = self.release_frame(frame);
             notified?;
             // set_internal finds the binding to store into after the watchers.
-            local = self.variable_binding_slot(base, false)?;
+            local = self.binding(base, false)?;
         }
         if let Some(fwd) = forwarded {
             return self.store_forwarded_binding(base, fwd, value, binding.3).map_err(forwarded::fault_text);
         }
-        self.slots[local].value = match self.localized_forwarded(base) {
+        let value = match self.localized_forwarded(base) {
             Some(fwd) => Self::localized_value(fwd, value).map_err(forwarded::fault_text)?,
             None => value,
         };
+        match local {
+            Binding::Local(index) => self.store_local(index, base, LocalStore::Set(value)),
+            Binding::Default => self.slots[base].value = value,
+        }
         Ok(())
     }
     pub(super) fn make_local_variable(&mut self, slot: usize) -> Result<()> {
@@ -566,19 +623,12 @@ impl Vm {
         // through the tracking: the kept forwarding would never localize it.
         if let Some(fwd) = self.access_forwarding(slot) { return self.make_forwarded_local(slot, fwd); }
         let value = self.variable_value(slot)?;
-        let table = if let Some(table) = self.local_table(slot)? { table } else {
-            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-            self.install_local_table(slot, table, true);
-            table
-        };
-        self.buffer_index()?;
-        let buffer = self.slots[self.buffer_slot].value;
-        if self.declaration_hash_get(table, buffer)?.is_none() {
-            let local = self.allocate_local_binding_slot();
-            self.slots[local].value = value;
-            self.declaration_hash_put(table, buffer, Value::reference(local+1,7))?;
-            self.note_local_binding(buffer, slot);
+        if !self.localized(slot) {
+            self.declare_local(slot, Localness::Explicit);
         }
+        let index = self.buffer_index()?;
+        let symbol = Value::reference(slot + 1, 7);
+        self.store_local(index, slot, LocalStore::Make(value));
         Ok(())
     }
     /// `special-variable-p' of SLOT's symbol: declared special now.
@@ -666,14 +716,11 @@ impl Vm {
                 }
             }
             MakeVariableBufferLocal => {
-                self.slots[slot].explicit_local = false;
-                if self.local_table(slot)?.is_none() {
-                    // data.c Fmake_variable_buffer_local: a plain void
-                    // variable's default becomes nil; a localized one keeps it.
-                    if self.slots[slot].value == Value::UNBOUND { self.slots[slot].value = Value::NIL; }
-                    let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-                    self.install_local_table(slot, table, false);
-                }
+                // data.c Fmake_variable_buffer_local: a plain void variable's
+                // default becomes nil; a localized one keeps it.
+                if !self.localized(slot) && self.slots[slot].value == Value::UNBOUND { self.slots[slot].value = Value::NIL; }
+                if self.slots[slot].localness != Localness::Automatic { self.slots[slot].localness = Localness::Automatic; }
+                self.declare_local(slot, Localness::Automatic);
                 Ok(symbol)
             }
             // A built-in variable is always bound (GNU Fboundp), so `defvar'

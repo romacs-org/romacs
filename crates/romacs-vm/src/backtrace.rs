@@ -307,58 +307,40 @@ impl Vm {
         };
         Ok(index.and_then(|i| i.checked_sub(offset)))
     }
-    fn backtrace_boolean_local(&self, at: usize) -> Option<(usize, Value)> {
+    /// Whether the binding at AT is of a buffer's Lisp local (GNU
+    /// SPECPDL_LET_LOCAL of a variable without per-buffer native storage).
+    fn backtrace_lisp_local(&self, at: usize) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, owner, _) = self.dynamic[at];
-        let symbol = self.backtrace.binding_symbol(at)?;
-        let base = symbol.index_if(7)? - 1;
-        (self.local_binding_slots.contains(&slot) && self.localized_forwarded(base).is_some()).then_some((base, owner))
+        let (slot, _, _, kind) = self.dynamic[at];
+        kind == Let::Local && !matches!(self.forwarding_ref(slot), Some(forwarded::Fwd::Buffer(_)))
     }
-    fn backtrace_binding_live(&mut self, at: usize, symbol: Value) -> Result<bool> {
+    fn backtrace_binding_live(&mut self, at: usize) -> Result<bool> {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, kind) = self.dynamic[at];
-        let default = kind == Let::Default;
-        if let Some((base, owner)) = self.backtrace_boolean_local(at) {
-            return Ok(self.live_buffer_value(owner) && self.declaration_hash_get(self.slots[base].local, owner)?.is_some());
+        if self.backtrace_lisp_local(at) {
+            return Ok(self.owner_local(slot, owner).is_some());
         }
         match self.forwarding_ref(slot) {
-            Some(forwarded::Fwd::Buffer(i)) if !default => Ok(self.live_buffer_value(owner)
+            Some(forwarded::Fwd::Buffer(i)) if kind != Let::Default => Ok(self.live_buffer_value(owner)
                 && owner
                     .index_if(0)
                     .is_some_and(|index| self.per_buffer_local_p(index - 1, i))),
-            None if symbol.index(7)? - 1 != slot => {
-                if !self.live_buffer_value(owner) {
-                    return Ok(false);
-                }
-                let Some(table) = self.local_table(symbol.index(7)? - 1)? else {
-                    return Ok(false);
-                };
-                Ok(self.declaration_hash_get(table, owner)? == Some(Value::reference(slot + 1, 7)))
-            }
             _ => Ok(true),
         }
     }
     /// What makes the binding at AT and a newer one bindings of the same
-    /// variable: its slot, and for a per-buffer variable also whether it is
-    /// the default and whose local it is.
+    /// variable: its slot, whether it is a buffer's local, and whose.
     fn backtrace_shadow_key(&self, at: usize) -> (usize, bool, u64) {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, kind) = self.dynamic[at];
-        let default = kind == Let::Default;
-        let fwd = self.localized_forwarded(slot).or_else(|| self.forwarding_ref(slot));
-        match fwd {
-            Some(forwarded::Fwd::Buffer(_)) => (slot, default, if default { Value::NIL.0 } else { owner.0 }),
-            _ => (slot, false, Value::NIL.0),
-        }
+        let local = kind == Let::Local;
+        (slot, local, if local { owner.0 } else { Value::NIL.0 })
     }
     /// The binding that saved the value of the one at AT: the nearest newer
     /// binding of the same variable. A scan of the newer bindings, as GNU's
     /// `backtrace--locals` unrewinds the whole distance per call;
     /// `backtrace_successors` gives every binding's in one sweep.
     fn backtrace_successor(&self, at: usize) -> Option<usize> {
-        if let Some(local) = self.backtrace_boolean_local(at) {
-            return (at + 1..self.dynamic.len()).find(|&next| self.backtrace_boolean_local(next) == Some(local));
-        }
         let key = self.backtrace_shadow_key(at);
         (at + 1..self.dynamic.len()).find(|&next| self.backtrace_shadow_key(next) == key)
     }
@@ -366,14 +348,9 @@ impl Vm {
     fn backtrace_successors(&self) -> Vec<Option<usize>> {
         let mut successors = vec![None; self.dynamic.len()];
         let mut newer = std::collections::HashMap::new();
-        let mut newer_local = std::collections::HashMap::new();
         for at in (0..self.dynamic.len()).rev() {
             let key = self.backtrace_shadow_key(at);
-            successors[at] = match self.backtrace_boolean_local(at) {
-                Some(local) => newer_local.insert((local.0, local.1.0), at),
-                None => newer.get(&key).copied(),
-            };
-            newer.insert(key, at);
+            successors[at] = newer.insert(key, at);
         }
         successors
     }
@@ -382,21 +359,18 @@ impl Vm {
         // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
         // let's own, never the root's
         let (slot, _, owner, kind) = self.dynamic[at];
-        let default = kind == Let::Default;
-        if let Some((base, owner)) = self.backtrace_boolean_local(at) {
+        if let Some(next) = successor {
+            if !self.backtrace_lisp_local(at) { self.tracked_binding(slot, at, owner); }
             // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
             // let's own, never the root's
-            if let Some(next) = successor { return Ok(self.dynamic[next].1); }
-            let local = self.declaration_hash_get(self.slots[base].local, owner)?.ok_or("missing local binding")?;
-            return Ok(self.slots[local.index(7)? - 1].value);
+            return Ok(self.dynamic[next].1);
+        }
+        if self.backtrace_lisp_local(at) {
+            let index = self.owner_local(slot, owner).ok_or("missing local binding")?;
+            return Ok(self.local_value(index, slot));
         }
         self.tracked_binding(slot, at, owner);
-        match successor {
-            // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
-            // let's own, never the root's
-            Some(next) => Ok(self.dynamic[next].1),
-            None => self.untracked(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
-        }
+        self.untracked(slot, |vm| vm.backtrace_live_value(slot, owner, kind == Let::Default))
     }
     /// Activation INDEX's own bindings, live ones only, as (SYMBOL . VALUE)
     /// conses, oldest first (GNU unrewind omits LET_LOCAL entries whose
@@ -408,7 +382,7 @@ impl Vm {
         let mut values = Vec::with_capacity(bindings.len());
         let inert = self.intern(INERT_BINDING);
         for (at, symbol) in bindings {
-            if symbol == inert || !self.backtrace_binding_live(at, symbol)? {
+            if symbol == inert || !self.backtrace_binding_live(at)? {
                 continue;
             }
             let successor = match successors {
@@ -577,24 +551,21 @@ impl Vm {
         let default = kind == Let::Default;
         let symbol = self.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
-        let present = match base {
-            Some(base) if self.local_binding_slots.contains(&slot) => self.owner_local_binding(base, owner).is_some(),
-            _ => match self.forwarding_ref(slot) {
+        let lisp_local = self.backtrace_lisp_local(at);
+        let present = if lisp_local { self.owner_local(slot, owner).is_some() } else {
+            match self.forwarding_ref(slot) {
                 Some(forwarded::Fwd::Buffer(i)) if !default => self.live_buffer_value(owner)
                     && owner.index_if(0).is_some_and(|index| self.per_buffer_local_p(index - 1, i)),
                 _ => true,
-            },
+            }
         };
         if !present {
             self.backtrace_disable_binding(at);
             return Ok(());
         }
-        let current = match base {
-            Some(base) if self.local_binding_slots.contains(&slot) => {
-                let target = self.owner_local_binding(base, owner).unwrap_or(base);
-                self.slots[target].value
-            }
-            _ => self.backtrace_live_value(slot, owner, default)?,
+        let current = match self.owner_local(slot, owner).filter(|_| lisp_local) {
+            Some(index) => self.local_value(index, slot),
+            None => self.backtrace_live_value(slot, owner, default)?,
         };
         let frame = self.root_frame(&[current]);
         let restored = self.restore_binding(slot, base, saved, owner, kind);

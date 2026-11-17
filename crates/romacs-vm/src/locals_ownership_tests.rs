@@ -53,18 +53,16 @@ fn written(locals: bool) -> (Written, usize) {
     (Written { objects: vm.objects.dirty_old().collect(), conses: vm.conses.dirty_old().collect(), cards }, killed)
 }
 
-/// Today each local writes its symbol's binding table, and a private slot
-/// for its value, both of which every buffer shares; the kill writes them
-/// back. These are what the run with locals writes beyond the run without.
+/// A buffer's locals are the buffer's: the run with 200 locals writes
+/// nothing old that the run without them does not, but its own buffer.
 #[test]
-fn a_buffers_locals_write_shared_tables() {
+fn a_buffers_locals_write_only_the_buffer() {
     let (with, a) = written(true);
     let (without, b) = written(false);
-    let extra_objects: BTreeSet<usize> = with.objects.difference(&without.objects).copied().filter(|&i| i != a).collect();
-    assert!(without.objects.difference(&with.objects).all(|&i| i == b), "the run without locals writes nothing more but its buffer");
-    let extra_cards: BTreeSet<usize> = with.cards.difference(&without.cards).copied().collect();
     assert!(without.objects.contains(&b) && with.objects.contains(&a), "each run writes its own buffer");
+    let extra_objects: BTreeSet<usize> = with.objects.difference(&without.objects).copied().filter(|&i| i != a).collect();
+    let extra_cards: BTreeSet<usize> = with.cards.difference(&without.cards).copied().collect();
     assert_eq!(with.conses, without.conses, "locals write no old cons");
-    assert!(extra_objects.len() >= 200, "each symbol's binding table: {}", extra_objects.len());
-    assert!(!extra_cards.is_empty(), "the private slots");
+    assert!(extra_objects.is_empty(), "old objects only the run with locals wrote: {extra_objects:?}");
+    assert!(extra_cards.is_empty(), "slot cards only the run with locals wrote: {extra_cards:?}");
 }

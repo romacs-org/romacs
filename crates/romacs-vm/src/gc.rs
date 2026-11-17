@@ -1363,7 +1363,6 @@ impl Vm {
             if !local_live.contains(&slot) {
                 self.slots[slot].value = Value::UNBOUND;
                 self.slots[slot].plist = Value::NIL;
-                self.slots[slot].local = Value::NIL;
                 self.free_local_binding_slots.push(slot);
             }
         }
@@ -1495,7 +1494,6 @@ impl Vm {
             rewrite(&mut s.value);
             rewrite(&mut s.function);
             rewrite(&mut s.plist);
-            rewrite(&mut s.local);
         }
         self.forwarded.visit_values(&mut |v| rewrite(v));
         for v in &mut self.standard_case_tables { rewrite(v); }
@@ -1567,7 +1565,6 @@ impl Vm {
                     | data::Object::SyntaxTable(_) => {}
                 }
         });
-        self.local_owners = None;
         for f in self.functions.collector_iter_mut() {
             // Function Arcs are private to this VM; no executable shares IR.
             let f = Arc::get_mut(f).expect("source IR must be exclusively owned at a wait point");
@@ -1738,7 +1735,6 @@ impl Vm {
         marking.finish(own);
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
-        self.local_owners = None;
     }
     /// A minor collection: what was made since the last collection and is
     /// no longer reached is freed, and nothing old is read but what may name
@@ -2136,7 +2132,7 @@ impl Vm {
             let slot = v.payload() as usize - 1;
             if let Some(&name) = self.obarray_symbol_names.get(&slot) && state.obarray_symbols_live.insert(slot) {
                 let s = &self.slots[slot];
-                pending.extend([name, s.value, s.function, s.plist, s.local]);
+                pending.extend([name, s.value, s.function, s.plist]);
                 if let Some(entry) = self.conditions.entries.get(&conditions::SymbolId::new(v).unwrap()) {
                     for &(key, value) in &entry.properties { pending.extend([key, value]); }
                 }

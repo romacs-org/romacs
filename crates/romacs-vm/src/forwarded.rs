@@ -892,11 +892,8 @@ pub(crate) struct Forwarded {
     object_vars: Vec<usize>,
     buffer_vars: Vec<usize>,
     /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
-    /// locally, else usize::MAX; and the current buffer's local binding as
-    /// last found (`Vm::eval_limit_local'): the buffer's bits, its private
-    /// slot or usize::MAX, and the `local_epoch' it was found at.
+    /// locally, else usize::MAX (`Vm::eval_limit_local').
     pub(super) eval_limit_symbol: usize,
-    pub(super) eval_limit_cache: (u64, usize, u64),
     /// Advanced by every change of a local-binding table and by collection,
     /// which moves buffers and reclaims bindings.
     pub(super) local_epoch: u64,
@@ -912,7 +909,6 @@ impl Default for Forwarded {
             ints: vec![],
             eval_limit_index: 0,
             eval_limit_symbol: usize::MAX,
-            eval_limit_cache: (0, usize::MAX, u64::MAX),
             local_epoch: 0,
             gc_cons: (0, 0),
             gc_done: (0, 0),
@@ -1070,7 +1066,8 @@ impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
     /// Its Lisp locals.
     pub(crate) fn locals(&self) -> &LocalVars { &self.6 }
-    pub(crate) fn locals_mut(&mut self) -> &mut LocalVars { &mut self.6 }
+    /// Its Lisp locals to change: only `Vm::store_local` does.
+    pub(super) fn locals_mut(&mut self) -> &mut LocalVars { &mut self.6 }
     /// Forget the visited file's identity and modification time, as a
     /// buffer that visits nothing has them.
     pub(crate) fn reset_visit(&mut self) {
@@ -1288,9 +1285,7 @@ impl Vm {
         }
         // GNU's syms_of_* call Fmake_variable_buffer_local on these.
         if AUTOMATICALLY_LOCAL.contains(&name) {
-            self.slots[slot].explicit_local = false;
-            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-            self.install_local_table(slot, table, false);
+            self.declare_local(slot, Localness::Automatic);
         }
     }
     /// The C variables GNU sets from the environment at every start
@@ -1909,13 +1904,7 @@ impl Vm {
         if let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) {
             if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
         } else if let Some(&slot) = self.names.get(name) {
-            let (table, buffer) = (self.slots[slot].local, Value::reference(index + 1, 0));
-            if table != Value::NIL
-                && let Some(binding) = self.declaration_hash_get(table, buffer).ok().flatten()
-                && let Ok(local) = binding.index(7)
-            {
-                self.slots[local - 1].value = value;
-            }
+            self.store_local(index, slot, crate::variable_runtime::LocalStore::Set(value));
         }
     }
     /// data.c check_fwd_predicate's FWDPRED_Qfraction: VALUE is a number

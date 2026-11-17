@@ -152,7 +152,7 @@ impl Vm {
         let local: HashSet<usize> = self.local_binding_slots.iter().copied().collect();
         for (slot, s) in self.slots.iter().enumerate() {
             if self.obarray_symbol_names.contains_key(&slot) { continue; }
-            values.extend([s.function, s.plist, s.local]);
+            values.extend([s.function, s.plist]);
             if !local.contains(&slot) { values.push(s.value); }
             if let Some(Some(VariableRedirect::Alias(target))) = self.variable_redirects.get(slot) {
                 values.push(Value::reference(target + 1, 7));
@@ -213,7 +213,7 @@ impl Vm {
                 let slot = v.payload() as usize - 1;
                 if let Some(&name) = self.obarray_symbol_names.get(&slot) && r.symbols.insert(slot) {
                     let s = &self.slots[slot];
-                    values.extend([name, s.value, s.function, s.plist, s.local]);
+                    values.extend([name, s.value, s.function, s.plist]);
                     if let Some(entry) = self.conditions.entries.get(&conditions::SymbolId::new(v).unwrap()) {
                         for &(key, value) in &entry.properties { values.extend([key, value]); }
                     }

@@ -1,5 +1,5 @@
-//! What a c-mode buffer's locals store into tables every buffer shares:
-//! the declaration tables (`romacs_vm::declaration_stores`), counted over
+//! What a c-mode buffer's locals store into tables every buffer shares,
+//! none: the declaration tables (`romacs_vm::declaration_stores`), counted over
 //! one buffer's c-mode setup and over its kill, at steady state. GNU keeps
 //! a buffer's locals in the buffer (`local_var_alist`), where neither
 //! stores into anything but that buffer.
@@ -18,7 +18,7 @@ fn stores(vm: &mut Vm, source: &str) -> (u64, String) {
 }
 
 #[test]
-fn a_c_mode_buffers_locals_store_into_shared_tables() {
+fn a_c_mode_buffers_locals_store_into_no_shared_table() {
     let (setup, kill, locals) = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
         let mut vm = gnu_lisp(&[]);
         // Warm: cc-mode loaded and one buffer set up, as every later one finds it.
@@ -31,9 +31,9 @@ fn a_c_mode_buffers_locals_store_into_shared_tables() {
         (setup, kill, locals.parse::<u64>().unwrap())
     }).unwrap().join().unwrap();
     eprintln!("c-mode: {locals} locals, {setup} shared stores in setup, {kill} in the kill");
-    // Each Lisp local made puts an entry in its symbol's binding table, and
-    // the kill removes each.
+    // A buffer's locals live in the buffer: neither the setup nor the
+    // kill stores a local into a shared table.
     assert!(locals >= 200, "c-mode's locals: {locals}");
-    assert!(setup >= 300, "setup's shared stores: {setup} for {locals} locals");
-    assert!(kill >= 300, "kill's shared stores: {kill} for {locals} locals");
+    assert_eq!(setup, 0, "setup's shared stores for {locals} locals");
+    assert_eq!(kill, 0, "kill's shared stores for {locals} locals");
 }

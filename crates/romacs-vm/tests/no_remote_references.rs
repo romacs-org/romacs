@@ -133,7 +133,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("cell_pairs", Owed),
     ("random", Free), ("tracking", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
-    ("referrers", Cache), ("local_owners", Cache),
+    ("referrers", Cache),
     ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     ("stack", Root), ("external_roots", Root),

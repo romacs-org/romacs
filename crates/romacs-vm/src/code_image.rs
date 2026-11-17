@@ -106,7 +106,7 @@ impl Vm {
         // GNU `u.s.plist`: each symbol object's own property list, by slot.
         let mut plists = Vec::new();
         for (i, slot) in self.slots.iter().enumerate() {
-            if slot.local != Value::NIL {
+            if slot.localness != Localness::Never {
                 return Err("code image cannot publish buffer-local bindings".into());
             }
             if slot.plist != Value::NIL {

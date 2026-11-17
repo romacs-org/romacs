@@ -563,10 +563,8 @@ impl Marking {
                     if keep(&s.function) { w.stack.push(s.function); }
                     // GNU alloc.c:6673 marks `u.s.plist` with the symbol. VM2
                     // symbols are never reclaimed (DIVERGENCES VM2-BOOT4), so a
-                    // plist and a buffer-local table are roots for every slot,
-                    // interned or not.
+                    // plist is a root for every slot, interned or not.
                     if keep(&s.plist) { w.stack.push(s.plist); }
-                    if keep(&s.local) { w.stack.push(s.local); }
                     if !view.local_binding[slot] && keep(&s.value) { w.stack.push(s.value); }
                 }
                 units
