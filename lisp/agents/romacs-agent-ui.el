@@ -2582,8 +2582,10 @@ saying so until its form comes."
 
 (defun romacs-agent-ui-drawn-ready (id first-seqs)
   "The turns of session ID from FIRST-SEQS were kept drawn: where its chat
-shows a row waiting for one, it shows the turn.  An edit to no undo."
-  (when-let* ((session (romacs-agent-get id))
+shows a row waiting for one, it shows the turn.  An edit to no undo.  A
+session not loaded has no chat: it is not loaded for this (a fill draws
+every session's turns)."
+  (when-let* ((session (romacs-agent-loaded id))
               (buffer (romacs-agent-buffer session))
               ((buffer-live-p buffer))
               (db (romacs-agent-turns--db)))
