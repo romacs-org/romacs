@@ -2511,13 +2511,19 @@ supervisor may be starting again."
 
 (defun romacs-agent--caught-up-p (session)
   "Replay what SESSION's last supervisor journaled since it started, unseen
-here; non-nil when that ends with the harness's exit.  What the replay
-folded is kept, so the next start reads on from there."
+here; non-nil when that ends with the harness's exit.  While a launch of
+SESSION waits for its supervisor, only an exit after a `run' note not
+seen before counts: an earlier run's exit is no end of the one launched.
+What the replay folded is kept, so the next start reads on from there."
   (when (romacs-agent-journal-start session)
-    (let ((ended nil))
+    (let ((launching (gethash (romacs-agent-id session) romacs-agent--launched))
+          (seen (romacs-agent-seq session)) (ran nil) (ended nil))
       (romacs-agent--read-journal
        session (lambda (record)
-                 (unless (eq (gethash "exit" record :absent) :absent) (setq ended t))
+                 (cond ((and launching (romacs-agent--note-p record "run") (> (or (gethash "seq" record) 0) seen))
+                        (setq ran t ended nil))
+                       ((and (not (eq (gethash "exit" record :absent) :absent)) (or ran (not launching)))
+                        (setq ended t)))
                  (romacs-agent--record session record))
        (romacs-agent-journal-start session))
       (romacs-agent--keep-soon session)
