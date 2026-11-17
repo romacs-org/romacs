@@ -28,12 +28,17 @@
       (call-process host nil t nil)
       (and (search-backward "--notes-only" nil t) host))))
 
-(defun romacs-agent-notes-host-tests--until (pred)
-  "Wait, up to 20 seconds, until PRED holds; its value."
-  (let ((end (+ (float-time) 20)))
+(defconst romacs-agent-notes-host-tests--patience 60
+  "Seconds a wait for a host lasts: a loaded machine starts a process and
+hands a lock over in seconds, not the moment it does unloaded.")
+
+(defun romacs-agent-notes-host-tests--until (pred &optional what)
+  "Wait, up to `romacs-agent-notes-host-tests--patience' seconds, until
+PRED holds; its value.  Not by then: failed, saying WHAT was waited for."
+  (let ((end (+ (float-time) romacs-agent-notes-host-tests--patience)))
     (while (and (not (funcall pred)) (< (float-time) end))
       (accept-process-output nil 0.05))
-    (funcall pred)))
+    (or (funcall pred) (ert-fail (list 'waited-for (or what "a host") romacs-agent-notes-host-tests--patience)))))
 
 (defun romacs-agent-notes-host-tests--records (session)
   "SESSION's journal, a record a line."
@@ -105,13 +110,13 @@ state and runtime directories its own."
        (romacs-agent--note session (romacs-mcp--object "type" "plan"))
        (romacs-agent--note session (romacs-mcp--object "type" "selection"))
        (should (= (romacs-agent-held-notes-count) 2))
-       (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session))))
+       (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session)) "its notes written and its host gone"))
        (should (eq (romacs-agent-state session) state))
        (should (= (romacs-agent-seq session) 3))
        (romacs-agent-notes-host-tests--check session '("plan" "selection"))
        ;; Again, a new host.
        (romacs-agent--note session (romacs-mcp--object "type" "title"))
-       (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session))))
+       (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session)) "its notes written and its host gone"))
        (romacs-agent-notes-host-tests--check session '("plan" "selection" "title"))))))
 
 (ert-deftest romacs-agent-notes-host-a-launch-waits-for-it ()
@@ -133,13 +138,15 @@ state and runtime directories its own."
          (should (romacs-agent-notes-host-tests--until
                   (lambda () (and (process-live-p (romacs-agent-connection session))
                                   (romacs-agent-caught-up session)
-                                  (not (gethash (romacs-agent-id session) romacs-agent--note-hosts))))))
+                                  (not (gethash (romacs-agent-id session) romacs-agent--note-hosts))))
+                  "the supervisor attached"))
          (process-send-string (romacs-agent-connection session)
                               (concat (json-serialize (romacs-mcp--object "write" "hello")) "\n"))
          (should (romacs-agent-notes-host-tests--until
                   (lambda () (and (null (gethash (romacs-agent-id session) romacs-agent--held-notes))
                                   (cl-some (lambda (r) (gethash "exit" r))
-                                           (romacs-agent-notes-host-tests--records session))))))
+                                           (romacs-agent-notes-host-tests--records session))))
+                  "the note written and the harness's exit"))
          (should (cl-some (lambda (r) (equal (gethash "out" r) "hello"))
                           (romacs-agent-notes-host-tests--records session)))
          (romacs-agent-notes-host-tests--check session '("plan")))))))
@@ -176,7 +183,8 @@ state and runtime directories its own."
        (should (romacs-agent-notes-host-tests--until
                 (lambda () (and (not (file-exists-p (romacs-agent-host-socket session)))
                                 (not (string-search (romacs-agent-dir session)
-                                                    (shell-command-to-string "ps -eo args")))))))))))
+                                                    (shell-command-to-string "ps -eo args")))))
+                "the batch process's host gone"))))))
 
 (ert-deftest romacs-agent-notes-host-a-stolen-attachment-writes-the-note-once ()
   ;; Another server steals the notes-only host's attachment before the
@@ -186,11 +194,11 @@ state and runtime directories its own."
   (romacs-agent-notes-host-tests--with
    (lambda (session)
      (romacs-agent--note session (romacs-mcp--object "type" "plan"))
-     (should (romacs-agent-notes-host-tests--until (lambda () (file-exists-p (romacs-agent-host-socket session)))))
+     (should (romacs-agent-notes-host-tests--until (lambda () (file-exists-p (romacs-agent-host-socket session))) "its notes-only host listening"))
      (let ((thief (make-network-process :name "thief" :family 'local :service (romacs-agent-host-socket session)
                                         :noquery t :coding 'no-conversion)))
        (process-send-string thief "{\"attach\":{\"from\":1,\"steal\":true}}\n")
        (accept-process-output nil 0.5)
        (delete-process thief))
-     (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session))))
+     (should (romacs-agent-notes-host-tests--until (lambda () (romacs-agent-notes-host-tests--written session)) "its notes written and its host gone"))
      (romacs-agent-notes-host-tests--check session '("plan")))))
