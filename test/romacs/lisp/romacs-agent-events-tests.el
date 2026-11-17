@@ -720,6 +720,17 @@ turns, and its journal's file; a state root of its own."
           (should-not (romacs-agent-events--supervised-p id socket))
           (host-pid (emacs-pid))
           (should-not (romacs-agent-events--supervised-p id socket))
+          ;; A host starting, its pid not in host.json yet: it holds the
+          ;; session's lock, so it counts.
+          (let ((locker (start-process "romacs-test-lock" nil "flock" (expand-file-name "host.lock" dir) "sleep" "30")))
+            (unwind-protect
+                (progn
+                  ;; Held once flock -n can no longer take it.
+                  (with-timeout (10 (error "The lock was never taken"))
+                    (while (eql 0 (call-process "flock" nil nil nil "-n" (expand-file-name "host.lock" dir) "true"))
+                      (accept-process-output nil 0.05)))
+                  (should (romacs-agent-events--supervised-p id socket)))
+              (delete-process locker)))
           ;; Its host there, once it runs as one.
           (with-timeout (10 (error "The stand-in host never ran"))
             (while (not (string-search "romacs-agent-host"

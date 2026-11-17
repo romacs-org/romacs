@@ -592,8 +592,26 @@ fn wait_while_kept(child: &mut std::process::Child, dir: &Path) -> Result<std::p
     }
 }
 
+/// Whether a host holds the session in DIR (its host.lock, held for a
+/// host's whole run from its first step): asked by `--supervised DIR`, so
+/// one starting, its pid not yet in host.json, counts as a supervisor.
+fn supervised(dir: &Path) -> bool {
+    match OpenOptions::new().write(true).open(dir.join("host.lock")) {
+        Ok(file) => match file.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => true,
+            Ok(()) => { let _ = file.unlock(); false }
+            Err(std::fs::TryLockError::Error(_)) => false,
+        },
+        Err(_) => false,
+    }
+}
+
 fn main() {
-    let code = parse(std::env::args().skip(1).collect()).and_then(run).unwrap_or_else(|error| {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, dir] = args.as_slice() && flag == "--supervised" {
+        std::process::exit(if supervised(Path::new(dir)) { 0 } else { 1 });
+    }
+    let code = parse(args).and_then(run).unwrap_or_else(|error| {
         eprintln!("romacs-agent-host: {error}");
         1
     });
@@ -603,6 +621,20 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_is_supervised_while_its_lock_is_held() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-supervised-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // None ever ran: no lock file.
+        assert!(!supervised(&dir));
+        let held = lock_session(&dir).unwrap();
+        assert!(supervised(&dir));
+        drop(held);
+        // Its host gone: the lock file left, held by none.
+        assert!(!supervised(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_harness_whose_session_directory_was_removed_is_ended() {

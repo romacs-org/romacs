@@ -62,17 +62,21 @@
 (defun romacs-agent-events--supervised-p (id &optional socket)
   "Whether a supervisor writes the records of the session ID: its socket
 \(SOCKET, else ID's) there, and the host its host.json names alive, a
-romacs-agent-host.  A socket a host left behind (its unit stopped, a
-crash) is none, so a stopped session's journal moves; with no host.json
-\(an earlier build's host) the socket alone says so."
-  (let ((socket (or socket (romacs-agent--host-socket id))))
+romacs-agent-host, or else a host holding the session's lock (one
+starting, its pid not in host.json yet: `romacs-agent-host --supervised').
+A socket a host left behind (its unit stopped, a crash) is none, so a
+stopped session's journal moves; with no host.json (an earlier build's
+host) the socket alone says so."
+  (let ((socket (or socket (romacs-agent--host-socket id)))
+        (dir (expand-file-name id (romacs-agent--state-root))))
     (and socket (file-exists-p socket)
-         (let* ((host (romacs-agent--read-json
-                       (expand-file-name "host.json" (expand-file-name id (romacs-agent--state-root)))))
+         (let* ((host (romacs-agent--read-json (expand-file-name "host.json" dir)))
                 (pid (and (hash-table-p host) (gethash "pid" host))))
            (or (not (integerp pid))
                (let ((args (cdr (assq 'args (process-attributes pid)))))
-                 (and (stringp args) (string-search "romacs-agent-host" args) t)))))))
+                 (and (stringp args) (string-search "romacs-agent-host" args) t))
+               (eql 0 (ignore-errors
+                        (call-process (romacs-agent--program "romacs-agent-host") nil nil nil "--supervised" dir))))))))
 
 (defun romacs-agent-events-p (session)
   "Whether SESSION's records are read from SQLite: it has been imported."
