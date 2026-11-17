@@ -37,7 +37,7 @@
   "lines_laid": 0,
   "rows_wrapped": 0,
   "display_instructions_p90": 731000,
-  "display_instructions_note": "the chat's session is in the store, as every real one is, so the agents' writer worker is alive: a live writer adds about 130 K instructions to each idle redisplay (measured 651-666 K; one unrelated writer write on a beta build without the chat change measures the same)"
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick": {
   "step_instructions": 875000,
@@ -51,7 +51,7 @@
   "lines_laid": 0,
   "rows_wrapped": 0,
   "display_instructions_p90": 731000,
-  "display_instructions_note": "the chat's session is in the store, as every real one is, so the agents' writer worker is alive: a live writer adds about 130 K instructions to each idle redisplay (measured 651-666 K; one unrelated writer write on a beta build without the chat change measures the same)"
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick-second": {
   "step_instructions": 19100000,
