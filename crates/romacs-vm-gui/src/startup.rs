@@ -2248,7 +2248,7 @@ mod tests {
     /// A chain that stopped before `simple.el`: the launch takes the GNU
     /// editing functions romacs-editing.el calls from the GNU files of its
     /// tree, here a simple.el of the tree's own, so C-SPC sets the mark and
-    /// `mark-whole-buffer' selects the buffer.
+    /// `mark-whole-buffer` selects the buffer.
     #[test]
     fn loadup_after_a_short_chain_takes_gnu_editing_from_its_tree() {
         let simple = "(defun mark (&optional _force) 'from-the-tree)
