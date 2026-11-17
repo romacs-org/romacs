@@ -50,6 +50,25 @@
             (should (equal lines '("{\"a\":\"ééé\"}" "{\"b\":\"a much longer line than a slice\"}" "{\"c\":1}")))))
       (delete-file file))))
 
+(ert-deftest romacs-agent-stream-a-record-that-signals-loses-none-after-it ()
+  ;; A record whose handling signals (here a notes-only host's
+  ;; acknowledgement) is reported, and the records sent with it are
+  ;; handled all the same, nothing signalled out of the filter.
+  (let* ((session (romacs-agent--make :id "s" :harness 'claude))
+         (process (make-process :name "romacs-stream-fixture" :command '("cat") :noquery t))
+         (seen nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--send-held) #'ignore)
+                  ((symbol-function 'romacs-agent--notes-written) (lambda (_s) (error "Broken")))
+                  ((symbol-function 'romacs-agent--record)
+                   (lambda (_s record) (push (gethash "seq" record) seen))))
+          (process-put process 'romacs-agent session)
+          (process-put process 'notes-only t)
+          (romacs-agent--filter process "{\"attached\":true}\n{\"seq\":2}\n{\"seq\":3}\n")
+          (should (process-get process 'attached))
+          (should (equal (reverse seen) '(2 3))))
+      (delete-process process))))
+
 (ert-deftest romacs-agent-stream-output-while-handling-waits ()
   ;; Output that comes while a record is handled (its handler waited on a
   ;; process) is handled after the records before it, once each.
