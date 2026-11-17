@@ -57,7 +57,7 @@ See Info node `(elisp)Describing Characters' for examples."
 (defun romacs-help--insertable (string)
   "STRING with each character above #x10FFFF that is not a raw byte as
 U+FFFD, one column as GNU counts it, so a section aligns as GNU's: a
-Romacs buffer cannot hold one (DIVERGENCES.md VM2-HELP-EXTENDED)."
+Romacs buffer cannot hold one (ledger/divergences VM2-HELP-EXTENDED)."
   (if (not (seq-some (lambda (c) (< #x10FFFF c #x3FFF80)) string))
       string
     (mapconcat (lambda (c) (string (if (< #x10FFFF c #x3FFF80) #xFFFD c))) string "")))

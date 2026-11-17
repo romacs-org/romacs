@@ -23,7 +23,7 @@
 ;; case table.  Matches sort best first: by fzf's score, then shorter,
 ;; then in the table's order, through the metadata's sort functions as
 ;; GNU's `flex' sorts (`completion--adjust-metadata').  Highlighting
-;; follows `completion-lazy-hilit'.  DIVERGENCES.md VM2-FZF.
+;; follows `completion-lazy-hilit'.  ledger/divergences VM2-FZF.
 
 ;;; Code:
 

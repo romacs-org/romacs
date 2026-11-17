@@ -1,6 +1,6 @@
 //! Cycles are rejected at construction, never guarded during resolution.
 //!
-//! GNU 32.0.50, `-Q --batch`, live (transcripts in GNU-DIVERGENCES.md):
+//! GNU 32.0.50, `-Q --batch`, live (transcripts in ledger/divergences):
 //! * a circular face-ref list and a plist whose `:inherit` is itself both
 //!   crash `face-attributes-as-vector` with SIGSEGV (exit 139), because
 //!   `merge_face_ref` recurses in C without consulting `max-lisp-eval-depth`;

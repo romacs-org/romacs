@@ -7,7 +7,7 @@ character), so (eq r a1) agrees; (eq r a0) differs only because GNU's empty
 strings are ONE shared object (alloc.c empty_unibyte_string /
 empty_multibyte_string; `copy-sequence' of "" returns it), while VM2 allocates
 a fresh empty string each time: (eq (copy-sequence "") (copy-sequence "")) is t
-in GNU, nil in VM2, before this port. DIVERGENCES.md VM2-EMPTYSTR1.
+in GNU, nil in VM2, before this port. ledger/divergences VM2-EMPTYSTR1.
 Only the pinned map is edited; no hash or recorded expectation is touched.
 """
 import json, sys

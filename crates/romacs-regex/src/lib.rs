@@ -26,7 +26,7 @@
 //! search whose candidates cost more than the text justifies.  Patterns it
 //! cannot run (backreferences, interval counters, `??`, nullable non-greedy
 //! loops, POSIX) stay on the backtracker, decided at compile time.  The one
-//! observable difference is recorded in `GNU-DIVERGENCES.md` (RX1).
+//! observable difference is recorded in `ledger/divergences` (RX1).
 //!
 //! ## The API is the seam
 //!

@@ -1,6 +1,6 @@
 //! GNU character.c `char-width' and `string-width' (`prim/leaf/width.rs').
 //! Automatic compositions (composition-function-table) are not applied:
-//! DIVERGENCES.md VM2-WIDTH1.
+//! ledger/divergences VM2-WIDTH1.
 use super::*;
 
 defsubr! { name = "char-width", gnu = "character.c:262", effect = Reads,

@@ -697,7 +697,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if argv.first().map(String::as_str) == Some("--restart-supervise") { std::process::exit(restart::supervise(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
-    // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
+    // Before any font resolver is built (ledger/divergences VM2-FONT-BUNDLED).
     for problem in fonts::register_bundled_fonts() {
         eprintln!("romacs: {problem}");
     }

@@ -1,4 +1,4 @@
-//! The window system a GUI embedder provides (DIVERGENCES.md VM2-WIN5):
+//! The window system a GUI embedder provides (ledger/divergences VM2-WIN5):
 //! the backend GNU's frames on it report, its display's name, and the
 //! fonts it draws with. The VM asks synchronously, as it asks the layout
 //! host; no Lisp value crosses. The display opens once the session leaves

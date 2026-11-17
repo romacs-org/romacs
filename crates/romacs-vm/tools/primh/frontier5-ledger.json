@@ -1,5 +1,5 @@
 {
-  "comment": "Every primh pin in the five frontier5 evidence files, with the /DIVERGENCES.md row that explains it. tests/frontier5.rs requires this map to equal the union of the evidence files' `pinned` maps exactly (ids and classes) and every row to exist in the ledger.",
+  "comment": "Every primh pin in the five frontier5 evidence files, with the ledger/divergences row that explains it. tests/frontier5.rs requires this map to equal the union of the evidence files' `pinned` maps exactly (ids and classes) and every row to exist in the ledger.",
   "pins": {
     "make-vector/0075": {
       "class": "PRINTER",

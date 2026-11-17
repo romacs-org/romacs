@@ -3,7 +3,7 @@
 (`cargo test -p romacs-vm --test primh -- primh_call_interactively ...`): every
 NEW DIVERGENCE the Rust replay (fresh VM per row, collection floor 1) reports
 becomes a pin of the class it reported. Run only after each pinned row
-has been checked against a DIVERGENCES.md row; prints the non-PRINTER pins.
+has been checked against a ledger/divergences row; prints the non-PRINTER pins.
 
   python3 pin_from_test.py TEST.log EVIDENCE_DIR
 """

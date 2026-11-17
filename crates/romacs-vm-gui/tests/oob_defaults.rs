@@ -1,4 +1,4 @@
-//! Romacs's interactive defaults (lisp/session/romacs-defaults.el, DIVERGENCES
+//! Romacs's interactive defaults (lisp/session/romacs-defaults.el, ledger/divergences
 //! VM2-OOB-DEFAULTS) on the real --loadup chain with a window system: a
 //! session turns them on before the user's init, as standard values, the
 //! modes the first frame does not need before its first command (whose

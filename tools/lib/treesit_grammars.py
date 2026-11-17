@@ -3,7 +3,7 @@
 
 Each grammar is the commit its GNU ts mode pins in
 `treesit-language-source-alist', linked into the executable
-(DIVERGENCES.md VM2-TREESIT-BUNDLED).
+(ledger/divergences VM2-TREESIT-BUNDLED).
 
   check [--root ROOT]   Every source file Cargo compiles for a grammar is the
                         one crates/romacs-grammars/sources.json records for

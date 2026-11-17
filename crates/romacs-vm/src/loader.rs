@@ -594,7 +594,7 @@ impl Vm {
         let interpreting = std::mem::replace(&mut self.interpreting_source, interpreting);
         // readevalloop binds `internal-interpreter-environment' once for the
         // file, so a top-level `(defvar NAME)' reaches every LATER form of
-        // this file and no other file (VM2-FILESPECIAL1 in DIVERGENCES.md).
+        // this file and no other file (VM2-FILESPECIAL1 in ledger/divergences).
         self.enter_file_specials();
         // A macro can load a file while an outer compilation is suspended.
         // Child compilations must not erase its nonconstant-macro guards.

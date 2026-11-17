@@ -1,7 +1,7 @@
 //! Romacs Icons (`RomacsIcons.ttf`) from assets/icons, into `OUT_DIR`.
 //!
 //! Each `assets/icons/NAME.svg` is one glyph: a single `<path>` in a box 500
-//! wide and 1000 tall, the baseline at y=800 (DIVERGENCES.md VM2-MODE-LINE);
+//! wide and 1000 tall, the baseline at y=800 (ledger/divergences VM2-MODE-LINE);
 //! `assets/icons/codepoints.txt` gives each name its codepoint in the
 //! Supplementary Private Use Area-A. The font is 1000 units per em, every
 //! advance 500, ascent 800 and descent 200. An icon is one column, and most

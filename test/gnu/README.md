@@ -70,7 +70,7 @@ neutral `gnu-fails-too` / `gnu-skips-too`.
 ## The exclusion ledger
 
 `ledger/gnu-test-exclusions.toml` is the only way to set a test aside. A row must name one
-deftest, an existing DIVERGENCES.md id, a symbol that entry covers and that
+deftest, an existing ledger/divergences id, a symbol that entry covers and that
 the test's source uses, and GNU's behaviour, ours and why it is intentional.
 Any invalid row refuses the whole run before anything is measured; a row whose
 test now passes refuses it too. There is no skip flag.
