@@ -84,14 +84,12 @@ by C-g, at its next safepoint.  0 means no budget."
         (puthash :forgotten t table)
         ;; A private file renamed over the log: an interrupted compaction
         ;; leaves the log as it was.
-        (let ((temporary (concat file ".tmp")))
-          (let ((coding-system-for-write 'utf-8-unix))
-            (with-temp-file temporary
-              (insert (romacs-agent--json (romacs-mcp--object "key" "forgotten")) "\n")
-              (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
-                (insert (romacs-agent--json (gethash key table)) "\n"))))
-          (set-file-modes temporary #o600)
-          (rename-file temporary file t))))
+        (let ((coding-system-for-write 'utf-8-unix))
+          (romacs-mcp-write-private
+           file (lambda ()
+                  (insert (romacs-agent--json (romacs-mcp--object "key" "forgotten")) "\n")
+                  (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
+                    (insert (romacs-agent--json (gethash key table)) "\n")))))))
     table))
 
 (defun romacs-agent-tools--table (session-id)

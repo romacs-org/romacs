@@ -56,17 +56,21 @@
   ;; handled all the same, nothing signalled out of the filter.
   (let* ((session (romacs-agent--make :id "s" :harness 'claude))
          (process (make-process :name "romacs-stream-fixture" :command '("cat") :noquery t))
-         (seen nil))
+         (seen nil) (raised nil))
     (unwind-protect
         (cl-letf (((symbol-function 'romacs-agent--send-held) #'ignore)
                   ((symbol-function 'romacs-agent--notes-written) (lambda (_s) (error "Broken")))
+                  ((symbol-function 'romacs-agent--raise) (lambda (_s event) (push event raised)))
                   ((symbol-function 'romacs-agent--record)
                    (lambda (_s record) (push (gethash "seq" record) seen))))
           (process-put process 'romacs-agent session)
           (process-put process 'notes-only t)
           (romacs-agent--filter process "{\"attached\":true}\n{\"seq\":2}\n{\"seq\":3}\n")
           (should (process-get process 'attached))
-          (should (equal (reverse seen) '(2 3))))
+          (should (equal (reverse seen) '(2 3)))
+          ;; Reported at once, in its chat: never left silent.
+          (should (equal (mapcar (lambda (e) (plist-get e :type)) raised) '(error)))
+          (should (string-search "Broken" (plist-get (car raised) :text))))
       (delete-process process))))
 
 (ert-deftest romacs-agent-stream-output-while-handling-waits ()

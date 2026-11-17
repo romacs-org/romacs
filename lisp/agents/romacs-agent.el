@@ -590,14 +590,8 @@ characters they encode, to put in a buffer, a string or more JSON."
 Through a temporary file of this write's own, beside FILE: two processes
 writing FILE at once (a session's harness answering in each) never take
 each other's."
-  (let ((temporary (make-temp-file (concat file ".") nil ".tmp")) (coding-system-for-write 'utf-8-unix))
-    (condition-case err
-        (progn
-          (with-temp-file temporary
-            (insert (romacs-agent--json object)))
-          (set-file-modes temporary #o600)
-          (rename-file temporary file t))
-      (error (ignore-errors (delete-file temporary)) (signal (car err) (cdr err))))))
+  (let ((coding-system-for-write 'utf-8-unix))
+    (romacs-mcp-write-private file (lambda () (insert (romacs-agent--json object))))))
 
 (defun romacs-agent--keep-json (file object)
   "Write OBJECT as JSON to FILE as `romacs-agent--write-json' does, unless
@@ -2264,6 +2258,15 @@ order they were sent."
             (romacs-agent--filter-lines process text)))
       (process-put process 'draining nil))))
 
+(defun romacs-agent--record-failed (session err)
+  "Report ERR, raised handling one of SESSION's records, at once: in its
+chat as an error line and in *Messages*, never left silent (a startup
+answer not handled leaves its session starting)."
+  (let ((text (format "Handling a record failed: %s" (error-message-string err))))
+    (message "romacs-agent: %s: %s" (romacs-agent-id session) text)
+    (with-demoted-errors "romacs-agent: reporting a record's failure: %S"
+      (romacs-agent--raise session (list :type 'error :text text)))))
+
 (defun romacs-agent--filter-lines (process text)
   "Handle each whole line of TEXT, PROCESS's output, each on its own: one
 whose handling signals is reported and the next handled, so no error
@@ -2329,7 +2332,7 @@ meanwhile."
                          (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
                         (t (romacs-agent--kept session process)
                            (romacs-agent--record session record)))
-                (error (message "romacs-agent: %s: %s" (romacs-agent-id session) (error-message-string err)))))))
+                (error (romacs-agent--record-failed session err))))))
       ;; Its rest goes before what came while its lines were handled.
       (when (< start (length text))
         (process-put process 'pending (append (process-get process 'pending) (list (substring text start))))
