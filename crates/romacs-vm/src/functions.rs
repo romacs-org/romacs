@@ -4,9 +4,11 @@
 //! or changed in place may name what was made since, and every other names
 //! only what a collection has promoted. So the table hands out `&mut` to a
 //! function through nothing but `set`, `push` and `change`, each of which
-//! records the id: a write that records nothing does not compile. The
-//! collector's own rewrite (`collector_iter_mut`) changes where values are,
-//! not which, and records nothing.
+//! records the id, once however often it changes: a minor reads each
+//! function's code, in every suspended engine, once per id recorded. A write
+//! that records nothing does not compile. The collector's own rewrite
+//! (`collector_iter_mut`) changes where values are, not which, and records
+//! nothing.
 use crate::Function;
 use std::sync::Arc;
 
@@ -18,8 +20,10 @@ const CHANGED_LIMIT: usize = 64 << 10;
 pub(crate) struct Functions {
     list: Vec<Arc<Function>>,
     /// The ids installed, replaced or changed in place since the last
-    /// collection, as they came: one may be there twice.
+    /// collection, each once, in the order they first changed.
     changed: Vec<usize>,
+    /// By id, whether it is in `changed`.
+    recorded: Vec<bool>,
     /// More changed than `CHANGED_LIMIT`: the record is void until the next
     /// collection.
     lost: bool,
@@ -43,13 +47,17 @@ impl<'a> IntoIterator for &'a Functions {
 
 impl Functions {
     fn record(&mut self, id: usize) {
-        if self.lost {
+        if self.lost || self.recorded.get(id).copied().unwrap_or(false) {
             return;
         }
         if self.changed.len() >= CHANGED_LIMIT {
-            (self.changed, self.lost) = (Vec::new(), true);
+            (self.changed, self.recorded, self.lost) = (Vec::new(), Vec::new(), true);
             return;
         }
+        if self.recorded.len() <= id {
+            self.recorded.resize(id + 1, false);
+        }
+        self.recorded[id] = true;
         self.changed.push(id);
     }
     /// FUNCTION as a new function: its id.
@@ -82,6 +90,9 @@ impl Functions {
     }
     /// A collection ended: every function's values are old.
     pub(crate) fn settle(&mut self) {
+        for &id in &self.changed {
+            self.recorded[id] = false;
+        }
         (self.changed, self.lost) = (Vec::new(), false);
     }
     /// Whether nothing is recorded: what a completed collection leaves.
@@ -93,5 +104,30 @@ impl Functions {
     /// the body of: it records nothing.
     pub(crate) fn collector_iter_mut(&mut self) -> std::slice::IterMut<'_, Arc<Function>> {
         self.list.iter_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An id changed again is recorded once, until a collection settles the
+    /// record; then it is recorded afresh.
+    #[test]
+    fn a_function_changed_again_is_recorded_once() {
+        let mut vm = crate::Vm::new();
+        vm.eval_source_raw("(defun recorded-once () 1)").unwrap();
+        let any = vm.functions.last().expect("a function").clone();
+        let mut functions = Functions::default();
+        let (a, b) = (functions.push(any.clone()), functions.push(any.clone()));
+        for _ in 0..1000 {
+            functions.change(b);
+            functions.set(a, any.clone());
+        }
+        assert_eq!(functions.changed(), Some(&[a, b][..]));
+        functions.settle();
+        assert!(functions.settled());
+        functions.change(b);
+        assert_eq!(functions.changed(), Some(&[b][..]));
     }
 }
