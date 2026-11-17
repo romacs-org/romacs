@@ -921,15 +921,18 @@ def tools(args, base):
         a.idle(sid)
         steps = tour(a.work, {'task': 'review this', 'target': {'provider': 'codex'}})
         task_id = None
+        results = []
         for tool, arguments, _ in steps:
             if 'taskId' in arguments:
                 arguments = {**arguments, 'taskId': task_id}
             # No instance: it is optional, and the tour shows each tool works without one.
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
+            # Each step's own call, once logged: the next goes after it.
+            call = a.called(tool, 60)
+            results.append((call['tool'], call['text'], call['error']))
             if tool == 'romacs_delegate_task':
-                task_id = json.loads(a.called(tool)['text'])['taskId']
-        results = a.tool_results()[-len(steps):]
+                task_id = json.loads(call['text'])['taskId']
         checked = {tool: (name == tool and bool(error) == (tool in REFUSED_IN_TOUR) and check(text))
                    for (tool, _, check), (name, text, error) in zip(steps, results)}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
