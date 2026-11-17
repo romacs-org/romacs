@@ -137,9 +137,24 @@ def prepared_store(binary, directory, timeout):
     return None, why
 
 
+def session_members(session):
+    """The processes of SESSION, by /proc: a host's own process groups, as a world
+    builder's, stay in the session it was started in."""
+    members = []
+    for stat in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = stat.read_text().rsplit(')', 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if int(fields[3]) == session:
+            members.append(int(stat.parent.name))
+    return members
+
+
 def run_host(command, env, log, timeout):
-    """The host's status, or None when it ran out of TIMEOUT.  Its output goes to
-    a file: a descendant keeping it open cannot hold the run."""
+    """The host's status, or None when it ran out of TIMEOUT; either way nothing it
+    started outlives it.  Its output goes to a file: a descendant keeping it open
+    cannot hold the run."""
     with log.open('wb') as sink:
         process = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT, env=env,
                                    cwd=ROOT, start_new_session=True)
@@ -148,10 +163,11 @@ def run_host(command, env, log, timeout):
     except subprocess.TimeoutExpired:
         return None
     finally:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        for pid in [process.pid, *session_members(process.pid)]:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         process.wait()
 
 

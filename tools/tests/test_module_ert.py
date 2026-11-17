@@ -102,6 +102,24 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('gnosis-test-agent-romacs.el', result.stdout)
         self.assertIn('ERT complete:', result.stdout)
 
+    def test_a_host_leaves_nothing_in_a_group_of_its_own(self):
+        # A world builder runs in a process group of its own; it must not outlive
+        # the host that started it, whether the host ends or times out.
+        for hang in (False, True):
+            fake = self.home / 'grouping-host'
+            pidfile = self.home / f'grouped-{hang}.pid'
+            fake.write_text(f'''#!{sys.executable}
+import pathlib, subprocess, time
+child = subprocess.Popen(["sleep", "30"], process_group=0)
+pathlib.Path({str(pidfile)!r}).write_text(str(child.pid))
+time.sleep(30 if {hang!r} else 0)
+''')
+            fake.chmod(0o700)
+            self.invoke('--timeout', '2', binary=fake)
+            state = Path(f'/proc/{int(pidfile.read_text())}/stat')
+            if state.exists():
+                self.assertEqual(state.read_text().rsplit(')', 1)[1].split()[0], 'Z')
+
     def test_unknown_module_and_budget_refuse(self):
         select = runpy.run_path(str(ROOT / 'tools/test-ert'))
         self.assertEqual(select['module_suites']('unknown-module', select['directories'](ROOT)), [])
