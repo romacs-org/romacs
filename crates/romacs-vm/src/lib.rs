@@ -12,6 +12,8 @@ mod keymap_tests;
 #[cfg(test)]
 mod lazy_tests;
 #[cfg(test)]
+mod locals_ownership_tests;
+#[cfg(test)]
 mod plist_tests;
 mod keymap;
 mod char_table;
@@ -31,6 +33,8 @@ mod host_input;
 mod quit;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
+#[cfg(feature = "test-hooks")]
+pub use hash::declaration_stores;
 mod bidi;
 mod layout_host;
 mod display_host;

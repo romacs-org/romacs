@@ -19,6 +19,26 @@ use crate::table::Stores;
 #[path = "fixnum_hash_tests.rs"]
 mod fixnum_tag_tests;
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Stores into declaration tables (`Vm::declaration_hash_put` and
+    /// `Vm::declaration_hash_remove`) this thread's VMs made.
+    static DECLARATION_STORES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// The stores into declaration tables this thread's VMs have made: tables
+/// that are no one buffer's, so a store into one is a store every buffer
+/// shares (`tests/locals_shared_stores.rs`). Only under the `test-hooks`
+/// feature, which only test targets enable.
+#[cfg(feature = "test-hooks")]
+pub fn declaration_stores() -> u64 {
+    DECLARATION_STORES.with(std::cell::Cell::get)
+}
+#[inline(always)]
+fn count_declaration_store() {
+    #[cfg(feature = "test-hooks")]
+    DECLARATION_STORES.with(|stores| stores.set(stores.get() + 1));
+}
+
 /// Marks an unused slot. `UNBOUND` is never a Lisp-visible value, and tag 7
 /// is neither marked nor rewritten by the collector.
 pub(super) const UNUSED: Value = Value::UNBOUND;
@@ -1031,6 +1051,7 @@ impl Vm {
         Ok(table.entries().map(|(_, key, value)| (key, value)).collect())
     }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
+        count_declaration_store();
         // Local-binding tables are declaration tables (`Vm::eval_limit_local').
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
@@ -1054,6 +1075,7 @@ impl Vm {
         key: Value,
         value: Value,
     ) -> Result<()> {
+        count_declaration_store();
         self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (found, hash, moving) = self
             .table_lookup(table, key)
