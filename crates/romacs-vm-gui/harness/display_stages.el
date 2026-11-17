@@ -292,9 +292,16 @@ line's end; return it."
 ;; redisplay after the poll is that one, and polls add none.
 ;;
 ;; What a step cost is what Romacs ran for it: its change, the timers it
-;; set off and its redisplays.  The loop's own polls and the host's wait
-;; for a frame to render are left out: they grow with the host's load,
-;; and a frame drawn slowly polled for as long as it took.
+;; set off and its redisplays, each counted once.  The loop's own polls
+;; and the host's wait for a frame to render are left out: they grow with
+;; the host's load, and a frame drawn slowly polled for as long as it
+;; took.  So are the host's own passes between them, which no scenario
+;; sets work for (process output, the echo area's sync after a message);
+;; collections fall where allocating makes them due, inside what is
+;; counted, as the host collects on its idle pass no more while steps run.
+;; A change or timer that waits, running a timer or a redisplay inside
+;; itself, would count its waiting as its work: it makes the scenario no
+;; measurement (`display-stages--waited').
 
 (defvar display-stages--poll nil
   "The step loop's own timer function, which sets off no redisplay of a step's.")
@@ -302,6 +309,12 @@ line's end; return it."
 (defvar display-stages--work 0
   "Instructions the steps' own Lisp ran outside redisplay: their changes
 and the timers they set off, the loop's own polls not.")
+
+(defvar display-stages--measuring nil
+  "Non-nil while a step's change or a timer it set off runs.")
+
+(defvar display-stages--waited nil
+  "Why the steps are no measurement: a change or timer that waited.")
 
 (defvar display-stages--owed nil
   "Redisplay cycles run when the last timer other than the step loop's ran,
@@ -312,11 +325,21 @@ until a cycle after it has run: then nil.")
   (alist-get 'cycles (romacs--display-stats)))
 
 (defun display-stages--work (run &rest args)
-  "Call RUN with ARGS, counting the instructions it ran as a step's work."
-  (let ((start (romacs-instructions)))
-    (unwind-protect (apply run args)
-      (when start
-        (setq display-stages--work (+ display-stages--work (- (romacs-instructions) start)))))))
+  "Call RUN with ARGS, counting the instructions it ran as a step's work.
+Inside another such call it is a wait (`display-stages--waited'), as is a
+redisplay inside it: what waits is counted no further."
+  (if display-stages--measuring
+      (progn (setq display-stages--waited "a step's change or timer ran a timer: it waited")
+             (apply run args))
+    (let* ((display-stages--measuring t)
+           (cycles (display-stages--cycles))
+           (start (romacs-instructions)))
+      (unwind-protect (apply run args)
+        (let ((end (romacs-instructions)))
+          (when (and start end)
+            (setq display-stages--work (+ display-stages--work (- end start)))))
+        (unless (eql cycles (display-stages--cycles))
+          (setq display-stages--waited "a step's change or timer redisplayed: it waited"))))))
 
 (defun display-stages--run-timer (run timer)
   "Run TIMER through RUN (`timer-event-handler').  Unless it is the step
@@ -371,6 +394,9 @@ stderr, and write the readings to OUT as JSON."
                              (if (display-stages--settled-p) (funcall step) (run-with-timer gap nil laid-out)))
                   display-stages--poll laid-out)
             (advice-add 'timer-event-handler :around #'display-stages--run-timer)
+            ;; Collections where allocating makes them due, not on the
+            ;; host's idle pass, which falls in this step or the next.
+            (setq romacs-gc-idle-delay nil)
             (setq step (lambda ()
                          (push (display-stages--reading) readings)
                          (if (< i steps)
@@ -385,7 +411,8 @@ stderr, and write the readings to OUT as JSON."
                              (insert (json-encode
                                       (list :name (symbol-name name) :steps steps
                                             :chars (with-current-buffer (window-buffer (selected-window)) (buffer-size))
-                                            :readings (vconcat (nreverse readings))))))
+                                            :readings (vconcat (nreverse readings))
+                                            :waited display-stages--waited))))
                            (kill-emacs 0))))
             (scaling--mark (list :stages "start"))
             (scaling--perf "enable")
