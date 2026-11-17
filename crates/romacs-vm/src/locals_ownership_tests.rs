@@ -135,4 +135,14 @@ fn a_minor_reads_only_the_locals_stored_into_since() {
     vm.eval_source_raw("(setq mn-i 0) (while (< mn-i 10000) (setq mn-junk (list mn-i mn-i)) (setq mn-i (1+ mn-i)))").unwrap();
     let kept = vm.eval_source_raw("(list (buffer-local-value 'mn-l0 (car mn-bufs)) (buffer-local-value 'mn-new1 (car mn-bufs)) (buffer-local-value 'mn-new2 (car mn-bufs)))").unwrap();
     assert_eq!(vm.display(kept).unwrap(), "((fresh 2) (made 1) (made 2))");
+    // The writes that move a buffer's whole store mark the entries they
+    // land in: `buffer-swap-text' moves each buffer's locals to the other's
+    // object, a multibyte conversion replaces the buffer's object.
+    vm.eval_source_raw(r#"
+      (save-current-buffer (set-buffer (nth 1 mn-bufs)) (setq mn-l1 (list 'swapped)) (buffer-swap-text (nth 2 mn-bufs)))
+      (save-current-buffer (set-buffer (nth 3 mn-bufs)) (setq mn-l2 (list 'converted)) (set-buffer-multibyte nil))"#).unwrap();
+    assert!(vm.collect_minor(&[]));
+    vm.eval_source_raw("(setq mn-i 0) (while (< mn-i 10000) (setq mn-junk (list mn-i mn-i)) (setq mn-i (1+ mn-i)))").unwrap();
+    let moved = vm.eval_source_raw("(list (buffer-local-value 'mn-l1 (nth 1 mn-bufs)) (buffer-local-value 'mn-l2 (nth 3 mn-bufs)))").unwrap();
+    assert_eq!(vm.display(moved).unwrap(), "((swapped) (converted))");
 }

@@ -408,13 +408,16 @@ impl Vm {
     /// change nothing (a Make where there is a local, a Set or Kill where
     /// there is none) writes nothing.
     pub(crate) fn store_local(&mut self, index: usize, slot: usize, at: std::result::Result<usize, usize>, store: LocalStore) {
-        let Some(per_buffer) = self.per_buffer_mut(index).filter(|_| at.is_ok() != matches!(store, LocalStore::Make(_))) else { return };
-        let locals = per_buffer.locals_mut();
+        if at.is_ok() == matches!(store, LocalStore::Make(_)) {
+            return;
+        }
+        let Some(per_buffer) = self.per_buffer_mut(index) else { return };
+        let (locals, symbol) = (per_buffer.locals_mut(), Value::reference(slot + 1, 7));
         match (store, at) {
-            (LocalStore::Make(value), Err(at)) => locals.insert_at(at, Value::reference(slot + 1, 7), value),
-            (LocalStore::Set(value), Ok(at)) => locals.set_at(at, value),
-            (LocalStore::Kill, Ok(at)) => locals.remove_at(at),
-            _ => unreachable!("filtered above"),
+            (LocalStore::Make(value), Err(at)) => locals.insert_at(at, symbol, value),
+            (LocalStore::Set(value), Ok(at)) => locals.set_at(at, symbol, value),
+            (LocalStore::Kill, Ok(at)) => locals.remove_at(at, symbol),
+            _ => unreachable!("returned above"),
         }
     }
     /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its

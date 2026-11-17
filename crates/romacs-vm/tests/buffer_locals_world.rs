@@ -36,7 +36,13 @@ const READ: &str = "(let ((a (get-buffer \"bw-a\")) (b (get-buffer \"bw-b\")))
 #[test]
 fn buffer_locals_survive_a_world_image() {
     let [restored, live] = [true, false].map(|in_world| std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = if in_world { gnu_lisp_with(MADE) } else {
+        let mut vm = if in_world {
+            let vm = gnu_lisp_with(MADE);
+            // In the `gnu` target, whose allocator is the world arena, the
+            // session is the world's, not a boot from source.
+            assert!(!romacs_vm::world::arena::serves_heap() || romacs_vm::world::arena::mapped_image().is_some(), "restored from a world");
+            vm
+        } else {
             let mut vm = gnu_lisp(&[]);
             vm.eval_source(MADE).unwrap();
             vm

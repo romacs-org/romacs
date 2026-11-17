@@ -46,18 +46,21 @@ impl LocalVars {
     pub(crate) fn value_at(&self, at: usize) -> Value {
         self.entries[at].1
     }
-    /// Store VALUE in the entry at AT, which `find` gave.
-    pub(crate) fn set_at(&mut self, at: usize, value: Value) {
-        self.entries[at].1 = value;
+    /// Store VALUE in SYMBOL's entry, at AT, which `find` gave.
+    pub(crate) fn set_at(&mut self, at: usize, symbol: Value, value: Value) {
+        let entry = &mut self.entries[at];
+        assert_eq!(entry.0, symbol, "a stale position");
+        entry.1 = value;
     }
     /// Give SYMBOL a local VALUE at AT, where `find` said it would go.
     pub(crate) fn insert_at(&mut self, at: usize, symbol: Value, value: Value) {
-        debug_assert_eq!(self.find(symbol), Err(at), "a fresh position");
+        assert!(self.entries.get(at).is_none_or(|e| e.0.0 > symbol.0) && (at == 0 || self.entries[at - 1].0.0 < symbol.0), "a stale position");
         self.entries.insert(at, (symbol, value));
         self.version = self.version.wrapping_add(1);
     }
-    /// Drop the entry at AT, which `find` gave.
-    pub(crate) fn remove_at(&mut self, at: usize) {
+    /// Drop SYMBOL's entry, at AT, which `find` gave.
+    pub(crate) fn remove_at(&mut self, at: usize, symbol: Value) {
+        assert_eq!(self.entries[at].0, symbol, "a stale position");
         self.entries.remove(at);
         self.version = self.version.wrapping_add(1);
     }
@@ -111,9 +114,9 @@ mod tests {
         assert_eq!(slots, [1, 3, 5, 7, 9]);
         assert_eq!(locals.get(symbol(7)), Some(Value::integer(7).unwrap()));
         assert_eq!(locals.get(symbol(4)), None);
-        locals.set_at(locals.find(symbol(3)).unwrap(), Value::TRUE);
+        locals.set_at(locals.find(symbol(3)).unwrap(), symbol(3), Value::TRUE);
         assert_eq!(locals.get(symbol(3)), Some(Value::TRUE));
-        locals.remove_at(locals.find(symbol(5)).unwrap());
+        locals.remove_at(locals.find(symbol(5)).unwrap(), symbol(5));
         assert_eq!(locals.find(symbol(5)), Err(2));
         assert!(!locals.contains(symbol(5)) && locals.contains(symbol(9)));
         assert_eq!(locals.iter().count(), 4);
@@ -126,9 +129,9 @@ mod tests {
         insert(&mut locals, 2, Value::NIL);
         let made = locals.version();
         assert_ne!(made, start);
-        locals.set_at(locals.find(symbol(2)).unwrap(), Value::TRUE);
+        locals.set_at(locals.find(symbol(2)).unwrap(), symbol(2), Value::TRUE);
         assert_eq!(locals.version(), made, "a store changes nothing");
-        locals.remove_at(locals.find(symbol(2)).unwrap());
+        locals.remove_at(locals.find(symbol(2)).unwrap(), symbol(2));
         assert_ne!(locals.version(), made);
         let removed = locals.version();
         locals.clear();
