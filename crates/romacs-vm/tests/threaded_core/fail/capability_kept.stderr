@@ -1,0 +1,12 @@
+error[E0521]: borrowed data escapes outside of function
+  --> tests/threaded_core/fail/capability_kept.rs:16:9
+   |
+15 |     pub(super) fn body<'f>(e: Hot<'f, '_, '_>, r: Regs<'f>, pc: Pc<'f>) -> Value {
+   |                        --  - `e` is a reference that is only valid in the function body
+   |                        |
+   |                        lifetime `'f` defined here
+16 |         KEPT.with(|kept| kept.set(Some(pc)));
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |         |
+   |         `e` escapes the function body here
+   |         argument requires that `'f` must outlive `'static`

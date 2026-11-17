@@ -1,8 +1,8 @@
 error[E0505]: cannot move out of `e` because it is borrowed
   --> tests/threaded_core/fail/window_across_dispatch.rs:11:22
    |
- 9 |     pub(super) fn body(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
-   |                        ----- binding `e` declared here
+ 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+   |                            ----- binding `e` declared here
 10 |         let regs = r.window(&mut e);
    |                             ------ borrow of `e` occurs here
 11 |         let out = go(e, r, pc.next());
@@ -10,11 +10,11 @@ error[E0505]: cannot move out of `e` because it is borrowed
 12 |         regs[pc.a()] = out;
    |         ------------ borrow later used here
    |
-note: if `Eng<'_, '_>` implemented `Clone`, you could clone the value
-  --> tests/threaded_core/fail/../support.rs
+note: if `Hot<'_, '_, '_>` implemented `Clone`, you could clone the value
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
    |
-   | struct Eng<'x, 'a>(&'x mut Engine<'a>);
-   | ^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+   | pub(super) struct Hot<'f, 'x, 'a> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
    |
   ::: tests/threaded_core/fail/window_across_dispatch.rs:10:34
    |
@@ -24,8 +24,8 @@ note: if `Eng<'_, '_>` implemented `Clone`, you could clone the value
 error[E0505]: cannot move out of `r` because it is borrowed
   --> tests/threaded_core/fail/window_across_dispatch.rs:11:25
    |
- 9 |     pub(super) fn body(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
-   |                                            ----- binding `r` declared here
+ 9 |     pub(super) fn body<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
+   |                                                    ----- binding `r` declared here
 10 |         let regs = r.window(&mut e);
    |                    - borrow of `r` occurs here
 11 |         let out = go(e, r, pc.next());

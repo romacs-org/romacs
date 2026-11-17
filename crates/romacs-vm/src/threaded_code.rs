@@ -5,10 +5,15 @@
 //! instructions) lands inside the code, and the code ends with the core's
 //! terminator. The handlers' raw reads rest on the first checks, the core's
 //! `Pc` steps on the last two. Instructions are read through `Deref`, and
-//! changed only through the methods here, which touch no operand. Lowering's
-//! choice of a typed handler (`bytes`, `typed_kernel`) is here too.
+//! changed only through the methods here, which touch no operand.
+//!
+//! Validation alone installs a typed handler (`threaded_audited.rs` I3): it
+//! writes the operands the handler reads from the operation it checked, and
+//! refuses code that names one anywhere else. It also wraps an instruction
+//! that reads a pending `&rest` list (`observes`), so the wrapper sees the
+//! handler validation chose.
 use super::audited::{self, terminator};
-use super::{k_inst, prim, Function, Handler, Inst, Op, Primitive, Value};
+use super::{k_inst, observe_then, prim, Function, Handler, Inst, Op, Primitive, Value};
 use std::fmt;
 use std::ops::Deref;
 
@@ -27,6 +32,8 @@ pub(super) enum Refusal {
     Site { at: usize, site: usize, sites: usize },
     /// A branch or landing to TO, outside the LEN instructions.
     Target { at: usize, to: usize, len: usize },
+    /// A typed handler that validation did not install.
+    Typed { at: usize },
 }
 
 impl fmt::Display for Refusal {
@@ -36,6 +43,7 @@ impl fmt::Display for Refusal {
             Refusal::Window { at, end, width } => write!(f, "instruction {at}: argument window ending at {end} outside a frame of {width}"),
             Refusal::Site { at, site, sites } => write!(f, "instruction {at}: closure site {site} of {sites}"),
             Refusal::Target { at, to, len } => write!(f, "instruction {at}: target {to} outside {len} instructions"),
+            Refusal::Typed { at } => write!(f, "instruction {at}: a typed handler lowering chose"),
         }
     }
 }
@@ -44,15 +52,26 @@ impl fmt::Display for Refusal {
 /// the terminator after them, or why not. In one pass, each instruction
 /// read in place; with room for the terminator in BODY, nothing moves.
 pub(super) fn validate(function: &Function, body: Vec<Inst>) -> Result<Code, Refusal> {
-    seal(body, |at, op| operands(function, at, op))
+    seal(body, |at, op| operands(function, at, op), |op| observes(function, op))
 }
 
 /// BODY with its branch distances filled in and the terminator after it,
 /// or the first refusal of CHECK or of a target outside it.
-fn seal(mut body: Vec<Inst>, check: impl Fn(usize, &Op) -> Result<(), Refusal>) -> Result<Code, Refusal> {
+fn seal(
+    mut body: Vec<Inst>,
+    check: impl Fn(usize, &Op) -> Result<(), Refusal>,
+    observes: impl Fn(&Op) -> bool,
+) -> Result<Code, Refusal> {
     let len = body.len();
     for (at, inst) in body.iter_mut().enumerate() {
         check(at, &inst.op)?;
+        if !install_typed(inst) && (audited::is_typed(inst.handler) || audited::is_typed(inst.observed_handler)) {
+            return Err(Refusal::Typed { at });
+        }
+        if observes(&inst.op) {
+            inst.observed_handler = inst.handler;
+            inst.handler = observe_then;
+        }
         let target = |to: usize| if to < len { Ok(to) } else { Err(Refusal::Target { at, to, len }) };
         inst.branch = match inst.op {
             Op::Jump(to) | Op::Unless(_, to) => {
@@ -98,14 +117,58 @@ fn operands(function: &Function, at: usize, op: &Op) -> Result<(), Refusal> {
     }
 }
 
-/// Lowering's choice of handler: a typed one where the operands fit a byte.
 /// An operand `Inst` keeps in 32 bits: a register, a count or a site.
 pub(super) fn narrow(operand: usize) -> u32 {
     u32::try_from(operand).expect("an operand fits 32 bits")
 }
+/// Whether OP, an instruction of FUNCTION, reads or replaces its pending
+/// `&rest` register: it then runs behind `observe_then`. Replacement writes
+/// count, as they discard a pending tail before a later observation could
+/// resurrect its old value.
+fn observes(function: &Function, op: &Op) -> bool {
+    if !function.rest {
+        return false;
+    }
+    let rest = function.captures + function.arity;
+    let mut observes = false;
+    op.each_register(&mut |register| observes |= register == rest);
+    if let Some((start, count)) = op.window() {
+        observes |= (start..start + count).contains(&rest);
+    }
+    if let Op::Closure(_, _, site) = *op {
+        observes |= function.sites.get(site).is_some_and(|captured| captured.contains(&rest));
+    }
+    observes
+}
+/// The typed handler of INST's checked operation, if it has one, installed
+/// with the operands it reads taken from that operation: whether it did.
+fn install_typed(inst: &mut Inst) -> bool {
+    match inst.op {
+        Op::Const(a, _) => {
+            inst.a = a;
+            bytes(inst, audited::t_constant, audited::t_constant_wide);
+        }
+        Op::Move(a, b) => {
+            (inst.a, inst.b) = (a, b);
+            bytes(inst, audited::t_mov, audited::t_mov_wide);
+        }
+        Op::Unless(a, _) => {
+            inst.a = a;
+            bytes(inst, audited::t_unless, audited::t_unless_wide);
+        }
+        Op::Jump(_) => inst.handler = audited::t_jump,
+        Op::Sealed(a, _, d, argc) => {
+            let Some(typed) = typed_kernel(inst.value, argc) else { return false };
+            (inst.a, inst.d) = (a, d);
+            return kernel_bytes(inst, typed);
+        }
+        _ => return false,
+    }
+    true
+}
 /// OP's handler on a frame whose operands A, B and D fit a byte, that is
 /// TYPED, else WIDE, either with the bytes `Inst` keeps for it.
-pub(super) fn bytes(i: &mut Inst, typed: Handler, wide: Handler) {
+fn bytes(i: &mut Inst, typed: Handler, wide: Handler) {
     match (u8::try_from(i.a), u8::try_from(i.b), u8::try_from(i.d)) {
         (Ok(a), Ok(b), Ok(d)) => {
             (i.a8, i.b8, i.d8) = (a, b, d);
@@ -141,20 +204,21 @@ pub(super) fn typed_kernel(target: Value, argc: usize) -> Option<(Handler, Handl
     })
 }
 /// A sealed kernel call takes TYPED when its operands fit a byte, OTHER its
-/// other cases (`Inst::kernel`); else it keeps the kernel it was given.
-pub(super) fn kernel_bytes(i: &mut Inst, (typed, other): (Handler, Handler)) {
-    if let (Ok(a), Ok(d)) = (u8::try_from(i.a), u8::try_from(i.d)) {
-        (i.a8, i.d8) = (a, d);
-        i.kernel = other;
-        i.handler = typed;
-    }
+/// other cases (`Inst::kernel`), and says so; else it keeps the kernel it
+/// was given.
+fn kernel_bytes(i: &mut Inst, (typed, other): (Handler, Handler)) -> bool {
+    let (Ok(a), Ok(d)) = (u8::try_from(i.a), u8::try_from(i.d)) else { return false };
+    (i.a8, i.d8) = (a, d);
+    i.kernel = other;
+    i.handler = typed;
+    true
 }
 
 impl Code {
     /// A test's hand-made BODY, its operands unchecked: there is no function.
     #[cfg(test)]
     pub(super) fn for_test(body: Vec<Inst>) -> Code {
-        seal(body, |_, _| Ok(())).expect("a test's branches land in its code")
+        seal(body, |_, _| Ok(()), |_| false).expect("a test's branches land in its code")
     }
     /// No code: its function was not lowered yet, or was released.
     pub(super) fn none() -> Code {
@@ -226,6 +290,29 @@ mod tests {
         assert!(branches >= 2, "the loop branches back and out");
         let terminator: Handler = terminator;
         assert!(std::ptr::fn_addr_eq(code.0[code.len()].handler, terminator));
+    }
+
+    /// Sol's S3 probe: lowering hands validation a constant whose wide
+    /// operand and handler were forged; what runs is what was checked.
+    #[test]
+    fn a_typed_handler_runs_only_the_operands_validation_checked() {
+        let mut vm = Vm::new();
+        let (f, body) = function(&mut vm, "(defun st-plain (x y) (if x (cons x y) y))", "st-plain");
+        let mut forged = body.clone();
+        forged[0] = lower(&vm, Op::Const(0, Value::NIL));
+        (forged[0].a, forged[0].handler) = (usize::MAX, audited::t_constant_wide);
+        let code = validate(&f, forged).unwrap();
+        let t_constant: Handler = audited::t_constant;
+        assert!(std::ptr::fn_addr_eq(code[0].handler, t_constant), "validation chose the handler");
+        assert_eq!((code[0].a, code[0].a8), (0, 0), "and the operand it reads");
+        // A typed handler on an operation that has none is refused, wrapped or not.
+        let mut stray = body.clone();
+        stray[0] = lower(&vm, Op::Return(0));
+        stray[0].handler = audited::t_constant_wide;
+        assert_eq!(validate(&f, stray.clone()).err(), Some(Refusal::Typed { at: 0 }));
+        stray[0].handler = lower(&vm, Op::Return(0)).handler;
+        stray[0].observed_handler = audited::t_mov_wide;
+        assert_eq!(validate(&f, stray).err(), Some(Refusal::Typed { at: 0 }));
     }
 
     #[test]

@@ -8,8 +8,8 @@
 //! no `Drop` or address-taken local across it, so it compiles to a jump
 //! (`tools/check_threading.py` checks).
 #![forbid(unsafe_code)]
-use super::audited::{go, legacy, poll, Pc, Regs};
-use super::{Eng, Value};
+use super::audited::{go, legacy, poll, Hot, Pc, Regs};
+use super::Value;
 
 macro_rules! truth {
     ($c:expr) => {
@@ -18,46 +18,43 @@ macro_rules! truth {
 }
 
 #[inline]
-pub(super) fn t_mov(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_mov<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let regs = r.window(&mut e);
     regs[pc.a()] = regs[pc.b()];
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_mov_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_mov_wide<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let value = *r.slot(&mut e, pc.wide_b());
     *r.slot(&mut e, pc.wide_a()) = value;
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_constant(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_constant<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     r.window(&mut e)[pc.a()] = pc.value();
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_constant_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_constant_wide<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     *r.slot(&mut e, pc.wide_a()) = pc.value();
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_unless(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_unless<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let to = if r.window(&mut e)[pc.a()] == Value::NIL { pc.branch() } else { pc.next() };
     go(e, r, to)
 }
 #[inline]
-pub(super) fn t_unless_wide(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_unless_wide<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let to = if *r.slot(&mut e, pc.wide_a()) == Value::NIL { pc.branch() } else { pc.next() };
     go(e, r, to)
 }
 /// A backward jump spends the engine's budget, and polls when it is gone.
 #[inline]
-pub(super) fn t_jump(mut e: Eng<'_, '_>, r: Regs, pc: Pc) -> Value {
+pub(super) fn t_jump<'f>(mut e: Hot<'f, '_, '_>, r: Regs<'f>, pc: Pc<'f>) -> Value {
     let to = pc.branch();
-    if pc.is_back(&to) {
-        e.budget -= 1;
-        if e.budget < 0 {
-            return poll(e, r, to);
-        }
+    if pc.is_back(&to) && e.spend() {
+        return poll(e, r, to);
     }
     go(e, r, to)
 }
@@ -66,10 +63,10 @@ pub(super) fn t_jump(mut e: Eng<'_, '_>, r: Regs, pc: Pc) -> Value {
 macro_rules! half {
     ($name:ident, $field:tt) => {
         #[inline]
-        pub(super) fn $name(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+        pub(super) fn $name<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
             let x = r.window(&mut e)[pc.d()];
             if x.0 & 7 == 3 {
-                if let Some(pair) = e.vm.conses.get((x.0 >> 3) as usize) {
+                if let Some(pair) = e.pair((x.0 >> 3) as usize) {
                     let value = pair.$field;
                     r.window(&mut e)[pc.a()] = value;
                     return go(e, r, pc.next());
@@ -90,7 +87,7 @@ half!(t_cdr, 1);
 macro_rules! fixnums {
     ($name:ident, $y:expr, |$x:ident, $yv:ident| $body:expr) => {
         #[inline]
-        pub(super) fn $name(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+        pub(super) fn $name<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
             let regs = r.window(&mut e);
             let $x = regs[pc.d()];
             let $yv: Value = $y(regs, pc);
@@ -110,11 +107,11 @@ macro_rules! fixnums {
     };
 }
 #[inline]
-fn second(regs: &[Value; 257], pc: Pc) -> Value {
+fn second(regs: &[Value; 257], pc: Pc<'_>) -> Value {
     regs[pc.d() + 1]
 }
 #[inline]
-fn one(_: &[Value; 257], _: Pc) -> Value {
+fn one(_: &[Value; 257], _: Pc<'_>) -> Value {
     Value(5)
 }
 fixnums!(t_add, second, |x, y| x.0.cast_signed().checked_add((y.0 - 1).cast_signed()).map(|n| Value(n.cast_unsigned())));
@@ -126,19 +123,19 @@ fixnums!(t_greater, second, |x, y| Some(truth!(x.0.cast_signed() > y.0.cast_sign
 fixnums!(t_equal, second, |x, y| Some(truth!(x == y)));
 
 #[inline]
-pub(super) fn t_null(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_null<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let regs = r.window(&mut e);
     regs[pc.a()] = truth!(regs[pc.d()] == Value::NIL);
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_consp(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_consp<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let regs = r.window(&mut e);
     regs[pc.a()] = truth!(regs[pc.d()].0 & 7 == 3);
     go(e, r, pc.next())
 }
 #[inline]
-pub(super) fn t_eq(mut e: Eng<'_, '_>, mut r: Regs, pc: Pc) -> Value {
+pub(super) fn t_eq<'f>(mut e: Hot<'f, '_, '_>, mut r: Regs<'f>, pc: Pc<'f>) -> Value {
     let regs = r.window(&mut e);
     regs[pc.a()] = truth!(regs[pc.d()] == regs[pc.d() + 1]);
     go(e, r, pc.next())

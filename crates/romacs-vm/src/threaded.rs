@@ -1948,25 +1948,9 @@ fn lower_function(
         // One more for the terminator: building the code moves nothing.
         let mut body = Vec::with_capacity(ops.len() + 1);
         body.extend(ops.iter().map(|&op| {
+                // Validation installs the typed handlers and wraps a `&rest`
+                // reader (`code::validate`).
                 let mut inst = lower(vm, op);
-                let function = &vm.functions[id];
-                if function.rest {
-                    let rest_reg = function.captures + function.arity;
-                    let mut observes = false;
-                    op.each_register(&mut |reg| observes |= reg == rest_reg);
-                    if let Some((start, count)) = op.window() {
-                        observes |= (start..start + count).contains(&rest_reg);
-                    }
-                    if let Op::Closure(_, _, site) = op {
-                        observes |= function.sites[site].contains(&rest_reg);
-                    }
-                    // Include replacement writes: they discard a pending tail
-                    // before a later observation can resurrect its old value.
-                    if observes {
-                        inst.observed_handler = inst.handler;
-                        inst.handler = observe_then;
-                    }
-                }
                 let entry = EntryCache {
                     world_version: 0,
                     target: Value::UNBOUND,
@@ -2010,15 +1994,14 @@ fn lower(vm: &Vm, op: Op) -> Inst {
         kernel: direct,
     };
     match op {
+        // Their typed handlers are validation's (`code::install_typed`).
         Op::Const(a, v) => {
             i.a = a;
             i.value = v;
-            code::bytes(&mut i, audited::t_constant, audited::t_constant_wide);
         }
         Op::Move(a, b) => {
             i.a = a;
             i.b = b;
-            code::bytes(&mut i, audited::t_mov, audited::t_mov_wide);
         }
         Op::Sealed(a, b, d, e) => {
             i.a = a;
@@ -2027,9 +2010,6 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.e = code::narrow(e);
             i.value = sealed::target(&vm.symbol_names[b], e).expect("sealed call of a byte-op primitive");
             i.handler = kernel(i.value, e).unwrap_or(sealed_call);
-            if let Some(typed) = code::typed_kernel(i.value, e) {
-                code::kernel_bytes(&mut i, typed);
-            }
         }
         Op::Global(a, b) => {
             // Two plain-looking variables whose value is the buffer's.
@@ -2097,12 +2077,9 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.b = b;
             i.c = code::narrow(c);
         }
-        // Their targets are `Inst::branch` (`code::validate`).
-        Op::Jump(_) => i.handler = audited::t_jump,
-        Op::Unless(a, _) => {
-            i.a = a;
-            code::bytes(&mut i, audited::t_unless, audited::t_unless_wide);
-        }
+        // Their targets are `Inst::branch`, their handlers validation's.
+        Op::Jump(_) => {}
+        Op::Unless(a, _) => i.a = a,
         Op::Return(a) => {
             i.handler = ret;
             i.a = a;
@@ -5920,8 +5897,8 @@ mod register_tests {
                 continue;
             }
             // A sealed call of a typed op takes the typed handler, its other
-            // cases the kernel's general path (`kernel_bytes`).
-            let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
+            // cases the kernel's general path, once validated (`kernel_bytes`).
+            let sealed = code::Code::for_test(vec![lower(&vm, Op::Sealed(0, slot, 1, argc))])[0];
             if let Some((typed, other)) = code::typed_kernel(sealed.value, argc) {
                 assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
                 assert!(std::ptr::fn_addr_eq(sealed.kernel, other), "{name}'s other cases");

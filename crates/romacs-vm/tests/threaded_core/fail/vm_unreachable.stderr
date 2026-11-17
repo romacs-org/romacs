@@ -1,0 +1,5 @@
+error[E0609]: no field `vm` on type `Hot<'f, '_, '_>`
+  --> tests/threaded_core/fail/vm_unreachable.rs:11:11
+   |
+11 |         e.vm.stack.clear();
+   |           ^^ unknown field

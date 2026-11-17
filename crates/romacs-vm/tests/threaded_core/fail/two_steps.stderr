@@ -1,15 +1,15 @@
-error[E0599]: no method named `next` found for struct `Next` in the current scope
+error[E0599]: no method named `next` found for struct `Next<'f>` in the current scope
   --> tests/threaded_core/fail/two_steps.rs:10:28
    |
 10 |         go(e, r, pc.next().next())
-   |                  --        ^^^^ method not found in `Next`
+   |                  --        ^^^^ method not found in `Next<'_>`
    |                  |
-   |                  method `next` is available on `audited::Pc`
+   |                  method `next` is available on `Pc<'f>`
    |
   ::: tests/threaded_core/fail/../../../src/threaded_audited.rs
    |
-   | pub(super) struct Next(*const Inst);
-   | ---------------------- method `next` not found for this struct
+   | pub(super) struct Next<'f>(*const Inst, Brand<'f>);
+   | -------------------------- method `next` not found for this struct
    |
    = help: items from traits can only be used if the trait is implemented and in scope
    = note: the following trait defines an item `next`, perhaps you need to implement it:

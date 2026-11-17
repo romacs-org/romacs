@@ -1,9 +1,9 @@
 error[E0502]: cannot borrow `e` as immutable because it is also borrowed as mutable
-  --> tests/threaded_core/fail/engine_read_under_window.rs:11:22
+  --> tests/threaded_core/fail/engine_read_under_window.rs:11:20
    |
 10 |         let regs = r.window(&mut e);
    |                             ------ mutable borrow occurs here
-11 |         let budget = e.budget;
-   |                      ^ immutable borrow occurs here
-12 |         regs[pc.a()] = Value(budget as u64);
+11 |         let pair = e.pair(0);
+   |                    ^ immutable borrow occurs here
+12 |         regs[pc.a()] = pair.map_or(Value::NIL, |p| p.0);
    |         ------------ mutable borrow later used here

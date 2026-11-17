@@ -59,13 +59,21 @@ fn fail(_: &mut Engine<'_>, _: &str) -> Value {
     Value::NIL
 }
 
+/// A body as the core's entries take one: generic over its call's brand.
+fn check<F>(_: F)
+where
+    F: for<'f, 'x, 'a> FnOnce(audited::Hot<'f, 'x, 'a>, audited::Regs<'f>, audited::Pc<'f>) -> Value,
+{
+}
+
 fn main() {
     use audited::*;
     let _: [Handler; 20] = [
         t_mov, t_mov_wide, t_constant, t_constant_wide, t_unless, t_unless_wide, t_jump, t_car, t_cdr,
         t_add, t_sub, t_inc, t_dec, t_less, t_greater, t_equal, t_null, t_consp, t_eq, terminator,
     ];
-    let _: fn(Eng<'_, '_>, Regs, Pc) -> Value = misuse::body;
+    check(misuse::body);
+    let _ = is_typed(stub);
     // The engine's file, which only `file_read_under_window` reads.
     let vm = Vm { stack: Vec::new(), conses: Vec::new() };
     let _ = vm.stack.len() + vm.conses.len();
