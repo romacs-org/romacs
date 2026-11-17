@@ -247,8 +247,7 @@ impl Locked {
         // image it maps. The lock, which SELF holds and lends only through
         // this borrow, makes this the header's one reference.
         let header = unsafe { &mut *(base as *mut Header) };
-        let room = reserve.saturating_sub(HEADER_BYTES);
-        Some(Heap { header, low: base + HEADER_BYTES, room, word_room: room.saturating_sub(size_of::<usize>()) })
+        Some(Heap { header, start: base, span: reserve })
     }
 }
 
@@ -283,12 +282,10 @@ const HEADER_BYTES: usize = size_of::<Header>().next_multiple_of(PAGE);
 /// panic would allocate under the lock.
 struct Heap<'l> {
     header: &'l mut Header,
-    /// The arena's first byte past its header.
-    low: usize,
-    /// The bytes from LOW to the arena's end.
-    room: usize,
-    /// The last offset from LOW a word may start at.
-    word_room: usize,
+    /// Where the arena starts, as its slot published it.
+    start: usize,
+    /// How many bytes it holds from there.
+    span: usize,
 }
 
 impl std::ops::Deref for Heap<'_> {
@@ -306,22 +303,18 @@ impl std::ops::DerefMut for Heap<'_> {
 
 impl Heap<'_> {
     /// Abort unless LEN bytes from AT lie in the arena past its header. AT
-    /// below LOW wraps to an offset past ROOM.
-    #[inline]
+    /// below the header's end wraps to an offset past the room.
     fn check(&self, at: usize, len: usize) {
-        let offset = at.wrapping_sub(self.low);
-        if offset > self.room || len > self.room - offset {
+        let room = self.span.saturating_sub(HEADER_BYTES);
+        let offset = at.wrapping_sub(self.start + HEADER_BYTES);
+        if offset > room || len > room - offset {
             std::process::abort();
         }
     }
 
-    /// Abort unless the word at AT lies in the arena past its header: one
-    /// comparison, as AT below LOW wraps to an offset past WORD_ROOM.
-    #[inline]
+    /// Abort unless the word at AT lies in the arena past its header.
     fn check_word(&self, at: usize) {
-        if at.wrapping_sub(self.low) > self.word_room {
-            std::process::abort();
-        }
+        self.check(at, size_of::<usize>());
     }
 
     /// The word at AT, unchecked: the allocator's own path (`take_small`,
