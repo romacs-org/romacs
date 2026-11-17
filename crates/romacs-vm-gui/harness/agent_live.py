@@ -101,7 +101,38 @@ import time
 import parity_live
 from romacs_mcp_client import RomacsMcp
 import server_live
-from server_live import Server, until, lisp
+from server_live import Server, lisp
+
+
+def patient(seconds):
+    """SECONDS, stretched by how loaded the host is: a wait that holds at
+    rest holds when the train runs the machine at several times its cores."""
+    return seconds * load_factor()[1]
+
+
+def load_factor():
+    """(LOAD, FACTOR): the host's 1-minute load and what a wait is stretched by."""
+    load = os.getloadavg()[0]
+    return load, min(4.0, max(1.0, load / (os.cpu_count() or 1)))
+
+
+def outlasted(what, took, seconds):
+    """Say on stderr that a wait for WHAT took TOOK seconds, past its
+    SECONDS at rest: a slowdown the stretch let pass is still seen."""
+    load, factor = load_factor()
+    print(f'agent_live: slow wait: {what} took {took:.1f}s, over its {seconds}s at rest '
+          f'(load {load:.0f}, factor {factor:.2f})', file=sys.stderr, flush=True)
+
+
+def until(predicate, seconds, what):
+    """`server_live.until', its deadline `patient'; one that outlasts its
+    deadline at rest is said (`outlasted')."""
+    started = time.time()
+    try:
+        return server_live.until(predicate, patient(seconds), what)
+    finally:
+        if time.time() - started > seconds:
+            outlasted(what, time.time() - started, seconds)
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
@@ -311,9 +342,11 @@ def session(args, base):
                     '"edits": [{"start": 1, "end": 6, "text": "ALPHA"}]}')
         a.idle(sid)
         edited = a.eval('(with-current-buffer "notes" (buffer-string))')
+        answered = len(a.results(sid))
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(+ 20 22)"}')
         a.idle(sid)
-        evaluated = a.results(sid)[-1]
+        # Its own turn's result, not the one before (idle may be that turn's).
+        evaluated = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         a.send(sid, 'ask touch approved.txt')
         until(lambda: a.state(sid) == 'waiting-approval', 20, 'approval raised')
         a.eval(f'(let ((s {a.s(sid)})) (romacs-agent-respond s (car (hash-table-keys (romacs-agent-approvals s))) t))')
@@ -597,11 +630,14 @@ def host(args, base):
         reader.connect(str(sock))
         reader.sendall(b'{"attach":{"from":1}}\n')
         started = time.time()
-        process.wait(30)
+        process.wait(patient(30))
         seconds = time.time() - started
         last = json.loads((journal_dir / 'journal.jsonl').read_text().splitlines()[-1])
         reader.close()
-        flood = {'seconds': round(seconds, 2), 'exit_record': last.get('exit'), 'ok': last.get('exit') == 3 and seconds < 20}
+        if seconds > 20:
+            outlasted('the flood', seconds, 20)
+        flood = {'seconds': round(seconds, 2), 'exit_record': last.get('exit'), 'factor': round(load_factor()[1], 2),
+                 'ok': last.get('exit') == 3 and seconds < patient(20)}
         # A harness whose descendant holds its stdin unread: server A blocks
         # writing to it; server B steals the attachment and writes, waiting
         # behind A; only then does the harness exit. Its exit must still be
@@ -1659,8 +1695,14 @@ def unicode(args, base):
              'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
             encoding='utf-8')
         a.providers([('claude', claude_dir)])
-        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
-                                              '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        # Listed once its scan has found it: the scan runs off the editor.
+        listed_now = lambda: parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
+                                                          '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        try:
+            listed = until(lambda: (lambda titles: titles if any(UNICODE in t for t in titles) else None)(listed_now()),
+                           30, 'the transcript listed')
+        except RuntimeError:
+            listed = listed_now()
         view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
                                             f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
                                             '(buffer-substring-no-properties (point-min) (point-max)))'))
@@ -1989,7 +2031,8 @@ def rpc(args, base):
         # for this one's; a message sent meanwhile waits for its readiness.
         a.eval(f'(romacs-agent-stop {a.s(sid)})')
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'stopped again')
-        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        held_gate = a.root / 'init-held'
+        a.eval(f'(progn (setenv "FAKERPC_SLOW_INIT" {lisp(held_gate)}) t)')
         seen_pids = {e.get('pid') for e in rpcs()}
         a.eval(f'(romacs-agent-resume {a.s(sid)})')
         until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'initialize read')
@@ -1999,6 +2042,7 @@ def rpc(args, base):
         until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'restored')
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
+        held_gate.touch()
         before = done(sid)
         a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
@@ -2006,7 +2050,8 @@ def rpc(args, base):
         a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
 
         # A new session's server restart in the middle of its startup.
-        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        fresh_gate = a.root / 'init-fresh'
+        a.eval(f'(progn (setenv "FAKERPC_SLOW_INIT" {lisp(fresh_gate)}) t)')
         seen_pids = {e.get('pid') for e in rpcs()}
         fresh = a.start('', 'fakerpc')
         until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'fresh initialize read')
@@ -2015,6 +2060,7 @@ def rpc(args, base):
         a.restart()
         until(lambda: a.eval(f'(and {a.s(fresh)} t)') == 't', 15, 'fresh restored')
         a.send(fresh, 'say fresh')
+        fresh_gate.touch()
         until(lambda: done(fresh) > 0, 30, 'fresh answered')
         fresh_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         fresh_run = [e.get('rpc') for e in rpcs() if e.get('pid') == fresh_pid and 'rpc' in e]

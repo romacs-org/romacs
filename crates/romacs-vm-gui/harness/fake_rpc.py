@@ -12,7 +12,8 @@ and nothing else.  Its "model" is a script, one command per prompt:
 
 It writes each session's transcript to $FAKERPC_HOME (default ~/.fakerpc)
 sessions/ID.jsonl, and logs every request it reads to $FAKE_HARNESS_LOG.
-$FAKERPC_SLOW_INIT delays its initialize answer by that many seconds;
+$FAKERPC_SLOW_INIT holds its initialize answer until that file exists
+(two minutes at most), or for that many seconds when it is a number;
 from its start it writes unsolicited notifications for a second.
 """
 import json
@@ -75,7 +76,14 @@ def main():
             continue
         log(rpc=method, id=rid, session=params.get('sessionId'), initialized=initialized, current=session)
         if method == 'initialize':
-            time.sleep(float(os.environ.get('FAKERPC_SLOW_INIT') or 0))
+            slow = os.environ.get('FAKERPC_SLOW_INIT') or '0'
+            try:
+                time.sleep(float(slow))
+            except ValueError:
+                # A gate: held until the workflow opens it, however loaded.
+                deadline = time.monotonic() + 120
+                while not os.path.exists(slow) and time.monotonic() < deadline:
+                    time.sleep(.05)
             initialized = True
             emit({'jsonrpc': '2.0', 'id': rid, 'result': {'protocolVersion': 1, 'agent': 'fakerpc'}})
         elif not initialized:
