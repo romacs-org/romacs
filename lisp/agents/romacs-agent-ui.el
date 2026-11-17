@@ -2294,7 +2294,9 @@ tables (`romacs-agent-ui--reset'): a redraw starts them anew.")
   (with-current-buffer buffer
     (when romacs-agent-ui--unfilled
       (setq romacs-agent-ui--unfilled nil)
-      (romacs-agent-ui--replay romacs-agent-ui--session)
+      ;; Drawn, not edited: no undo of it (kept forms and rows are
+      ;; inserted here, not by `romacs-agent-ui--render').
+      (romacs-agent-ui--editing (romacs-agent-ui--replay romacs-agent-ui--session))
       ;; What its journal does not hold, said while it was not shown: its
       ;; supervisor never coming up.
       (when (eq (romacs-agent-state romacs-agent-ui--session) 'unstarted)
