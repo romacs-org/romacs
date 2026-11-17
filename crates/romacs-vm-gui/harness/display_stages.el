@@ -12,10 +12,11 @@
 ;; So the redisplays a step sets off, such as jit-lock's
 ;; `jit-lock-force-redisplay', count in it however fast the host is.  At
 ;; the start of each step, and once the last one settled, the session
-;; keeps the evaluator's `romacs-instructions', `romacs--display-stats'
-;; and `gcs-done': the differences are what a step cost in all, what its
-;; redisplays cost alone, and whether a collection fell in it.  Every
-;; reading is taken before anything is serialized.
+;; keeps what Romacs ran for the steps so far (`display-stages--work'
+;; and `romacs--display-stats'), and `gcs-done': the differences are
+;; what a step cost in all, what its redisplays cost alone, and whether
+;; a collection fell in it.  Every reading is taken before anything is
+;; serialized.
 ;;
 ;; A scenario is (display-stages-scenario NAME [:paints t] :setup FORM
 ;; :body FORM): :setup's value is `it' in :body, `i' the step; :paints
@@ -285,13 +286,32 @@ line's end; return it."
 ;; finds it unsettled is owed a redisplay already: the step's own, one
 ;; after a timer that ran, or one after a ripe timer, which runs in the
 ;; poll's own pass (`romacs--timer-check' runs every ripe one).  So the
-;; redisplay after the poll is that one, and polls add none.  The poll and
-;; the advice on `timer-event-handler' cost a step 15 to 20 k instructions
-;; (plain-idle's 616 k became 629 to 637 k): plain-idle's and chat-idle's
-;; step bars rose by as much, their margins kept.
+;; redisplay after the poll is that one, and polls add none.
+;;
+;; What a step cost is what Romacs ran for it: its change, the timers it
+;; set off and its redisplays, each counted once.  The loop's own polls
+;; and the host's wait for a frame to render are left out: they grow with
+;; the host's load, and a frame drawn slowly polled for as long as it
+;; took.  So are the host's own passes between them, which no scenario
+;; sets work for (process output, the echo area's sync after a message);
+;; collections fall where allocating makes them due, inside what is
+;; counted, as the host collects on its idle pass no more while steps run.
+;; A change or timer that waits, running a timer or a redisplay inside
+;; itself, would count its waiting as its work: it makes the scenario no
+;; measurement (`display-stages--waited').
 
 (defvar display-stages--poll nil
   "The step loop's own timer function, which sets off no redisplay of a step's.")
+
+(defvar display-stages--work 0
+  "Instructions the steps' own Lisp ran outside redisplay: their changes
+and the timers they set off, the loop's own polls not.")
+
+(defvar display-stages--measuring nil
+  "Non-nil while a step's change or a timer it set off runs.")
+
+(defvar display-stages--waited nil
+  "Why the steps are no measurement: a change or timer that waited.")
 
 (defvar display-stages--owed nil
   "Redisplay cycles run when the last timer other than the step loop's ran,
@@ -301,11 +321,31 @@ until a cycle after it has run: then nil.")
   "Redisplay cycles run so far."
   (alist-get 'cycles (romacs--display-stats)))
 
-(defun display-stages--note-timer (timer)
-  "Before TIMER runs, note that a redisplay is owed after it, unless it is
-the step loop's own."
-  (unless (eq (timer--function timer) display-stages--poll)
-    (setq display-stages--owed (display-stages--cycles))))
+(defun display-stages--work (run &rest args)
+  "Call RUN with ARGS, counting the instructions it ran as a step's work.
+Inside another such call it is a wait (`display-stages--waited'), as is a
+redisplay inside it: what waits is counted no further."
+  (if display-stages--measuring
+      (progn (setq display-stages--waited "a step's change or timer ran a timer: it waited")
+             (apply run args))
+    (let* ((display-stages--measuring t)
+           (cycles (display-stages--cycles))
+           (start (romacs-instructions)))
+      (unwind-protect (apply run args)
+        (let ((end (romacs-instructions)))
+          (when (and start end)
+            (setq display-stages--work (+ display-stages--work (- end start)))))
+        (unless (eql cycles (display-stages--cycles))
+          (setq display-stages--waited "a step's change or timer redisplayed: it waited"))))))
+
+(defun display-stages--run-timer (run timer)
+  "Run TIMER through RUN (`timer-event-handler').  Unless it is the step
+loop's own, what it runs is the step's work, and a redisplay is owed
+after it."
+  (if (eq (timer--function timer) display-stages--poll)
+      (funcall run timer)
+    (setq display-stages--owed (display-stages--cycles))
+    (display-stages--work run timer)))
 
 (defun display-stages--settled-p ()
   "Whether the step marked last has settled: its redisplay ran, no timer is
@@ -320,9 +360,12 @@ other than the loop's own."
                 (progn (setq display-stages--owed nil) t)))))
 
 (defun display-stages--reading ()
-  "The evaluator's instructions and collections so far, and redisplay's counts."
-  `((step-instructions . ,(romacs-instructions)) (collections . ,gcs-done) ,@(romacs--display-stats)
-    ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified)))))
+  "What Romacs ran for the steps so far (`step-instructions': their work
+and redisplays), collections so far, and redisplay's counts."
+  (let* ((stats (romacs--display-stats)) (shown (alist-get 'instructions stats)))
+    `((step-instructions . ,(and shown (romacs-instructions) (+ display-stages--work shown)))
+      (collections . ,gcs-done) ,@stats
+      ,@(and display-stages--fontified `((fontified-chars . ,display-stages--fontified))))))
 
 (defun display-stages-start (name out steps)
   "Run scenario NAME for STEPS steps in this session, then exit.
@@ -347,12 +390,15 @@ stderr, and write the readings to OUT as JSON."
             (setq laid-out (lambda ()
                              (if (display-stages--settled-p) (funcall step) (run-with-timer gap nil laid-out)))
                   display-stages--poll laid-out)
-            (advice-add 'timer-event-handler :before #'display-stages--note-timer)
+            (advice-add 'timer-event-handler :around #'display-stages--run-timer)
+            ;; Collections where allocating makes them due, not on the
+            ;; host's idle pass, which falls in this step or the next.
+            (setq romacs-gc-idle-delay nil)
             (setq step (lambda ()
                          (push (display-stages--reading) readings)
                          (if (< i steps)
                              (progn (set-buffer (window-buffer (selected-window)))
-                                    (funcall body it i) (setq i (1+ i))
+                                    (display-stages--work body it i) (setq i (1+ i))
                                     (romacs--redisplay-since-mark t)
                                     (run-with-timer gap nil laid-out))
                            ;; The last reading is taken: nothing below is in any count.
@@ -362,7 +408,8 @@ stderr, and write the readings to OUT as JSON."
                              (insert (json-encode
                                       (list :name (symbol-name name) :steps steps
                                             :chars (with-current-buffer (window-buffer (selected-window)) (buffer-size))
-                                            :readings (vconcat (nreverse readings))))))
+                                            :readings (vconcat (nreverse readings))
+                                            :waited display-stages--waited))))
                            (kill-emacs 0))))
             (scaling--mark (list :stages "start"))
             (scaling--perf "enable")
