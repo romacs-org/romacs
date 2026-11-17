@@ -136,7 +136,7 @@ fn look(stall: &mut Option<Stall>, startup: u64) {
     for (since, end) in ended {
         let done = stall.take_if(|s| s.since == since).unwrap_or(Stall { since, ..Stall::default() });
         let line = record(&done, end - since, since == startup, false);
-        eprintln!("romacs-stall: {line}");
+        crate::stderr::line(&format!("romacs-stall: {line}"));
         romacs_vm::host::note_stall(line);
     }
     let since = SINCE.load(Ordering::Relaxed);
@@ -155,7 +155,7 @@ fn look(stall: &mut Option<Stall>, startup: u64) {
     let line = record(watched, ran, since == startup, true);
     if Duration::from_nanos(ran) >= ONGOING && !watched.said_ongoing {
         watched.said_ongoing = true;
-        eprintln!("romacs-stall: {line}");
+        crate::stderr::line(&format!("romacs-stall: {line}"));
     }
     romacs_vm::host::note_ongoing_stall(Some(line));
 }
@@ -181,7 +181,7 @@ pub fn start(threshold: Duration) {
         std::thread::sleep(LOOK);
         look_now();
     });
-    if let Err(error) = started { eprintln!("romacs: stall watchdog: {error}"); }
+    if let Err(error) = started { crate::stderr::line(&format!("romacs: stall watchdog: {error}")); }
 }
 
 #[cfg(test)]

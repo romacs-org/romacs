@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
@@ -62,21 +63,24 @@ its own, its records in its journal and `records' them all."
            (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root :title "rows"
                                               :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
              (puthash id session romacs-agent--sessions)
+             ;; Its records in SQLite, as a chat finds them.
+             (remhash id romacs-agent-events--imported)
+             (romacs-agent-events-import session t)
              ,@body))
        (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
        (delete-directory root t))))
 
 (defun romacs-agent-drawn-tests--drawn (session &optional records-only)
   "SESSION's chat transcript as a first show draws it (5 turns), from its
-records alone with RECORDS-ONLY, and the buffer."
-  (let ((buffer (romacs-agent-ui--make-chat session)))
-    (with-current-buffer buffer
-      (setq romacs-agent-ui--turns 5)
-      (cl-letf (((symbol-function 'romacs-agent-turns-page)
-                 (if records-only #'ignore (symbol-function 'romacs-agent-turns-page))))
-        (romacs-agent-ui--fill buffer))
-      (setf (romacs-agent-buffer session) nil)
-      (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
+records as they were drawn live with RECORDS-ONLY
+\(`romacs-agent-test-drawn-live'), and the buffer."
+  (if records-only (romacs-agent-test-drawn-live session 5)
+    (let ((buffer (romacs-agent-ui--make-chat session)))
+      (with-current-buffer buffer
+        (setq romacs-agent-ui--turns 5)
+        (romacs-agent-ui--fill buffer)
+        (setf (romacs-agent-buffer session) nil)
+        (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer)))))
 
 (defun romacs-agent-drawn-tests--forms (session n)
   "SESSION's last N turns drawn by `romacs-agent-ui-draw-turn', oldest first."

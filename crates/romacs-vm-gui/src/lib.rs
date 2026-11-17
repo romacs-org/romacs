@@ -13,6 +13,7 @@ pub mod measure;
 pub mod native;
 pub mod presentation;
 pub mod startup;
+pub mod stderr;
 pub mod terminal_helper;
 pub mod terminal_proto;
 pub mod terminal_service;

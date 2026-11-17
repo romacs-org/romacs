@@ -217,7 +217,28 @@ class Agents(Server):
         return self.eval(f'(romacs-agent-state {self.s(sid)})')
 
     def idle(self, sid, seconds=30):
-        until(lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+        self.until(sid, lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+
+    def until(self, sid, ready, seconds, what):
+        """`until', and on its timeout what SID's session holds: what it
+        waits on is then in the failure, not lost with the run."""
+        try:
+            until(ready, seconds, what)
+        except RuntimeError as error:
+            raise RuntimeError(f'{error}; {self.held(sid)}') from None
+
+    def held(self, sid):
+        """SID's state, queue, selection and driver, as the editor has them."""
+        try:
+            return self.eval(f'(let ((s {self.s(sid)})) (if (not s) "no session" (prin1-to-string (list '
+                             ':state (romacs-agent-state s) :queue (romacs-agent-queue s) '
+                             ':selection (romacs-agent-pending-selection s) :driver (romacs-agent-driver-state s) '
+                             ':dispatch (romacs-agent-dispatch s) :caught-up (romacs-agent-caught-up s) '
+                             ':startup (romacs-agent-startup-pending s) :interrupted (romacs-agent-interrupted s) '
+                             ':input (romacs-agent-input-seq s) :completed (romacs-agent-completed-seq s) '
+                             ':connected (process-live-p (romacs-agent-connection s))))))')[:3000]
+        except Exception as error:  # A dead server says so, not hides the timeout.
+            return f'(state unreadable: {error!r})'
 
     def journal(self, sid):
         """SID's records, as the editor reads them wherever they are kept:
@@ -636,21 +657,31 @@ def deadline(args, base):
         a.eval('(setq romacs-agent-reply-timeout 2)')
         sid = a.start('say ready')
         a.idle(sid)
+        # A turn is over once its end is recorded: idle right after a send
+        # may be the turn before's, the message not taken yet.
+        done = lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})')
+
+        def answered(before, what):
+            until(lambda: done() != before, 40, f'{what} answered')
+            a.idle(sid, 40)
+
         ran = a.root / 'ran.txt'
+        before = done()
         a.send(sid, 'call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(progn (append-to-file "ran\\n" nil {lisp(ran)}) (sleep-for 5) 1)') + ', "budgetMs": 0}')
-        a.idle(sid, 40)
+        answered(before, 'the running call')
         running = next(e for e in reversed(a.logged()) if e.get('tool') == 'romacs_eval')
         asked = next((e['outcome'] for e in reversed(a.logged()) if 'outcome_of' in e), '')
         queued = a.root / 'queued.txt'
         # The harness calls a second after it is asked, while the editor is
         # busy with a client's 6 s evaluation: the call waits in the queue.
+        before = done()
         a.send(sid, 'later 1 call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(append-to-file "q\\n" nil {lisp(queued)})') + '}')
         busy = subprocess.Popen([a.args.romacs, '--server', a.name, '-e', '(progn (sleep-for 6) t)'], env=a.env,
                                 cwd=a.work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         busy.wait(30)
-        a.idle(sid, 40)
+        answered(before, 'the queued call')
         withdrawn = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'withdrawn' in e.get('text', '')]
         result = {'running_text': running['text'][:120], 'running_seconds': round(running['seconds'], 2),
                   'outcome': asked[:120], 'ran_once': ran.read_text().count('ran') == 1,
@@ -1956,7 +1987,7 @@ def rpc(args, base):
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
         before = done(sid)
-        until(lambda: done(sid) > before, 30, 'held message answered')
+        a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
         a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
@@ -3124,7 +3155,7 @@ def select(args, base):
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         gate.touch()
-        until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
+        a.until(one, lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
@@ -3167,7 +3198,7 @@ def select(args, base):
             a.send(sid, 'say again')
             settled(sid, 30)
             a.eval('(progn (setenv "FAKE_SELECT" nil) t)')
-            until(lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
+            a.until(sid, lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
             argv = starts(sid)[-1]
             restarts[how] = {'runs': len(starts(sid)), 'resume': after(argv, '--resume') == sid,
                              'model': after(argv, '--model')}

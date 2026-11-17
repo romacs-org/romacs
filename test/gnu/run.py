@@ -731,9 +731,11 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             for line in stream:
                 lines.put(line)
             lines.put(None)
-        threading.Thread(target=pump, daemon=True).start()
         stderr_chunks: list[str] = []
-        threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True).start()
+        readers = [(proc.stdout, threading.Thread(target=pump, daemon=True)),
+                   (proc.stderr, threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True))]
+        for _, reader in readers:
+            reader.start()
         current = None
         done = False
         deadline = setup_timeout
@@ -760,6 +762,12 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             elif kind == 'done':
                 done = True
         proc.wait()
+        # Its output read to the end before it is reported, and each pipe
+        # closed; a descendant that keeps one open bounds the wait instead.
+        for stream, reader in readers:
+            reader.join(timeout=5)
+            if not reader.is_alive():
+                stream.close()
         log.write(f'# attempt {attempt}: exit {proc.returncode}\n')
         if stderr_chunks and stderr_chunks[0]:
             log.write('# stderr: ' + stderr_chunks[0][-4000:].replace('\n', '\n# ') + '\n')
