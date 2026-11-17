@@ -60,9 +60,6 @@ impl LocalVars {
     pub(crate) fn version(&self) -> u32 {
         self.version
     }
-    pub(crate) fn len(&self) -> usize {
-        self.entries.len()
-    }
     /// Each (symbol, value), in slot order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (Value, Value)> + '_ {
         self.entries.iter().copied()
@@ -101,7 +98,7 @@ mod tests {
         assert_eq!(locals.remove(symbol(5)), Some(Value::integer(5).unwrap()));
         assert_eq!(locals.remove(symbol(5)), None);
         assert!(!locals.contains(symbol(5)) && locals.contains(symbol(9)));
-        assert_eq!(locals.len(), 4);
+        assert_eq!(locals.iter().count(), 4);
     }
 
     #[test]
@@ -121,7 +118,7 @@ mod tests {
         assert_eq!(locals.version(), removed, "clearing nothing changes nothing");
         locals.insert(symbol(2), Value::NIL);
         locals.clear();
-        assert!(locals.len() == 0 && locals.version() != removed);
+        assert!(locals.iter().next().is_none() && locals.version() != removed);
     }
 
     #[test]
