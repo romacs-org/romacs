@@ -2058,13 +2058,23 @@ nothing that waits."
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     scratch))
 
+(defconst romacs-agent--events-page 2000
+  "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
+page a short read, so a long replay holds no snapshot of the store.")
+
 (defun romacs-agent-events (session &optional end)
   "SESSION's journal as the events it raised, in order, replayed on a
 copy (`romacs-agent--scratch'): SESSION is left as it is.  To place END
-\(`romacs-agent--journal-end'), when given."
+\(`romacs-agent--journal-end'), when given.  Records in SQLite are read a
+page of seqs at a time (`romacs-agent--events-page')."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
-         (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) nil end)
+         (romacs-agent-event-functions (list (lambda (_ event) (push event events))))
+         (fold (lambda (record) (romacs-agent--record scratch record))))
+    (if (not (romacs-agent-events-p session))
+        (romacs-agent--read-journal session fold nil end)
+      (let ((end (or end (romacs-agent-events-end session))))
+        (cl-loop for from from 0 below end by romacs-agent--events-page
+                 do (romacs-agent--read-journal session fold from (min end (+ from romacs-agent--events-page))))))
     (nreverse events)))
 
 (defconst romacs-agent--journal-slice (* 1024 1024)

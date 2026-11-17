@@ -210,6 +210,9 @@ however long its journal, the editor reads none of them."
   (let ((future (condition-case err
                     (isolate-spawn 'romacs-agent-renew--thread (romacs-agent-dir session) (romacs-agent--journal-end session)
                                    :name "romacs-agent renew"
+                                   ;; A worker of its own: one the user waits for
+                                   ;; never queues behind background moves.
+                                   :fresh t
                                    :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
                                                            romacs-agent-renew)
                                    :bindings (romacs-agent--fold-bindings))
