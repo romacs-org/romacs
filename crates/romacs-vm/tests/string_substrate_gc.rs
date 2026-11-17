@@ -72,8 +72,7 @@ fn p1a_mapped_fill_refuses_without_panicking() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut builder=ImageBuilder::default(); let value=builder.string("a");
     let key=builder.publish(&dir,[71;32]).unwrap();
-    // SAFETY: this test never overwrites the immutable published inode.
-    let image=unsafe { ImageRegion::open(&dir,&key) }.unwrap();
+    let image=ImageRegion::open(&dir,&key).unwrap();
     let mut vm=Vm::new();vm.attach_image(image).unwrap();vm.declare_special("p1a-image-string",value);
     // Image strings refuse writes with GNU's read-only error (ledger/divergences VM2-FROZEN).
     assert_eq!(printed(&mut vm,"(fillarray p1a-image-string 97)"),"(error \"Attempt to modify read-only object\" \"a\")");
