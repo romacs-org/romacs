@@ -507,7 +507,7 @@ impl World {
         let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
-                .ok_or_else(|| json!({"image": "made for another key"})),
+                .ok_or_else(|| json!({"image": "made for another key or carry"})),
             failed => Err(arena_reason(failed)),
         }
     }
@@ -611,7 +611,7 @@ impl World {
                     self.mark_use();
                     Launch::Restored { vm: Box::new(vm), carry, manifest }
                 }
-                None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+                None => Launch::Chain { reason: json!({"image": "made for another key or carry"}) },
             },
             failed => Launch::Chain { reason: arena_reason(failed) },
         }
@@ -704,7 +704,7 @@ impl World {
                     self.mark_use();
                     Ok((Box::new(vm), carry))
                 }
-                None => Err(json!({"image": "made for another key"})),
+                None => Err(json!({"image": "made for another key or carry"})),
             },
             failed => Err(json!({"image": format!("{failed:?}")})),
         }

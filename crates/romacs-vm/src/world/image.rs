@@ -148,7 +148,7 @@ pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut c
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
-    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
+    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>() };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
     whole_in_memory(file, written).map(|()| written)
@@ -226,14 +226,23 @@ fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
     }
 }
 
+/// The type T names in an image: one carried as T is restored only as T.
+/// An image serves the executable that made it, so the name of a type in
+/// it is that type's.
+fn carry_tag<T: ?Sized>() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::any::type_name::<T>().hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The VM and carry of the image this process mapped, when it was made for
-/// KEY, with the process-global counters it depends on restored. Taken once.
-///
-/// T must be the type `capture` carried: KEY binds the embedder that made it.
+/// KEY and carried a T, with the process-global counters it depends on
+/// restored. Taken once.
 pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
-    let fields = arena::mapped_image().filter(|fields| fields.key == *key)?;
+    let fields = arena::mapped_image().filter(|fields| fields.key == *key && fields.carry == carry_tag::<T>())?;
     if TAKEN.swap(true, Ordering::AcqRel) {
         return None;
     }

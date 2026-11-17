@@ -108,6 +108,7 @@ fn act_in_role() -> bool {
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         Ok("census") => census(&store.unwrap()),
+        Ok("other-carry") => other_carry(&store.unwrap()),
         Ok("guard") => guard(&store.unwrap()),
         #[cfg(target_arch = "x86_64")]
         Ok("stray") => stray(&store.unwrap()),
@@ -478,6 +479,31 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
+/// A worker's restore of the world in STORE (`World::restore_only`) as
+/// another carry than the u64 it was made with: what it said.
+fn other_carry(store: &Path) {
+    let refused = world(store).restore_only::<String>().map(|(_, carry)| carry);
+    println!("WORLD-IMAGE {}", refused.unwrap_err());
+}
+
+const OTHER_CARRY: &str = "a_world_restored_as_another_carry_is_refused";
+
+/// A world restored as another carry than its builder's is refused, as one
+/// for another key is: read as another type, the carry is garbage its
+/// restorer would drop. A worker isolate restores its spawner's world as the
+/// carry it knows; it once read a batch world's `()` as the GUI's carry.
+#[test]
+fn a_world_restored_as_another_carry_is_refused() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(OTHER_CARRY);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for another key or carry"}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 /// What a child printed of its outcomes: every outcome line.
 fn outcomes(command: &mut Command) -> Vec<String> {
     let output = command.output().unwrap();
@@ -718,7 +744,7 @@ fn pages(scratch: &Path) {
     unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
     block[PAGE..2 * PAGE].fill(0xab);
     let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
-    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32] };
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0 };
     let len = unsafe { arena::write_image(&out, fields) }.unwrap();
     let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
     assert_eq!(bytes.len(), len);

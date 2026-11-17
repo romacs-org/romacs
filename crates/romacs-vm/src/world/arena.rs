@@ -129,6 +129,9 @@ pub struct ImageFields {
     pub executable: usize,
     /// The world's key.
     pub key: [u8; 32],
+    /// The type of the carry beside the VM (`image::carry_tag`): a restore
+    /// as another type is refused, as one for another key is.
+    pub carry: u64,
 }
 
 /// The state of the process's arena.
