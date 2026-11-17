@@ -262,6 +262,28 @@ fn libraries_digest() -> Result<[u8; 32], String> {
     Ok(sha256(entries.join("\n").as_bytes()))
 }
 
+/// `World::lisp_files_digest` of MANIFEST: each file-read record's path,
+/// relative to the first of ROOTS that holds it, and its recorded result
+/// (the content's length and digest, or why it could not be read).
+fn files_digest(manifest: &Json, roots: &[PathBuf]) -> Option<String> {
+    let name = |path: &str| roots.iter().enumerate()
+        .find_map(|(i, root)| Path::new(path).strip_prefix(root).ok().map(|rest| format!("root{i}/{}", rest.display())))
+        .unwrap_or_else(|| path.to_owned());
+    let mut files: Vec<String> = manifest["records"].as_array()?.iter()
+        .filter(|r| r["kind"] == "file-read")
+        .map(|r| Some(format!("{} {}", name(r["path"].as_str()?), r["result"])))
+        .collect::<Option<_>>()?;
+    files.sort();
+    files.dedup();
+    Some(hex(&sha256(files.join("\n").as_bytes())))
+}
+
+/// `libraries_digest` as hex: the shared libraries this process loaded,
+/// by content, not the executable. An error when one cannot be identified.
+pub fn libraries_identity() -> Result<String, String> {
+    libraries_digest().map(|digest| hex(&digest))
+}
+
 /// The file that makes a directory a world store: Romacs wrote it there,
 /// with the store's format. `reset` and `prune` touch no directory without
 /// it.
@@ -463,7 +485,7 @@ impl World {
     /// with the executable and the copy of the Lisp tree beside it. Its key
     /// binds the executable, its libraries and RECIPE; what else its build
     /// read is the installation's own, so its records are kept in its
-    /// manifest (`lisp_identity` reads them) but not asked again. Nothing is
+    /// manifest (`lisp_files_digest` reads them) but not asked again. Nothing is
     /// made or written there, no lock taken, no use stamped and the digest
     /// cache, which the installer's build filled, is only read. No launch
     /// prunes such a store or builds in it.
@@ -490,22 +512,17 @@ impl World {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
     }
 
-    /// The identity of this world's Lisp, from its published manifest
-    /// alone (no record is checked): its key, which binds the executable
-    /// and the recipe, and the content of every file its build read. What
-    /// a compile process restores, for the compiled-Lisp key
-    /// (`crate::compiled_lisp`); a rebuild for another host fact, the
-    /// environment's say, keeps it. None when no world was published.
-    pub fn lisp_identity(&self) -> Option<String> {
+    /// The digest of the Lisp this world's build read, from its published
+    /// manifest alone (no record is checked): every file's content, each
+    /// named relative to the first of ROOTS that holds it (`root0/subr.el`),
+    /// so the same tree copied elsewhere gives the same digest. With the
+    /// embedder's build and `libraries_identity`, what compiled Lisp made
+    /// against this world depends on (`crate::compiled_lisp`): not this
+    /// executable's file, which two builds of one commit make different
+    /// (romacs#277). None when no world was published.
+    pub fn lisp_files_digest(&self, roots: &[PathBuf]) -> Option<String> {
         let text = host::read_store_file(self.file(".json")).ok()?;
-        let manifest: Json = serde_json::from_str(&text).ok()?;
-        let mut files: Vec<String> = manifest["records"].as_array()?.iter()
-            .filter(|r| r["kind"] == "file-read")
-            .map(|r| format!("{} {}", r["path"], r["sha256"]))
-            .collect();
-        files.sort();
-        files.dedup();
-        Some(format!("{} {}", hex(&self.key), hex(&sha256(files.join("\n").as_bytes()))))
+        files_digest(&serde_json::from_str(&text).ok()?, roots)
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -1431,6 +1448,19 @@ pub fn pinned_env(invoking: &[(OsString, OsString)], p: &Path) -> Vec<(OsString,
 
 #[cfg(test)]
 mod tests {
+    /// The Lisp a world read keys compiled Lisp by its content, wherever
+    /// the tree lies: a file changed in place changes the digest, and the
+    /// same files under another root do not.
+    #[test]
+    fn a_worlds_lisp_digest_is_its_files_content_relative_to_the_tree() {
+        let manifest = |root: &str, sha: &str| serde_json::json!({"records": [
+            {"kind": "file-read", "path": format!("{root}/lisp/subr.el"), "result": {"len": 3, "sha256": sha}},
+            {"kind": "probe", "path": format!("{root}/etc"), "result": "ok"}]});
+        let at = |root: &str| vec![std::path::PathBuf::from(root)];
+        let a = super::files_digest(&manifest("/a/tree", "11"), &at("/a/tree")).unwrap();
+        assert_eq!(a, super::files_digest(&manifest("/b/c/tree", "11"), &at("/b/c/tree")).unwrap());
+        assert_ne!(a, super::files_digest(&manifest("/a/tree", "22"), &at("/a/tree")).unwrap());
+    }
     use super::*;
 
     /// Build a shared library at OUT from SOURCE with ARGS, or None when no
