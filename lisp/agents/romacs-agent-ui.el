@@ -1894,6 +1894,63 @@ order, or nil when none is news."
                                  romacs-agent-ui--states))))
     (and parts (mapconcat #'identity parts (propertize (if romacs-agent-glyphs " " " · ") 'face 'romacs-agent-dim)))))
 
+;;; A state's mark
+;;
+;; One mark for each kind of state, the same in every view of agents (the
+;; board's rows, a chat's chips): what waits for the user ◆, failed ✗,
+;; working ●, done ✓, nothing more ·.
+
+(defface romacs-agent-chip '((t :weight bold :inverse-video t))
+  "A state chip: a short word on its state's colour, set off from text.")
+(defface romacs-agent-chip-done '((t :inherit (success romacs-agent-chip)))
+  "A chip of something that finished well.")
+(defface romacs-agent-chip-failed '((t :inherit (error romacs-agent-chip)))
+  "A chip of something that failed.")
+(defface romacs-agent-chip-working '((t :inherit (font-lock-keyword-face romacs-agent-chip)))
+  "A chip of something still working.")
+(defface romacs-agent-chip-you '((t :inherit (warning romacs-agent-chip)))
+  "A chip of something waiting for the user.")
+(defface romacs-agent-approval-row '((t :inherit secondary-selection :extend t))
+  "The row of something waiting for the user: tinted across the window.")
+
+(defconst romacs-agent-ui--marks
+  '((you "◆" romacs-agent-approval romacs-agent-chip-you "needs you")
+    (failed "✗" romacs-agent-error romacs-agent-chip-failed "failed")
+    (working "●" romacs-agent-running romacs-agent-chip-working "working")
+    (done "✓" romacs-agent-done romacs-agent-chip-done "done")
+    (idle "·" romacs-agent-dim nil "idle"))
+  "Each kind of state (`romacs-agent-ui--chip-kind') as (KIND MARK FACE
+CHIP-FACE WORD), what wants the user first: the one mark every view of
+agents says it by.")
+
+(defun romacs-agent-ui--chip-kind (key)
+  "The kind of state KEY (`romacs-agent-ui--states'): `you' waits for the
+user, `failed', `working', `done' finished well and unseen, `idle' says
+nothing more."
+  (pcase key
+    ((or 'approval 'question 'plan) 'you)
+    ((or 'failed 'unstarted) 'failed)
+    ((or 'working 'waiting) 'working)
+    ('completed 'done)
+    (_ 'idle)))
+
+(defun romacs-agent-ui--mark (kind)
+  "KIND's mark (`romacs-agent-ui--marks') in its face, its word on hover."
+  (pcase-let ((`(,_ ,mark ,face ,_ ,word) (assq kind romacs-agent-ui--marks)))
+    (propertize mark 'face face 'help-echo word)))
+
+(defun romacs-agent-ui--kind-counts (keys)
+  "State KEYS as each kind's mark and count, what wants the user first
+\(◆1 ●2 ✗1 ✓3), or nil when none counts; `idle' is not counted."
+  (let ((kinds (mapcar #'romacs-agent-ui--chip-kind keys)))
+    (and-let* ((parts (delq nil (mapcar (lambda (entry)
+                                          (let ((count (cl-count (car entry) kinds)))
+                                            (and (> count 0) (not (eq (car entry) 'idle))
+                                                 (concat (romacs-agent-ui--mark (car entry))
+                                                         (propertize (number-to-string count) 'face (nth 2 entry))))))
+                                        romacs-agent-ui--marks))))
+      (string-join parts " "))))
+
 (defvar romacs-mode-line-agent)
 
 ;; Sessions a new server restored raised no events: their news shows.
