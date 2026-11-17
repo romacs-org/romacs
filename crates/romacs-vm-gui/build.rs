@@ -38,6 +38,12 @@ fn files(workspace: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         if path.is_dir() {
+            // A crate's sources are found by listing them, so a file added
+            // there (a new primitive module) changes the id: Cargo watches a
+            // directory's whole tree, not only the files listed last time.
+            if path.file_name().is_some_and(|n| n == "src") {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
             files(workspace, &path, out);
         } else {
             out.push(relative);
