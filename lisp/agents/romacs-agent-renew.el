@@ -307,8 +307,17 @@ finished once its replay is over (`romacs-agent-caught-up-functions')."
       (romacs-agent-renew--unfinished session))))
 
 (defun romacs-agent-renew--ran (session event)
-  "A run started for SESSION (EVENT its note): a renewal finishing is done."
-  (when (eq (plist-get event :type) 'run) (remhash session romacs-agent-renew--finishing)))
+  "A run started for SESSION (EVENT its note): a renewal finishing is done.
+Its launch failed instead (`unstarted'): the renewal, journaled, waits
+for the next resume, which finishes it, and SESSION's view says so."
+  (pcase (plist-get event :type)
+    ('run (remhash session romacs-agent-renew--finishing))
+    ('unstarted
+     (remhash session romacs-agent-renew--finishing)
+     (when (romacs-agent-renewing session)
+       (romacs-agent--raise session (list :type 'error
+                                          :text (substitute-command-keys
+                                                 "Renewal not finished: resume the session \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-resume] to finish it")))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 (add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)
