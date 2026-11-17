@@ -4,7 +4,7 @@
 //! the arena, so the rule that keeps it sound is kept here: a range is
 //! mapped over what is already there only where that is this process's
 //! reservation and no published arena (`place`); anywhere else it is
-//! mapped only where nothing is (MAP_FIXED_NOREPLACE), which replaces
+//! mapped only where nothing is (`MAP_FIXED_NOREPLACE`), which replaces
 //! nothing.
 use super::{FIRST_ARENA, IMAGE_ARENA, RESERVE};
 use rustix::mm::{MapFlags, ProtFlags};
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// so images, start in BUILD; a process's first arena starts in FIRST, the
 /// window's top eighth. Both are above the window's lower part, where a
 /// process with an unlimited stack maps its libraries (bottom-up from
-/// 0x1554_0000_0000 or so, a sixth of the address space, plus up to a TiB
+/// `0x1554_0000_0000` or so, a sixth of the address space, plus up to a TiB
 /// of randomization; see the module documentation). The window is
 /// reserved a CHUNK at a time.
 pub(super) const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
@@ -63,7 +63,7 @@ fn chunks(at: usize, len: usize) -> Option<u64> {
         return None;
     }
     let (first, last) = ((at - WINDOW.0) / CHUNK, (at + len - 1 - WINDOW.0) / CHUNK);
-    Some(((1u128 << (last + 1)) - (1u128 << first)) as u64)
+    u64::try_from((1u128 << (last + 1)) - (1u128 << first)).ok()
 }
 
 /// Whether the range at AT, LEN bytes, is within this process's
@@ -222,6 +222,6 @@ mod tests {
         assert_eq!((chunks(WINDOW.1, PAGE), chunks(WINDOW.1 + CHUNK, PAGE), chunks(usize::MAX, 1)), (None, None, None));
         assert!(!within_reservation(WINDOW.1 + CHUNK, PAGE) && !within_reservation(WINDOW.0 - PAGE, PAGE));
         // The parts a range is chosen from fit whole chunks, and FIRST is above BUILD.
-        assert!(BUILD.0 % CHUNK == 0 && BUILD.1 == FIRST.0 && FIRST.0 % CHUNK == 0 && FIRST.1 == WINDOW.1 && RESERVE < CHUNK);
+        assert!(BUILD.0.is_multiple_of(CHUNK) && BUILD.1 == FIRST.0 && FIRST.0.is_multiple_of(CHUNK) && FIRST.1 == WINDOW.1 && RESERVE < CHUNK);
     }
 }

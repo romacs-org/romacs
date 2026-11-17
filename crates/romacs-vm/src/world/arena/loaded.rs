@@ -16,13 +16,19 @@ static LOADED: [[AtomicUsize; 4]; 256] = [const { [const { AtomicUsize::new(0) }
 static LOADED_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LOADED_COMPLETE: AtomicBool = AtomicBool::new(false);
 
-/// One object as dl_iterate_phdr describes it: NAME, loaded at BASE, with
+/// One object as `dl_iterate_phdr` describes it: NAME, loaded at BASE, with
 /// PHNUM program headers at PHDR.
 struct Object<'a> {
     name: &'a CStr,
     base: usize,
     phdr: usize,
     phnum: usize,
+}
+
+/// An ELF64 address or size as a `usize`: Romacs builds for 64-bit
+/// targets only, so it never truncates.
+fn to_usize(n: u64) -> usize {
+    usize::try_from(n).expect("a 64-bit target")
 }
 
 /// Call F on each object the loader has mapped, until it answers false.
@@ -42,7 +48,7 @@ fn each_object<F: FnMut(&Object<'_>) -> bool>(mut f: F) {
         // UNSAFE(the loader's names are C strings)
         // SAFETY: a non-null name is NUL-terminated, the loader's, for this call.
         let name = unsafe { CStr::from_ptr(info.dlpi_name) };
-        let object = Object { name, base: info.dlpi_addr as usize, phdr: info.dlpi_phdr as usize, phnum: usize::from(info.dlpi_phnum) };
+        let object = Object { name, base: to_usize(info.dlpi_addr), phdr: info.dlpi_phdr as usize, phnum: usize::from(info.dlpi_phnum) };
         libc::c_int::from(!f(&object))
     }
     // UNSAFE(the loader's object list is reached only through dl_iterate_phdr's C callback)
@@ -102,6 +108,7 @@ pub fn libraries() -> Option<Vec<Library>> {
 ///
 /// # Safety
 /// The library stays loaded for the process's life: nothing dlcloses it.
+#[must_use]
 pub unsafe fn find_library(name: &CStr) -> Option<Library> {
     let mut found = None;
     each_object(|object| {
@@ -117,7 +124,7 @@ pub unsafe fn find_library(name: &CStr) -> Option<Library> {
 }
 
 impl Library {
-    /// The object a dl_phdr_info describes: NAME, loaded at BASE, with
+    /// The object a `dl_phdr_info` describes: NAME, loaded at BASE, with
     /// PHNUM program headers at PHDR.
     ///
     /// # Safety
@@ -137,22 +144,25 @@ impl Library {
         // SAFETY: VADDR and LEN come from one of its program headers, whose
         // segment the loader mapped readable at BASE for the object's life
         // (`at`'s contract).
-        unsafe { std::slice::from_raw_parts((self.base + vaddr as usize) as *const u8, len as usize) }
+        unsafe { std::slice::from_raw_parts((self.base + to_usize(vaddr)) as *const u8, to_usize(len)) }
     }
 
-    /// The GNU build-id note of its PT_NOTE segments, as mapped.
+    /// The GNU build-id note of its `PT_NOTE` segments, as mapped.
+    #[must_use]
     pub fn build_id(&self) -> Option<&'static [u8]> {
         self.headers.iter().filter(|h| h.p_type == libc::PT_NOTE).find_map(|h| build_id(self.bytes(h.p_vaddr, h.p_memsz)))
     }
 
     /// Where its first segment is mapped: an address in the object.
+    #[must_use]
     pub fn address(&self) -> usize {
-        self.headers.iter().find(|h| h.p_type == libc::PT_LOAD).map_or(self.base, |h| self.base + h.p_vaddr as usize)
+        self.headers.iter().find(|h| h.p_type == libc::PT_LOAD).map_or(self.base, |h| self.base + to_usize(h.p_vaddr))
     }
 
     /// Whether the loader writes its read-only segments: its dynamic
-    /// section has DT_TEXTREL, or DF_TEXTREL in DT_FLAGS. Each entry is an
-    /// Elf64_Dyn, a tag and its value.
+    /// section has `DT_TEXTREL`, or `DF_TEXTREL` in `DT_FLAGS`. Each entry
+    /// is an `Elf64_Dyn`, a tag and its value.
+    #[must_use]
     pub fn text_relocations(&self) -> bool {
         const DT_TEXTREL: i64 = 22;
         const DT_FLAGS: i64 = 30;
@@ -167,10 +177,11 @@ impl Library {
     }
 
     /// What the loader leaves as the file has it: each non-writable
-    /// PT_LOAD segment's bytes, code and read-only data, as mapped, but for
+    /// `PT_LOAD` segment's bytes, code and read-only data, as mapped, but for
     /// the RELRO range the loader writes, each with the file offset it maps.
     /// Position-independent code and data are not relocated there, so they
     /// are alike in every process. None when a segment is not readable.
+    #[must_use]
     pub fn constant_segments(&self) -> Option<Vec<(u64, &'static [u8])>> {
         let relro = self.headers.iter().filter(|h| h.p_type == libc::PT_GNU_RELRO)
             .map(|h| (h.p_vaddr, h.p_vaddr + h.p_memsz)).collect::<Vec<_>>();
@@ -219,7 +230,7 @@ pub(super) fn executable() -> Option<(usize, std::ops::Range<usize>)> {
     // UNSAFE(no crate reads the auxiliary vector's AT_PHDR: getauxval is a C call)
     // SAFETY: getauxval reads the auxiliary vector the kernel gave this
     // process; it has no precondition.
-    let (phdr, count) = unsafe { (libc::getauxval(libc::AT_PHDR) as usize, libc::getauxval(libc::AT_PHNUM) as usize) };
+    let (phdr, count) = unsafe { (to_usize(libc::getauxval(libc::AT_PHDR)), to_usize(libc::getauxval(libc::AT_PHNUM))) };
     if phdr == 0 {
         return None;
     }
@@ -227,14 +238,15 @@ pub(super) fn executable() -> Option<(usize, std::ops::Range<usize>)> {
     // SAFETY: AT_PHDR and AT_PHNUM give the address and number of this
     // executable's program headers, which stay mapped for the process's life.
     let headers = unsafe { std::slice::from_raw_parts(phdr as *const libc::Elf64_Phdr, count) };
-    let base = phdr - headers.iter().find(|h| h.p_type == libc::PT_PHDR)?.p_vaddr as usize;
+    let base = phdr - to_usize(headers.iter().find(|h| h.p_type == libc::PT_PHDR)?.p_vaddr);
     let loads = || headers.iter().filter(|h| h.p_type == libc::PT_LOAD);
-    let low = loads().map(|h| h.p_vaddr as usize / PAGE * PAGE).min()?;
-    let high = loads().map(|h| (h.p_vaddr + h.p_memsz) as usize).max()?.next_multiple_of(PAGE);
+    let low = loads().map(|h| to_usize(h.p_vaddr) / PAGE * PAGE).min()?;
+    let high = loads().map(|h| to_usize(h.p_vaddr + h.p_memsz)).max()?.next_multiple_of(PAGE);
     Some((base, low..high))
 }
 
 /// Where this process's executable loaded: what a capture records.
+#[must_use]
 pub fn executable_base() -> usize {
     executable().map_or(0, |(base, _)| base)
 }
@@ -247,8 +259,8 @@ mod tests {
     fn notes(notes: &[(&[u8], u32, &[u8])]) -> Vec<u8> {
         let mut out = vec![];
         for (name, kind, desc) in notes {
-            out.extend((name.len() as u32).to_ne_bytes());
-            out.extend((desc.len() as u32).to_ne_bytes());
+            out.extend(u32::try_from(name.len()).unwrap().to_ne_bytes());
+            out.extend(u32::try_from(desc.len()).unwrap().to_ne_bytes());
             out.extend(kind.to_ne_bytes());
             out.extend(*name);
             out.resize(out.len().next_multiple_of(4), 0);
@@ -271,7 +283,7 @@ mod tests {
     /// headers: what the mapping's note must agree with.
     fn file_build_id(path: &str) -> Option<Vec<u8>> {
         let bytes = std::fs::read(path).ok()?;
-        let at = |o: usize, n: usize| u64::from_le_bytes(bytes[o..o + n].iter().chain([0u8; 8].iter()).take(8).copied().collect::<Vec<_>>().try_into().unwrap()) as usize;
+        let at = |o: usize, n: usize| u64::from_le_bytes(bytes[o..o + n].iter().chain([0u8; 8].iter()).take(8).copied().collect::<Vec<_>>().try_into().unwrap()).try_into().unwrap();
         let (shoff, shentsize, shnum) = (at(0x28, 8), at(0x3a, 2), at(0x3c, 2));
         (0..shnum).find_map(|i| {
             let h = shoff + i * shentsize;
@@ -289,7 +301,8 @@ mod tests {
         // Read-only data and code, as the file has them at those offsets.
         let file = std::fs::read(path).unwrap();
         for (offset, bytes) in segments {
-            assert_eq!(&file[offset as usize..offset as usize + bytes.len()], bytes);
+            let offset = usize::try_from(offset).unwrap();
+            assert_eq!(&file[offset..offset + bytes.len()], bytes);
         }
     }
 }

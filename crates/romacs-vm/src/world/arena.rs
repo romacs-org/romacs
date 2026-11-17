@@ -749,7 +749,7 @@ fn address_space_limit() -> std::io::Result<Option<u64>> {
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     // UNSAFE(rustix's getrlimit takes the call as infallible, and a refused one would read garbage)
     // SAFETY: getrlimit writes only the local it is given.
-    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &mut limit) } != 0 {
+    if unsafe { libc::getrlimit(libc::RLIMIT_AS, &raw mut limit) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok((limit.rlim_cur != libc::RLIM_INFINITY).then_some(limit.rlim_cur))
