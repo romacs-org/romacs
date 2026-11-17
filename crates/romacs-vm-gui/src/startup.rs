@@ -744,6 +744,14 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
     for path in EDITING_LISP { load_lisp(vm, dir, path)?; }
+    // A chain that stopped short leaves GNU editing functions romacs-editing.el
+    // calls undefined: each comes from the GNU file in the tree that defines it.
+    define_gnu_editing(vm, |file| {
+        let path = dir.join(file);
+        let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let spans = std::rc::Rc::new(crate::loadup::form_spans(&source)?);
+        Ok((std::borrow::Cow::Owned(source), spans))
+    })?;
     mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
     mark_phase("journey-keys");
@@ -849,33 +857,62 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
 
 fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
     policy!(vm, root, "romacs-editing.el")?;
-    for (source, names) in [
-        (include_str!("../../../lisp/subr.el"), &[
-            "plusp", "add-to-history", "ignore", "string=", "undefined",
-        ][..]),
-        (include_str!("../../../lisp/files.el"), &[
-            "files--ensure-directory", "make-directory",
-        ][..]),
-        (include_str!("../../../lisp/mail/mailheader.el"), &[
-            "mail-header-extract", "mail-header-format-function",
-        ][..]),
-        (include_str!("../../../lisp/simple.el"), &[
-            "mark", "set-mark", "push-mark", "pop-mark", "push-mark-command",
-            "pop-to-mark-command", "set-mark-command", "beginning-of-buffer",
-            "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
-        ][..]),
-    ] {
-        let spans = gnu_form_spans(source)?;
+    define_gnu_editing(vm, |file| {
+        let source = compiled_gnu_editing(file).ok_or_else(|| format!("No GNU editing file {file}"))?;
+        Ok((std::borrow::Cow::Borrowed(source), gnu_form_spans(source)?))
+    })
+}
+
+/// GNU's editing functions romacs-editing.el calls, by the GNU file that
+/// defines each.
+const GNU_EDITING: [(&str, &[&str]); 4] = [
+    ("subr.el", &["plusp", "add-to-history", "ignore", "string=", "undefined"]),
+    ("files.el", &["files--ensure-directory", "make-directory"]),
+    ("mail/mailheader.el", &["mail-header-extract", "mail-header-format-function"]),
+    ("simple.el", &["mark", "set-mark", "push-mark", "pop-mark", "push-mark-command", "pop-to-mark-command",
+                    "set-mark-command", "beginning-of-buffer", "kill-new", "current-kill", "backward-word",
+                    "kill-word", "backward-kill-word"]),
+];
+
+/// The workspace's copy of FILE of [`GNU_EDITING`]: it runs no GNU Lisp tree.
+fn compiled_gnu_editing(file: &str) -> Option<&'static str> {
+    match file {
+        "subr.el" => Some(include_str!("../../../lisp/subr.el")),
+        "files.el" => Some(include_str!("../../../lisp/files.el")),
+        "mail/mailheader.el" => Some(include_str!("../../../lisp/mail/mailheader.el")),
+        "simple.el" => Some(include_str!("../../../lisp/simple.el")),
+        _ => None,
+    }
+}
+
+/// Spans of top-level forms, as `crate::loadup::form_spans` gives them.
+type Spans = std::rc::Rc<Vec<(usize, usize, usize)>>;
+
+/// Define each function of [`GNU_EDITING`] this VM lacks from its GNU file,
+/// which SOURCE gives with its forms' spans, read only for a file one is
+/// missing from. A function is missing when unbound; the kill ring's also
+/// while it is still the VM's native function, which GNU's replace.
+fn define_gnu_editing<'a>(vm: &mut Vm, source: impl Fn(&str) -> Result<(std::borrow::Cow<'a, str>, Spans), String>)
+                          -> Result<(), String> {
+    for (file, names) in GNU_EDITING {
+        let mut missing = Vec::new();
         for name in names {
-            if !matches!(*name, "kill-new" | "current-kill")
-                && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
+            let test = if matches!(*name, "kill-new" | "current-kill") {
+                format!("(or (not (fboundp '{name})) (subrp (symbol-function '{name})))")
+            } else {
+                format!("(not (fboundp '{name}))")
+            };
+            if vm.eval_source(&test)? != romacs_vm::Fixed::NIL { missing.push(*name); }
+        }
+        if missing.is_empty() { continue; }
+        let (source, spans) = source(file)?;
+        for name in missing {
             let prefixes = [format!("(defun {name}"), format!("(defvar {name}"), format!("(defalias '{name}")];
             let definitions: Vec<_> = spans.iter().filter(|&&(start, end, _)| {
                 prefixes.iter().any(|prefix| source[start..end].strip_prefix(prefix)
                     .is_some_and(|tail| tail.starts_with(char::is_whitespace)))
             }).collect();
-            if definitions.len() != 1 { return Err(format!("Expected one GNU editing definition: {name}")); }
-            let &&(start, end, _) = definitions.first().unwrap();
+            let [&(start, end, _)] = definitions[..] else { return Err(format!("Expected one GNU editing definition: {name}")) };
             vm.eval_source(&source[start..end])?;
         }
     }
@@ -884,8 +921,8 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
 
 /// `form_spans` of an embedded GNU source, scanned once per thread: editing
 /// and coding take forms from the same large files (subr.el, files.el).
-fn gnu_form_spans(source: &'static str) -> Result<std::rc::Rc<Vec<(usize, usize, usize)>>, String> {
-    type Scans = std::collections::HashMap<usize, std::rc::Rc<Vec<(usize, usize, usize)>>>;
+fn gnu_form_spans(source: &'static str) -> Result<Spans, String> {
+    type Scans = std::collections::HashMap<usize, Spans>;
     thread_local! { static SCANS: std::cell::RefCell<Scans> = Default::default(); }
     let key = source.as_ptr() as usize;
     if let Some(spans) = SCANS.with(|scans| scans.borrow().get(&key).cloned()) { return Ok(spans); }
@@ -1966,9 +2003,10 @@ mod tests {
         for directory in ["lisp/session", "lisp/completion"] {
             std::fs::create_dir_all(root.join(directory)).unwrap();
         }
-        // Romacs's own Lisp, which the launch loads from its tree.
+        // Romacs's own Lisp, which the launch loads from its tree, and the
+        // GNU files it takes editing functions a short chain lacks from.
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
-        for path in launch_lisp() {
+        for path in launch_lisp().chain(GNU_EDITING.iter().map(|(file, _)| *file)) {
             let link = gnu.join(path);
             std::fs::create_dir_all(link.parent().unwrap()).unwrap();
             std::os::unix::fs::symlink(source.join(path), link).unwrap();
@@ -2205,6 +2243,26 @@ mod tests {
             });
             assert_eq!(ran, format!("{path:?}"), "the launch ran another {path} than its tree's");
         }
+    }
+
+    /// A chain that stopped before simple.el: the launch takes the GNU
+    /// editing functions romacs-editing.el calls from the tree's GNU files,
+    /// so C-SPC sets the mark and `mark-whole-buffer' selects the buffer;
+    /// a tree's own mailheader.el is the one it reads.
+    #[test]
+    fn loadup_after_a_short_chain_takes_gnu_editing_from_its_tree() {
+        let mailheader = "(defun mail-header-extract () 'from-the-tree)\n(defvar mail-header-format-function nil)\n";
+        let dir = scratch_runtime("short-chain", "", &[("mail/mailheader.el", mailheader)]);
+        let marked = on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            printed(&mut vm, "(progn (set-buffer (get-buffer-create \"marked\")) (insert \"abc\") (goto-char 2)
+                                (mark-whole-buffer)
+                                (list (key-binding [0]) (point) (marker-position (mark-marker))
+                                      (subrp (symbol-function 'kill-new)) (mail-header-extract)))")
+        });
+        assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
     }
 
     /// `--gnu-lisp`/`--loadup`: GNU's directories come before every bundled
