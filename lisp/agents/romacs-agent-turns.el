@@ -641,6 +641,16 @@ whether it has rows before this page's."
             :after (romacs-agent-turns--last session)
             :more (> (length rows) limit)))))
 
+(defun romacs-agent-turns-first-after (session seq)
+  "SESSION's earliest turn after seq SEQ, as a row of
+`romacs-agent-turns-page' gives it, or nil with none."
+  (when-let* ((db (romacs-agent-turns--db))
+              (row (car (sqlite-select db (concat "select " romacs-agent-turns--page-columns
+                                                  " from turns where session = ? and first_seq > ? and first_seq > 0"
+                                                  " order by first_seq limit 1")
+                                       (list (romacs-agent-id session) seq)))))
+    (romacs-agent-turns--page-row row)))
+
 (defun romacs-agent-turns--tool (session id)
   "SESSION's tool item ID, from its turns' rows, or nil."
   (when-let* ((db (romacs-agent-turns--db))
