@@ -13,7 +13,7 @@
 ;; display is claimed once (`romacs-layer-echo-claim-functions').  An error
 ;; shows as a tinted chip.  The next command that moves point, edits,
 ;; scrolls or selects another window hides it, else a timer.
-;; DIVERGENCES.md VM2-ECHO-LAYER.
+;; ledger/divergences VM2-ECHO-LAYER.
 
 ;;; Code:
 

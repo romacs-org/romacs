@@ -16,7 +16,7 @@
 ;; is `file-notify-handle-event'.  The kernel queue stands for GNU's
 ;; keyboard buffer: events wait there until a keyboard wait reads them, so
 ;; `sleep-for' and `accept-process-output' leave them queued, as GNU's do
-;; (DIVERGENCES.md VM2-INOTIFY).
+;; (ledger/divergences VM2-INOTIFY).
 
 ;;; Code:
 

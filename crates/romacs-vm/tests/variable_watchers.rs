@@ -176,7 +176,7 @@ fn bootstrap_mode_writes_watchers_may_collect() {
 
 /// A primitive's queued write (`watchers.rs`) differs from GNU's in place in
 /// one way Lisp can see: the rest of the primitive has run when its watcher
-/// does, so what it did stands if the watcher signals. DIVERGENCES VM2-WATCH1.
+/// does, so what it did stands if the watcher signals. ledger/divergences VM2-WATCH1.
 #[test]
 fn a_queued_write_runs_after_the_rest_of_its_primitive() {
     let mut vm = prelude();

@@ -469,7 +469,7 @@ mod tests {
     /// wait, which reads a queued key and ends at its time limit between
     /// rounds. Pinned GNU 45b0f7699df, -nw: the key typed 0.3s in is read
     /// then; its time limit waits for the rescheduling to stop
-    /// (DIVERGENCES.md VM2-KBD1). A starved wait ends only when the
+    /// (ledger/divergences VM2-KBD1). A starved wait ends only when the
     /// rescheduling does, after 10 s; half that bounds a loaded host's
     /// slowness.
     #[test]

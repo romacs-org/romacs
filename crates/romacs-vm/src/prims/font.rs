@@ -1,5 +1,5 @@
 //! GNU font.c's font objects over the open display's fonts
-//! (display_host.rs, DIVERGENCES.md VM2-FONT1). A font-spec, font-entity
+//! (display_host.rs, ledger/divergences VM2-FONT1). A font-spec, font-entity
 //! or font-object is a record whose type is that symbol, its slots GNU's
 //! property vector (font.h FONT_TYPE_INDEX ... FONT_EXTRA_INDEX), a
 //! font-object followed by its name, full name, file and metrics. On the

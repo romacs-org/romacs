@@ -420,7 +420,7 @@ fn coding_encode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> 
 }
 
 /// The bytes detection reads: raw bytes as themselves; a character as its
-/// internal representation (DIVERGENCES.md VM2-CODING-DETECT-MULTIBYTE).
+/// internal representation (ledger/divergences VM2-CODING-DETECT-MULTIBYTE).
 fn coding_detection_bytes(tokens: &[CodingToken]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(tokens.len());
     for &token in tokens {

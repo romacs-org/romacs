@@ -46,7 +46,7 @@ fn eval_when_compile_returning_a_hook_list_holding_a_closure() {
         "1"
     );
     // The expansion carries the identical closure the body built. (Its list
-    // cells are copied, unlike GNU: DIVERGENCES.md VM2-EVAL2.)
+    // cells are copied, unlike GNU: ledger/divergences VM2-EVAL2.)
     assert_eq!(shown(&mut vm, "(eq (car eo-hook) (car (eo-ewc eo-hook)))"), "t");
 }
 

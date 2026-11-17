@@ -95,7 +95,7 @@ fn homes_share_compiled_lisp_and_real_inputs_invalidate_it() {
 }
 
 /// A user's library on `load-path` with no `.elc` compiles into the store
-/// (DIVERGENCES VM2-LOADCOMPILED) whatever the entry's spelling: a `~`
+/// (ledger/divergences VM2-LOADCOMPILED) whatever the entry's spelling: a `~`
 /// entry, a relative one and nil each name a directory under the session's
 /// `default-directory` (lread.c openp), not the process's directory nor the
 /// store's HOME and directory a compile runs in. So the compile finds the

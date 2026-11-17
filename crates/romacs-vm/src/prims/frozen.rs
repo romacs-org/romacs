@@ -1,6 +1,6 @@
 //! Frozen values (vm-concurrency design §3.3, §4.2): `freeze` copies a value
 //! graph into an immutable region, `thaw` copies one back into the private
-//! heap, `frozen-p` tells the two apart. Not in GNU (DIVERGENCES.md
+//! heap, `frozen-p` tells the two apart. Not in GNU (ledger/divergences
 //! VM2-FROZEN).
 use super::*;
 

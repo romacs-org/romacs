@@ -6,7 +6,7 @@
 //! `crates/romacs-vm-gui/evidence/tierb/gnu/mode-line.el` (transcript
 //! `mode-line.txt` beside it). Where VM2 lacks the C state GNU reads (coding
 //! systems, `mode-name`'s buffer.c default, a save point), the test pins what
-//! VM2 really shows and DIVERGENCES.md VM2-G1B says so.
+//! VM2 really shows and ledger/divergences VM2-G1B says so.
 use romacs_vm::Vm;
 
 const LINE: u32 = 20;
@@ -380,7 +380,7 @@ fn precision_counts_control_characters_like_gnu() {
 /// mode-line expander refused `%e` ("unsupported VM2 mode-line percent
 /// escape") and with it the whole frame. GNU (`decode_mode_spec`, `case 'e'`
 /// at 45b0f7699df): always "" on a SYSTEM_MALLOC build such as glibc's, else
-/// "!MEM FULL! " while `memory-full` is non-nil; VM2 is always "" (DIVERGENCES.md VM2-G1B).
+/// "!MEM FULL! " while `memory-full` is non-nil; VM2 is always "" (ledger/divergences VM2-G1B).
 /// Oracle: `evidence/tierb/gnu/standard-head.txt` (GNU 32.0.50, tty, -Q).
 #[test]
 fn gnus_standard_mode_line_head_formats_as_gnu() {

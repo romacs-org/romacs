@@ -13,8 +13,14 @@ evaluator's instruction counter and `romacs--display-stats' at the start of
 every step and after the last one's redisplay, all before it serializes
 anything, so a step's figures are differences of two readings:
 
-  step_instructions     everything the step ran: its timer, its change and
-                        its redisplays
+  step_instructions     what Romacs ran for the step: its change, the
+                        timers it set off and its redisplays, each once,
+                        not the loop's own polls nor the host's wait for a
+                        frame to render (`display-stages--work'), nor the
+                        host's passes for process output and the echo
+                        area's sync, which no scenario sets work for; a
+                        step that waits inside its change makes no
+                        measurement
   cycles                redisplays the step ran: its own, and any after a
                         timer it set off (jit-lock's `jit-lock-force-redisplay')
   display_instructions  the part inside redisplays (the frame frozen and
@@ -85,8 +91,8 @@ COUNTS = {'step_instructions': 'step-instructions', 'cycles': 'cycles', 'display
           'frames_submitted': 'frames-submitted', 'lines_laid': 'lines-laid', 'rows_wrapped': 'rows-wrapped'}
 # Figures only the scenarios that count them have.
 OPTIONAL = {'chars_fontified': 'fontified-chars'}
-# The figures whose 90th percentile is held too (a whole step's varies
-# with the timers that poll for its redisplay), the figures held under a
+# The figures whose 90th percentile is held too (a redisplay's: the
+# streamed deltas that add a row), the figures held under a
 # ceiling and the margin --write-bars gives them, and the share of steps
 # that may be odd.
 PEAKS = ('display_instructions',)
@@ -129,6 +135,8 @@ def refusal(scenario, result, wanted):
     """Why RESULT, a session's readings, is no measurement of SCENARIO over
     WANTED steps; None when it is one."""
     readings = result.get('readings') or []
+    if result.get('waited'):
+        return f"a step waited, counting its waiting as its work: {result['waited']}"
     if len(readings) != wanted + 1:
         return f'{len(readings)} readings for {wanted} steps'
     if any(r.get('step-instructions') is None or r.get('instructions') is None for r in readings):

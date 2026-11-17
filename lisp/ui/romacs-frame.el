@@ -10,7 +10,7 @@
 ;; the frame type to x-, w32-, ns-, pgtk-, haiku-, android- and tty- C
 ;; primitives.  Romacs has one display, described by one capability
 ;; record, `romacs-display'; the functions below read it instead
-;; (DIVERGENCES.md VM2-DISPLAY1).  Loaded after frame.el, faces.el and
+;; (ledger/divergences VM2-DISPLAY1).  Loaded after frame.el, faces.el and
 ;; term/tty-colors.el.
 ;;
 ;; Without a GUI the record is `romacs-display-headless': what pinned GNU
@@ -480,7 +480,7 @@ font (fontset_from_font)."
           (t 'light))))
 
 ;; Recalculating a face is the same writes in the same order as faces.el,
-;; in Rust (DIVERGENCES.md VM2-FACE-ENGINE).  A child frame shows its
+;; in Rust (ledger/divergences VM2-FACE-ENGINE).  A child frame shows its
 ;; parent's faces until something sets one on it alone
 ;; (`romacs--frame-shares-faces-p', VM2-CHILD-FRAME), so recomputing there
 ;; is skipped, and a theme or a `defface' costs one frame's work however

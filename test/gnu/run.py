@@ -16,7 +16,7 @@ Every deftest gets exactly one VERDICT:
                       harness could not get that far
 and every verdict other than `passed` gets exactly one CATEGORY:
     intentional-divergence  ONLY via an ledger/gnu-test-exclusions.toml row bound to a
-                            DIVERGENCES.md entry (validated; see below)
+                            ledger/divergences entry (validated; see below)
     out-of-scope            ONLY via an ledger/gnu-test-exclusions.toml row, same validation
     not-yet-implemented     names what is missing (`missing`), derived
                             mechanically from the failure, never asserted
@@ -25,7 +25,7 @@ plus two neutral categories that are not romacs's doing and are reported apart:
     gnu-fails-too           GNU itself does not give the expected result here
     gnu-skips-too           GNU skips it too
 The ONLY way to put a test in an exclusion category is a ledger row that names
-an existing DIVERGENCES.md id, a Lisp symbol that row lists AND that the test's
+an existing ledger/divergences id, a Lisp symbol that row lists AND that the test's
 source uses, and GNU's behaviour, ours and why it is intentional. A row that
 fails any check stops the run (exit 2) before anything is measured; a row for a
 test that now passes stops it too. There is no other skip switch.
@@ -391,8 +391,8 @@ def load_ledger(path: pathlib.Path = LEDGER, plans: dict | None = None) -> dict[
             errors.append(f'{where}: no globs; one row names exactly one deftest')
         div = divergences.get(row['divergence'])
         if div is None:
-            errors.append(f'{where}: divergence {row["divergence"]!r} is not an entry in DIVERGENCES.md '
-                          f'(or a crate GNU-DIVERGENCES.md); record the divergence there first')
+            errors.append(f'{where}: divergence {row["divergence"]!r} is not an entry in ledger/divergences; '
+                          f'record the divergence there first')
         elif row['symbol'] not in div['symbols']:
             errors.append(f'{where}: symbol {row["symbol"]!r} is not one of the symbols ledger entry '
                           f'{row["divergence"]} covers {div["symbols"]}')
@@ -731,9 +731,11 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             for line in stream:
                 lines.put(line)
             lines.put(None)
-        threading.Thread(target=pump, daemon=True).start()
         stderr_chunks: list[str] = []
-        threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True).start()
+        readers = [(proc.stdout, threading.Thread(target=pump, daemon=True)),
+                   (proc.stderr, threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True))]
+        for _, reader in readers:
+            reader.start()
         current = None
         done = False
         deadline = setup_timeout
@@ -760,6 +762,12 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             elif kind == 'done':
                 done = True
         proc.wait()
+        # Its output read to the end before it is reported, and each pipe
+        # closed; a descendant that keeps one open bounds the wait instead.
+        for stream, reader in readers:
+            reader.join(timeout=5)
+            if not reader.is_alive():
+                stream.close()
         log.write(f'# attempt {attempt}: exit {proc.returncode}\n')
         if stderr_chunks and stderr_chunks[0]:
             log.write('# stderr: ' + stderr_chunks[0][-4000:].replace('\n', '\n# ') + '\n')
