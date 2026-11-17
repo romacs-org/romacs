@@ -777,6 +777,29 @@ mod tests {
     }
 
     #[test]
+    fn every_line_the_supervisor_writes_reads_from_its_ends_as_a_parse() {
+        // Lines as the supervisor writes them (json!, its keys sorted, so
+        // the kind first and seq, t last), times of every size and
+        // precision: the fields read from the line's ends are a parse's.
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        for i in 0..200_000u64 {
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            let time = match i % 4 {
+                0 => 1.7e9 + (x % 1_000_000_000) as f64 / 1e7,
+                1 => f64::from_bits(0x3ff0_0000_0000_0000 | (x >> 12)) * 1e9,
+                2 => (x % 100_000) as f64,
+                _ => f64::from_bits(x >> 2).abs().min(1e15),
+            };
+            let kind = ["in", "out", "note", "exit"][(i % 4) as usize];
+            let line = json!({"seq": x % 10_000_000, "t": time, kind: {"seq": 1, "t": 2.5, "text": "x"}}).to_string();
+            let parsed: Json = serde_json::from_str(&line).unwrap();
+            assert_eq!(line_fields(&line),
+                       Some((parsed["seq"].as_i64().unwrap(), parsed["t"].as_f64(), Some(kind.to_owned()))),
+                       "{line}");
+        }
+    }
+
+    #[test]
     fn a_line_of_megabytes_is_read_from_its_ends() {
         let line = format!("{{\"out\":{{\"text\":\"{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(4_000_000));
         assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))));
