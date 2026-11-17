@@ -379,6 +379,7 @@ enum Shape<'a> {
     Overlay(Value, Option<(u32, u32)>, &'a [(Value, Value)]),
     /// A tree-sitter node: the tree and node `ts_node_eq' compares.
     TreesitNode((usize, usize)),
+    CharTable(&'a crate::char_table::CharTable),
     Opaque,
 }
 
@@ -452,6 +453,7 @@ impl Vm {
                 Some(data::Object::Vector(a)) => Shape::Vector(a),
                 Some(data::Object::BoolVector(a)) => Shape::BoolVector(a),
                 Some(data::Object::Record(a)) => Shape::Record(a),
+                Some(data::Object::CharTable(t)) => Shape::CharTable(t),
                 Some(data::Object::Marker(m)) => Shape::Marker(
                     m.buffer,
                     m.anchor.and_then(|a| self.anchor_byte(m.buffer, a)),
@@ -536,6 +538,11 @@ impl Vm {
             // Coherent with `equal' (VM2-TREESIT-HASH): GNU hashes the
             // node object's address, so `equal' nodes differ there.
             Shape::TreesitNode((tree, id)) => combine(tree as u64, id as u64),
+            // What every two `equal' tables share without a walk of their
+            // characters: purpose, default and how many extra slots.
+            Shape::CharTable(t) => combine(
+                combine(self.sxhash_mode(t.purpose(), depth + 1, moving, public), self.sxhash_mode(t.default(), depth + 1, moving, public)),
+                t.extras().len() as u64),
             Shape::Opaque => {
                 *moving |= Self::moving_reference(v);
                 if public { 0 } else { v.0 }
@@ -720,6 +727,7 @@ impl Vm {
                 }
                 // fns.c internal_equal: treesit_node_eq.
                 (Shape::TreesitNode(x), Shape::TreesitNode(y)) => return Ok(x == y),
+                (Shape::CharTable(x), Shape::CharTable(y)) => return self.char_tables_equal((a, x), (b, y), depth, seen, props),
                 (Shape::Overlay(x, r, p), Shape::Overlay(y, s, q)) => {
                     if x != y || r != s || p.len() != q.len() {
                         return Ok(false);
@@ -736,6 +744,51 @@ impl Vm {
                 _ => return Ok(false),
             }
         }
+    }
+    /// fns.c internal_equal over two char-tables, by what they hold: the
+    /// same purpose, default, parent and extra slots, and `equal' values
+    /// for every character, read a run of equal slots at a time, a
+    /// compressed Unicode property block decoded. GNU compares their
+    /// sub-char-table layout too (VM2-CHAR-TABLE-EQUAL). A pair met again
+    /// inside itself is taken as equal from the first, as GNU takes every
+    /// pair past its depth limit, so a table that holds itself is no
+    /// exponential walk.
+    fn char_tables_equal(&self, (a, x): (Value, &crate::char_table::CharTable), (b, y): (Value, &crate::char_table::CharTable),
+                         depth: usize, seen: &mut Seen, props: bool) -> Hashed<bool> {
+        let pairs = seen.get_or_insert_default().entry(a.0).or_default();
+        if pairs.contains(&b.0) { return Ok(true); }
+        pairs.push(b.0);
+        let same = |a: Value, b: Value, seen: &mut Seen| self.equal_at(a, b, depth + 1, seen, props);
+        if !same(x.purpose(), y.purpose(), seen)? || !same(x.default(), y.default(), seen)?
+            || !same(x.parent(), y.parent(), seen)? || x.extras().len() != y.extras().len() {
+            return Ok(false);
+        }
+        for (&a, &b) in x.extras().iter().zip(y.extras()) {
+            if !same(a, b, seen)? { return Ok(false); }
+        }
+        let internal = |e: String| HashFault::Internal(e);
+        // A compressed block's 128 values, its nil ones the default
+        // (char_table_own's decoding), or None for a plain value.
+        let block = |t: &crate::char_table::CharTable, value: Value| -> Hashed<Option<Vec<Value>>> {
+            if !self.is_uniprop_table(t) { return Ok(None); }
+            let Some(codes) = self.uniprop_compressed(value) else { return Ok(None) };
+            Ok(Some(crate::char_table::uniprop_block(&codes).map_err(internal)?.into_iter()
+                .map(|v| if v == Value::NIL { t.default() } else { v }).collect()))
+        };
+        let mut at = 0usize;
+        while at <= crate::lstring::MAX_CHAR as usize {
+            let ((u, _, to_a), (v, _, to_b)) = (x.span(at).map_err(internal)?, y.span(at).map_err(internal)?);
+            let to = to_a.min(to_b);
+            match (block(x, u)?, block(y, v)?) {
+                (None, None) => if !same(u, v, seen)? { return Ok(false); },
+                (p, q) => for c in at..=to {
+                    let one = |values: &Option<Vec<Value>>, plain: Value| values.as_ref().map_or(plain, |values| values[c % 128]);
+                    if !same(one(&p, u), one(&q, v), seen)? { return Ok(false); }
+                },
+            }
+            at = to + 1;
+        }
+        Ok(true)
     }
     /// compare_string_intervals: the same properties, with `equal' values,
     /// over every run of either string (the texts are already equal).

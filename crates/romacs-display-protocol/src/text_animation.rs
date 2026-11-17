@@ -1,7 +1,7 @@
 //! Text animations: a block of a window's character cells that the render
 //! thread redraws frame after frame, over the glyphs the evaluator laid
 //! out, with no evaluator work per frame.  Lisp registers one with its
-//! parameters (lisp/romacs/romacs-animate.el) and changes it only when they
+//! parameters (lisp/ui/romacs-animate.el) and changes it only when they
 //! change; the render thread keeps the clock, the motion time and the
 //! frames.
 use crate::face::Face;
@@ -107,33 +107,11 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
     if cols == 0 || cells.len() != cols * rows {
         return;
     }
-    let in_window = |glyph: &FrameGlyph| match glyph {
-        FrameGlyph::Char {
-            slot_id,
-            row_role: GlyphRowRole::Text,
-            composed: None,
-            ..
-        } if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
-        _ => None,
-    };
-    let Some((first_row, first_col)) =
-        frame
-            .glyphs
-            .iter()
-            .filter_map(in_window)
-            .fold(None, |origin: Option<(u32, u16)>, slot| {
-                Some(origin.map_or((slot.row, slot.col), |(r, c)| {
-                    (r.min(slot.row), c.min(slot.col))
-                }))
-            })
-    else {
+    let in_window = |glyph: &FrameGlyph| text_slot(glyph, animation);
+    let Some((first_row, first_col)) = origin(frame, animation) else {
         return;
     };
-    let block = |slot: &DisplaySlotId| -> Option<usize> {
-        let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
-        let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
-        ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
-    };
+    let block = |slot: &DisplaySlotId| cell_of(animation, (first_row, first_col), slot);
     // Each cell's glyph, and one glyph per row to model missing cells on.
     let mut at: Vec<Option<usize>> = vec![None; cells.len()];
     let mut model: Vec<Option<usize>> = vec![None; rows];
@@ -229,6 +207,59 @@ pub fn paint(frame: &mut FrameGlyphBuffer, animation: &TextAnimation, cells: &[r
                 .or_default()
                 .insert(ch, glyph);
         }
+    }
+}
+
+/// GLYPH's slot, when it is a text cell of ANIMATION's window.
+fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlotId> {
+    match glyph {
+        FrameGlyph::Char {
+            slot_id,
+            row_role: GlyphRowRole::Text,
+            composed: None,
+            ..
+        } if slot_id.window_id.get() as u64 == animation.window => Some(*slot_id),
+        _ => None,
+    }
+}
+
+/// ANIMATION's window's first text row and column in FRAME, where its
+/// block is placed from.
+fn origin(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<(u32, u16)> {
+    frame.glyphs.iter().filter_map(|glyph| text_slot(glyph, animation)).fold(None, |origin: Option<(u32, u16)>, slot| {
+        Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col))))
+    })
+}
+
+/// SLOT's cell in ANIMATION's block placed from ORIGIN, if it is in it.
+fn cell_of(animation: &TextAnimation, (first_row, first_col): (u32, u16), slot: &DisplaySlotId) -> Option<usize> {
+    let (cols, rows) = (animation.cols as usize, animation.rows as usize);
+    let row = i64::from(slot.row) - i64::from(first_row) - i64::from(animation.top);
+    let col = usize::from(slot.col).checked_sub(usize::from(first_col))?;
+    ((0..rows as i64).contains(&row) && col < cols).then(|| row as usize * cols + col)
+}
+
+/// Clear ANIMATION's block in FRAME for a scene drawn over it: a cell
+/// whose face paints nothing past the frame's own background (its
+/// background, and no box, line, inverse video, stipple or gradient) is
+/// taken out; any other is blanked, its face kept, as `paint` with blank
+/// cells does.  The same pixels as blanking every cell, and a frame of the
+/// block's other glyphs alone where its faces are plain, not a glyph for
+/// every one of its cells.
+pub fn clear(frame: &mut FrameGlyphBuffer, animation: &TextAnimation) {
+    use crate::face::FaceAttributes;
+    let Some(origin) = origin(frame, animation) else { return };
+    let decorated = FaceAttributes::UNDERLINE | FaceAttributes::OVERLINE | FaceAttributes::STRIKE_THROUGH
+        | FaceAttributes::INVERSE | FaceAttributes::BOX;
+    let in_block = |glyph: &FrameGlyph| text_slot(glyph, animation).and_then(|slot| cell_of(animation, origin, &slot)).is_some();
+    let background = frame.background;
+    let plain: std::collections::HashSet<FaceId> = frame.faces.iter()
+        .filter(|(_, face)| face.background == background && !face.attributes.intersects(decorated)
+                && face.stipple.is_none() && face.background_gradient.is_none())
+        .map(|(id, _)| *id).collect();
+    frame.retain_glyphs(|glyph| !(in_block(glyph) && face_of(glyph).is_some_and(|id| plain.contains(&id))));
+    for glyph in &mut frame.glyphs {
+        if in_block(glyph) && let FrameGlyph::Char { char, .. } = glyph { *char = ' '; }
     }
 }
 

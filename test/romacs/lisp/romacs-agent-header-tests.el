@@ -56,8 +56,6 @@ string, an overlay."
            (with-current-buffer chat
              (romacs-agent-chat-mode)
              (setq romacs-agent-ui--session session
-                   romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-                   romacs-agent-ui--tasks (make-hash-table :test #'equal)
                    romacs-agent-ui--messages (make-hash-table :test #'equal)
                    romacs-agent-ui--end (point-marker)
                    romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
@@ -74,7 +72,7 @@ string, an overlay."
 
 ;; What runs before a redisplay: a batch session has no host to run it.
 (unless (fboundp 'romacs--run-window-change-functions)
-  (load (expand-file-name "vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
 
 (defun romacs-agent-header-tests--header ()
   "The chat's header as its buffer hands it to display."

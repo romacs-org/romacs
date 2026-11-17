@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 
 pub(crate) const SWHITESPACE: i32 = 0;
+pub(crate) const SPUNCT: i32 = 1;
 pub(crate) const SWORD: i32 = 2;
 pub(crate) const SSYMBOL: i32 = 3;
 pub(crate) const SOPEN: i32 = 4;
@@ -39,12 +40,19 @@ pub(crate) const ST_STRING_STYLE: i32 = 256 + 2;
 /// syntax.c syntax_code_spec: the designator character of each class.
 pub(crate) const SYNTAX_CODE_SPEC: [u8; 16] = *b" .w_()'\"$\\/<>@!|";
 
+#[inline]
 pub(crate) fn comstart_first(s: i32) -> bool { (s >> 16) & 1 != 0 }
+#[inline]
 pub(crate) fn comstart_second(s: i32) -> bool { (s >> 17) & 1 != 0 }
+#[inline]
 fn comend_first(s: i32) -> bool { (s >> 18) & 1 != 0 }
+#[inline]
 fn comend_second(s: i32) -> bool { (s >> 19) & 1 != 0 }
+#[inline]
 fn comstartend_first(s: i32) -> bool { s & 0x50000 != 0 }
+#[inline]
 pub(crate) fn prefix(s: i32) -> bool { (s >> 20) & 1 != 0 }
+#[inline]
 fn nested(s: i32) -> bool { (s >> 22) & 1 != 0 }
 /// SYNTAX_FLAGS_COMMENT_STYLE: FLAGS of the main delimiter character.
 fn comment_style(flags: i32, other: i32) -> i32 {
@@ -79,14 +87,21 @@ pub(crate) trait Text {
     fn syntax(&self, at: Pos) -> i32;
     /// SYNTAX_WITH_FLAGS of character C in the buffer's own syntax table.
     fn table_syntax(&self, c: u32) -> i32;
-    /// Pass the characters from AT, before character position LIMIT, whose
-    /// syntax `comment_plain` accepts: where the pass ends, and the syntax
-    /// of the last character passed, if any.  A text may pass fewer than
-    /// there are, or none (as here): `forw_comment` reads the rest one at
-    /// a time.
-    fn pass_comment_plain(&self, at: Pos, _limit: i64) -> (Pos, Option<i32>) {
-        (at, None)
+    /// Pass the ASCII characters from AT, before character position LIMIT,
+    /// whose syntax the table alone gives and that PLAIN accepts, given
+    /// each as (byte, syntax).  A text may pass fewer than there are, or
+    /// none (as here): the scanner reads the rest one at a time.
+    fn pass(&self, at: Pos, _limit: i64, _plain: impl Fn(u8, i32) -> bool) -> Passed {
+        Passed { to: at, last: None, before: None }
     }
+}
+
+/// What `Text::pass` passed: where it ended, and the syntax of the last
+/// character it passed and of the one before that, if any.
+pub(crate) struct Passed {
+    pub to: Pos,
+    pub last: Option<i32>,
+    pub before: Option<i32>,
 }
 
 /// The variables a scan reads.
@@ -324,6 +339,15 @@ pub(crate) struct Scan {
 }
 
 impl<T: Text> Scanner<'_, T> {
+    /// How far a pass may go towards STOP: short of text still to be
+    /// propertized, where `update_forward` stops, so the character before
+    /// it is read one at a time.
+    fn plain_limit(&self, stop: i64) -> i64 {
+        match self.options.propertize_done {
+            Some(done) if done < self.zv.char => stop.min(done - 1),
+            _ => stop,
+        }
+    }
     fn update_forward(&self, charpos: i64) -> R<()> {
         // UPDATE_SYNTAX_TABLE_FORWARD's just-in-time parse_sexp_propertize.
         match self.options.propertize_done {
@@ -395,14 +419,11 @@ impl<T: Text> Scanner<'_, T> {
                     // two-character delimiter, or reaches text that is
                     // still to be propertized (`update_forward` stops
                     // there, so the character before it is read below).
-                    let plain_limit = match self.options.propertize_done {
-                        Some(done) if done < self.zv.char => stop.min(done - 1),
-                        _ => stop,
-                    };
-                    if let (to, Some(last)) = self.text.pass_comment_plain(from, plain_limit) {
+                    let passed = self.text.pass(from, self.plain_limit(stop), |_, s| comment_plain(s));
+                    if let Some(last) = passed.last {
                         syntax = last;
                         code = syntax & 0xff;
-                        from = to;
+                        from = passed.to;
                     }
                     if from.char == stop {
                         let last = if code == SESCAPE || code == SCHARQUOTE || comend_first(syntax)
@@ -783,6 +804,20 @@ impl<T: Text> Scanner<'_, T> {
         macro_rules! cur {
             () => { levels.last_mut().expect("a current level") };
         }
+        // INC_FROM over each character a pass takes, at once: PLAIN
+        // accepts only characters after which the loop it serves goes on
+        // as it was, and the pass stops short of a stop for Lisp.
+        macro_rules! pass {
+            ($plain:expr) => {{
+                let passed = self.text.pass(from, self.plain_limit(end), $plain);
+                if let Some(last) = passed.last {
+                    prev_prev_from_syntax = passed.before.unwrap_or(prev_from_syntax);
+                    prev_from = Pos { char: passed.to.char - 1, byte: passed.to.byte - 1 };
+                    prev_from_syntax = last;
+                    from = passed.to;
+                }
+            }};
+        }
 
         loop {
             at = match at {
@@ -812,6 +847,10 @@ impl<T: Text> Scanner<'_, T> {
                     At::AtComment
                 }
                 At::Top => {
+                    // Whitespace, punctuation and comment enders (out of
+                    // a comment, a newline) that start no comment lead
+                    // back here.
+                    pass!(|_, s| matches!(s & 0xff, SWHITESPACE | SPUNCT | SENDCOMMENT) && !comstart_first(s));
                     if from.char >= end { At::Done } else {
                         inc_from!(At::TopDispatch);
                         At::TopDispatch
@@ -888,6 +927,12 @@ impl<T: Text> Scanner<'_, T> {
                     let mut next = None;
                     let mut ended = false;
                     while from.char < end {
+                        // Constituents that start no comment, after one
+                        // that does not either.
+                        if !comstart_first(prev_from_syntax) {
+                            pass!(|_, s| matches!(s & 0xff, SWORD | SSYMBOL | SQUOTE) && !comstart_first(s));
+                            if from.char >= end { break; }
+                        }
                         if self.two_char_comment_start(state, prev_from_syntax, prev_from, from) {
                             inc_from!(At::SymbolToComment);
                             next = Some(At::SymbolToComment);
@@ -963,10 +1008,14 @@ impl<T: Text> Scanner<'_, T> {
                 }
                 At::InString | At::QuotedInString => {
                     let nofence = state.instring != ST_STRING_STYLE;
+                    let instring = state.instring;
                     let mut quoted = matches!(at, At::QuotedInString);
                     let mut next = None;
                     loop {
                         if !quoted {
+                            // The body: no escape, fence or terminator.
+                            pass!(|byte, s| !matches!(s & 0xff, SCHARQUOTE | SESCAPE | SSTRING_FENCE)
+                                && !(s & 0xff == SSTRING && i32::from(byte) == instring));
                             if from.char >= end { next = Some(At::Done); break; }
                             let c = self.text.char_at(from);
                             let c_code = self.text.syntax(from) & 0xff;

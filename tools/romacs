@@ -24,8 +24,9 @@
 # decides whether anything needs rebuilding; an up-to-date build costs ~1s.
 #
 # Environment (all optional):
-#   ROMACS_GUI_FONT / ROMACS_GUI_FONT_SIZE   font family / points (default Iosevka 14
-#                                            when fontconfig has it)
+#   ROMACS_GUI_FONT / ROMACS_GUI_FONT_SIZE   font family / points (default Romacs's
+#                                            own, Iosevka 14; either alone keeps
+#                                            the other)
 #   ROMACS_TARGET_DIR                        build directory
 #   ROMACS_NO_BUILD=1                        run the existing binary as-is
 set -euo pipefail
@@ -59,17 +60,12 @@ if [ -z "${WAYLAND_DISPLAY:-}" ]; then
 fi
 [ -n "${WAYLAND_DISPLAY:-}" ] || { echo "romacs: no Wayland socket in $XDG_RUNTIME_DIR" >&2; exit 1; }
 
-if [ -z "${ROMACS_GUI_FONT:-}" ] && command -v fc-list >/dev/null \
-   && fc-list : family | grep -qx 'Iosevka'; then
-    export ROMACS_GUI_FONT=Iosevka ROMACS_GUI_FONT_SIZE=${ROMACS_GUI_FONT_SIZE:-14}
-fi
-
 # GNU's Lisp from this checkout; the GUI loads loadup.el's preload chain.
-export ROMACS_LISP_DIR="$root/lisp/gnu"
+export ROMACS_LISP_DIR="$root/lisp"
 # A lane's RUST_MIN_STACK must not hide the evaluator's own 64 MiB reservation.
 unset RUST_MIN_STACK
 
-# Server-first (lisp/romacs/romacs-server.el, DIVERGENCES.md SERVER2): connect to
+# Server-first (lisp/session/romacs-server.el, DIVERGENCES.md SERVER2): connect to
 # the server named ROMACS_SERVER (default romacs), starting it as a user
 # unit when none runs, and ask it for a window; ROMACS_SERVER=off runs a
 # standalone session as before. Batch and installer runs stay standalone.

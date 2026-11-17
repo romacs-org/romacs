@@ -81,7 +81,7 @@ HARNESSES = ('world', 'autoloads', 'completion', 'fontify', 'timers', 'popup', '
 # More harnesses, each for the paths only it drives end to end.
 HARNESS_RULES = (
     # The agent client end to end (sessions, selections and restarts, relays, tools).
-    (re.compile(r'^(?:lisp/romacs/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
+    (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
 )
 EDITOR = 'romacs-vm-gui'
@@ -282,7 +282,9 @@ def runs(answer, root, leave=()):
     def flags(package):
         if package in test_modules.PACKAGES:
             return test_modules.targets(root, package)
-        return ['--lib', '--bins', '--tests']
+        # Every target that has tests, the library and binaries among them
+        # where the package has them: --lib refuses a package with none.
+        return ['--tests']
     return [(package, flags(package), ' | '.join(found)) for package, found in sorted(terms.items())]
 
 

@@ -121,6 +121,10 @@ pub struct TextBody {
     /// The parse-state summaries of this text, which every change edits.
     // CELL(Plain): Parse-state summaries: positions and syntax codes, no Value.
     pub(crate) syntax: std::cell::RefCell<crate::syntax_index::SyntaxIndex>,
+    /// The Markdown block index of this text, empty until Markdown is asked
+    /// of it (`crate::markdown::Index`), which every change edits.
+    // CELL(Plain)
+    pub(crate) markdown: std::cell::RefCell<crate::markdown::Index>,
 }
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
@@ -139,13 +143,89 @@ pub(crate) trait Newlines {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize>;
     /// The last newline in TO..FROM.
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize>;
+    /// Up to COUNT newlines of FROM..TO, from FROM on (GNU `find_newline`):
+    /// each piece of text is scanned once, however many lines it holds.
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found;
+    /// Up to COUNT newlines of TO..FROM, from FROM back.
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found;
 }
+
+/// A search for newlines: how many it found and where the last of them is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Found {
+    pub(crate) count: usize,
+    pub(crate) last: Option<usize>,
+}
+
+/// N lines of motion, either way, as the newlines to find.
+pub(crate) fn newline_count(n: i64) -> usize {
+    usize::try_from(n.unsigned_abs()).unwrap_or(usize::MAX)
+}
+
+impl Found {
+    /// How many it found, as lines.
+    pub(crate) fn lines(self) -> i64 {
+        i64::try_from(self.count).unwrap_or(i64::MAX)
+    }
+    /// FOUND with up to COUNT in all of BYTES's newlines, BYTES starting at
+    /// byte BASE, first to last: a block holding fewer than are still
+    /// wanted is counted, not searched, so lines cost their bytes.
+    fn forward(self, bytes: &[u8], base: usize, count: usize) -> Self {
+        let (mut found, mut at) = (self, base);
+        for block in bytes.chunks(NEWLINE_BLOCK) {
+            let wanted = count - found.count;
+            if wanted == 0 { break; }
+            let here = newlines_in(block);
+            if here >= wanted {
+                let i = memchr::memchr_iter(b'\n', block).nth(wanted - 1).unwrap_or(0);
+                return Found { count, last: Some(at + i) };
+            }
+            if here > 0 { found = Found { count: found.count + here, last: memchr::memrchr(b'\n', block).map(|i| at + i) }; }
+            at += block.len();
+        }
+        found
+    }
+    /// FOUND with up to COUNT in all of BYTES's newlines, BYTES starting at
+    /// byte BASE, last to first.
+    fn backward(self, bytes: &[u8], base: usize, count: usize) -> Self {
+        let (mut found, mut end) = (self, base + bytes.len());
+        for block in bytes.rchunks(NEWLINE_BLOCK) {
+            let wanted = count - found.count;
+            if wanted == 0 { break; }
+            let at = end - block.len();
+            let here = newlines_in(block);
+            if here >= wanted {
+                let i = memchr::memrchr_iter(b'\n', block).nth(wanted - 1).unwrap_or(0);
+                return Found { count, last: Some(at + i) };
+            }
+            if here > 0 { found = Found { count: found.count + here, last: memchr::memchr(b'\n', block).map(|i| at + i) }; }
+            end = at;
+        }
+        found
+    }
+}
+
+/// The bytes a newline scan counts at a time before it searches them.
+const NEWLINE_BLOCK: usize = 1024;
+
+/// How many newlines BYTES holds: memchr's vector count, a fraction of an
+/// instruction a byte (a filtered count compiles to 64-bit lanes, ~3.5).
+fn newlines_in(bytes: &[u8]) -> usize {
+    memchr::memchr_iter(b'\n', bytes).count()
+}
+
 impl Newlines for [u8] {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
-        self[from..to].iter().position(|&c| c == b'\n').map(|i| from + i)
+        memchr::memchr(b'\n', &self[from..to]).map(|i| from + i)
     }
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
-        self[to..from].iter().rposition(|&c| c == b'\n').map(|i| to + i)
+        memchr::memrchr(b'\n', &self[to..from]).map(|i| to + i)
+    }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        Found::default().forward(&self[from..to], from, count)
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        Found::default().backward(&self[to..from], to, count)
     }
 }
 impl Newlines for Vec<u8> {
@@ -155,6 +235,12 @@ impl Newlines for Vec<u8> {
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
         self.as_slice().previous_newline(from, to)
     }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        self.as_slice().newlines_after(from, to, count)
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        self.as_slice().newlines_before(from, to, count)
+    }
 }
 impl Newlines for TextBody {
     fn next_newline(&self, from: usize, to: usize) -> Option<usize> {
@@ -162,6 +248,26 @@ impl Newlines for TextBody {
     }
     fn previous_newline(&self, from: usize, to: usize) -> Option<usize> {
         self.newline_before(from, to)
+    }
+    fn newlines_after(&self, from: usize, to: usize, count: usize) -> Found {
+        let (mut found, mut at) = (Found::default(), from);
+        for chunk in self.chunks_in(from..to) {
+            if found.count == count { break; }
+            found = found.forward(chunk, at, count);
+            at += chunk.len();
+        }
+        found
+    }
+    fn newlines_before(&self, from: usize, to: usize, count: usize) -> Found {
+        let (mut found, mut end) = (Found::default(), from.min(self.bytes_len));
+        while end > to && found.count < count {
+            let (chunk, start) = self.chunk_before(end);
+            let start = start.max(to);
+            let slice = &chunk[start - (end - chunk.len())..];
+            found = found.backward(slice, start, count);
+            end = start;
+        }
+        found
     }
 }
 
@@ -189,6 +295,17 @@ fn internal_to_rope(bytes: &[u8]) -> Result<(Cow<'_, str>, Vec<u32>)> {
     }
     let text = String::from_utf8(text).map_err(|_| "invalid Unicode text")?;
     Ok((Cow::Owned(text), raw))
+}
+
+/// The byte where the character before END starts, for BYTES that lie at
+/// BASE, begin on a character and hold the byte before END.
+#[inline]
+pub(crate) fn char_start_in(bytes: &[u8], base: usize, end: usize) -> usize {
+    let mut i = end - 1 - base;
+    while i > 0 && bytes[i] & 0xc0 == 0x80 {
+        i -= 1;
+    }
+    base + i
 }
 
 /// The bytes from AT to the end of its chunk of ROPE, or of TAIL after it.
@@ -369,6 +486,7 @@ impl Text {
                 property_edit_visits: 0,
                 treesit: Default::default(),
                 syntax: Default::default(),
+                markdown: std::cell::RefCell::new(crate::markdown::Index::default()),
             }),
             restriction: ByteOffset(0)..ByteOffset(s.len()),
             state: Default::default(),
@@ -615,6 +733,12 @@ impl Text {
     }
 }
 impl TextBody {
+    /// Characters START..END replaced by INSERTED ones: the caches derived
+    /// from the text follow.
+    fn edit_derived(&mut self, start: usize, end: usize, inserted: usize) {
+        self.syntax.get_mut().edit(start, end, inserted);
+        self.markdown.get_mut().edit(start, end, inserted);
+    }
     /// `Text::append_utf8`'s edit of the body: S, of CHARS characters,
     /// after its end.
     fn append_body(&mut self, s: &str, chars: usize) {
@@ -625,7 +749,7 @@ impl TextBody {
         if self.tail.len() + s.len() > 1024 {
             self.flush_tail();
         }
-        self.syntax.get_mut().edit(self.chars_len, self.chars_len, chars);
+        self.edit_derived(self.chars_len, self.chars_len, chars);
         self.tail.push_str(s);
         self.tail_chars += chars;
         self.bytes_len += s.len();
@@ -667,7 +791,7 @@ impl TextBody {
         }
         self.bytes_len = self.rope.len_bytes();
         let inserted = self.rope.len_chars() + end.0 - start.0 - self.chars_len;
-        self.syntax.get_mut().edit(start.0, end.0, inserted);
+        self.edit_derived(start.0, end.0, inserted);
         self.chars_len = self.rope.len_chars();
         self.is_ascii = self.bytes_len == self.chars_len;
         end.0 - start.0 + inserted
@@ -682,7 +806,7 @@ impl TextBody {
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, replacement);
         self.properties.resize_character(r, replacement.len());
-        self.syntax.get_mut().edit(start, end, replacement.chars().count());
+        self.edit_derived(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, replacement);
         self.bytes_len = self.rope.len_bytes();
@@ -710,6 +834,7 @@ impl TextBody {
     }
     /// The bytes from AT to the end of its rope chunk (or the tail), for a
     /// parse's reader; empty at the end.
+    #[inline]
     pub(crate) fn chunk_from(&self, at: usize) -> &[u8] {
         chunk_from(&self.rope, &self.tail, at)
     }
@@ -724,7 +849,7 @@ impl TextBody {
             let chunk = self.chunk_from(at);
             let chunk = &chunk[..chunk.len().min(limit - at)];
             if chunk.is_empty() { return None; }
-            if let Some(i) = chunk.iter().position(|&b| b == b'\n') { return Some(at + i); }
+            if let Some(i) = memchr::memchr(b'\n', chunk) { return Some(at + i); }
             at += chunk.len();
         }
         None
@@ -736,7 +861,7 @@ impl TextBody {
             let (chunk, start) = self.chunk_before(end);
             let start = start.max(limit);
             let slice = &chunk[start - (end - chunk.len())..];
-            if let Some(i) = slice.iter().rposition(|&b| b == b'\n') { return Some(start + i); }
+            if let Some(i) = memchr::memrchr(b'\n', slice) { return Some(start + i); }
             end = start;
         }
         None
@@ -755,13 +880,7 @@ impl TextBody {
     pub(crate) fn char_start_before(&self, at: usize) -> usize {
         // A chunk never splits a character: scan back within the one
         // holding the byte before AT.
-        let start = |bytes: &[u8], base: usize| {
-            let mut i = at - 1 - base;
-            while i > 0 && bytes[i] & 0xc0 == 0x80 {
-                i -= 1;
-            }
-            base + i
-        };
+        let start = |bytes: &[u8], base: usize| char_start_in(bytes, base, at);
         let rope_bytes = self.bytes_len - self.tail.len();
         match self.flat.get() {
             _ if at == 0 => 0,
@@ -775,7 +894,7 @@ impl TextBody {
     }
     /// The bytes of the chunk holding the byte before END, up to END, and
     /// where that chunk starts.
-    fn chunk_before(&self, end: usize) -> (&[u8], usize) {
+    pub(crate) fn chunk_before(&self, end: usize) -> (&[u8], usize) {
         let rope_bytes = self.bytes_len - self.tail.len();
         if end > rope_bytes {
             return (&self.tail.as_bytes()[..end - rope_bytes], rope_bytes);
@@ -895,6 +1014,7 @@ impl TextBody {
     pub fn len_chars(&self) -> usize {
         self.chars_len
     }
+    #[inline]
     pub fn len_bytes(&self) -> usize {
         self.bytes_len
     }
@@ -906,8 +1026,14 @@ impl TextBody {
         if c.0 > self.len_chars() {
             return Err("index out of range".into());
         }
-        if self.is_ascii {
+        // The ends need no chunk: a restriction's edges are read on every
+        // field and property check, and fetching them evicts the chunk
+        // point's reads are using.
+        if self.is_ascii || c.0 == 0 {
             return Ok(ByteOffset(c.0));
+        }
+        if c.0 == self.chars_len {
+            return Ok(ByteOffset(self.bytes_len));
         }
         let prefix_chars = self.chars_len - self.tail_chars;
         if c.0 >= prefix_chars {
@@ -915,9 +1041,6 @@ impl TextBody {
                 self.bytes_len - self.tail.len()
                     + str_indices::chars::to_byte_idx(&self.tail, c.0 - prefix_chars),
             ));
-        }
-        if c.0 == self.len_chars() {
-            return Ok(ByteOffset(self.len_bytes()));
         }
         let (prior_char, prior_byte) = self.coordinate.get();
         if c.0 == prior_char {
@@ -952,8 +1075,11 @@ impl TextBody {
         if b.0 > self.bytes_len {
             return Err("index out of range".into());
         }
-        if self.is_ascii {
+        if self.is_ascii || b.0 == 0 {
             return Ok(CharOffset(b.0));
+        }
+        if b.0 == self.bytes_len {
+            return Ok(CharOffset(self.chars_len));
         }
         let (prior_char, prior_byte) = self.coordinate.get();
         if b.0 == prior_byte {
@@ -1294,7 +1420,7 @@ impl TextBody {
         let start = if self.is_ascii { r.start.0 } else { self.rope.byte_to_char(r.start.0) };
         let end = if self.is_ascii { r.end.0 } else { self.rope.byte_to_char(r.end.0) };
         self.invalidate_reads_for(r.start.0..r.end.0, &replacement);
-        self.syntax.get_mut().edit(start, end, replacement.chars().count());
+        self.edit_derived(start, end, replacement.chars().count());
         self.rope.remove(start..end);
         self.rope.insert(start, &replacement);
         self.chars_len = self.rope.len_chars();

@@ -47,11 +47,11 @@ pub(crate) enum Fwd {
     Bool(u16),
     Int(u16),
     Buffer(u16),
-    /// A world build's fence (`crate::world`) around the variable at this
-    /// slot: its own redirect is kept by the fence, and every access checks
-    /// the fence, then acts through that redirect. Only `native_forwarding`
+    /// A world build's tracking (`crate::world`) around the variable at this
+    /// slot: its own redirect is kept by the tracking, and every access checks
+    /// the tracking, then acts through that redirect. Only `native_forwarding`
     /// sees it; the kind queries see the redirect it keeps.
-    Fence(u32),
+    Tracked(u32),
 }
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
@@ -95,7 +95,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
     CVariable { name: "window-system", gnu: "dispnew.c:7522", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
-    // DEFVAR_KBOARD; read_char applies it (lisp/romacs/vm/keyboard.el).
+    // DEFVAR_KBOARD; read_char applies it (lisp/vm/keyboard.el).
     CVariable { name: "keyboard-translate-table", gnu: "keyboard.c:13980", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it as initialization begins; org-persist reads it.
     CVariable { name: "before-init-time", gnu: "emacs.c:3587", kind: Kind::Lisp(Init::Nil) },
@@ -389,7 +389,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "tool-bar-mode", gnu: "frame.c:7545", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
     // What the command loop evaluates when a throw returns it to top level
-    // (lisp/romacs/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
+    // (lisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
     CVariable { name: "top-level", gnu: "keyboard.c:13974", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-style", gnu: "xdisp.c:38992", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "toolkit-theme", gnu: "frame.c:7896", kind: Kind::Lisp(Init::Nil) },
@@ -421,7 +421,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // Run at the end of a collection (`romacs--run-finalizers').
     CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
     // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
-    // the command loop's run it (lisp/romacs/vm/keyboard.el, echo.rs).
+    // the command loop's run it (lisp/vm/keyboard.el, echo.rs).
     CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "visible-bell", gnu: "dispnew.c:7496", kind: Kind::Bool(false) },
     CVariable { name: "visible-cursor", gnu: "term.c:5347", kind: Kind::Bool(true) },
@@ -468,7 +468,8 @@ pub(crate) enum Init {
     Str(&'static str),
     /// make_float (X).
     Float(f64),
-    /// build_string (getenv (NAME) ?: FALLBACK), read at startup.
+    /// build_string (getenv (NAME) ?: FALLBACK), read at startup: in every
+    /// process, so a world holds none (`Vm::reseed_environment_variables`).
     Getenv(&'static str, &'static str),
     SystemName,
     SourceDirectory,
@@ -536,9 +537,11 @@ pub(crate) struct CVariable {
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
     // The collector's pacing reads both (`Vm::collection_due`), scaling the
-    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    // percentage internally. The threshold starts at 128 MiB, not GNU's
+    // 800000: a floor that bounds the garbage between collections whatever
+    // the heap's size (DIVERGENCES VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(128 << 20) },
     // benchmark.el's `benchmark-run' reads both around its body.
     CVariable { name: "gc-elapsed", gnu: "alloc.c:7536", kind: Kind::Lisp(Init::GcElapsed) },
     CVariable { name: "gcs-done", gnu: "alloc.c:7539", kind: Kind::Int(0) },
@@ -627,7 +630,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // appends `face minibuffer-prompt' from Lisp).
     CVariable { name: "unread-command-events", gnu: "keyboard.c:13776", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "executing-kbd-macro", gnu: "macros.c:435", kind: Kind::Lisp(Init::Nil) },
-    // The command loop's Lisp half (lisp/romacs/vm/keyboard.el) advances it per
+    // The command loop's Lisp half (lisp/vm/keyboard.el) advances it per
     // event read from the macro (keyboard.c read_char).
     CVariable { name: "executing-kbd-macro-index", gnu: "macros.c:439", kind: Kind::Int(0) },
     // Counted by the same Lisp half; repeat.el compares num-input-keys.
@@ -661,7 +664,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     // Chain: cus-start.el (preloaded) signals for a missing built-in.
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // self-insert-command (lisp/romacs/vm/prelude.el) reads both.
+    // self-insert-command (lisp/vm/prelude.el) reads both.
     CVariable { name: "auto-fill-function", gnu: "buffer.c:5433", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // simple.el's delete-backward-char and self-insert paths read it.
     CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Choice(&["nil", "overwrite-mode-textual", "overwrite-mode-binary"])) } },
@@ -976,7 +979,7 @@ impl Forwarded {
             Fwd::Bool(i) => Some(if self.bools[i as usize] { Value::TRUE } else { Value::NIL }),
             Fwd::Int(i) => Value::integer(self.ints[i as usize]).ok(),
             Fwd::Obj(i) => Some(self.objects[i as usize]).filter(|&value| value != Value::UNBOUND),
-            Fwd::Buffer(_) | Fwd::Fence(_) => None,
+            Fwd::Buffer(_) | Fwd::Tracked(_) => None,
         }
     }
     #[inline(always)]
@@ -1171,10 +1174,17 @@ impl Vm {
             self.forwarded.objects[i as usize] = Value::UNBOUND;
         }
     }
+    /// `source-directory' made again from this process's environment on
+    /// its next read (`host::source_directory`), as a restored VM must.
+    pub(crate) fn forget_source_directory(&mut self) {
+        if let Some(Fwd::Obj(i)) = Forwarded::lookup("source-directory") {
+            self.forwarded.objects[i as usize] = Value::UNBOUND;
+        }
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
-    /// A fenced built-in variable is the forwarding the fence keeps; a
-    /// fenced plain one is `Fwd::Fence`.
+    /// A tracked built-in variable is the forwarding the tracking keeps; a
+    /// tracked plain one is `Fwd::Tracked`.
     /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
     /// the only ones a `Fwd::Buffer' forwards.
     pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
@@ -1183,9 +1193,9 @@ impl Vm {
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => match self.fenced_forwarding(slot) {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => match self.tracked_forwarding(slot) {
                 Some(kept) => Some(kept),
-                // A fenced buffer-local variable is no built-in.
+                // A tracked buffer-local variable is no built-in.
                 None if matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => None,
                 None => Some(fwd),
             },
@@ -1193,8 +1203,8 @@ impl Vm {
             _ => None,
         }
     }
-    /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
-    /// variable is `Fwd::Fence`.
+    /// [`Vm::forwarding`] as the access paths dispatch on it: every tracked
+    /// variable is `Fwd::Tracked`.
     pub(super) fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
@@ -1216,7 +1226,7 @@ impl Vm {
     /// [`Vm::forwarding`] without caching, for `&self` readers.
     pub(super) fn forwarding_ref(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => Some(self.tracked_forwarding(slot).unwrap_or(fwd)),
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             Some(_) => None,
             None => {
@@ -1275,6 +1285,16 @@ impl Vm {
             self.install_local_table(slot, table, false);
         }
     }
+    /// The C variables GNU sets from the environment at every start
+    /// (`Init::Getenv`: init_callproc's `shell-file-name'), set from this
+    /// process's environment after a restore.
+    pub(crate) fn reseed_environment_variables(&mut self) {
+        for variable in C_SPECIALS {
+            if let Kind::Lisp(init @ Init::Getenv(..)) = variable.kind && let Some(&slot) = self.names.get(variable.name) {
+                self.slots[slot].value = self.materialize(init);
+            }
+        }
+    }
     fn materialize(&mut self, init: Init) -> Value {
         match init {
             Init::Nil => Value::NIL,
@@ -1286,7 +1306,7 @@ impl Vm {
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::GcElapsed => self.allocate_object(data::Object::Float(self.gc_stats.elapsed_ns as f64 / 1e9)),
             Init::Getenv(name, fallback) => {
-                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
+                let text = crate::host::per_process_env(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
@@ -1589,7 +1609,7 @@ impl Vm {
                 let buffer = self.buffer_index()?;
                 self.forwarded_buffer_value(buffer, i)
             }
-            Fwd::Fence(slot) => return self.fenced(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
+            Fwd::Tracked(slot) => return self.tracked(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
         })
     }
     /// GNU `default_value`, SYMBOL_FORWARDED arm: a per-buffer variable's
@@ -1597,7 +1617,7 @@ impl Vm {
     pub(super) fn forwarded_default(&mut self, fwd: Fwd) -> Result<Value> {
         match fwd {
             Fwd::Buffer(i) => Ok(self.per_buffer_default(i)),
-            Fwd::Fence(slot) => self.fenced(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
+            Fwd::Tracked(slot) => self.tracked(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
             _ => self.forwarded_value(fwd),
         }
     }
@@ -1642,7 +1662,7 @@ impl Vm {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
             }
-            Fwd::Fence(_) => unreachable!("set_forwarded acts through the fence"),
+            Fwd::Tracked(_) => unreachable!("set_forwarded acts through the tracking"),
         }
         Ok(())
     }
@@ -1660,8 +1680,8 @@ impl Vm {
     }
     /// GNU `set_internal`, SYMBOL_FORWARDED arm (data.c:1791-1818).
     pub(super) fn set_forwarded(&mut self, slot: usize, fwd: Fwd, value: Value, flag: SetFlag) -> std::result::Result<(), Fault> {
-        if let Fwd::Fence(cell) = fwd {
-            return self.fenced(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
+        if let Fwd::Tracked(cell) = fwd {
+            return self.tracked(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
         }
         if value == Value::UNBOUND {
             return Err(Fault::Error(format!("{UNBINDABLE}{}", self.symbol_names[slot])));
@@ -1691,7 +1711,7 @@ impl Vm {
                 self.forwarded.defaults[i as usize] = value;
                 Ok(())
             }
-            Fwd::Fence(cell) => self.fenced(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
+            Fwd::Tracked(cell) => self.tracked(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
             _ => self.set_forwarded(slot, fwd, value, flag),
         }
     }
@@ -1748,7 +1768,7 @@ impl Vm {
             local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
-            Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
+            Fwd::Tracked(_) => unreachable!("unbind_one restores a tracked binding through the tracking"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
             Fwd::Bool(i) => {
                 self.forwarded.bools[i as usize] = old != Value::NIL;
@@ -1799,7 +1819,7 @@ impl Vm {
                 }
                 Ok(())
             }
-            Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
+            Fwd::Tracked(_) => self.tracked(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
     /// The condition GNU signals for a forwarded store fault rendered by

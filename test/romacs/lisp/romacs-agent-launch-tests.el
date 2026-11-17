@@ -38,7 +38,7 @@ whatever TMPDIR is); `delivered' collects wakes."
      (dolist (s (list parent child)) (puthash (romacs-agent-id s) s romacs-agent--sessions))
      (romacs-agent--index child)
      (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
-                (lambda (_session text done &optional _valid) (push text delivered) (funcall done)))
+                (lambda (_session text done &rest _) (push text delivered) (funcall done)))
                ((symbol-function 'run-at-time) #'ignore))
        (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
@@ -136,6 +136,24 @@ whatever TMPDIR is); `delivered' collects wakes."
         (setf (romacs-agent-input-seq child) 4)
         (romacs-agent-resume child))
       (should (equal resumed '(4 nil))))))
+
+;; A launch's relay config written again only when it differs: an
+;; unchanged one is neither written nor renamed.
+(ert-deftest romacs-agent-launch-an-unchanged-config-is-not-written-again ()
+  (let* ((root (make-temp-file "romacs-launch-json-" t))
+         (file (expand-file-name "mcp.json" root))
+         (writes 0)
+         (write (symbol-function 'romacs-agent--write-json)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--write-json)
+                   (lambda (&rest args) (cl-incf writes) (apply write args))))
+          (romacs-agent--keep-json file (romacs-mcp--object "a" 1 "b" "é"))
+          (romacs-agent--keep-json file (romacs-mcp--object "a" 1 "b" "é"))
+          (should (= writes 1))
+          (romacs-agent--keep-json file (romacs-mcp--object "a" 2 "b" "é"))
+          (should (= writes 2))
+          (should (equal (gethash "a" (romacs-agent--read-json file)) 2)))
+      (delete-directory root t))))
 
 (provide 'romacs-agent-launch-tests)
 ;;; romacs-agent-launch-tests.el ends here

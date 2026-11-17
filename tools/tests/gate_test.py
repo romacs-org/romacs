@@ -53,6 +53,20 @@ class GraphicalOracleEnvironment(unittest.TestCase):
         environment = gate.test_env(pathlib.Path('/source'), pathlib.Path('/private'), names=set())
         self.assertEqual(environment.get('ROMACS_TEST_LABWC'), gate.LABWC)
 
+    def test_no_running_editors_launch_variable_reaches_the_tests(self):
+        saved = {k: os.environ.get(k) for k in gate.EDITOR_LAUNCH}
+        try:
+            os.environ.update({k: 'set' for k in gate.EDITOR_LAUNCH})
+            environment = gate.test_env(pathlib.Path('/source'), pathlib.Path('/private'), names=set())
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertIn('ROMACS_SOURCE_DIRECTORY', gate.EDITOR_LAUNCH)
+        self.assertFalse(set(gate.EDITOR_LAUNCH) & set(environment))
+
 
 class FixtureProvisioning(unittest.TestCase):
     """The gate fills the pinned test-fixture cache before tests, which only read it."""
@@ -330,7 +344,7 @@ class BuildAndRun(unittest.TestCase):
 
     def test_run_environment_drops_a_running_editors_launch_variables(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
-        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp/gnu',
+        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp',
                       ROMACS_USAGE_LOG='/sessions/ended/usage.jsonl', ROMACS_GUI_FONT='Iosevka',
                       ROMACS_GUI_FONT_SIZE='15')
         with mock.patch.dict(os.environ, editor):

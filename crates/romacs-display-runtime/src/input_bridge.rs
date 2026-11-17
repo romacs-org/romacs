@@ -50,6 +50,8 @@ pub(crate) struct State {
     /// The frame whose window the pointer is over, and where, in logical
     /// pixels. The pointer is over one window at most.
     pointer: Option<(u64, (i32, i32))>,
+    /// Each frame's window size, in logical pixels, as its last resize said.
+    sizes: HashMap<u64, (u32, u32)>,
     key_repeats: KeyRepeatLog,
 }
 
@@ -102,7 +104,12 @@ fn apply(state: &mut State, fact: Fact) -> Notice {
         }
         Fact::KeyRepeatTiming(RepeatTiming::Repeat(after)) => { state.key_repeats.repeat(after); Notice::Nothing }
         Fact::KeyRepeatTiming(RepeatTiming::Held(held)) => { state.key_repeats.released(held); Notice::Nothing }
-        Fact::FrameClosed(frame) => { state.rendered.remove(&frame); Notice::Nothing }
+        Fact::WindowSize { frame, width, height } => { state.sizes.insert(frame, (width, height)); Notice::Nothing }
+        Fact::FrameClosed(frame) => {
+            state.rendered.remove(&frame);
+            state.sizes.remove(&frame);
+            Notice::Nothing
+        }
         Fact::Reply { .. } => Notice::Nothing,
     }
 }
@@ -159,6 +166,8 @@ impl Facts {
     pub(crate) fn model_renderer(&self) -> bool { self.state().model_renderer }
 
     pub(crate) fn pointer(&self) -> Option<(u64, (i32, i32))> { self.state().pointer }
+
+    pub(crate) fn window_size(&self, frame: u64) -> Option<(u32, u32)> { self.state().sizes.get(&frame).copied() }
 
     pub(crate) fn take_key_repeats(&self) -> KeyRepeatCounts { self.state().key_repeats.take() }
 

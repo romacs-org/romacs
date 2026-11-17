@@ -101,28 +101,46 @@ class Forecast(unittest.TestCase):
         self.assertEqual(check.forecast(self.repo, 'beta')[2],
                          [check.conflict(name, 'overlap', 2)])
 
+    def test_only_exact_renames_count_as_moved(self):
+        self.commit('more', {'kept.el': '(a)\n', 'edited.el': '(b)\n(c)\n(d)\n'})
+        base = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.repo, capture_output=True, text=True).stdout.strip()
+        (self.repo / 'lisp').mkdir()
+        self.git('mv', 'kept.el', 'lisp/kept.el')
+        self.git('mv', 'edited.el', 'lisp/edited.el')
+        self.git('commit', '-q', '-m', 'move')
+        (self.repo / 'lisp/edited.el').write_text('(b)\n(c)\n(e)\n')
+        self.assertEqual(check.moved_unchanged(self.repo, base), {'lisp/kept.el'})
+
     def test_uncommitted_work_is_said_to_be_left_out(self):
         (self.repo / 'new.rs').write_text('y\n')
         self.assertIn('1 uncommitted path(s) are not in the forecast', check.forecast(self.repo, 'beta')[2][0])
 
 
 class Lint(unittest.TestCase):
-    def test_only_our_lisp_that_is_still_there_is_linted(self):
-        names = {'lisp/romacs/romacs-lint.el', 'lisp/romacs/romacs-deleted-by-the-change.el', 'lisp/gnu/simple.el',
-                 'lisp/romacs/README', 'crates/romacs-vm/src/gc.rs'}
-        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/romacs/romacs-lint.el'])
+    def test_runtime_lisp_that_is_still_there_is_linted(self):
+        names = {'lisp/emacs-lisp/romacs-lint.el', 'lisp/session/romacs-deleted-by-the-change.el', 'lisp/simple.el',
+                 'lisp/session/README', 'crates/romacs-vm/src/gc.rs', 'lisp/packages/jabber/jabber.el'}
+        self.assertEqual(check.lisp_files(names, ROOT), ['lisp/emacs-lisp/romacs-lint.el', 'lisp/simple.el'])
+
+    def test_a_file_moved_with_its_text_unchanged_is_not_linted(self):
+        names = {'lisp/simple.el', 'lisp/emacs-lisp/romacs-lint.el'}
+        self.assertEqual(check.lisp_files(names, ROOT, {'lisp/simple.el'}), ['lisp/emacs-lisp/romacs-lint.el'])
+
+    def test_the_loaddefs_stage_runs_only_for_lisp_and_themes(self):
+        self.assertEqual(check.loaddefs(ROOT, {'crates/romacs-vm/src/gc.rs', 'lisp/GENERATED'}),
+                         ('ok', 'no Lisp or theme file changed', []))
 
     def test_the_lint_is_given_the_base_the_paths_came_from(self):
         # Left to itself the lint compares with beta, whatever trunk was asked for.
-        command = check.lint_command(ROOT, ['lisp/romacs/a.el'], 'abc123', '/x/romacs-vm-gui')
-        self.assertEqual(command[2:], [str(ROOT / 'tools/romacs-lint'), '--base', 'abc123', '--binary', '/x/romacs-vm-gui', 'lisp/romacs/a.el'])
-        self.assertNotIn('--binary', check.lint_command(ROOT, ['lisp/romacs/a.el'], 'abc123', None))
+        command = check.lint_command(ROOT, ['lisp/session/a.el'], 'abc123', '/x/romacs-vm-gui')
+        self.assertEqual(command[2:], [str(ROOT / 'tools/romacs-lint'), '--base', 'abc123', '--binary', '/x/romacs-vm-gui', 'lisp/session/a.el'])
+        self.assertNotIn('--binary', check.lint_command(ROOT, ['lisp/session/a.el'], 'abc123', None))
 
     def test_the_lints_closing_line_is_the_summary(self):
-        output = "lisp/romacs/a.el:3: error: in f: `g' is not defined; fix: require its library\nromacs-lint: 1 file, 1 error, 0 warnings, 0 hints new since abc\n"
+        output = "lisp/session/a.el:3: error: in f: `g' is not defined; fix: require its library\nromacs-lint: 1 file, 1 error, 0 warnings, 0 hints new since abc\n"
         self.assertEqual(check.lint_stage(1, output, ''),
                          ('FAIL', '1 file, 1 error, 0 warnings, 0 hints new since abc',
-                          ["lisp/romacs/a.el:3: error: in f: `g' is not defined; fix: require its library"]))
+                          ["lisp/session/a.el:3: error: in f: `g' is not defined; fix: require its library"]))
         self.assertEqual(check.lint_stage(0, 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints\n', ''),
                          ('ok', '1 file, 0 errors, 0 warnings, 0 hints', []))
 
@@ -186,6 +204,14 @@ class Toolchain(unittest.TestCase):
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
+
+    def test_the_tests_see_no_running_editors_launch_variables(self):
+        # A check started from inside Romacs: the session's source
+        # directory steered source-directory in the VM's tests.
+        env = check.test_environment('/scratch', {'PATH': '/usr/bin', 'ROMACS_SOURCE_DIRECTORY': '/elsewhere',
+                                                  'ROMACS_RUNTIME_ROOT': '/build', 'WAYLAND_DISPLAY': 'wayland-1',
+                                                  'ROMACS_TOOLCHAIN_BIN': '/rust'})
+        self.assertEqual(env, {'PATH': '/usr/bin', 'ROMACS_TOOLCHAIN_BIN': '/rust', 'TMPDIR': '/scratch'})
 
     def test_neither_way_is_no_toolchain(self):
         self.assertIsNone(check.toolchain_path({'PATH': '/usr/bin'}))

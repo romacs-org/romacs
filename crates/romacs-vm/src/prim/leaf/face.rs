@@ -324,6 +324,13 @@ impl Leaf<'_> {
     pub(crate) fn face_own(&mut self, frame: Value) -> super::super::Out {
         let owner = self.face_owner(frame)?;
         if owner == frame { return Ok(frame); }
+        self.face_copy(frame, owner)
+    }
+
+    /// Give FRAME a copy of each face OWNER shows, with the default colours
+    /// and the background mode they were computed for, as make-terminal-frame
+    /// copies the selected frame's (frame.c:1879).
+    pub(crate) fn face_copy(&mut self, frame: Value, owner: Value) -> super::super::Out {
         // The default colours it showed stay its own, as its default face's.
         let entries = self.windows().frame_parameter_entries(owner)?;
         let own = self.windows().frame_parameter_entries(frame)?;

@@ -2,7 +2,7 @@
 
 ;; Fifty keys of M-x after its first, over N more commands: what each key
 ;; costs before matching, M-x's candidates kept while nothing they depend on
-;; changed (lisp/romacs/romacs-commands.el).  No predicate is asked about
+;; changed (lisp/completion/romacs-commands.el).  No predicate is asked about
 ;; each command, so the work stays flat.  Matching the names stays linear
 ;; and native, as GNU's `all-completions' is.
 (scaling-probe mx-commands :n 20000 :budget 0.1

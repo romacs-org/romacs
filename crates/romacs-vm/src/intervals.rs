@@ -227,6 +227,9 @@ impl IntervalIndex {
         anchors: &AnchorTree,
         mut emit: impl FnMut(Value, u32, u32),
     ) -> usize {
+        if self.slots.is_empty() {
+            return 0;
+        }
         let mut visited = 0;
         fn visit(
             t: &IntervalIndex,
@@ -318,6 +321,27 @@ impl IntervalIndex {
             }
         }
         (best, visited)
+    }
+    /// The last overlay endpoint before `a`, or `floor` when none is
+    /// above it: [`Self::next`] backwards.
+    pub fn previous(&self, a: u32, floor: u32, anchors: &AnchorTree) -> u32 {
+        let mut best = floor;
+        for order in 0..2 {
+            for root in self.roots[order] {
+                let mut current = root;
+                while let Some(i) = current {
+                    let node = &self.nodes[i];
+                    let pos = anchors.resolve(node.endpoint(order)).unwrap();
+                    if pos < a {
+                        best = best.max(pos);
+                        current = node.links[order].right;
+                    } else {
+                        current = node.links[order].left;
+                    }
+                }
+            }
+        }
+        best
     }
     pub fn next(&self, a: u32, limit: u32, anchors: &AnchorTree) -> u32 {
         self.next_counted(a, limit, anchors).0

@@ -151,7 +151,7 @@ and its comparison policy in its docstring:
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
-with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/gnu and lisp/romacs, on a
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init
@@ -164,8 +164,8 @@ profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
 own completion layer (`romacs-complete-mode`), which takes the root
 window's last line, and the completion styles without fzf.  Each engine serves
-`lisp/romacs/romacs-mcp.el` with the session tools from
-`lisp/romacs/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
+`lisp/agents/romacs-mcp.el` with the session tools from
+`lisp/agents/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
 
 * `romacs_send_keys`: `kbd` keys or literal text, fed through
@@ -563,16 +563,22 @@ of `display_stages.el` (synthetic buffers: plain text, text with invisible
 and `display` parts, an agent chat) runs in a fresh `-Q --loadup` session
 in a private headless labwc: a buffer shown one way, then 30 steps, each a
 timer that makes the scenario's change followed by the loop's own
-redisplay. The session reads `romacs-instructions` and
-`romacs--display-stats` at each step's start, all before it writes
-anything, so the report has, per step and as medians, the instructions and
-conses spent inside redisplay beside the whole step's instructions, the
-windows rebuilt, the bands expanded, the layouts asked of the layout host
-and the frames submitted. `display_stages_bars.json` holds each scenario's
-figures: instructions and conses under a ceiling, the counts exactly, so a
-step that no longer does its change fails too. So does a scenario more
-than a tenth of whose steps paint when they change nothing, or do not when
-they do. Work that removes cost lowers the bars in the same change:
+redisplay and those of what the change set off. A step ends once it has
+settled: its redisplay ran, no timer is ripe, and a redisplay ran after any
+timer that ran since. So a follow-up redisplay, such as the one
+`jit-lock-force-redisplay` asks for when a fontified chunk reaches back
+before its start (the folded Org scenarios), counts in its step however
+fast the host is, not in this step or the next by a race with a poll. The
+session reads `romacs-instructions` and `romacs--display-stats` at each
+step's start, all before it writes anything, so the report has, per step
+and as medians, the redisplays run, the instructions and conses spent
+inside them beside the whole step's instructions, the windows rebuilt, the
+bands expanded, the layouts asked of the layout host and the frames
+submitted. `display_stages_bars.json` holds each scenario's figures:
+instructions and conses under a ceiling, the counts exactly, so a step
+that no longer does its change fails too. So does a scenario more than a
+tenth of whose steps run more or fewer redisplays than the others, or
+paint when they change nothing, or do not when they do. Work that removes cost lowers the bars in the same change:
 `--write-bars FILE` writes the ones a run would pass. `--record` adds a
 call graph of each scenario's steps (a frame-pointer build).
 

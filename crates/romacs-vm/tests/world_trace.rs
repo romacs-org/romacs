@@ -1,6 +1,6 @@
 //! World build mode's read trace (DESIGN-M1 §6, §13 step 2): every host
 //! query of a recipe is recorded with its site and classified, a per-process
-//! fact read outside startup refuses, and an effect refuses and fails.
+//! fact read outside startup is noted, and an effect is not performed and fails.
 use romacs_vm::Vm;
 use romacs_vm::host::{self, Class, Fact, Pinned, Site};
 use serde_json::{Value as Json, json};
@@ -48,8 +48,8 @@ fn items<'a>(trace: &'a Json, list: &str, kind: &str) -> Vec<&'a Json> {
     trace[list].as_array().unwrap().iter().filter(|r| r["kind"] == kind).collect()
 }
 
-fn refusals(trace: &Json) -> Vec<(String, usize)> {
-    trace["refusals"].as_array().unwrap().iter()
+fn uncaptured(trace: &Json) -> Vec<(String, usize)> {
+    trace["uncaptured"].as_array().unwrap().iter()
         .map(|r| (r["what"].as_str().or(r["kind"].as_str()).unwrap().to_owned(), r["site"]["line"].as_u64().unwrap_or(0) as usize))
         .collect()
 }
@@ -72,26 +72,26 @@ fn class_is_the_closed_p_set() {
     assert_eq!(host::class(Fact::Other, None), Class::K);
     assert_eq!(host::class(Fact::Effect, None), Class::F);
     let site = |file: &str, head: &str| Site { file: file.into(), line: 79, head: head.into() };
-    let baked = site("/x/lisp/gnu/version.el", "(defconst emacs-build-time (if emacs-build-system");
+    let baked = site("/x/lisp/version.el", "(defconst emacs-build-time (if emacs-build-system");
     assert_eq!(host::class(Fact::Clock, Some(&baked)), Class::B);
     assert_eq!(host::class(Fact::Pid, Some(&baked)), Class::P);
-    assert_eq!(host::class(Fact::Clock, Some(&site("/x/lisp/gnu/version.el", "(defconst emacs-build-number 1"))), Class::P);
+    assert_eq!(host::class(Fact::Clock, Some(&site("/x/lisp/version.el", "(defconst emacs-build-number 1"))), Class::P);
     assert_eq!(host::class(Fact::Clock, Some(&site("/x/other.el", "(defconst emacs-build-time"))), Class::P);
 }
 
 #[test]
-fn p_reads_outside_startup_refuse_with_their_site() {
+fn p_reads_outside_startup_are_noted_with_their_site() {
     let dir = scratch("p-reads");
     let file = write(&dir.join("preload.el"), "(defvar x1 (getenv-internal \"TMPDIR\"))\n(defvar x2 (getenv-internal \"PWD\" initial-environment))\n(defvar x3 (emacs-pid))\n(defvar x4 (current-time))\n(defvar x5 (getenv-internal \"HOME\"))\n(defvar x6 (list (num-processors) (num-processors (quote current))))\n");
     let (mut vm, trace) = build(&[file.clone()]);
-    let refused = refusals(&trace);
+    let notes = uncaptured(&trace);
     for (what, line) in [("env TMPDIR (process)", 1), ("env PWD (explicit)", 2), ("pid", 3), ("clock", 4), ("processors", 6), ("env OMP_NUM_THREADS (host)", 6)] {
-        assert!(refused.contains(&(what.into(), line)), "{what} at line {line}: {refused:?}");
+        assert!(notes.contains(&(what.into(), line)), "{what} at line {line}: {notes:?}");
     }
-    let site = &trace["refusals"][0]["site"];
+    let site = &trace["uncaptured"][0]["site"];
     assert_eq!(site["file"], json!(file.to_string_lossy()));
     assert!(site["form"].as_str().unwrap().starts_with("(defvar x1"), "{site}");
-    assert!(!refused.iter().any(|(what, _)| what.contains("HOME")), "HOME is keyed: {refused:?}");
+    assert!(!notes.iter().any(|(what, _)| what.contains("HOME")), "HOME is keyed: {notes:?}");
     // The answers are the pinned ones.
     assert_eq!(eval(&mut vm, "x3"), "4242");
     assert_eq!(eval(&mut vm, "(time-convert x4 'integer)"), "0");
@@ -100,23 +100,23 @@ fn p_reads_outside_startup_refuse_with_their_site() {
 #[test]
 fn startup_reads_p_facts_and_only_the_bootstrap_switches() {
     let dir = scratch("startup");
-    let bootstrap = write(&dir.join("lisp/romacs/romacs-loadup-bootstrap.el"), "(unwind-protect\n    (progn (romacs--startup-phase t) (setq s1 (getenv-internal \"TMPDIR\")) (setq s2 (emacs-pid)))\n  (romacs--startup-phase nil))\n(setq s3 (getenv-internal \"TERM\"))\n(unwind-protect (romacs--startup-phase t) (romacs--startup-phase nil))\n");
+    let bootstrap = write(&dir.join("lisp/session/romacs-loadup-bootstrap.el"), "(unwind-protect\n    (progn (romacs--startup-phase t) (setq s1 (getenv-internal \"TMPDIR\")) (setq s2 (emacs-pid)))\n  (romacs--startup-phase nil))\n(setq s3 (getenv-internal \"TERM\"))\n(unwind-protect (romacs--startup-phase t) (romacs--startup-phase nil))\n");
     let other = write(&dir.join("other.el"), "(romacs--startup-phase t)\n(setq s4 (getenv-internal \"PATH\"))\n");
     let (_, trace) = build(&[bootstrap, other]);
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().map(|r| (r["what"].as_str().unwrap(), r["allowed"].as_str().unwrap())).collect();
     assert!(allowed.contains(&("env TMPDIR (process)", "startup")) && allowed.contains(&("pid", "startup")), "{allowed:?}");
-    let refused = refusals(&trace);
-    assert!(refused.contains(&("env TERM (process)".into(), 4)), "{refused:?}");
-    // A second run, and a switch from anywhere else, refuse; neither enters startup.
-    assert!(refused.contains(&("startup".into(), 5)) && refused.contains(&("startup".into(), 1)), "{refused:?}");
-    assert!(refused.contains(&("env PATH (process)".into(), 2)), "{refused:?}");
+    let notes = uncaptured(&trace);
+    assert!(notes.contains(&("env TERM (process)".into(), 4)), "{notes:?}");
+    // A second run, and a switch from anywhere else, are noted; neither enters startup.
+    assert!(notes.contains(&("startup".into(), 5)) && notes.contains(&("startup".into(), 1)), "{notes:?}");
+    assert!(notes.contains(&("env PATH (process)".into(), 2)), "{notes:?}");
     assert_eq!(items(&trace, "records", "startup").len(), 2, "{trace}");
 }
 
-/// A re-seed form may read its own P fact or fenced variable, and only that;
-/// its variable is fenced once the form ends (root 4).
+/// A re-seed form may read its own P fact or tracked variable, and only that;
+/// its variable is tracked once the form ends (root 4).
 #[test]
-fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
+fn a_reseed_form_reads_its_fact_and_tracks_its_variable() {
     let dir = scratch("reseed");
     let extra = write(&dir.join("emacs-lisp/cl-extra.el"),
                       "(defvar cl--random-state (current-time))\n(defvar cl-other (current-time))\n");
@@ -128,17 +128,17 @@ fn a_reseed_form_reads_its_fact_and_fences_its_variable() {
     assert_eq!(reseeds, ["clock", "default-directory"], "{trace}");
     let allowed: Vec<_> = items(&trace, "records", "p-read").iter().filter_map(|r| r["allowed"].as_str()).filter(|a| *a != "init").collect();
     assert_eq!(allowed, ["reseed"], "{trace}");
-    let fenced: Vec<_> = items(&trace, "refusals", "fence").iter()
+    let tracked: Vec<_> = items(&trace, "uncaptured", "per-process").iter()
         .map(|r| (r["root"].as_u64().unwrap(), r["symbol"].as_str().unwrap(), r["site"]["line"].as_u64().unwrap())).collect();
-    assert_eq!(fenced, [(4, "cl--random-state", 1), (4, "find-function-C-source-directory", 2)], "{trace}");
-    assert_eq!(refusals(&trace).iter().filter(|(what, _)| what == "clock").count(), 1, "the second clock read refuses: {trace}");
+    assert_eq!(tracked, [(4, "cl--random-state", 1), (4, "find-function-C-source-directory", 2)], "{trace}");
+    assert_eq!(uncaptured(&trace).iter().filter(|(what, _)| what == "clock").count(), 1, "the second clock read is noted: {trace}");
 }
 
 /// Each `romacs--world-reseed' form restates its pinned GNU source.
 #[test]
 fn reseed_forms_restate_their_gnu_sources() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let bootstrap = std::fs::read_to_string(root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
+    let bootstrap = std::fs::read_to_string(root.join("lisp/session/romacs-loadup-bootstrap.el")).unwrap();
     for (file, source, restated) in [
         ("emacs-lisp/cl-extra.el", "(defvar cl--random-state (cl--make-random-state (cl--random-time)))",
          "(setq cl--random-state (cl--make-random-state (cl--random-time)))"),
@@ -146,7 +146,7 @@ fn reseed_forms_restate_their_gnu_sources() {
          "(defvar find-function-C-source-directory\n  (let ((dir (expand-file-name \"src\" source-directory)))\n    (if (file-accessible-directory-p dir) dir))",
          "(let ((dir (expand-file-name \"src\" source-directory)))\n             (if (file-accessible-directory-p dir) dir))"),
     ] {
-        let gnu = std::fs::read_to_string(root.join("lisp/gnu").join(file)).unwrap();
+        let gnu = std::fs::read_to_string(root.join("lisp").join(file)).unwrap();
         assert!(gnu.contains(source), "{file} no longer has {source}");
         assert!(bootstrap.contains(&format!("\"{file}\"")) && bootstrap.contains(restated), "the re-seed of {file}");
     }
@@ -154,13 +154,13 @@ fn reseed_forms_restate_their_gnu_sources() {
 
 /// A space-named buffer made beside another of its name (a temporary buffer
 /// inside a temporary buffer) takes the counter's name in a build, which
-/// fences the random state: GNU's random name only spares the search.
+/// tracks the random state: GNU's random name only spares the search.
 #[test]
 fn a_nested_temporary_buffer_is_named_without_the_random_state() {
     let dir = scratch("nested-temp");
     let file = write(&dir.join("nested.el"), "(get-buffer-create \" rx\")\n(defvar nested-name (generate-new-buffer-name \" rx\"))\n");
     let (mut vm, trace) = build(&[file]);
-    assert_eq!(trace["refusals"], json!([]), "{trace}");
+    assert_eq!(trace["uncaptured"], json!([]), "{trace}");
     assert_eq!(eval(&mut vm, "nested-name"), "\" rx<2>\"");
 }
 
@@ -171,7 +171,7 @@ fn the_build_time_is_baked_at_its_one_site() {
     let (mut vm, trace) = build(&[version]);
     let reads: Vec<_> = items(&trace, "records", "p-read").iter().map(|r| r["allowed"].as_str().unwrap()).filter(|a| *a != "init").collect();
     assert_eq!(reads, ["baked"], "{trace}");
-    assert_eq!(refusals(&trace), [("clock".into(), 2)]);
+    assert_eq!(uncaptured(&trace), [("clock".into(), 2)]);
     assert_eq!(eval(&mut vm, "(time-convert emacs-build-time 'integer)"), "0");
 }
 
@@ -191,7 +191,7 @@ fn the_build_host_is_baked_at_its_one_site() {
     let keyed = |trace: &Json| items(trace, "records", "host").iter().filter(|r| r["fact"] == "system-name").count();
     let (_, trace) = build(std::slice::from_ref(&version));
     assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 0), "{trace}");
-    assert!(refusals(&trace).is_empty(), "{trace}");
+    assert!(uncaptured(&trace).is_empty(), "{trace}");
     let (_, trace) = build(&[version, other]);
     assert_eq!((reads(&trace), keyed(&trace)), (vec!["baked".to_owned()], 1), "{trace}");
     let site = items(&trace, "records", "host").iter().find(|r| r["fact"] == "system-name").map(|r| r["site"]["file"].clone());
@@ -218,9 +218,9 @@ fn keyed_environment_reads_record_form_and_value() {
         assert!(env.contains(&(form.into(), name.into(), value.clone(), line)), "{form} {name} {line:?}: {env:?}");
     }
     assert!(env.iter().any(|(form, name, _, _)| form == "initial" && name == "LOGNAME"), "UserIdentity: {env:?}");
-    // Only evaluating the fenced `initial-environment' as an argument refuses.
-    let refused: Vec<_> = trace["refusals"].as_array().unwrap().iter().map(|r| (r["kind"].as_str().unwrap(), r["symbol"].as_str(), r["site"]["line"].as_u64())).collect();
-    assert_eq!(refused, [("fence", Some("initial-environment"), Some(4))], "{trace}");
+    // Only evaluating the tracked `initial-environment' as an argument is noted.
+    let notes: Vec<_> = trace["uncaptured"].as_array().unwrap().iter().map(|r| (r["kind"].as_str().unwrap(), r["symbol"].as_str(), r["site"]["line"].as_u64())).collect();
+    assert_eq!(notes, [("per-process", Some("initial-environment"), Some(4))], "{trace}");
 }
 
 #[test]
@@ -288,19 +288,19 @@ fn listings_record_names_in_order_and_how_they_ended() {
 }
 
 #[test]
-fn effects_refuse_and_fail() {
+fn effects_are_not_performed_in_a_build() {
     let dir = scratch("effects");
     let out = dir.join("out");
     let file = write(&dir.join("effects.el"), &format!(
         "(setq w (condition-case e (write-region \"x\" nil {out}) (file-error (car e))))\n(setq p (condition-case e (process-lines \"true\") (error e)))\n(setq j (condition-case e (romacs--process-start '(\"true\") \"\" \"/\" 5) (error e)))\n", out = lisp(&out)));
     let (mut vm, trace) = build(&[file]);
     assert!(!out.exists());
-    // An asynchronous job refuses as it is submitted, not on its worker.
+    // An asynchronous job is noted as it is submitted, not on its worker.
     assert_eq!(eval(&mut vm, "(list (and w t) (and p t) (consp j))"), "(t t t)");
-    let refused: Vec<_> = items(&trace, "refusals", "effect").iter().map(|r| (r["what"].as_str().unwrap().to_owned(), r["site"]["line"].as_u64().unwrap())).collect();
-    assert!(refused.iter().any(|(what, line)| what.starts_with("write ") && *line == 1), "{refused:?}");
-    assert!(refused.iter().any(|(what, line)| what == "run true" && *line == 2), "{refused:?}");
-    assert!(refused.iter().any(|(what, line)| what == "run true" && *line == 3), "{refused:?}");
+    let notes: Vec<_> = items(&trace, "uncaptured", "effect").iter().map(|r| (r["what"].as_str().unwrap().to_owned(), r["site"]["line"].as_u64().unwrap())).collect();
+    assert!(notes.iter().any(|(what, line)| what.starts_with("write ") && *line == 1), "{notes:?}");
+    assert!(notes.iter().any(|(what, line)| what == "run true" && *line == 2), "{notes:?}");
+    assert!(notes.iter().any(|(what, line)| what == "run true" && *line == 3), "{notes:?}");
 }
 
 #[test]
@@ -316,31 +316,52 @@ fn off_mode_answers_the_host() {
     assert_eq!(host::leave_build(), None);
 }
 
+/// A build reads what its user can: a file beside no tree the recipe names
+/// is read, and its read is a keyed record, so editing it makes the world
+/// stale. Nothing confines a builder.
 #[test]
-fn confinement_fails_and_lists_a_read_outside_the_roots() {
-    let dir = scratch("confined");
+fn a_build_reads_any_file_its_user_can_and_keys_it() {
+    let dir = scratch("unconfined");
     let outside = write(&dir.join("outside/data.txt"), "x");
     let file = write(&dir.join("roots/read.el"), &format!(
         "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {out}) 'read) (file-error 'failed)))\n", out = lisp(&outside)));
-    // The pinned table's directories, empty and read-only, as the runner
-    // makes them, and a directory outside the roots: a case query measures
-    // each one's filesystem without reading beneath it.
-    let store = dir.join("out.json.d");
-    for name in ["cwd", "tmp", "bin"] {
-        std::fs::create_dir_all(store.join("p").join(name)).unwrap();
-    }
-    let probe = write(&dir.join("roots/probe.el"), &format!("(setq c (list (file-name-case-insensitive-p {}) (file-name-case-insensitive-p {})))\n",
-                                                             lisp(&store.join("p/cwd/x")), lisp(&dir.join("outside/x"))));
-    let roots = romacs_vm::world::sandbox::build_roots(vec![dir.join("roots")], &store);
-    romacs_vm::world::sandbox::confine(&roots, &[]).expect("Landlock");
-    assert_eq!(std::fs::read(&outside).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
-    assert_eq!(std::fs::read_dir(dir.join("outside")).map(drop).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
-    // Its flags still answer, read outside the thread's domain.
-    assert_ne!(host::directory_flags(&dir.join("outside")).map_err(|e| e.raw_os_error()), Err(Some(libc::EACCES)));
-    let (mut vm, trace) = build(&[file, probe]);
-    assert_eq!(eval(&mut vm, "(list r c)"), "(failed (nil nil))");
-    let confined: Vec<_> = items(&trace, "refusals", "confined").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
-    assert_eq!(confined, [outside.to_string_lossy()], "{trace}");
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "r"), "read");
+    assert!(items(&trace, "uncaptured", "confined").is_empty(), "{trace}");
+    let reads: Vec<_> = items(&trace, "records", "file-read").iter().map(|r| r["path"].as_str().unwrap().to_owned()).collect();
+    assert!(reads.contains(&outside.to_string_lossy().into_owned()), "{reads:?}");
+}
+
+/// A SQLite database is a live resource SQLite reads and writes past the
+/// host boundary: a build opens none. `sqlite-open' answers nil there, the
+/// file is not made, and the effect is listed, so the form or its entry
+/// runs in the session instead.
+#[test]
+fn a_build_opens_no_sqlite_database() {
+    let dir = scratch("sqlite");
+    let database = dir.join("data/db.sqlite");
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+    let file = write(&dir.join("open.el"), &format!("(setq d (sqlite-open {}))\n", lisp(&database)));
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "d"), "nil");
+    assert!(!database.exists(), "the build made {}", database.display());
+    let notes: Vec<_> = items(&trace, "uncaptured", "effect").iter().filter_map(|r| r["what"].as_str()).map(str::to_owned).collect();
+    assert!(notes.iter().any(|what| what.starts_with("open sqlite database ")), "{notes:?}");
+}
+
+/// A build reads no credential file: the read fails as an effect does,
+/// is listed as a secret read, and keeps no digest of the content.
+#[test]
+fn a_build_reads_no_credential_file() {
+    let dir = scratch("credential");
+    let netrc = write(&dir.join("home/.netrc"), "machine example login me password hunter2\n");
+    let file = write(&dir.join("read.el"), &format!(
+        "(setq r (condition-case nil (with-temp-buffer (insert-file-contents {}) (buffer-string)) (file-error 'failed)))\n", lisp(&netrc)));
+    let (mut vm, trace) = build(&[file]);
+    assert_eq!(eval(&mut vm, "r"), "failed");
+    let path = netrc.to_string_lossy().into_owned();
+    assert!(items(&trace, "records", "secret-read").iter().any(|r| r["path"] == path), "{trace}");
+    assert!(!items(&trace, "records", "file-read").iter().any(|r| r["path"] == path), "a digest of {path} was kept: {trace}");
 }
 
 #[test]

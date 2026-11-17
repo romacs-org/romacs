@@ -295,7 +295,7 @@ impl Vm {
     /// already arrived, as a press the host counted or as `quit-flag', so
     /// the read returns the quit character at once (GNU's
     /// quit_throw_to_read_char). `quit-flag' is cleared: the reader acts on
-    /// the key as read_char's caller does on its quit (lisp/romacs/vm/keyboard.el).
+    /// the key as read_char's caller does on its quit (lisp/vm/keyboard.el).
     /// When `quit-flag' is `throw-on-input''s tag the read returns nothing
     /// and leaves it for the next safepoint, which throws.
     pub(crate) fn take_read_quit(&mut self) -> ReadQuit {
@@ -423,7 +423,8 @@ impl Vm {
     }
 
     pub(crate) fn host_input_pending(&mut self) -> bool {
-        self.host_input.as_mut().is_some_and(|host| host.input_pending())
+        // A key a `switch-frame' went before is input not yet read.
+        self.deferred_event.is_some() || self.host_input.as_mut().is_some_and(|host| host.input_pending())
     }
 }
 

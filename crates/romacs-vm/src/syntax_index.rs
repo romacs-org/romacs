@@ -28,7 +28,7 @@ use crate::syntax_scan::{ParseState, R, Scanner, Text};
 use crate::syntax_summary::{self as summary, Key, Span, Summary};
 
 /// Characters in a leaf the index cuts; a leaf grown past twice this splits.
-pub(crate) const LEAF: usize = 2048;
+pub(crate) const LEAF: usize = 1024;
 /// Children a node holds before it splits.
 const FANOUT: usize = 16;
 /// Summaries a node keeps; the oldest goes first. A key whose span closes
@@ -323,6 +323,9 @@ impl SyntaxIndex {
             Self::composed(counts, scanner, node, start, slot).map_or(Span::Deep, Span::Exact)
         };
         node.spans.truncate(KEYS - 1);
+        // Room for this one only: most nodes keep one or two keys, and a
+        // slot is large beside a leaf's characters.
+        node.spans.reserve_exact(1);
         node.spans.insert(0, (slot, span));
         &node.spans[0].1
     }

@@ -587,7 +587,10 @@ impl Leaf<'_> {
         let buffer = self.current_buffer()?;
         let Some(data::Object::Buffer(_)) = self.vm.object_if(buffer) else { return Ok(Value::NIL) };
         let base = self.ts_base(buffer);
-        Ok(flag(self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending())))
+        if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
+            return Ok(Value::TRUE);
+        }
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and
@@ -627,9 +630,19 @@ impl Leaf<'_> {
             return Ok(None);
         }
         let (old, visible) = { let c = core.borrow(); (c.tree.clone(), c.visible) };
+        // A reparse a frame started on a thread: its tree, waited for, is
+        // this parse's if the text has not changed since it began, and the
+        // nearest old tree if it has.
+        let ahead = core.borrow_mut().ahead.take();
+        let ahead = ahead.and_then(|ahead| ahead.finish(self.ts_buffer_text(self.ts_base(buffer))?))
+            .filter(|(_, region, ..)| *region == visible);
+        let (ahead, ahead_changed) = match ahead {
+            Some((tree, _, edited, changed)) => (Some((tree, edited)), changed),
+            None => (None, None),
+        };
         let twin = self.ts_twin_tree(parser, old.is_none());
         let early = if old.is_none() && twin.is_none() { self.ts_early_tree(parser) } else { None };
-        let (done, behind) = match early {
+        let (done, behind) = match ahead.or(early) {
             Some((tree, false)) => (Some(tree), None),
             Some((tree, true)) => (None, Some(tree)),
             None => (twin, None),
@@ -637,13 +650,15 @@ impl Leaf<'_> {
         let new = done.or_else(|| {
             let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            native.borrow_mut().parse(old.as_deref().or(behind.as_ref()), &reader)
+            // A thread's tree that fell behind the text is newer than the old one.
+            native.borrow_mut().parse(behind.as_ref().or(old.as_deref()), &reader)
         });
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
         };
         let new = Rc::new(new);
-        let changed = old.as_ref().map(|old| new.changed_since(old));
+        // The thread compared the same two trees, when it parsed this one.
+        let changed = old.as_ref().map(|old| ahead_changed.unwrap_or_else(|| new.changed_since(old)));
         {
             let mut c = core.borrow_mut();
             c.tree = Some(new);
@@ -700,7 +715,10 @@ impl Leaf<'_> {
         if !self.ts_parser(parser)?.native.borrow_mut().set_included_ranges(&bytes) {
             return Err(self.ts_message("treesit-range-invalid", "Something went wrong when setting ranges", &[ranges]));
         }
-        self.ts_parser(parser)?.core.borrow_mut().need_reparse = true;
+        let mut core = self.ts_parser(parser)?.core.borrow_mut();
+        core.need_reparse = true;
+        // A reparse on its thread read the old ranges.
+        core.ahead = None;
         Ok(Value::NIL)
     }
     /// treesit_check_range_argument, in the current buffer.
@@ -972,26 +990,53 @@ impl Leaf<'_> {
     /// treesit-subtree-stat: (MAX-DEPTH MAX-WIDTH COUNT) of NODE's subtree.
     pub(crate) fn ts_subtree_stat(&mut self, node: Value) -> Out {
         let n = self.ts_node(node)?.clone();
-        let mut cursor = native::Cursor::new(n.node);
-        let (mut max_depth, mut max_width, mut count, mut depth) = (1i64, 0i64, 0i64, 0i64);
-        loop {
-            count += 1;
-            while cursor.first_child() {
-                depth += 1;
-                count += 1;
-                let mut width = 1;
-                while cursor.next_sibling() { width += 1; }
-                max_width = max_width.max(width);
-                cursor.parent();
-                cursor.first_child();
+        let stat = subtree_stat(n.node, None);
+        Ok(self.ts_list(&[fixnum(stat.depth), fixnum(stat.width), fixnum(stat.count)]))
+    }
+    /// `romacs--treesit-subtree-exceeds`: whether NODE's subtree is deeper
+    /// than DEPTH or has a node with more than WIDTH children, as
+    /// `treesit-subtree-stat` would tell, without walking the rest of it
+    /// once it is.
+    pub(crate) fn ts_subtree_exceeds(&mut self, node: Value, depth: Value, width: Value) -> Out {
+        let n = self.ts_node(node)?.clone();
+        let (depth, width) = (self.ts_depth(depth)?, self.ts_depth(width)?);
+        let stat = subtree_stat(n.node, Some((depth, width)));
+        Ok(flag(stat.depth > depth || stat.width > width))
+    }
+}
+
+/// What `treesit-subtree-stat` tells of a subtree.
+struct Stat { depth: i64, width: i64, count: i64 }
+
+/// NODE's subtree's greatest depth and width and its node count, walked
+/// as GNU's treesit-subtree-stat walks it; with LIMIT (depth, width), the
+/// walk stops as soon as either is exceeded.
+fn subtree_stat(node: native::Node, limit: Option<(i64, i64)>) -> Stat {
+    let mut cursor = native::Cursor::new(node);
+    let mut stat = Stat { depth: 1, width: 0, count: 0 };
+    let mut depth = 0i64;
+    let over = |stat: &Stat| limit.is_some_and(|(d, w)| stat.depth > d || stat.width > w);
+    loop {
+        stat.count += 1;
+        while cursor.first_child() {
+            depth += 1;
+            stat.count += 1;
+            let mut width = 1;
+            while cursor.next_sibling() { width += 1; }
+            stat.width = stat.width.max(width);
+            stat.depth = stat.depth.max(depth);
+            if over(&stat) {
+                return stat;
             }
-            max_depth = max_depth.max(depth);
-            while !cursor.next_sibling() {
-                if cursor.parent() {
-                    depth -= 1;
-                } else {
-                    return Ok(self.ts_list(&[fixnum(max_depth), fixnum(max_width), fixnum(count)]));
-                }
+            cursor.parent();
+            cursor.first_child();
+        }
+        stat.depth = stat.depth.max(depth);
+        while !cursor.next_sibling() {
+            if cursor.parent() {
+                depth -= 1;
+            } else {
+                return stat;
             }
         }
     }
@@ -1066,7 +1111,7 @@ impl Leaf<'_> {
         out.bytes.extend_from_slice(view.bytes());
         Ok(())
     }
-    fn ts_proper_list(&self, list: Value) -> R<Vec<Value>> {
+    pub(crate) fn ts_proper_list(&self, list: Value) -> R<Vec<Value>> {
         let mut out = Vec::new();
         let mut tail = list;
         while tail != Value::NIL {
@@ -1184,6 +1229,8 @@ enum Verdict {
 // The task values of treesit-query-capture.
 const CAPTURE_PARSER: usize = 0;
 const CAPTURE_FN: usize = 1;
+/// A fontify task's settings (`romacs--treesit-fontify`).
+const CAPTURE_SPANS: usize = 2;
 const CAPTURE_FLAGS: usize = 3;
 
 // treesit-query-capture.
@@ -1197,6 +1244,97 @@ impl Leaf<'_> {
     /// treesit-query-capture on the up-to-date NODE, until its first
     /// `#pred?' call.
     pub(crate) fn ts_capture(&mut self, node: Value, query: Value, beg: Value, end: Value, node_only: Value, grouped: Value) -> R<Next> {
+        let flags = i64::from(node_only != Value::NIL) | i64::from(grouped != Value::NIL) << 1;
+        self.ts_capture_with(node, query, beg, end, flags, None)
+    }
+    /// `romacs--treesit-fontify`: NODE's captures by QUERY between BEG and
+    /// END, as `treesit-query-capture` finds them, its predicates run; done
+    /// with the task itself, whose captures `ts_fontify_next` hands out for
+    /// faces between REGION's ends. QUERY's patterns are the settings
+    /// SPANS names, a vector of (FIRST-PATTERN . OVERRIDE).
+    pub(crate) fn ts_fontify(&mut self, node: Value, query: Value, beg: Value, end: Value, region: (i64, i64), spans: Value) -> R<Next> {
+        let settings = self.vector_values(spans)?.into_iter()
+            .map(|span| self.pair(span).and_then(|(first, _)| first.integer_value()).and_then(|first| u32::try_from(first).ok()))
+            .collect::<Option<Vec<u32>>>().ok_or(Fault::Wrong("vectorp", spans))?;
+        let fontify = ts::Fontify { start: region.0, end: region.1, settings, batch: 0, next: (0, 0) };
+        self.ts_capture_with(node, query, beg, end, 0, Some((fontify, spans)))
+    }
+    /// The next capture of a finished fontify TASK, as (name, node, override),
+    /// and the region its faces go in; None when all are applied.
+    pub(crate) fn ts_fontify_next(&mut self, task: Value) -> Option<(Value, Value, Value, i64, i64)> {
+        let (pair, setting, start, end) = {
+            let mut s = self.ts_capture_state(task);
+            let f = s.fontify.as_ref().expect("a fontify task");
+            let (start, end, (mut at, mut pair)) = (f.start, f.end, f.next);
+            let found = loop {
+                let Some(&passed) = s.passed.get(at) else { break None };
+                let (pattern, first, count) = s.matches[passed];
+                if pair < count {
+                    break Some((first + 2 * pair, f.setting(pattern)));
+                }
+                (at, pair) = (at + 1, 0);
+            };
+            s.fontify.as_mut().expect("a fontify task").next = (at, pair + 1);
+            let (pair, setting) = found?;
+            (pair, setting, start, end)
+        };
+        let values = &self.ts_task(task).values;
+        let (name, node, spans) = (values[pair], values[pair + 1], values[CAPTURE_SPANS]);
+        let overriding = i64::try_from(setting).ok().and_then(|i| self.vector_get(spans, fixnum(i)).ok())
+            .and_then(|span| self.pair(span)).map_or(Value::NIL, |(_, o)| o);
+        Some((name, node, overriding, start, end))
+    }
+    /// Whether a fontify TASK's match AT begins a setting after the one
+    /// under way, whose captures must be applied first.
+    fn ts_fontify_boundary(&self, task: Value, at: usize) -> bool {
+        let s = self.ts_capture_state(task);
+        s.fontify.as_ref().is_some_and(|f| at > f.batch && f.setting(s.matches[at].0) != f.setting(s.matches[f.batch].0))
+    }
+    /// The next setting of a fontify TASK whose captures are all applied:
+    /// its predicates run, as `ts_capture_run` does; done with nil when no
+    /// setting is left.
+    pub(crate) fn ts_fontify_more(&mut self, task: Value) -> R<Next> {
+        {
+            let mut s = self.ts_capture_state(task);
+            if s.at >= s.matches.len() {
+                return Ok(Next::Done(Value::NIL));
+            }
+            let at = s.at;
+            s.passed.clear();
+            let f = s.fontify.as_mut().expect("a fontify task");
+            (f.batch, f.next) = (at, (0, 0));
+        }
+        self.ts_capture_run(task)
+    }
+    /// `romacs--treesit-query-combine`: one query of LANGUAGE holding the
+    /// patterns of QUERIES in order, and the settings it stands for as
+    /// `ts_fontify` takes them, each query's first pattern with the
+    /// override in OVERRIDES beside it.
+    pub(crate) fn ts_query_combine(&mut self, language: Value, queries: &[Value], overrides: &[Value]) -> Out {
+        let mut text = Vec::new();
+        let mut spans = Vec::with_capacity(queries.len());
+        let mut first = 0u32;
+        for (&query, &overriding) in queries.iter().zip(overrides) {
+            let compiled = self.ts_ensure_compiled(query)?;
+            let source = self.ts_query(query)?.source;
+            let bytes = if self.pair(source).is_some() { self.ts_query_expand_bytes(source)?.bytes } else { self.string_bytes(source)? };
+            text.extend_from_slice(&bytes);
+            text.push(b'\n');
+            spans.push(self.cons(fixnum(i64::from(first)), overriding));
+            first += compiled.query.pattern_count();
+        }
+        let combined = if let [only] = queries {
+            *only
+        } else {
+            let source = self.ts_text_value(&text);
+            let query = self.ts_allocate(ts::Object::Query(ts::Query { language, source, compiled: None }));
+            self.ts_ensure_compiled(query)?;
+            query
+        };
+        let spans = self.vector_from(spans);
+        Ok(self.cons(combined, spans))
+    }
+    fn ts_capture_with(&mut self, node: Value, query: Value, beg: Value, end: Value, flags: i64, fontify: Option<(ts::Fontify, Value)>) -> R<Next> {
         let n = self.ts_check_node(node)?;
         let (buffer, visible_beg) = self.ts_node_buffer(&n);
         let beg = if beg == Value::NIL { None } else { Some(self.ts_position(beg, buffer)?) };
@@ -1219,7 +1357,8 @@ impl Leaf<'_> {
         };
         let found = compiled.query.matches(n.node, range);
         let mut names: Vec<Option<Value>> = Vec::new();
-        let mut values = vec![n.parser, Value::NIL, Value::NIL, fixnum(i64::from(node_only != Value::NIL) | i64::from(grouped != Value::NIL) << 1)];
+        let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
+        let mut values = vec![n.parser, Value::NIL, overriding, fixnum(flags)];
         let mut matches = Vec::with_capacity(found.len());
         for m in found {
             let start = values.len();
@@ -1242,7 +1381,10 @@ impl Leaf<'_> {
             matches.push((m.pattern, start, m.captures.len()));
         }
         let timestamp = self.ts_parser(n.parser)?.timestamp;
-        let state = ts::Capture { compiled, matches, at: 0, predicate: 0, passed: Vec::new(), timestamp };
+        if let Some(f) = &fontify {
+            matches.sort_by_key(|&(pattern, _, _)| f.setting(pattern));
+        }
+        let state = ts::Capture { compiled, matches, at: 0, predicate: 0, passed: Vec::new(), timestamp, fontify };
         let task = self.ts_allocate(ts::Object::Task(ts::Task { values, state: Rc::new(RefCell::new(ts::TaskState::Capture(state))) }));
         self.ts_capture_run(task)
     }
@@ -1379,7 +1521,7 @@ impl Leaf<'_> {
                 let s = self.ts_capture_state(task);
                 (s.compiled.clone(), s.at, s.predicate, s.matches.len())
             };
-            if at >= matches_len {
+            if at >= matches_len || self.ts_fontify_boundary(task, at) {
                 return self.ts_capture_finish(task);
             }
             let (pattern, start, count) = self.ts_capture_state(task).matches[at];
@@ -1430,6 +1572,9 @@ impl Leaf<'_> {
         }
     }
     fn ts_capture_finish(&mut self, task: Value) -> R<Next> {
+        if self.ts_capture_state(task).fontify.is_some() {
+            return Ok(Next::Done(task));
+        }
         let flags = self.ts_task(task).values[CAPTURE_FLAGS].integer_value().unwrap_or(0);
         let (node_only, grouped) = (flags & 1 != 0, flags & 2 != 0);
         let (matches, passed) = {

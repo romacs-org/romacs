@@ -195,7 +195,14 @@ fn frame_alist(cx: &mut Leaf<'_>, frame: Value, font: bool) -> std::result::Resu
     store(&mut alist, cx.intern("menu-bar-lines"), Value::integer(lines).unwrap());
     let ([left, right], tab_bar_lines) = cx.windows().frame_chrome(frame)?;
     store(&mut alist, cx.intern("tab-bar-lines"), Value::integer(i64::from(tab_bar_lines)).unwrap());
-    store(&mut alist, cx.intern("visibility"), Value::TRUE);
+    // Fframe_parameters: t for a mini-window of its own, else the window
+    // it borrows.
+    let mini = minibuffer_window(cx, frame)?;
+    let own = cx.windows().window_frame_of(mini)? == cx.windows().decode_live_frame(frame)?;
+    store(&mut alist, cx.intern("minibuffer"), if own { Value::TRUE } else { mini });
+    let visibility = if cx.windows().frame_visible(frame)? { Value::TRUE }
+                     else if cx.windows().frame_iconified(frame)? { cx.intern("icon") } else { Value::NIL };
+    store(&mut alist, cx.intern("visibility"), visibility);
     store(&mut alist, cx.intern("no-accept-focus"), Value::NIL);
     // A window-system frame stores every parameter it has a handler for,
     // nil when unset (pgtkfns.c:1599 gui_default_parameter), and reports
@@ -432,9 +439,10 @@ fn apply_child_parameters(cx: &mut Leaf<'_>, frame: Value, pairs: &[(Value, Valu
     Ok(())
 }
 
-// What pgtkfns.c x-create-frame does for a `parent-frame': Romacs's
-// display makes child frames, painted over their parent (DIVERGENCES.md
-// VM2-CHILD-FRAME); a top-level frame is refused (VM2-WIN-SUBSTRATE).
+// What pgtkfns.c x-create-frame does: with a `parent-frame' Romacs's
+// display makes a child frame, painted over its parent (DIVERGENCES.md
+// VM2-CHILD-FRAME); without one a top-level frame, in a window of its own
+// where the host shows more than one (VM2-WIN-SUBSTRATE).
 // Not named `x-create-frame': loadup.el and cus-start.el read that name
 // as a window system's whole frame surface. romacs-pgtk.el's
 // `frame-creation-function' method calls it for `make-frame'.
@@ -449,14 +457,6 @@ fn romacs_create_frame(cx, parms: Value) {
     if tail != Value::NIL { return Err(Fault::Wrong("listp", parms)); }
     let lookup = |cx: &mut Leaf<'_>, name: &str| { let key = cx.intern(name); pairs.iter().find(|(k, _)| *k == key).map(|&(_, v)| v) };
     let parent = lookup(cx, "parent-frame").unwrap_or(Value::NIL);
-    if parent == Value::NIL {
-        return Err(Fault::Error("Romacs creates child frames only (a `parent-frame' parameter)".into()));
-    }
-    if cx.windows().frame_live_p(parent) == Value::NIL { return Err(Fault::Wrong("frame-live-p", parent)); }
-    let (column, line) = (char_size(cx, true)?, char_size(cx, false)?);
-    // GNU's default frame size, 80 columns by 36 lines.
-    let start = ChildGeometry { left: 0, top: 0, width: 80 * column, height: 36 * line, border: 0 };
-    let geometry = requested_geometry(cx, parent, start, &pairs)?;
     // x_create_frame stores every parameter it was given, then the name.
     let mut stored: Vec<(Value, Value)> = Vec::new();
     for &(key, value) in &pairs {
@@ -468,6 +468,12 @@ fn romacs_create_frame(cx, parms: Value) {
         stored.retain(|(k, _)| *k != name_key);
         stored.insert(0, (name_key, name));
     }
+    if parent == Value::NIL { return create_top_frame(cx, &pairs, stored); }
+    if cx.windows().frame_live_p(parent) == Value::NIL { return Err(Fault::Wrong("frame-live-p", parent)); }
+    let (column, line) = (char_size(cx, true)?, char_size(cx, false)?);
+    // GNU's default frame size, 80 columns by 36 lines.
+    let start = ChildGeometry { left: 0, top: 0, width: 80 * column, height: 36 * line, border: 0 };
+    let geometry = requested_geometry(cx, parent, start, &pairs)?;
     // Its faces are its parent's until something sets one on it alone
     // (`face_own').
     let frame = cx.windows().create_child_frame(parent, geometry, stored)?;
@@ -482,6 +488,47 @@ fn romacs_create_frame(cx, parms: Value) {
     cx.windows().set_frame_visible(frame, visibility.is_none_or(|v| v != Value::NIL && v != icon))?;
     Ok(frame)
 }}
+
+/// x_create_frame without a `parent-frame' (pgtkfns.c:1197): a visible
+/// top-level frame on the one display, PAIRS its parameters and STORED
+/// what it keeps of them. Its mini-window is its own unless `minibuffer'
+/// is nil (the default minibuffer frame's) or a minibuffer window; its
+/// faces are copies of the selected frame's; its size is `width' columns
+/// by `height' lines of text, GNU's 80 by 36 by default, with its
+/// fringes, internal border and tab bar around them.
+fn create_top_frame(cx: &mut Leaf<'_>, pairs: &[(Value, Value)], stored: Vec<(Value, Value)>) -> Out {
+    if !cx.windows().host_top_level_frames() {
+        return Err(Fault::Error("This display shows one top-level frame; a new frame needs a `parent-frame' parameter".into()));
+    }
+    let lookup = |cx: &mut Leaf<'_>, name: &str| { let key = cx.intern(name); pairs.iter().find(|(k, _)| *k == key).map(|&(_, v)| v) };
+    let mini = match lookup(cx, "minibuffer") {
+        Some(v) if v == cx.intern("only") => return Err(Fault::Error("Romacs makes no minibuffer-only frame".into())),
+        Some(Value::NIL) => Some(cx.windows().default_minibuffer_window()?),
+        Some(v) if cx.windows().is_minibuffer_window(v)? => Some(v),
+        _ => None,
+    };
+    let selected = cx.windows().selected_top_frame();
+    let frame = cx.windows().create_top_frame(mini, stored)?;
+    cx.face_copy(frame, selected)?;
+    // gui_default_parameter (pgtkfns.c:1599): each parameter's handler
+    // runs on the frame already listed, as `modify-frame-parameters' runs it.
+    for &(key, value) in pairs.iter().rev() { handle_frame_parameter(cx, frame, key, value)?; }
+    let (column, line) = (char_size(cx, true)?, char_size(cx, false)?);
+    let size = |cx: &Leaf<'_>, value: Option<Value>, unit: u32, default: u32| {
+        value.and_then(|v| size_param(cx, v, unit, 0)).filter(|&n| n > 0).unwrap_or(default * unit)
+    };
+    let (width, height) = (lookup(cx, "width"), lookup(cx, "height"));
+    let (width, height) = (size(cx, width, column, 80), size(cx, height, line, 36));
+    cx.windows().size_top_frame(frame, width, height)?;
+    let visibility = lookup(cx, "visibility");
+    let icon = cx.intern("icon");
+    match visibility {
+        Some(Value::NIL) => cx.windows().set_top_frame_visibility(frame, false, false)?,
+        Some(v) if v == icon => cx.windows().set_top_frame_visibility(frame, false, true)?,
+        _ => {}
+    }
+    Ok(frame)
+}
 
 // The frame reserves no line for a minibuffer window a child frame hosts
 // (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER); romacs-complete.el places it.
@@ -510,16 +557,28 @@ fn romacs_minibuffer_host(cx) {
     cx.windows().minibuffer_host()
 }}
 
-// frame.c Fdelete_frame: the hooks around delete_frame's deletion.
+// frame.c Fdelete_frame: delete_frame's checks, hooks and deletion.
 // Descendants are deleted without running theirs (VM2-CHILD-FRAME).
 defsubr! { name = "delete-frame", gnu = "frame.c:3150", effect = Global,
 fn delete_frame(cx; optional frame: Value, force: Value) -> Step {
     let target = if frame == Value::NIL { cx.windows().decode_live_frame(Value::NIL)? } else { frame };
     if cx.windows().frame_p(target) == Value::NIL { return Err(Fault::Wrong("framep", target)); }
     if cx.windows().frame_live_p(target) == Value::NIL { return Ok(Step::Done(Value::NIL)); }
-    if !cx.windows().is_child_frame(target)? { cx.windows().delete_frame(target, force)?; }
+    if !cx.windows().is_child_frame(target)? {
+        check_top_deletable(cx, target, force)?;
+        if cx.windows().minibuffer_borrower(target).is_some() {
+            return Err(Fault::Error("Attempt to delete a surrogate minibuffer frame".into()));
+        }
+    }
     run_frame_hook(cx, "delete-frame-functions", target, delete_after_hook, vec![target, force])
 }}
+/// frame.c delete_frame: at least one other visible or iconified
+/// top-level frame must remain, or with FORCE some other frame.
+fn check_top_deletable(cx: &mut Leaf<'_>, frame: Value, force: Value) -> std::result::Result<(), Fault> {
+    if cx.windows().other_frames(frame, force != Value::NIL)? { return Ok(()); }
+    Err(Fault::Error(if force == Value::NIL { "Attempt to delete the sole visible or iconified frame" }
+                     else { "Attempt to delete the only frame" }.into()))
+}
 fn run_frame_hook(cx: &mut Leaf<'_>, hook: &str, frame: Value, then: fn(&mut Leaf<'_>, Value, &[Value]) -> Next, saved: Vec<Value>) -> Next {
     let run = cx.intern("run-hook-with-args");
     if !cx.fboundp(run) { return then(cx, Value::NIL, &saved); }
@@ -527,13 +586,35 @@ fn run_frame_hook(cx: &mut Leaf<'_>, hook: &str, frame: Value, then: fn(&mut Lea
     Ok(Step::Call { f: run, args: vec![hook, frame], then, saved })
 }
 fn delete_after_hook(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
+    let (frame, force) = (saved[0], saved[1]);
     // The hook may have deleted the frame already.
-    if cx.windows().frame_live_p(saved[0]) == Value::NIL { return Ok(Step::Done(Value::NIL)); }
-    cx.windows().delete_frame(saved[0], saved[1])?;
-    run_frame_hook(cx, "after-delete-frame-functions", saved[0], deleted, vec![])
+    if cx.windows().frame_live_p(frame) == Value::NIL { return Ok(Step::Done(Value::NIL)); }
+    if cx.windows().is_child_frame(frame)? {
+        cx.windows().delete_frame(frame, force)?;
+        return run_frame_hook(cx, "after-delete-frame-functions", frame, deleted, vec![]);
+    }
+    check_top_deletable(cx, frame, force)?;
+    // Don't let the frame remain selected: with `delete-frame-choose-selected'
+    // `mru' the most recently used visible frame takes over, as frame.el's
+    // `get-mru-frame' finds it, else another visible one, else any other.
+    if cx.windows().selected_top_frame() == frame {
+        let choose = cx.intern("delete-frame-choose-selected");
+        let mru = cx.intern("mru");
+        let mru = cx.variable_value(choose)? == Some(mru);
+        let next = cx.windows().successor_frame(frame, mru)?;
+        cx.windows().select_frame(next, Value::TRUE)?;
+    }
+    cx.windows().delete_top_frame(frame)?;
+    run_frame_hook(cx, "after-delete-frame-functions", frame, deleted, vec![])
 }
 fn deleted(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
+// frame.c Fframe_id: the frame's display identity, unique in the session.
+defsubr! { name = "frame-id", gnu = "frame.c:345", effect = Reads,
+fn frame_id(cx; optional frame: Value) {
+    let frame = cx.windows().decode_live_frame(frame)?;
+    Ok(Value::integer(cx.windows().frame_display_id(frame)? as i64).unwrap())
+}}
 defsubr! { name = "frame-parent", gnu = "frame.c:2180", effect = Reads,
 fn frame_parent(cx; optional frame: Value) { cx.windows().frame_parent(frame) }}
 defsubr! { name = "frame-ancestor-p", gnu = "frame.c:2242", effect = Reads,
@@ -644,15 +725,31 @@ fn current_message(cx) {
 }}
 defsubr! { name = "internal-handle-focus-in", gnu = "keyboard.c:7891", effect = Reads,
 fn internal_handle_focus_in(cx, event: Value) {
-    // GNU queues a switch-frame event when the focused frame is not the
-    // selected one; a VM2 session has one frame (`frame-list'), always
-    // selected, so there is never one to queue.
+    // The focus moving to a frame neither the last event's nor selected
+    // queues the `switch-frame' read_char reads next.
     let focus_in = cx.intern("focus-in");
     let frame = cx.pair(event).filter(|&(head, _)| head == focus_in).and_then(|(_, rest)| cx.pair(rest)).map(|(frame, _)| frame);
-    if !frame.is_some_and(|frame| cx.windows().frame_p(frame) != Value::NIL) {
+    let Some(frame) = frame.filter(|&frame| cx.windows().frame_p(frame) != Value::NIL) else {
         return Err(Fault::Error("Invalid focus-in event".into()));
-    }
+    };
+    cx.windows().handle_focus_in(frame);
     Ok(Value::NIL)
+}}
+// keyboard.c read_char's `unread_switch_frame', taken (lisp/vm/keyboard.el).
+defsubr! { name = "romacs--take-unread-switch-frame", gnu = "keyboard.c:2683", effect = Global,
+fn romacs_take_unread_switch_frame(cx) {
+    Ok(cx.windows().take_unread_switch_frame())
+}}
+// Whether read_char's `unread_switch_frame' holds an event.
+defsubr! { name = "romacs--unread-switch-frame-p", gnu = "keyboard.c:2683", effect = Reads,
+fn romacs_unread_switch_frame_p(cx) {
+    Ok(if cx.windows().unread_switch_frame_pending() { Value::TRUE } else { Value::NIL })
+}}
+// read_key_sequence's `delayed_switch_frame', left for read_char.
+defsubr! { name = "romacs--set-unread-switch-frame", gnu = "keyboard.c:11874", effect = Global,
+fn romacs_set_unread_switch_frame(cx, event: Value) {
+    cx.windows().set_unread_switch_frame(event);
+    Ok(event)
 }}
 defsubr! { name = "internal-show-cursor", gnu = "dispnew.c:7428", effect = Global,
 fn internal_show_cursor(cx, window: Value, show: Value) {

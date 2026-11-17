@@ -1,6 +1,6 @@
 //! The interned symbols `commandp` may accept, kept as definitions change,
 //! so M-x filters them rather than every symbol on each key
-//! (lisp/romacs/romacs-commands.el).
+//! (lisp/completion/romacs-commands.el).
 //!
 //! Writes only mark what changed; `romacs-command-symbols` brings the set
 //! up to date when asked, judging the marked slots and, as an alias's

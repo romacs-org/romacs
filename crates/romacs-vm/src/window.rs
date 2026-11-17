@@ -2,7 +2,7 @@
 use crate::{data::Object, *};
 #[path = "redisplay.rs"]
 mod redisplay;
-pub(crate) use redisplay::shown_bytes;
+pub(crate) use redisplay::{shown_bytes, Recentred};
 #[path = "window_config.rs"]
 mod config;
 pub(crate) use config::WindowConfiguration;
@@ -241,6 +241,11 @@ impl Vm {
         let frame = if name == ROOT { self.selected_top_frame() } else { self.frame_value_peek() };
         let Ok(f) = self.frame(frame) else { return Value::UNBOUND; };
         match name { ROOT => f.root, SELECTED => f.selected, MINI => f.minibuffer, _ => unreachable!() }
+    }
+    /// Whether top-level frame ROOT's minibuffer window is its own, not
+    /// one it borrows from another frame (`(minibuffer . nil)').
+    pub(super) fn owns_minibuffer(&self, root: Value) -> Result<bool> {
+        Ok(self.window(self.frame(root)?.minibuffer)?.frame == root)
     }
     /// The selected frame's minibuffer window.
     pub(super) fn mini_window(&self) -> Value {
@@ -890,6 +895,27 @@ impl Vm {
         self.refit_mini_window(root, geometry.width, geometry.height)?;
         Ok(true)
     }
+    /// window.c `Fresize_mini_window_internal`: give mini-window WINDOW the
+    /// height `window--resize-mini-window` prepared (its new pixel size)
+    /// while it and the root window's prepared size still fill their
+    /// height. The mini-window's height is a number of lines of its
+    /// top-level frame here, and the root window's children take the change
+    /// as a frame resize gives it them (`set_top_frame_geometry`).
+    pub(crate) fn resize_mini_window_internal(&mut self, window: Value) -> Result<()> {
+        let w = self.decode_window(window, true, false)?;
+        let frame = self.window(w)?.frame;
+        let (minibuffer, root) = { let f = self.frame(frame)?; (f.minibuffer, f.root) };
+        if minibuffer != w { return Err("Not a valid minibuffer window".into()); }
+        if root == w { return Err("Cannot resize a minibuffer-only frame".into()); }
+        let (r, m) = (self.window(root)?, self.window(w)?);
+        let fits = m.new_pixel > 0 && r.height + m.height == r.new_pixel + m.new_pixel;
+        if !fits || !self.prepared_check(root, false, Value::NIL)? { return Err("Cannot resize mini window".into()); }
+        let lines = (m.new_pixel / self.window_state.line.max(1)).max(1);
+        let top = self.top_frame(frame);
+        self.top_geometry_mut(top)?.mini_lines = lines;
+        let geometry = self.top_geometry(top)?;
+        self.refit_mini_window(top, geometry.width, geometry.height)
+    }
     /// Lay out again after top-level frame ROOT's mini-window's height
     /// changed: a hosted mini-window's hosting frame takes its new height,
     /// else ROOT's windows, WIDTH by HEIGHT, make room for it.
@@ -915,11 +941,13 @@ impl Vm {
         let mut ids = vec![];
         self.window_leaf_ids(self.frame(root)?.root, &mut ids)?;
         let mini = self.frame(root)?.minibuffer;
-        // A hosted mini-window is shown with its host's windows.
+        // A hosted mini-window is shown with its host's windows, and a
+        // borrowed one with its own frame's.
         let host = self.minibuffer_host(root);
-        if host.is_none() { ids.push(self.window(mini)?.id); }
+        let own = self.owns_minibuffer(root)?;
+        if host.is_none() && own { ids.push(self.window(mini)?.id); }
         // Redisplay sizes the mini-window to its display before laying out.
-        if self.resize_mini_window(root, mini)? { self.refit_mini_window(root, width, height)?; }
+        if own && self.resize_mini_window(root, mini)? { self.refit_mini_window(root, width, height)?; }
         self.reconcile_terminal_geometry()?;
         // Painted inside the internal border (frame.h:1796).
         let border = self.host_border(self.frame_of_id(frame)?);
@@ -1233,8 +1261,9 @@ impl Vm {
             return Err("frame geometry is below safe window minimum".into());
         }
         let root = self.frame(root_frame)?.root;
-        // A hosted mini-window takes none of the root windows' lines.
-        let hosted = self.minibuffer_host(root_frame).is_some();
+        // A hosted mini-window takes none of the root windows' lines, nor
+        // does another frame's that this one borrows.
+        let hosted = self.minibuffer_host(root_frame).is_some() || !self.owns_minibuffer(root_frame)?;
         // A mini-window the root windows cannot make room for keeps one
         // line (window.c grow_mini_window, bug#69140).
         let mini_lines = self.top_geometry(root_frame)?.mini_lines;
@@ -2749,6 +2778,14 @@ impl<'a> Windows<'a> {
         let changed = self.vm.resize_mini_window_now().map_err(internal)?;
         if changed { self.vm.display_state.version += 1; }
         Ok(if changed { Value::TRUE } else { Value::NIL })
+    }
+    /// window.c `Fresize_mini_window_internal`: t once the mini-window has
+    /// its prepared height.
+    pub(crate) fn resize_mini_window_internal(&mut self, window: Value) -> Out {
+        self.vm.ensure_windows().map_err(internal)?;
+        self.vm.resize_mini_window_internal(window).map_err(Fault::Error)?;
+        self.vm.display_state.version += 1;
+        Ok(Value::TRUE)
     }
     /// minibuf.c:215: the minibuffer window while a minibuffer is active.
     pub(crate) fn active_minibuffer_window(&mut self) -> Out {

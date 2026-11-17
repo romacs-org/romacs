@@ -256,8 +256,8 @@ impl Vm {
             && y != self.intern_symbol("error-message")
         {
             if p == Get {
-                if self.fence.is_some() {
-                    self.fence_property(x, Some(y), world::Access::Read, None);
+                if self.tracking.is_some() {
+                    self.tracked_property(x, Some(y), world::Access::Read, None);
                 }
                 return Ok(self.symbol_property(x, y).expect("checked symbol"));
             }

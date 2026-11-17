@@ -391,6 +391,20 @@ mod leaf {
         }
         /// A line boundary without moving point (GNU editfns.c).
         pub fn line_boundary_position(&mut self, count: Value, end: bool) -> super::Out {
+            let byte = self.line_boundary_byte(count, end)?;
+            self.position_of_byte(byte)
+        }
+        /// The position of byte BYTE of the current buffer's text.
+        pub(crate) fn position_of_byte(&mut self, byte: usize) -> super::Out {
+            let index = self.vm.buffer_index().map_err(Fault::Error)?;
+            let position = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(Fault::Error)?.0,
+                _ => byte,
+            };
+            Value::integer(position as i64 + 1).map_err(Fault::Error)
+        }
+        /// `line_boundary_position' as the byte offset of the current buffer's text.
+        pub(crate) fn line_boundary_byte(&mut self, count: Value, end: bool) -> std::result::Result<usize, Fault> {
             // CHECK_INTEGER: a bignum counts past either end of the buffer.
             let count = if count == Value::NIL { 1 } else if let Some(n) = count.integer_value() { n } else {
                 match self.bigint_value(count) {
@@ -400,7 +414,6 @@ mod leaf {
                 }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            let error = |e: String| Fault::Error(e);
             // Byte scans: a newline byte is never part of another character.
             let (text, point, low, high): (&dyn crate::text::Newlines, usize, usize, usize) = match &self.vm.objects[index] {
                 data::Object::Buffer(b) => { let range = b.accessible(); (b.body(), b.point.0, range.start.0, range.end.0) }
@@ -410,13 +423,8 @@ mod leaf {
             // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
             // the COUNTth newline from point, or the accessible end when
             // there are fewer; bol: the start of the line COUNT - 1 lines on.
-            let byte = if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
-                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) };
-            let position = match &self.vm.objects[index] {
-                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(error)?.0,
-                _ => byte,
-            };
-            Ok(Value::integer(position as i64 + 1).unwrap())
+            Ok(if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
+                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) })
         }
         /// Point of the current buffer as a 1-based character position.
         pub(crate) fn point(&mut self) -> std::result::Result<i64, Fault> {
@@ -775,6 +783,12 @@ mod leaf {
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
+            // The old text is wiped where it lies, not only replaced.
+            match self.object_mut(value)? {
+                data::Object::String(string) | data::Object::RawString(string) => string.wipe(),
+                data::Object::Bytes(old) => zeroize::Zeroize::zeroize(old),
+                _ => {}
+            }
             *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }
@@ -1113,8 +1127,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1123,9 +1137,9 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1137,8 +1151,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1147,8 +1161,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1531,6 +1545,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
+            self.vm.permanent_names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.
@@ -1929,6 +1944,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod load_progress;
     mod model;
     mod effects;
     mod clipboard;
@@ -2041,9 +2057,9 @@ pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, 
     Leaf::new(vm).window_text_shows_glyphs(window, from, to)
 }
 
-/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
-pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
-    Leaf::new(vm).window_line_numbers(window)
+/// The line numbers WINDOW shows from position FIRST (`Leaf::window_line_numbers`).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value, first: i64) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window, first)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary
@@ -2555,7 +2571,8 @@ impl Vm {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
         self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
+        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
     }
 }
 
@@ -2876,45 +2893,28 @@ mod tests {
 /// TEXT, within LOW..HIGH (`forward-line' from that line's start): at LOW
 /// or HIGH when there are fewer lines.
 pub(crate) fn line_beginning(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, lines: i64) -> usize {
-    let start_of = |at: usize| text.previous_newline(at, low).map_or(low, |i| i + 1);
-    let mut pos = start_of(point);
-    if lines >= 0 {
-        for _ in 0..lines {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-    } else {
-        for _ in lines..0 {
-            if pos == low { break; }
-            pos = start_of(pos - 1);
-        }
+    if lines < 0 {
+        // Point's line start is one newline back, then -LINES more.
+        let wanted = crate::text::newline_count(lines).saturating_add(1);
+        let found = text.newlines_before(point, low, wanted);
+        return found.last.filter(|_| found.count == wanted).map_or(low, |i| i + 1);
     }
-    pos
+    let start = text.previous_newline(point, low).map_or(low, |i| i + 1);
+    if lines == 0 { return start; }
+    let wanted = crate::text::newline_count(lines);
+    let found = text.newlines_after(start, high, wanted);
+    found.last.filter(|_| found.count == wanted).map_or(high, |i| i + 1)
 }
 
 /// GNU find_before_next_newline from byte POINT of TEXT within LOW..HIGH:
 /// for COUNT > 0 the COUNTth newline on, else the -COUNTth newline back;
 /// with fewer newlines, HIGH or LOW.
 pub(crate) fn line_end_after(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, count: i64) -> usize {
-    let mut pos = point;
-    if count > 0 {
-        for _ in 0..count {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-        return pos - 1;
-    }
-    for _ in count..0 {
-        match text.previous_newline(pos, low) {
-            Some(i) => pos = i,
-            None => return low,
-        }
-    }
-    pos
+    if count == 0 { return point; }
+    let wanted = crate::text::newline_count(count);
+    let (found, short) = if count > 0 { (text.newlines_after(point, high, wanted), high) }
+        else { (text.newlines_before(point, low, wanted), low) };
+    found.last.filter(|_| found.count == wanted).unwrap_or(short)
 }
 
 #[cfg(test)]

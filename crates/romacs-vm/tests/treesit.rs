@@ -127,6 +127,84 @@ fn an_early_parse_is_used_only_for_the_text_it_read() {
     assert_eq!(value.as_deref(), Ok("((t nil t) t t t t nil t)"));
 }
 
+/// In a session that can be woken, a typed character's parse runs on a
+/// thread: the frames meanwhile fontify nothing and wait for nothing, the
+/// frame its landing wakes has the tree without the evaluator parsing, and
+/// keys typed while it ran are caught up with the same way.
+#[test]
+fn a_small_edit_is_parsed_off_the_evaluator() {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (defvar romacs-treesit-show-before-parse 8) \
+        (setq parsed 0 pre 0 fontified 0) \
+        (defalias 'treesit-test-parsed (lambda (_ranges _parser) (setq parsed (1+ parsed)))) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") \
+        (dotimes (i 400) (insert (format \"int f%d (int a) {{ return a + %d; }}\\n\" i i))) \
+        (setq treesit-test-parser (treesit-parser-create 'c)) \
+        (setq treesit-test-twin (treesit-parser-create 'c nil nil 'twin)) \
+        (treesit-parser-add-notifier treesit-test-parser 'treesit-test-parsed) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (setq pre (1+ pre)) (treesit-parser-root-node treesit-test-parser) (treesit-parser-root-node treesit-test-twin))) \
+        (setq fontification-functions (list (lambda (pos) (setq fontified (1+ fontified)) (put-text-property pos (point-max) 'fontified t)))))");
+    vm.eval_source(&setup).unwrap();
+    vm.set_background_wake(std::sync::Arc::new(|| {}));
+    vm.frame_snapshot(800, 600).unwrap();
+    let counts = |vm: &mut Vm| vm.eval_source("(list parsed pre (> fontified 0))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(counts(&mut vm), "(1 1 t)");
+    let landed = |vm: &mut Vm| {
+        for _ in 0..20_000 {
+            if vm.eval_source("(romacs--treesit-parsing-p)").unwrap().display().unwrap() == "nil" {
+                // As the session's loop does when a parse wakes it.
+                vm.land_treesit();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(500));
+        }
+        panic!("the reparse never landed");
+    };
+    let frame = |vm: &mut Vm| {
+        vm.defer_parse().unwrap();
+        vm.frame_snapshot(800, 600).unwrap();
+        vm.deferred_parse_done()
+    };
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    // One key: its frame and any frame before the landing run no hook and
+    // fontify nothing; the frame after it has the new tree.
+    vm.eval_source("(progn (setq fontified 0) (goto-char 9) (insert \"x\"))").unwrap();
+    frame(&mut vm);
+    assert_eq!(counts(&mut vm), "(1 1 nil)", "the key's frame waits for nothing");
+    landed(&mut vm);
+    while frame(&mut vm) {}
+    assert_eq!(counts(&mut vm), "(2 2 t)", "the frame after the landing has the tree and the faces");
+    // Keys typed while a parse runs: the tree that lands is behind the
+    // text, and catches up on its thread.
+    vm.eval_source("(progn (setq fontified 0) (insert \"y\"))").unwrap();
+    frame(&mut vm);
+    vm.eval_source("(insert \"z\")").unwrap();
+    frame(&mut vm);
+    for _ in 0..4 {
+        landed(&mut vm);
+        frame(&mut vm);
+    }
+    assert_eq!(vm.eval_source("(list parsed (> fontified 0))").and_then(romacs_vm::Local::display).unwrap(), "(3 t)",
+        "one reparse for Lisp, however many the thread ran");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the evaluator parsed nothing");
+    // The trees are the ones a parse of the text gives.
+    let same = vm.eval_source("(let ((fresh (treesit-parser-create 'c nil t))) \
+        (list (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) (treesit-node-string (treesit-parser-root-node fresh))) \
+              (equal (treesit-node-string (treesit-parser-root-node treesit-test-twin)) (treesit-node-string (treesit-parser-root-node fresh))) \
+              (buffer-substring 1 20)))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(same, "(t t \"int f0 (xyzint a) {\")");
+    // What asks for the tree while its parse runs waits for it, and gets it.
+    vm.eval_source("(insert \"w\")").unwrap();
+    frame(&mut vm);
+    let asked = vm.eval_source("(list (treesit-node-text (treesit-node-at 9 treesit-test-parser)) \
+        (equal (treesit-node-string (treesit-parser-root-node treesit-test-parser)) \
+               (treesit-node-string (treesit-parser-root-node (treesit-parser-create 'c nil t)))))").and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(asked, "(\"xyzwint\" t)");
+}
+
 /// A frame `defer_parse' starts shows a small edit without its parse, and
 /// so without `pre-redisplay-functions' or fontification; the next frame
 /// runs them, however small its own edit. A larger edit never waits.
@@ -263,7 +341,7 @@ fn twin_parsers_parse_an_edit_once() {
         (list (equal (twin-string twin-b) (twin-string twin-a)) (equal (twin-string twin-b) (twin-fresh '((1 . 12))))))"), "(nil t)");
 }
 
-/// While a visit's first parse runs on its thread (lisp/romacs/romacs-treesit.el),
+/// While a visit's first parse runs on its thread (lisp/romacs-treesit.el),
 /// a frame leaves the tree alone: `treesit--pre-redisplay' would wait for the
 /// parse, and the window shows its text plain meanwhile. The first frame after
 /// the parse lands runs it, and marks the whole text for its faces. The parse
@@ -291,6 +369,51 @@ fn a_frame_waits_for_no_first_parse() {
     vm.eval_source("(setq treesit-test-parsing nil)").unwrap();
     vm.frame_snapshot(800, 600).unwrap();
     assert_eq!(state(&mut vm), "(1 nil)", "the frame after it lands parses and marks the text for its faces");
+}
+
+/// Romacs's `treesit-font-lock-fontify-region` (`romacs-treesit-font-lock.el`),
+/// one query for all of a language's settings, writes the faces and calls
+/// the functions GNU's, read from treesit.el, does, in the same order: every
+/// override, a function capture, a `#pred?` predicate, and nodes that reach
+/// past the region on either side.
+#[test]
+fn fontify_applies_captures_as_gnus_loop() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (set-buffer (get-buffer-create \"fontify\")) \
+        (insert \"int alpha = 1;\\nint beta = alpha + 22;\\nchar *gamma(int delta) {{ return 0; }}\\n\") \
+        (setq-local treesit-primary-parser (treesit-parser-create 'c)) \
+        (defalias 'tf-call (lambda (node override start end) (push (list 'call (treesit-node-type node) override start end) tf-order))) \
+        (defalias 'tf-pred (lambda (node) (push (list 'pred (treesit-node-text node t)) tf-order) (not (equal (treesit-node-text node t) \"beta\")))) \
+        (setq-local treesit-font-lock-settings \
+          (treesit-font-lock-rules \
+            :language 'c :feature 'a '((identifier) @font-lock-variable-name-face) \
+            :language 'c :feature 'b :override t '((number_literal) @font-lock-constant-face) \
+            :language 'c :feature 'c :override 'append '((primitive_type) @font-lock-type-face) \
+            :language 'c :feature 'd :override 'prepend '((primitive_type) @bold) \
+            :language 'c :feature 'e :override 'keep '((identifier) @italic) \
+            :language 'c :feature 'f '((declaration declarator: (_) @tf-call)) \
+            :language 'c :feature 'g '(((identifier) @font-lock-keyword-face (:pred tf-pred @font-lock-keyword-face))))) \
+        (defalias 'tf-run (lambda () \
+          (setq tf-order nil) \
+          (with-silent-modifications (remove-text-properties (point-min) (point-max) '(face nil))) \
+          (treesit-font-lock-fontify-region 5 40) \
+          (list (format \"%S\" (buffer-string)) (reverse tf-order)))))");
+    vm.eval_source(&setup).unwrap();
+    let run = |vm: &mut Vm| vm.eval_source("(tf-run)").and_then(romacs_vm::Local::display).unwrap();
+    let ours = run(&mut vm);
+    assert_eq!(vm.eval_source("(and (string-match-p \"romacs-treesit-font-lock\" (symbol-file 'treesit-font-lock-fontify-region)) t)")
+        .and_then(romacs_vm::Local::display).unwrap(), "t", "Romacs's definition ran first");
+    vm.eval_source("(dolist (name '(treesit-font-lock-fontify-region treesit--font-lock-fontify-region-1)) \
+        (let ((form (with-temp-buffer \
+          (insert-file-contents (locate-library \"treesit.el\")) \
+          (re-search-forward (concat \"^(defun \" (regexp-quote (symbol-name name)) \" \")) (goto-char (match-beginning 0)) \
+          (read (current-buffer))))) \
+          (defalias name (eval (cons 'lambda (cddr form)) t))))").unwrap();
+    let gnus = run(&mut vm);
+    assert_eq!(ours, gnus);
+    assert!(ours.contains("(call \"init_declarator\" nil 5 40)") && ours.contains("(bold font-lock-type-face)"), "the run exercised what it names: {ours}");
 }
 
 /// romacs-treesit-code.el: a code block takes its language's faces in front
@@ -398,4 +521,62 @@ fn reparsing_predicates_signal_as_treesit_c() {
                 (condition-case e (treesit-search-subtree (treesit-parser-root-node (car (treesit-parser-list))) 'treesit-test-reparse) (error e))))))");
     let value = vm.eval_source(&source).and_then(|v| v.display());
     assert_eq!(value.as_deref(), Ok("((treesit-query-error treesit-test-reparse) (treesit-buffer_changed treesit-test-reparse))"));
+}
+
+/// A window waiting for its buffer's first parse takes stopgap faces:
+/// strings and comments as the syntax table finds them (a doc comment as
+/// the mode's comment rule matches it), and the keyword tokens of the
+/// mode's enabled font-lock rules, matched by case as whole tokens;
+/// nothing structural, no rule of a feature that is off, and no
+/// `syntax-propertize`, which may ask for the tree.
+#[test]
+fn a_window_waiting_for_its_first_parse_takes_lexical_faces() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} (load \"romacs-treesit\") \
+        (with-temp-buffer \
+          (set-window-buffer nil (current-buffer)) \
+          (let ((table (make-syntax-table))) \
+            (modify-syntax-entry ?/ \". 124b\" table) (modify-syntax-entry ?* \". 23\" table) \
+            (modify-syntax-entry ?\\n \"> b\" table) (set-syntax-table table)) \
+          (setq-local treesit-font-lock-settings \
+            (treesit-font-lock-rules \
+              :language 'c :feature 'comment \
+              '(((comment) @font-lock-doc-face (:match \"\\\\`/\\\\*\\\\*\" @font-lock-doc-face)) (comment) @font-lock-comment-face) \
+              :language 'c :feature 'keyword '([\"return\" \"if\"] @font-lock-keyword-face) \
+              :language 'c :feature 'operator '([\"+\"] @font-lock-operator-face) \
+              :language 'c :feature 'delimiter '([\";\"] @font-lock-delimiter-face))) \
+          (setf (nth 1 (nth 3 treesit-font-lock-settings)) nil) \
+          (setq-local syntax-propertize-function (lambda (&rest _) (error \"stopgap propertized\"))) \
+          (setq-local parse-sexp-lookup-properties t) (setq syntax-propertize--done 1) \
+          (insert \"/** doc */ /* plain */ int f (int a) {{ if (a) return a + 1; Return xif; \\\"if x\\\"; }}\") \
+          (romacs-treesit--stopgap (selected-window) (point-min) (point-max)) \
+          (mapcar (lambda (word) (goto-char (point-min)) (let ((case-fold-search nil)) (search-forward word)) (get-text-property (1- (match-end 0)) 'face)) \
+                  '(\"doc\" \"plain\" \"int\" \"if\" \"return\" \"+\" \";\" \"Return\" \"xif\" \"if x\"))))");
+    let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("(font-lock-doc-face font-lock-comment-face nil font-lock-keyword-face font-lock-keyword-face font-lock-operator-face nil nil nil font-lock-string-face)"));
+}
+
+/// `romacs--treesit-subtree-exceeds' tells what `treesit-subtree-stat'
+/// does against a depth and a width, for a wide tree, a deep one and a
+/// small one, on each side of their numbers.
+#[test]
+fn subtree_exceeds_agrees_with_subtree_stat() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} \
+        (let (out) \
+          (dolist (text (list (mapconcat (lambda (i) (format \"int a%d;\" i)) (number-sequence 1 50) \"\\n\") \
+                              (concat \"int f(void) {{\" (make-string 30 ?{{) (make-string 30 ?}}) \"}}\") \
+                              \"int a;\")) \
+            (with-temp-buffer \
+              (insert text) \
+              (let* ((root (treesit-parser-root-node (treesit-parser-create 'c))) (stat (treesit-subtree-stat root))) \
+                (dolist (d (list 0 (1- (car stat)) (car stat))) \
+                  (dolist (w (list 0 (1- (cadr stat)) (cadr stat))) \
+                    (unless (eq (romacs--treesit-subtree-exceeds root d w) (or (> (car stat) d) (> (cadr stat) w))) \
+                      (push (list text d w stat) out))))))) \
+          out))");
+    let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("nil"));
 }
