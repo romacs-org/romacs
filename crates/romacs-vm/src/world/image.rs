@@ -243,6 +243,9 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     // The at-rest fields are this process's to make, before anything runs.
     // Only the VM, the image's root, has them (`#[snapshot(root)]`).
     root.0.renew();
+    // To this process the image is a generation no collection frees, and of
+    // which a full reads only what may name the rest.
+    root.0.make_image_permanent();
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.
     crate::epoch::raise(root.0.allocation.since);
