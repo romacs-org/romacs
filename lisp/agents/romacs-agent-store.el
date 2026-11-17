@@ -104,12 +104,19 @@ never waits on a writer."
 
 (defvar romacs-agent-store--making nil "Whether the writer is making the store.")
 
+(defvar romacs-agent-store-readable-hook nil
+  "Run in the editor once the writer has answered its asking to make the
+store (`romacs-agent-store--make-soon'): what waited for the store to be
+read here goes on.")
+
 (defun romacs-agent-store--make-soon ()
   "Ask the writer to make the store, once until it has."
   (unless romacs-agent-store--making
     (setq romacs-agent-store--making t)
     (romacs-agent-write 'romacs-agent-store--made nil
-                        (lambda (_answer) (setq romacs-agent-store--making nil)))))
+                        (lambda (_answer)
+                          (setq romacs-agent-store--making nil)
+                          (run-hooks 'romacs-agent-store-readable-hook)))))
 
 (defvar romacs-agent-store-made-functions nil
   "Functions that make the tables of the store's other modules, called by
