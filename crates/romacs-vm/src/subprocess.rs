@@ -286,7 +286,7 @@ fn reap(orphan: &Orphan) -> bool {
 /// Wait for PID without blocking: true once it is no longer this host's
 /// child to wait for (reaped now, or not a child).
 fn reaped(pid: i32) -> bool {
-    let Some(pid) = rustix::process::Pid::from_raw(pid) else { return true };
+    let Some(pid) = child(pid) else { return true };
     loop {
         match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::NOHANG) {
             Err(rustix::io::Errno::INTR) => {}
@@ -294,6 +294,12 @@ fn reaped(pid: i32) -> bool {
             Ok(Some(_)) | Err(_) => return true,
         }
     }
+}
+
+/// The child PID names: None for 0 or a negative number, which waitpid
+/// would read as a process group.
+fn child(pid: i32) -> Option<rustix::process::Pid> {
+    if pid > 0 { rustix::process::Pid::from_raw(pid) } else { None }
 }
 
 pub(crate) fn last_error() -> io::Error {
@@ -424,7 +430,7 @@ pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
 
 /// child_status_changed: a nonblocking waitpid, or None if unchanged.
 pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Option<i32> {
-    let child = rustix::process::Pid::from_raw(pid)?;
+    let child = child(pid)?;
     loop {
         match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::NOHANG | options) {
             Ok(Some((_, status))) => {
@@ -439,7 +445,7 @@ pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Op
 
 /// wait_for_termination: block until PID ends; its wait status.
 pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
-    let child = rustix::process::Pid::from_raw(pid).ok_or(rustix::io::Errno::CHILD)?;
+    let child = child(pid).ok_or(rustix::io::Errno::CHILD)?;
     loop {
         match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::empty()) {
             Ok(Some((_, status))) => {
@@ -456,7 +462,7 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
 /// Whether child PID has exited, without reaping it: its number stays pinned
 /// until a wait takes it.
 pub(crate) fn child_exited(pid: i32) -> io::Result<bool> {
-    let child = rustix::process::Pid::from_raw(pid).ok_or(rustix::io::Errno::CHILD)?;
+    let child = child(pid).ok_or(rustix::io::Errno::CHILD)?;
     let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
     loop {
         // NOHANG answers None while the child runs.
