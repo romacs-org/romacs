@@ -616,7 +616,11 @@ fn give_small(heap: &mut Heap<'_>, at: usize, class: usize) {
 /// The arena AT is in, or None for a block outside the arenas.
 #[inline]
 fn owner(at: *mut u8) -> Option<Published> {
-    [&IMAGE_ARENA, &FIRST_ARENA].into_iter().filter_map(Slot::published).find(|arena| arena.holds(at as usize))
+    let at = at as usize;
+    if let Some(image) = IMAGE_ARENA.published() && image.holds(at) {
+        return Some(image);
+    }
+    FIRST_ARENA.published().filter(|first| first.holds(at))
 }
 
 fn state() -> u8 {
