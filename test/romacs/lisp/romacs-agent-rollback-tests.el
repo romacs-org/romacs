@@ -259,6 +259,114 @@ rollback: a long history before them is not parsed."
                                           (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 2)))
     (should (equal (romacs-agent--claude-head-read session) "u1"))))
 
+(defun romacs-agent-rollback-tests--claude (body)
+  "Call BODY with an idle Claude session recorded in a private state root,
+its relay's config not written."
+  (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--create :id (romacs-agent--uuid) :harness 'claude :provider "claude"
+                                        :title "t" :state 'idle :turns 2)))
+    (romacs-agent--manifest session nil)
+    (cl-letf (((symbol-function 'romacs-agent--write-json) #'ignore))
+      (funcall body session))))
+
+(defun romacs-agent-rollback-tests--live (session spec)
+  "Journal and fold SPEC's records for SESSION, one at a time, as they come
+live: (prompt N), (assistant UUID [PARENT]), (rollback N) (its note made as
+a rollback makes it, from the live records then), (renew).  After each,
+the fold's head and the records' are compared: a list of (HEAD . READ)."
+  (let ((records nil) (seen nil))
+    (dolist (item spec (nreverse seen))
+      (let ((record (pcase item
+                      (`(prompt ,n) (romacs-agent-rollback-tests--prompt n "p"))
+                      (`(assistant ,uuid . ,parent) (romacs-agent-rollback-tests--assistant uuid (car parent)))
+                      (`(rollback ,n) (romacs-mcp--object
+                                       "note" (romacs-agent-rollback--note
+                                               session (romacs-agent--live-records (reverse records)) n 1 "p" nil)))
+                      (`(renew) (romacs-mcp--object "note" (romacs-mcp--object "type" "renew"))))))
+        (puthash "seq" (1+ (romacs-agent-seq session)) record)
+        (puthash "t" 1.0 record)
+        (push record records)
+        (write-region (concat (romacs-agent--json record) "\n") nil
+                      (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+        (romacs-agent--record session record)
+        (push (cons (romacs-agent--claude-head session) (romacs-agent--claude-head-read session)) seen)))))
+
+(ert-deftest romacs-agent-rollback-claude-head-is-folded-as-records-read-it ()
+  "romacs#270: the head a resume takes from the fold is the one the
+records give, through rollbacks, renewals and what follows them."
+  (dolist (spec '(((prompt 1) (assistant "u1") (prompt 2) (assistant "s" "toolu_1") (assistant "u2") (rollback 2))
+                  ((prompt 1) (assistant "u1") (rollback 1))
+                  ((prompt 1) (assistant "u1") (renew))
+                  ((prompt 1) (assistant "u1") (renew) (assistant "late"))
+                  ((prompt 1) (assistant "u1") (renew) (prompt 3) (assistant "u3") (prompt 4) (assistant "u4") (rollback 4))
+                  ((prompt 1) (assistant "u1") (renew) (prompt 3) (assistant "u3") (rollback 3))
+                  ((prompt 1) (assistant "u1") (prompt 2) (assistant "u2") (prompt 3) (assistant "u3") (rollback 3)
+                   (prompt 4) (assistant "u4") (rollback 4) (prompt 5) (assistant "u5") (rollback 2))))
+    (romacs-agent-rollback-tests--claude
+     (lambda (session)
+       (dolist (pair (romacs-agent-rollback-tests--live session spec))
+         (should (equal (car pair) (cdr pair))))))))
+
+(ert-deftest romacs-agent-rollback-claude-resume-reads-no-records ()
+  "romacs#270: a resume after a rollback or a renewal with nothing said
+since takes where its conversation goes on from the fold: none of its
+records is read, however long its journal."
+  (romacs-agent-rollback-tests--claude
+   (lambda (session)
+     (let ((reads 0))
+       (cl-letf* ((read (symbol-function 'romacs-agent--read-journal))
+                  ((symbol-function 'romacs-agent--read-journal) (lambda (&rest args) (cl-incf reads) (apply read args))))
+         (romacs-agent-rollback-tests--live session '((prompt 5) (assistant "u1") (prompt 9) (assistant "u2") (rollback 9)))
+         (setq reads 0)
+         (let ((argv (romacs-agent--claude-argv session t)))
+           (should (equal (cadr (member "--resume-session-at" argv)) "u1")))
+         (romacs-agent-rollback-tests--live session '((renew)))
+         (setq reads 0)
+         (let ((argv (romacs-agent--claude-argv session t)))
+           (should (member "--session-id" argv))
+           (should-not (member "--resume" argv)))
+         ;; Across runs of its harness, still known.
+         (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session)) "exit" 0))
+         (romacs-agent--record session (romacs-mcp--object "seq" (1+ (romacs-agent-seq session))
+                                                           "note" (romacs-mcp--object "type" "run")))
+         (should (member "--session-id" (romacs-agent--claude-argv session t)))
+         (should (= reads 0)))))))
+
+(ert-deftest romacs-agent-rollback-claude-renewed-kept-from-before-reads-its-tail ()
+  "romacs#270: a renewal folded by an earlier build, which kept no place,
+is read from the journal's end only as far back as its note."
+  (romacs-agent-rollback-tests--claude
+   (lambda (session)
+     (apply #'romacs-agent-rollback-tests--journal session
+            (append (cl-loop for n from 1 to 3000
+                             append (list (romacs-agent-rollback-tests--prompt n (make-string 200 ?x))
+                                          (romacs-agent-rollback-tests--assistant (format "u%d" n))))
+                    (list (romacs-mcp--object "note" (romacs-mcp--object "type" "renew")))))
+     (setf (romacs-agent-driver-state session) (list :rolled-back t))
+     (let ((parsed 0))
+       (cl-letf* ((parse (symbol-function 'json-parse-string))
+                  ((symbol-function 'json-parse-string) (lambda (&rest args) (cl-incf parsed) (apply parse args))))
+         (should (eq (romacs-agent--claude-head session) 'fresh)))
+       (should (< 0 parsed 10)))
+     ;; Its harness said more after the note: resumed there.
+     (write-region (concat (romacs-agent--json (let ((r (romacs-agent-rollback-tests--assistant "late")))
+                                                 (puthash "seq" 6002 r) (puthash "t" 1.0 r) r))
+                           "\n")
+                   nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)
+     (should (equal (romacs-agent--claude-head session) "late")))))
+
+(ert-deftest romacs-agent-rollback-resume-reads-on-from-the-last-record-seen ()
+  "romacs#270: a resume's attach reads on what its last run journaled from
+the last record seen, not from where that run began."
+  (romacs-agent-rollback-tests--claude
+   (lambda (session)
+     (romacs-agent-rollback-tests--journal session (romacs-agent-rollback-tests--prompt 1 "a")
+                                           (romacs-agent-rollback-tests--assistant "u1"))
+     (setf (romacs-agent-journal-start session) 0)
+     (romacs-agent--read-on-from-seen session)
+     (should (= (romacs-agent-journal-start session)
+                (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))))))))
+
 (ert-deftest romacs-agent-rollback-codex-reverts-the-turn ()
   (let* ((session (romacs-agent--make :id "c" :harness 'codex :harness-session "th"))
          (records (list (romacs-mcp--object "in" (romacs-mcp--object "id" "turn/start:4" "method" "turn/start" "romacsRequest" 7))
