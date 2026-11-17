@@ -76,7 +76,7 @@ const ALIGN: usize = 1 << 30;
 /// as a process may hold two (`adopt`).
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
-const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA4");
+const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA5");
 /// 16..=1024 by 16, then four steps per doubling to 32 KiB.
 const CLASSES: usize = 64 + 20;
 const SMALL_MAX: usize = 32768;

@@ -480,9 +480,10 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
 }
 
 /// A worker's restore of the world in STORE (`World::restore_only`) as
-/// another carry than the u64 it was made with: what it said.
+/// another carry than the u64 it was made with: what it said. An i64, so a
+/// restore that let it through reads a number, not an owner of nothing.
 fn other_carry(store: &Path) {
-    let refused = world(store).restore_only::<String>().map(|(_, carry)| carry);
+    let refused = world(store).restore_only::<i64>().map(|(_, carry)| carry);
     println!("WORLD-IMAGE {}", refused.unwrap_err());
 }
 
