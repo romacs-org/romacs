@@ -769,7 +769,14 @@ pub fn adopt(file: &std::fs::File) -> Restore {
         return refuse(2, 0, false);
     }
     let Some(outcome) = map_image_fd(file.as_fd()) else { return refuse(2, 0, false) };
-    RESTORE.store(outcome as u8, Ordering::Release);
+    // A failure is said only while no image is adopted: one adopted at the
+    // same time by another thread keeps what became of it. Under the lock
+    // its publication took, so the two cannot interleave.
+    let locked = Locked::take();
+    if outcome == Restore::Mapped || IMAGE_ARENA.get().is_none() {
+        RESTORE.store(outcome as u8, Ordering::Release);
+    }
+    drop(locked);
     outcome
 }
 
