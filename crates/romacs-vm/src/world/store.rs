@@ -1449,17 +1449,19 @@ pub fn pinned_env(invoking: &[(OsString, OsString)], p: &Path) -> Vec<(OsString,
 #[cfg(test)]
 mod tests {
     /// The Lisp a world read keys compiled Lisp by its content, wherever
-    /// the tree lies: a file changed in place changes the digest, and the
-    /// same files under another root do not.
+    /// the tree lies: a file changed in place, or a read that now fails,
+    /// changes the digest, and the same files under another root do not.
     #[test]
     fn a_worlds_lisp_digest_is_its_files_content_relative_to_the_tree() {
-        let manifest = |root: &str, sha: &str| serde_json::json!({"records": [
-            {"kind": "file-read", "path": format!("{root}/lisp/subr.el"), "result": {"len": 3, "sha256": sha}},
+        let manifest = |root: &str, result: serde_json::Value| serde_json::json!({"records": [
+            {"kind": "file-read", "path": format!("{root}/lisp/subr.el"), "result": result},
             {"kind": "probe", "path": format!("{root}/etc"), "result": "ok"}]});
+        let read = |sha: &str| serde_json::json!({"len": 3, "sha256": sha});
         let at = |root: &str| vec![std::path::PathBuf::from(root)];
-        let a = super::files_digest(&manifest("/a/tree", "11"), &at("/a/tree")).unwrap();
-        assert_eq!(a, super::files_digest(&manifest("/b/c/tree", "11"), &at("/b/c/tree")).unwrap());
-        assert_ne!(a, super::files_digest(&manifest("/a/tree", "22"), &at("/a/tree")).unwrap());
+        let a = super::files_digest(&manifest("/a/tree", read("11")), &at("/a/tree")).unwrap();
+        assert_eq!(a, super::files_digest(&manifest("/b/c/tree", read("11")), &at("/b/c/tree")).unwrap());
+        assert_ne!(a, super::files_digest(&manifest("/a/tree", read("22")), &at("/a/tree")).unwrap());
+        assert_ne!(a, super::files_digest(&manifest("/a/tree", serde_json::json!({"errno": 2})), &at("/a/tree")).unwrap());
     }
     use super::*;
 
