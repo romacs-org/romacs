@@ -231,7 +231,7 @@ however long its journal, the editor reads none of them."
            (other (funcall fail (format "the worker answered %S" other)))))))))
 
 (declare-function romacs-agent-turns-page "romacs-agent-turns" (session &optional before limit))
-(declare-function romacs-agent-turns--db "romacs-agent-turns" ())
+(declare-function romacs-agent-turns-first-after "romacs-agent-turns" (session seq))
 
 (defun romacs-agent-renew--thread (dir end &optional last)
   "In a worker VM: what a renewal takes of the conversation of the session
@@ -281,11 +281,8 @@ and, when earlier ones are left out, the first of them and a gap's mark
               more (and (plist-get page :more) before (> before from)))))
     ;; Left out: the conversation's first turn still leads, as a brief keeps it.
     (when-let* (((and rows (> size romacs-agent-handoff-budget)))
-                (first (caar (sqlite-select (romacs-agent-turns--db)
-                                            "select min(first_seq) from turns where session = ? and first_seq > ?"
-                                            (list (romacs-agent-id session) from))))
-                ((< first (plist-get (car rows) :first-seq)))
-                (row (car (plist-get (romacs-agent-turns-page session (1+ first) 1) :rows))))
+                (row (romacs-agent-turns-first-after session from))
+                ((< (plist-get row :first-seq) (plist-get (car rows) :first-seq))))
       (setq rows (cons row (cons 'gap rows))))
     rows))
 
