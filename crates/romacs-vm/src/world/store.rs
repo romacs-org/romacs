@@ -499,13 +499,7 @@ impl World {
     pub fn lisp_identity(&self) -> Option<String> {
         let text = host::read_store_file(self.file(".json")).ok()?;
         let manifest: Json = serde_json::from_str(&text).ok()?;
-        let mut files: Vec<String> = manifest["records"].as_array()?.iter()
-            .filter(|r| r["kind"] == "file-read")
-            .map(|r| format!("{} {}", r["path"], r["sha256"]))
-            .collect();
-        files.sort();
-        files.dedup();
-        Some(format!("{} {}", hex(&self.key), hex(&sha256(files.join("\n").as_bytes()))))
+        Some(format!("{} {}", hex(&self.key), files_digest(&manifest)?))
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -1429,8 +1423,34 @@ pub fn pinned_env(invoking: &[(OsString, OsString)], p: &Path) -> Vec<(OsString,
         .collect()
 }
 
+/// The content of every file a world's build read, as its MANIFEST
+/// records it: each file's path and what reading it gave (`host.rs`'s
+/// file-read record: its length and digest, or the error). A file changed
+/// in place changes it. None for a manifest with no records.
+fn files_digest(manifest: &Json) -> Option<String> {
+    let mut files: Vec<String> = manifest["records"].as_array()?.iter()
+        .filter(|r| r["kind"] == "file-read")
+        .map(|r| format!("{} {}", r["path"], r["result"]))
+        .collect();
+    files.sort();
+    files.dedup();
+    Some(hex(&sha256(files.join("\n").as_bytes())))
+}
+
 #[cfg(test)]
 mod tests {
+    /// The Lisp a world read keys compiled Lisp by its content: a file
+    /// changed in place, or a read that now fails, changes the digest.
+    #[test]
+    fn a_worlds_lisp_digest_is_its_files_content() {
+        let manifest = |result: serde_json::Value| serde_json::json!({"records": [
+            {"kind": "file-read", "path": "/tree/lisp/subr.el", "result": result},
+            {"kind": "probe", "path": "/tree/etc", "result": "ok"}]});
+        let a = super::files_digest(&manifest(serde_json::json!({"len": 3, "sha256": "11"}))).unwrap();
+        assert_eq!(a, super::files_digest(&manifest(serde_json::json!({"len": 3, "sha256": "11"}))).unwrap());
+        assert_ne!(a, super::files_digest(&manifest(serde_json::json!({"len": 3, "sha256": "22"}))).unwrap());
+        assert_ne!(a, super::files_digest(&manifest(serde_json::json!({"errno": 2}))).unwrap());
+    }
     use super::*;
 
     /// Build a shared library at OUT from SOURCE with ARGS, or None when no
