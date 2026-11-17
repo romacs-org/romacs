@@ -25,7 +25,7 @@
 mod on {
     use std::cell::RefCell;
     use std::io::Write;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     /// One primitive's share of the span since the last safepoint.
     struct Segment {
@@ -39,12 +39,12 @@ mod on {
         out: Option<std::path::PathBuf>,
         threshold: Duration,
         /// The last event (safepoint, entry or exit).
-        last: Instant,
+        last: std::time::Instant,
         /// The last safepoint, and the thread's CPU time near it.
-        span_start: Instant,
+        span_start: std::time::Instant,
         span_cpu: Duration,
         /// The last CPU read, and when.
-        cpu_read: (Instant, Duration),
+        cpu_read: (std::time::Instant, Duration),
         stack: Vec<&'static str>,
         segments: Vec<Segment>,
     }
@@ -62,16 +62,16 @@ mod on {
             // HOST(std::env::var): the probe's threshold, in a test build only.
             let ms = std::env::var("ROMACS_GAP_PROBE_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
             // HOST(Instant::now): the probe's own clock, in a test build only.
-            let now = Instant::now();
+            let now = std::time::Instant::now();
             let cpu = thread_cpu();
             Self { out, threshold: Duration::from_millis(ms), last: now, span_start: now, span_cpu: cpu,
                    cpu_read: (now, cpu), stack: Vec::new(), segments: Vec::new() }
         }
 
         /// The time now, and the CPU time at most a millisecond old.
-        fn now(&mut self) -> Instant {
+        fn now(&mut self) -> std::time::Instant {
             // HOST(Instant::now): the probe's own clock, in a test build only.
-            let now = Instant::now();
+            let now = std::time::Instant::now();
             if now.duration_since(self.cpu_read.0) > Duration::from_millis(1) {
                 self.cpu_read = (now, thread_cpu());
             }
@@ -79,7 +79,7 @@ mod on {
         }
 
         /// Charge the span since the last event to the innermost primitive.
-        fn charge(&mut self, now: Instant, frames: impl FnOnce() -> String) {
+        fn charge(&mut self, now: std::time::Instant, frames: impl FnOnce() -> String) {
             let wall = now.duration_since(self.last);
             self.last = now;
             let leaf = self.stack.last().copied().unwrap_or("-");
@@ -116,15 +116,13 @@ mod on {
             let Some(top) = self.segments.iter().max_by_key(|s| s.wall) else { return };
             let line = format!("gap {:.1} {:.1} {} {:.1} {}\n", wall.as_secs_f64() * 1e3, cpu.as_secs_f64() * 1e3,
                                top.leaf, top.wall.as_secs_f64() * 1e3, if top.frames.is_empty() { "-" } else { &top.frames });
-            // HOST(OpenOptions): the probe's report, in a test build only.
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(mut file) = crate::host::open_output(path, crate::host::OpenOptions::new().create(true).append(true)) {
                 let _ = file.write_all(line.as_bytes());
             }
         }
     }
 
     thread_local! {
-        // CELL(Plain)
         static PROBE: RefCell<Probe> = RefCell::new(Probe::new());
     }
 
@@ -137,10 +135,16 @@ mod on {
         if names.is_empty() { "(top)".into() } else { names.join("<") }
     }
 
+    // Out of line: the engine dispatches by sibling calls, which a
+    // guard inlined into its functions would turn into nested frames.
+    #[inline(never)]
     pub(crate) fn safepoint(vm: Option<&crate::Vm>) {
         PROBE.with(|p| if let Ok(mut p) = p.try_borrow_mut() && p.out.is_some() { p.safepoint(|| frames(vm)) });
     }
 
+    // Out of line: the engine dispatches by sibling calls, which a
+    // guard inlined into its functions would turn into nested frames.
+    #[inline(never)]
     pub(crate) fn enter(vm: &crate::Vm, leaf: impl FnOnce() -> &'static str) {
         PROBE.with(|p| if let Ok(mut p) = p.try_borrow_mut() && p.out.is_some() {
             let now = p.now();
@@ -149,6 +153,9 @@ mod on {
         });
     }
 
+    // Out of line: the engine dispatches by sibling calls, which a
+    // guard inlined into its functions would turn into nested frames.
+    #[inline(never)]
     pub(crate) fn exit(vm: &crate::Vm) {
         PROBE.with(|p| if let Ok(mut p) = p.try_borrow_mut() && p.out.is_some() {
             let now = p.now();
