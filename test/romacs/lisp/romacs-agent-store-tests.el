@@ -349,6 +349,64 @@ journal one turn long."
         (should (equal (sqlite-select db "select session, seq from events") '(("old" 1))))
         (should (equal (sqlite-select db "select project from board_folds") '(("/p"))))))))
 
+(defconst romacs-agent-store-tests--older-open
+  '("drop table if exists sessions"
+    "pragma user_version = 2"
+    "create table if not exists sessions (
+       id text primary key, dir text not null, harness text, provider text, model text,
+       title text, cwd text, parent text, state text, last_time real, cost real, transcript text,
+       input_seq integer, done_seq integer, seen_seq integer, settled_seq integer)"
+    "insert into sessions (id, dir, state) values ('older', '/o', 'idle')")
+  "What a build of the store's version 2 (before sessions moved to SQLite
+by default) does opening a database of another version, then a row it
+writes: the sessions table made again in its form, the rest left.")
+
+(defun romacs-agent-store-tests--tables (db)
+  "Each table of DB but the sessions cache, with its rows, sorted."
+  (mapcar (lambda (row)
+            (cons (car row) (sort (mapcar #'prin1-to-string (sqlite-select db (format "select * from %s" (car row))))
+                                  #'string<)))
+          (sqlite-select db "select name from sqlite_master where type = 'table' and name != 'sessions' order by name")))
+
+(ert-deftest romacs-agent-store-a-downgrade-and-back-keep-every-record ()
+  ;; A store this build migrated, opened by an earlier build (a rollback),
+  ;; then by this one again: only the sessions table, a cache, is made
+  ;; again each time; the records, what is imported, the turns and the
+  ;; board's folds are kept, and an imported session reads as it did.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-events)
+  (romacs-agent-store-tests--with
+    (let ((romacs-agent-events-store t) (romacs-agent-events--made nil)
+          (romacs-agent-events--imported (make-hash-table :test #'equal)))
+      (record "imp" "imported")
+      (make-directory (file-name-directory (romacs-agent-store--file)) t)
+      (let ((session (romacs-agent--make :id "imp" :dir (expand-file-name "imp" root))))
+        (should (romacs-agent-events-import session))
+        (romacs-agent-store-fold "/p/one/" t)
+        (let* ((db (romacs-agent-store--open))
+               (kept (romacs-agent-store-tests--tables db))
+               (seqs (lambda ()
+                       (let ((seqs nil))
+                         (romacs-agent--read-journal (romacs-agent--make :id "imp" :dir (expand-file-name "imp" root))
+                                                     (lambda (record) (push (gethash "seq" record) seqs)))
+                         (nreverse seqs)))))
+          (should (equal (funcall seqs) '(1 2)))
+          ;; The earlier build opens it, and writes a row of its own.
+          (sqlite-close db)
+          (setq romacs-agent-store--db nil)
+          (let ((older (sqlite-open (romacs-agent-store--file))))
+            (dolist (statement romacs-agent-store-tests--older-open) (sqlite-execute older statement))
+            (should (equal (romacs-agent-store-tests--tables older) kept))
+            (sqlite-close older))
+          ;; This build again: its sessions table, everything else as it was.
+          (clrhash romacs-agent-events--imported)
+          (setq romacs-agent-events--made nil)
+          (let ((db (romacs-agent-store--open)))
+            (should (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version))
+            (should-not (sqlite-select db "select 1 from sessions where id = 'older'"))
+            (should (equal (romacs-agent-store-tests--tables db) kept))
+            (should (equal (funcall seqs) '(1 2)))))))))
+
 (ert-deftest romacs-agent-store-a-fill-chunk-fails-whole ()
   ;; A row of a fill's chunk that fails to be written fails the chunk:
   ;; none of it is kept, it is said, and the next fill has it again.
