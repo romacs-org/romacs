@@ -257,7 +257,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "load-read-function", gnu: "lread.c:5697", kind: Kind::Lisp(Init::Symbol("read")) },
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
     // thread.c's value in a build without threads: VM2 has no thread
-    // objects and does not provide `threads' (DIVERGENCES.md VM2-THREAD1).
+    // objects and does not provide `threads' (ledger/divergences VM2-THREAD1).
     CVariable { name: "main-thread", gnu: "thread.c:1307", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
@@ -539,7 +539,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // The collector's pacing reads both (`Vm::collection_due`), scaling the
     // percentage internally. The threshold starts at 128 MiB, not GNU's
     // 800000: a floor that bounds the garbage between collections whatever
-    // the heap's size (DIVERGENCES VM2-GC-PACING).
+    // the heap's size (ledger/divergences VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
     CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(128 << 20) },
     // benchmark.el's `benchmark-run' reads both around its body.
@@ -610,7 +610,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // C maintains them while it runs (load specbinds current-load-list,
     // LOADHIST_ATTACH conses onto it, provide runs after-load-alist); VM2's
     // loader binds it to (FILE) but attaches no definitions and runs no
-    // after-load callbacks (DIVERGENCES.md VM2-LOADHIST1).
+    // after-load callbacks (ledger/divergences VM2-LOADHIST1).
     CVariable { name: "after-load-alist", gnu: "lread.c:5637", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-load-list", gnu: "lread.c:5693", kind: Kind::Lisp(Init::Nil) },
     // `load' binds these as a `let' does, so their watchers see GNU's
@@ -651,7 +651,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
     CVariable { name: "undo-outer-limit-function", gnu: "undo.c:476", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
-    // Variable harness (R216 task 2) and DIVERGENCES.md VM2-VARALIAS1: the
+    // Variable harness (R216 task 2) and ledger/divergences VM2-VARALIAS1: the
     // per-buffer kind. buffer.c:4898 default 70, predicate Qintegerp.
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
     // Automatically local in every buffer, unibyte ones included: url-http

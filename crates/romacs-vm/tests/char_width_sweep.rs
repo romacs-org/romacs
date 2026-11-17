@@ -6,7 +6,7 @@
 //! scan_for_column counts a character by that same table
 //! (CHARACTER_WIDTH), so an unassigned code point in a wide block, U+321F,
 //! is two columns in both.  Surrogates, which a Romacs buffer cannot hold
-//! (DIVERGENCES.md VM2-RAWTEXT1), are left out of the column sweep.
+//! (ledger/divergences VM2-RAWTEXT1), are left out of the column sweep.
 use romacs_vm::Vm;
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;

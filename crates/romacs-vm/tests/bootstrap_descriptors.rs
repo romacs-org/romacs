@@ -166,7 +166,7 @@ fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
         (buffer-local-restore-state '((restore-a t . tail) atom (restore-b t 9 extra)))
         (list restore-a restore-b restore-kills)").map(|v| v.display().unwrap()));
     // The body is compiled: its arguments run before the unbound head is read
-    // (DIVERGENCES VM2-BCALL1), so the backquote argument fails first.
+    // (ledger/divergences VM2-BCALL1), so the backquote argument fails first.
     assert_eq!(called, Err("(invalid-function (` ((, variable) (, local) (, value))))".to_owned()),
         "frontier moved: if this is GNU's (nil 9 (nil)), turn the ratchet into the GNU assertion");
 }
@@ -269,7 +269,7 @@ fn subr_cold_frontier_is_pinned() {
         if relative == "lisp/files.el" {
             let error = result.unwrap_err();
             // The expander's compiled body reads the unbound `bound-and-true-p'
-            // after its argument, the void variable (DIVERGENCES VM2-BCALL1).
+            // after its argument, the void variable (ledger/divergences VM2-BCALL1).
             assert!(error.contains(" form 50: ") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
             assert!(report["steps"].as_array().unwrap().iter().any(|s| s["file"] == canonical && s["status"] == "error" && s["source"].as_str().unwrap().starts_with("(define-minor-mode auto-save-visited-mode")), "FILES_MACRO_FRONTIER_MOVED {error}");
             // Native defgroup is a compiler form, not a callable function cell.

@@ -1043,7 +1043,7 @@ impl Leaf<'_> {
     }
 
     /// The tab, header and mode lines MODE-LINES asks for. VM2 draws no
-    /// tab line (DIVERGENCES.md VM2-WIN3).
+    /// tab line (ledger/divergences VM2-WIN3).
     fn mode_line_heights(&mut self, area: &TextArea, mode_lines: Value) -> std::result::Result<i64, Fault> {
         let (mode_line, header_line) = (self.intern("mode-line"), self.intern("header-line"));
         let all = mode_lines == Value::TRUE;

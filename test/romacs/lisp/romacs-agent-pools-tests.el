@@ -148,13 +148,15 @@ a time, `allow' marks it allowed."
                      '(("claude" :false) ("claude2" t) ("claude3" t)))))))
 
 (ert-deftest romacs-agent-pools-resume-at-the-reset ()
-  ;; Every account spent, the first back in a few seconds: it resumes by
-  ;; itself then, journaled, kept across a restart, on the first with room.
+  ;; Every account spent, the first back first: it resumes by itself then,
+  ;; journaled, kept across a restart, on the first with room.  The reset
+  ;; is an hour ahead: a resume is never scheduled before now, and a loaded
+  ;; run may take seconds to get there.
   (romacs-agent-pools-tests--with
     (let* ((dir (make-temp-file "s" t))
            (session (romacs-agent--make :id "r" :harness 'claude :provider "claude" :state 'idle :caught-up t
                                         :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude")))
-           (soon (+ (float-time) 5)) (armed nil) (told nil) (moved nil)
+           (soon (+ (float-time) 3600)) (armed nil) (told nil) (moved nil)
            (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
            (romacs-agent-tools--moving (make-hash-table :test #'equal))
            (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))

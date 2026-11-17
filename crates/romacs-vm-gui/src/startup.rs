@@ -1001,7 +1001,7 @@ fn mode_line_note(gnu: bool) -> String {
 
 /// The mode line used when `mode-line-format` keeps buffer.c's default
 /// after loadup: the default launch loads no GNU Lisp, and under `--loadup`
-/// bindings.el can stop before its default (see DIVERGENCES.md GUI-ML1). Built from GNU's own
+/// bindings.el can stop before its default (see ledger/divergences GUI-ML1). Built from GNU's own
 /// %-constructs in GNU's order (coding/EOL, modified, remote, buffer name,
 /// position, line) and expanded by GNU's display_mode_element/decode_mode_spec;
 /// the label says on screen that bindings.el did not load. [`workspace`] gives

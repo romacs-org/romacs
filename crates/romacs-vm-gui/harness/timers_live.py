@@ -58,7 +58,7 @@ INIT = '''(setq gnosis-dir {gnosis})
   (message "Idle probe %d" timers-live-idle))
 ;; The idle probe starts once the dwell probe's read has returned: inside
 ;; that read its message could be wiped by the read's own event within one
-;; timer pass, never painted (DIVERGENCES.md VM2-REDISPLAY1).  Registered
+;; timer pass, never painted (ledger/divergences VM2-REDISPLAY1).  Registered
 ;; while idle, it fires at 1s of this idle period (timer.el's DONT-WAIT).
 (run-with-timer 3 nil (lambda () (require 'gnosis-feed) (timers-live-record (list 'dwell (gnosis-feed--dwell-supported-p)))
                         (run-with-idle-timer 1 t #'timers-live-idle-probe)))

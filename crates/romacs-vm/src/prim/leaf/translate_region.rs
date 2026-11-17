@@ -1,6 +1,6 @@
 //! editfns.c Ftranslate_region_internal over a multibyte buffer. Like the
 //! other text primitives it runs no change hooks and records no undo
-//! (DIVERGENCES.md VM2-EDIT-HOOKS1).
+//! (ledger/divergences VM2-EDIT-HOOKS1).
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
 

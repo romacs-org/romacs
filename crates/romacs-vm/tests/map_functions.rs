@@ -1,5 +1,5 @@
 //! The prelude's `mapc', `mapcar', `mapcan' and `mapconcat' (lisp/vm/
-//! prelude.el, DIVERGENCES.md VM2-MAPCAR1) called from compiled code,
+//! prelude.el, ledger/divergences VM2-MAPCAR1) called from compiled code,
 //! against pinned byte-compiled GNU: the frames a callback sees, nonlocal
 //! exits through and around the walk, redefinition and advice of the
 //! mapping function, and every sequence type.

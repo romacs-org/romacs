@@ -112,7 +112,7 @@ follows; `romacs-gui-loadup-after-init' ends initialization."
           (romacs--setup-fontsets))
         ;; The root frame's windows are drawn as panes, with a status bar,
         ;; on a window system, in the chrome colours of the faces this
-        ;; display shows (romacs-chrome.el, DIVERGENCES.md VM2-PANE-CHROME
+        ;; display shows (romacs-chrome.el, ledger/divergences VM2-PANE-CHROME
         ;; and VM2-STATUS-BAR).
         (when (fboundp 'romacs-chrome-refresh) (romacs-chrome-refresh)))
     (romacs--startup-phase nil)))

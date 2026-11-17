@@ -1,5 +1,5 @@
 //! menu.c's popup menus on the GUI's `pgtk' frame, through GNU's text
-//! menus (lisp/ui/romacs-menu.el, DIVERGENCES VM2-MENU1), on the real
+//! menus (lisp/ui/romacs-menu.el, ledger/divergences VM2-MENU1), on the real
 //! `--loadup' chain with the GUI's display and its keyboard
 //! (`romacs_vm::HostInput`). tmm gives each item a shortcut key, the same
 //! in pinned GNU and Romacs. Expected values: pinned GNU's text menus

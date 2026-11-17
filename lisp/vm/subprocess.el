@@ -12,7 +12,7 @@
 ;; and status conversion are native; every Lisp call happens here, so the
 ;; values a loop keeps across a callback live in traced Lisp frames.
 ;;
-;; Limits (DIVERGENCES.md VM2-PROC1, VM2-PROC2): these waits never read
+;; Limits (ledger/divergences VM2-PROC1, VM2-PROC2): these waits never read
 ;; the keyboard; `undecided' output decoding detects only ASCII and UTF-8;
 ;; network processes are TCP and local (Unix domain) stream sockets,
 ;; without Internet :local/:remote addresses, datagrams or TLS.

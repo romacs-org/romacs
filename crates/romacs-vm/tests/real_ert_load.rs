@@ -16,7 +16,7 @@ fn complete_gnu_ert_dependency_closure() {
 }
 
 // GNU's Unicode tables, with their byte-code functions in source
-// (DIVERGENCES.md VM2-UNIDATA1), give pinned GNU's property values.
+// (ledger/divergences VM2-UNIDATA1), give pinned GNU's property values.
 #[test]
 fn unicode_character_properties_match_gnu() {
     let mut vm = bootstrapped();
@@ -127,7 +127,7 @@ fn insert_file_contents_coding_matches_gnu() {
     // Only a local buffer-file-coding-system: GNU's startup sets the default
     // (set-locale-environment), which the loadup chain does not run. Undo
     // lists are compared where GNU records no insertion: VM2 records no
-    // insertion undo (DIVERGENCES.md VM2-EDIT-HOOKS1).
+    // insertion undo (ledger/divergences VM2-EDIT-HOOKS1).
     let state = "last-coding-system-used (buffer-string) (and (local-variable-p 'buffer-file-coding-system) buffer-file-coding-system) (point) (buffer-modified-p) enable-multibyte-characters";
     let read = format!("(with-temp-buffer (list (cdr (insert-file-contents FILE)) {state}))");
     let big = [vec![b'x'; 6000], b"\n;; Local Variables:\n;; coding: latin-1\n;; End:\n\xe9\n".to_vec()].concat();

@@ -115,7 +115,7 @@ fn push_face_ref(r: &Datum, out: &mut Vec<Layer>) -> Result<(), FaceError> {
 /// An anonymous plist. Unlike GNU, where an attribute *before* `:inherit` in
 /// the plist is overridden by the inherited face, the plist's own attributes
 /// always win over what it inherits, wherever `:inherit` appears; see
-/// GNU-DIVERGENCES.md. Invalid attributes are skipped, as GNU's merge skips
+/// ledger/divergences. Invalid attributes are skipped, as GNU's merge skips
 /// them (it logs and carries on).
 fn parse_anonymous(plist: &[Datum]) -> Result<AnonymousFace, FaceError> {
     let mut attrs = Attrs::default();

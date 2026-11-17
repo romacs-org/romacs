@@ -36,7 +36,7 @@ those of the depths below it by their names."
 ;; simple.el:2008; read_minibuf binds it while the prompt is active.
 (defvar minibuffer-default nil)
 
-;; BOOTSTRAP STAND-INS (DIVERGENCES.md VM2-MINIBUF1). GNU binds RET, C-j and
+;; BOOTSTRAP STAND-INS (ledger/divergences VM2-MINIBUF1). GNU binds RET, C-j and
 ;; C-g in `minibuffer-local-map' from Lisp (minibuffer.el:3407-3415), and
 ;; `exit-minibuffer' / `minibuffer-quit-recursive-edit' are Lisp
 ;; (minibuffer.el:3077, 3104); `abort-minibuffers' is C (minibuf.c:472).

@@ -35,7 +35,7 @@ GRID = (120, 33)  # the root window's body columns and lines in both frames
 ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mode -1))\n"
 # Completion as GNU's engine has it after loading lisp/completion/romacs-completion-defaults.el,
 # which lacks the fzf style and romacs-complete, set in both engines' inits:
-# Romacs's own defaults complete with fzf (DIVERGENCES.md VM2-FZF-DEFAULT) in
+# Romacs's own defaults complete with fzf (ledger/divergences VM2-FZF-DEFAULT) in
 # romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
 # GNU's completion, displayed by fido-vertical.  Romacs's other interactive
 # defaults (lisp/session/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their

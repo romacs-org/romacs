@@ -356,7 +356,7 @@ fn fresh_vm(args: &Args) -> Vm {
         }
     }
     // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
-    // of 1x1 characters (DIVERGENCES.md VM2-WIN5).
+    // of 1x1 characters (ledger/divergences VM2-WIN5).
     if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
         std::process::exit(3);
