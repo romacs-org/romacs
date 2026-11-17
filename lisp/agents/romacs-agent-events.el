@@ -918,11 +918,13 @@ order given."
       (setq romacs-agent-events--until-store (append romacs-agent-events--until-store (list (cons session then)))))
      ((and (not (gethash id romacs-agent-events--waiting))
              (not (eq own 'queued))
-             (not (and (romacs-agent-events--movable-p session)
-                       (not (romacs-agent-events-p session))
+             (not (and (not (romacs-agent-events-p session))
+                       ;; A job moving it holds its lock, so it reads as
+                       ;; unmovable then: waited for all the same.
                        (or (gethash id romacs-agent-events--migrating)
-                           (> (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)
-                              (or romacs-agent-fold-bytes most-positive-fixnum)))
+                           (and (romacs-agent-events--movable-p session)
+                                (> (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)
+                                   (or romacs-agent-fold-bytes most-positive-fixnum))))
                        (not (run-hook-with-args-until-success 'romacs-agent-events-held-functions session)))))
       (funcall then))
      (t

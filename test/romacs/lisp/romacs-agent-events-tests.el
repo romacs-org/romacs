@@ -430,6 +430,31 @@ turns, and its journal's file; a state root of its own."
          (should (= (romacs-agent-journal-start session) 11))
          (should (= (file-attribute-size (file-attributes journal)) size)))))))
 
+(ert-deftest romacs-agent-events-a-session-a-job-moves-is-waited-for-under-its-lock ()
+  ;; A job moving it holds its lock: a launch waits for that job all the
+  ;; same, not taken for a session a host runs.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal))
+        (romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--migrate-queue nil)
+        (romacs-agent-events-store t))
+    (romacs-agent-events-tests--with-session
+     3
+     (lambda (session _journal)
+       (let ((id (romacs-agent-id session)) (ran nil) (romacs-agent-fold-bytes 10))
+         (puthash id t romacs-agent-events--migrating)
+         (let ((host (romacs-agent-events-tests--hold id)))
+           (unwind-protect
+               (cl-letf (((symbol-function 'isolate-main-p) (lambda () t)))
+                 (romacs-agent-events-then session (lambda () (setq ran t)))
+                 (should-not ran)
+                 (should (romacs-agent-events-waiting-p id))
+                 ;; Its job moves it: not queued again.
+                 (should-not romacs-agent-events--migrate-queue))
+             (delete-process host))))))))
+
 ;; Sent to twice while its move waits: one resume, one launch.
 (ert-deftest romacs-agent-events-a-resume-waiting-for-its-move-is-one ()
   (let ((romacs-agent--resuming (make-hash-table :test #'equal))
