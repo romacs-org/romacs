@@ -52,25 +52,60 @@ in a store of its own."
     buffer))
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
-  ;; Not moved yet: a row says so, it is asked first, its journal unread;
-  ;; moved, the chat draws.
+  ;; Not moved yet: a row says so, the chat waits for the move
+  ;; (`romacs-agent-events-then'), its journal unread; moved, it draws.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-no-journal-tests--with
-    (let ((first nil))
-      (cl-letf (((symbol-function 'romacs-agent-events-migrate-first) (lambda (id) (setq first id)))
+    (let ((waits nil))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits)))
                 ((symbol-function 'romacs-agent--read-journal-file) (lambda (&rest _) (error "Read the journal"))))
+        ;; Its move failed: said so, not waited for again.
         (let ((buffer (romacs-agent-no-journal-tests--chat session)))
-          (should (equal first id))
+          (should (equal (mapcar #'car waits) (list id)))
           (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
           (should-not (string-search "ask 1" (with-current-buffer buffer (buffer-string))))
-          (kill-buffer buffer)))
-      (let ((buffer (romacs-agent-no-journal-tests--chat session)))
-        (romacs-agent-test-stored session)
-        (run-hook-with-args 'romacs-agent-events-migrated-functions (list id))
-        (with-current-buffer buffer
-          (should-not (string-search "move to the store" (buffer-string)))
-          (should (string-search "say 2" (buffer-string))))
-        (kill-buffer buffer)))))
+          (funcall (cdr (pop waits)))
+          (with-current-buffer buffer
+            (should (string-search "could not move" (buffer-string)))
+            (should-not (string-search "moving" (buffer-string))))
+          (should-not waits)
+          (kill-buffer buffer))
+        ;; Moved: drawn from the store.
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (romacs-agent-test-stored session)
+          (funcall (cdr (pop waits)))
+          (with-current-buffer buffer
+            (should-not (string-search "move to the store" (buffer-string)))
+            (should (string-search "say 2" (buffer-string))))
+          (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
+  ;; A chat restored from its row is taken over by its session as the
+  ;; session loads (a watcher's, not a command's), and drawn again once
+  ;; its replay is over: what it said meanwhile is not missed.
+  (let* ((id "r1r1r1r1-2222-4333-8444-555566667777")
+         (row (romacs-agent--make :id id :harness 'claude :title "row"))
+         (live (romacs-agent--make :id id :harness 'claude :title "live"))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent-ui--row-chats (make-hash-table :test #'equal))
+         (redraws 0))
+    (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (_) row))
+              ((symbol-function 'romacs-agent-ui--redraw) (lambda () (cl-incf redraws))))
+      (let ((buffer (romacs-agent-ui-desktop-restore nil nil (list :session id :draft ""))))
+        (unwind-protect
+            (progn
+              (should (eq (buffer-local-value 'romacs-agent-ui--session buffer) row))
+              (with-current-buffer buffer (setq romacs-agent-ui--unfilled nil))
+              (run-hook-with-args 'romacs-agent-loaded-functions live (make-hash-table))
+              (should (eq (buffer-local-value 'romacs-agent-ui--session buffer) live))
+              (should (eq (romacs-agent-buffer live) buffer))
+              (should (= redraws 0))
+              (run-hook-with-args 'romacs-agent-caught-up-functions live)
+              (should (= redraws 1))
+              ;; Once.
+              (run-hook-with-args 'romacs-agent-caught-up-functions live)
+              (should (= redraws 1)))
+          (kill-buffer buffer))))))
 
 (ert-deftest romacs-agent-no-journal-opens-from-the-store-alone ()
   ;; Moved: its chat opens with its journal never read.

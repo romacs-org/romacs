@@ -2450,6 +2450,38 @@ attach it when its supervisor listens (`romacs-agent-load-session')."
     (unless (equal (romacs-agent-imported live) (romacs-agent-imported session))
       (romacs-agent-ui--redraw))))
 
+(defvar romacs-agent-ui--row-chats (make-hash-table :test #'equal)
+  "The chats restored from their sessions' rows alone, by session id: a
+session takes over its chat as it loads (`romacs-agent-ui--take-over').")
+
+(defvar-local romacs-agent-ui--taken nil
+  "Non-nil in a chat its session took over as it loaded: drawn again once
+the session's replay is over (`romacs-agent-ui--caught-up').")
+
+(defun romacs-agent-ui--take-over (session _manifest)
+  "SESSION, just loaded, takes over the chat restored from its row, so
+what it says from now on is drawn there; the chat is drawn again once
+its replay is over."
+  (when-let* ((buffer (gethash (romacs-agent-id session) romacs-agent-ui--row-chats)))
+    (remhash (romacs-agent-id session) romacs-agent-ui--row-chats)
+    (when (and (buffer-live-p buffer) (not (buffer-live-p (romacs-agent-buffer session))))
+      (with-current-buffer buffer
+        (setq romacs-agent-ui--session session romacs-agent-ui--taken t)
+        (setf (romacs-agent-buffer session) buffer)))))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-ui--take-over)
+
+(defun romacs-agent-ui--caught-up (session)
+  "SESSION's replay is over: a chat it took over is drawn again from its
+records, what came while it showed the row included, none twice."
+  (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (when romacs-agent-ui--taken
+        (setq romacs-agent-ui--taken nil)
+        (unless romacs-agent-ui--unfilled (romacs-agent-ui--redraw))))))
+
+(add-hook 'romacs-agent-caught-up-functions #'romacs-agent-ui--caught-up)
+
 (defun romacs-agent-ui-desktop-restore (_file _name misc)
   "The chat of MISC's session with its draft, drawn the first time a
 window shows it, from its session's row alone
@@ -2462,6 +2494,7 @@ was open, loading no session; one is loaded when its chat is used
                           (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer
         (romacs-agent-ui--set-draft-parts (or (plist-get misc :draft) "") (plist-get misc :images)))
+      (unless (romacs-agent-loaded id) (puthash id buffer romacs-agent-ui--row-chats))
       buffer)))
 
 (add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-ui-desktop-restore))
@@ -2477,32 +2510,48 @@ until it is (`romacs-agent-ui--moved'): its journal is never read."
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
     (romacs-agent-ui--wait-for-move session)))
 
-(defvar-local romacs-agent-ui--moving nil
-  "Non-nil in a chat waiting for its session's records to move to SQLite.")
-
 (defun romacs-agent-ui--wait-for-move (session)
-  "Show that SESSION's records are moving to SQLite, and ask that they go
-first: its chat is drawn once they are (`romacs-agent-ui--moved')."
-  (setq romacs-agent-ui--moving t)
-  (romacs-agent-events-migrate-first (romacs-agent-id session))
-  (romacs-agent-ui--insert-at
-   romacs-agent-ui--end
-   (propertize (if (romacs-agent-events-migrating-p (romacs-agent-id session))
-                   "⋯ moving this chat's records to the store\n"
-                 "⋯ waiting for this chat's records to move to the store\n")
-               'face 'romacs-agent-placeholder)))
+  "Show that SESSION's records are moving to SQLite, and wait for them
+\(`romacs-agent-events-then'), ahead of every other session: its chat is
+drawn once they are, or says it cannot be when they could not move."
+  (let ((buffer (current-buffer)) (now t))
+    (romacs-agent-events-then
+     session (lambda ()
+               (if now (setq now 'moved)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer (romacs-agent-ui--moved session))))))
+    (if (eq now 'moved) (romacs-agent-ui--moved-here session)
+      (setq now nil)
+      (romacs-agent-ui--insert-at
+       romacs-agent-ui--end
+       (propertize (if (romacs-agent-events-migrating-p (romacs-agent-id session))
+                       "⋯ moving this chat's records to the store\n"
+                     "⋯ waiting for this chat's records to move to the store\n")
+                   'face 'romacs-agent-placeholder 'romacs-agent-moving t)))))
 
-(defun romacs-agent-ui--moved (ids)
-  "The sessions IDS name moved to SQLite: their chats waiting for it are
-drawn."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (and romacs-agent-ui--moving romacs-agent-ui--session
-                 (member (romacs-agent-id romacs-agent-ui--session) ids))
-        (setq romacs-agent-ui--moving nil)
-        (romacs-agent-ui--redraw)))))
+(defun romacs-agent-ui--moved-here (session)
+  "Draw SESSION in the current chat, its records' move over: from them
+when they are in SQLite, else a row saying they could not move."
+  (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
+    (romacs-agent-ui--insert-at
+     romacs-agent-ui--end
+     (propertize "! this chat's records could not move to the store: shown once they do\n"
+                 'face 'romacs-agent-error))))
 
-(add-hook 'romacs-agent-events-migrated-functions #'romacs-agent-ui--moved)
+(defun romacs-agent-ui--moved (session)
+  "SESSION's records' move is over: the current chat, which waited for it,
+is drawn again from them; one they could not move says so in place of
+the row that said they were moving.  An edit to no undo."
+  (if (romacs-agent-events-p session) (romacs-agent-ui--redraw)
+    (romacs-agent-ui--unrecorded
+     (lambda ()
+       (let ((inhibit-read-only t))
+         (save-excursion
+           (goto-char (point-min))
+           (when-let* ((found (text-property-search-forward 'romacs-agent-moving t t)))
+             (delete-region (prop-match-beginning found) (prop-match-end found)))
+           (goto-char romacs-agent-ui--end)
+           (romacs-agent-ui--moved-here session)))))))
 
 (defun romacs-agent-ui--replay-rows (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns as kept drawn, under
@@ -3756,14 +3805,6 @@ HARNESS's prefix (claude-opus-5-5 is opus-5-5)."
 ;; Loaded into a running session, its open chats' headers are this file's:
 ;; an older version's form names functions this one has changed.
 (romacs-agent-ui--headers-remake)
-
-;; A chat's replays and pages keep places in its session's journal while
-;; it is still in one: the session is not moved to SQLite under it.
-(defun romacs-agent-ui--holds-journal-p (session)
-  "Whether a chat shows SESSION, which is still in its journal."
-  (buffer-live-p (romacs-agent-buffer session)))
-
-(add-hook 'romacs-agent-events-held-functions #'romacs-agent-ui--holds-journal-p)
 
 ;; The keymaps a chat puts in its text, which a turn kept as drawn names.
 (mapc #'romacs-agent-drawn-keymap '(romacs-agent-chat-transcript-map romacs-agent-ui--link-map
