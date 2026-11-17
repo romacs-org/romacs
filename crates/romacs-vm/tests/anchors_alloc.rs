@@ -15,6 +15,12 @@ fn edits_collapse_and_movement_allocate_nothing() {
         .iter()
         .map(|&(p, b)| t.create(p, b).unwrap())
         .collect();
+    // The counter holds exactly what this one-test process allocates and
+    // keeps, so the zeroes below are counts.
+    let (kept, _, allocs, live) = measure(|| std::hint::black_box(vec![7u8; 4096]));
+    assert!(allocs >= 1 && live == 4096, "{allocs} allocations, {live} bytes kept");
+    let ((), _, _, live) = measure(|| drop(kept));
+    assert_eq!(live, -4096);
     let ((), _, allocs, live) = measure(|| for i in 0..1024 {
         assert!(t.delete(0, 1000));
         assert!(t.insert(0, 1000, i & 1 == 0));
