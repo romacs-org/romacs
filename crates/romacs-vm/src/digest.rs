@@ -36,7 +36,8 @@ fn keccak_f(a: &mut [u64; 25]) {
 }
 
 /// SHA3 with an OUT-byte digest: rate 200 - 2 OUT, padding 0x06 ... 0x80.
-fn sha3(bytes: &[u8], out: usize) -> Vec<u8> {
+/// Stopped once STOP, asked every [`CHUNK`] bytes or so, says to stop.
+fn sha3(bytes: &[u8], out: usize, stop: &dyn Fn() -> bool) -> Result<Vec<u8>, crate::quit::Stopped> {
     let rate = 200 - 2 * out;
     let mut state = [0u64; 25];
     let absorb = |state: &mut [u64; 25], block: &[u8]| {
@@ -47,13 +48,16 @@ fn sha3(bytes: &[u8], out: usize) -> Vec<u8> {
     };
     let blocks = bytes.chunks_exact(rate);
     let rest = blocks.remainder();
-    for block in blocks { absorb(&mut state, block); }
+    for (i, block) in blocks.enumerate() {
+        if i % (CHUNK / rate) == 0 && i > 0 && stop() { return Err(crate::quit::Stopped); }
+        absorb(&mut state, block);
+    }
     let mut last = vec![0u8; rate];
     last[..rest.len()].copy_from_slice(rest);
     last[rest.len()] ^= 0x06;
     last[rate - 1] ^= 0x80;
     absorb(&mut state, &last);
-    state.iter().flat_map(|lane| lane.to_le_bytes()).take(out).collect()
+    Ok(state.iter().flat_map(|lane| lane.to_le_bytes()).take(out).collect())
 }
 
 /// RFC 2104 HMAC under digest D, whose block size is BLOCK, keyed once:
@@ -115,18 +119,34 @@ pub(crate) fn hmac(algorithm: &str, key: &[u8], message: &[u8]) -> Option<Vec<u8
 
 /// The digest of BYTES under ALGORITHM, a `secure-hash-algorithms' name.
 pub(crate) fn digest(algorithm: &str, bytes: &[u8]) -> Option<Vec<u8>> {
-    use sha2::Digest as _;
+    digest_until(algorithm, bytes, &|| false).map(|digest| digest.expect("never stopped"))
+}
+
+/// Bytes hashed between two looks at a stop: a millisecond or two.
+const CHUNK: usize = 1 << 20;
+
+/// `digest`, hashed a chunk at a time with STOP asked between chunks (a
+/// quit probe): None for no such algorithm.
+pub(crate) fn digest_until(algorithm: &str, bytes: &[u8], stop: &dyn Fn() -> bool) -> Option<Result<Vec<u8>, crate::quit::Stopped>> {
+    fn chunked<D: sha2::Digest>(bytes: &[u8], stop: &dyn Fn() -> bool) -> Result<Vec<u8>, crate::quit::Stopped> {
+        let mut digest = D::new();
+        for (i, chunk) in bytes.chunks(CHUNK).enumerate() {
+            if i > 0 && stop() { return Err(crate::quit::Stopped); }
+            digest.update(chunk);
+        }
+        Ok(digest.finalize().to_vec())
+    }
     Some(match algorithm {
-        "md5" => md5::Md5::digest(bytes).to_vec(),
-        "sha1" => sha1::Sha1::digest(bytes).to_vec(),
-        "sha224" => sha2::Sha224::digest(bytes).to_vec(),
-        "sha256" => sha2::Sha256::digest(bytes).to_vec(),
-        "sha384" => sha2::Sha384::digest(bytes).to_vec(),
-        "sha512" => sha2::Sha512::digest(bytes).to_vec(),
-        "sha3-224" => sha3(bytes, 28),
-        "sha3-256" => sha3(bytes, 32),
-        "sha3-384" => sha3(bytes, 48),
-        "sha3-512" => sha3(bytes, 64),
+        "md5" => chunked::<md5::Md5>(bytes, stop),
+        "sha1" => chunked::<sha1::Sha1>(bytes, stop),
+        "sha224" => chunked::<sha2::Sha224>(bytes, stop),
+        "sha256" => chunked::<sha2::Sha256>(bytes, stop),
+        "sha384" => chunked::<sha2::Sha384>(bytes, stop),
+        "sha512" => chunked::<sha2::Sha512>(bytes, stop),
+        "sha3-224" => sha3(bytes, 28, stop),
+        "sha3-256" => sha3(bytes, 32, stop),
+        "sha3-384" => sha3(bytes, 48, stop),
+        "sha3-512" => sha3(bytes, 64, stop),
         _ => return None,
     })
 }

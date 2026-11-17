@@ -3,8 +3,12 @@
 //! safe types below. SQLite is linked from the bundled amalgamation, so no
 //! system library is required.
 use libsqlite3_sys as ffi;
-use std::ffi::{CStr, c_int};
+use std::ffi::{CStr, c_int, c_void};
 use std::sync::Arc;
+
+/// The database's virtual machine instructions between two asks of a quit
+/// probe: a few microseconds.
+const PROGRESS_STEPS: c_int = 1000;
 
 /// An open database. Each statement holds it, so `sqlite3_close` runs once
 /// the database object and every statement prepared on it have gone.
@@ -118,6 +122,37 @@ impl Connection {
         let sql = std::ffi::CString::new(sql).expect("no NUL");
         // SAFETY: `db` is open and `sql` NUL-terminated; no callback.
         unsafe { ffi::sqlite3_exec(self.db, sql.as_ptr(), None, std::ptr::null_mut(), std::ptr::null_mut()) == ffi::SQLITE_OK }
+    }
+    /// BODY, with STOP asked as the database runs, through its progress
+    /// handler every [`PROGRESS_STEPS`] virtual machine instructions: once
+    /// STOP says to stop, the statement running ends with
+    /// `SQLITE_INTERRUPT`, which rolls it back (and, for a write inside an
+    /// explicit transaction, the transaction), as `sqlite3_interrupt` does.
+    pub(crate) fn stoppable<T>(&self, stop: &crate::quit::NativeStop, body: impl FnOnce() -> T) -> T {
+        /// Removes the handler, however BODY ends, before STOP's borrow does.
+        struct Installed<'a>(&'a Connection);
+        impl Drop for Installed<'_> {
+            fn drop(&mut self) {
+                // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
+                // SAFETY: `db` is open; removing the handler takes no argument.
+                unsafe { ffi::sqlite3_progress_handler(self.0.db, 0, None, std::ptr::null_mut()) };
+            }
+        }
+        extern "C" fn progress(stop: *mut c_void) -> c_int {
+            // UNSAFE(SQLite hands the handler its argument back as a raw pointer)
+            // SAFETY: the argument is the probe `stoppable` borrows for as long
+            // as the handler is installed (`Installed` removes it first).
+            c_int::from(unsafe { &*stop.cast::<crate::quit::NativeStop>() }.due())
+        }
+        if !stop.armed() { return body(); }
+        // UNSAFE(this module is libsqlite3-sys's one boundary: rusqlite's safe handler needs its own Connection)
+        // SAFETY: `db` is open; STOP outlives the installation, which
+        // `Installed` ends before this function returns or unwinds.
+        unsafe { ffi::sqlite3_progress_handler(self.db, PROGRESS_STEPS, Some(progress), std::ptr::from_ref(stop).cast_mut().cast()) };
+        let installed = Installed(self);
+        let out = body();
+        drop(installed);
+        out
     }
     /// sqlite3_prepare_v2 of the first statement in SQL.
     pub(crate) fn prepare(self: &Arc<Self>, sql: &[u8]) -> Result<Statement, PrepareError> {

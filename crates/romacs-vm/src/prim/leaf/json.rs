@@ -64,6 +64,10 @@ fn out_string(out: &mut Vec<u8>, bytes: &[u8], multibyte: bool, skip: usize) -> 
     Some(())
 }
 
+/// The serializer's nesting budget left, and its values written, for the
+/// quit poll.
+struct Nest { depth: i32, steps: super::quit_poll::Steps }
+
 /// One open container while parsing.
 enum Open {
     Array(Vec<Value>),
@@ -79,6 +83,8 @@ struct Parser<'l, 'a> {
     multibyte: bool,
     depth: i32,
     conf: Config,
+    /// Values parsed, for the quit poll.
+    steps: super::quit_poll::Steps,
 }
 
 type Parsed<T> = std::result::Result<T, Fault>;
@@ -133,6 +139,7 @@ impl Parser<'_, '_> {
     /// json_parse_string, after the opening quote: the UTF-8 contents.
     fn string(&mut self) -> Parsed<Vec<u8>> {
         let mut out = Vec::new();
+        // NOPOLL: one string's bytes, each copied once.
         loop {
             let c = self.get()?;
             if plain(c) { out.push(c); continue; }
@@ -325,6 +332,8 @@ impl Parser<'_, '_> {
         let mut open: Vec<Open> = Vec::new();
         let mut c = self.skip_whitespace()?;
         loop {
+            // A quit drops the values parsed so far: nothing else holds them.
+            if self.steps.tick() { self.cx.native_poll()?; }
             // A complete value, or None after opening a container.
             let value = match c {
                 b'{' => {
@@ -432,7 +441,7 @@ impl Leaf<'_> {
     }
 
     /// json_out_nest: at most 50 open containers.
-    fn json_nest(depth: &mut i32) -> std::result::Result<(), Fault> {
+    fn json_nest(Nest { depth, .. }: &mut Nest) -> std::result::Result<(), Fault> {
         *depth -= 1;
         if *depth < 0 { return Err(Fault::Error("Maximum JSON serialization depth exceeded".into())); }
         Ok(())
@@ -444,7 +453,9 @@ impl Leaf<'_> {
     }
 
     /// json_out_something.
-    fn json_out(&mut self, out: &mut Vec<u8>, depth: &mut i32, conf: &Config, v: Value) -> std::result::Result<(), Fault> {
+    fn json_out(&mut self, out: &mut Vec<u8>, depth: &mut Nest, conf: &Config, v: Value) -> std::result::Result<(), Fault> {
+        // A quit drops the bytes written so far: nothing else holds them.
+        if depth.steps.tick() { self.native_poll()?; }
         if v == conf.null { out.extend_from_slice(b"null"); return Ok(()); }
         if v == conf.false_ { out.extend_from_slice(b"false"); return Ok(()); }
         if v == Value::TRUE { out.extend_from_slice(b"true"); return Ok(()); }
@@ -477,7 +488,7 @@ impl Leaf<'_> {
                     self.json_out(out, depth, conf, value)?;
                 }
                 out.push(b'}');
-                *depth += 1;
+                depth.depth += 1;
             }
             Kind::Vector => {
                 Self::json_nest(depth)?;
@@ -487,7 +498,7 @@ impl Leaf<'_> {
                     self.json_out(out, depth, conf, item)?;
                 }
                 out.push(b']');
-                *depth += 1;
+                depth.depth += 1;
             }
             _ => return Err(Fault::Wrong("json-value-p", v)),
         }
@@ -496,7 +507,7 @@ impl Leaf<'_> {
 
     /// json_out_object_cons: an alist or plist with symbol keys; for a
     /// repeated key the first value counts.
-    fn json_out_cons(&mut self, out: &mut Vec<u8>, depth: &mut i32, conf: &Config, object: Value) -> std::result::Result<(), Fault> {
+    fn json_out_cons(&mut self, out: &mut Vec<u8>, depth: &mut Nest, conf: &Config, object: Value) -> std::result::Result<(), Fault> {
         Self::json_nest(depth)?;
         out.push(b'{');
         let alist = self.pair(object).is_some_and(|(car, _)| self.pair(car).is_some());
@@ -526,7 +537,7 @@ impl Leaf<'_> {
         }
         if tail != Value::NIL { return Err(Fault::Wrong("listp", object)); }
         out.push(b'}');
-        *depth += 1;
+        depth.depth += 1;
         Ok(())
     }
 
@@ -534,14 +545,14 @@ impl Leaf<'_> {
     pub fn json_serialize_bytes(&mut self, object: Value, args: &[Value]) -> std::result::Result<Vec<u8>, Fault> {
         let conf = self.json_config(args, false)?;
         let mut out = Vec::new();
-        self.json_out(&mut out, &mut 50, &conf, object)?;
+        self.json_out(&mut out, &mut Nest { depth: 50, steps: super::quit_poll::Steps::default() }, &conf, object)?;
         Ok(out)
     }
 
     /// Parse INPUT, GNU internal bytes; the value and the bytes it used.
     fn json_parse(&mut self, input: Vec<u8>, multibyte: bool, args: &[Value], whole: bool) -> std::result::Result<(Value, usize), Fault> {
         let conf = self.json_config(args, true)?;
-        let mut parser = Parser { cx: self, input, at: 0, multibyte, depth: 10000, conf };
+        let mut parser = Parser { cx: self, input, at: 0, multibyte, depth: 10000, conf, steps: super::quit_poll::Steps::default() };
         let value = parser.parse()?;
         if whole && parser.skip_whitespace_if_possible().is_some() {
             return Err(parser.fail("json-trailing-content"));

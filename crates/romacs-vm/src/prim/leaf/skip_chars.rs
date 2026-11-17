@@ -1,5 +1,8 @@
 //! Non-collecting character-set motion in current-buffer character coordinates.
 use super::*;
+
+/// Characters between two looks at the quit probe.
+const POLL: usize = super::quit_poll::POLL_STEPS as usize;
 use crate::coordinates::{ByteOffset, CharOffset};
 
 struct CharacterSet {
@@ -102,46 +105,57 @@ impl Leaf<'_> {
         let source = if set.classes != 0 { Some(self.vm.word_motion_syntax()?) } else { None };
         let tables = if set.upper || set.lower { Some([self.case_table(true)?, self.case_table(false)?]) } else { None };
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
-        let syntax = source.map(|source| crate::regexp::VmSyntax::new(self.vm, source));
-        let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex::SyntaxLookup);
-        let tables = tables.map(|tables| tables.map(|table| table.reader(self.vm)));
-        let case = |code: u32, down: bool| {
-            let [downcase, upcase] = tables.as_ref().expect("a set with [:upper:] or [:lower:] found its case tables");
-            if down { downcase.of(code) } else { upcase.of(code) }
-        };
-        let (start, at) = match &self.vm.objects[index] {
+        let (start, bound) = match &self.vm.objects[index] {
             data::Object::Buffer(buffer) => {
                 let accessible = buffer.accessible();
                 let low = buffer.char_of_byte(accessible.start).map_err(Fault::Error)?.0;
                 let high = buffer.char_of_byte(accessible.end).map_err(Fault::Error)?.0;
                 let start = buffer.char_of_byte(buffer.point).map_err(Fault::Error)?.0;
-                let bound = limit.unwrap_or(if forward { high as i64 + 1 } else { low as i64 + 1 })
-                    .clamp(low as i64 + 1, high as i64 + 1) as usize - 1;
-                let mut at = start;
-                while if forward { at < bound } else { at > bound } {
-                    let character = if forward { at } else { at - 1 };
-                    let Some(code) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
-                    if !set.contains(code as u32, true, syntax, &case)? { break; }
-                    if forward { at += 1; } else { at -= 1; }
-                }
-                (start, at)
+                (start, limit.unwrap_or(if forward { high as i64 + 1 } else { low as i64 + 1 })
+                    .clamp(low as i64 + 1, high as i64 + 1) as usize - 1)
             }
             data::Object::ByteBuffer(buffer) => {
-                let low = buffer.restriction.start.0;
-                let high = buffer.restriction.end.0;
-                let start = buffer.point.0;
-                let bound = limit.unwrap_or(if forward { high as i64 + 1 } else { low as i64 + 1 })
-                    .clamp(low as i64 + 1, high as i64 + 1) as usize - 1;
-                let mut at = start;
-                while if forward { at < bound } else { at > bound } {
-                    let character = if forward { at } else { at - 1 };
-                    if !set.contains(buffer.bytes[character] as u32, false, syntax, &case)? { break; }
-                    if forward { at += 1; } else { at -= 1; }
-                }
-                (start, at)
+                let (low, high) = (buffer.restriction.start.0, buffer.restriction.end.0);
+                (buffer.point.0, limit.unwrap_or(if forward { high as i64 + 1 } else { low as i64 + 1 })
+                    .clamp(low as i64 + 1, high as i64 + 1) as usize - 1)
             }
             _ => return Err(Fault::Error("buffer required".into())),
         };
+        // A quit stops the scan before point moves; a poll that does not
+        // quit goes on from where the scan stopped.
+        let mut at = start;
+        loop {
+            let syntax = source.clone().map(|source| crate::regexp::VmSyntax::new(self.vm, source));
+            let syntax = syntax.as_ref().map(|s| s as &dyn romacs_regex::SyntaxLookup);
+            let tables = tables.map(|tables| tables.map(|table| table.reader(self.vm)));
+            let case = |code: u32, down: bool| {
+                let [downcase, upcase] = tables.as_ref().expect("a set with [:upper:] or [:lower:] found its case tables");
+                if down { downcase.of(code) } else { upcase.of(code) }
+            };
+            let mut stopped = false;
+            match &self.vm.objects[index] {
+                data::Object::Buffer(buffer) => {
+                    while if forward { at < bound } else { at > bound } {
+                        if at.is_multiple_of(POLL) && self.vm.native_stop_due() { stopped = true; break; }
+                        let character = if forward { at } else { at - 1 };
+                        let Some(code) = buffer.character_of_char(CharOffset(character)).map_err(Fault::Error)? else { break; };
+                        if !set.contains(code as u32, true, syntax, &case)? { break; }
+                        if forward { at += 1; } else { at -= 1; }
+                    }
+                }
+                data::Object::ByteBuffer(buffer) => {
+                    while if forward { at < bound } else { at > bound } {
+                        if at.is_multiple_of(POLL) && self.vm.native_stop_due() { stopped = true; break; }
+                        let character = if forward { at } else { at - 1 };
+                        if !set.contains(buffer.bytes[character] as u32, false, syntax, &case)? { break; }
+                        if forward { at += 1; } else { at -= 1; }
+                    }
+                }
+                _ => unreachable!("checked above"),
+            }
+            if !stopped { break; }
+            self.native_poll()?;
+        }
         match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(buffer) => buffer.point = buffer.byte_of_char(CharOffset(at)).map_err(Fault::Error)?,
             data::Object::ByteBuffer(buffer) => buffer.point = ByteOffset(at),

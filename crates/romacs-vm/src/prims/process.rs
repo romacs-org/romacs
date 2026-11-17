@@ -527,7 +527,8 @@ fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, outp
     let infile = cx.string_view(infile)?.bytes().to_vec();
     let output = if output == Value::TRUE { CallOutput::Pipe } else { call_output(cx, output)? };
     let error = call_output(cx, error)?;
-    cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL)
+    // Its wait quits: the child is interrupted and reaped later.
+    cx.quittable(|cx| cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL))
 }}
 
 defsubr! { name = "romacs--wait-status", gnu = "romacs:process", effect = Pure,

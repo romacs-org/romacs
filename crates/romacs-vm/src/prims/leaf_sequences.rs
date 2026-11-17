@@ -41,7 +41,10 @@ fn sort(cx, sequence: Value; rest options) -> Step {
         let mut values = Vec::new();
         let mut seen = HashSet::default();
         let mut tail = sequence;
+        // Nothing is written yet: polled anywhere.
+        let mut steps = crate::quit::Steps::default();
         while let Some((car, cdr)) = cx.pair(tail) {
+            if steps.tick() { cx.quittable(Leaf::native_poll)?; }
             if !seen.insert(tail.0) { return Err(Fault::Circular(sequence)); }
             values.push(car);
             tail = cdr;
@@ -65,7 +68,8 @@ fn sort_key(cx: &mut Leaf<'_>, mut state: Vec<Value>) -> Next {
     let n = cx.vector_len(state[5])?;
     let i = index(state[7]);
     if state[2] == Value::NIL || state[2] == cx.intern("identity") || i == n {
-        if sort_native(cx, &state)? { return sort_finish(cx, &state); }
+        // Its sort stops consistently: the input is written only at the end.
+        if cx.quittable(|cx| sort_native(cx, &state))? { return sort_finish(cx, &state); }
         state[7] = number(1);
         state[8] = number(1);
         if n < 64 {
@@ -93,6 +97,30 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
+/// A stable sort of ORDER by COMPARE that polls between its runs: runs of
+/// [`SORT_RUN`] sorted alone, then merged pairwise a level at a time, each
+/// merge a sort of two sorted runs, which std's stable sort merges in one
+/// pass. Every step is bounded by a run or a merge, never the whole input.
+fn sort_polled<T>(cx: &mut Leaf<'_>, order: &mut [T],
+                  mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
+    let mut width = SORT_RUN;
+    for run in order.chunks_mut(width) {
+        run.sort_by(|a, b| compare(cx, a, b));
+        cx.native_poll()?;
+    }
+    while width < order.len() {
+        for pair in order.chunks_mut(2 * width).filter(|pair| pair.len() > width) {
+            pair.sort_by(|a, b| compare(cx, a, b));
+            cx.native_poll()?;
+        }
+        width *= 2;
+    }
+    Ok(())
+}
+
+/// Elements a sort's run holds between two polls.
+const SORT_RUN: usize = 1 << 15;
+
 /// The native order of a predicate that resolves to a builtin subr, when
 /// every key is of a type it compares without signaling. GNU sort.c marks
 /// this point as where keys would be checked for faster comparison.
@@ -115,15 +143,21 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         Some("<" | "value<") if fixnums() => false,
         _ => return Ok(false),
     };
+    // The keys' order, sorted with no Lisp to poll: polled between runs
+    // (`sort_polled`), nothing written to the input before it ends.
     let mut order: Vec<usize> = (0..keys.len()).collect();
     if by_string {
         // Validated above, so the comparison cannot fail.
-        order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal));
+        sort_polled(cx, &mut order, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?;
     } else {
-        order.sort_by_key(|&i| keys[i].integer_value());
+        let ints: Vec<i64> = keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect();
+        sort_polled(cx, &mut order, |_, a, b| ints[*a].cmp(&ints[*b]))?;
     }
     let items = cx.vector_values(state[5])?;
+    // Into the sort's own vectors: polled anywhere.
+    let mut steps = crate::quit::Steps::default();
     for (to, &from) in order.iter().enumerate() {
+        if steps.tick() { cx.native_poll()?; }
         cx.vector_set(state[5], number(to), items[from])?;
         cx.vector_set(state[6], number(to), keys[from])?;
     }
@@ -262,6 +296,8 @@ fn sort_finish(cx: &mut Leaf<'_>, state: &[Value]) -> Next {
     let result = if state[4] != Value::NIL {
         if cx.pair(original).is_some() {
             let mut tail = original;
+            // NOPOLL: the list's length, one store each; a quit would leave
+            // it half sorted.
             for value in values {
                 let Some((_, cdr)) = cx.pair(tail) else { break };
                 cx.setcar(tail, value)?;

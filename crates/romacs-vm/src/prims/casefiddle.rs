@@ -2,10 +2,10 @@ use super::*;
 use crate::prim::leaf::RegionCase;
 
 defsubr! { name = "upcase", gnu = "casefiddle.c:368", effect = Reads,
-fn upcase(cx, value: Value) { cx.case_convert(value, false) }}
+fn upcase(cx, value: Value) { cx.quittable(|cx| cx.case_convert(value, false)) }}
 
 defsubr! { name = "downcase", gnu = "casefiddle.c:383", effect = Reads,
-fn downcase(cx, value: Value) { cx.case_convert(value, true) }}
+fn downcase(cx, value: Value) { cx.quittable(|cx| cx.case_convert(value, true)) }}
 
 fn flag(b: bool) -> Value { if b { Value::TRUE } else { Value::NIL } }
 fn fixnum(n: i64) -> Value { Value::integer(n).expect("buffer position") }

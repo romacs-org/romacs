@@ -3,6 +3,9 @@
 //! display-table glyph sum.
 use super::*;
 
+/// Characters between two polls.
+const POLL: usize = super::quit_poll::POLL_STEPS as usize;
+
 /// disptab.h DISP_TABLE_EXTRA_SLOTS (BOX_DOUBLE_UP_LEFT + 1).
 const DISP_TABLE_EXTRA_SLOTS: usize = 18;
 
@@ -73,16 +76,17 @@ impl Leaf<'_> {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let compositions = if multibyte && from < to { self.composition_table()? } else { None };
         // FROM..TO and the PREV-CHARS a rule looks ahead (3), decoded once.
-        let mut text = self.characters(string, from, to - from + 3);
+        let mut text = self.characters(string, from, to - from + 3)?;
         let (mut width, mut i) = (0i64, 0);
         while from + i < to {
+            if i.is_multiple_of(POLL) && i != 0 { self.native_poll()?; }
             if let Some(table) = compositions
                 && let Some((end, emoji)) = self.composition_at(table, string, &text, from, i)? {
                 // compose-gstring-and-emoji-for-terminal: two columns; another
                 // function's run keeps its characters' widths, as
                 // compose-gstring-for-terminal leaves them.
                 if !emoji && end > text.len() {
-                    let more = self.characters(string, from + text.len(), end - text.len());
+                    let more = self.characters(string, from + text.len(), end - text.len())?;
                     text.extend(more);
                 }
                 width += if emoji { 2 } else {
@@ -100,19 +104,26 @@ impl Leaf<'_> {
     }
     /// Up to COUNT characters of STRING from character FROM, each with the
     /// byte it starts at; a unibyte string's characters are its bytes.
-    fn characters(&self, string: Value, from: usize, count: usize) -> Vec<(u32, usize)> {
+    /// Polled: a C-g quits it before the width is summed.
+    fn characters(&mut self, string: Value, from: usize, count: usize) -> std::result::Result<Vec<(u32, usize)>, Fault> {
+        if let Some(out) = self.characters_until(string, from, count, true) { return Ok(out); }
+        self.native_poll()?;
+        Ok(self.characters_until(string, from, count, false).expect("never stopped"))
+    }
+    fn characters_until(&self, string: Value, from: usize, count: usize, stop: bool) -> Option<Vec<(u32, usize)>> {
         let total = self.vm.str_view(string).expect("string-width takes a string").bytes.len();
         let view = self.vm.str_view_from(string, from).expect("string-width takes a string");
         let mut at = total - view.bytes.len();
         let mut out = Vec::with_capacity(count.min(view.chars));
         let mut bytes = view.bytes;
         while out.len() < count && !bytes.is_empty() {
+            if out.len().is_multiple_of(POLL) && !out.is_empty() && stop && self.vm.native_stop_due() { return None; }
             let (code, length) = if view.multibyte { crate::lstring::string_char(bytes) } else { (u32::from(bytes[0]), 1) };
             out.push((code, at));
             at += length;
             bytes = &bytes[length..];
         }
-        out
+        Some(out)
     }
     /// `composition-function-table', when it is a char-table.
     fn composition_table(&mut self) -> std::result::Result<Option<Value>, Fault> {

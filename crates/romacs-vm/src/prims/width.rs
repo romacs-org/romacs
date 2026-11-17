@@ -22,5 +22,5 @@ fn string_width(cx, string: Value; optional from: Value, to: Value) {
     if !(0 <= f && f <= t && t <= size) {
         return Err(Fault::Range3(string, from, to));
     }
-    cx.string_width(string, f as usize, t as usize)
+    cx.quittable(|cx| cx.string_width(string, f as usize, t as usize))
 }}

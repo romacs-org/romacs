@@ -421,7 +421,7 @@ pub(super) fn read<'a, 'b, B: Plain, R: Plain>(m: &mut Orch<'_, 'b, 'a>, gc: Gc<
     let e = m.raw(&EngineKey);
     let step = e.code_suspended(|vm| {
         let index = vm.reading_primitive(target.get(), argc)?;
-        crate::gap_probe::enter(vm, || prim::generated(target.get()).map_or("(reader)", |d| d.name));
+        crate::gap_probe::enter(vm, move || prim::generated(target.get()).map_or("(reader)", |d| d.name));
         let out = vm.root_frame(&[Value::NIL; 3]);
         let signalled = over_vm(vm, gc, (index, start, argc, &out), |mut m, gc, (index, start, argc, out)| {
             prim::reader_body(index)(prim::ReadCall { m: &mut m, gc, start, argc, out })

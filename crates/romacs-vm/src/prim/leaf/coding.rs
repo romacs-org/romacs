@@ -35,11 +35,18 @@ fn num(n: i64) -> Value {
 
 impl Leaf<'_> {
     pub(crate) fn coding_convert_string(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool) -> super::super::Out {
-        self.coding_convert(string, coding, nocopy, buffer, encode, true)
+        // A short conversion takes no probe: its passes end within a chunk.
+        let long = self.vm.str_view(string).is_some_and(|view| view.bytes.len() > CHUNK);
+        let stop = if long { self.native_stop() } else { crate::quit::NativeStop::never() };
+        self.coding_convert(string, coding, nocopy, buffer, encode, true, &mut Pass::new(stop))
     }
     /// code_convert_string; ASCII_FAST is false once detection replaced
     /// the system the caller named, whose ASCII optimization alone applies.
-    fn coding_convert(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool, ascii_fast: bool) -> super::super::Out {
+    /// PASS asks the quit probe as each long pass goes: a pass that stops
+    /// leaves nothing made, and the conversion polls (`stopped`).
+    #[expect(clippy::too_many_arguments, reason = "code_convert_string's arguments, and the pass its long loops ask")]
+    fn coding_convert(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool, ascii_fast: bool,
+                      pass: &mut Pass) -> super::super::Out {
         let source = self.string_view(string)?;
         self.coding_symbol(coding)?;
         let last = self.intern("last-coding-system-used");
@@ -82,12 +89,24 @@ impl Leaf<'_> {
         }
         let tokens = if encode && kind == self.intern("utf-8") && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
-        } else { source.chars().map(|code| {
-            if !source.is_multibyte() { CodingToken::Byte(code as u8) }
-            else if code >= crate::lstring::BYTE8_OFFSET + 128 { CodingToken::Byte((code - crate::lstring::BYTE8_OFFSET) as u8) }
-            else if code < 128 { CodingToken::Byte(code as u8) }
-            else { CodingToken::Character(code) }
-        }).collect::<Vec<_>>() };
+        } else {
+            let multibyte = source.is_multibyte();
+            let token = |code: u32| {
+                if !multibyte { CodingToken::Byte(code as u8) }
+                else if code >= crate::lstring::BYTE8_OFFSET + 128 { CodingToken::Byte((code - crate::lstring::BYTE8_OFFSET) as u8) }
+                else if code < 128 { CodingToken::Byte(code as u8) }
+                else { CodingToken::Character(code) }
+            };
+            let mut tokens = Vec::with_capacity(source.chars);
+            let mut chars = source.chars();
+            loop {
+                let before = tokens.len();
+                tokens.extend(chars.by_ref().take(CHUNK).map(token));
+                if tokens.len() - before < CHUNK || !pass.check() { break; }
+            }
+            tokens
+        };
+        if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
         let bom = self.vector_get(attrs, num(24))?;
         let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
         let undecided = kind == self.intern("undecided");
@@ -96,7 +115,7 @@ impl Leaf<'_> {
         if !encode && (undecided || (self.pair(bom).is_some() && matches!(category, CATEGORY_UTF_8_AUTO | CATEGORY_UTF_16_AUTO))) {
             let bytes = coding_detection_bytes(&tokens);
             if let Some(found) = self.coding_detected_system(spec, attrs, &bytes)? {
-                return self.coding_convert(string, found, nocopy, buffer, false, false);
+                return self.coding_convert(string, found, nocopy, buffer, false, false, pass);
             }
         }
         let is = |this: &mut Self, name: &str| kind == this.intern(name);
@@ -138,7 +157,8 @@ impl Leaf<'_> {
                 return self.coding_string_result(buffer, last, precise, bytes, false, Vec::new());
             }
             // consume_chars converts line ends before the encoder sees them.
-            let tokens = coding_encode_eol(tokens, mode);
+            let tokens = coding_encode_eol(tokens, mode, pass);
+            if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
             if charset {
                 self.coding_encode_charset(attrs, &tokens, &mut bytes)?;
             } else if iso {
@@ -147,17 +167,24 @@ impl Leaf<'_> {
                 bytes.extend(self.coding_encode_emacs_mule(attrs, &tokens)?);
             } else if sjis || big5 {
                 bytes.extend(self.coding_encode_double(attrs, &tokens, sjis)?);
-            } else { for token in tokens { match token {
-                CodingToken::Byte(byte) => bytes.push(byte),
-                CodingToken::Character(code) => coding_emit(code, &mut bytes),
-            }}}
+            } else {
+                for chunk in tokens.chunks(CHUNK) {
+                    for &token in chunk { match token {
+                        CodingToken::Byte(byte) => bytes.push(byte),
+                        CodingToken::Character(code) => coding_emit(code, &mut bytes),
+                    }}
+                    if !pass.check() { break; }
+                }
+            }
+            if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
             (bytes, false)
         } else {
             let tokens = if utf8 {
-                coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"))
+                coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"), pass)
                     .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
             } else { tokens };
-            let tokens = coding_decode_eol(tokens, mode);
+            let tokens = coding_decode_eol(tokens, mode, pass);
+            if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
             let tokens = if charset || sjis || big5 || iso || mule {
                 let (tokens, found) = if charset { self.coding_decode_charset(attrs, &tokens)? }
                     else if iso { self.coding_decode_iso_2022(attrs, &tokens)? }
@@ -167,17 +194,27 @@ impl Leaf<'_> {
                 tokens
             } else { tokens };
             let for_unibyte = !utf8 && self.vector_get(attrs, num(12))? != Value::NIL;
-            let codes = tokens.into_iter().map(|token| match token {
-                    CodingToken::Character(code) if for_unibyte => 0u32.wrapping_sub(code) & 255,
-                    CodingToken::Character(code) => code,
-                    CodingToken::Byte(byte) if for_unibyte || byte < 128 => u32::from(byte),
-                    CodingToken::Byte(byte) => crate::lstring::BYTE8_OFFSET + u32::from(byte),
-                });
+            let code = |token: CodingToken| match token {
+                CodingToken::Character(code) if for_unibyte => 0u32.wrapping_sub(code) & 255,
+                CodingToken::Character(code) => code,
+                CodingToken::Byte(byte) if for_unibyte || byte < 128 => u32::from(byte),
+                CodingToken::Byte(byte) => crate::lstring::BYTE8_OFFSET + u32::from(byte),
+            };
             let mut bytes = Vec::new();
-            for code in codes { if for_unibyte { bytes.push(code as u8); } else { coding_emit(code, &mut bytes); } }
+            for chunk in tokens.chunks(CHUNK) {
+                for &token in chunk { let code = code(token); if for_unibyte { bytes.push(code as u8); } else { coding_emit(code, &mut bytes); } }
+                if !pass.check() { break; }
+            }
+            if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
             (bytes, !for_unibyte)
         };
         self.coding_string_result(buffer, last, precise, bytes, multibyte, runs)
+    }
+    /// A conversion a pass stopped for the quit probe: the poll, which
+    /// quits, or (what stopped it taken) the conversion again, unstopped.
+    fn coding_stopped(&mut self, string: Value, coding: Value, nocopy: Value, buffer: Value, encode: bool, ascii_fast: bool) -> super::super::Out {
+        self.native_poll()?;
+        self.coding_convert(string, coding, nocopy, buffer, encode, ascii_fast, &mut Pass::new(crate::quit::NativeStop::never()))
     }
     fn coding_string_result(&mut self, buffer: Value, last: Value, precise: Value, bytes: Vec<u8>, multibyte: bool, runs: Vec<(usize, usize, usize)>) -> super::super::Out {
         // A BUFFER destination receives the string (prims/coding.rs).
@@ -406,15 +443,39 @@ fn coding_eol(tokens: &[CodingToken]) -> Option<usize> {
 }
 
 /// consume_chars's line ends: LF becomes CRLF (MODE 1) or CR (MODE 2).
-fn coding_encode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> {
+/// Items a conversion's pass takes between two looks at the quit probe.
+const CHUNK: usize = 1 << 14;
+
+/// A conversion's look at the quit probe, once a [`CHUNK`] of a pass; once
+/// it says to stop, every pass stops.
+pub(super) struct Pass {
+    stop: crate::quit::NativeStop,
+    stopped: bool,
+}
+
+impl Pass {
+    fn new(stop: crate::quit::NativeStop) -> Self {
+        Self { stop, stopped: false }
+    }
+    /// Whether the pass goes on past this chunk.
+    fn check(&mut self) -> bool {
+        if !self.stopped { self.stopped = self.stop.due(); }
+        !self.stopped
+    }
+}
+
+fn coding_encode_eol(tokens: Vec<CodingToken>, mode: usize, pass: &mut Pass) -> Vec<CodingToken> {
     if mode == 0 { return tokens; }
     let mut result = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        if matches!(token, CodingToken::Byte(b'\n')) {
-            result.push(CodingToken::Byte(b'\r'));
-            if mode == 2 { continue; }
+    for chunk in tokens.chunks(CHUNK) {
+        for &token in chunk {
+            if matches!(token, CodingToken::Byte(b'\n')) {
+                result.push(CodingToken::Byte(b'\r'));
+                if mode == 2 { continue; }
+            }
+            result.push(token);
         }
-        result.push(token);
+        if !pass.check() { break; }
     }
     result
 }
@@ -432,10 +493,14 @@ fn coding_detection_bytes(tokens: &[CodingToken]) -> Vec<u8> {
     bytes
 }
 
-fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> {
+fn coding_decode_eol(tokens: Vec<CodingToken>, mode: usize, pass: &mut Pass) -> Vec<CodingToken> {
     let mut result = Vec::with_capacity(tokens.len());
-    let mut at = 0;
+    let (mut at, mut next) = (0, CHUNK);
     while at < tokens.len() {
+        if at >= next {
+            next = at + CHUNK;
+            if !pass.check() { break; }
+        }
         if matches!(tokens[at], CodingToken::Byte(13)) {
             if mode == 2 { result.push(CodingToken::Byte(10)); at += 1; continue; }
             if mode == 1 && tokens.get(at + 1).is_some_and(|t| matches!(t, CodingToken::Byte(10))) {
@@ -458,10 +523,11 @@ pub(super) fn decode_utf8_detecting_eol(bytes: &[u8], inhibit_eol: bool) -> Vec<
     }
     let tokens: Vec<CodingToken> = bytes.iter().map(|&b| CodingToken::Byte(b)).collect();
     let mode = if inhibit_eol { 0 } else { coding_eol(&tokens).unwrap_or(0) };
-    let tokens = coding_decode_utf8(&tokens, false, false).into_iter()
+    let never = &mut Pass::new(crate::quit::NativeStop::never());
+    let tokens = coding_decode_utf8(&tokens, false, false, never).into_iter()
         .map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect();
     let mut out = Vec::with_capacity(bytes.len());
-    for token in coding_decode_eol(tokens, mode) {
+    for token in coding_decode_eol(tokens, mode, never) {
         match token {
             CodingToken::Byte(byte) => coding_emit(u32::from(byte), &mut out),
             CodingToken::Character(code) => coding_emit(code, &mut out),
@@ -484,11 +550,17 @@ fn coding_encode_unibyte(mut bytes: &[u8]) -> Vec<CodingToken> {
     tokens
 }
 
-fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool) -> Vec<u32> {
+fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool, pass: &mut Pass) -> Vec<u32> {
     let mut chars = Vec::<i32>::new();
     let mut at = if bom && matches!(tokens.get(..3), Some([CodingToken::Byte(239), CodingToken::Byte(187), CodingToken::Byte(191)])) { 3 } else { 0 };
     let mut after_cr = None;
+    // A stop leaves what it decoded, which the caller drops (`Pass`).
+    let mut next = CHUNK;
     loop {
+        if at >= next {
+            next = at + CHUNK;
+            if !pass.check() { break; }
+        }
         // GNU saves src_base after the CR lookahead, including on retry/EOF.
         let base = at;
         let Some(token) = after_cr.take().or_else(|| {

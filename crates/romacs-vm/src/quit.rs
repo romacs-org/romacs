@@ -116,6 +116,12 @@ impl QuitSignal {
         self.word.load(Ordering::Relaxed) & (PRESSES | DEADLINE) != 0
     }
 
+    /// Whether a passed deadline waits that is the current call's, without
+    /// taking it.
+    pub(crate) fn deadline_current(&self) -> bool {
+        self.word.load(Ordering::Relaxed) & DEADLINE != 0 && crate::host::call_deadline::expired_is_current()
+    }
+
     /// Take a passed deadline: whether it was the current call's.
     pub(crate) fn take_deadline(&self) -> bool {
         self.word.fetch_and(!DEADLINE, Ordering::AcqRel) & DEADLINE != 0 && crate::host::call_deadline::expired_is_current()
@@ -170,20 +176,57 @@ impl Vm {
         self.quit.due() || (self.quit.busy() && (flag != Value::NIL || throw_on_input != Value::NIL))
     }
 
-    /// A long native loop's poll, between steps it can stop at: an inspect
-    /// request is answered and the loop goes on; a quit, in a Lisp-called
-    /// motion only, is `maybe_quit''s, so what it holds stays held. A C-g
-    /// counts only while `inhibit-quit' is nil, a debug event whatever it
-    /// is, as handle_user_signal clears it.
+    /// The one poll of a long native loop, between steps it can stop at,
+    /// as GNU's C loops call `maybe_quit`: an inspect request is answered
+    /// and the loop goes on; a quit, inside a primitive Lisp called that
+    /// declared its loop's stops consistent (`Leaf::quittable`), is
+    /// `maybe_quit`'s, so what the loop did stays done. A C-g counts only
+    /// while `inhibit-quit` is nil, a debug event whatever it is, as
+    /// `handle_user_signal` clears it. A loop that cannot hold the VM between
+    /// its steps (a comparator, a C library's callback) asks
+    /// [`Self::native_stop`] instead, stops at a consistent point, and polls
+    /// here.
     pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
-        if !self.motion_quit || !self.native_quit_reached() { return Ok(()); }
+        if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
         crate::gap_probe::safepoint(Some(self));
         let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
         if !press && !crate::host::user_signal_waiting(self.debug_event_mask()) { return Ok(()); }
+        self.quit_fault()
+    }
+
+    /// `maybe_quit` inside a primitive: its escape as the primitive's
+    /// fault, a `throw-on-input` throw left in `propagated_escape`.
+    pub(crate) fn quit_fault(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         match self.maybe_quit() {
-            Some(crate::threaded::Escape::Signal(condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
-            _ => Ok(()),
+            None => Ok(()),
+            Some(Escape::Signal(condition, data)) => Err(crate::prim::Fault::Signal(condition, data)),
+            Some(escape) => {
+                self.propagated_escape = Some(escape);
+                Err(crate::prim::Fault::Escape)
+            }
+        }
+    }
+
+    /// [`NativeStop::due`] for a loop that holds the VM borrowed: the same
+    /// answer, with nothing taken from the VM to ask it.
+    pub(crate) fn native_stop_due(&self) -> bool {
+        if !self.native_quit || !self.native_quit_reached() { return false; }
+        crate::gap_probe::safepoint(None);
+        let held = self.quit_variables()[1] != Value::NIL;
+        (!held && (self.quit.pressed() || self.quit.deadline_current()))
+            || crate::host::user_signal_waiting(self.debug_event_mask())
+    }
+
+    /// What [`Self::native_poll`] would quit for, as a probe a loop can ask
+    /// without the VM: armed only where the poll would act, so a stop it
+    /// asks for always ends in `quit`.
+    pub(crate) fn native_stop(&self) -> NativeStop {
+        let inhibit = self.quit_variables()[1];
+        let armed = self.native_quit && self.native_quit_reached();
+        NativeStop {
+            quit: (armed && inhibit == Value::NIL).then(|| self.quit.clone()),
+            debug_events: if armed { self.debug_event_mask() } else { 0 },
         }
     }
     /// Whether a quit raised in a native loop would be acted on: the
@@ -428,6 +471,59 @@ impl Vm {
     pub(crate) fn host_input_pending(&mut self) -> bool {
         // A key a `switch-frame' went before is input not yet read.
         self.deferred_event.is_some() || self.host_input.as_mut().is_some_and(|host| host.input_pending())
+    }
+}
+
+/// Steps between two polls of a long loop: GNU's `rarely_quit` polls
+/// every 2^16 steps of a cheap loop, `invisible.rs` every 1024.
+pub(crate) const POLL_STEPS: u32 = 1024;
+
+/// A step counter for a loop: true every [`POLL_STEPS`] steps.
+#[derive(Default)]
+pub(crate) struct Steps(u32);
+
+impl Steps {
+    #[inline]
+    pub(crate) fn tick(&mut self) -> bool {
+        self.0 = self.0.wrapping_add(1);
+        self.0.is_multiple_of(POLL_STEPS)
+    }
+}
+
+/// A loop its quit probe stopped ([`NativeStop`]): it made nothing, and
+/// polls (`Vm::native_poll`).
+#[derive(Debug)]
+pub(crate) struct Stopped;
+
+/// A loop's quit probe, taken from the VM before the loop
+/// ([`Vm::native_stop`]): whether a press or a debug event waits that
+/// `native_poll` would quit for. It reads one atomic word.
+#[derive(Clone)]
+pub(crate) struct NativeStop {
+    quit: Option<std::sync::Arc<QuitSignal>>,
+    debug_events: u8,
+}
+
+impl NativeStop {
+    /// A probe that never stops: for a loop no quit may reach.
+    pub(crate) fn never() -> Self {
+        Self { quit: None, debug_events: 0 }
+    }
+
+    /// Whether it may ever say to stop: a probe that cannot needs no
+    /// callback installed.
+    pub(crate) fn armed(&self) -> bool {
+        self.quit.is_some() || self.debug_events != 0
+    }
+
+    /// Whether to stop and poll: a press, the current call's deadline or
+    /// a debug event, each of which `native_poll` quits for, so a loop
+    /// that stops ends in the quit. Where it is armed, a safepoint.
+    #[inline]
+    pub(crate) fn due(&self) -> bool {
+        if self.quit.is_some() { crate::gap_probe::safepoint(None); }
+        self.quit.as_ref().is_some_and(|quit| quit.pressed() || quit.deadline_current())
+            || crate::host::user_signal_waiting(self.debug_events)
     }
 }
 

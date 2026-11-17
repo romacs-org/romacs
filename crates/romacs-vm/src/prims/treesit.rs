@@ -48,7 +48,8 @@ fn after(saved: &[Value]) -> Then {
 
 /// treesit_ensure_parsed for PARSER, then AFTER with ARGS.
 fn forced(cx: &mut Leaf<'_>, parser: Value, kind: i64, args: &[Value]) -> Next {
-    let ranges = cx.ts_reparse(parser)?;
+    // A parse stops consistently: nothing is written before it ends.
+    let ranges = cx.quittable(|cx| cx.ts_reparse(parser))?;
     let mut saved = vec![parser, ranges.unwrap_or(Value::NIL), Value::integer(kind).unwrap()];
     saved.extend_from_slice(args);
     if ranges.is_some() && cx.ts_parser(parser)?.notifiers != Value::NIL {

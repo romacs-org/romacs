@@ -371,6 +371,7 @@ fn scanned(text: &Mutable<'_>, options: Options, call: Call, done: i64, seed: u6
                 answers.insert(pos, (pos - back).max(1));
             }
             Halt::ScanError(..) => unreachable!("returned above"),
+            Halt::Poll => unreachable!("a test text never asks to stop"),
         }
         if resumed {
             went.push(stopped.suspended.as_ref().map(|scan| (scan.at, scan.forw.map(|forw| forw.at))));

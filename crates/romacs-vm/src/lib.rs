@@ -631,6 +631,11 @@ enum Primitive {
 }
 /// The file declaring [`PRIMITIVES`], relative to the source tree.
 pub(crate) const PRIMITIVES_FILE: &str = file!();
+/// A lib.rs primitive's name, for the gap probe (`gap_probe`).
+pub(crate) fn legacy_primitive_name(primitive: Primitive) -> &'static str {
+    PRIMITIVES.iter().find(|(_, p)| *p == primitive).map_or("(legacy)", |(name, _)| name)
+}
+
 const PRIMITIVES: &[(&str, Primitive)] = &[
     ("+", Primitive::Add),
     ("/", Primitive::Div),
@@ -1278,9 +1283,11 @@ pub struct Vm {
     display_state: display::DisplayState,
     window_state: window::WindowState,
     world_version: u64,
-    /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
-    /// Off in redisplay, which never unwinds half done.
-    motion_quit: bool,
+    /// A primitive Lisp called runs a native loop that stops consistently at
+    /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
+    /// Off in redisplay, which never unwinds half done, and wherever Rust
+    /// reaches the same loop without a caller that would unwind.
+    native_quit: bool,
     // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
@@ -1743,7 +1750,7 @@ impl Vm {
             display_state: display::DisplayState::new(),
             window_state: window::WindowState::default(),
             world_version: 1,
-            motion_quit: false,
+            native_quit: false,
             #[cfg(test)]
             variable_read_probes: std::cell::Cell::new(0),
             #[cfg(test)]

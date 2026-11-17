@@ -214,10 +214,28 @@ impl Parser {
     }
     /// ts_parser_parse of SOURCE, reusing OLD's unchanged subtrees.
     pub(crate) fn parse(&mut self, old: Option<&Tree>, source: &dyn Source) -> Option<Tree> {
+        self.parse_until(old, source, &crate::quit::NativeStop::never()).expect("never stopped")
+    }
+    /// `parse`, asking STOP as it goes (the runtime's progress callback):
+    /// Err once STOP stopped it, the parser reset so that the next parse
+    /// starts afresh rather than resuming this one.
+    pub(crate) fn parse_until(&mut self, old: Option<&Tree>, source: &dyn Source, stop: &crate::quit::NativeStop)
+                              -> Result<Option<Tree>, crate::quit::Stopped> {
         let old = old.map(|tree| tree.0.borrow());
         PARSES.with(|n| n.set(n.get() + 1));
-        let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), None)?;
-        Some(Tree(RefCell::new(tree), OnceCell::new()))
+        let (mut stopped, mut calls) = (false, 0u32);
+        let mut progress = |_: &tree_sitter::ParseState| {
+            calls = calls.wrapping_add(1);
+            stopped = calls.is_multiple_of(64) && stop.due();
+            if stopped { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) }
+        };
+        let options = stop.armed().then(|| tree_sitter::ParseOptions::new().progress_callback(&mut progress));
+        let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), options);
+        if stopped {
+            self.0.reset();
+            return Err(crate::quit::Stopped);
+        }
+        Ok(tree.map(|tree| Tree(RefCell::new(tree), OnceCell::new())))
     }
 }
 
@@ -415,19 +433,40 @@ impl Query {
     }
     /// Every match of the query under NODE whose span overlaps the byte
     /// RANGE, in ts_query_cursor_next_match order.
-    pub(crate) fn matches(&self, node: Node, range: (u32, u32)) -> Vec<Match> {
+    /// The matches under NODE in RANGE, STOP asked between matches and as
+    /// the cursor walks (the runtime's progress callback): None once it
+    /// stopped.
+    pub(crate) fn matches(&self, node: Node, range: (u32, u32), stop: &crate::quit::NativeStop) -> Option<Vec<Match>> {
+        // UNSAFE(the runtime's progress callback type is an unsafe extern fn)
+        // SAFETY: the runtime calls it only during this walk, with the state
+        // whose payload OPTIONS below set.
+        unsafe extern "C" fn progress(state: *mut ffi::TSQueryCursorState) -> bool {
+            // UNSAFE(the runtime hands the callback its payload back as a raw pointer)
+            // SAFETY: the payload is the probe `matches` borrows for the whole walk.
+            unsafe { &*(*state).payload.cast::<crate::quit::NativeStop>() }.due()
+        }
+        let options = ffi::TSQueryCursorOptions {
+            payload: std::ptr::from_ref(stop).cast_mut().cast(),
+            progress_callback: stop.armed().then_some(progress as unsafe extern "C" fn(*mut ffi::TSQueryCursorState) -> bool),
+        };
+        let mut steps = crate::quit::Steps::default();
         // SAFETY: the cursor is ours; NODE's tree is live (see `Node`); a
-        // match's captures are read before the next step.
+        // match's captures are read before the next step; OPTIONS and the
+        // probe it points at outlive the cursor, deleted before return.
         unsafe {
             let cursor = ffi::ts_query_cursor_new();
             ffi::ts_query_cursor_set_byte_range(cursor, range.0, range.1);
-            ffi::ts_query_cursor_exec(cursor, self.0, node.0);
-            let mut out = Vec::new();
+            ffi::ts_query_cursor_exec_with_options(cursor, self.0, node.0, &raw const options);
+            let mut out = Some(Vec::new());
             let mut found: ffi::TSQueryMatch = std::mem::zeroed();
             while ffi::ts_query_cursor_next_match(cursor, &mut found) {
+                if steps.tick() && stop.due() { out = None; break; }
                 let captures = raw_slice(found.captures, u32::from(found.capture_count));
-                out.push(Match { pattern: u32::from(found.pattern_index), captures: captures.iter().map(|c| (Node(c.node), c.index)).collect() });
+                if let Some(out) = &mut out {
+                    out.push(Match { pattern: u32::from(found.pattern_index), captures: captures.iter().map(|c| (Node(c.node), c.index)).collect() });
+                }
             }
+            if stop.armed() && stop.due() { out = None; }
             ffi::ts_query_cursor_delete(cursor);
             out
         }

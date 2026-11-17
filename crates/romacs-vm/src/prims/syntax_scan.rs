@@ -75,7 +75,8 @@ fn start(cx: &mut Leaf<'_>, op: Op, args: &[Value]) -> Next {
 fn run(cx: &mut Leaf<'_>, saved: &[Value]) -> Next {
     let saved = &saved[..ARGS];
     let int = |n: i64| Value::integer(n).expect("buffer position");
-    let outcome = cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7], saved[8])?;
+    // A scan stops consistently at its polls: nothing is written before it ends.
+    let outcome = cx.quittable(|cx| cx.syntax_scan(Op::of(saved[0]), &saved[1..7], saved[7], saved[8]))?;
     if let Outcome::Done(value) = outcome {
         return Ok(Step::Done(value));
     }

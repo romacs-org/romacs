@@ -262,12 +262,23 @@ impl Leaf<'_> {
         self.sqlite_list(names)
     }
 
+    /// STATEMENT's next step, which a C-g interrupts: the statement is
+    /// rolled back and the quit raised (`Connection::stoppable`).
+    fn sqlite_step(&mut self, statement: &mut Statement, probe: &crate::quit::NativeStop) -> std::result::Result<Step, Fault> {
+        let step = statement.connection().clone().stoppable(probe, || statement.step());
+        if matches!(step, Step::Error(_)) && probe.due() { self.native_poll()?; }
+        Ok(step)
+    }
+
     pub(crate) fn sqlite_execute(&mut self, db: Value, query: Value, values: Value) -> Out {
         let mut statement = self.sqlite_prepare(db, query, values, false, true)?;
-        match statement.step() {
+        let probe = self.native_stop();
+        match self.sqlite_step(&mut statement, &probe)? {
             Step::Row => {
                 let mut rows = vec![self.sqlite_row(&statement)?];
-                while matches!(statement.step(), Step::Row) {
+                let mut steps = super::quit_poll::Steps::default();
+                while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
+                    if steps.tick() { self.native_poll()?; }
                     rows.push(self.sqlite_row(&statement)?);
                 }
                 Ok(self.sqlite_list(rows))
@@ -289,8 +300,11 @@ impl Leaf<'_> {
             return Ok(self.vm.allocate_object(data::Object::Sqlite(Box::new(set))));
         }
         let mut rows = vec![];
+        let probe = self.native_stop();
         // A step that fails ends the rows, as in GNU.
-        while matches!(statement.step(), Step::Row) {
+        let mut steps = super::quit_poll::Steps::default();
+        while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
+            if steps.tick() { self.native_poll()?; }
             rows.push(self.sqlite_row(&statement)?);
         }
         let rows = self.sqlite_list(rows);
@@ -304,7 +318,10 @@ impl Leaf<'_> {
     /// sqlite_exec of SQL in DB: t when it succeeded, else nil.
     pub(crate) fn sqlite_exec(&mut self, db: Value, sql: &[u8]) -> Out {
         let connection = self.sqlite_connection(db)?;
-        Ok(if connection.exec(sql) { Value::TRUE } else { Value::NIL })
+        let stop = self.native_stop();
+        let done = connection.stoppable(&stop, || connection.exec(sql));
+        if !done && stop.due() { self.native_poll()?; }
+        Ok(if done { Value::TRUE } else { Value::NIL })
     }
     pub(crate) fn sqlite_execute_batch(&mut self, db: Value, statements: Value) -> Out {
         self.sqlite_check(db, false)?;
@@ -344,7 +361,16 @@ impl Leaf<'_> {
         let State::Set { statement, eof } = &mut self.sqlite_handle_mut(set).state else { unreachable!("checked") };
         if *eof { return Ok(Value::NIL); }
         let mut statement = statement.take().expect("checked");
-        let step = statement.step();
+        let probe = self.native_stop();
+        let step = self.sqlite_step(&mut statement, &probe);
+        let State::Set { statement: slot, eof } = &mut self.sqlite_handle_mut(set).state else { unreachable!("checked") };
+        let step = match step {
+            Ok(step) => step,
+            Err(quit) => {
+                *slot = Some(statement);
+                return Err(quit);
+            }
+        };
         *eof = matches!(step, Step::Done);
         let result = match step {
             Step::Done => Ok(Value::NIL),

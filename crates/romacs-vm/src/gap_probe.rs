@@ -169,20 +169,20 @@ mod on {
 pub(crate) use on::{enter, exit, safepoint};
 
 #[cfg(not(feature = "safepoint-gap-probe"))]
-#[inline(always)]
+#[inline]
 pub(crate) fn safepoint(_vm: Option<&crate::Vm>) {}
 #[cfg(not(feature = "safepoint-gap-probe"))]
-#[inline(always)]
+#[inline]
 pub(crate) fn enter(_vm: &crate::Vm, _leaf: impl FnOnce() -> &'static str) {}
 #[cfg(not(feature = "safepoint-gap-probe"))]
-#[inline(always)]
+#[inline]
 pub(crate) fn exit(_vm: &crate::Vm) {}
 
 /// QUIT, as a VM's signal: in the probe's build a batch VM's is held twice,
 /// as a host shares it, so the matcher and waits poll as they do under a
 /// host (`Vm::poll_quittable`, the regexp's probe) and the spans are a
 /// host's.
-#[inline(always)]
+#[inline]
 pub(crate) fn as_hosted(quit: std::sync::Arc<crate::quit::QuitSignal>) -> std::sync::Arc<crate::quit::QuitSignal> {
     #[cfg(feature = "safepoint-gap-probe")]
     std::mem::forget(quit.clone());
@@ -190,7 +190,7 @@ pub(crate) fn as_hosted(quit: std::sync::Arc<crate::quit::QuitSignal>) -> std::s
 }
 
 /// PRIMITIVE's body, BODY, run with the probe charging its time to it.
-#[inline(always)]
+#[inline]
 pub(crate) fn within<T>(vm: &mut crate::Vm, primitive: impl FnOnce() -> &'static str, body: impl FnOnce(&mut crate::Vm) -> T) -> T {
     enter(vm, primitive);
     let out = body(vm);

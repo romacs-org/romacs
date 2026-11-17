@@ -202,7 +202,8 @@ fn convert_string(cx: &mut Leaf<'_>, encode: bool, string: Value, coding: Value,
 
 fn converted_string(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let buffer = saved[4];
-    let result = cx.coding_convert_string(saved[1], saved[2], saved[3], buffer, saved[0] != Value::NIL)?;
+    // A conversion makes a new string: it stops anywhere.
+    let result = cx.quittable(|cx| cx.coding_convert_string(saved[1], saved[2], saved[3], buffer, saved[0] != Value::NIL))?;
     if buffer == Value::NIL || buffer == Value::TRUE {
         return Ok(Step::Done(result));
     }
@@ -257,7 +258,8 @@ fn converted_region(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     if own { cx.prepare_change(from, to)?; }
     let text = cx.region_plain_text(from, to)?;
     let coding = if coding == Value::NIL { cx.intern("no-conversion") } else { coding };
-    let result = cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, encode)?;
+    // Before the region is replaced: the conversion stops anywhere.
+    let result = cx.quittable(|cx| cx.coding_convert_string(text, coding, Value::TRUE, Value::NIL, encode))?;
     if destination == Value::TRUE { return Ok(Step::Done(result)); }
     if !own {
         return Ok(Step::Call { f: cx.intern("romacs--coding-insert"), args: vec![destination, result], then: done, saved: vec![] });

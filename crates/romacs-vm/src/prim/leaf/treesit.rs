@@ -647,12 +647,24 @@ impl Leaf<'_> {
             Some((tree, true)) => (None, Some(tree)),
             None => (twin, None),
         };
-        let new = done.or_else(|| {
-            let text = self.ts_buffer_text(buffer).filter(|_| self.ts_live(buffer)).map(|t| &**t);
+        // A parse a C-g stops has changed nothing: the parser is reset and
+        // left out of its reparse, and the quit raised.
+        let stop = self.native_stop();
+        let parse = |leaf: &Self, stop: &crate::quit::NativeStop| {
+            let text = leaf.ts_buffer_text(buffer).filter(|_| leaf.ts_live(buffer)).map(|t| &**t);
             let reader = ts::Reader::new(text, ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
             // A thread's tree that fell behind the text is newer than the old one.
-            native.borrow_mut().parse(behind.as_ref().or(old.as_deref()), &reader)
-        });
+            native.borrow_mut().parse_until(behind.as_ref().or(old.as_deref()), &reader, stop)
+        };
+        let new = match done {
+            Some(tree) => Some(tree),
+            None => if let Ok(tree) = parse(self, &stop) { tree } else {
+                self.ts_parser_mut(parser).within_reparse = false;
+                self.native_poll()?;
+                self.ts_parser_mut(parser).within_reparse = true;
+                parse(self, &crate::quit::NativeStop::never()).expect("never stopped")
+            },
+        };
         let Some(new) = new else {
             return Err(self.ts_signal("treesit-parse-error", &[buffer]));
         };
@@ -1355,12 +1367,21 @@ impl Leaf<'_> {
             }
             _ => (0, u32::MAX),
         };
-        let found = compiled.query.matches(n.node, range);
+        // A query stops consistently between matches: nothing is written
+        // before it ends.
+        let found = self.quittable(|cx| {
+            if let Some(found) = compiled.query.matches(n.node, range, &cx.native_stop()) { return Ok(found); }
+            cx.native_poll()?;
+            Ok(compiled.query.matches(n.node, range, &crate::quit::NativeStop::never()).expect("never stopped"))
+        })?;
         let mut names: Vec<Option<Value>> = Vec::new();
         let (fontify, overriding) = fontify.map_or((None, Value::NIL), |(f, o)| (Some(f), o));
         let mut values = vec![n.parser, Value::NIL, overriding, fixnum(flags)];
         let mut matches = Vec::with_capacity(found.len());
+        // The captures as Lisp: a query's, which writes nothing, stops anywhere.
+        let mut steps = crate::quit::Steps::default();
         for m in found {
+            if fontify.is_none() && steps.tick() { self.quittable(Leaf::native_poll)?; }
             let start = values.len();
             for &(node, index) in &m.captures {
                 let index = index as usize;

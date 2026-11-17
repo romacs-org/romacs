@@ -344,11 +344,8 @@ impl Leaf<'_> {
                 None => Err("Window system frame should be used".into()),
             };
             if !finished.as_ref().is_err_and(|e| e == crate::display_host::DECODE_QUIT) { break finished; }
-            match self.vm.maybe_quit() {
-                Some(crate::threaded::Escape::Signal(condition, data)) => return Err(Fault::Signal(condition, data)),
-                Some(escape) => { self.vm.propagated_escape = Some(escape); return Err(Fault::Escape) }
-                None => quittable = !signal.pressed(),
-            }
+            self.vm.quit_fault()?;
+            quittable = !signal.pressed();
         };
         self.vm.images.settle(entry.facts.id);
         let before = entry.clone();

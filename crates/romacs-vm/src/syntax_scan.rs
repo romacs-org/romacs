@@ -94,6 +94,11 @@ pub(crate) trait Text {
     fn pass(&self, at: Pos, _limit: i64, _plain: impl Fn(u8, i32) -> bool) -> Passed {
         Passed { to: at, last: None, before: None }
     }
+    /// Whether the scan should stop for a quit poll (`Halt::Poll`): asked
+    /// once a step; a text whose scans no quit reaches never says so.
+    fn stop_due(&self) -> bool {
+        false
+    }
 }
 
 /// What `Text::pass` passed: where it ended, and the syntax of the last
@@ -135,6 +140,9 @@ pub(crate) enum Halt {
     Propertize(i64, i64),
     /// Call `syntax-ppss' at this position.
     Ppss(i64),
+    /// Poll quit (`Vm::native_poll`), then go on: a stop where the scan
+    /// has changed nothing.
+    Poll,
 }
 pub(crate) type R<T> = Result<T, Halt>;
 
@@ -348,6 +356,11 @@ impl<T: Text> Scanner<'_, T> {
             _ => stop,
         }
     }
+    /// A step's quit poll: `Halt::Poll` when the text asks to stop.
+    #[inline]
+    fn poll(&self) -> R<()> {
+        if self.text.stop_due() { Err(Halt::Poll) } else { Ok(()) }
+    }
     fn update_forward(&self, charpos: i64) -> R<()> {
         // UPDATE_SYNTAX_TABLE_FORWARD's just-in-time parse_sexp_propertize.
         match self.options.propertize_done {
@@ -406,7 +419,7 @@ impl<T: Text> Scanner<'_, T> {
         let Forw { mut at, mut from, mut nesting, mut syntax, mut code, mut prev_syntax } = forw;
         macro_rules! update {
             ($next:expr) => {
-                if let Err(halt) = self.update_forward(from.char) {
+                if let Err(halt) = self.update_forward(from.char).and_then(|()| self.poll()) {
                     return Err(CommentHalt { halt, forw: Forw { at: $next, from, nesting, syntax, code, prev_syntax } });
                 }
             };
@@ -510,6 +523,8 @@ impl<T: Text> Scanner<'_, T> {
         let mut syntax = 0;
         let mut lossage = false;
         while from.char != stop {
+            // A poll stops where the scan starts again.
+            self.poll()?;
             from = self.text.dec(from);
             let prev_syntax = syntax;
             let mut c = self.text.char_at(from) as i32;
@@ -656,6 +671,7 @@ impl<T: Text> Scanner<'_, T> {
             // property syntax.
             let mut point = self.line_start(pos, 1);
             while point.char > self.begv.char {
+                self.poll()?;
                 if self.text.table_syntax(self.text.char_at(point)) & 0xff == SOPEN {
                     self.setup(point.char + 1, -1)?;
                     if self.text.syntax(point) & 0xff == SOPEN { break; }
@@ -799,6 +815,7 @@ impl<T: Text> Scanner<'_, T> {
                         return Err(suspend!(halt, $next, None));
                     }
                 }
+                if let Err(halt) = self.poll() { return Err(suspend!(halt, $next, None)); }
             }};
         }
         macro_rules! cur {

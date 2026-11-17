@@ -47,6 +47,12 @@ struct View<'a> {
     /// in place instead of finding its chunk again.
     // CELL(Plain)
     window: std::cell::Cell<(usize, &'a [u8])>,
+    /// Whether a step asks the quit probe (`Text::stop_due`,
+    /// `Vm::native_stop_due`), and the steps left before it asks: 1 once a
+    /// pass stopped for it.
+    stop: bool,
+    // CELL(Plain)
+    countdown: std::cell::Cell<u32>,
 }
 
 /// The UTF-8 width of the character whose first byte is LEAD.
@@ -80,8 +86,15 @@ fn cons_code(vm: &Vm, entry: Value) -> i32 {
 }
 
 impl<'a> View<'a> {
+    /// A step that asks the probe: the countdown starts again.
+    #[cold]
+    #[inline(never)]
+    fn stop_now(&self) -> bool {
+        self.countdown.set(super::quit_poll::POLL_STEPS);
+        self.stop && self.vm.native_stop_due()
+    }
     #[inline]
-    fn new(vm: &'a Vm, index: usize, table: Value, properties: bool) -> Self {
+    fn new(vm: &'a Vm, index: usize, table: Value, properties: bool, stop: bool) -> Self {
         let body = match &vm.objects[index] {
             data::Object::Buffer(b) => {
                 let text: &crate::text::Text = b;
@@ -98,6 +111,8 @@ impl<'a> View<'a> {
             ascii: [const { std::cell::Cell::new(UNREAD) }; 128],
             last: std::cell::Cell::new((usize::MAX, 0)),
             window: std::cell::Cell::new((0, &[])),
+            stop,
+            countdown: std::cell::Cell::new(if stop { super::quit_poll::POLL_STEPS } else { u32::MAX }),
         }
     }
     /// The bytes from BYTE to the end of its chunk, the window moved
@@ -141,6 +156,15 @@ impl<'a> View<'a> {
 }
 
 impl scan::Text for View<'_> {
+    #[inline]
+    fn stop_due(&self) -> bool {
+        let left = self.countdown.get();
+        if left > 1 {
+            self.countdown.set(left - 1);
+            return false;
+        }
+        self.stop_now()
+    }
     #[inline]
     fn char_at(&self, at: Pos) -> u32 {
         match self.body {
@@ -246,6 +270,12 @@ impl scan::Text for View<'_> {
             // ASCII: as many characters as bytes.
             pos = Pos { char: pos.char + i64::try_from(count).expect("a run inside the text"), byte: pos.byte + count };
             if !whole {
+                break;
+            }
+            // A run over many chunks stops for the quit probe, which the
+            // scan's next step then answers (`stop_due`).
+            if self.stop && self.vm.native_stop_due() {
+                self.countdown.set(1);
                 break;
             }
         }
@@ -631,55 +661,74 @@ impl Leaf<'_> {
             let state = self.state_at(index);
             (state.defun_start.filter(|&(owner, _)| owner == epoch).map(|(_, cache)| cache), state.modification.modiff)
         };
-        let view = View::new(self.vm, index, table, properties);
         // A rerun scans in the first run's bounds, whatever the call did
         // to point or the restriction, and goes on where it stopped.
-        let pos = |c: i64| scan::Text::pos(&view, c);
         let mut kept = None;
-        let (begv, zv, point) = match &memory {
-            None => (begv, zv, point),
-            Some(memory) => {
-                let tail = MEMORY_STATE + 12 + usize::try_from(int(memory[MEMORY_STATE + 11])).expect("saved levels");
-                if tail < memory.len() {
-                    kept = Some(if matches!(op, Op::ParsePartialSexp) {
-                        Kept::Parse(Box::new(memory_suspended(&memory[tail..], pos)))
-                    } else {
-                        Kept::Scan(Box::new(memory_scan(&memory[tail..], pos)))
-                    });
-                }
-                (pos(int(memory[0])), pos(int(memory[1])), pos(int(memory[2])))
-            }
-        };
-        let mut scanner = Scanner { text: &view, begv, zv, options, ppss, defun_start: cached, modiff };
-        let scan_stopped = |stopped: scan::Stopped<Box<scan::Scan>>| (stopped.halt, stopped.suspended.map(Kept::Scan));
-        let parse_stopped = |stopped: scan::Stopped| (stopped.halt, stopped.suspended.map(Kept::Parse));
-        let result: std::result::Result<Result_, (Halt, Option<Kept>)> = match (op, kept) {
-            (Op::ForwardComment, Some(Kept::Scan(scan))) => scanner.comments(*scan).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped),
-            (Op::ForwardComment, _) => {
-                let count = args[0].integer_value().expect("checked");
-                scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped)
-            }
-            (Op::ScanLists | Op::ScanSexps, Some(Kept::Scan(scan))) => {
-                scanner.lists(*scan, matches!(op, Op::ScanSexps)).map(Result_::Lists).map_err(scan_stopped)
-            }
-            (Op::ScanLists | Op::ScanSexps, _) => {
-                let int = |v: Value| v.integer_value().expect("checked");
-                let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
-                scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
-                    .map(Result_::Lists).map_err(scan_stopped)
-            }
-            (Op::ParsePartialSexp, kept) => {
-                let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
-                if let Some(Kept::Parse(suspended)) = kept {
-                    scanner.resume(*suspended, to, target, stopbefore, commentstop).map(Result_::Parse).map_err(parse_stopped)
-                } else {
-                    scanner.parse(&mut state, pos(from), to, target, stopbefore, commentstop)
-                        .map(|()| Result_::Parse(state)).map_err(parse_stopped)
+        let (begv, zv, point) = {
+            let view = View::new(self.vm, index, table, properties, false);
+            let pos = |c: i64| scan::Text::pos(&view, c);
+            match &memory {
+                None => (begv, zv, point),
+                Some(memory) => {
+                    let tail = MEMORY_STATE + 12 + usize::try_from(int(memory[MEMORY_STATE + 11])).expect("saved levels");
+                    if tail < memory.len() {
+                        kept = Some(if matches!(op, Op::ParsePartialSexp) {
+                            Kept::Parse(Box::new(memory_suspended(&memory[tail..], pos)))
+                        } else {
+                            Kept::Scan(Box::new(memory_scan(&memory[tail..], pos)))
+                        });
+                    }
+                    (pos(int(memory[0])), pos(int(memory[1])), pos(int(memory[2])))
                 }
             }
-            (Op::BackwardPrefixChars, _) => scanner.backward_prefix_chars(point).map(Result_::Prefix).map_err(|halt| (halt, None)),
         };
-        let written = scanner.defun_start.filter(|&cache| Some(cache) != cached);
+        // A scan stopped for a quit poll (`Halt::Poll`) has changed nothing:
+        // the poll quits, or the scan goes on where it stopped (backward,
+        // from its start).
+        let mut defun_start = cached;
+        let result: std::result::Result<Result_, (Halt, Option<Kept>)> = loop {
+            let result = {
+                let view = View::new(self.vm, index, table, properties, true);
+                let pos = |c: i64| scan::Text::pos(&view, c);
+                let mut scanner = Scanner { text: &view, begv, zv, options, ppss, defun_start, modiff };
+                let scan_stopped = |stopped: scan::Stopped<Box<scan::Scan>>| (stopped.halt, stopped.suspended.map(Kept::Scan));
+                let parse_stopped = |stopped: scan::Stopped| (stopped.halt, stopped.suspended.map(Kept::Parse));
+                let result = match (op, kept.take()) {
+                    (Op::ForwardComment, Some(Kept::Scan(scan))) => scanner.comments(*scan).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped),
+                    (Op::ForwardComment, _) => {
+                        let count = args[0].integer_value().expect("checked");
+                        scanner.forward_comment(point, count).map(|(at, found)| Result_::Comment(at, found)).map_err(scan_stopped)
+                    }
+                    (Op::ScanLists | Op::ScanSexps, Some(Kept::Scan(scan))) => {
+                        scanner.lists(*scan, matches!(op, Op::ScanSexps)).map(Result_::Lists).map_err(scan_stopped)
+                    }
+                    (Op::ScanLists | Op::ScanSexps, _) => {
+                        let int = |v: Value| v.integer_value().expect("checked");
+                        let depth = if let Op::ScanLists = op { int(args[2]) } else { 0 };
+                        scanner.scan_lists(int(args[0]), int(args[1]), depth, matches!(op, Op::ScanSexps))
+                            .map(Result_::Lists).map_err(scan_stopped)
+                    }
+                    (Op::ParsePartialSexp, kept) => {
+                        let (from, to, target, stopbefore, commentstop, mut state) = parse.clone().expect("checked");
+                        if let Some(Kept::Parse(suspended)) = kept {
+                            scanner.resume(*suspended, to, target, stopbefore, commentstop).map(Result_::Parse).map_err(parse_stopped)
+                        } else {
+                            scanner.parse(&mut state, pos(from), to, target, stopbefore, commentstop)
+                                .map(|()| Result_::Parse(state)).map_err(parse_stopped)
+                        }
+                    }
+                    (Op::BackwardPrefixChars, _) => scanner.backward_prefix_chars(point).map(Result_::Prefix).map_err(|halt| (halt, None)),
+                };
+                defun_start = scanner.defun_start;
+                result
+            };
+            match result {
+                Err((Halt::Poll, stopped)) => kept = stopped,
+                result => break result,
+            }
+            self.vm.native_poll()?;
+        };
+        let written = defun_start.filter(|&cache| Some(cache) != cached);
         let memory = |leaf: &mut Self, kept: Option<Kept>| {
             let fixnum = |n: i64| Value::integer(n).expect("fixnum");
             let (from, to, state) = match &parse {
@@ -700,6 +749,7 @@ impl Leaf<'_> {
             Err((Halt::ScanError(message, a, b), _)) => return Err(self.scan_error(message, a, b)),
             Err((Halt::Propertize(arg, charpos), kept)) => return Ok(Outcome::Propertize(arg, charpos, memory(self, kept))),
             Err((Halt::Ppss(pos), kept)) => return Ok(Outcome::Ppss(pos, memory(self, kept))),
+            Err((Halt::Poll, _)) => unreachable!("polled above"),
         };
         if let Some(cache) = written {
             self.vm.defun_start_epoch += 1;
@@ -800,7 +850,7 @@ impl Leaf<'_> {
     fn summarized(&mut self, index: usize, table: Value, served: &Served, options: scan::Options,
                   (from, to): (i64, i64), state: &mut ParseState) -> std::result::Result<bool, Fault> {
         let (begv, zv, _) = self.syntax_bounds(index)?;
-        let view = View::new(self.vm, index, table, options.propertize_done.is_some());
+        let view = View::new(self.vm, index, table, options.propertize_done.is_some(), false);
         let Body::Multibyte(text, _) = &view.body else { return Ok(false) };
         let ppss = BTreeMap::new();
         let mut scanner = Scanner { text: &view, begv, zv, options, ppss: &ppss, defun_start: None, modiff: 0 };

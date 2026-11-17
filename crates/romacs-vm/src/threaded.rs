@@ -4485,7 +4485,7 @@ unsafe fn leaf_call(
         }
         let leaf: prim::LeafBody = std::mem::transmute(en.entries.get_unchecked((*pc).site).function);
         en.vm.site_leaf = (pc as usize, r as usize);
-        crate::gap_probe::enter(en.vm, || prim::generated(target).map_or("(site leaf)", |d| d.name));
+        crate::gap_probe::enter(en.vm, move || prim::generated(target).map_or("(site leaf)", |d| d.name));
         let value = en.vm.leaf_value(leaf, r.add(start), argc, &mut en.leaf_fault);
         crate::gap_probe::exit(en.vm);
         en.vm.site_leaf = (0, 0);
@@ -4594,9 +4594,10 @@ unsafe fn primitive(
             return orchestrate(e, (Pc::new(pc), Box::new((p, base + start, argc))), loader_body, continue_at);
         }
         let mut signal = None;
-        match en
-            .vm
-            .primitive_call(p, base + start, argc, &mut en.error, &mut signal)
+        crate::gap_probe::enter(en.vm, move || crate::legacy_primitive_name(p));
+        let called = en.vm.primitive_call(p, base + start, argc, &mut en.error, &mut signal);
+        crate::gap_probe::exit(en.vm);
+        match called
         {
             Some(value) => {
                 leave_native(en);

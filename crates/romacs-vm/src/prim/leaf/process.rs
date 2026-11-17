@@ -1189,6 +1189,43 @@ impl Leaf<'_> {
         Ok(proc)
     }
 
+    /// `call_process`'s wait for child PID: what it wrote to READER until the
+    /// pipe closed, then its end, each a quittable wait (`Vm::poll_quittable`).
+    /// A C-g sends the child SIGINT, as `call_process_cleanup` does, leaves it
+    /// for the reaper, and quits; under `inhibit-quit` the wait goes on
+    /// without looking at the press again.
+    fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<Vec<u8>> {
+        let pidfd = crate::host::pidfd_open(pid);
+        let mut bytes = Vec::new();
+        let mut buf = vec![0; 64 * 1024];
+        let mut held = false;
+        loop {
+            let fd = match (&reader, &pidfd) {
+                (Some(read), _) => read.as_raw_fd(),
+                (None, Some(pidfd)) => pidfd.as_raw_fd(),
+                (None, None) => break,
+            };
+            let fds = [(fd, libc::POLLIN)];
+            let revents = if held { sp::poll(&fds, None) } else { self.vm.poll_quittable(&fds, None) }
+                .map_err(|e| self.file_errno("Waiting for process", &e))?;
+            if revents[0] == 0 {
+                if let Err(quit) = self.native_poll() {
+                    let _ = crate::host::kill(pid, libc::SIGINT);
+                    self.vm.subprocesses.deleted.push((pid, None));
+                    return Err(quit);
+                }
+                held = self.vm.quit.pressed();
+                continue;
+            }
+            let Some(read) = &reader else { break };
+            match sp::read(read.as_fd(), &mut buf) {
+                Ok(0) | Err(_) => reader = None,
+                Ok(n) => bytes.extend_from_slice(&buf[..n]),
+            }
+        }
+        Ok(bytes)
+    }
+
     /// call_process's child: run ARGV synchronously with INFILE on stdin.
     /// OUTPUT is `pipe' (collect), `discard', or a file; ERROR is t (as
     /// output), nil (discard) or a file. With WAIT nil, record the child
@@ -1234,17 +1271,7 @@ impl Leaf<'_> {
             self.vm.subprocesses.deleted.push((pid, None));
             return Ok(Value::NIL);
         }
-        let mut bytes = Vec::new();
-        if let Some(read) = reader {
-            let mut buf = vec![0; 64 * 1024];
-            loop {
-                match sp::read(read.as_fd(), &mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => bytes.extend_from_slice(&buf[..n]),
-                    Err(_) => break,
-                }
-            }
-        }
+        let bytes = self.call_process_wait(pid, reader)?;
         let status = sp::wait_blocking(pid).map_err(|e| self.file_errno("Waiting for process", &e))?;
         let text = self.make_string(bytes, false);
         Ok(self.cons(fixnum(status.into()), text))

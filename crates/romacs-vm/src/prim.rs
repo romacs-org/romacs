@@ -2015,6 +2015,7 @@ mod leaf {
     mod display_hosted;
     pub(crate) use display_hosted::{FaceKey, Shown, ShownKind};
     mod text_pixel_size;
+    mod quit_poll;
     mod bidi;
     pub(crate) use text_pixel_size::{TextSizeArgs, LineLabels};
     mod session;
@@ -2092,6 +2093,9 @@ pub(crate) fn initialize_coding_slot(vm: &mut Vm, name: &str) {
 #[cfg(test)]
 #[path = "leaf_tests.rs"]
 mod leaf_tests;
+#[cfg(test)]
+#[path = "quit_reach_tests.rs"]
+mod quit_reach_tests;
 
 /// GNU's CHECK_* macros as types: the parameter type IS the check, so arity,
 /// coercion and the signalled predicate are declared, never re-implemented.
@@ -2451,7 +2455,7 @@ impl Vm {
             heap = self.stack[start..start + argc].to_vec();
             &heap
         };
-        let step = crate::gap_probe::within(self, || d.name, |vm| no_collection(vm, |vm| {
+        let step = crate::gap_probe::within(self, move || d.name, |vm| no_collection(vm, |vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
                 Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
@@ -2507,7 +2511,7 @@ impl Vm {
         result: Value,
         saved: &[Value],
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
-        crate::gap_probe::within(self, || "(continuation)", |vm| no_collection(vm, |vm| then(&mut Leaf::new(vm), result, saved)))
+        crate::gap_probe::within(self, move || "(continuation)", |vm| no_collection(vm, |vm| then(&mut Leaf::new(vm), result, saved)))
             .map_err(|fault| self.step_fault(fault))
     }
     fn step_fault(&mut self, fault: Fault) -> Option<(Value, Value)> {

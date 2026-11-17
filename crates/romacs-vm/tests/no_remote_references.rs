@@ -49,7 +49,7 @@ const FIELDS: &[(&str, Class)] = &[
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.
     ("display_state", Cache),
-    ("window_state", Free), ("world_version", Free), ("motion_quit", Free),
+    ("window_state", Free), ("world_version", Free), ("native_quit", Free),
     // The current buffer as last resolved: a collection and a kill clear it,
     // and a slot holding another value resolves afresh (buffer.rs).
     ("resolved_buffer", Cache), ("buffer_resolutions", Free),

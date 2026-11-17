@@ -38,7 +38,7 @@ impl<T: Text> Scanner<'_, T> {
         // UPDATE_SYNTAX_TABLE_FORWARD (from), going on at NEXT after a stop.
         macro_rules! update {
             ($next:expr) => {
-                if let Err(halt) = self.update_forward(from.char) { return Err(suspend!(halt, $next, None)); }
+                if let Err(halt) = self.update_forward(from.char).and_then(|()| self.poll()) { return Err(suspend!(halt, $next, None)); }
             };
         }
         while count > 0 {
@@ -113,6 +113,8 @@ impl<T: Text> Scanner<'_, T> {
                 let ended = if std::mem::take(&mut decode) {
                     self.back_decode(from, comnested, comstyle, None)
                 } else {
+                    // Backward, a poll stops where the scan starts again.
+                    self.poll()?;
                     if from.char <= stop { return Ok((self.begv, false)); }
                     from = self.text.dec(from);
                     let quoted = self.char_quoted(from)?;
@@ -135,6 +137,7 @@ impl<T: Text> Scanner<'_, T> {
                         let mut fence_found = false;
                         if from.char > stop {
                             loop {
+                                self.poll()?;
                                 from = self.text.dec(from);
                                 if self.text.syntax(from) & 0xff == SCOMMENT_FENCE && !self.char_quoted(from)? {
                                     fence_found = true;
@@ -185,6 +188,8 @@ impl<T: Text> Scanner<'_, T> {
             let syntax = self.text.syntax(pos);
             syntax & 0xff == SQUOTE || prefix(syntax)
         } {
+            // Backward, a poll stops where the scan starts again.
+            self.poll()?;
             opoint = pos;
             if pos.char <= self.begv.char { break; }
             pos = self.text.dec(pos);
@@ -226,7 +231,7 @@ impl<T: Text> Scanner<'_, T> {
         // UPDATE_SYNTAX_TABLE_FORWARD (from), going on at NEXT after a stop.
         macro_rules! update {
             ($next:expr) => {
-                if let Err(halt) = self.update_forward(from.char) { return Err(suspend!(halt, $next, None)); }
+                if let Err(halt) = self.update_forward(from.char).and_then(|()| self.poll()) { return Err(suspend!(halt, $next, None)); }
             };
         }
         // done: a sexp or list is passed.
@@ -389,6 +394,8 @@ impl<T: Text> Scanner<'_, T> {
         }
         while count < 0 {
             let done = 'scan: loop {
+                // Backward, a poll stops where the scan starts again.
+                self.poll()?;
                 if from.char <= stop { break false; }
                 from = self.text.dec(from);
                 let c = self.text.char_at(from);
@@ -417,6 +424,7 @@ impl<T: Text> Scanner<'_, T> {
                     SWORD | SSYMBOL | SESCAPE | SCHARQUOTE => {
                         if depth != 0 || !sexpflag { continue; }
                         while from.char > stop {
+                            self.poll()?;
                             let mut temp = self.text.dec(from);
                             if self.class(temp, symbol) == SENDCOMMENT { break 'scan true; }
                             let quoted = self.char_quoted(temp)?;
@@ -457,6 +465,7 @@ impl<T: Text> Scanner<'_, T> {
                     }
                     SCOMMENT_FENCE | SSTRING_FENCE => {
                         loop {
+                            self.poll()?;
                             if from.char == stop { return Err(lose(last_good, from).into()); }
                             from = self.text.dec(from);
                             if !self.char_quoted(from)? && self.class(from, symbol) == code { break; }
@@ -466,6 +475,7 @@ impl<T: Text> Scanner<'_, T> {
                     SSTRING => {
                         let stringterm = self.text.char_at(from);
                         loop {
+                            self.poll()?;
                             if from.char == stop { return Err(lose(last_good, from).into()); }
                             from = self.text.dec(from);
                             if !self.char_quoted(from)? && self.text.char_at(from) == stringterm

@@ -14,7 +14,9 @@ fn romacs_secure_hash(cx, algorithm: Value, bytes: Value; optional binary: Value
     }
     let data = view.bytes().to_vec();
     // GNU compares ALGORITHM with EQ: an uninterned namesake is no algorithm.
-    let digest = if algorithm == cx.intern(&name) { crate::digest::digest(&name, &data) } else { None };
+    let digest = if algorithm == cx.intern(&name) {
+        cx.quittable(|cx| hashed(cx, |_, stop| Ok(crate::digest::digest_until(&name, &data, stop))))?
+    } else { None };
     let Some(digest) = digest else {
         return Err(Fault::Error(format!("Invalid algorithm arg: {name}")));
     };
@@ -53,9 +55,27 @@ fn buffer_hash(cx; optional buffer_or_name: Value) {
         // nsberror (buffer.c:408)
         return Err(Fault::Error(format!("No buffer named {}", cx.string_text(buffer_or_name)?)));
     }
-    let digest = cx.with_buffer_internal_bytes(buffer, |bytes| crate::digest::digest("sha1", bytes))?;
+    let digest = cx.quittable(|cx| hashed(cx, |cx, stop| cx.with_buffer_internal_bytes(buffer, |bytes| crate::digest::digest_until("sha1", bytes, stop))))?;
     Ok(cx.make_string(hex(&digest.expect("sha1 is an algorithm")), false))
 }}
+
+/// The result of HASH (None for no such algorithm), HASH asked to stop
+/// between its chunks by the quit probe: a C-g quits before anything is
+/// made; a poll that does not quit (what stopped it is taken) hashes again
+/// with no probe.
+type Hashed = Option<std::result::Result<Vec<u8>, crate::quit::Stopped>>;
+fn hashed(cx: &mut Leaf<'_>, hash: impl Fn(&Leaf<'_>, &dyn Fn() -> bool) -> std::result::Result<Hashed, Fault>)
+          -> std::result::Result<Option<Vec<u8>>, Fault> {
+    let stop = cx.native_stop();
+    match hash(cx, &|| stop.due())? {
+        None => Ok(None),
+        Some(Ok(digest)) => Ok(Some(digest)),
+        Some(Err(crate::quit::Stopped)) => {
+            cx.native_poll()?;
+            Ok(hash(cx, &|| false)?.map(|digest| digest.expect("never stopped")))
+        }
+    }
+}
 
 fn hex(digest: &[u8]) -> Vec<u8> {
     digest.iter().map(|b| format!("{b:02x}")).collect::<String>().into_bytes()

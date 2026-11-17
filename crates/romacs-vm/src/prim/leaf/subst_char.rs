@@ -39,11 +39,17 @@ impl Leaf<'_> {
             return Err(Fault::Error("Characters in \u{2018}subst-char-in-region\u{2019} have different byte-lengths".into()));
         }
         // Character positions holding FROM.
+        // Polled between chunks: nothing is changed yet.
         let hits: Vec<usize> = match &self.vm.objects[index] {
-            data::Object::Buffer(b) => {
+            data::Object::Buffer(_) => {
                 let mut hits = Vec::new();
-                for at in (lo - 1) as usize..(hi - 1) as usize {
-                    if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) { hits.push(at); }
+                let span = (lo - 1) as usize..(hi - 1) as usize;
+                for chunk in span.clone().step_by(super::quit_poll::POLL_STEPS as usize) {
+                    let data::Object::Buffer(b) = &self.vm.objects[index] else { unreachable!("checked above") };
+                    for at in chunk..span.end.min(chunk + super::quit_poll::POLL_STEPS as usize) {
+                        if b.character_of_char(CharOffset(at)).map_err(Fault::Error)? == Some(from_c) { hits.push(at); }
+                    }
+                    self.native_poll()?;
                 }
                 hits
             }
@@ -80,6 +86,8 @@ impl Leaf<'_> {
         let mut encoded = [0; 5];
         let width = crate::lstring::char_string(to_c, &mut encoded);
         let text = &encoded[..width];
+        // NOPOLL: the hits, each a same-width overwrite; inside modify_text's
+        // bracket, which a quit would leave without its after-change call.
         for &at in hits {
             if !noundo { self.vm.record_change(index, at).map_err(Fault::Error)?; }
             match self.vm.objects.entry_mut(index) {
