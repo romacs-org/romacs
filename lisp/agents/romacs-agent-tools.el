@@ -1676,6 +1676,10 @@ wake file says `verdict' is told by the restart's supervisor instead
                                        (lambda () (file-exists-p file))))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
+;; A session that asked to be told of a restart is loaded as a restore
+;; runs, so it is told: one left a row would never be.
+(add-hook 'romacs-agent-pending-functions
+          (lambda (dir _manifest) (file-exists-p (expand-file-name "restart-wake" dir))))
 ;; A session due to resume when its limit resets is loaded as a restore
 ;; runs, so its resume is set again.
 (add-hook 'romacs-agent-pending-functions
