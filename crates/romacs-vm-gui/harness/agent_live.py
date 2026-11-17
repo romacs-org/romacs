@@ -3366,11 +3366,64 @@ def history_real(args, base):
         a.close()
 
 
+def live_rows(args, base):
+    """What a lead's delegates do now, above its composer: a row for each
+    one that works, its title, its turn's clock and what it does (the call
+    it started, or that it needs approval), with the lead idle; the clocks
+    move with no event from anyone; frames a second apart are kept."""
+    a = Agents(args, base, 'lr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate(task, title):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
+                {'task': task, 'title': title, 'target': {'provider': 'claude'}, 'clientRequestId': title}))
+            a.idle(parent, 60)
+            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
+            return record['taskId']
+
+        # One runs a long call (its harness's own subagent), one asks.
+        held = delegate('agent 300 read the code', 'held call')
+        asking = delegate('ask true', 'asks approval')
+        until(lambda: a.state(asking) == 'waiting-approval', 30, 'child waiting')
+        until(lambda: a.state(held) == 'running', 30, 'child running')
+        a.idle(parent, 60)
+
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def rows():
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+                '(substring-no-properties (or (overlay-get romacs-agent-ui--composer (quote before-string)) "")))')) or ''
+
+        until(lambda: 'held call' in rows() and 'asks approval' in rows(), 20, 'rows above the composer')
+        result = {'rows': rows(), 'frames': []}
+        for i in range(4):
+            path = base / f'live-rows-{i}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            result['frames'].append(str(path))
+            time.sleep(1)
+        result['rows_later'] = rows()
+        held_row = lambda text: next((line for line in text.splitlines() if 'held call' in line), '')
+        result['ok'] = (re.search(r'held call  \d+s · ', held_row(result['rows'])) is not None
+                        and 'thinking' not in held_row(result['rows'])
+                        and '◆ asks approval' in result['rows'] and 'needs approval' in result['rows']
+                        and held_row(result['rows']) != held_row(result['rows_later']))
+        return result
+    finally:
+        a.close()
+
+
 WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
