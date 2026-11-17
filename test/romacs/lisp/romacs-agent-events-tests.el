@@ -70,6 +70,15 @@ turns, and its journal's file; a state root of its own."
   "The seq of the record SESSION's records hold at PLACE."
   (car (romacs-agent-events-tests--seqs session place)))
 
+(defun romacs-agent-events-tests--hold (id)
+  "A process holding the lock of the session ID, as its host does, once held."
+  (let* ((lock (expand-file-name "host.lock" (expand-file-name id (romacs-agent--state-root))))
+         (process (start-process "romacs-test-host-lock" nil "flock" "-o" lock "sleep" "60")))
+    (with-timeout (10 (error "The lock was never taken"))
+      (while (eql 0 (call-process "flock" nil nil nil "-n" lock "true"))
+        (accept-process-output nil 0.05)))
+    process))
+
 (ert-deftest romacs-agent-events-read-as-the-journal-was ()
   ;; Imported: the same records, the same tail, notes and places, read
   ;; from SQLite; the journal moved to the backup directory; a note
@@ -144,23 +153,6 @@ turns, and its journal's file; a state root of its own."
          (should (equal (mapcar (lambda (e) (plist-get e :text))
                                 (seq-filter (lambda (e) (eq (plist-get e :type) 'input)) result))
                         '("question 1" "question 2" "question 3" "question 4" "question 5"))))))))
-
-(ert-deftest romacs-agent-events-a-line-is-kept-as-written ()
-  ;; As the supervisor writes it: its row read from its ends, the line as
-  ;; it is; a counter left out; another order parsed.
-  (let ((line "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":7,\"t\":12.5}"))
-    (should (equal (romacs-agent-events--line-row "s" line) (list "s" 7 12.5 "out" line))))
-  (should-not (romacs-agent-events--line-row
-               "s" "{\"out\":{\"subtype\":\"thinking_tokens\",\"type\":\"system\"},\"seq\":8,\"t\":1.0}"))
-  (let ((row (romacs-agent-events--line-row "s" "{\"seq\":9,\"t\":2.0,\"note\":{\"type\":\"run\"}}")))
-    (should (equal (seq-take row 4) '("s" 9 2.0 "note"))))
-  (should-not (romacs-agent-events--line-row "s" "not json"))
-  ;; A line of megabytes: its ends read, no pattern across it.
-  (let ((line (concat "{\"out\":{\"text\":\"" (make-string 4000000 ?a) "\"},\"seq\":10,\"t\":3.0}")))
-    (should (equal (seq-take (romacs-agent-events--line-row "s" line) 4) '("s" 10 3.0 "out"))))
-  ;; A nested seq and time are not the line's.
-  (let ((row (romacs-agent-events--line-row "s" "{\"t\":4.0,\"seq\":11,\"note\":{\"seq\":1,\"t\":2}}")))
-    (should (equal (seq-take row 4) '("s" 11 4.0 "note")))))
 
 (ert-deftest romacs-agent-events-thinking-counters-are-not-kept ()
   (should (romacs-agent-events--counter-p
@@ -296,7 +288,7 @@ turns, and its journal's file; a state root of its own."
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
         (romacs-agent-events--imported (make-hash-table :test #'equal))
-        (romacs-agent-events--compact-window 2) (romacs-agent-events--chunk 2))
+        (romacs-agent-events--compact-window 2))
     (romacs-agent-events-tests--with-session
      0
      (lambda (session journal)
@@ -344,12 +336,10 @@ turns, and its journal's file; a state root of its own."
          (remhash id romacs-agent--sessions)
          (should (member dir (romacs-agent-events--journaled)))
          ;; Its supervisor runs: not queued, not written.
-         (let ((socket (romacs-agent--host-socket id)))
-           (make-directory (file-name-directory socket) t)
-           (write-region "" nil socket nil 'silent)
+         (let ((host (romacs-agent-events-tests--hold id)))
            (should-not (member dir (romacs-agent-events--journaled)))
            (should-not (romacs-agent-events--migrate-job (list dir)))
-           (delete-file socket))
+           (delete-process host))
          (should (equal (romacs-agent-events--migrate-job (list dir)) (list id)))
          ;; Written, not its own: read from its journal still, not queued again.
          (should-not (romacs-agent-events-p session))
@@ -534,11 +524,9 @@ turns, and its journal's file; a state root of its own."
            (should (= (events) 0))
            ;; A supervisor started after it was written.
            (pcase-let ((`(,size . ,count) (romacs-agent-events--stage session))
-                       (socket (romacs-agent--host-socket id)))
-             (make-directory (file-name-directory socket) t)
-             (write-region "" nil socket nil 'silent)
+                       (host (romacs-agent-events-tests--hold id)))
              (should-not (romacs-agent-events--flip id size count))
-             (delete-file socket))
+             (delete-process host))
            (should (= (events) 0))
            ;; Its last line cut short: nothing written.
            (write-region "{\"note\":{\"type\":\"cut\"" nil journal t 'silent)
@@ -560,7 +548,7 @@ turns, and its journal's file; a state root of its own."
            (should-error (romacs-agent-events--stage session))))))))
 
 (ert-deftest romacs-agent-events-a-running-session-is-not-compacted ()
-  ;; Its supervisor's socket there when compacting holds the write lock:
+  ;; Its supervisor holding its lock when compacting holds the write lock:
   ;; nothing is removed.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
@@ -574,12 +562,10 @@ turns, and its journal's file; a state root of its own."
                                                           "message" (romacs-mcp--object "id" "m1" "content" []))))
                      nil journal t 'silent)
        (romacs-agent-events-import session)
-       (let ((socket (romacs-agent--host-socket (romacs-agent-id session))))
-         (make-directory (file-name-directory socket) t)
-         (write-region "" nil socket nil 'silent)
+       (let ((host (romacs-agent-events-tests--hold (romacs-agent-id session))))
          (should-error (romacs-agent-events-compact (romacs-agent-id session)))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
-         (delete-file socket))))))
+         (delete-process host))))))
 
 (ert-deftest romacs-agent-events-a-large-database-is-compacted-as-it-is ()
   ;; Too large to be made to give pages back: compacted all the same, its
@@ -698,45 +684,35 @@ turns, and its journal's file; a state root of its own."
         (delete-directory root t)))))
 
 (ert-deftest romacs-agent-events-a-socket-left-behind-supervises-nothing ()
-  ;; A supervisor writes a session's records while its host lives; a socket
-  ;; a host left behind (its unit stopped, a crash) is none, so the session
-  ;; is moved; with no host.json (an earlier build's host) the socket says so.
+  ;; One holds a session while its lock is held (a host running, a move);
+  ;; a socket and a lock file a host left behind (its unit stopped, a
+  ;; crash) are none, so the session is moved.  A host older than the lock
+  ;; left no lock file: its socket says so then.
   (let* ((root (make-temp-file "romacs-stale-" t))
          (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
          (id "aaaaaaaa-0000-4000-8000-00000000050c")
          (dir (expand-file-name id (romacs-agent--state-root)))
-         (socket (expand-file-name "host.sock" root))
-         (host (start-process "romacs-test-host" nil "bash" "-c" "exec -a romacs-agent-host sleep 30")))
+         (lock (expand-file-name "host.lock" dir))
+         (socket (expand-file-name "host.sock" root)))
     (unwind-protect
-        (cl-flet ((host-pid (pid) (romacs-agent--write-json (expand-file-name "host.json" dir)
-                                                            (romacs-mcp--object "pid" pid))))
+        (progn
           (make-directory dir t)
+          (should-not (romacs-agent-events--supervised-p id socket))
+          ;; An older host: its socket alone.
           (write-region "" nil socket nil 'silent)
-          (should-not (romacs-agent-events--supervised-p id (expand-file-name "none.sock" root)))
-          ;; No host.json: the socket alone.
           (should (romacs-agent-events--supervised-p id socket))
-          ;; Its host gone: a process no more, or another program's.
-          (host-pid 999999999)
+          ;; A host gone: its lock file and socket left, held by none.
+          (write-region "" nil lock nil 'silent)
           (should-not (romacs-agent-events--supervised-p id socket))
-          (host-pid (emacs-pid))
-          (should-not (romacs-agent-events--supervised-p id socket))
-          ;; A host starting, its pid not in host.json yet: it holds the
-          ;; session's lock, so it counts.
-          (let ((locker (start-process "romacs-test-lock" nil "flock" (expand-file-name "host.lock" dir) "sleep" "30")))
+          (should-not (gethash dir (romacs-agent-events--held (list dir))))
+          ;; Held (a host starting, running, or a move): one holds it.
+          (let ((locker (start-process "romacs-test-lock" nil "flock" "-o" lock "sleep" "30")))
             (unwind-protect
                 (progn
-                  ;; Held once flock -n can no longer take it.
                   (with-timeout (10 (error "The lock was never taken"))
-                    (while (eql 0 (call-process "flock" nil nil nil "-n" (expand-file-name "host.lock" dir) "true"))
+                    (while (eql 0 (call-process "flock" nil nil nil "-n" lock "true"))
                       (accept-process-output nil 0.05)))
-                  (should (romacs-agent-events--supervised-p id socket)))
-              (delete-process locker)))
-          ;; Its host there, once it runs as one.
-          (with-timeout (10 (error "The stand-in host never ran"))
-            (while (not (string-search "romacs-agent-host"
-                                       (or (cdr (assq 'args (process-attributes (process-id host)))) "")))
-              (accept-process-output nil 0.05)))
-          (host-pid (process-id host))
-          (should (romacs-agent-events--supervised-p id socket)))
-      (delete-process host)
+                  (should (romacs-agent-events--supervised-p id socket))
+                  (should (gethash dir (romacs-agent-events--held (list dir)))))
+              (delete-process locker))))
       (delete-directory root t))))

@@ -592,9 +592,9 @@ fn wait_while_kept(child: &mut std::process::Child, dir: &Path) -> Result<std::p
     }
 }
 
-/// Whether a host holds the session in DIR (its host.lock, held for a
-/// host's whole run from its first step): asked by `--supervised DIR`, so
-/// one starting, its pid not yet in host.json, counts as a supervisor.
+/// Whether one holds the session in DIR: its host.lock, which a host takes
+/// first and holds its whole run, and a move of its records (`--stage',
+/// `--hold') holds while it runs.  Asked by `--supervised DIR...'.
 fn supervised(dir: &Path) -> bool {
     match OpenOptions::new().write(true).open(dir.join("host.lock")) {
         Ok(file) => match file.try_lock() {
@@ -606,10 +606,143 @@ fn supervised(dir: &Path) -> bool {
     }
 }
 
+/// The session in DIR's lock, taken now or not at all: a move of its
+/// records holds it, and never waits for a host that runs.
+fn take_lock(dir: &Path) -> Result<File, String> {
+    let path = dir.join("host.lock");
+    let file = OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(format!("{}: a host holds it", path.display())),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// The rows a stage commits a transaction: others' writes wait no longer.
+const STAGE_CHUNK: usize = 20_000;
+
+/// Write SESSION's JOURNAL into DATABASE as records not yet its own (no
+/// `imported' row: no reader reads them): every record with a seq, as its
+/// line, but thinking-token counters, up to the journal's size as this
+/// began; its last line too when whole and unended.  What an earlier stage
+/// wrote is removed first; one imported already is refused.  (SIZE,
+/// COUNT): the size read and the records written.  On an error, what it
+/// wrote is removed.  lisp/agents/romacs-agent-events.el moves a journal
+/// so, then makes the records the session's own.
+fn stage(journal: &Path, database: &Path, session: &str) -> Result<(u64, u64), String> {
+    // No host writes the journal while it is read: none starts meanwhile.
+    let _lock = take_lock(journal.parent().ok_or("a journal names no session")?)?;
+    let size = std::fs::metadata(journal).map(|m| m.len()).unwrap_or(0);
+    let mut db = rusqlite::Connection::open(database).map_err(|e| format!("{}: {e}", database.display()))?;
+    db.busy_timeout(std::time::Duration::from_secs(60)).map_err(|e| e.to_string())?;
+    db.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
+    db.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+    db.execute_batch(EVENTS_SCHEMA).map_err(|e| e.to_string())?;
+    {
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let imported: bool = tx.query_row("select exists (select 1 from imported where session = ?1)", [session], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if imported { return Err(format!("staging {session}: imported already")); }
+        tx.execute("delete from events where session = ?1", [session]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    let written = stage_lines(&mut db, journal, size, session);
+    if written.is_err() {
+        let _ = db.execute("delete from events where session = ?1", [session]);
+    }
+    written.map(|count| (size, count))
+}
+
+/// A line as the supervisor writes it, `{"KIND":...,"seq":N,"t":F}': its
+/// (SEQ, T, KIND) read from its ends, nothing else parsed; None for any
+/// other, which is parsed whole.
+fn line_fields(text: &str) -> Option<(i64, Option<f64>, Option<String>)> {
+    let rest = text.strip_prefix("{\"")?;
+    let kind = &rest[..rest.find('"')?];
+    if kind.is_empty() || kind == "seq" || kind == "t" || !kind.bytes().all(|b| b.is_ascii_lowercase())
+        || !rest[kind.len()..].starts_with("\":") {
+        return None;
+    }
+    let tail = &text[text.len().saturating_sub(80)..];
+    let at = tail.rfind(",\"seq\":")?;
+    let fields = tail[at + 7..].strip_suffix('}')?;
+    let (seq, time) = fields.split_once(",\"t\":")?;
+    Some((seq.parse().ok()?, Some(time.parse().ok()?), Some(kind.to_owned())))
+}
+
+fn stage_lines(db: &mut rusqlite::Connection, journal: &Path, size: u64, session: &str) -> Result<u64, String> {
+    use std::io::Read;
+    // None at all: nothing to write.
+    if size == 0 { return Ok(0); }
+    let file = File::open(journal).map_err(|e| format!("{}: {e}", journal.display()))?;
+    let mut reader = BufReader::with_capacity(1 << 20, file.take(size));
+    let mut line = Vec::new();
+    let (mut count, mut pending) = (0u64, 0usize);
+    let mut tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).map_err(|e| e.to_string())? == 0 { break; }
+        let ended = line.last() == Some(&b'\n');
+        let text = String::from_utf8_lossy(&line);
+        let text = text.trim_end_matches(['\n', '\r']);
+        if text.trim().is_empty() { continue; }
+        if text.contains("thinking_tokens") && counter(text) { continue; }
+        // As the supervisor writes a line (its kind first, its seq and time
+        // last): read from its ends; another, parsed.
+        let (seq, time, kind) = match (ended, line_fields(text)) {
+            (true, Some(fields)) => fields,
+            _ => {
+                let record = serde_json::from_str::<Json>(text);
+                // Its last line, unended: a whole record, or nothing written.
+                if !ended && !matches!(record, Ok(Json::Object(_))) {
+                    return Err(format!("staging {session}: its last line is cut short"));
+                }
+                let Ok(Json::Object(record)) = record else { continue };
+                let Some(seq) = record.get("seq").and_then(Json::as_i64) else { continue };
+                (seq, record.get("t").and_then(Json::as_f64),
+                 record.keys().find(|key| *key != "seq" && *key != "t").cloned())
+            }
+        };
+        tx.execute("insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)",
+                   rusqlite::params![session, seq, time, kind, text]).map_err(|e| e.to_string())?;
+        count += 1;
+        pending += 1;
+        if pending >= STAGE_CHUNK {
+            tx.commit().map_err(|e| e.to_string())?;
+            tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+            pending = 0;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let [flag, dir] = args.as_slice() && flag == "--supervised" {
-        std::process::exit(if supervised(Path::new(dir)) { 0 } else { 1 });
+    if let Some((flag, dirs)) = args.split_first() && flag == "--supervised" {
+        // Each held session's directory, a line each.
+        for dir in dirs.iter().filter(|dir| supervised(Path::new(dir))) { println!("{dir}"); }
+        std::process::exit(0);
+    }
+    if let [flag, dir] = args.as_slice() && flag == "--hold" {
+        // Held until stdin closes: what the caller does meanwhile no host
+        // starts under.
+        match take_lock(Path::new(dir)) {
+            Ok(_lock) => {
+                println!("held");
+                let _ = std::io::stdout().flush();
+                let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+                std::process::exit(0)
+            }
+            Err(error) => { eprintln!("romacs-agent-host: {error}"); std::process::exit(1) }
+        }
+    }
+    if let [flag, journal, store_flag, database, session_flag, session] = args.as_slice()
+        && flag == "--stage" && store_flag == "--store" && session_flag == "--session" {
+        match stage(Path::new(journal), Path::new(database), session) {
+            Ok((size, count)) => { println!("{size} {count}"); std::process::exit(0) }
+            Err(error) => { eprintln!("romacs-agent-host: {error}"); std::process::exit(1) }
+        }
     }
     let code = parse(args).and_then(run).unwrap_or_else(|error| {
         eprintln!("romacs-agent-host: {error}");
@@ -621,6 +754,70 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_read_from_its_ends_is_what_a_parse_reads() {
+        // Its kind, seq and time, exactly: a float as `str::parse' reads it.
+        for (line, want) in [
+            (r#"{"in":{"x":1},"seq":3,"t":1794678357.2928457}"#, Some((3, Some(1794678357.2928457), Some("in".to_owned())))),
+            (r#"{"out":{"t":2,"seq":9},"seq":12,"t":0.1}"#, Some((12, Some(0.1), Some("out".to_owned())))),
+            (r#"{"seq":3,"t":1.5,"note":{}}"#, None),
+            // A nested seq and time are not the line's.
+            (r#"{"t":4.0,"seq":11,"note":{"seq":1,"t":2}}"#, None),
+            (r#"{"in":{"seq":5,"t":1},"seq":7,"t":2.5}"#, Some((7, Some(2.5), Some("in".to_owned())))),
+        ] {
+            assert_eq!(line_fields(line), want);
+            if let Some((seq, time, kind)) = want {
+                let parsed: Json = serde_json::from_str(line).unwrap();
+                assert_eq!(parsed["seq"].as_i64(), Some(seq));
+                assert_eq!(parsed["t"].as_f64(), time);
+                assert_eq!(parsed.as_object().unwrap().keys().find(|k| *k != "seq" && *k != "t").cloned(), kind);
+            }
+        }
+    }
+
+    #[test]
+    fn a_line_of_megabytes_is_read_from_its_ends() {
+        let line = format!("{{\"out\":{{\"text\":\"{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(4_000_000));
+        assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))));
+    }
+
+    #[test]
+    fn a_stage_writes_every_record_and_holds_its_session() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-stage-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000005");
+        std::fs::create_dir_all(&session).unwrap();
+        let journal = session.join("journal.jsonl");
+        std::fs::write(&journal, concat!(
+            "{\"in\":{\"m\":1},\"seq\":1,\"t\":1.25}\n",
+            "{\"out\":{\"subtype\":\"thinking_tokens\",\"type\":\"system\"},\"seq\":2,\"t\":2.0}\n",
+            "{\"seq\":3,\"t\":3.5,\"note\":{\"type\":\"run\"}}\n",
+            "not json\n",
+            "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":5,\"t\":5.0}\n",
+            "{\"out\":{\"x\":true},\"seq\":6,\"t\":6.0}")).unwrap();
+        let database = dir.join("sessions.sqlite");
+        // A host holding it: refused, nothing written.
+        let held = lock_session(&session).unwrap();
+        assert!(stage(&journal, &database, "s").is_err());
+        drop(held);
+        let (size, count) = stage(&journal, &database, "s").unwrap();
+        assert_eq!(size, std::fs::metadata(&journal).unwrap().len());
+        // The counter and the line no record left out; a line mentioning
+        // thinking tokens, the parsed line and the unended last one in, each
+        // as it was written.
+        assert_eq!(count, 4);
+        let rows: Vec<(i64, f64, String)> = rusqlite::Connection::open(&database).unwrap()
+            .prepare("select seq, t, kind from events where session = 's' order by seq").unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap().map_while(Result::ok).collect();
+        assert_eq!(rows, [(1, 1.25, "in".to_owned()), (3, 3.5, "note".to_owned()), (5, 5.0, "out".to_owned()),
+                          (6, 6.0, "out".to_owned())]);
+        let kept: String = rusqlite::Connection::open(&database).unwrap()
+            .query_row("select record from events where seq = 5", [], |row| row.get(0)).unwrap();
+        assert_eq!(kept, "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":5,\"t\":5.0}");
+        // Not held once it ended.
+        assert!(!supervised(&session));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_session_is_supervised_while_its_lock_is_held() {
