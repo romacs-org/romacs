@@ -610,3 +610,23 @@ turns, and its journal's file; a state root of its own."
          (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 2))))))
 
 ;;; romacs-agent-events-tests.el ends here
+
+(ert-deftest romacs-agent-events-a-session-started-before-the-store-goes-to-it ()
+  ;; In the editor, the store not made yet (the writer makes it as the
+  ;; editor starts): a new session's records go to it all the same, not to
+  ;; a journal no store-drawn chat shows while it runs.
+  (let* ((root (make-temp-file "romacs-first-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-events-store t)
+         (romacs-agent-events--imported (make-hash-table :test #'equal))
+         (romacs-agent-writer-queued t) (asked nil)
+         (session (romacs-agent--make :id "first" :dir (expand-file-name "first" root))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-write) (lambda (function args &rest _) (push (cons function args) asked)))
+                  ((symbol-function 'romacs-agent-store--make-soon) #'ignore))
+          (make-directory (romacs-agent-dir session) t)
+          (should-not (romacs-agent-events--db))
+          (should (eq (romacs-agent-events-own session) t))
+          (should (romacs-agent-events-p session))
+          (should (equal asked '((romacs-agent-events--mark "first")))))
+      (delete-directory root t))))
