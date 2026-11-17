@@ -29,8 +29,8 @@ possible; say so where you do.
   give the guarantee's debugging, which today's worker VMs predate: its runs can be
   replayed, the order things ran in can be asked for, and a conflict or an abort is
   reported in Lisp terms (this buffer, this variable, this form). Weakening the
-  guarantee is the owner's decision, for a design that wins by a wide margin on
-  everything else.
+  guarantee is a change to this rule, never a trade one design makes on its own,
+  and only for a design that wins by a wide margin on everything else.
 - The direction is ownership: state has one owner at a time. A buffer, with its
   text, properties, locals, markers and processes, belongs to one owner, and a turn
   (a command, a filter or sentinel call, a timer, a fontify chunk) runs on the
