@@ -20,6 +20,28 @@ measure for a text-terminal display. Romacs *contains* a terminal emulator
 program. Pinned GNU may be run `-nw` as an oracle when no GUI comparison is
 possible; say so where you do.
 
+## Ownership and sequential semantics
+
+- Elisp's sequential semantics is the machine's guarantee, and its parallelism is
+  built on it. Any mechanism that runs Lisp in parallel keeps it: what runs in
+  parallel is indistinguishable from some sequential order a Lisp programmer could
+  have written, and Lisp never observes a data race. Such a mechanism also gives
+  the guarantee's debugging: a run it makes can be replayed, the order things ran
+  in can be asked for, and a conflict or an abort is reported in Lisp terms (this
+  buffer, this variable, this form). A design under which Lisp can observe a race
+  must win by a wide margin on everything else.
+- The direction is ownership: state has one owner at a time. A buffer, with its
+  text, properties, locals, markers and processes, belongs to one owner, and a turn
+  (a command, a filter or sentinel call, a timer, a fontify chunk) runs on the
+  owner of the state it writes; code, options, faces and keymaps are the world
+  every owner reads. Today every buffer's owner is the main VM, and worker VMs
+  compute over frozen copies and hand results back (`doc/performance.org`). New
+  work moves toward owners, not away from them.
+- A stuck owner never takes the rest of Romacs with it, and a stall is a defect: a
+  block of the main VM past a second, a Rust loop that quit cannot reach
+  (`native_poll`), a pause whose cost grows with the session's history. Measure a
+  stall in instructions and CPU time under load, not in wall time alone.
+
 ## Where a rule goes
 
 - A rule that holds across the repository goes in this file.
@@ -144,7 +166,7 @@ possible; say so where you do.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even
-  when both are new.
+  when both are new: one scheduler, one quit path, one busy tracker.
 - When a mechanism moves to Rust, keep the policy users customize reachable from
   Lisp.
 - Back structural and performance claims with measurements on the development
