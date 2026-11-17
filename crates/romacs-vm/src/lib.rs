@@ -121,6 +121,7 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod gc_image;
 mod functions;
 mod epoch;
 mod slots;
@@ -1539,6 +1540,8 @@ pub struct Vm {
     gc_times: gc::GcTimes,
     /// What the last mark counted (`garbage-collect's statistics).
     gc_census: gc::Census,
+    /// The restored world image, as `make_image_permanent` found it.
+    world_image: gc_image::WorldImage,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1850,6 +1853,7 @@ impl Vm {
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
             gc_census: Default::default(),
+            world_image: Default::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,

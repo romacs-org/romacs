@@ -16,6 +16,12 @@ use std::sync::Arc;
 /// it lost promotes everything instead.
 const CHANGED_LIMIT: usize = 64 << 10;
 
+/// An id's place in the restored image (`Functions::image`): not the image's,
+/// free there, or one of its functions, as it was then or changed since.
+const NOT_IMAGE: u8 = 0;
+const UNTOUCHED: u8 = 1;
+const TOUCHED: u8 = 2;
+
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Functions {
     list: Vec<Arc<Function>>,
@@ -24,6 +30,14 @@ pub(crate) struct Functions {
     changed: Vec<usize>,
     /// By id, whether it is in `changed`.
     recorded: Vec<bool>,
+    /// By id, the functions of the restored image (`Vm::make_image_permanent`)
+    /// and whether each changed since: never forgotten, so a full reads the
+    /// changed and no other image function (`Vm::image_roots`). An id free at
+    /// the restore, which a request may take again, is not the image's.
+    /// Empty in a process that restored none.
+    image: Vec<u8>,
+    /// The image's ids changed since the restore, each once.
+    touched: Vec<usize>,
     /// More changed than `CHANGED_LIMIT`: the record is void until the next
     /// collection.
     lost: bool,
@@ -47,6 +61,10 @@ impl<'a> IntoIterator for &'a Functions {
 
 impl Functions {
     fn record(&mut self, id: usize) {
+        if let Some(kept @ &mut UNTOUCHED) = self.image.get_mut(id) {
+            *kept = TOUCHED;
+            self.touched.push(id);
+        }
         if self.lost || self.recorded.get(id).copied().unwrap_or(false) {
             return;
         }
@@ -100,6 +118,24 @@ impl Functions {
     pub(crate) fn settled(&self) -> bool {
         self.changed.is_empty() && !self.lost
     }
+    /// Every function there is but the FREE ids becomes the image's, none
+    /// changed since.
+    pub(crate) fn make_image(&mut self, free: &[usize]) {
+        self.image = vec![UNTOUCHED; self.list.len()];
+        for &id in free {
+            if let Some(kept) = self.image.get_mut(id) { *kept = NOT_IMAGE; }
+        }
+        self.touched.clear();
+    }
+    /// The image's functions changed since the restore.
+    pub(crate) fn image_touched(&self) -> &[usize] {
+        &self.touched
+    }
+    /// The image's functions not changed since the restore: each names
+    /// only what the image held then.
+    pub(crate) fn image_untouched(&self) -> impl Iterator<Item = usize> + '_ {
+        self.image.iter().enumerate().filter(|&(_, &kept)| kept == UNTOUCHED).map(|(id, _)| id)
+    }
     /// Every function, for the collector to rewrite the values of or drop
     /// the body of: it records nothing.
     pub(crate) fn collector_iter_mut(&mut self) -> std::slice::IterMut<'_, Arc<Function>> {
@@ -129,5 +165,26 @@ mod tests {
         assert!(functions.settled());
         functions.change(b);
         assert_eq!(functions.changed(), Some(&[b][..]));
+    }
+
+    /// An image function changed since the restore stays so through every
+    /// collection's settle; a new one is not the image's, nor one free at
+    /// the restore that a request took again.
+    #[test]
+    fn an_image_function_changed_stays_touched() {
+        let mut vm = crate::Vm::new();
+        vm.eval_source_raw("(defun touched-once () 1)").unwrap();
+        let any = vm.functions.last().expect("a function").clone();
+        let mut functions = Functions::default();
+        let (a, b, free) = (functions.push(any.clone()), functions.push(any.clone()), functions.push(any.clone()));
+        functions.make_image(&[free]);
+        let c = functions.push(any.clone());
+        functions.change(b);
+        functions.change(c);
+        functions.set(free, any.clone());
+        functions.settle();
+        functions.change(b);
+        assert_eq!(functions.image_touched(), [b], "neither a new id nor one free at the restore is the image's");
+        assert_eq!(functions.image_untouched().collect::<Vec<_>>(), [a]);
     }
 }
