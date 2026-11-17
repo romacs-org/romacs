@@ -1191,8 +1191,8 @@ impl Leaf<'_> {
 
     /// `call_process`'s wait for child PID: what it wrote to READER until the
     /// pipe closed, then its end, each a quittable wait (`Vm::poll_quittable`).
-    /// A C-g sends the child SIGINT, as `call_process_cleanup` does, leaves it
-    /// for the reaper, and quits; under `inhibit-quit` the wait goes on
+    /// A C-g ends the child as `call_process_cleanup` does
+    /// (`call_process_stop`) and quits; under `inhibit-quit` the wait goes on
     /// without looking at the press again.
     fn call_process_wait(&mut self, pid: i32, mut reader: Option<OwnedFd>) -> Result<Vec<u8>> {
         let pidfd = crate::host::pidfd_open(pid);
@@ -1210,8 +1210,7 @@ impl Leaf<'_> {
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
             if revents[0] == 0 {
                 if let Err(quit) = self.native_poll() {
-                    let _ = crate::host::kill(pid, libc::SIGINT);
-                    self.vm.subprocesses.deleted.push((pid, None));
+                    self.call_process_stop(pid, pidfd.as_ref());
                     return Err(quit);
                 }
                 held = self.vm.quit.pressed();
@@ -1224,6 +1223,32 @@ impl Leaf<'_> {
             }
         }
         Ok(bytes)
+    }
+
+    /// `call_process_cleanup` for a quit: SIGINT to the child's process group
+    /// (its own, made by spawn's setsid), then a wait for it to die, which a
+    /// further C-g ends with SIGKILL (`call_process_kill`), as "If you quit,
+    /// the process is killed with SIGINT, or SIGKILL if you quit again". The
+    /// child is reaped here: none is left running.
+    fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) {
+        if crate::host::kill(-pid, libc::SIGINT).is_err() { let _ = crate::host::kill(pid, libc::SIGINT); }
+        if let Some(pidfd) = pidfd {
+            let fds = [(pidfd.as_raw_fd(), libc::POLLIN)];
+            loop {
+                match self.vm.poll_quittable(&fds, None) {
+                    Ok(revents) if revents[0] != 0 => break,
+                    Ok(_) if self.vm.quit.pressed() => {
+                        // The second C-g: taken here, as GNU's kill takes it.
+                        self.vm.quit.take();
+                        if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        if sp::wait_blocking(pid).is_err() { self.vm.subprocesses.deleted.push((pid, None)); }
     }
 
     /// call_process's child: run ARGV synchronously with INFILE on stdin.

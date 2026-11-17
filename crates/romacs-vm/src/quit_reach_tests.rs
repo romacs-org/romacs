@@ -222,3 +222,51 @@ fn compare_buffer_substrings_quits_between_chunks() {
                  (set-buffer b1) (insert (make-string 50000 ?a)) (set-buffer b2) (insert (make-string 50000 ?a)))";
     reaches("compare-buffer-substrings", setup, "(list b1 nil nil b2 nil nil)", "t");
 }
+
+/// The child's pid, as it wrote it to FILE.
+fn child_pid(file: &std::path::Path) -> i32 {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(pid) = std::fs::read_to_string(file).ok().and_then(|text| text.trim().parse().ok()) { return pid; }
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "the child never wrote its pid");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// GNU's call-process: "If you quit, the process is killed with SIGINT, or
+/// SIGKILL if you quit again." After the quit no child is left running: one
+/// that dies of SIGINT, and one that ignores it and takes a second C-g.
+#[test]
+fn a_quit_in_call_process_leaves_no_child_running() {
+    let dir = std::env::temp_dir().join(format!("quit-call-process-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, script, presses) in [("plain", "echo $$ > {F}; exec sleep 30", 1), ("ignoring", "trap '' INT; echo $$ > {F}; exec sleep 30", 2)] {
+        let file = dir.join(name);
+        let script = script.replace("{F}", &file.display().to_string());
+        let (mut vm, signal) = busy_vm();
+        let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t)"));
+        let presser = {
+            let (signal, file) = (signal.clone(), file.clone());
+            std::thread::spawn(move || {
+                let pid = child_pid(&file);
+                for _ in 0..presses {
+                    assert!(signal.interrupt());
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+                pid
+            })
+        };
+        let outcome = invoke(&mut vm, call);
+        let pid = presser.join().unwrap();
+        assert!(quit_signalled(&mut vm, &outcome), "{name}: the wait did not quit");
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists(), "{name}: child {pid} still exists after the quit");
+    }
+}
+
+/// The printer stops between objects, as GNU's print_object polls at each,
+/// before any text is made; `delq' polls as GNU's FOR_EACH_TAIL does.
+#[test]
+fn the_printer_and_delq_quit_in_their_walks() {
+    reaches("prin1-to-string", "(setq l (make-list 20000 'a))", "(list l)", "t");
+    reaches("delq", "(setq l (make-list 20000 'a))", "(list 'b l)", "(= (length l) 20000)");
+}

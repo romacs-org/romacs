@@ -668,7 +668,25 @@ impl Vm {
         if hash::is_hash_primitive(p) {
             return self.hash_call(p, start, argc, error_out, signal_out);
         }
-        match self.primitive(p, start, argc) {
+        // `format' prints with GNU's print_object, which polls (`PRINT_STOPPED`).
+        let quittable = p == Primitive::Format;
+        let outer = self.native_quit;
+        self.native_quit = outer || quittable;
+        let mut called = self.primitive(p, start, argc);
+        if quittable && called.as_ref().is_err_and(|error| error == crate::eval_data::PRINT_STOPPED) {
+            match self.native_poll() {
+                Ok(()) => called = self.primitive(p, start, argc),
+                Err(crate::prim::Fault::Signal(condition, data)) => {
+                    self.native_quit = outer;
+                    *signal_out = Some((condition, data));
+                    *error_out = Some("Quit".into());
+                    return None;
+                }
+                Err(_) => called = Err("Quit".into()),
+            }
+        }
+        self.native_quit = outer;
+        match called {
             Ok(value) => Some(value),
             Err(error) => {
                 *signal_out = self.primitive_condition(p, start, argc, &error);

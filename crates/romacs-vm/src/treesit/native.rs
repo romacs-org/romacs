@@ -437,16 +437,26 @@ impl Query {
     /// the cursor walks (the runtime's progress callback): None once it
     /// stopped.
     pub(crate) fn matches(&self, node: Node, range: (u32, u32), stop: &crate::quit::NativeStop) -> Option<Vec<Match>> {
+        /// The callback's payload: the probe, asked once every 64 calls.
+        struct Progress<'a> {
+            stop: &'a crate::quit::NativeStop,
+            // CELL(Plain)
+            calls: std::cell::Cell<u32>,
+        }
         // UNSAFE(the runtime's progress callback type is an unsafe extern fn)
         // SAFETY: the runtime calls it only during this walk, with the state
         // whose payload OPTIONS below set.
         unsafe extern "C" fn progress(state: *mut ffi::TSQueryCursorState) -> bool {
             // UNSAFE(the runtime hands the callback its payload back as a raw pointer)
-            // SAFETY: the payload is the probe `matches` borrows for the whole walk.
-            unsafe { &*(*state).payload.cast::<crate::quit::NativeStop>() }.due()
+            // SAFETY: the payload is the `Progress` `matches` borrows for the whole walk.
+            let progress = unsafe { &*(*state).payload.cast::<Progress<'_>>() };
+            let calls = progress.calls.get().wrapping_add(1);
+            progress.calls.set(calls);
+            calls.is_multiple_of(64) && progress.stop.due()
         }
+        let payload = Progress { stop, calls: std::cell::Cell::new(0) };
         let options = ffi::TSQueryCursorOptions {
-            payload: std::ptr::from_ref(stop).cast_mut().cast(),
+            payload: std::ptr::from_ref(&payload).cast_mut().cast(),
             progress_callback: stop.armed().then_some(progress as unsafe extern "C" fn(*mut ffi::TSQueryCursorState) -> bool),
         };
         let mut steps = crate::quit::Steps::default();

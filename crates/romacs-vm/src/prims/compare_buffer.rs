@@ -13,14 +13,11 @@ fn compare_buffer_substrings(cx, buffer1: Value, start1: Value, end1: Value, buf
     // GNU translates both through the current buffer's case_canon_table
     // when folding; equal characters need no translation.
     let mut canon = None;
-    // A read: it stops anywhere, polled a chunk at a time; equal chunks are
-    // compared whole.
+    // A read: it stops anywhere, polled a chunk at a time.
     let common = first.len().min(second.len());
     for start in (0..common).step_by(CHUNK) {
         if start != 0 { cx.quittable(Leaf::native_poll)?; }
-        let end = (start + CHUNK).min(common);
-        if first[start..end] == second[start..end] { continue; }
-        for n in start..end {
+        for n in start..(start + CHUNK).min(common) {
             let (a, b) = (first[n], second[n]);
             if a == b { continue; }
             let (a, b) = if fold {

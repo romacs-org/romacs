@@ -104,7 +104,11 @@ fn delete_eq(cx: &mut Leaf<'_>, elt: Value, mut list: Value) -> Out {
         tail = cx.pair(tail).unwrap().1;
         if tail == tortoise { return Err(Fault::Circular(tail)); }
         steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
+        if steps & 4095 == 0 {
+            if steps.is_power_of_two() { tortoise = tail; }
+            // FOR_EACH_TAIL's maybe_quit: what was deleted stays deleted.
+            cx.quittable(Leaf::native_poll)?;
+        }
     }
     if tail != Value::NIL { return Err(Fault::Wrong("listp", list)); }
     Ok(list)

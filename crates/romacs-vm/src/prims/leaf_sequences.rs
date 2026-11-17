@@ -97,18 +97,18 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
-/// A stable sort of ORDER by COMPARE that polls as it goes: runs of
-/// [`SORT_RUN`] sorted alone, then merged pairwise a level at a time, a poll
-/// every run's worth of merged elements. Nothing outside ORDER is written.
-fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T],
+/// A stable sort of ORDER by COMPARE that polls as it goes: runs of RUN
+/// elements sorted alone, then merged pairwise a level at a time, a poll
+/// every RUN merged elements. Nothing outside ORDER is written.
+fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T], run: usize,
                         mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
     use std::cmp::Ordering::{Greater, Less};
-    for run in order.chunks_mut(SORT_RUN) {
-        run.sort_by(|a, b| compare(cx, a, b));
+    for chunk in order.chunks_mut(run) {
+        chunk.sort_by(|a, b| compare(cx, a, b));
         cx.native_poll()?;
     }
-    let mut merged = Vec::with_capacity(order.len().min(2 * SORT_RUN));
-    let mut width = SORT_RUN;
+    let mut merged = Vec::with_capacity(order.len().min(2 * run));
+    let mut width = run;
     while width < order.len() {
         for start in (0..order.len()).step_by(2 * width) {
             let (mid, end) = ((start + width).min(order.len()), (start + 2 * width).min(order.len()));
@@ -125,7 +125,7 @@ fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T],
                     merged.push(order[left]);
                     left += 1;
                 }
-                if merged.len().is_multiple_of(SORT_RUN) { cx.native_poll()?; }
+                if merged.len().is_multiple_of(run) { cx.native_poll()?; }
             }
             merged.extend_from_slice(&order[left..mid]);
             merged.extend_from_slice(&order[right..end]);
@@ -136,8 +136,11 @@ fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T],
     Ok(())
 }
 
-/// Elements a sort's run holds between two polls.
+/// Fixnums a sort's run holds between two polls: about a millisecond.
 const SORT_RUN: usize = 1 << 15;
+/// Strings a run holds: a comparison reads both strings' text, about six
+/// times a fixnum's.
+const STRING_RUN: usize = 1 << 12;
 
 /// The native order of a predicate that resolves to a builtin subr, when
 /// every key is of a type it compares without signaling. GNU sort.c marks
@@ -166,10 +169,9 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
     let mut order: Vec<usize> = (0..keys.len()).collect();
     if by_string {
         // Validated above, so the comparison cannot fail.
-        sort_polled(cx, &mut order, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?;
+        sort_polled(cx, &mut order, STRING_RUN, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?;
     } else {
-        let ints: Vec<i64> = keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect();
-        sort_polled(cx, &mut order, |_, a, b| ints[*a].cmp(&ints[*b]))?;
+        sort_polled(cx, &mut order, SORT_RUN, |_, a, b| keys[*a].integer_value().cmp(&keys[*b].integer_value()))?;
     }
     let items = cx.vector_values(state[5])?;
     // Into the sort's own vectors: polled anywhere.

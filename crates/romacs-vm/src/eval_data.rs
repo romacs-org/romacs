@@ -361,6 +361,9 @@ impl Vm {
     }
 
     fn print_object(&self, value: Value, quoted: bool, options: &PrintOptions, depth: usize) -> Result<String> {
+        let objects = options.objects.get().wrapping_add(1);
+        options.objects.set(objects);
+        if objects.is_multiple_of(PRINT_POLL) && self.native_stop_due() { return Err(PRINT_STOPPED.into()); }
         let key = match self.object_if(value) {
             Some(data::Object::SubCharTable(node)) => (1, char_table::char_table_node_id(node) as u64),
             _ => (0, value.0),
@@ -697,10 +700,20 @@ struct PrintOptions {
     nonascii: bool, multibyte: bool, controls: bool, circle: bool, gensym: bool,
     /// Output goes to a multibyte buffer, as print_string's does.
     buffer: bool,
+    /// Objects printed, for the quit probe (`print_object`).
+    // CELL(Plain)
+    objects: std::cell::Cell<u32>,
 }
 impl Default for PrintOptions {
-    fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false } }
+    fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false, objects: std::cell::Cell::new(0) } }
 }
+
+/// A print a quit probe stopped (`print_object`): its caller polls.
+pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";
+
+/// Objects printed between two looks at the quit probe; GNU's print_object
+/// looks at each (maybe_quit at print_obj).
+const PRINT_POLL: u32 = 4096;
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
         let on = value != Value::NIL;
