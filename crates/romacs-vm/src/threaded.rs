@@ -5922,15 +5922,12 @@ mod register_tests {
             // A sealed call of a typed op takes the typed handler, its other
             // cases the kernel's general path (`kernel_bytes`).
             let sealed = lower(&vm, Op::Sealed(0, slot, 1, argc));
-            match code::typed_kernel(sealed.value, argc) {
-                Some((typed, other)) => {
-                    assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
-                    assert!(std::ptr::fn_addr_eq(sealed.kernel, other), "{name}'s other cases");
-                }
-                None => {
-                    assert!(!matches!(name, "car" | "cdr" | "null"), "{name} has a typed handler");
-                    assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler), "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
-                }
+            if let Some((typed, other)) = code::typed_kernel(sealed.value, argc) {
+                assert!(std::ptr::fn_addr_eq(sealed.handler, typed), "{name} takes its typed handler");
+                assert!(std::ptr::fn_addr_eq(sealed.kernel, other), "{name}'s other cases");
+            } else {
+                assert!(!matches!(name, "car" | "cdr" | "null"), "{name} has a typed handler");
+                assert!(std::ptr::fn_addr_eq(direct.kernel, sealed.handler), "HEAD_ORDER_SPECIALIZATION_LOST: {name}");
             }
         }
     }

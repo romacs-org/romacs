@@ -19,7 +19,7 @@
 //!
 //! Not guaranteed by any type: that the engine's modules make no second
 //! `Vm` to swap a running one's files with; `tools/lib/smells.py` holds that
-//! (`vm-replacement`).
+//! (`vm_replacements`).
 use super::{fail, next, poll_resume, Eng, Handler, Inst, Value};
 
 /// The running frame's registers: one per engine, moved along dispatch, made
@@ -55,6 +55,7 @@ impl Regs {
     /// the engine, a shared read of the file included, runs while it lives.
     #[inline]
     pub(super) fn window<'w>(&'w mut self, _engine: &'w mut Eng<'_, '_>) -> &'w mut [Value; 257] {
+        // UNSAFE(a frame is an offset into its engine's register file, which no reference type can name)
         // SAFETY: I3: a typed handler's operands are validated below its
         // frame's width, so the frame is one register wide or more, and I1
         // puts 256 initialised slots past it; I5 makes this the one reference
@@ -65,6 +66,7 @@ impl Regs {
     /// names, read or written through the slot. Borrows as `window` does.
     #[inline]
     pub(super) fn slot<'w>(&'w mut self, _engine: &'w mut Eng<'_, '_>, at: Wide) -> &'w mut Value {
+        // UNSAFE(a frame is an offset into its engine's register file, which no reference type can name)
         // SAFETY: I3: `code::validate` proved AT below the frame's width, and
         // I1 puts that width and 256 initialised slots past the base; I5
         // makes this the one reference to it while it lives.
@@ -83,6 +85,7 @@ impl Next {
 impl Pc {
     #[inline]
     fn inst(&self) -> &Inst {
+        // UNSAFE(a Pc is dispatch's raw instruction pointer: a reference would tie each handler to its code's lifetime)
         // SAFETY: I3 and I4: a Pc is made from an instruction of validated
         // code that outlives it, and this reference never leaves this module.
         unsafe { &*self.0 }
@@ -115,6 +118,7 @@ impl Pc {
     }
     #[inline]
     fn step(self, distance: isize) -> Next {
+        // UNSAFE(a branch is a pointer offset within validated code, as dispatch takes it)
         // SAFETY: I3: every instruction's branch distance lands in its code,
         // and 1 does too, as validated code ends in the terminator and no
         // typed handler is handed the terminator's Pc.
@@ -142,6 +146,7 @@ impl Pc {
 #[inline]
 fn call(handler: Handler, e: Eng<'_, '_>, r: Regs, at: *const Inst) -> Value {
     let r = r.into_raw();
+    // UNSAFE(a Handler is an unsafe fn pointer: the threaded engine's calling convention)
     // SAFETY: I1, I3, I4: R is the running frame, made only by the entries
     // below, and AT an instruction of its function's validated code (a
     // `Pc`'s or a `Next`'s), which is what every `Handler` requires.
@@ -187,6 +192,7 @@ macro_rules! handlers {
         $(
             #[cfg_attr(
                 all(target_os = "linux", target_arch = "x86_64"),
+                // UNSAFE(link_section is unsafe in Rust; it puts each handler on a cache line of its own)
                 // SAFETY: a section of this binary's own text, laid out by the
                 // `global_asm!` above; it holds only this handler's code.
                 unsafe(link_section = concat!(".text.vm2.", stringify!($name)))
@@ -194,6 +200,7 @@ macro_rules! handlers {
             /// # Safety
             /// R is the running engine's current frame (`Engine::regs`) and PC an
             /// instruction of the validated code of the function running in it.
+            // UNSAFE(the Handler signature: raw frame and instruction pointers, the threaded calling convention)
             pub(super) unsafe fn $name(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -> Value {
                 super::hot::$name(e, Regs(r), Pc(pc))
             }

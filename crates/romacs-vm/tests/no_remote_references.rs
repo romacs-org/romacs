@@ -41,10 +41,6 @@ use Class::{Barrier, Cache, Free, Owed, Rescanned, Root, Transient};
 const FIELDS: &[(&str, Class)] = &[
     ("charsets", Root), ("standard_case_tables", Root), ("command_point", Root),
     ("change_prepared", Free),
-    // Keeps the last kernel's arguments until the next edit clears it, past
-    // any collection; during one it is `stack`, swapped in. Inert: nothing
-    // reads it before that clear (insdel.rs).
-    ("kernel_stack", Cache),
     ("change_slots", Free), ("case_symbols_slot", Free), ("print_number_index", Free), ("undo_list_slot", Free),
     // `Shown`'s Values are compared only while `collections` still matches, and
     // `previous` and the bar's caches go the same way; faces are hidden slots.
@@ -136,12 +132,14 @@ const FIELDS: &[(&str, Class)] = &[
     ("referrers", Cache), ("local_owners", Cache),
     ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
+    // Every register file: the current, the suspended and the kernel's
+    // (registers.rs); the kernel's is empty between calls.
     ("stack", Root), ("external_roots", Root),
     // Not roots: the collector dooms those it does not reach.
     ("finalizers", Cache),
     ("doomed_finalizers", Root),
     ("post_gc_due", Free), ("undo_offers_due", Free), ("unwinding", Free), ("aftermath_runs", Free),
-    ("suspended_stacks", Root), ("suspended", Root),
+    ("suspended", Root),
     // Set and cleared around one keymap walk, which never collects (keymap.rs).
     ("keymap_filters", Transient), ("keymap_pending_filter", Transient),
     // A native call's watched writes, from the write to its engine's drain;
