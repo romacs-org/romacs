@@ -3321,21 +3321,21 @@ attached, or to start once its session is moved."
 (defcustom romacs-agent-start-deadline 120
   "Seconds a session launching may stay `starting' with no run of its
 harness begun (its supervisor's `run' record) before it is ended failed,
-saying so: a launch never leaves a session starting for ever.  The wait
-for a worker VM moving its records to SQLite first is not counted."
+saying so: a launch never leaves a session starting for ever.  Counted
+from the launch itself: the wait for a worker VM moving its records to
+SQLite first ends by itself, moved or not."
   :type 'number :group 'romacs-agent)
 
 (defvar romacs-agent--attempts (make-hash-table :test #'eq :weakness 'key)
   "Each session launching to its attempt, (TOKEN . TIMER): TIMER the
-attempt's deadline (`romacs-agent-start-deadline').  One at a time: a new
-attempt replaces an earlier one.")
+attempt's deadline (`romacs-agent-start-deadline'), nil until it
+launches.  One at a time: a new attempt replaces an earlier one.")
 
 (defun romacs-agent--attempt (session)
-  "Begin a launch attempt of SESSION, its deadline armed: its token."
+  "Begin a launch attempt of SESSION: its token."
   (romacs-agent--attempt-over session)
   (let ((token (list 'attempt)))
-    (puthash session (cons token (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token))
-             romacs-agent--attempts)
+    (puthash session (list token) romacs-agent--attempts)
     token))
 
 (defun romacs-agent--attempt-current-p (session token)
@@ -3360,13 +3360,9 @@ and its deadline has not ended it."
   "The deadline of SESSION's launch attempt TOKEN: one with no run begun,
 still `starting' or `detached' (its new supervisor never attached: a
 session with records of an earlier run is taken for detached), ends
-failed, and its launch, should it come later, is not made.  One whose
-records a worker still moves waits on for it."
+failed."
   (when (romacs-agent--attempt-current-p session token)
     (cond ((not (memq (romacs-agent-state session) '(starting detached))) (romacs-agent--attempt-over session))
-          ((romacs-agent-events-waiting-p (romacs-agent-id session))
-           (setcdr (gethash session romacs-agent--attempts)
-                   (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token)))
           (t (romacs-agent--attempt-over session)
              (remhash (romacs-agent-id session) romacs-agent--resuming)
              (romacs-agent--unstarted
@@ -3384,7 +3380,7 @@ sent through another host."
 (defun romacs-agent--launch-when-placed (session launch)
   "Call LAUNCH, which launches SESSION, once its records' place is known
 \(`romacs-agent-events-then'), as one launch attempt with a deadline
-\(`romacs-agent-start-deadline', `romacs-agent--attempted')."
+\(`romacs-agent-start-deadline', from the launch: `romacs-agent--attempted')."
   (let ((now t) (token (romacs-agent--attempt session)))
     (romacs-agent-events-then session (lambda () (romacs-agent--attempted session token now launch)))
     (setq now nil)))
@@ -3397,6 +3393,9 @@ supervisor that never came up does: no attach is left to, and what waits
 for its start would wait for ever.  NOW, called from where the attempt
 began: the error then reaches that caller too."
   (when (romacs-agent--attempt-current-p session token)
+    ;; Its deadline from now, the launch's start.
+    (setcdr (gethash session romacs-agent--attempts)
+            (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token))
     (condition-case err (funcall launch)
       ((error quit)
        (when (eq (romacs-agent-state session) 'starting)
