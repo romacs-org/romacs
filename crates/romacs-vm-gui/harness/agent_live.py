@@ -417,6 +417,19 @@ def renew(args, base):
         result = {'outcome': outcome, 'native': native, 'new_conversation': native != sid,
                   'session_id': argv[argv.index('--session-id') + 1] if '--session-id' in argv else None,
                   'resumed_old': '--resume' in argv, 'briefed': len(briefed), 'main_reads': main_reads, 'workers': workers}
+        # Its worker failing (its manifest gone): the renewal fails, said
+        # so, and lets the session go, at once.
+        manifest = a.home / '.local/state/romacs/agents' / sid / 'manifest.json'
+        manifest.rename(manifest.with_suffix('.aside'))
+        # Asked once it is free again (its last turn's end settles first).
+        until(lambda: a.eval(f'(condition-case nil (progn (setq rn-outcome nil) (romacs-agent-renew {a.s(sid)} "harness" '
+                             '(lambda (r) (setq rn-outcome r))) t) (user-error nil))') == 't', 30, 'renewal asked again')
+        try:
+            until(lambda: a.eval('(car rn-outcome)') in (':done', ':error'), 30, 'a failed renewal answered')
+        finally:
+            manifest.with_suffix('.aside').rename(manifest)
+        result['worker_failed'] = a.eval('(car rn-outcome)')
+        result['let_go'] = a.eval(f'(romacs-agent--held-p {a.s(sid)})')
         # A resume whose launch fails ends failed, saying why; the next runs.
         a.eval(f'(romacs-agent-stop {a.s(sid)})')
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'session ended')
@@ -431,10 +444,14 @@ def renew(args, base):
         a.until(sid, lambda: len(runs()) > runs_failed, 60, 'a run after the failed resume')
         a.idle(sid, 60)
         result['raised'] = failed
+        logged = a.eval('(progn (romacs-usage-log-flush) romacs-usage-log-file)')
+        usage = Path(parity_live.read_sexp(logged)) if logged not in ('nil', '') else None
+        result['usage_logged'] = bool(usage and usage.exists() and 'agent-unstarted' in usage.read_text())
         result['ok'] = (':done' in outcome and main_reads == 0 and workers == 1 and result['new_conversation'] and result['session_id'] == native
                         and not result['resumed_old'] and result['briefed'] == 1
                         and 'forced failure' in (failed or '') and result['failed_state'] == 'unstarted'
-                        and 'forced failure' in result['failed_said'])
+                        and 'forced failure' in result['failed_said'] and result['usage_logged']
+                        and result['worker_failed'] == ':error' and result['let_go'] == 'nil')
         return result
     finally:
         a.close()
@@ -3471,7 +3488,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     results = {}
     for name in args.workflow or ['host', 'sockets', 'reap', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
+                                  'outcome', 'budget', 'deadline', 'probe', 'select', 'renew']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
