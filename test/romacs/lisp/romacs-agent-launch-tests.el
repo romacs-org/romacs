@@ -100,7 +100,12 @@ whatever TMPDIR is); `delivered' collects wakes."
       (should-not (funcall poll))
       ;; Had: answered.
       (setf (romacs-agent-input-seq child) 4)
-      (should (equal (funcall poll) '(answered))))))
+      (should (equal (funcall poll) '(answered)))))
+  ;; Its harness gone before it had the brief: the call fails, not waits.
+  (romacs-agent-launch-tests--with
+    (let ((poll (cadr (romacs-agent-tools--started child (lambda () 'answered) t))))
+      (setf (romacs-agent-state child) 'ended)
+      (should-error (funcall poll) :type 'user-error))))
 
 (ert-deftest romacs-agent-launch-each-failure-wakes-and-says-failed ()
   (romacs-agent-launch-tests--with

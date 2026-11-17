@@ -922,7 +922,9 @@ with resume it goes on with that conversation of the instance's
                                 (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
                               (romacs-agent-tools--task child)))
                     prompted)))
-         (known (and request (romacs-agent-requested parent request))))
+         (known (and request (romacs-agent-requested parent request)))
+         ;; A brief is sent: its answer waits for the task to have it.
+         (briefed (let ((task (gethash "task" arguments))) (and (stringp task) (not (string-empty-p task))))))
     (cond (known (funcall answer known))
           ((gethash "resume" arguments)
            (funcall answer (romacs-agent-tools--adopt arguments pinned start-options)))
@@ -930,8 +932,8 @@ with resume it goes on with that conversation of the instance's
            ;; A child that cannot start leaves no worktree behind.
            (romacs-agent--start-instance provider)
            (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start)
-                                         (lambda (child) (funcall answer child t))))
-          (t (funcall answer (funcall start cwd) t)))))
+                                         (lambda (child) (funcall answer child briefed))))
+          (t (funcall answer (funcall start cwd) briefed)))))
 
 (defun romacs-agent-tools--own (session caller what)
   "SESSION, when CALLER delegated it (a caller that is no agent session
@@ -1202,6 +1204,12 @@ wakes no one besides."
               (romacs-agent-tools--answer child (romacs-agent-done-seq child))
               (user-error "Task %s (%s) did not start: %s" (romacs-agent-id child) (romacs-agent-title child)
                           (romacs-agent-reply child)))
+             ;; Its harness gone before it had its brief: it never will.
+             ((and prompted (not (romacs-agent--per-turn-p child)) (not (romacs-agent-input-seq child))
+                   (eq (romacs-agent-state child) 'ended)
+                   (not (process-live-p (romacs-agent-connection child))))
+              (user-error "Task %s (%s) ended before it had its brief: %s" (romacs-agent-id child)
+                          (romacs-agent-title child) (or (romacs-agent-reply child) "its harness exited")))
              ((and (or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
                        (not (eq (romacs-agent-state child) 'starting)))
                    (or (not prompted) (romacs-agent--per-turn-p child) (romacs-agent-input-seq child)))
