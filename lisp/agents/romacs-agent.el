@@ -2058,12 +2058,13 @@ nothing that waits."
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     scratch))
 
-(defun romacs-agent-events (session)
+(defun romacs-agent-events (session &optional end)
   "SESSION's journal as the events it raised, in order, replayed on a
-copy (`romacs-agent--scratch'): SESSION is left as it is."
+copy (`romacs-agent--scratch'): SESSION is left as it is.  To place END
+\(`romacs-agent--journal-end'), when given."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
          (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
+    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) nil end)
     (nreverse events)))
 
 (defconst romacs-agent--journal-slice (* 1024 1024)

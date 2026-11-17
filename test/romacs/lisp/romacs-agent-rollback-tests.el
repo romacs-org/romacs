@@ -367,6 +367,28 @@ the last record seen, not from where that run began."
      (should (= (romacs-agent-journal-start session)
                 (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))))))))
 
+(ert-deftest romacs-agent-rollback-claude-head-survives-a-restart ()
+  "romacs#270: where a renewed or rolled back conversation resumes is part
+of its kept state: an editor started again restores it from the store,
+and its resume reads none of the session's records."
+  (dolist (spec '(((prompt 1) (assistant "u1") (renew))
+                  ((prompt 1) (assistant "u1") (prompt 2) (assistant "u2") (rollback 2))))
+    (romacs-agent-rollback-tests--claude
+     (lambda (session)
+       (romacs-agent-rollback-tests--live session spec)
+       (let* ((text (romacs-agent--kept-text session))
+              (head (romacs-agent--claude-head session))
+              (again (romacs-agent--make :id (romacs-agent-id session) :harness 'claude :provider "claude"
+                                         :dir (romacs-agent-dir session) :cwd (romacs-agent-cwd session)))
+              (reads 0))
+         (cl-letf* (((symbol-function 'romacs-agent--kept-get) (lambda (_) text))
+                    (read (symbol-function 'romacs-agent--read-journal))
+                    ((symbol-function 'romacs-agent--read-journal) (lambda (&rest args) (cl-incf reads) (apply read args))))
+           ;; Restored at its last record: nothing after it to read.
+           (should (integerp (romacs-agent--restore-kept again)))
+           (should (equal (romacs-agent--claude-head again) head))
+           (should (= reads 0))))))))
+
 (ert-deftest romacs-agent-rollback-codex-reverts-the-turn ()
   (let* ((session (romacs-agent--make :id "c" :harness 'codex :harness-session "th"))
          (records (list (romacs-mcp--object "in" (romacs-mcp--object "id" "turn/start:4" "method" "turn/start" "romacsRequest" 7))
