@@ -74,24 +74,15 @@ impl Leaf<'_> {
     }
 
     pub fn fileio_sync_output(&self, file: &std::fs::File) -> std::io::Result<()> {
-        use std::os::fd::AsRawFd as _;
-        if unsafe { libc::fsync(file.as_raw_fd()) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
+        file.sync_all()
     }
 
     pub fn fileio_close_output(&self, file: std::fs::File) -> std::io::Result<()> {
-        use std::os::fd::IntoRawFd as _;
-        if unsafe { libc::close(file.into_raw_fd()) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
+        crate::host::close_file(file)
     }
 
     pub fn fileio_write_output(&self, file: &mut std::fs::File, mut bytes: &[u8]) -> std::io::Result<()> {
         use std::io::Write as _;
-        use std::os::fd::AsRawFd as _;
         let deadline = crate::host::monotonic() + std::time::Duration::from_secs(1);
         while !bytes.is_empty() {
             if crate::host::monotonic() >= deadline {
@@ -104,10 +95,11 @@ impl Leaf<'_> {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     let remaining = deadline.saturating_duration_since(crate::host::monotonic());
                     let timeout = remaining.as_millis().clamp(1, 100) as i32;
-                    let mut pollfd = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
-                    if unsafe { libc::poll(&mut pollfd, 1, timeout) } < 0 {
-                        let error = std::io::Error::last_os_error();
-                        if error.kind() != std::io::ErrorKind::Interrupted { return Err(error) }
+                    let mut fds = [rustix::event::PollFd::new(&*file, rustix::event::PollFlags::OUT)];
+                    let timeout = rustix::event::Timespec { tv_sec: 0, tv_nsec: i64::from(timeout) * 1_000_000 };
+                    match rustix::event::poll(&mut fds, Some(&timeout)) {
+                        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                        Err(error) => return Err(error.into()),
                     }
                 }
                 Err(e) => return Err(e),

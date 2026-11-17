@@ -275,7 +275,7 @@ impl Worker {
     fn exited(&self) -> Option<Exit> {
         match self.zygote {
             Some(_) => Some(self.reported.map_or(Exit::Unknown, Exit::Status)),
-            None => crate::subprocess::wait_status(self.pid, 0).map(Exit::Status),
+            None => crate::subprocess::wait_status(self.pid, rustix::process::WaitOptions::empty()).map(Exit::Status),
         }
     }
 }
@@ -751,7 +751,7 @@ impl Vm {
         let exited: Vec<i32> = self.isolates.forked.iter().filter(|(_, fd)| ready.contains(&fd.as_raw_fd())).map(|(&pid, _)| pid).collect();
         let mut reaped = false;
         for pid in exited {
-            let Some(status) = crate::subprocess::wait_status(pid, 0) else { continue };
+            let Some(status) = crate::subprocess::wait_status(pid, rustix::process::WaitOptions::empty()) else { continue };
             self.isolates.forked.remove(&pid);
             reaped = true;
             if let Some(parent) = &self.isolates.parent {
@@ -932,6 +932,7 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     }
     crate::host::catch_isolate_signals().map_err(|e| e.to_string())?;
     crate::host::limit_termination(TERMINATION_SECONDS);
+    // UNSAFE(a descriptor inherited by number has no safe owner: from_raw_fd is unsafe)
     // SAFETY: the launcher put the socket at FD and nothing else owns it, so
     // this one owner closes it once.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
