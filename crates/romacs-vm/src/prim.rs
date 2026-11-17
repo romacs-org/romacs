@@ -2564,15 +2564,21 @@ impl Vm {
         let c = self.intern(name);
         (c, self.list_value(data))
     }
-    /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
-    /// loops written in Lisp over leaf cursors, so their state is registers.
+    /// Evaluate the VM's own Lisp (`prims::PRELUDES`) as the runtime tree
+    /// holds it: callback loops written in Lisp over leaf cursors, so their
+    /// state is registers, and the Lisp of the process, inotify, isolate and
+    /// window-change primitives. Its definitions stand in for GNU's C, so no
+    /// `load-history` entry names them. A world build records what it read;
+    /// a process with no runtime tree gets the reason as an error, and none
+    /// runs a copy compiled into the executable.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
-        self.eval_source_raw(prims::HOOKS_LISP)?;
-        self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
-        self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
-        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
+        let mut value = Value::NIL;
+        for path in prims::PRELUDES {
+            let file = crate::host::runtime_lisp(path)?;
+            let source = crate::host::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            value = self.eval_source_raw(&source)?;
+        }
+        Ok(value)
     }
 }
 
@@ -2871,14 +2877,13 @@ mod tests {
     }
 
     #[test]
-    fn installed_prelude_is_the_committed_file() {
+    fn installed_prelude_defines_mapcar() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude_raw().unwrap();
         let v = vm
             .eval_source_raw("(mapcar (lambda (x) (* x x)) '(1 2 3))")
             .unwrap();
         assert_eq!(vm.display(v).unwrap(), "(1 4 9)");
-        assert!(prims::PRELUDE.contains("(defun mapcar (function sequence)"));
     }
 
     #[test]

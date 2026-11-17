@@ -11,6 +11,10 @@
   lint        tools/romacs-lint on the runtime Lisp files the change touches:
               what it adds since the merge-base, as the queue's Lisp tier holds
               it. It runs a Romacs: --binary, else what tools/romacs-lint finds.
+  epoch       a change of lisp/vm/ beside romacs-vm's Rust may be one contract
+              between them: unless it raises etc/romacs-runtime-epoch, it is
+              named, to raise the epoch if the Lisp needs the Rust
+              (lisp/vm/AGENTS.md). It cannot tell, so it fails nothing.
   loaddefs    lisp/'s loaddefs files are what tools/lisp-loaddefs makes of the tree,
               when the change touches a .el under lisp/ or etc/themes. It runs the
               pinned GNU binary; without one the stage cannot run.
@@ -152,6 +156,24 @@ def generated(root):
     found = generated_files.tracked(root)
     findings = [f'{name} is tracked; {generated_files.OUTPUTS[name]} makes it; fix: git rm it' for name in found]
     return ('FAIL', f'{len(found)} generated file(s) tracked', findings) if found else ('ok', 'no generated file is tracked', [])
+
+
+# The runtime tree's generation.
+
+EPOCH = 'etc/romacs-runtime-epoch'
+
+
+def epoch(names):
+    """(STATUS, SUMMARY, FINDINGS): NAMES, the change's paths, changing lisp/vm/ and
+    romacs-vm's Rust together, which may be one contract, raise the epoch or are named."""
+    lisp = sorted(n for n in names if n.startswith('lisp/vm/') and n.endswith('.el'))
+    rust = [n for n in names if n.startswith('crates/romacs-vm/src/') and n.endswith('.rs')]
+    if not (lisp and rust):
+        return 'ok', "no lisp/vm/ change beside romacs-vm's Rust", []
+    if EPOCH in names:
+        return 'ok', f'lisp/vm/ and romacs-vm change together, and {EPOCH} is raised', []
+    return 'ok', f"lisp/vm/ and romacs-vm change together, {EPOCH} unchanged", [
+        f'{", ".join(lisp)}: if it needs the Rust beside it, raise {EPOCH} (lisp/vm/AGENTS.md)']
 
 
 # The AGENTS.md files.
@@ -386,7 +408,8 @@ def main():
     trunk = gate.trunk(ROOT, args.trunk)
     names = gate.changed_names(ROOT, trunk)
     stages = [('forecast', *forecast(ROOT, trunk)), ('generated', *generated(ROOT)), ('agents', *agents(ROOT)),
-              ('lint', *lint(ROOT, names, trunk, args.binary)), ('loaddefs', *loaddefs(ROOT, names))]
+              ('epoch', *epoch(names)), ('lint', *lint(ROOT, names, trunk, args.binary)),
+              ('loaddefs', *loaddefs(ROOT, names))]
     if not args.no_tests:
         stages.append(('tests', *tests(ROOT, names, args.threads)))
     lines, status = report(stages)
