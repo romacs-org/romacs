@@ -632,12 +632,20 @@ has it: in a transaction of its own, after the statement FIRST when given."
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (require 'romacs-agent-events)
   (let* ((home (make-temp-file "romacs-store-" t))
-         (fresh (expand-file-name "state/romacs/agents/" home))
+         (root nil)
+         (romacs-agent-writer-queued nil)
          (romacs-agent-store--db nil))
-    (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () fresh)))
+    (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root)))
       (unwind-protect
           (progn
-            (should-not (file-directory-p fresh))
+            ;; At its start.
+            (setq root (expand-file-name "start/romacs/agents/" home))
+            (should-not (file-directory-p root))
+            (should (romacs-agent-store--writer-start))
+            (should (file-exists-p (romacs-agent-store--file)))
+            ;; Asked to make the store, and its mark after.
+            (setq root (expand-file-name "asked/romacs/agents/" home))
+            (should-not (file-directory-p root))
             (should (romacs-agent-store--made))
             (should (file-exists-p (romacs-agent-store--file)))
             (should (romacs-agent-events--mark "aaaaaaaa-0000-4000-8000-000000000001"))

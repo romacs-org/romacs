@@ -316,11 +316,14 @@ comment and string syntax, its summaries made by one parse to the end."
     store))
 
 (defun scaling--store-read ()
-  "Wait, at most half a minute, until the agents' store reads here: in a
-fresh home the writer makes it first."
+  "The agents' store made and read here, as in a home that has one: made
+by this process where its writes are its own (a batch one), else by the
+writer, waited for; an error when it does not read within half a minute."
+  (unless (romacs-agent-writer-queued-p) (romacs-agent-store--made))
   (let ((deadline (+ (float-time) 30)))
     (while (and (not (romacs-agent-events--db)) (< (float-time) deadline))
-      (accept-process-output nil 0.05))))
+      (accept-process-output nil 0.05)))
+  (unless (romacs-agent-events--db) (error "The agents' store did not read within half a minute")))
 
 ;; A chat of N characters over a fixed 100 turns.
 (defun scaling--big-chat (n)
