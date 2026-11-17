@@ -73,7 +73,7 @@ runs: harnesses are never started."
                ((symbol-function 'romacs-agent--check-companions) #'ignore)
                ;; Children start at once here (romacs-agent-launch-tests
                ;; has one that never does).
-               ((symbol-function 'romacs-agent-tools--started) (lambda (_child then) (funcall then))))
+               ((symbol-function 'romacs-agent-tools--started) (lambda (_child then &rest _) (funcall then))))
        (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
 (defun romacs-agent-lead-tests--args (&rest pairs)

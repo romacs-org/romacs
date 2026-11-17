@@ -640,3 +640,59 @@ turns, and its journal's file; a state root of its own."
             (should launched)
             (should (romacs-agent-events-p session))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-events-a-long-journal-waits-for-the-store-to-be-made ()
+  ;; Early in a fresh start, the store not readable here yet: a session
+  ;; whose journal only a worker moves waits for the writer to make the
+  ;; store, then for the worker, never taken for unmovable meanwhile.  A
+  ;; store still unreadable once the writer answered lets it go.
+  ;; Every module whose tables the writer makes, as in the editor.
+  (require 'romacs-agent-turns)
+  (require 'romacs-agent-history)
+  (dolist (made '(t nil unasked))
+    (let* ((root (make-temp-file "romacs-long-" t))
+           (romacs-agent-store--making nil)
+           (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+           (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-events-store t)
+           (romacs-agent-events--imported (make-hash-table :test #'equal))
+           (romacs-agent-events--waiting (make-hash-table :test #'equal))
+           (romacs-agent-events--importing (make-hash-table :test #'equal))
+           (romacs-agent-events--migrating (make-hash-table :test #'equal))
+           (romacs-agent-events--migrate-queue nil) (romacs-agent-events--until-store nil)
+           (romacs-agent-writer-queued t) (romacs-agent-fold-bytes 10) (ran nil)
+           (session (romacs-agent--make :id "long" :dir (expand-file-name "romacs/agents/long" root)
+                                        :host-socket (expand-file-name "none.sock" root))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-write) #'ignore)
+                    ;; Unreadable with no asking to make it (an open that
+                    ;; failed otherwise): nothing would let it go.
+                    ((symbol-function 'romacs-agent-store--make-soon)
+                     (if (eq made 'unasked) #'ignore (symbol-function 'romacs-agent-store--make-soon)))
+                    ((symbol-function 'isolate-main-p) (lambda () t))
+                    ((symbol-function 'romacs-agent-events--migrate-next) #'ignore))
+            (make-directory (romacs-agent-dir session) t)
+            (with-temp-file (expand-file-name "journal.jsonl" (romacs-agent-dir session))
+              (insert "{\"seq\":1,\"t\":1.0,\"in\":{\"prompt\":\"a long journal\"}}\n"))
+            (romacs-agent-events-then session (lambda () (setq ran t)))
+            (when (eq made 'unasked)
+              (should ran)
+              (should-not (romacs-agent-events-waiting-p "long")))
+            (unless (eq made 'unasked)
+              (should-not ran)
+              (should (romacs-agent-events-waiting-p "long")))
+            ;; The writer made the store, as it does, or not.
+            (when (eq made t)
+              (let ((romacs-agent-writer-queued nil))
+                (romacs-agent-store--made)
+                (romacs-agent-events--db))
+              (setq romacs-agent-store--db nil))
+            (run-hooks 'romacs-agent-store-readable-hook)
+            (if (not (eq made t))
+                (should ran)
+              ;; A worker's now: queued for it, THEN once it is moved.
+              (should-not ran)
+              (should (member (romacs-agent-dir session) romacs-agent-events--migrate-queue))
+              (romacs-agent-events--waited "long")
+              (should ran)))
+        (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+        (delete-directory root t)))))
