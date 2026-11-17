@@ -2,13 +2,17 @@
 
 ;; Gnosis's collection-wide drift check over N reviewed themata, two
 ;; reviews and one voided review each: the whole history read in two
-;; queries and each review recomputed once.
+;; queries and each review recomputed once.  The setup's database keeps
+;; its journal in memory and never syncs: its thousands of commits, each
+;; a journal file and a sync on disk, took minutes on a loaded host.
 (scaling-probe gnosis-drift :n 100
   :setup (progn
            (require 'gnosis-scheduler)
            (setq gnosis-dir (file-name-as-directory (make-temp-file "scaling-gnosis-" t))
                  gnosis-db nil)
            (let ((db (gnosis--ensure-db)))
+             (sqlite-execute db "PRAGMA journal_mode = MEMORY")
+             (sqlite-execute db "PRAGMA synchronous = OFF")
              (dotimes (i n)
                (let ((id (1+ i)))
                  (gnosis-sqlite-execute
