@@ -19,6 +19,15 @@ fork's transcript with its first message, so until one was sent every
 run forks its source again."
   (and (plist-get (romacs-agent-options session) :fork) (not (romacs-agent-input-seq session))))
 
+(defun romacs-agent--claude-message (record)
+  "The uuid of RECORD when it is a message of Claude Code's own in its
+conversation (a subagent's is not), else nil."
+  (let ((out (gethash "out" record)))
+    (and (hash-table-p out) (equal (gethash "type" out) "assistant")
+         (not (romacs-agent--value (gethash "parent_tool_use_id" out)))
+         (stringp (gethash "uuid" out))
+         (gethash "uuid" out))))
+
 (defun romacs-agent--claude-cursor (records &optional request)
   "The uuid of the last message of Claude Code's own in RECORDS (a
 subagent's are not the conversation's), before prompt REQUEST's when given."
@@ -26,37 +35,45 @@ subagent's are not the conversation's), before prompt REQUEST's when given."
     (catch 'found
       (dolist (record records last)
         (when (and request (equal (romacs-agent--record-request record) request)) (throw 'found last))
-        (let ((out (gethash "out" record)))
-          (when (and (hash-table-p out) (equal (gethash "type" out) "assistant")
-                     (not (romacs-agent--value (gethash "parent_tool_use_id" out)))
-                     (stringp (gethash "uuid" out)))
-            (setq last (gethash "uuid" out))))))))
+        (setq last (or (romacs-agent--claude-message record) last))))))
 
 (defun romacs-agent--claude-head (session)
   "Where SESSION's conversation was rolled back to, while nothing was said
 since: the uuid its harness resumes at, `fresh' when it went back to its
 start or was renewed (a new conversation, under its new id); else nil.
-Its records are read only when it was rolled back or renewed since it was
-last spoken to, which its fold keeps (`:rolled-back'); a session
-whose kept state predates that is read once to know."
+Its fold keeps both (`:rolled-back', `:resume-at'), so its records are
+not read: only when its kept state, or a rollback's note, comes from an
+earlier build that kept neither (`romacs-agent--claude-head-read')."
   (let ((state (romacs-agent-driver-state session)))
-    (if (plist-member state :rolled-back)
-        (and (plist-get state :rolled-back) (romacs-agent--claude-head-read session))
-      (let ((head (romacs-agent--claude-head-read session)))
-        (setf (romacs-agent-driver-state session)
-              (plist-put (romacs-agent-driver-state session) :rolled-back (and head t)))
-        head))))
+    (cond ((not (plist-member state :rolled-back))
+           (let ((head (romacs-agent--claude-head-read session)))
+             (setf (romacs-agent-driver-state session)
+                   (plist-put (romacs-agent-driver-state session) :rolled-back (and head t)))
+             head))
+          ((not (plist-get state :rolled-back)) nil)
+          ((and (plist-member state :resume-at) (not (eq (plist-get state :resume-at) 'unknown)))
+           (or (plist-get state :resume-at) 'fresh))
+          (t (romacs-agent--claude-head-read session)))))
 
 (defun romacs-agent--claude-head-read (session)
   "`romacs-agent--claude-head', from SESSION's records: its journal's last
 prompt, rollback or renewal, read from its end (only as far back as that),
-and all of them only after a rollback or renewal."
+and all of them only after a rollback.  For what an earlier build kept:
+its fold keeps the answer now."
   (when-let* ((last (romacs-agent--journal-last
                      session '("romacsRequest" "\"rollback\"" "\"renew\"")
                      (lambda (record) (or (romacs-agent--record-request record) (romacs-agent--rollback-note-p record)
                                           (romacs-agent--note-p record "renew")))))
               ((or (romacs-agent--rollback-note-p last) (romacs-agent--note-p last "renew"))))
-    (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh)))
+    (if (romacs-agent--note-p last "renew")
+        ;; Its conversation begins at the note: its last message after it,
+        ;; read from the end only as far back as the note.
+        (or (romacs-agent--claude-message
+             (romacs-agent--journal-last session '("\"renew\"" "\"assistant\"")
+                                         (lambda (record) (or (romacs-agent--note-p record "renew")
+                                                              (romacs-agent--claude-message record)))))
+            'fresh)
+      (or (romacs-agent--claude-cursor (romacs-agent--live-records (romacs-agent--journal-records session))) 'fresh))))
 
 (cl-defun romacs-agent--claude-rollback (session records request)
   "SESSION goes back to before prompt REQUEST by its next run: resumed at
@@ -310,6 +327,11 @@ cache, it reports none) or does not say."
                 ("thinking_delta" (list (list :type 'thinking :text (gethash "thinking" delta) :parent parent))))))
            (_ nil))))
       ("assistant"
+       ;; The conversation's last message: where a resume after a rollback
+       ;; or renewal with nothing said since goes on (`romacs-agent--claude-head').
+       (when (and (not parent) (stringp (gethash "uuid" line)))
+         (setf (romacs-agent-driver-state session)
+               (plist-put (romacs-agent-driver-state session) :resume-at (gethash "uuid" line))))
        (let* ((message (gethash "message" line))
               (id (gethash "id" message))
               (streamed (gethash id (romacs-agent-streamed session)))
@@ -752,6 +774,7 @@ environment."
   :result-summary #'romacs-agent--claude-result-summary
   :conversation-files #'romacs-agent--claude-conversation-files
   :rollback #'romacs-agent--claude-rollback
+  :resume-at #'romacs-agent--claude-cursor
   ;; A renewed conversation is named by Romacs, as a first one is.
   :renew #'romacs-agent--claude-renew
   :next #'romacs-agent--claude-next

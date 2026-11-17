@@ -3988,6 +3988,7 @@ dependencies = [
  "romacs-vm-gui-test-build",
  "rustix",
  "serde_json",
+ "sha2",
  "tracing",
  "tracing-subscriber",
  "wgpu",

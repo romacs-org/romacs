@@ -58,6 +58,19 @@
     (goto-char (point-min))
     (should-error (romacs-agent-chat-edit-turn) :type 'user-error)))
 
+(ert-deftest romacs-agent-chat-an-editor-error-is-shown-as-it-comes ()
+  ;; A record whose handling failed is said in the chat at once, though
+  ;; it is no record (no seq) and the chat has shown records past 0.
+  (let ((session (romacs-agent--make :id "e" :harness 'claude)))
+    (romacs-agent-chat-tests--with "> asked\n" ""
+      (setq romacs-agent-ui--session session romacs-agent-ui--shown 5)
+      (setf (romacs-agent-buffer session) (current-buffer))
+      (romacs-agent--record-failed session '(error "Broken"))
+      (should (string-search "Handling a record failed: Broken"
+                             (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+      ;; Its replay's place is where it was.
+      (should (= romacs-agent-ui--shown 5)))))
+
 (ert-deftest romacs-agent-chat-a-window-start-stays-at-the-transcript ()
   ;; A window starting at the transcript's end stays where it is as text
   ;; comes in, while point at the composer follows.

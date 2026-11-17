@@ -184,6 +184,17 @@ rollback failed).  The waiter goes either way."
                             (funcall then event))))))
     (add-hook 'romacs-agent-event-functions waiter)))
 
+(defun romacs-agent-rollback--note (session records request turns prompt plan)
+  "The journal's note of SESSION's rollback to before REQUEST, of its live
+RECORDS, TURNS turns gone, PROMPT's text, PLAN's files restored when
+given; with where its conversation resumes (`at', its harness's
+:resume-at), so a resume finds it in its fold."
+  (let ((note (romacs-mcp--object "type" "rollback" "to" request "turns" turns
+                                  "prompt" (or prompt "") "files" (if plan t :false))))
+    (when-let* ((resume-at (romacs-agent--harness-get session :resume-at)))
+      (puthash "at" (or (funcall resume-at records request) :null) note))
+    note))
+
 (defun romacs-agent-rollback--commit (session token records request turns prompt plan then)
   "Roll SESSION back to before REQUEST, the first of TURNS, whose text is
 PROMPT, and PLAN's files when given, under the hold TOKEN; THEN as
@@ -210,8 +221,7 @@ before the note leaves the conversation as it was, to try again."
             (lambda (event) (and (eq (plist-get event :type) 'rolled-back) (equal (plist-get event :to) request)))
             #'noted)
            (condition-case err
-               (romacs-agent--note session (romacs-mcp--object "type" "rollback" "to" request "turns" (length turns)
-                                                               "prompt" (or prompt "") "files" (if plan t :false)))
+               (romacs-agent--note session (romacs-agent-rollback--note session records request (length turns) prompt plan))
              (error (funcall fail (error-message-string err))))))
       (condition-case err
           (progn

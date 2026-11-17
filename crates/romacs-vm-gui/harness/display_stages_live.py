@@ -45,7 +45,10 @@ usually run (their median), with a frame submitted in every step of a
 scenario that changes what the frame shows, and in none of one that does
 not.  The host redisplays for reasons of its
 own now and then, so the figures are taken over the steps that kept the
-rule, and the report names the odd ones.  A measurement is refused when
+rule, and the report names the odd ones; characters fontified, which the
+step's change alone decides and an extra redisplay adds nothing to, over
+every step: in a typing scenario they grow a character a step, so a
+median over the steps kept would move with which were left out.  A measurement is refused when
 the thread has no instruction counter, or when more than a tenth of the
 steps are odd.  Each step's counts, `collections' among them, are in the
 report.
@@ -114,11 +117,13 @@ def quantile(values, share):
     return sorted(values)[min(len(values) - 1, int(len(values) * share))]
 
 
-def figures(deltas):
+def figures(deltas, every=None):
     """A scenario's figures from its steps' counts, with the optional ones
-    its steps counted."""
-    counted = {**COUNTS, **{figure: count for figure, count in OPTIONAL.items() if all(count in d for d in deltas)}}
-    out = {figure: quantile([d[count] for d in deltas], .5) for figure, count in counted.items()}
+    its steps counted: those, which the step's change alone decides, over
+    EVERY step when given."""
+    every = every or deltas
+    counted = {**COUNTS, **{figure: count for figure, count in OPTIONAL.items() if all(count in d for d in every)}}
+    out = {figure: quantile([d[count] for d in (every if figure in OPTIONAL else deltas)], .5) for figure, count in counted.items()}
     out.update({f'{figure}_p90': quantile([d[COUNTS[figure]] for d in deltas], .9) for figure in PEAKS})
     return out
 
@@ -167,7 +172,7 @@ def verdict(scenario, result, wanted, bars):
     deltas = steps(result['readings'])
     odd = odd_steps(scenario, deltas)
     kept = [d for i, d in enumerate(deltas) if i not in odd]
-    row.update(chars=result.get('chars'), figures=figures(kept), odd=odd, steps=deltas)
+    row.update(chars=result.get('chars'), figures=figures(kept, deltas), odd=odd, steps=deltas)
     if scenario['name'] not in bars:
         return {**row, 'status': 'FAIL', 'reason': 'no bars for this scenario'}
     row['off'] = off(row['figures'], bars[scenario['name']])

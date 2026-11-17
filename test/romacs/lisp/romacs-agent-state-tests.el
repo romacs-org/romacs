@@ -61,6 +61,19 @@
                                      (apply #'romacs-agent-state-tests--session (car case))))
                    case))))
 
+(ert-deftest romacs-agent-state-marks-say-each-kind ()
+  ;; Every state key has a kind, and every kind its mark, what wants the
+  ;; user first.
+  (dolist (state romacs-agent-ui--states)
+    (should (assq (romacs-agent-ui--chip-kind (car state)) romacs-agent-ui--marks)))
+  (should (equal (mapcar (lambda (key) (romacs-agent-ui--chip-kind key))
+                         '(approval question plan failed unstarted working waiting completed idle ended settled))
+                 '(you you you failed failed working working done idle idle idle)))
+  (should (equal (substring-no-properties (romacs-agent-ui--kind-counts '(completed working approval idle working failed)))
+                 "◆1 ✗1 ●2 ✓1"))
+  (should (eq (get-text-property 0 'face (romacs-agent-ui--mark 'you)) 'romacs-agent-approval))
+  (should-not (romacs-agent-ui--kind-counts '(idle ended))))
+
 (ert-deftest romacs-agent-state-tuples-rank-in-order ()
   (let ((rank -1))
     (dolist (state romacs-agent-ui--states)
