@@ -3357,11 +3357,13 @@ and its deadline has not ended it."
 (add-hook 'romacs-agent-event-functions #'romacs-agent--attempt-ended)
 
 (defun romacs-agent--attempt-due (session token)
-  "The deadline of SESSION's launch attempt TOKEN: one still `starting',
-with no run begun, ends failed, and its launch, should it come later, is
-not made.  One whose records a worker still moves waits on for it."
+  "The deadline of SESSION's launch attempt TOKEN: one with no run begun,
+still `starting' or `detached' (its new supervisor never attached: a
+session with records of an earlier run is taken for detached), ends
+failed, and its launch, should it come later, is not made.  One whose
+records a worker still moves waits on for it."
   (when (romacs-agent--attempt-current-p session token)
-    (cond ((not (eq (romacs-agent-state session) 'starting)) (romacs-agent--attempt-over session))
+    (cond ((not (memq (romacs-agent-state session) '(starting detached))) (romacs-agent--attempt-over session))
           ((romacs-agent-events-waiting-p (romacs-agent-id session))
            (setcdr (gethash session romacs-agent--attempts)
                    (run-at-time romacs-agent-start-deadline nil #'romacs-agent--attempt-due session token)))

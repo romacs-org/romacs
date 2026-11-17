@@ -296,6 +296,13 @@ made."
          (funcall fire)
          (should (eq (romacs-agent-state session) 'unstarted))
          (should (string-match-p "no run of its harness began" (romacs-agent-reply session)))
+         ;; Its new supervisor never attached, the session taken for
+         ;; detached by its earlier run's records: failed all the same.
+         (romacs-agent-resume session)
+         (funcall placed)
+         (setf (romacs-agent-state session) 'detached)
+         (funcall fire)
+         (should (eq (romacs-agent-state session) 'unstarted))
          ;; A run began: the deadline does nothing.
          (romacs-agent-resume session)
          (funcall placed)
@@ -315,7 +322,7 @@ made."
          (funcall fire)
          (should (eq (romacs-agent-state session) 'unstarted))
          (funcall placed)
-         (should (= launched 2)))))))
+         (should (= launched 3)))))))
 
 (ert-deftest romacs-agent-launch-a-renewal-whose-resume-failed-waits-for-the-next ()
   "romacs#271: a renewal whose new run failed to launch is finished by the
