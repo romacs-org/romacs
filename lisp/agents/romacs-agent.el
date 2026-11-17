@@ -627,6 +627,20 @@ editor a write and a rename, which a loaded disk makes long."
   "This editor's own endpoint, when it is no named server."
   (expand-file-name (format "editor/%d.sock" (emacs-pid)) (romacs-agent--runtime-root)))
 
+(declare-function warm-restart-pending-file "warm-restart" (server))
+
+(defun romacs-agent--relay-args (session)
+  "The arguments of SESSION's relay (romacs-mcp, its harness's Romacs MCP
+server): its route, its session, how long a call may take, and, for a
+named server, where a restart of it says it is under way, so a call made
+meanwhile waits for the successor rather than be refused."
+  (append (list "--socket" (romacs-agent--route session) "--reconnect"
+                "--session" (romacs-agent-id session)
+                "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
+          (when-let* ((server (bound-and-true-p romacs-server-name))
+                      ((require 'warm-restart nil t)))
+            (list "--restart-pending" (warm-restart-pending-file server)))))
+
 (defun romacs-agent--route (session)
   "The path SESSION's relays name: a link to its attached process's endpoint,
 named by the session's id (its record's directory name)."
