@@ -436,6 +436,11 @@ not have loaded: no reader here switches from journal to SQLite midway.
 DIR, where the session is recorded, when not under the state root.
 Non-nil when made its own; else the records written, and their `staged'
 row, are removed."
+  ;; Two holds, the stage's and this one, not one across both: the flip
+  ;; waits while the session is loaded here (`romacs-agent-events--flip-step'),
+  ;; and a lock held that long would refuse its every launch meanwhile.  A
+  ;; host started between them writes its journal on, which the size check
+  ;; below sees: the stage is dropped, and moved again later.
   (let ((held nil) (ok nil))
     (romacs-agent-events--holding (or dir (expand-file-name id (romacs-agent--state-root)))
                                   (lambda () (setq held t ok (romacs-agent-events--flip-held id size count t))))
