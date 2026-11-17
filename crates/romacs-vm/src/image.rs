@@ -103,7 +103,7 @@ impl ImageRegion {
                 image.len = conses;
                 image.strings = strings;
                 image.blob = blob;
-            } else if bytes % 16 != 0 {
+            } else if !bytes.is_multiple_of(16) {
                 return Err("image must contain complete cons records".into());
             }
             if image.integrity.is_some() {
@@ -494,7 +494,6 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     /// Run F with IMAGE's pages unreadable, so any read of them faults.
     fn unreadable<T>(image: &ImageRegion, f: impl FnOnce() -> T) -> T {
         let protect = |prot| {
