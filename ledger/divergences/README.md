@@ -67,139 +67,25 @@ observable difference must be recorded here, whether or not it fails loudly.
 
 ## VM2 buffer-local substrate subset
 
-- **VM2-BUFLOCAL1 — native local-variable inventories are incomplete.** GNU
-  `src/buffer.c:1485` enumerates ordinary locals plus every native buffer slot,
-  in buffer-alist/native-slot order. VM2 enumerates ordinary locals and every
-  `DEFVAR_PER_BUFFER` slot local in the buffer, in symbol-slot order; a
-  package can observe the ordering. `buffer-local-value`/`local-variable-p` for unrepresented native
-  buffer fields retain their existing ordinary-variable behavior. Why: this
-  lane adds clear-one storage and modeled slots, not the entire GNU buffer
-  structure. The live-GNU corpus compares explicit supported projections,
-  never equates that corpus with complete inventory parity.
-  <!-- symbols: buffer-local-variables, buffer-local-value, local-variable-p -->
 
-- **VM2-BUFLOCAL2 — major-mode reset covers represented state only.** GNU
-  `src/buffer.c:1137,3031` resets case tables, abbrev tables, invisibility state,
-  redisplay flags and (for `reset`) the entire native buffer state; it also
-  notifies variable watchers except for the documented suppressing arguments.
-  VM2 runs `change-major-mode-hook`, removes eligible ordinary/forwarded
-  locals, preserves permanent hooks and modeled visit metadata, and resets
-  major-mode/mode-name, local keymap and syntax table. `reset` additionally
-  clears modeled file name/read-only/format and visit timestamp/identity/
-  truename metadata. Missing case/abbrev/redisplay state and variable watchers
-  are not reset/notified. Packages can observe this. Why: the missing native subsystems are outside
-  the buffer-local storage slice, rather than silently claimed as implemented.
-  <!-- symbols: kill-all-local-variables, kill-local-variable -->
 
 ## VM2 source-position and alias diagnostics
 
-- **VM2-SYMPOS1 — positioned symbols are not represented.** GNU
-  `src/data.c:362,840,854,876` provides `symbol-with-pos-p`, `bare-symbol`,
-  `symbol-with-pos-pos` and `position-symbol` over `PVEC_SYMBOL_WITH_POS`.
-  VM2 lacks that object type and these callable primitives. Packages observe
-  `(void-function symbol-with-pos-p)` while expanding GNU `define-inline`
-  through macroexp.el. A predicate returning nil unconditionally would conceal
-  this missing substrate. Why: full positioned-symbol identity, reader,
-  evaluator and GC integration is deferred rather than supplied as a stub.
-  <!-- symbols: symbol-with-pos-p, bare-symbol, symbol-with-pos-pos, position-symbol -->
 
-- **VM2-ALIAS-DIAG1 — investigated, no GNU divergence.** A two-hop alias whose
-  terminal target is void reports the ORIGINAL alias in GNU and VM2, not the
-  missing terminal. Pinned GNU 45b0f7699df returns `(void-function alias-a)`
-  for direct, funcall and apply calls through `alias-a -> alias-b ->
-  alias-missing`. This can obscure the dependency in diagnostics, but changing
-  the Lisp condition would introduce a divergence. Evidence and mutation-tested
-  regression: `INLINE-CHAIN.md`, `tests/alias_void_chain.rs` in romacs-vm.
-  <!-- symbols: funcall, apply -->
 ## VM2 replace-match
 
 GNU pin: `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea`, `src/search.c:2344`.
 
 ## VM2 host-name bootstrap subset
 
-- **VM2-SYSNAME1 — `system-name` does not refresh GNU's identity cache.** GNU
-  `src/editfns.c:1283` refreshes the kernel host name when `Vsystem_name` is EQ
-  to its cached object (`src/sysdep.c:1608`), repairing in-place string edits
-  and noticing kernel host-name changes. VM2 materialises its forwarded initial
-  value on first access and returns its current binding verbatim, without refresh.
-  Packages can observe this with `(let ((before (copy-sequence system-name)))
-  (aset system-name 0 88) (equal (system-name) before))`: the pinned live GNU
-  returns `t`, this implementation returns `nil` on the measured host.
-  Evidence: `crates/romacs-vm/tools/primh/evidence/system-name.json`, case
-  `system-name/0010` (VALUE). Why: this lane unblocks the startup call and
-  preserves explicit string/non-string/nil overrides; cache state is deferred.
 
-- **VM2-SYSNAME2 — startup host acquisition is Linux/UTF-8-only.** GNU
-  `src/sysdep.c:1608` obtains raw kernel bytes via `gethostname` (or `uname`),
-  normalizes spaces/tabs, and uses `build_string`'s multibyte detection. VM2
-  reads `/proc/sys/kernel/hostname` as UTF-8, normalizes spaces/tabs and exposes
-  a unibyte string; absent procfs, read errors or invalid UTF-8 yield the
-  explicitly non-signalling fallback `"unknown"`. Non-ASCII hosts can differ
-  in string multibyteness; non-Linux or restricted-procfs packages can see the
-  fallback rather than their host name. Why: the proven target is the measured
-  Linux ASCII host; no new unsafe syscall boundary or platform dependency is
-  introduced. Those other host configurations have not been live-oracle tested.
 
-- **VM2-SYSNAME3 — host acquisition is deferred; build-details policy is absent.**
-  GNU `init_editfns` initializes host state at startup, including after dump
-  reload, and `init_system_name` returns nil when build details are disabled.
-  VM2 acquires the host name on first access, not at `Vm::new`; a host-name
-  change before that access can therefore affect the initial value. Code images
-  do not save forwarded storage, so their fresh VM also acquires the current
-  host on first access. No `--no-build-details` host-name policy is implemented;
-  packages can see a non-nil name in a reproducible-build regime. Why: preserve
-  VM2's allocation-free constructor; build-details CLI policy remains deferred.
 
-- **VM2-SYSNAME4 — buffer-local host-name bindings are unsupported.** GNU permits
-  `make-local-variable` / `make-variable-buffer-local` on `system-name`. As a
-  forwarded built-in, VM2 instead signals `VM2 cannot make built-in variable
-  buffer-local: system-name` (VM2-CVAR2). Global assignment and dynamic
-  nil/string/non-string overrides remain supported. Why: localized forwarding
-  is not yet implemented; the host-name variable uses the same storage contract
-  as its peer built-ins.
 
 ## Buffer lifecycle remaining boundaries
 
-- **VM2-BUFLIFE3 — RESOLVED, superseded by VM2-EXCUR1.** `save-excursion` is
-  implemented natively (`src/save_excursion.rs`, GNU `src/editfns.c:818`) and
-  `src/buffer-tests.el::test-remove-overlays` passes again; the file's floor
-  rose 108 to 113 in the same recording. Its unibyte boundary, VM2-EXCUR1,
-  is withdrawn.
 
-- **VM2-IFC-HELD1 — the overlays of a buffer `insert-file-contents` is
-  deciding are held aside.** GNU makes the empty buffer unibyte while
-  `set-auto-coding-function` reads the file's bytes, and its markers stay at
-  BEG. VM2's unibyte buffer takes the markers, at BEG (`insert_from_gap_1`
-  moves none), and holds the empty multibyte buffer's overlays aside until
-  the unwind restores it (`fileio_set_multibyte_flag`). While it is held,
-  overlay queries on that buffer signal, and `set-buffer-multibyte t`
-  signals `cannot decode buffer while insert-file-contents decides its
-  coding`, where GNU succeeds. GNU's
-  `set-auto-coding` only reads the buffer, so only a custom
-  `set-auto-coding-function` can observe this; the buffer and its markers
-  are intact afterwards (`insert_file_contents_refuses_unsupported_decoding_intact`).
-  <!-- symbols: insert-file-contents, set-auto-coding-function -->
 
-- **VM2-BUFLIFE1 — missing process subsystem.** Pinned GNU
-  `45b0f7699df36b3849edc3bdef37d4cb9e75b9ea` runs the default
-  `process-kill-buffer-query-function` and returns t when killing a normal
-  process-free buffer. VM2 runs that function too, but it signals
-  `(void-function get-buffer-process)` after completed `subr.el` loads: VM2 has
-  no process object or buffer-process association. Custom query functions and
-  kill hooks genuinely run; nil queries veto. Inhibited buffers skip all three
-  lifecycle hooks for their lifetime. **Package-observable unresolved
-  subsystem**, not an ignored optional argument or a disabled GNU query hook.
-- **VM2-BUFLIFE2 — replacement selection.** As GNU's Fkill_buffer, the
-  Lisp half (`lisp/vm/buffer_lifecycle.el`) calls `replace-buffer-in-windows`
-  once window.el defines it, then makes `other-buffer`'s choice current in
-  place of a killed current buffer, and keeps the buffer when it is its own
-  choice (a sole `*scratch*`) or the minibuffer's only fallback. Where those leave the buffer shown or current
-  (the bare VM, or `other-buffer` finding none), the native kill takes
-  other_buffer_safely's: the first live Unicode buffer not beginning with a
-  space and not the minibuffer's, otherwise a new `*scratch*`. VM2 keeps no
-  frame buffer list (VM2-FRAME1), so `other-buffer` scans the buffer list
-  alone and `buffer-list` of a live frame is the buffer list. **Package-observable** only where GNU's frame buffer list would order
-  candidates differently.
 
 ## Observable by a package
 
@@ -242,6 +128,25 @@ nobody re-litigates them.
 Kept visible on purpose: a corrected claim is worth more than a quietly
 deleted one.
 
+- **VM2-ALIAS-DIAG1 — investigated, no GNU divergence.** A two-hop alias whose
+  terminal target is void reports the ORIGINAL alias in GNU and VM2, not the
+  missing terminal. Pinned GNU 45b0f7699df returns `(void-function alias-a)`
+  for direct, funcall and apply calls through `alias-a -> alias-b ->
+  alias-missing`. This can obscure the dependency in diagnostics, but changing
+  the Lisp condition would introduce a divergence. Evidence and mutation-tested
+  regression: `INLINE-CHAIN.md`, `tests/alias_void_chain.rs` in romacs-vm.
+- **VM2-BUFLIFE3 — RESOLVED, superseded by VM2-EXCUR1.** `save-excursion` is
+  implemented natively (`src/save_excursion.rs`, GNU `src/editfns.c:818`) and
+  `src/buffer-tests.el::test-remove-overlays` passes again; the file's floor
+  rose 108 to 113 in the same recording. Its unibyte boundary, VM2-EXCUR1,
+  is withdrawn.
+- **VM2-BUFLIFE1 — missing process subsystem.** Withdrawn 2026-11-17.
+  `get-buffer-process` is defined, and killing a process-free buffer runs
+  the default `process-kill-buffer-query-function` and returns t, as pinned
+  GNU does (both asked on a beta build).
+- **VM2-SYSNAME4 — buffer-local host-name bindings were unsupported.**
+  Withdrawn 2026-11-17. `make-local-variable` of `system-name` returns the
+  symbol in Romacs as in pinned GNU (both asked on a beta build).
 - **VM2-CVAR-PRED1 — `scroll-up-aggressively` and
   `scroll-down-aggressively` accepted any value.** Withdrawn 2026-10-30.
   Every `DEFVAR_PER_BUFFER` now checks GNU's predicate on a set: `fraction`'s
