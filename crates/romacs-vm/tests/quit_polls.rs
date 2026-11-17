@@ -35,6 +35,7 @@ const LONG: &[(&str, &str)] = &[
     ("digest.rs", "pub(crate) fn digest_until("),
     ("digest.rs", "fn sha3("),
     ("prims/leaf_sequences.rs", "fn sort_native("),
+    ("prims/leaf_sequences.rs", "fn sort_polled<T: Copy>("),
     ("sqlite.rs", "pub(crate) fn stoppable<T>("),
     ("prim/leaf/sqlite.rs", "pub(crate) fn sqlite_execute("),
     ("prim/leaf/sqlite.rs", "pub(crate) fn sqlite_select("),

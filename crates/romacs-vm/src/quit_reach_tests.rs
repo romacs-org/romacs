@@ -202,3 +202,23 @@ fn a_native_sort_in_runs_is_stable_and_ordered() {
                          (sort (copy-sequence l) :key #'car :lessp (lambda (a b) (< a b)))))";
     assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "t");
 }
+
+/// Coding conversion stops between the chunks of its passes, before the
+/// new string is made: a long non-ASCII encode, and a decode that carriage
+/// returns keep off its fast path.
+#[test]
+fn coding_conversion_quits_between_chunks() {
+    // `undecided', which the runtime defines itself: the bare VM loads no
+    // coding systems of GNU's Lisp.
+    let setup = "(progn (encode-coding-string \"é\" 'undecided) (decode-coding-string \"a\" 'undecided) \
+                 (setq s (make-string 50000 ?é)) (setq crlf (string-to-unibyte (make-string 50000 ?\\r))))";
+    reaches("encode-coding-string", setup, "(list s 'undecided)", "t");
+    reaches("decode-coding-string", setup, "(list crlf 'undecided)", "t");
+}
+
+#[test]
+fn compare_buffer_substrings_quits_between_chunks() {
+    let setup = "(progn (setq b1 (get-buffer-create \"cmp-1\") b2 (get-buffer-create \"cmp-2\")) \
+                 (set-buffer b1) (insert (make-string 50000 ?a)) (set-buffer b2) (insert (make-string 50000 ?a)))";
+    reaches("compare-buffer-substrings", setup, "(list b1 nil nil b2 nil nil)", "t");
+}
