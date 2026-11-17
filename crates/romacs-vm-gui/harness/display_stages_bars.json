@@ -91,7 +91,9 @@
   "lines_laid": 0,
   "rows_wrapped": 0,
   "display_instructions_p90": 24300000,
-  "layouts_note": "a live writer worker (the chat's session in the store) costs one more window rebuild and layout after a collection: measured 3 and 3, the same on a beta build after one unrelated writer write"
+  "windows_rebuilt_ceiling": true,
+  "layouts_ceiling": true,
+  "layouts_note": "a live writer worker (the chat's session in the store) costs a window rebuild and layout after a collection in some runs and not others: measured 2 or 3 of each from run to run, the same on a beta build after one unrelated writer write; both held to a ceiling of 3, not exactly. TODO(#269): back to exactly 2 once a live writer costs nothing idle"
  },
  "cursor-move": {
   "step_instructions": 1860000,
