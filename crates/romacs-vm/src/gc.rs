@@ -1805,7 +1805,7 @@ impl Vm {
         // Setup is the old marked and what is read again gathered; Roots and
         // Mark as a full's; Weak, all that is dropped; then the sweep.
         lap.lap(&mut self.gc_times, Phase::Setup);
-        let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, clean.into_iter().map(|i| i as u32).collect(), 1, &mut lap) else { unreachable!("no key ends a minor") };
+        let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, clean.into_iter().map(|i| u32::try_from(i).expect("an object index")).collect(), 1, &mut lap) else { unreachable!("no key ends a minor") };
         lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
             self.check_minor(roots);
@@ -2149,13 +2149,13 @@ impl Vm {
             data::Object::Buffer(t) => {
                 let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
-                let locals = state.clean_holders.binary_search(&(i as u32)).is_err();
+                let locals = u32::try_from(i).map_or(true, |i| state.clean_holders.binary_search(&i).is_err());
                 t.visit_values_but(state.reading, weak, locals, &mut |v| if keep(v) { pending.push(*v) });
             }
             data::Object::ByteBuffer(t) => {
                 let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
-                let locals = state.clean_holders.binary_search(&(i as u32)).is_err();
+                let locals = u32::try_from(i).map_or(true, |i| state.clean_holders.binary_search(&i).is_err());
                 t.visit_values_but(state.reading, weak, locals, &mut |v| if keep(v) { pending.push(*v) });
             }
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),

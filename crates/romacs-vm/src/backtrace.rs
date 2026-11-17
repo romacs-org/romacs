@@ -308,24 +308,26 @@ impl Vm {
         Ok(index.and_then(|i| i.checked_sub(offset)))
     }
     /// Whether the binding at AT is of a buffer's Lisp local (GNU
-    /// SPECPDL_LET_LOCAL of a variable without per-buffer native storage).
+    /// `SPECPDL_LET_LOCAL` of a variable without per-buffer native storage).
     fn backtrace_lisp_local(&self, at: usize) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, _, kind) = self.dynamic[at];
         kind == Let::Local && !matches!(self.forwarding_ref(slot), Some(forwarded::Fwd::Buffer(_)))
     }
-    fn backtrace_binding_live(&mut self, at: usize) -> Result<bool> {
+    /// Whether the binding at AT still binds something: a buffer's local
+    /// one, while its buffer lives and has the local.
+    fn backtrace_binding_live(&self, at: usize) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let (slot, _, owner, kind) = self.dynamic[at];
         if self.backtrace_lisp_local(at) {
-            return Ok(self.owner_local(slot, owner).is_some());
+            return self.owner_local(slot, owner).is_some();
         }
         match self.forwarding_ref(slot) {
-            Some(forwarded::Fwd::Buffer(i)) if kind != Let::Default => Ok(self.live_buffer_value(owner)
+            Some(forwarded::Fwd::Buffer(i)) if kind != Let::Default => self.live_buffer_value(owner)
                 && owner
                     .index_if(0)
-                    .is_some_and(|index| self.per_buffer_local_p(index - 1, i))),
-            _ => Ok(true),
+                    .is_some_and(|index| self.per_buffer_local_p(index - 1, i)),
+            _ => true,
         }
     }
     /// What makes the binding at AT and a newer one bindings of the same
@@ -382,7 +384,7 @@ impl Vm {
         let mut values = Vec::with_capacity(bindings.len());
         let inert = self.intern(INERT_BINDING);
         for (at, symbol) in bindings {
-            if symbol == inert || !self.backtrace_binding_live(at)? {
+            if symbol == inert || !self.backtrace_binding_live(at) {
                 continue;
             }
             let successor = match successors {

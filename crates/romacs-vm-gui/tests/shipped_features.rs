@@ -1,6 +1,6 @@
 //! What a shipped romacs-vm-gui is built with: its normal dependency graph
 //! (`cargo build`), not the test graph. romacs-vm's test hooks
-//! (`test-hooks`: ROMACS_WORLD_TEST_PAUSE_LOCK, the store counters) are only
+//! (`test-hooks`: `ROMACS_WORLD_TEST_PAUSE_LOCK`, the store counters) are only
 //! compiled under that feature, and only romacs-vm's own tests enable it.
 //! A test build that also builds those tests may unify the feature into
 //! this crate's test binaries, so the graph is what is checked, not a

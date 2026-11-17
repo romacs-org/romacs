@@ -1,10 +1,11 @@
 //! A buffer's locals through a world image: a world captured with buffers
 //! that hold an automatic local, an explicit one, a permanent one and a
 //! localized built-in Boolean and integer restores each with its value,
-//! and the restored buffers keep, set, bind and kill them as before.
+//! and the restored buffers keep, set, bind and kill them as a session
+//! that made them after its own restore does.
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;
-use gnu_lisp::gnu_lisp_with;
+use gnu_lisp::{gnu_lisp, gnu_lisp_with};
 
 const MADE: &str = "(progn
   (defvar-local bw-auto 'default)
@@ -34,9 +35,14 @@ const READ: &str = "(let ((a (get-buffer \"bw-a\")) (b (get-buffer \"bw-b\")))
 
 #[test]
 fn buffer_locals_survive_a_world_image() {
-    let printed = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
-        let mut vm = gnu_lisp_with(MADE);
-        vm.eval_source(READ).and_then(|v| v.display()).unwrap()
-    }).unwrap().join().unwrap();
-    assert_eq!(printed, "(auto-a auto-b default explicit-a default (perm-a t 1234 t t) nil (let-a auto-b) (default default perm-a t) auto-b)");
+    let [restored, live] = [true, false].map(|in_world| std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
+        let mut vm = if in_world { gnu_lisp_with(MADE) } else {
+            let mut vm = gnu_lisp(&[]);
+            vm.eval_source(MADE).unwrap();
+            vm
+        };
+        vm.eval_source(READ).and_then(romacs_vm::Local::display).unwrap()
+    }).unwrap().join().unwrap());
+    assert_eq!(restored, "(auto-a auto-b default explicit-a default (perm-a t 1234 t t) nil (let-a auto-b) (default default perm-a t) auto-b)");
+    assert_eq!(restored, live);
 }

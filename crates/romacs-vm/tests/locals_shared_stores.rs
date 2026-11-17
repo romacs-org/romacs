@@ -13,7 +13,7 @@ const TEXT: &str = r##""#include <stdio.h>\nint main (void) { return 0; }\n""##;
 /// The declaration-table stores SOURCE makes in VM, and its value printed.
 fn stores(vm: &mut Vm, source: &str) -> (u64, String) {
     let before = declaration_stores();
-    let value = vm.eval_source(source).and_then(|v| v.display()).unwrap();
+    let value = vm.eval_source(source).and_then(romacs_vm::Local::display).unwrap();
     (declaration_stores() - before, value)
 }
 

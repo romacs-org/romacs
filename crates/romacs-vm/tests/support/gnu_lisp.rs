@@ -29,36 +29,31 @@ pub fn gnu_lisp(then: &[&str]) -> Vm {
 }
 
 /// GNU batch's VM as `gnu_lisp` gives it, with SOURCE evaluated after the
-/// boot and before its world is captured: in the `gnu` target, a world of
-/// its own that holds what SOURCE made, restored in this process.
+/// boot and before its world is captured: in the `gnu` target, where this
+/// process can map one (`World::for_test`, one test a process), a world of
+/// its own that holds what SOURCE made, restored; elsewhere the boot from
+/// source, SOURCE then evaluated.
 pub fn gnu_lisp_with(source: &str) -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    restored_with(&root, source).unwrap_or_else(|| {
-        let mut vm = booted(&root, false);
-        if !source.is_empty() {
-            vm.eval_source(source).unwrap();
-        }
-        vm
-    })
-}
-
-/// The boot from its world, with SOURCE evaluated after it in the world's
-/// build, when this process can map one (`World::for_test`): in the `gnu`
-/// target, one test a process.
-fn restored_with(root: &Path, source: &str) -> Option<Vm> {
     let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
     let mut recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
     if !source.is_empty() {
         recipe.push(format!("then {source}"));
     }
-    World::for_test(store, &recipe, || {
-        romacs_vm::host::end_at_dump_point();
-        let mut vm = booted(root, true);
+    let evaluated = |mut vm: Vm| {
         if !source.is_empty() {
             vm.eval_source(source).map_err(|error| format!("{source}: {error}"))?;
         }
-        Ok((vm, ()))
-    }).map(|(vm, ())| vm)
+        Ok::<_, String>(vm)
+    };
+    let restored = World::for_test(store, &recipe, || {
+        romacs_vm::host::end_at_dump_point();
+        Ok((evaluated(booted(&root, true))?, ()))
+    });
+    match restored {
+        Some((vm, ())) => vm,
+        None => evaluated(booted(&root, false)).unwrap(),
+    }
 }
 
 /// The boot from source, recording for a world when WORLD.

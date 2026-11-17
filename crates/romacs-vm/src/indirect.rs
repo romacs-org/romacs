@@ -177,7 +177,7 @@ impl Vm {
     /// clone_per_buffer_values (buffer.c:727) from BASE to its new indirect
     /// buffer BUFFER: the per-buffer variables, with a positioned mark
     /// remade in BUFFER and the visited file forgotten, the Lisp locals
-    /// (buffer_lisp_local_variables, which the per-buffer store carries),
+    /// (`buffer_lisp_local_variables`, which the per-buffer store carries),
     /// the keymap and tables, and copies of the overlays.
     pub(crate) fn clone_indirect_state(&mut self, buffer: Value, base: Value) -> Result<()> {
         let Object::Buffer(from) = &self.objects[arena(base)?] else { return Err("buffer required".into()) };

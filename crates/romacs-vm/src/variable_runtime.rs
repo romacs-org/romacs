@@ -233,7 +233,7 @@ impl<const N: usize> Places<N> {
 
 impl Vm {
     /// GNU eval.c:747: search oldest-first for this exact symbol, without
-    /// following aliases. A buffer's local's lets (SPECPDL_LET_LOCAL) are
+    /// following aliases. A buffer's local's lets (`SPECPDL_LET_LOCAL`) are
     /// excluded. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
@@ -330,7 +330,7 @@ impl Vm {
         }
     }
     /// Whether the variable at SLOT (the end of its alias chain) may have
-    /// buffer-local values: GNU's SYMBOL_LOCALIZED, as a tracking keeps it.
+    /// buffer-local values: GNU's `SYMBOL_LOCALIZED`, as a tracking keeps it.
     #[inline]
     pub(super) fn localized(&mut self, slot: usize) -> bool {
         match self.variable_redirects.get(slot).copied().flatten() {

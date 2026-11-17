@@ -33,7 +33,7 @@ thread_local! {
 pub fn declaration_stores() -> u64 {
     DECLARATION_STORES.with(std::cell::Cell::get)
 }
-#[inline(always)]
+#[inline]
 fn count_declaration_store() {
     #[cfg(feature = "test-hooks")]
     DECLARATION_STORES.with(|stores| stores.set(stores.get() + 1));

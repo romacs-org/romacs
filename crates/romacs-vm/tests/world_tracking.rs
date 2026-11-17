@@ -561,8 +561,8 @@ fn a_tracked_buffer_local_reads_alike_in_two_buffers() {
     let (mut off, none) = run_with("local-off", bootstrap, probes, false);
     assert!(none.is_none());
     let (mut on, _) = run_with("local-on", bootstrap, probes, true);
-    let off = off.eval_source(show).and_then(|v| v.display()).unwrap();
-    let on = on.eval_source(show).and_then(|v| v.display()).unwrap();
+    let off = off.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    let on = on.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
     assert_eq!(off, "((in-a t) (\"std\" nil in-a) ((let-a \"std\") in-a) ((let-b let-b in-a) \"std\") \"std\")");
     assert_eq!(on, off);
 }

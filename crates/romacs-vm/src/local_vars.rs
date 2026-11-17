@@ -104,7 +104,7 @@ mod tests {
     fn entries_stay_sorted_by_slot_and_unique() {
         let mut locals = LocalVars::default();
         for slot in [9, 3, 7, 1, 5] {
-            insert(&mut locals, slot, Value::integer(slot as i64).unwrap());
+            insert(&mut locals, slot, Value::integer(i64::try_from(slot).unwrap()).unwrap());
         }
         assert!(locals.find(symbol(7)).is_ok(), "an existing local has a position");
         let slots: Vec<usize> = locals.iter().map(|(s, _)| s.index(7).unwrap() - 1).collect();

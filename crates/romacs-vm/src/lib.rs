@@ -1197,7 +1197,7 @@ impl Slot {
     }
 }
 /// A variable's declaration as one with buffer-local values: written at
-/// its first localization (GNU's SYMBOL_LOCALIZED and `local_if_set`).
+/// its first localization (GNU's `SYMBOL_LOCALIZED` and `local_if_set`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 enum Localness {
     /// Never localized: no buffer has a local value of it.
@@ -1223,16 +1223,16 @@ enum VariableRedirect {
     /// in runtime storage (`forwarded.rs`), never in the symbol's value cell.
     Forwarded(forwarded::Fwd),
 }
-/// What a `let` of a variable bound, GNU's SPECPDL_LET kinds (eval.c
+/// What a `let` of a variable bound, GNU's `SPECPDL_LET` kinds (eval.c
 /// `specbind`): its one value, the default of a variable that has no
 /// local in the buffer where the `let` ran, or that buffer's local.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum Let {
-    /// SPECPDL_LET: a variable with no per-buffer values.
+    /// `SPECPDL_LET`: a variable with no per-buffer values.
     Plain,
-    /// SPECPDL_LET_DEFAULT: the default of a localized variable.
+    /// `SPECPDL_LET_DEFAULT`: the default of a localized variable.
     Default,
-    /// SPECPDL_LET_LOCAL: the owner buffer's local.
+    /// `SPECPDL_LET_LOCAL`: the owner buffer's local.
     Local,
 }
 #[derive(romacs_snapshot::Snapshot)]

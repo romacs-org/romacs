@@ -892,7 +892,7 @@ pub(crate) struct Forwarded {
     object_vars: Vec<usize>,
     buffer_vars: Vec<usize>,
     /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
-    /// locally, else usize::MAX (`Vm::eval_limit_local').
+    /// locally, else `usize::MAX` (`Vm::eval_limit_local`).
     pub(super) eval_limit_symbol: usize,
     /// Advanced by every collection, which may move buffers: what a cache
     /// that names a buffer by its Value (`Places`) holds under.

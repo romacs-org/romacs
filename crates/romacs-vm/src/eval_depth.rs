@@ -42,7 +42,7 @@ pub(super) fn native_stack_floor() -> usize {
 
 impl Vm {
     /// The current buffer's object index and its local value of
-    /// `max-lisp-eval-depth', if it has one: GNU swaps that binding into the
+    /// `max-lisp-eval-depth`, if it has one: GNU swaps that binding into the
     /// C variable at set-buffer, so evaluation reads it.
     fn eval_limit_local(&self) -> Option<crate::variable_runtime::LocalEntry> {
         let symbol = self.forwarded.eval_limit_symbol;
