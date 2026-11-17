@@ -2913,6 +2913,10 @@ def children(args, base):
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
         a.codex_instance()
+        # A child waits for its approval only when the user is asked: every
+        # tool call is allowed by default.  Counts said in words, as read
+        # below (a glyph says them by default).
+        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
         parent = a.start('say ready')
         a.idle(parent)
 
@@ -2955,10 +2959,14 @@ def children(args, base):
 
         def open_menu():
             a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
-            until(lambda: 'Agents' in menu(), 15, 'menu open')
+            until(lambda: 'Workers' in menu(), 15, 'menu open')
 
-        until(lambda: '1 failed' in header(), 15, 'counts in the header')
+        until(lambda: '1 needs approval' in header(), 15, 'counts in the header')
         result = {'header': header()}
+        # The failure is counted while it is news: until a turn of the parent
+        # passes with it in view (the parent's own wake may be that turn).
+        unseen = lambda: a.eval(f'(romacs-agent-unseen-p {a.s(failed)})') != 'nil'
+        result['failure_counted'] = '1 failed' in result['header'] or not unseen()
         result['shot_header'] = shot('header')
         open_menu()
         time.sleep(.5)
@@ -2967,13 +2975,16 @@ def children(args, base):
 
         # With the menu open, the approval answered: its row and the title follow.
         a.eval(f'(romacs-agent-respond {a.s(waiting)} (car (hash-table-keys (romacs-agent-approvals {a.s(waiting)}))) t)')
-        until(lambda: 'waiting' not in menu(), 15, 'menu follows the child')
+        until(lambda: 'Needs approval' not in menu(), 15, 'menu follows the child')
         result['menu_after'] = menu()
         result['header_after'] = header()
         result['shot_menu_after'] = shot('menu-after')
 
-        # A digit on the first row: the failure, first of what wants the user.
-        a.keys('1')
+        # A row's digit opens its worker: the failed one's.  (A failure is
+        # news until a turn of its parent passes, as one has here: its row
+        # is ranked among the finished, not first.)
+        rows = [line for line in result['menu_after'].splitlines() if 'broken task' in line]
+        a.keys(rows[0].split('broken task')[0].split()[-1] if rows else '1')
         until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
         result['opened'] = shown()
         a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
@@ -2983,7 +2994,7 @@ def children(args, base):
         # The list of them, RET on the one typed for.
         open_menu()
         a.keys('o')
-        until(lambda: 'Subagent' in (parity_live.read_sexp(a.eval(
+        until(lambda: 'Worker' in (parity_live.read_sexp(a.eval(
             '(if (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
             '(substring-no-properties (minibuffer-prompt))) "")')) or ''), 15, 'palette open')
         time.sleep(.5)
@@ -2998,7 +3009,7 @@ def children(args, base):
         # The harness's own subagent: counted while it runs; its row goes to its card.
         a.send(parent, 'agent 6 read the code')
         until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
-        until(lambda: '2 running' in header() or '1 running' in header(), 15, 'subagent counted')
+        until(lambda: 'threads live' in header(), 15, 'subagent counted')
         result['header_subagent'] = header()
         open_menu()
         time.sleep(.3)
@@ -3015,10 +3026,12 @@ def children(args, base):
 
         running_stopped = a.eval(f'(romacs-agent-stop {a.s(running)})')
         result['header_end'] = header()
-        result['ok'] = (all(w in result['header'] for w in ('⇢', '1 running', '1 waiting', '1 failed'))
-                        and all(w in result['menu'] for w in ('long build', 'needs approval', 'broken task', 'finished task'))
-                        and '1 running' in result['header_after'] and 'waiting' not in result['header_after']
-                        and 'waiting' not in result['menu_after']
+        # The header counts in words (glyphs off): what wants the user, then
+        # the threads still live; the menu's group is the parent's workers.
+        result['ok'] = (all(w in result['header'] for w in ('1 needs approval', 'threads live')) and result['failure_counted']
+                        and all(w in result['menu'] for w in ('Workers', 'long build', 'Needs approval', 'broken task', 'finished task'))
+                        and 'threads live' in result['header_after'] and 'needs approval' not in result['header_after']
+                        and 'Needs approval' not in result['menu_after']
                         and 'finished task' in result['chosen']
                         and 'broken task' in result['opened'] and 'failed' not in result['header_seen']
                         and 'read the code' in result['menu_subagent'] and 'read the code' in result['card_line'])
