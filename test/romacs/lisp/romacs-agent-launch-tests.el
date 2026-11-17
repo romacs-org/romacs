@@ -204,3 +204,27 @@ whatever TMPDIR is); `delivered' collects wakes."
             (romacs-agent-events--waited (romacs-agent-id session))
             (should (equal launched (list (romacs-agent-id session))))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-launch-a-start-that-fails-later-ends-unstarted ()
+  ;; Launched later (its records' place known only then), a launch that
+  ;; fails ends the session unstarted and failed, as a supervisor that
+  ;; never came up: what waits for its start is not left waiting.
+  (let* ((root (make-temp-file "romacs-start-" t))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent--children (make-hash-table :test #'equal))
+         (romacs-agent-events--waiting (make-hash-table :test #'equal))
+         (romacs-agent-providers (list (cons "claude" root))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore)
+                  ((symbol-function 'romacs-agent--state-root) (lambda () root))
+                  ((symbol-function 'romacs-agent-events-own) (lambda (_) 'queued))
+                  ((symbol-function 'romacs-agent-events--migrate-next) #'ignore)
+                  ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness")))
+                  ((symbol-function 'romacs-agent--launch) (lambda (&rest _) (error "No such directory")))
+                  ((symbol-function 'romacs-agent--no-supervisor) #'ignore))
+          (let ((session (romacs-agent-start root nil nil "claude")))
+            (romacs-agent-events--waited (romacs-agent-id session))
+            (should (eq (romacs-agent-state session) 'unstarted))
+            (should (romacs-agent-failed session))
+            (should (string-match-p "No such directory" (romacs-agent-reply session)))))
+      (delete-directory root t))))
