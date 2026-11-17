@@ -28,11 +28,13 @@ pub(crate) struct Registers {
 
 impl Deref for Registers {
     type Target = [Value];
+    #[inline]
     fn deref(&self) -> &[Value] {
         &self.current
     }
 }
 impl DerefMut for Registers {
+    #[inline]
     fn deref_mut(&mut self) -> &mut [Value] {
         &mut self.current
     }
@@ -46,18 +48,22 @@ impl Registers {
         Registers { current: Vec::new(), suspended: Vec::new(), kernel: Vec::new() }
     }
     /// How many files are set aside beneath the current one.
+    #[inline]
     pub(crate) fn depth(&self) -> usize {
         self.suspended.len()
     }
     /// No engine runs and none is set aside.
+    #[inline]
     pub(crate) fn at_rest(&self) -> bool {
         self.current.is_empty() && self.suspended.is_empty()
     }
     /// File I, in file order: the suspended ones, then the current one.
+    #[inline]
     pub(crate) fn file(&self, i: usize) -> &[Value] {
         self.suspended.get(i).unwrap_or(&self.current)
     }
     /// File I, writable in place.
+    #[inline]
     pub(crate) fn file_mut(&mut self, i: usize) -> &mut [Value] {
         self.suspended.get_mut(i).unwrap_or(&mut self.current)
     }
@@ -72,18 +78,21 @@ impl Registers {
     /// Set the current file aside, still traced, its allocation unmoved for
     /// the frames' raw pointers: an engine's for a nested run, or for a
     /// storage kernel's.
+    #[inline]
     pub(crate) fn suspend(&mut self) {
         let file = std::mem::take(&mut self.current);
         self.suspended.push(file);
     }
     /// Take back the file `suspend` set aside. The nested run has returned
     /// its own: overwriting a file would free its engine's.
+    #[inline]
     pub(crate) fn resume(&mut self) {
         assert!(self.current.is_empty(), "a nested run returned its registers");
         self.current = self.suspended.pop().expect("a suspended register stack");
     }
     /// Make ARGS the current file's first slots, in the reused kernel file,
     /// with the current one set aside beneath it (`leave_kernel` undoes it).
+    #[inline]
     pub(crate) fn enter_kernel(&mut self, args: &[Value]) {
         self.suspend();
         self.current = std::mem::take(&mut self.kernel);
@@ -92,6 +101,7 @@ impl Registers {
     }
     /// Return the kernel file, emptied: untraced between calls, nothing it
     /// held may stay in it.
+    #[inline]
     pub(crate) fn leave_kernel(&mut self) {
         self.current.clear();
         self.kernel = std::mem::take(&mut self.current);
@@ -101,6 +111,7 @@ impl Registers {
     /// at least SIZE slots and all NIL past ARGS, which fill its first slots.
     /// The current file must be empty, as its caller set it aside: taking a
     /// file over it would free a running engine's.
+    #[inline]
     pub(crate) fn enter(&mut self, file: Vec<Value>, size: usize, args: &[Value]) {
         assert!(self.current.is_empty(), "a nested run's caller set its registers aside");
         self.current = file;
@@ -114,6 +125,7 @@ impl Registers {
     /// for the next run. A file a deep run grew is kept, up to a cap; past
     /// it, cut back, not dropped: an empty file means "no program" to the
     /// spares.
+    #[inline]
     pub(crate) fn leave(&mut self, used: usize) -> Vec<Value> {
         self.current[..used].fill(Value::NIL);
         if self.current.len() > SPARE_CAP {
