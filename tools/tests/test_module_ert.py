@@ -1,5 +1,6 @@
 """Exercise the module ERT command with real GNU ERT and negative hosts."""
 import hashlib
+import json
 import os
 import runpy
 from pathlib import Path
@@ -101,6 +102,24 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('gnosis-test-agent-romacs.el', result.stdout)
         self.assertIn('ERT complete:', result.stdout)
 
+    def test_a_host_leaves_nothing_in_a_group_of_its_own(self):
+        # A world builder runs in a process group of its own; it must not outlive
+        # the host that started it, whether the host ends or times out.
+        for hang in (False, True):
+            fake = self.home / 'grouping-host'
+            pidfile = self.home / f'grouped-{hang}.pid'
+            fake.write_text(f'''#!{sys.executable}
+import pathlib, subprocess, time
+child = subprocess.Popen(["sleep", "30"], process_group=0)
+pathlib.Path({str(pidfile)!r}).write_text(str(child.pid))
+time.sleep(30 if {hang!r} else 0)
+''')
+            fake.chmod(0o700)
+            self.invoke('--timeout', '2', binary=fake)
+            state = Path(f'/proc/{int(pidfile.read_text())}/stat')
+            if state.exists():
+                self.assertEqual(state.read_text().rsplit(')', 1)[1].split()[0], 'Z')
+
     def test_unknown_module_and_budget_refuse(self):
         select = runpy.run_path(str(ROOT / 'tools/test-ert'))
         self.assertEqual(select['module_suites']('unknown-module', select['directories'](ROOT)), [])
@@ -153,6 +172,39 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('gnosis-test-demo.el', names)
         self.assertFalse(names & {'gnosis-test-db.el', 'gnosis-test-helpers.el',
                                   'gnosis-test-schema-v8.el'})
+
+    def recording_host(self, builds):
+        """A host that records each run's arguments and ROMACS_WORLD, and on
+        `--world-build` makes a world in its store when BUILDS."""
+        fake, record = self.home / 'recording-host', self.home / 'runs'
+        fake.write_text(f'''#!{sys.executable}
+import json, os, pathlib, sys
+with open({str(record)!r}, 'a') as runs:
+    runs.write(json.dumps([sys.argv[1:], os.environ.get('ROMACS_WORLD')]) + '\\n')
+if {builds!r} and '--world-build' in sys.argv:
+    (pathlib.Path(sys.argv[sys.argv.index('--world-store') + 1]) / 'w.rwi').write_text('')
+''')
+        fake.chmod(0o700)
+        return fake, record
+
+    def test_files_restore_the_world_the_run_prepares(self):
+        fake, record = self.recording_host(builds=True)
+        result = self.invoke(binary=fake)
+        self.assertIn('ERT batch world: prepared', result.stdout)
+        (prepare, world), (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        store = prepare[prepare.index('--world-store') + 1]
+        self.assertEqual(prepare[-2:], ['--world-build', '--batch'])
+        self.assertEqual(run[:4], ['--world-store', store, '-Q', '--batch'])
+        self.assertEqual((world, run_world), (None, None))
+        self.assertFalse(Path(store).exists(), 'the run removes its store')
+
+    def test_files_boot_from_source_when_no_world_is_built(self):
+        fake, record = self.recording_host(builds=False)
+        result = self.invoke(binary=fake)
+        self.assertIn('ERT batch world: none', result.stdout)
+        _, (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        self.assertEqual(run[:2], ['-Q', '--batch'])
+        self.assertEqual(run_world, 'off')
 
     def test_timeout_kills_the_process_group(self):
         fake = self.home / 'hanging-host'

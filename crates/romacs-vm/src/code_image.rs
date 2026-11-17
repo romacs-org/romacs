@@ -730,7 +730,7 @@ mod image_alias_tests {
         source.collect_garbage();
         let entry = source.compile(&Form::Sym("image-texts".into())).unwrap();
         let key = source.publish_code_image(&path, entry, [65; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, _) = Vm::from_code_image(image, [65; 32]).unwrap();
         let kinds = loaded.eval_source("(list (multibyte-string-p (car image-texts)) (multibyte-string-p (car (cdr image-texts))))").unwrap();
         assert_eq!(kinds.display().unwrap(), "(nil t)");
@@ -753,7 +753,7 @@ mod image_alias_tests {
         assert!(source.objects.unused() > 0 && source.closures.unused() > 0, "the sweep left free entries below live ones");
         let entry = source.compile(&Form::Sym("image-kept".into())).unwrap();
         let key = source.publish_code_image(&path, entry, [64; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [64; 32]).unwrap();
         let value = loaded.execute_raw(entry).unwrap();
         assert_eq!(loaded.display(value).unwrap(), "(\"kkkk\" 7)");
@@ -776,7 +776,7 @@ mod image_alias_tests {
         assert_eq!(source.execute_raw(entry).unwrap(), root, "PRE_IMAGE_COLD_ALIAS_IDENTITY");
         assert_eq!(source.slots[plist_slot].plist, root, "PRE_IMAGE_PLIST_ALIAS_IDENTITY");
         let key = source.publish_code_image(&path, entry, [63; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [63; 32]).unwrap();
         loaded.collect_garbage();
         let cold = loaded.execute_raw(entry).unwrap();

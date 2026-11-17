@@ -12,7 +12,7 @@ mod uninitialized_image_tests {
         let entry = vm.compile(&Form::Int(0)).unwrap();
         let store = std::env::temp_dir().join(format!("uv-image-{}", std::process::id()));
         let key = vm.publish_code_image(&store, entry, [0; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         let (mut loaded, _) = Vm::from_code_image(image, [0; 32]).unwrap();
         let result = loaded.eval_source_raw("(list (special-variable-p uv-image-symbol) (special-variable-p 'uv-image-twin) (special-variable-p 'uv-image-interned))").unwrap();
         assert_eq!(loaded.display(result).unwrap(), "(t nil t)", "code image must preserve declaration identity");
@@ -96,7 +96,7 @@ mod reclamation_tests {
         source.eval_source_raw("(put 'print-circle 'redirect-note 1) (put 'truncate-lines 'redirect-note 1)").unwrap();
         let entry = source.compile(&Form::Int(0)).unwrap();
         let key = source.publish_code_image(&store, entry, [0; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         let (mut vm, _) = Vm::from_code_image(image, [0; 32]).unwrap();
         vm.eval_source_raw("(make-variable-buffer-local 'print-circle)").unwrap();
         assert_eq!(vm.eval_source_raw("(local-variable-if-set-p 'print-circle)").unwrap(), Value::TRUE, "image intrinsic localization");

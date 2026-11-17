@@ -69,6 +69,8 @@ tree-sitter = "=0.27.0"
 tree-sitter-language.workspace = true
 # dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
 libloading = "0.8"
+# Read-only maps of the code-image store's entries (image.rs).
+memmap2.workspace = true
 # errno around wcscoll_l, which reports through it alone (locale_info.rs).
 errno = "0.3"
 
