@@ -232,7 +232,7 @@ pub(super) fn room(store: &Path) -> bool {
 
 /// STORE's lock, taken as HOW, held until the file is dropped; a `Try`
 /// lock held elsewhere is an error (`WouldBlock`).
-pub(super) fn lock(store: &Path, how: host::Lock) -> std::io::Result<std::fs::File> {
+pub(super) fn lock(store: &Path, how: host::Flock) -> std::io::Result<std::fs::File> {
     let file = host::open_store_file(store.join("lock"), host::StoreOpen::Write { create: true, truncate: false })?;
     if !host::lock(&file, how)? {
         return Err(std::io::ErrorKind::WouldBlock.into());
@@ -248,7 +248,7 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
     }
     let generation = generation(store);
     subdir(store)?;
-    let _lock = lock(store, host::Lock::Shared)?;
+    let _lock = lock(store, host::Flock::Shared)?;
     subdir(&generation)?;
     let dir = generation.join(hex(key));
     subdir(&dir)?;
@@ -266,7 +266,7 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
 /// which no load waits for.
 pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     use std::io::Write;
-    let Ok(_lock) = lock(store, host::Lock::TryShared) else { return };
+    let Ok(_lock) = lock(store, host::Flock::TryShared) else { return };
     let log = generation(store).join("use.log");
     if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Append) {
         let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
@@ -280,7 +280,7 @@ pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
 /// budget. Runs after a compile publishes, never inside a load, holding
 /// the store's lock alone.
 pub(super) fn prune(store: &Path, budget: u64, keep: &std::collections::HashSet<PathBuf>) -> std::io::Result<Vec<PathBuf>> {
-    let _lock = lock(store, host::Lock::Exclusive)?;
+    let _lock = lock(store, host::Flock::Exclusive)?;
     let current = generation(store);
     let mut removed = vec![];
     // Every older generation: at most two are kept, the current and the one

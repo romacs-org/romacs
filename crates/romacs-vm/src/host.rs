@@ -2083,8 +2083,9 @@ pub enum StoreOpen {
 
 /// How a lock is taken on a file or directory: flock(2). A `Try` lock does
 /// not wait for a holder.
+// CELL(Plain)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lock {
+pub enum Flock {
     Shared,
     Exclusive,
     TryShared,
@@ -2096,17 +2097,17 @@ pub enum Lock {
 ///
 /// # Errors
 /// What flock(2) reports, but a `Try` lock's `EWOULDBLOCK`.
-pub fn lock(fd: impl std::os::fd::AsFd, how: Lock) -> io::Result<bool> {
+pub fn lock(fd: impl std::os::fd::AsFd, how: Flock) -> io::Result<bool> {
     use rustix::fs::FlockOperation as Op;
     let operation = match how {
-        Lock::Shared => Op::LockShared,
-        Lock::Exclusive => Op::LockExclusive,
-        Lock::TryShared => Op::NonBlockingLockShared,
-        Lock::TryExclusive => Op::NonBlockingLockExclusive,
+        Flock::Shared => Op::LockShared,
+        Flock::Exclusive => Op::LockExclusive,
+        Flock::TryShared => Op::NonBlockingLockShared,
+        Flock::TryExclusive => Op::NonBlockingLockExclusive,
     };
     match rustix::fs::flock(fd, operation) {
         Ok(()) => Ok(true),
-        Err(rustix::io::Errno::WOULDBLOCK) if matches!(how, Lock::TryShared | Lock::TryExclusive) => Ok(false),
+        Err(rustix::io::Errno::WOULDBLOCK) if matches!(how, Flock::TryShared | Flock::TryExclusive) => Ok(false),
         Err(error) => Err(error.into()),
     }
 }
