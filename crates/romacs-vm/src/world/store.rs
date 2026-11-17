@@ -53,6 +53,10 @@ const LOCK_ENV: &str = "ROMACS_WORLD_LOCK_FD";
 /// How long a launch waits for a builder before it boots from source and
 /// counts the build as failed.
 const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// A file's identity, as a publication changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileIdentity { device: u64, inode: u64, modified: (i64, i64) }
+
 /// How long after the Nth transient failure a launch builds again.
 const BACKOFF: [u64; 4] = [60, 600, 3600, 86400];
 
@@ -735,6 +739,7 @@ impl World {
             return Ok(usable);
         }
         let attempts = self.failures().map(|f| f.0);
+        let published = self.publication();
         if wait {
             announce();
         }
@@ -750,21 +755,24 @@ impl World {
             std::thread::spawn(move || {
                 let mut child = child;
                 let status = child.wait();
-                world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts);
+                world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts, published);
             });
             return Err(json!({"world": reason, "builder": pid}));
         }
         let ended = wait_bounded(child, BUILD_TIMEOUT);
-        self.note_builder_end(ended.clone(), attempts);
+        self.note_builder_end(ended.clone(), attempts, published);
         self.usable().map_err(|now| json!({"world": now, "builder": ended.err().unwrap_or_else(|| "built".into())}))
     }
 
     /// After a builder ended (ENDED, its status or why there is none):
-    /// record a failure it could not record itself, unless it published or
-    /// recorded one since ATTEMPTS.
-    fn note_builder_end(&self, ended: Result<String, String>, attempts: Option<u64>) {
-        let recorded = self.failures().map(|f| f.0) != attempts || self.usable().is_ok()
-            || self.valid_manifest().is_err_and(|r| r.get("uncaptured").is_some());
+    /// record a failure it could not record itself, unless it recorded one
+    /// since ATTEMPTS or published since the manifest was PUBLISHED. A world
+    /// it published is no builder failure even when it is stale already, its
+    /// inputs changed while it built (a Lisp tree edited meanwhile): a later
+    /// launch builds it again as it builds any stale world, with no backoff.
+    fn note_builder_end(&self, ended: Result<String, String>, attempts: Option<u64>, published: Option<FileIdentity>) {
+        let recorded = self.failures().map(|f| f.0) != attempts || self.publication() != published
+            || self.usable().is_ok() || self.valid_manifest().is_err_and(|r| r.get("uncaptured").is_some());
         if !recorded {
             let why = match ended { Ok(status) => format!("the builder ended: {status}"), Err(e) => e };
             let _ = self.record_transient(&why);
@@ -825,6 +833,14 @@ impl World {
         command.args(args).env_clear().envs(env).current_dir(pinned.join("cwd"))
             .stdin(lock).stdout(log.try_clone()?).stderr(log).process_group(0);
         command.spawn()
+    }
+
+    /// The published manifest's identity: a publication renames a new file
+    /// into place, so another identity means another publication.
+    fn publication(&self) -> Option<FileIdentity> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = host::metadata(&self.file(".json")).ok()?;
+        Some(FileIdentity { device: meta.dev(), inode: meta.ino(), modified: (meta.mtime(), meta.mtime_nsec()) })
     }
 
     /// The transient failures recorded since the last success: how many,
@@ -1893,6 +1909,29 @@ mod tests {
         // world of it unused for over a week, which `prune` deletes.
         assert_eq!(current.prune_family().unwrap(), ["b".repeat(64)]);
         assert_eq!(current.prune().unwrap(), ["f".repeat(64)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A builder that published a world has not failed, even when the world
+    /// is stale already because its inputs changed while it built (a Lisp
+    /// tree edited meanwhile): no failure is counted, so no backoff holds the
+    /// next launch, which builds it again as any stale world. A builder that
+    /// published nothing has failed.
+    #[test]
+    fn a_world_published_stale_is_no_builder_failure() {
+        let dir = marked_store("published-stale");
+        let world = World { store: dir.clone(), key: [0xab; 32], recipe: vec!["consumer t".into()] };
+        // A record that no longer holds: a variable the build saw set, unset now.
+        let manifest = json!({"records": [{"kind": "env", "form": "process", "name": "ROMACS_TEST_PUBLISHED_STALE", "value": "built"}],
+                              "uncaptured": []});
+        let before = world.publication();
+        world.publish(".json", manifest.to_string().as_bytes()).unwrap();
+        assert!(world.usable().is_err(), "the world holds");
+        world.note_builder_end(Ok("exit status: 0".into()), None, before);
+        assert_eq!(world.failures(), None, "a published world counted as a builder failure");
+        // Nothing published since the manifest was read: the builder failed.
+        world.note_builder_end(Ok("exit status: 0".into()), None, world.publication());
+        assert_eq!(world.failures().map(|f| f.0), Some(1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
