@@ -586,12 +586,12 @@ characters they encode, to put in a buffer, a string or more JSON."
   (decode-coding-string (json-serialize object :false-object :false :null-object :null) 'utf-8))
 
 (defun romacs-agent--write-json (file object)
-  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user."
-  (let ((temporary (concat file ".tmp")) (coding-system-for-write 'utf-8-unix))
-    (with-temp-file temporary
-      (insert (romacs-agent--json object)))
-    (set-file-modes temporary #o600)
-    (rename-file temporary file t)))
+  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user.
+Through a temporary file of this write's own, beside FILE: two processes
+writing FILE at once (a session's harness answering in each) never take
+each other's."
+  (let ((coding-system-for-write 'utf-8-unix))
+    (romacs-mcp-write-private file (lambda () (insert (romacs-agent--json object))))))
 
 (defun romacs-agent--keep-json (file object)
   "Write OBJECT as JSON to FILE as `romacs-agent--write-json' does, unless
@@ -1080,18 +1080,20 @@ that file's time.  Nil when it is not found."
             (gethash "models" kept))))
 
 (defun romacs-agent--keep-models (session rows)
-  "Keep ROWS, what SESSION's harness reports, for its instance."
-  (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
-         (file (romacs-agent--models-file (plist-get instance :name))))
-    (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
-      (make-directory (file-name-directory file) t)
-      (romacs-agent--write-json
-       file (romacs-mcp--object
-             "stamp" stamp
-             "models" (vconcat (mapcar (lambda (row)
-                                         (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
-                                                             "efforts" (vconcat (plist-get (cdr row) :efforts))))
-                                       rows)))))))
+  "Keep ROWS, what SESSION's harness reports, for its instance.  A cache:
+one not written is reported, never in the way of the answer it came in."
+  (with-demoted-errors "romacs-agent: keeping models: %S"
+    (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+           (file (romacs-agent--models-file (plist-get instance :name))))
+      (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
+        (make-directory (file-name-directory file) t)
+        (romacs-agent--write-json
+         file (romacs-mcp--object
+               "stamp" stamp
+               "models" (vconcat (mapcar (lambda (row)
+                                           (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
+                                                               "efforts" (vconcat (plist-get (cdr row) :efforts))))
+                                         rows))))))))
 
 (defun romacs-agent--refresh-models (session)
   "Ask SESSION's harness for its models, when its driver can and its
@@ -2256,69 +2258,81 @@ order they were sent."
             (romacs-agent--filter-lines process text)))
       (process-put process 'draining nil))))
 
+(defun romacs-agent--record-failed (session err)
+  "Report ERR, raised handling one of SESSION's records, at once: in its
+chat as an error line and in *Messages*, never left silent (a startup
+answer not handled leaves its session starting)."
+  (let ((text (format "Handling a record failed: %s" (error-message-string err))))
+    (message "romacs-agent: %s: %s" (romacs-agent-id session) text)
+    (with-demoted-errors "romacs-agent: reporting a record's failure: %S"
+      (romacs-agent--raise session (list :type 'error :text text)))))
+
 (defun romacs-agent--filter-lines (process text)
-  "Handle each whole line of TEXT, PROCESS's output; what follows its last
-newline, or the lines left when a handler exits nonlocally, waits before
-what came meanwhile."
+  "Handle each whole line of TEXT, PROCESS's output, each on its own: one
+whose handling signals is reported and the next handled, so no error
+loses the records after it.  What follows its last newline, or the lines
+left when a handler exits nonlocally (a quit), waits before what came
+meanwhile."
   (let ((session (process-get process 'romacs-agent))
         (start 0))
     (unwind-protect
-    (while (string-match "\n" text start)
-      (let ((line (substring text start (match-beginning 0))))
-        (setq start (match-end 0))
-        (let ((record (ignore-errors
-                        ;; JSON false and null are kept, so a tool's input
-                        ;; written back (an approval) is the one the harness sent.
-                        (json-parse-string (decode-coding-string line 'utf-8)
-                                           :object-type 'hash-table :null-object :null :false-object :false))))
-          (cond ((not (hash-table-p record)))
-                ;; The connection to its notes-only host: it takes the held
-                ;; notes and nothing else; their records let them go.
-                ((process-get process 'notes-only)
-                 (cond ((gethash "refused" record) (delete-process process))
-                       ((gethash "attached" record)
-                        (process-put process 'attached t)
-                        (romacs-agent--send-held session process)
-                        (romacs-agent--notes-written session))
-                       (t (romacs-agent--record session record))))
-                ((gethash "refused" record)
-                 (romacs-agent--raise session (list :type 'error :text "another server is attached")))
-                ((and (gethash "attached" record) (eq (gethash "notesOnly" record) t))
-                 ;; A notes-only host met where a supervisor was looked for:
-                 ;; let go, so it ends and frees the lock, and looked for
-                 ;; again.
-                 (when (eq (romacs-agent-connection session) process)
-                   (setf (romacs-agent-connection session) nil))
-                 (delete-process process)
-                 (run-at-time 0.1 nil #'romacs-agent--attach session romacs-agent--launch-tries))
-                ((gethash "attached" record)
-                 (romacs-agent--kept session process)
-                 ;; The notes held for it, numbered by it, now it is ours.
-                 (romacs-agent--send-held session process)
-                 (remhash session romacs-agent--reattaching)
-                 ;; Attached again: what it does is what its records say, a
-                 ;; turn under way or none; a replay from the last record
-                 ;; seen says nothing new.
-                 (when (eq (romacs-agent-state session) 'detached)
-                   (setf (romacs-agent-state session)
-                         (cond ((> (hash-table-count (romacs-agent-approvals session)) 0) 'waiting-approval)
-                               ((> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
-                                'running)
-                               (t 'idle)))
-                   ;; Its views, and its parent's rows, read it anew.
-                   (romacs-agent--raise session (list :type 'status :text "attached")))
-                 ;; The replay is over: what comes now is live.
-                 (setf (romacs-agent-caught-up session) t)
-                 (run-hook-with-args 'romacs-agent-caught-up-functions session)
-                 (romacs-agent--keep-soon session)
-                 (romacs-agent--seen-caught-up session)
-                 (romacs-agent--allow-tool-calls session)
-                 (romacs-agent--step session)
-                 ;; A selection a restart found armed, with no turn to end.
-                 (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
-                (t (romacs-agent--kept session process)
-                   (condition-case err (romacs-agent--record session record)
-                     (error (message "romacs-agent: %s" (error-message-string err)))))))))
+        (while (string-match "\n" text start)
+          (let ((line (substring text start (match-beginning 0))))
+            (setq start (match-end 0))
+            (let ((record (ignore-errors
+                            ;; JSON false and null are kept, so a tool's input
+                            ;; written back (an approval) is the one the harness sent.
+                            (json-parse-string (decode-coding-string line 'utf-8)
+                                               :object-type 'hash-table :null-object :null :false-object :false))))
+              (condition-case err
+                  (cond ((not (hash-table-p record)))
+                        ;; The connection to its notes-only host: it takes the held
+                        ;; notes and nothing else; their records let them go.
+                        ((process-get process 'notes-only)
+                         (cond ((gethash "refused" record) (delete-process process))
+                               ((gethash "attached" record)
+                                (process-put process 'attached t)
+                                (romacs-agent--send-held session process)
+                                (romacs-agent--notes-written session))
+                               (t (romacs-agent--record session record))))
+                        ((gethash "refused" record)
+                         (romacs-agent--raise session (list :type 'error :text "another server is attached")))
+                        ((and (gethash "attached" record) (eq (gethash "notesOnly" record) t))
+                         ;; A notes-only host met where a supervisor was looked for:
+                         ;; let go, so it ends and frees the lock, and looked for
+                         ;; again.
+                         (when (eq (romacs-agent-connection session) process)
+                           (setf (romacs-agent-connection session) nil))
+                         (delete-process process)
+                         (run-at-time 0.1 nil #'romacs-agent--attach session romacs-agent--launch-tries))
+                        ((gethash "attached" record)
+                         (romacs-agent--kept session process)
+                         ;; The notes held for it, numbered by it, now it is ours.
+                         (romacs-agent--send-held session process)
+                         (remhash session romacs-agent--reattaching)
+                         ;; Attached again: what it does is what its records say, a
+                         ;; turn under way or none; a replay from the last record
+                         ;; seen says nothing new.
+                         (when (eq (romacs-agent-state session) 'detached)
+                           (setf (romacs-agent-state session)
+                                 (cond ((> (hash-table-count (romacs-agent-approvals session)) 0) 'waiting-approval)
+                                       ((> (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
+                                        'running)
+                                       (t 'idle)))
+                           ;; Its views, and its parent's rows, read it anew.
+                           (romacs-agent--raise session (list :type 'status :text "attached")))
+                         ;; The replay is over: what comes now is live.
+                         (setf (romacs-agent-caught-up session) t)
+                         (run-hook-with-args 'romacs-agent-caught-up-functions session)
+                         (romacs-agent--keep-soon session)
+                         (romacs-agent--seen-caught-up session)
+                         (romacs-agent--allow-tool-calls session)
+                         (romacs-agent--step session)
+                         ;; A selection a restart found armed, with no turn to end.
+                         (when (romacs-agent-pending-selection session) (romacs-agent--settle session)))
+                        (t (romacs-agent--kept session process)
+                           (romacs-agent--record session record)))
+                (error (romacs-agent--record-failed session err))))))
       ;; Its rest goes before what came while its lines were handled.
       (when (< start (length text))
         (process-put process 'pending (append (process-get process 'pending) (list (substring text start))))
@@ -3259,10 +3273,17 @@ socket."
 as it acknowledges this server's attachment: kept until each comes back
 \(`romacs-agent--held-echoed'), so one a refused or stolen attachment
 never wrote goes again with the next.  The replay before the
-acknowledgement has let go of the ones written already."
+acknowledgement has let go of the ones written already.  A PROCESS
+gone meanwhile (its attachment stolen, its host ended) takes none: they
+stay held for the next host, and nothing is signalled in the filter
+this runs from, whose records after the acknowledgement would be lost."
   (remhash (romacs-agent-id session) romacs-agent--launched)
-  (dolist (note (gethash (romacs-agent-id session) romacs-agent--held-notes))
-    (process-send-string process (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))))
+  (let ((lines (mapcar (lambda (note) (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
+                       (gethash (romacs-agent-id session) romacs-agent--held-notes))))
+    (condition-case nil
+        (dolist (line lines) (process-send-string process line))
+      ;; Its pipe closed as it was written to.
+      (error nil))))
 
 (defun romacs-agent-held-notes-count ()
   "How many notes wait for a supervisor that is not attached here."
