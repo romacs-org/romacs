@@ -572,7 +572,10 @@ fast the host is, not in this step or the next by a race with a poll. The
 session reads `romacs-instructions` and `romacs--display-stats` at each
 step's start, all before it writes anything, so the report has, per step
 and as medians, the redisplays run, the instructions and conses spent
-inside them beside the whole step's instructions, the windows rebuilt, the
+inside them beside what Romacs ran for the whole step (its change, the
+timers it set off and its redisplays; not the loop's own polls nor the
+host's wait for a frame to render, which grow with the machine's load),
+the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
 submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step

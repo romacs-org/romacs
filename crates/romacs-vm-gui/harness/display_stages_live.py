@@ -13,8 +13,10 @@ evaluator's instruction counter and `romacs--display-stats' at the start of
 every step and after the last one's redisplay, all before it serializes
 anything, so a step's figures are differences of two readings:
 
-  step_instructions     everything the step ran: its timer, its change and
-                        its redisplays
+  step_instructions     what Romacs ran for the step: its change, the
+                        timers it set off and its redisplays, not the
+                        loop's own polls nor the host's wait for a frame to
+                        render (`display-stages--work')
   cycles                redisplays the step ran: its own, and any after a
                         timer it set off (jit-lock's `jit-lock-force-redisplay')
   display_instructions  the part inside redisplays (the frame frozen and
