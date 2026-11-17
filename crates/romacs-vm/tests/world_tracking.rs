@@ -566,3 +566,30 @@ fn a_tracked_buffer_local_reads_alike_in_two_buffers() {
     assert_eq!(off, "((in-a t) (\"std\" nil in-a) ((let-a \"std\") in-a) ((let-b let-b in-a) \"std\") \"std\")");
     assert_eq!(on, off);
 }
+
+/// `truncate-lines' is declared automatically local at its first lookup. A
+/// build's startup tracks it when its redirect was resolved before startup;
+/// its first set in a buffer, inside startup, still makes that buffer's
+/// local, and leaves other buffers the default, with the tracking on as
+/// off.
+#[test]
+fn a_tracked_built_in_automatic_local_is_made_local_at_its_first_set() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(setq tl-seen (default-value 'truncate-lines))
+(setq tl-a (get-buffer-create \"tl-a\") tl-b (get-buffer-create \"tl-b\"))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (save-current-buffer (set-buffer tl-a) (setq truncate-lines t))
+           (setq custom-delayed-init-variables t))
+  (romacs--startup-phase nil))
+";
+    let show = "(list (buffer-local-value 'truncate-lines tl-a) (buffer-local-value 'truncate-lines tl-b) (local-variable-p 'truncate-lines tl-a) (default-value 'truncate-lines))";
+    let (mut off, none) = run_with("tl-off", bootstrap, "", false);
+    assert!(none.is_none());
+    let (mut on, _) = run_with("tl-on", bootstrap, "", true);
+    let off = off.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    let on = on.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(off, "(t nil t nil)");
+    assert_eq!(on, off);
+}

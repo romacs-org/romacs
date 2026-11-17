@@ -366,8 +366,14 @@ impl Vm {
         // every reader and writer (data.c:1629, 1719, ...).
         let slot = self.indirect_variable(slot);
         // Built-in automatic locals are declared at their first lookup, so
-        // cold VM and code-image construction see none.
-        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot) && self.slots[slot].localness == Localness::Never {
+        // cold VM and code-image construction see none. A tracked one is
+        // declared inside the tracking's access, under its own redirect,
+        // which the access then reaches (`Vm::tracked`): declared here, its
+        // kept redirect would stay plain and never localize.
+        if (slot == self.truncate_lines_slot || slot == self.case_symbols_slot)
+            && self.slots[slot].localness == Localness::Never
+            && !matches!(self.variable_redirects.get(slot).copied().flatten(), Some(VariableRedirect::Forwarded(forwarded::Fwd::Tracked(_))))
+        {
             self.declare_local(slot, Localness::Automatic);
         }
         if !self.localized(slot) { return Ok(Binding::Default); }
