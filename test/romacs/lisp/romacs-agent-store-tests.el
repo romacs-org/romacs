@@ -618,7 +618,11 @@ has it: in a transaction of its own, after the statement FIRST when given."
     (let ((romacs-agent-store-patience 200))
       (romacs-agent-store--writer-start)
       (should (= romacs-agent-store-patience 200))
-      (should (= (caar (sqlite-select (romacs-agent-store--open) "pragma busy_timeout")) romacs-agent-store-patient)))))
+      (should (= (caar (sqlite-select (romacs-agent-store--open) "pragma busy_timeout")) romacs-agent-store-patient))
+      ;; The writer itself waits long for every connection of its life: one
+      ;; opened again after a start that failed too.
+      (should (equal (alist-get 'romacs-agent-store-patience (funcall romacs-agent-writer-bindings-function))
+                     romacs-agent-store-patient)))))
 
 (ert-deftest romacs-agent-store-a-reader-waits-for-the-lock ()
   ;; The editor's read connection waits a moment for the lock: a WAL read

@@ -142,7 +142,12 @@ are): what a crash may lose of them is the writer's queue's window."
     (romacs-agent-store--made)))
 
 (add-hook 'romacs-agent-writer-start-functions #'romacs-agent-store--writer-start)
-(setq romacs-agent-writer-bindings-function #'romacs-agent--fold-bindings)
+(defun romacs-agent-store--writer-bindings ()
+  "What the writer starts with: the editor's agents' options, and the long
+wait for the store's lock, every connection of its life."
+  (cons (cons 'romacs-agent-store-patience romacs-agent-store-patient) (romacs-agent--fold-bindings)))
+
+(setq romacs-agent-writer-bindings-function #'romacs-agent-store--writer-bindings)
 
 (defun romacs-agent-store--open-to-write (file)
   "FILE opened to write and its tables made; nil when it cannot be."
