@@ -2792,12 +2792,13 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-x C-a a, RET): on a project, its
-    first row opens, the thread that wants the user most, else the newest
-    (a delegated one folds under its parent) or, with no thread, its
-    newest transcript; on "◇ N more", every transcript is shown and the
-    board stays; a thread gone since the board was drawn is said so, and
-    the board is drawn again."""
+    """The agent board by real keys (C-x C-a a, RET), a buffer in the
+    selected window: on a project, its first row opens in the board's
+    window, the thread that wants the user most, else the newest (a
+    delegated one folds under its parent) or, with no thread, its newest
+    transcript; on "◇ N more", every transcript is shown and the board
+    stays; a thread gone since the board was drawn is said so, and the
+    board is drawn again."""
     a = Agents(args, base, 'hk')
     try:
         a.up()
@@ -2835,9 +2836,8 @@ def board_keys(args, base):
             '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
         def open_board():
-            # A key typed as a layer hides or shows can be lost on a loaded
-            # host (seen: no command ran for it): keys must reach the frame,
-            # then the board, before one is relied on.
+            # Keys must reach the frame, then the board, before one is
+            # relied on: a loaded host runs a key later than it is typed.
             a.keyboard_ready()
             a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
