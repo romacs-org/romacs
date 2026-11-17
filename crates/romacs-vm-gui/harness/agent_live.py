@@ -3410,10 +3410,13 @@ def live_rows(args, base):
             time.sleep(1)
         result['rows_later'] = rows()
         held_row = lambda text: next((line for line in text.splitlines() if 'held call' in line), '')
-        result['ok'] = (re.search(r'held call  \d+s · ', held_row(result['rows'])) is not None
-                        and 'thinking' not in held_row(result['rows'])
+        clock = lambda text: (lambda m: int(m.group(1)) if m else None)(re.search(r'held call  (\d+)s · ', held_row(text)))
+        result['clocks'] = [clock(result['rows']), clock(result['rows_later'])]
+        result['lead_state'] = a.state(parent)
+        result['ok'] = (None not in result['clocks'] and result['clocks'][1] > result['clocks'][0]
+                        and result['lead_state'] == 'idle' and 'thinking' not in held_row(result['rows'])
                         and '◆ asks approval' in result['rows'] and 'needs approval' in result['rows']
-                        and held_row(result['rows']) != held_row(result['rows_later']))
+                        )
         return result
     finally:
         a.close()

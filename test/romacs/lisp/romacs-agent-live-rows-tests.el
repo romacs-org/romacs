@@ -92,5 +92,52 @@ stops once none does; the boundary carries the rows."
     (setf (romacs-agent-state (car (romacs-agent-children parent))) 'idle)
     (should-not (romacs-agent-ui--ticks-p parent))))
 
+(ert-deftest romacs-agent-live-rows-keep-the-clock-and-state-for-a-long-title ()
+  "A title too long for the row gives way: the clock and what it does stay."
+  (romacs-agent-live-rows-tests--with
+      (list (list (romacs-agent-live-rows-tests--child 1) 'waiting-approval (make-string 300 ?x) (float-time)))
+    (let ((rows (substring-no-properties (romacs-agent-ui--worker-rows parent))))
+      (should (string-match-p "  [01]s · needs approval\n\\'" rows))
+      (should (<= (string-width (string-trim-right rows)) 100)))))
+
+(ert-deftest romacs-agent-live-rows-follow-a-delegate-and-stop-ticking ()
+  "A delegate's state moving reaches its parent's chat: the rows show and
+the ticker starts; a tick in the same second writes nothing; once none
+works, the rows go and the next tick stops the ticker."
+  (romacs-agent-live-rows-tests--with
+      (list (list (romacs-agent-live-rows-tests--child 1) 'running "lane compiler" (float-time) "Bash"))
+    (let ((chat (generate-new-buffer "*romacs-agent-live-rows-tests*"))
+          (child (car (romacs-agent-children parent)))
+          (romacs-agent-ui--ticker nil)
+          (written 0))
+      (unwind-protect
+          (cl-letf* ((put (symbol-function 'overlay-put))
+                     ((symbol-function 'overlay-put) (lambda (&rest args) (cl-incf written) (apply put args)))
+                     ((symbol-function 'romacs-agent-ui--summarize-children) #'ignore)
+                     ((symbol-function 'romacs-agent-ui--header-refresh) #'ignore)
+                     ((symbol-function 'romacs-agent-ui--announce) #'ignore))
+            (with-current-buffer chat
+              (romacs-agent-chat-mode)
+              (setq romacs-agent-ui--session parent
+                    romacs-agent-ui--end (point-marker)
+                    romacs-agent-ui--composer (make-overlay (point) (point))))
+            (setf (romacs-agent-buffer parent) chat)
+            (set-window-buffer (selected-window) chat)
+            (romacs-agent-ui--flush-rows (list parent))
+            (should (timerp romacs-agent-ui--ticker))
+            (should (string-match-p "lane compiler" (overlay-get (buffer-local-value 'romacs-agent-ui--composer chat) 'before-string)))
+            (setq written 0)
+            (with-current-buffer chat (romacs-agent-ui--composer-update))
+            (should (= written 0))
+            (setf (romacs-agent-state child) 'idle)
+            ;; Its state moving reaches the parent as it did when it began.
+            (romacs-agent-ui--flush-rows (list parent))
+            (romacs-agent-ui--tick)
+            (should-not romacs-agent-ui--ticker)
+            (should-not (string-match-p "lane compiler"
+                                        (or (overlay-get (buffer-local-value 'romacs-agent-ui--composer chat) 'before-string) ""))))
+        (when (timerp romacs-agent-ui--ticker) (cancel-timer romacs-agent-ui--ticker))
+        (kill-buffer chat)))))
+
 (provide 'romacs-agent-live-rows-tests)
 ;;; romacs-agent-live-rows-tests.el ends here
