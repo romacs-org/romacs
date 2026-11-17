@@ -408,24 +408,50 @@ And a parent that loaded before the thread was read is stale again."
       (should (equal '(nil t) seen))
       (should-not (file-exists-p (jabber-db--intent-file))))))
 
+(defun jabber-test-mam-sync--defer (sql freshness &optional in-transaction)
+  "Run the worker's deferral of SQL on a clock of the test's own.
+FRESHNESS maps the clock's seconds since the call to whether the mark is
+fresh.  Return the seconds the worker waited, or nil when it never ran the
+statement.  Each clock reading advances it a hundredth of a second, and a
+worker still asking after ten thousand readings is an error, not a hang."
+  (let* ((db jabber-db--connection)
+         (jabber-db--in-transaction (and in-transaction db))
+         (now 1000.0) (start now) (ran nil) (asked 0)
+         (bound (lambda ()
+                  (when (> (setq asked (1+ asked)) 10000)
+                    (error "The worker waited past any patience")))))
+    (cl-letf (((symbol-function 'float-time)
+               (lambda (&rest _) (funcall bound) (setq now (+ now 0.01))))
+              ((symbol-function 'jabber-db--intent-fresh-p)
+               (lambda (_file) (funcall bound) (funcall freshness (- now start)))))
+      (jabber-db--defer-to-session (lambda (&rest _) (setq ran (- now start))) db sql))
+    ran))
+
 (ert-deftest jabber-test-mam-sync-worker-defers-to-fresh-intent ()
   "The worker waits while a fresh mark exists, at most its patience; a stale one not."
   (jabber-test-mam-sync--with-db
-    (let ((db jabber-db--connection)
-          (jabber-db-intent-patience 0.3)
-          (file (jabber-db--intent-file)))
-      (write-region "" nil file nil 'silent)
-      (let ((start (float-time)))
-        (jabber-db--defer-to-session #'ignore db "BEGIN IMMEDIATE")
-        (should (>= (- (float-time) start) 0.25)))
+    (let ((jabber-db-intent-patience 0.5))
+      ;; A mark that goes stale: it goes on then, before its patience.
+      (let ((waited (jabber-test-mam-sync--defer "BEGIN IMMEDIATE" (lambda (age) (< age 0.2)))))
+        (should (and waited (<= 0.2 waited) (< waited 0.25))))
+      ;; A mark that stays fresh: it goes on when its patience runs out.
+      (let ((waited (jabber-test-mam-sync--defer "BEGIN IMMEDIATE" #'always)))
+        (should (and waited (<= 0.5 waited) (< waited 0.55))))
       ;; Statements inside the worker's own transaction never wait.
-      (let ((start (float-time)) (jabber-db--in-transaction db))
-        (jabber-db--defer-to-session #'ignore db "INSERT INTO x VALUES (1)")
-        (should (< (- (float-time) start) 0.05)))
+      (should (equal 0.0 (jabber-test-mam-sync--defer "INSERT INTO x VALUES (1)" #'always t)))
+      ;; Nor does one with no fresh mark.
+      (should (< (jabber-test-mam-sync--defer "BEGIN IMMEDIATE" #'ignore) 0.05)))))
+
+(ert-deftest jabber-test-mam-sync-intent-mark-is-fresh-for-its-patience ()
+  "A mark is fresh while younger than the patience, and stale after."
+  (jabber-test-mam-sync--with-db
+    (let ((file (jabber-db--intent-file))
+          (jabber-db-intent-patience 5))
+      (should-not (jabber-db--intent-fresh-p file))
+      (write-region "" nil file nil 'silent)
+      (should (jabber-db--intent-fresh-p file))
       (set-file-times file (time-subtract nil 10))
-      (let ((start (float-time)))
-        (jabber-db--defer-to-session #'ignore db "BEGIN IMMEDIATE")
-        (should (< (- (float-time) start) 0.05)))
+      (should-not (jabber-db--intent-fresh-p file))
       (delete-file file))))
 
 (ert-deftest jabber-test-mam-sync-live-write-waits-a-bounded-time ()
