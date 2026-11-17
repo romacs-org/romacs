@@ -537,13 +537,20 @@ the same width, while the board shows one; else stop."
   "Draw the board, from one of its commands."
   (romacs-agent-board--render (current-buffer)))
 
+(defun romacs-agent-board--in (window)
+  "WINDOW's buffer when it is a board, else nil: a window that shows
+another buffer now runs the board's window hooks too."
+  (let ((buffer (window-buffer window)))
+    (and (provided-mode-derived-p (buffer-local-value 'major-mode buffer) 'romacs-agent-board-mode) buffer)))
+
 (defun romacs-agent-board--shown-in (window)
   "Draw the board anew as WINDOW shows it: it was not followed hidden."
-  (romacs-agent-board--render (window-buffer window)))
+  (when-let* ((buffer (romacs-agent-board--in window)))
+    (romacs-agent-board--render buffer)))
 
 (defun romacs-agent-board--resized (window)
   "Draw the board again when WINDOW, showing it, changed its width."
-  (let ((buffer (window-buffer window)))
+  (when-let* ((buffer (romacs-agent-board--in window)))
     (unless (eql (romacs-agent-board--columns buffer) (buffer-local-value 'romacs-agent-board--width buffer))
       (romacs-agent-board--render buffer))))
 

@@ -402,6 +402,20 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
                                start))))
           (kill-buffer "*romacs-agents*"))))))
 
+(ert-deftest romacs-agent-board-window-hooks-leave-another-buffer-alone ()
+  ;; A window that showed the board and now shows another buffer runs the
+  ;; board's window hooks: that buffer is never drawn into.
+  (romacs-agent-board-tests--with
+    (mk "a" "a" 'idle 10)
+    (save-window-excursion
+      (with-temp-buffer
+        (insert "the user's text")
+        (let ((other (current-buffer)))
+          (set-window-buffer (selected-window) other)
+          (romacs-agent-board--shown-in (selected-window))
+          (romacs-agent-board--resized (selected-window))
+          (should (equal (with-current-buffer other (buffer-string)) "the user's text")))))))
+
 (provide 'romacs-agent-board-tests)
 (ert-deftest romacs-agent-board-a-folded-project-shows-its-heading ()
   ;; Folded, a project is its row alone: how many threads and what they
