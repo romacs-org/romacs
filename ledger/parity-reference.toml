@@ -8,11 +8,12 @@
 # them checked *which* one.  A reference that VANISHED was caught; a reference
 # that CHANGED would have been scored in silence.
 #
-# WHAT IDENTIFIES THE BUILD. Surviving parity harnesses attest the running
-# release version through crates/romacs-parity-reference/src/lib.rs.
-# `pin-reference` records these fields when deliberately re-baselining.
-# GNU's dump fingerprint identifies the executable/dump pair; the digests bind
-# the pair to the deliberately built mirror revision below.
+# WHAT IDENTIFIES THE BUILD. tools/lib/gnu_oracle.py refuses any recording
+# GNU whose own emacs-repository-version is not mirror_commit, and
+# test/gnu/run.py holds the binary to executable_sha256. `gnu_oracle.py repin`
+# records these fields when deliberately re-baselining. GNU's dump fingerprint
+# identifies the executable/dump pair; the digests bind the pair to the
+# deliberately built mirror revision below.
 #
 # The legacy oracle harness is retired, and its mixed-vintage inline
 # expectations are no longer in the tree; this pin does NOT attest that any of
@@ -21,8 +22,10 @@
 # RE-BASELINING.  A rebuild of the GNU mirror is its own change with its own
 # re-baselining, never a side effect of a session.  To re-pin, run
 #
-#     cargo run -p romacs-parity-reference --bin pin-reference -- --emacs PATH --reason "..."
+#     python3 tools/lib/gnu_oracle.py repin --emacs PATH --reason "..."
 #
+# (--mirror-commit SHA when PATH is not in the mirror's clean checkout,
+# --build-time STAMP when the build records none, --dry-run to see the change)
 # which rewrites the keys below and appends to the log in this comment block.
 # Editing the keys by hand defeats the log; the command exists so that the
 # record cannot be forgotten.

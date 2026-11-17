@@ -3770,15 +3770,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-parity-reference"
-version = "0.0.20"
-dependencies = [
- "romacs-infra",
- "sha2",
- "tempfile",
-]
-
-[[package]]
 name = "romacs-record"
 version = "0.0.20"
 dependencies = [
