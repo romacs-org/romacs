@@ -230,13 +230,12 @@ pub(super) fn room(store: &Path) -> bool {
     free >= (size / 20).min(2 << 30)
 }
 
-/// STORE's lock, taken as KIND (`libc::LOCK_SH`, `LOCK_EX`, with
-/// `LOCK_NB` not to wait), held until the file is dropped.
-pub(super) fn lock(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
-    use std::os::fd::AsRawFd;
+/// STORE's lock, taken as HOW, held until the file is dropped; a `Try`
+/// lock held elsewhere is an error (`WouldBlock`).
+pub(super) fn lock(store: &Path, how: host::Flock) -> std::io::Result<std::fs::File> {
     let file = host::open_store_file(store.join("lock"), host::StoreOpen::Write { create: true, truncate: false })?;
-    if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
-        return Err(std::io::Error::last_os_error());
+    if !host::lock(&file, how)? {
+        return Err(std::io::ErrorKind::WouldBlock.into());
     }
     Ok(file)
 }
@@ -249,7 +248,7 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
     }
     let generation = generation(store);
     subdir(store)?;
-    let _lock = lock(store, libc::LOCK_SH)?;
+    let _lock = lock(store, host::Flock::Shared)?;
     subdir(&generation)?;
     let dir = generation.join(hex(key));
     subdir(&dir)?;
@@ -267,7 +266,7 @@ pub(super) fn publish(store: &Path, key: &[u8; 32], inputs: &[u8; 32], bytes: &[
 /// which no load waits for.
 pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
     use std::io::Write;
-    let Ok(_lock) = lock(store, libc::LOCK_SH | libc::LOCK_NB) else { return };
+    let Ok(_lock) = lock(store, host::Flock::TryShared) else { return };
     let log = generation(store).join("use.log");
     if let Ok(mut file) = host::open_store_file(&log, host::StoreOpen::Append) {
         let line = format!("{}\t{}\n", path.strip_prefix(generation(store)).unwrap_or(path).display(), source.display());
@@ -281,7 +280,7 @@ pub(super) fn note_use(store: &Path, path: &Path, source: &Path) {
 /// budget. Runs after a compile publishes, never inside a load, holding
 /// the store's lock alone.
 pub(super) fn prune(store: &Path, budget: u64, keep: &std::collections::HashSet<PathBuf>) -> std::io::Result<Vec<PathBuf>> {
-    let _lock = lock(store, libc::LOCK_EX)?;
+    let _lock = lock(store, host::Flock::Exclusive)?;
     let current = generation(store);
     let mut removed = vec![];
     // Every older generation: at most two are kept, the current and the one
