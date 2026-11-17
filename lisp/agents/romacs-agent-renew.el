@@ -171,16 +171,15 @@ cannot renew."
     (romacs-agent-renew--note-owed session)
     (romacs-agent--changed session)
     (run-at-time
-     0 nil #'romacs-agent-events-async
+     0 nil #'romacs-agent-renew--read
      session
-     (lambda (events)
+     (lambda (summary items)
        (when (eq (romacs-agent-renew--holder session) token)
          (romacs-agent-renew--with-note
-          session token events
+          session token summary
           (lambda (note source)
          (condition-case err
              (let* ((from (romacs-agent--native-id session))
-                    (items (romacs-agent-renew--items session events))
                     (brief (romacs-agent-handoff-brief
                             (if note (cons (list :role 'context :text (concat romacs-agent-renew--note-head note)) items)
                               items)
@@ -200,7 +199,40 @@ cannot renew."
                                                                "why" (or why :null) "brief" brief "summary" source
                                                                "context" (or (romacs-agent-context-used session) :null))))
            (error (funcall fail (error-message-string err))))))))
-     nil fail)))
+     fail)))
+
+(defun romacs-agent-renew--read (session then fail)
+  "Call THEN with what SESSION's renewal takes of its conversation: its
+harness's compaction summary since its last turn, or nil, and its brief's
+items (`romacs-agent-renew--items'); FAIL with why, should reading fail.
+Its records are read and replayed in a worker VM, to where they end now:
+however long its journal, the editor reads none of them."
+  (let ((future (condition-case err
+                    (isolate-spawn 'romacs-agent-renew--thread (romacs-agent-dir session) (romacs-agent--journal-end session)
+                                   :name "romacs-agent renew"
+                                   :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
+                                                           romacs-agent-renew)
+                                   :bindings (romacs-agent--fold-bindings))
+                  (error (funcall fail (error-message-string err)) nil))))
+    (when future
+      (isolate-on-done
+       future
+       (lambda (done)
+         (pcase (condition-case err (cons 'read (isolate-await done))
+                  (error (cons 'failed (error-message-string err))))
+           (`(read ,summary ,items) (funcall then summary items))
+           (`(failed . ,why) (funcall fail why))
+           (other (funcall fail (format "the worker answered %S" other)))))))))
+
+(defun romacs-agent-renew--thread (dir end)
+  "In a worker VM: what a renewal takes of the conversation of the session
+recorded in DIR, its records to place END: (SUMMARY ITEMS), as
+`romacs-agent-renew--read' gives them."
+  (let* ((romacs-agent-store-patience romacs-agent-store-patient)
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (session (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
+         (events (romacs-agent-events session end)))
+    (list (romacs-agent-renew--compaction events) (romacs-agent-renew--items session events))))
 
 (defun romacs-agent-renew--compaction (events)
   "The summary of the compaction its harness made since its last turn
@@ -211,44 +243,44 @@ ended, in EVENTS (`romacs-agent-events'), or nil."
                      (not (string-empty-p (string-trim (plist-get event :text)))))
            return (string-trim (plist-get event :text))))
 
-(defun romacs-agent-renew--with-note (session token events then)
+(defun romacs-agent-renew--with-note (session token summary then)
   "Call THEN with the note SESSION's brief leads with and where it came
 from (`compaction', `note' or `selection', with no note), once known:
-its harness's own compaction summary, newer than its last turn; else, as
+SUMMARY, its harness's own compaction summary newer than its last turn
+\(`romacs-agent-renew--compaction'); else, as
 `romacs-agent-renew-summary' says and with its harness there to ask, the
 note it writes in one more turn (Romacs's own: `romacs-agent--input');
 else none.  The turn failing, or its harness ending, gives none."
-  (let ((summary (romacs-agent-renew--compaction events)))
-    (cond
-     (summary (funcall then summary "compaction"))
-     ((not (and (eq romacs-agent-renew-summary 'note)
-                (romacs-agent--harness-live-p session) (romacs-agent--ready-p session)))
-      (funcall then nil "selection"))
-     (t
-      ;; Its own turn's end only: begun by the note's prompt read back.
-      (letrec ((asked nil)
-               (waiter (lambda (seen event)
-                         (cond ((not (eq (romacs-agent-renew--holder session) token))
-                                (remove-hook 'romacs-agent-event-functions waiter))
-                               ((not (eq seen session)))
-                               ((and (eq (plist-get event :type) 'input) (equal (plist-get event :own) "renew-note"))
-                                (setq asked t))
-                               ((and (eq (plist-get event :type) 'done)
-                                     (not (and asked (equal (romacs-agent-own-turn session) "renew-note")))))
-                               ((memq (plist-get event :type) '(done exit))
-                                (remove-hook 'romacs-agent-event-functions waiter)
-                                (let ((note (and (eq (plist-get event :type) 'done) (not (plist-get event :error))
-                                                 (stringp (plist-get event :text))
-                                                 (string-trim (plist-get event :text)))))
-                                  ;; After the event is folded: the journal is
-                                  ;; written to from the command loop.
-                                  (run-at-time 0 nil then (and note (not (string-empty-p note)) note)
-                                               (if (and note (not (string-empty-p note))) "note" "selection"))))))))
-        (add-hook 'romacs-agent-event-functions waiter)
-        (condition-case nil
-            (romacs-agent--input session romacs-agent-renew--note-prompt nil nil "renew-note")
-          (error (remove-hook 'romacs-agent-event-functions waiter)
-                 (funcall then nil "selection"))))))))
+  (cond
+   (summary (funcall then summary "compaction"))
+   ((not (and (eq romacs-agent-renew-summary 'note)
+              (romacs-agent--harness-live-p session) (romacs-agent--ready-p session)))
+    (funcall then nil "selection"))
+   (t
+    ;; Its own turn's end only: begun by the note's prompt read back.
+    (letrec ((asked nil)
+             (waiter (lambda (seen event)
+                       (cond ((not (eq (romacs-agent-renew--holder session) token))
+                              (remove-hook 'romacs-agent-event-functions waiter))
+                             ((not (eq seen session)))
+                             ((and (eq (plist-get event :type) 'input) (equal (plist-get event :own) "renew-note"))
+                              (setq asked t))
+                             ((and (eq (plist-get event :type) 'done)
+                                   (not (and asked (equal (romacs-agent-own-turn session) "renew-note")))))
+                             ((memq (plist-get event :type) '(done exit))
+                              (remove-hook 'romacs-agent-event-functions waiter)
+                              (let ((note (and (eq (plist-get event :type) 'done) (not (plist-get event :error))
+                                               (stringp (plist-get event :text))
+                                               (string-trim (plist-get event :text)))))
+                                ;; After the event is folded: the journal is
+                                ;; written to from the command loop.
+                                (run-at-time 0 nil then (and note (not (string-empty-p note)) note)
+                                             (if (and note (not (string-empty-p note))) "note" "selection"))))))))
+      (add-hook 'romacs-agent-event-functions waiter)
+      (condition-case nil
+          (romacs-agent--input session romacs-agent-renew--note-prompt nil nil "renew-note")
+        (error (remove-hook 'romacs-agent-event-functions waiter)
+               (funcall then nil "selection")))))))
 
 (defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
   "Sessions whose journaled renewal is being finished: once each.")

@@ -2060,12 +2060,13 @@ nothing that waits."
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     scratch))
 
-(defun romacs-agent-events (session)
+(defun romacs-agent-events (session &optional end)
   "SESSION's journal as the events it raised, in order, replayed on a
-copy (`romacs-agent--scratch'): SESSION is left as it is."
+copy (`romacs-agent--scratch'): SESSION is left as it is.  To place END
+\(`romacs-agent--journal-end'), when given."
   (let* ((scratch (romacs-agent--scratch session)) (events nil)
          (romacs-agent-event-functions (list (lambda (_ event) (push event events)))))
-    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)))
+    (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) nil end)
     (nreverse events)))
 
 (defconst romacs-agent--journal-slice (* 1024 1024)
@@ -2524,13 +2525,23 @@ supervisor may be starting again."
 
 (defun romacs-agent--caught-up-p (session)
   "Replay what SESSION's last supervisor journaled since it started, unseen
-here; non-nil when that ends with the harness's exit.  What the replay
-folded is kept, so the next start reads on from there."
+here; non-nil when that ends with the harness's exit.  While a launch of
+SESSION waits for its supervisor, only an exit after a `run' note past
+what it had seen as it launched counts: an earlier run's exit is no end
+of the one launched.
+What the replay folded is kept, so the next start reads on from there."
   (when (romacs-agent-journal-start session)
-    (let ((ended nil))
+    (let* ((launching (gethash (romacs-agent-id session) romacs-agent--launched))
+           ;; Its run's records follow the seq seen as it launched, however
+           ;; many tries have read some of them since.
+           (seen (if (integerp launching) launching (romacs-agent-seq session)))
+           (ran nil) (ended nil))
       (romacs-agent--read-journal
        session (lambda (record)
-                 (unless (eq (gethash "exit" record :absent) :absent) (setq ended t))
+                 (cond ((and launching (romacs-agent--note-p record "run") (> (or (gethash "seq" record) 0) seen))
+                        (setq ran t ended nil))
+                       ((and (not (eq (gethash "exit" record :absent) :absent)) (or ran (not launching)))
+                        (setq ended t)))
                  (romacs-agent--record session record))
        (romacs-agent-journal-start session))
       (romacs-agent--keep-soon session)
@@ -3275,7 +3286,8 @@ it go."
 
 (defvar romacs-agent--launched (make-hash-table :test #'equal)
   "The ids of the sessions whose supervisor this server launched and has
-not attached to, or seen fail, yet.")
+not attached to, or seen fail, yet, each to the seq it had seen as it
+launched: the launched run's records come after it.")
 
 (defun romacs-agent--supervisor-may-run-p (session)
   "Whether a supervisor of SESSION may be running, not attached here: one
@@ -3682,7 +3694,7 @@ to it."
         (apply #'call-process "setsid" nil 0 nil "--fork" command))
       (setf (romacs-agent-unit session) nil))
     ;; It numbers its records from now on: notes wait for it to attach.
-    (puthash (romacs-agent-id session) t romacs-agent--launched)
+    (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
     (romacs-agent--manifest session argv)))
 
 (defun romacs-agent--project-default ()

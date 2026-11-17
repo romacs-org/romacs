@@ -359,3 +359,29 @@ next resume, and its session says so."
          (funcall placed))
        (should-not (gethash session romacs-agent-renew--finishing))
        (should (cl-some (lambda (text) (string-match-p "Renewal not finished" text)) said))))))
+
+(ert-deftest romacs-agent-launch-an-earlier-runs-exit-is-no-end-of-a-launch ()
+  "A launched supervisor not yet listening is waited for, though the
+records read on hold the exit of the run before it: only an exit after
+the launched run's own `run' note ends it."
+  (romacs-agent-launch-tests--resuming
+   (lambda (session _placed _fire _due)
+     (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+           (romacs-agent--launched (make-hash-table :test #'equal)))
+       (cl-flet ((write (&rest records)
+                   (dolist (record records)
+                     (write-region (concat (romacs-agent--json record) "\n") nil journal t 'silent))))
+         (write (romacs-mcp--object "seq" 1 "t" 1.0 "note" (romacs-mcp--object "type" "run"))
+                (romacs-mcp--object "seq" 2 "t" 2.0 "exit" 0))
+         (setf (romacs-agent-journal-start session) 0)
+         ;; No launch waits: its last run ended.
+         (should (romacs-agent--caught-up-p session))
+         ;; A launch waits: that exit was the run before it.
+         (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
+         (should-not (romacs-agent--caught-up-p session))
+         ;; The launched run began, read by one try; it ended before the
+         ;; next one attached.
+         (write (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "run")))
+         (should-not (romacs-agent--caught-up-p session))
+         (write (romacs-mcp--object "seq" 4 "t" 4.0 "exit" 0))
+         (should (romacs-agent--caught-up-p session)))))))

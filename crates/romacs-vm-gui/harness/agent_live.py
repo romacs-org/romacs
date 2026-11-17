@@ -16,6 +16,9 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              session is attached again, the turn completes in the journal
              and the chat, and the harness pid is the same; the harness's
              next call meets the new instance and retries once.
+  renew      a session renewed by hand: its thread read in a worker VM, a
+             new conversation's run (--session-id), its next message briefed;
+             a resume whose launch fails ends the session failed, saying why.
   outcome    a call running when the server is killed is answered `outcome
              unknown' and romacs_call_outcome says `unknown', and it ran
              once; a call made while no server listens is `not executed'
@@ -379,6 +382,86 @@ def survive(args, base):
         resumed = [e for e in a.logged() if 'started' in e][-1]
         result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
+        return result
+    finally:
+        a.close()
+
+
+def renew(args, base):
+    """A session renewed by hand: its thread is read in a worker VM, its
+    harness runs anew on a new conversation (--session-id, not --resume),
+    and its next message carries the brief.  A resume whose launch fails
+    ends the session failed, saying why, and a resume after runs it."""
+    a = Agents(args, base, 'rn')
+    try:
+        a.up()
+        sid = a.start('say ready')
+        a.idle(sid)
+        a.send(sid, 'say before')
+        a.idle(sid)
+        # Its only session: a renewed run is logged under its new conversation.
+        runs = lambda: [e for e in a.logged() if 'started' in e]
+        before = len(runs())
+        # The editor's readers of a whole thread, and the worker VMs given
+        # that read, while the brief is made (a resume's catch-up reads on
+        # only from the last record seen).
+        a.eval("(progn (defvar rn-reads 0) (defvar rn-workers 0) "
+               "(dolist (f '(romacs-agent-events romacs-agent--journal-pager romacs-agent-events-async)) "
+               "(advice-add f :before (lambda (&rest _) (setq rn-reads (1+ rn-reads))) '((name . rn)))) "
+               "(advice-add 'isolate-spawn :before (lambda (f &rest _) (when (eq f 'romacs-agent-renew--thread) "
+               "(setq rn-workers (1+ rn-workers)))) '((name . rn))) t)")
+        a.eval(f'(progn (setq romacs-agent-renew-summary (quote selection)) (defvar rn-outcome nil) '
+               f'(romacs-agent-renew {a.s(sid)} "harness" (lambda (r) (setq rn-outcome r))) t)')
+        until(lambda: a.eval('(car rn-outcome)') in (':done', ':error'), 60, 'renewed')
+        outcome = a.eval('(prin1-to-string rn-outcome)')
+        main_reads, workers = int(a.eval('rn-reads')), int(a.eval('rn-workers'))
+        a.eval("(progn (dolist (f '(romacs-agent-events romacs-agent--journal-pager romacs-agent-events-async isolate-spawn)) "
+               "(advice-remove f 'rn)) t)")
+        a.until(sid, lambda: len(runs()) > before, 60, 'a run after the renewal')
+        native = a.eval(f'(romacs-agent--native-id {a.s(sid)})').strip('"')
+        argv = runs()[-1]['argv']
+        a.idle(sid, 60)
+        a.send(sid, 'say after')
+        a.idle(sid, 60)
+        briefed = [r for r in a.journal(sid) if isinstance(r.get('in'), dict) and r['in'].get('romacsBrief')]
+        result = {'outcome': outcome, 'native': native, 'new_conversation': native != sid,
+                  'session_id': argv[argv.index('--session-id') + 1] if '--session-id' in argv else None,
+                  'resumed_old': '--resume' in argv, 'briefed': len(briefed), 'main_reads': main_reads, 'workers': workers}
+        # Its worker failing (its manifest gone): the renewal fails, said
+        # so, and lets the session go, at once.
+        manifest = a.home / '.local/state/romacs/agents' / sid / 'manifest.json'
+        manifest.rename(manifest.with_suffix('.aside'))
+        # Asked once it is free again (its last turn's end settles first).
+        until(lambda: a.eval(f'(condition-case nil (progn (setq rn-outcome nil) (romacs-agent-renew {a.s(sid)} "harness" '
+                             '(lambda (r) (setq rn-outcome r))) t) (user-error nil))') == 't', 30, 'renewal asked again')
+        try:
+            until(lambda: a.eval('(car rn-outcome)') in (':done', ':error'), 30, 'a failed renewal answered')
+        finally:
+            manifest.with_suffix('.aside').rename(manifest)
+        result['worker_failed'] = a.eval('(car rn-outcome)')
+        result['let_go'] = a.eval(f'(romacs-agent--held-p {a.s(sid)})')
+        # A resume whose launch fails ends failed, saying why; the next runs.
+        a.eval(f'(romacs-agent-stop {a.s(sid)})')
+        until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'session ended')
+        a.eval("(advice-add 'romacs-agent--argv :override (lambda (&rest _) (error \"forced failure\")) "
+               "'((name . rn-forced)))")
+        failed = a.eval(f'(condition-case err (progn (romacs-agent-resume {a.s(sid)}) nil) (error (error-message-string err)))')
+        result['failed_state'] = a.state(sid)
+        result['failed_said'] = a.eval(f'(romacs-agent-reply {a.s(sid)})')
+        a.eval("(advice-remove 'romacs-agent--argv 'rn-forced)")
+        runs_failed = len(runs())
+        a.eval(f'(romacs-agent-resume {a.s(sid)})')
+        a.until(sid, lambda: len(runs()) > runs_failed, 60, 'a run after the failed resume')
+        a.idle(sid, 60)
+        result['raised'] = failed
+        logged = a.eval('(progn (romacs-usage-log-flush) romacs-usage-log-file)')
+        usage = Path(parity_live.read_sexp(logged)) if logged not in ('nil', '') else None
+        result['usage_logged'] = bool(usage and usage.exists() and 'agent-unstarted' in usage.read_text())
+        result['ok'] = (':done' in outcome and main_reads == 0 and workers == 1 and result['new_conversation'] and result['session_id'] == native
+                        and not result['resumed_old'] and result['briefed'] == 1
+                        and 'forced failure' in (failed or '') and result['failed_state'] == 'unstarted'
+                        and 'forced failure' in result['failed_said'] and result['usage_logged']
+                        and result['worker_failed'] == ':error' and result['let_go'] == 'nil')
         return result
     finally:
         a.close()
@@ -3390,7 +3473,7 @@ def history_real(args, base):
 
 
 WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
-             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
+             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
              'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
@@ -3418,7 +3501,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     results = {}
     for name in args.workflow or ['host', 'sockets', 'reap', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
+                                  'outcome', 'budget', 'deadline', 'probe', 'select', 'renew']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
