@@ -534,3 +534,35 @@ fn a_binding_across_startups_end_stays_tracked_in_backtraces() {
     assert_eq!(seen, "\"(((tracking-a . new)) ((transient-mark-mode . outer) (tracking-a . \\\"/outer/\\\") (tracking-a . inner)))\"");
     assert_eq!(seen, off.eval_source(shown).and_then(|v| v.display()).unwrap());
 }
+
+/// A tracked variable that is buffer-local reads and writes as without
+/// the tracking in two buffers: a buffer's own local, the default the
+/// other sees, a `let' of each, and `buffer-local-value' across them.
+#[test]
+fn a_tracked_buffer_local_reads_alike_in_two_buffers() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables '(tracking-local))
+(defvar-local tracking-local nil)
+(put 'tracking-local 'standard-value (list \"std\"))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (set-default 'tracking-local (car (get 'tracking-local 'standard-value)))
+           (setq custom-delayed-init-variables t))
+  (romacs--startup-phase nil))
+";
+    let probes = "\
+(setq ta (get-buffer-create \"tracked-a\") tb (get-buffer-create \"tracked-b\"))
+(setq r1 (save-current-buffer (set-buffer ta) (setq tracking-local 'in-a) (list tracking-local (local-variable-p 'tracking-local))))
+(setq r2 (save-current-buffer (set-buffer tb) (list tracking-local (local-variable-p 'tracking-local) (buffer-local-value 'tracking-local ta))))
+(setq r3 (save-current-buffer (set-buffer ta) (list (let ((tracking-local 'let-a)) (list tracking-local (buffer-local-value 'tracking-local tb))) tracking-local)))
+(setq r4 (save-current-buffer (set-buffer tb) (list (let ((tracking-local 'let-b)) (list tracking-local (default-value 'tracking-local) (buffer-local-value 'tracking-local ta))) tracking-local)))
+";
+    let show = "(list r1 r2 r3 r4 (default-value 'tracking-local))";
+    let (mut off, none) = run_with("local-off", bootstrap, probes, false);
+    assert!(none.is_none());
+    let (mut on, _) = run_with("local-on", bootstrap, probes, true);
+    let off = off.eval_source(show).and_then(|v| v.display()).unwrap();
+    let on = on.eval_source(show).and_then(|v| v.display()).unwrap();
+    assert_eq!(off, "((in-a t) (\"std\" nil in-a) ((let-a \"std\") in-a) ((let-b let-b in-a) \"std\") \"std\")");
+    assert_eq!(on, off);
+}
