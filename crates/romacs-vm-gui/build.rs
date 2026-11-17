@@ -12,7 +12,7 @@
 //! `Cargo.lock` and the root `Cargo.toml`, and the configuration a build
 //! takes from cargo: profile, target, features, cfg, `RUSTFLAGS`, the
 //! compiler's version and the environment native builds read (`CC`,
-//! `CFLAGS`, the bundled SQLite's `SQLITE_*`). The libraries the process loads are not known here:
+//! `CFLAGS`, the bundled `SQLite`'s `SQLITE_*`). The libraries the process loads are not known here:
 //! the embedder hashes them at run time, as the world store does.
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ fn skipped(path: &Path) -> bool {
     }) || name.ends_with("_tests.rs")
         || name.ends_with("_test.rs")
         || name == "tests.rs"
-        || name.ends_with(".md")
+        || path.extension().is_some_and(|e| e == "md")
 }
 
 fn files(workspace: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
@@ -78,10 +78,10 @@ fn named_by_build_script(workspace: &Path, source: &Path, out: &mut Vec<PathBuf>
 }
 
 /// Environment variables the native parts of a build read (cc, pkg-config,
-/// the bundled SQLite's compile-time settings): what changes the code they
+/// the bundled `SQLite`'s compile-time settings): what changes the code they
 /// make without a file changing.
 /// Each is also a rerun trigger; the prefixes are hashed when present, and
-/// the names among them the bundled SQLite's build reads are listed here so
+/// the names among them the bundled `SQLite`'s build reads are listed here so
 /// a change reruns this script.
 const NATIVE_ENV: &[&str] = &["CC", "CXX", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "PKG_CONFIG_PATH",
     "PKG_CONFIG_LIBDIR", "LIBSQLITE3_FLAGS", "LIBSQLITE3_SYS_USE_PKG_CONFIG", "SQLITE_MAX_VARIABLE_NUMBER",
@@ -164,6 +164,10 @@ fn main() {
     let rustc = std::process::Command::new(env::var_os("RUSTC").unwrap()).arg("-vV").output().unwrap();
     assert!(rustc.status.success());
     hash.update(rustc.stdout);
-    let id: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let id = hash.finalize().iter().fold(String::new(), |mut id, b| {
+        use std::fmt::Write;
+        let _ = write!(id, "{b:02x}");
+        id
+    });
     println!("cargo:rustc-env=ROMACS_BUILD_ID={id}");
 }

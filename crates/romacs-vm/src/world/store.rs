@@ -279,7 +279,11 @@ fn files_digest(manifest: &Json, roots: &[PathBuf]) -> Option<String> {
 }
 
 /// `libraries_digest` as hex: the shared libraries this process loaded,
-/// by content, not the executable. An error when one cannot be identified.
+/// by content, not the executable.
+///
+/// # Errors
+///
+/// Why a loaded library could not be identified.
 pub fn libraries_identity() -> Result<String, String> {
     libraries_digest().map(|digest| hex(&digest))
 }

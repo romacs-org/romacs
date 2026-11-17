@@ -32,10 +32,10 @@ pub(super) fn generation(store: &Path) -> PathBuf {
     store.join(&hex(&Sha256::digest(FORMAT.as_bytes()))[..16])
 }
 
-/// The key of SOURCE (its resolved path, `rooted' under ROOT, and content
-/// DIGEST) compiled in the environment ENV. `load-path' is not keyed: the
+/// The key of SOURCE (its resolved path, `rooted` under ROOT, and content
+/// DIGEST) compiled in the environment ENV. `load-path` is not keyed: the
 /// compile's library resolutions are observed inputs, checked on the
-/// `load-path' of the load.
+/// `load-path` of the load.
 pub(super) fn key(env: &str, root: Option<&Path>, source: &Path, digest: &[u8; 32]) -> [u8; 32] {
     let mut hash = Sha256::new();
     hash.update(FORMAT.as_bytes());
@@ -52,7 +52,7 @@ pub(super) fn key(env: &str, root: Option<&Path>, source: &Path, digest: &[u8; 3
 const ROOT: char = '\0';
 
 /// PATH as an artifact names it: under ROOT, the installation's tree,
-/// relative to it behind `ROOT' (`\0/lisp/subr.el`), so a copy of the tree
+/// relative to it behind `ROOT` (`\0/lisp/subr.el`), so a copy of the tree
 /// elsewhere names it alike; any other file by its path, a user's package
 /// as a library of the tree by one rule.
 pub(super) fn rooted_path(root: Option<&Path>, path: &Path) -> String {
@@ -63,7 +63,7 @@ pub(super) fn rooted_path(root: Option<&Path>, path: &Path) -> String {
 }
 
 /// RECORD, an observed input, with every string naming a file under ROOT
-/// `rooted_path'ed: what an artifact keeps, so its inputs, and the name of
+/// `rooted_path`ed: what an artifact keeps, so its inputs, and the name of
 /// its inputs file, are the same wherever the tree was.
 pub(super) fn rooted(record: &Json, root: Option<&Path>) -> Json {
     let Some(root) = root else { return record.clone() };
@@ -74,7 +74,7 @@ pub(super) fn rooted(record: &Json, root: Option<&Path>) -> Json {
     })
 }
 
-/// RECORD as `rooted' kept it, with ROOT, this process's tree, put back:
+/// RECORD as `rooted` kept it, with ROOT, this process's tree, put back:
 /// the record a check replays here.
 pub(super) fn unrooted(record: &Json, root: Option<&Path>) -> Json {
     let Some(root) = root else { return record.clone() };
@@ -87,7 +87,7 @@ pub(super) fn unrooted(record: &Json, root: Option<&Path>) -> Json {
 /// path: a constant a compile captured from the
 /// tree (a file name), which a copy of the tree elsewhere must not see. None
 /// when none does, so the artifact serves any copy. Kept as written, never
-/// `rooted'.
+/// `rooted`.
 pub(super) fn root_record<'a>(root: Option<&Path>, mut captured: impl Iterator<Item = &'a [u8]>) -> Option<Json> {
     let root = root?;
     let name = root.display().to_string();
