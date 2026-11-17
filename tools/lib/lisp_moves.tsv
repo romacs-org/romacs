@@ -92,7 +92,6 @@ rule	romacs-treesit.el	lisp/
 rule	romacs-truncate.el	lisp/ui/
 rule	romacs-unidata.el	lisp/international/
 rule	romacs-usage-log.el	lisp/session/
-rule	romacs-video.el	lisp/graphics/
 rule	romacs-workspace-completion.el	lisp/completion/
 rule	warm-restart.el	lisp/session/
 rule	markdown-mode.el	lisp/textmodes/

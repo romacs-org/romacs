@@ -10,7 +10,6 @@
 
 Full covers surviving workspace test targets with one feature resolution.
 All workspace suites, including VM2 oracle tests, remain included.
-Linux enables display-runtime/video.
 A gate-owned nextest config avoids retired editor filters and setup scripts.
 VM2 and support tests run beside a disjoint display suite. No editor binary,
 compiled Lisp runtime, bootstrap image or bytecode overlay is provisioned.
@@ -74,8 +73,7 @@ SHORT = pathlib.Path(os.environ.get('ROMACS_GATE_SCRATCH', HOME / '.cache/ng'))
 DISPLAY_PACKAGES = {
     'romacs-display-runtime', 'romacs-renderer-wgpu',
     'romacs-font', 'romacs-face', 'romacs-gui-oracle', 'romacs-display-protocol',
-    'romacs-font-materializer', 'romacs-test-fonts', 'romacs-video',
-    'romacs-video-model', 'romacs-layout-input',
+    'romacs-font-materializer', 'romacs-test-fonts', 'romacs-layout-input',
     'romacs-layout', 'romacs-vm-gui',
 }
 GATE_PROFILE = ['--config', 'profile.gate.inherits="release"', '--config', 'profile.gate.lto="off"',
@@ -537,12 +535,9 @@ def build_and_run(src, run_dir, expr, threads, run, t0, suites, repeat=1):
         folded = folded_tests(src)
         targets = test_targets(json.loads((run_dir / 'cargo-metadata.json').read_text()),
                                {p for packages in suites.values() for p in packages}, folded)
-        features = (['--features', 'romacs-display-runtime/video']
-                    if sys.platform == 'linux' and 'romacs-display-runtime' in suites.get('display', [])
-                    else [])
         subject_tool = src / 'test/gnu/tools/gate_vacuity.py'
         subject_source = out(sys.executable, '-B', str(subject_tool), 'source', cwd=src, env=env(src))
-        build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *targets, *features,
+        build_command = [*nextest, 'list', *config_flags, '--cargo-profile', 'gate', *flags, *pkgs, *targets,
                          '--list-type', 'binaries-only', '--message-format', 'json']
         with open(run_dir / 'all-binaries.json', 'w') as f:
             rc = subprocess.call(build_command, stdout=f, env=env(src), cwd=src)
