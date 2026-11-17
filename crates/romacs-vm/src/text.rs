@@ -1493,9 +1493,13 @@ impl TextBody {
 }
 
 #[cfg(test)]
+#[path = "text_contract.rs"]
+mod contract;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use romacs_coordinate_contract::{self as contract, *};
+    use super::contract::{self, *};
     #[test]
     fn modification_tracks_edits_noops_failures_and_representation_changes() {
         let mut text = crate::text::Text::new(b"").unwrap();
@@ -1611,9 +1615,6 @@ mod tests {
             b: &[u8],
         ) -> std::result::Result<(), InvalidPosition> {
             bad(Text::replace(self, r, b))
-        }
-        fn set_mode(&mut self, m: Mode) {
-            assert_eq!(m, Mode::Multibyte, "text cannot reinterpret bytes")
         }
     }
     impl RestrictedCoordinates for Text {
