@@ -165,6 +165,7 @@ mod window;
 mod fontsets;
 mod frame;
 mod hash;
+mod local_vars;
 mod intervals;
 mod properties;
 pub mod text;

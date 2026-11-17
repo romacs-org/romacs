@@ -37,6 +37,7 @@
 use super::*;
 use crate::prim::Fault;
 use crate::world::Access;
+use crate::local_vars::LocalVars;
 
 /// GNU `Lisp_Fwd` kinds (lisp.h). The payload indexes the matching vector
 /// of [`Forwarded`]. `Lisp_Fwd_Kboard_Obj` is not modelled (no variable the
@@ -1038,9 +1039,10 @@ impl Forwarded {
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
 /// local here": the buffer sees the default. Beside them, the visited
 /// file's modification time, identity and truename bytes, the mark marker,
-/// and the labeled restrictions (`prim/leaf/labeled_restrictions.rs`).
+/// the labeled restrictions (`prim/leaf/labeled_restrictions.rs`), and the
+/// buffer's Lisp locals (`local_vars.rs`).
 #[derive(Clone, Default, romacs_snapshot::Snapshot)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>);
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>, LocalVars);
 impl PerBuffer {
     /// How many per-buffer variables it has a slot for, each at its
     /// forwarded place (`Fwd::Buffer`).
@@ -1066,6 +1068,9 @@ pub(crate) fn file_identity(path: impl AsRef<std::path::Path>) -> Option<(u64, u
 
 impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
+    /// Its Lisp locals.
+    pub(crate) fn locals(&self) -> &LocalVars { &self.6 }
+    pub(crate) fn locals_mut(&mut self) -> &mut LocalVars { &mut self.6 }
     /// Forget the visited file's identity and modification time, as a
     /// buffer that visits nothing has them.
     pub(crate) fn reset_visit(&mut self) {
@@ -1099,11 +1104,13 @@ impl PerBuffer {
         }
         self.0[i] = Some(value);
     }
-    /// Forget every binding but those at KEPT, keeping the visit metadata.
+    /// Forget every binding but those at KEPT, and every Lisp local,
+    /// keeping the visit metadata.
     pub(crate) fn retain_locals(&mut self, kept: &[u16]) {
         for (i, value) in self.0.iter_mut().enumerate() {
             if !kept.contains(&(i as u16)) { *value = None; }
         }
+        self.6.clear();
     }
     /// Forget one binding without disturbing the other values or visit metadata.
     /// Absence is the local flag: removing the value also removes that flag.
@@ -1116,6 +1123,7 @@ impl PerBuffer {
     pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
         if let Some(list) = &mut self.5 { visit(list); }
+        self.6.visit_values(visit);
         let skip = skip.map(usize::from);
         for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
             if let Some(v) = v { visit(v); }
