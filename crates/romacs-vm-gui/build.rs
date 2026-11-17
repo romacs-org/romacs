@@ -93,17 +93,18 @@ const NATIVE_ENV_PREFIXES: &[&str] = &["SQLITE_", "LIBSQLITE3", "TREE_SITTER"];
 /// `TARGET_CFLAGS`, `HOST_CFLAGS`): every form is hashed and watched.
 const CC_ENV: &[&str] = &["CC", "CXX", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "ARFLAGS", "CRATE_CC_NO_DEFAULTS"];
 
-/// Every variable name `CC_ENV` reads for TARGET and HOST.
+/// Every variable name `CC_ENV` reads for TARGET and HOST. One literal
+/// selector of name templates, the shape `tools/gate` reads to pass the same
+/// variables through to a gated build.
 fn cc_variants(target: &str, host: &str) -> Vec<String> {
     let mut names = Vec::new();
-    for base in CC_ENV {
-        names.push((*base).to_owned());
+    for &base in CC_ENV {
         for triple in [target, host] {
-            names.push(format!("{base}_{triple}"));
-            names.push(format!("{base}_{}", triple.replace('-', "_")));
+            let under = triple.replace('-', "_");
+            for name in [base.to_owned(), format!("{base}_{triple}"), format!("{base}_{under}"), format!("HOST_{base}"), format!("TARGET_{base}")] {
+                names.push(name);
+            }
         }
-        names.push(format!("HOST_{base}"));
-        names.push(format!("TARGET_{base}"));
     }
     names.sort();
     names.dedup();
@@ -155,10 +156,8 @@ fn main() {
         hash.update(value.as_bytes());
         hash.update([0]);
     }
-    for name in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC"].iter().chain(NATIVE_ENV) {
-        println!("cargo:rerun-if-env-changed={name}");
-    }
-    for name in &cc {
+    let watched = ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC"].iter().chain(NATIVE_ENV).map(|n| (*n).to_owned()).chain(cc);
+    for name in watched {
         println!("cargo:rerun-if-env-changed={name}");
     }
     let rustc = std::process::Command::new(env::var_os("RUSTC").unwrap()).arg("-vV").output().unwrap();
