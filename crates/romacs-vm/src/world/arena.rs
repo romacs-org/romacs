@@ -55,23 +55,12 @@
 //! own, outside both arenas; a fork that thread asks to be lazy copies no
 //! page-table entry of them (`start_heap_file`).
 use romacs_allocator::file_heap;
+use map::{ALIGN, BUILD, FIRST, WINDOW};
+mod map;
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
-/// Where an arena may start: a GiB-aligned address in this window, far from
-/// the executable, its heap, the libraries and the stack. Builders' arenas,
-/// so images, start in BUILD; a process's first arena starts in FIRST, the
-/// window's top eighth. Both are above the window's lower part, where a
-/// process with an unlimited stack maps its libraries (bottom-up from
-/// 0x1554_0000_0000 or so, a sixth of the address space, plus up to a TiB
-/// of randomization; see the module documentation). The window is
-/// reserved a CHUNK at a time.
-const WINDOW: (usize, usize) = (0x1000_0000_0000, 0x5000_0000_0000);
-const BUILD: (usize, usize) = (0x2800_0000_0000, 0x4800_0000_0000);
-const FIRST: (usize, usize) = (0x4800_0000_0000, WINDOW.1);
-const CHUNK: usize = 1 << 40;
-const ALIGN: usize = 1 << 30;
 /// The most an arena reserves. Pages are committed only as they are
 /// touched; under an address-space limit an arena reserves a quarter of it,
 /// as a process may hold two (`adopt`).
@@ -148,9 +137,6 @@ static RESTORE: AtomicU8 = AtomicU8::new(Restore::None as u8);
 /// What became of the builder's executable range in the adopting process
 /// (`Guard`).
 static GUARD: AtomicU8 = AtomicU8::new(Guard::None as u8);
-/// The chunks of the window this process reserved at its first allocation
-/// (`reserve_window`): bit N for the Nth CHUNK from the window's start.
-static RESERVED: AtomicU64 = AtomicU64::new(0);
 /// What refused the image's range (`Restore::Map`): the step (an index in
 /// STEPS) and the error; and whether the range was within the reservation.
 static MAP_STEP: AtomicU8 = AtomicU8::new(0);
@@ -165,10 +151,47 @@ const PLATFORM: romacs_allocator::PlatformAllocator = romacs_allocator::PLATFORM
 /// Whether the file heap this process asked for started (`start_heap_file`); unset when it asked for none.
 static HEAP_FILE: std::sync::OnceLock<Result<(), file_heap::Refused>> = std::sync::OnceLock::new();
 
-/// Where the arena allocations come from starts, once it has.
-static BASE: AtomicUsize = AtomicUsize::new(0);
-/// Where the process's first arena starts, once an image replaced it.
-static FORMER: AtomicUsize = AtomicUsize::new(0);
+/// An arena's range, published once: its reserve is stored before its
+/// base, so a reader that sees the base (Acquire) sees the reserve.
+struct Slot {
+    base: AtomicUsize,
+    reserve: AtomicUsize,
+}
+
+impl Slot {
+    const fn new() -> Self {
+        Slot { base: AtomicUsize::new(0), reserve: AtomicUsize::new(0) }
+    }
+
+    /// (base, reserve), once published.
+    fn get(&self) -> Option<(usize, usize)> {
+        let base = self.base.load(Ordering::Acquire);
+        (base != 0).then(|| (base, self.reserve.load(Ordering::Relaxed)))
+    }
+
+    /// Publish the arena at BASE, RESERVE bytes, which is mapped read-write
+    /// and stays mapped for the process's life. Once, under the lock.
+    fn publish(&self, base: usize, reserve: usize) {
+        self.reserve.store(reserve, Ordering::Relaxed);
+        self.base.store(base, Ordering::Release);
+    }
+
+    /// Whether AT lies in this arena.
+    fn holds(&self, at: usize) -> bool {
+        self.get().is_some_and(|(base, reserve)| (base..base + reserve).contains(&at))
+    }
+}
+
+/// The process's first arena, once it started.
+static FIRST_ARENA: Slot = Slot::new();
+/// The image this process adopted, once it did: the arena it allocates
+/// from then on, in place of the first.
+static IMAGE_ARENA: Slot = Slot::new();
+
+/// The arena allocations come from: the image, once one is adopted.
+fn current() -> &'static Slot {
+    if IMAGE_ARENA.get().is_some() { &IMAGE_ARENA } else { &FIRST_ARENA }
+}
 /// A builder's arena is a shared mapping of this unlinked file, and an
 /// image is copied from the file (`write_image`); unset elsewhere.
 static BACKING: std::sync::OnceLock<OwnedFd> = std::sync::OnceLock::new();
@@ -198,24 +221,39 @@ pub enum Restore {
 
 pub struct Arena;
 
-fn base() -> usize {
-    BASE.load(Ordering::Relaxed)
-}
+/// The allocator's lock, held while this lives. One spin lock serializes
+/// the allocator; whoever holds it may view an arena's state (`heap`).
+struct Locked(());
 
-fn header() -> *mut Header {
-    base() as *mut Header
-}
+impl Locked {
+    fn take() -> Self {
+        let mut spins = 0u32;
+        while LOCK.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            spins += 1;
+            if spins < 64 { std::hint::spin_loop() } else { std::thread::yield_now() }
+        }
+        Locked(())
+    }
 
-fn lock() {
-    let mut spins = 0u32;
-    while LOCK.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-        spins += 1;
-        if spins < 64 { std::hint::spin_loop() } else { std::thread::yield_now() }
+    /// The arena SLOT holds, once published: its header and the words of
+    /// its blocks, for as long as this borrow of the lock lasts.
+    fn heap(&mut self, slot: &Slot) -> Option<Heap<'_>> {
+        let (base, reserve) = slot.get()?;
+        // UNSAFE(an arena is memory this module maps at an address it chooses; no type owns it)
+        // SAFETY: a slot publishes only an arena mapped read-write for
+        // RESERVE bytes from BASE, which stays mapped for the process's life,
+        // with its header at BASE, initialized when it started or by the
+        // image it maps. The lock, which SELF holds and lends only through
+        // this borrow, makes this the header's one reference.
+        let header = unsafe { &mut *(base as *mut Header) };
+        Some(Heap { header, low: base + HEADER_BYTES, high: base + reserve })
     }
 }
 
-fn unlock() {
-    LOCK.store(false, Ordering::Release);
+impl Drop for Locked {
+    fn drop(&mut self) {
+        LOCK.store(false, Ordering::Release);
+    }
 }
 
 /// FORK, a fork(2), with the allocator's lock held, and the lock released
@@ -223,10 +261,90 @@ fn unlock() {
 /// alone, so a lock another thread held at the fork would stay held there.
 /// FORK allocates nothing.
 pub fn across_fork<T>(fork: impl FnOnce() -> T) -> T {
-    lock();
+    let locked = Locked::take();
     let forked = fork();
-    unlock();
+    drop(locked);
     forked
+}
+
+/// The bytes of an arena its header's pages take.
+const HEADER_BYTES: usize = size_of::<Header>().next_multiple_of(PAGE);
+
+/// One arena's state, under the lock (`Locked::heap`): its header, and the
+/// words this module keeps in its free blocks and free runs.
+///
+/// The words are written only by the free-list code below, which writes a
+/// free block's first word and a free run's head and nothing a caller holds:
+/// within this module, it keeps that invariant. Every access is checked to
+/// lie in the arena past its header, and the process aborts otherwise: a
+/// panic would allocate under the lock.
+struct Heap<'l> {
+    header: &'l mut Header,
+    low: usize,
+    high: usize,
+}
+
+impl std::ops::Deref for Heap<'_> {
+    type Target = Header;
+    fn deref(&self) -> &Header {
+        self.header
+    }
+}
+
+impl std::ops::DerefMut for Heap<'_> {
+    fn deref_mut(&mut self) -> &mut Header {
+        self.header
+    }
+}
+
+impl Heap<'_> {
+    /// Abort unless LEN bytes from AT, word-aligned, lie in the arena past
+    /// its header.
+    fn check(&self, at: usize, len: usize) {
+        if at < self.low || at > self.high || len > self.high - at || at % size_of::<usize>() != 0 {
+            std::process::abort();
+        }
+    }
+
+    /// The word at AT, which this module stored.
+    fn word(&self, at: usize) -> usize {
+        self.check(at, size_of::<usize>());
+        // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
+        // SAFETY: AT is a word-aligned address in the arena, mapped
+        // read-write (`check`), which this module wrote: a free block's
+        // link or a free run's head.
+        unsafe { (at as *const usize).read() }
+    }
+
+    /// Store VALUE at AT: a free block's link or a free run's head.
+    fn set_word(&mut self, at: usize, value: usize) {
+        self.check(at, size_of::<usize>());
+        // UNSAFE(the arena's free-list words are memory no type owns; see `Heap`)
+        // SAFETY: AT is a word-aligned address in the arena, mapped
+        // read-write (`check`), in a free block or run no caller holds.
+        unsafe { (at as *mut usize).write(value) }
+    }
+
+    /// Zero LEN bytes from AT, in a free block or run.
+    fn zero(&mut self, at: usize, len: usize) {
+        self.check(at, len);
+        // UNSAFE(the arena's free blocks are memory no type owns; see `Heap`)
+        // SAFETY: the LEN bytes from AT lie in the arena, mapped read-write
+        // (`check`), in a free block or run no caller holds.
+        unsafe { std::ptr::write_bytes(at as *mut u8, 0, len) }
+    }
+
+    /// The free run whose head is at AT.
+    fn run(&self, at: usize) -> Run {
+        Run { pages: self.word(at), next: self.word(at + 8), released: self.word(at + 16) != 0 }
+    }
+
+    /// Write RUN's head at AT.
+    fn set_run(&mut self, at: usize, run: Run) {
+        self.set_word(at, run.pages);
+        self.set_word(at + 8, run.next);
+        self.set_word(at + 16, usize::from(run.released));
+    }
 }
 
 /// The class of a request of SIZE bytes aligned to ALIGN, or None for a run.
@@ -271,229 +389,163 @@ fn bin(pages: usize) -> usize {
     ((usize::BITS - 1 - pages.leading_zeros()) as usize).min(BINS - 1)
 }
 
-/// A free run's head: its length in pages, the next run of its bin, and
-/// whether its pages but the head's went back to the system.
-#[repr(C)]
+/// A free run's head, three words at its start (`Heap::run`): its length
+/// in pages, the next run of its bin, and whether its pages but the
+/// head's went back to the system.
+#[derive(Clone, Copy)]
 struct Run {
     pages: usize,
     next: usize,
     released: bool,
 }
 
-unsafe fn push_run(h: &mut Header, at: usize, pages: usize, released: bool) {
-    let run = at as *mut Run;
-    unsafe { *run = Run { pages, next: h.runs[bin(pages)], released } };
-    h.runs[bin(pages)] = at;
+/// The bytes a run's head takes.
+const RUN_HEAD: usize = 3 * size_of::<usize>();
+
+fn push_run(heap: &mut Heap<'_>, at: usize, pages: usize, released: bool) {
+    let next = heap.runs[bin(pages)];
+    heap.set_run(at, Run { pages, next, released });
+    heap.runs[bin(pages)] = at;
 }
 
 /// PAGES pages aligned to ALIGN (a multiple of the page), from a free run
 /// or the top. Null when the range is spent.
-unsafe fn take_pages(h: &mut Header, pages: usize, align: usize) -> usize {
+fn take_pages(heap: &mut Heap<'_>, pages: usize, align: usize) -> usize {
     if align <= PAGE {
         for b in bin(pages)..BINS {
-            let mut link: *mut usize = &mut h.runs[b];
+            // The run before AT in the bin, None while AT is its first.
+            let mut before = None;
+            let mut at = heap.runs[b];
             let mut walked = 0;
-            while unsafe { *link } != 0 && walked < 32 {
-                let at = unsafe { *link };
-                let run = unsafe { &mut *(at as *mut Run) };
+            while at != 0 && walked < 32 {
+                let run = heap.run(at);
                 if run.pages >= pages {
-                    unsafe { *link = run.next };
+                    match before {
+                        None => heap.runs[b] = run.next,
+                        Some(before) => heap.set_word(before + 8, run.next),
+                    }
                     let rest = run.pages - pages;
                     if rest > 0 {
-                        unsafe { push_run(h, at + pages * PAGE, rest, run.released) };
+                        push_run(heap, at + pages * PAGE, rest, run.released);
                     }
                     return at;
                 }
-                link = &mut run.next;
+                before = Some(at);
+                at = run.next;
                 walked += 1;
             }
         }
     }
-    let at = h.top.next_multiple_of(align.max(PAGE));
+    let at = heap.top.next_multiple_of(align.max(PAGE));
     let end = at + pages * PAGE;
-    if end > h.base + h.reserve {
+    if end > heap.base + heap.reserve {
         return 0;
     }
-    if at > h.top {
-        unsafe { push_run(h, h.top, (at - h.top) / PAGE, false) };
+    if at > heap.top {
+        let top = heap.top;
+        push_run(heap, top, (at - top) / PAGE, false);
     }
-    h.top = end;
+    heap.top = end;
     at
 }
 
-unsafe fn give_pages(h: &mut Header, at: usize, pages: usize) {
-    if at + pages * PAGE == h.top {
-        h.top = at;
-        unsafe { trim_top(h, TRIM_SLACK) };
+fn give_pages(heap: &mut Heap<'_>, at: usize, pages: usize) {
+    if at + pages * PAGE == heap.top {
+        heap.top = at;
+        trim_top(heap, TRIM_SLACK);
         return;
     }
     let released = pages >= RELEASE_PAGES;
     if released {
-        unsafe { release(at + PAGE, (pages - 1) * PAGE) };
+        release(heap, at + PAGE, (pages - 1) * PAGE);
     }
-    unsafe { push_run(h, at, pages, released) };
+    push_run(heap, at, pages, released);
 }
 
 /// Record that the top grew: what lies below it is touched.
-fn grew(h: &mut Header) {
-    h.zero = h.zero.max(h.top);
-    h.dirty = h.dirty.max(h.top);
+fn grew(heap: &mut Heap<'_>) {
+    heap.zero = heap.zero.max(heap.top);
+    heap.dirty = heap.dirty.max(heap.top);
 }
 
 /// Give back the pages above the top but for TRIM_KEEP, when more than
 /// SLACK of them may be resident. The zero mark stays: a released page of
 /// a restored image reads its file's bytes again, not zeros.
-unsafe fn trim_top(h: &mut Header, slack: usize) {
-    if h.dirty > h.top + slack {
-        let keep = h.top + TRIM_KEEP.min(slack);
-        unsafe { release(keep, h.dirty - keep) };
-        h.dirty = keep;
+fn trim_top(heap: &mut Heap<'_>, slack: usize) {
+    if heap.dirty > heap.top + slack {
+        let keep = heap.top + TRIM_KEEP.min(slack);
+        let dirty = heap.dirty;
+        release(heap, keep, dirty - keep);
+        heap.dirty = keep;
     }
 }
 
-unsafe fn take_small(h: &mut Header, class: usize) -> usize {
-    let head = h.free[class];
+fn take_small(heap: &mut Heap<'_>, class: usize) -> usize {
+    let head = heap.free[class];
     if head != 0 {
-        h.free[class] = unsafe { *(head as *const usize) };
+        heap.free[class] = heap.word(head);
         return head;
     }
     let size = class_size(class);
-    if h.cursor[class] + size > h.end[class] {
+    if heap.cursor[class] + size > heap.end[class] {
         let slab = (64 * 1024).max(4 * size);
-        let at = unsafe { take_pages(h, pages(slab), PAGE) };
+        let at = take_pages(heap, pages(slab), PAGE);
         if at == 0 {
             return 0;
         }
-        h.cursor[class] = at;
-        h.end[class] = at + pages(slab) * PAGE;
+        heap.cursor[class] = at;
+        heap.end[class] = at + pages(slab) * PAGE;
     }
-    let at = h.cursor[class];
-    h.cursor[class] += size;
+    let at = heap.cursor[class];
+    heap.cursor[class] += size;
     at
 }
 
-unsafe fn give_small(h: &mut Header, at: usize, class: usize) {
-    unsafe { *(at as *mut usize) = h.free[class] };
-    h.free[class] = at;
+fn give_small(heap: &mut Heap<'_>, at: usize, class: usize) {
+    let next = heap.free[class];
+    heap.set_word(at, next);
+    heap.free[class] = at;
 }
 
-/// The header of the arena AT is in, or None for a block outside the arenas.
-fn owner(at: *mut u8) -> Option<*mut Header> {
-    let at = at as usize;
-    // An adoption publishes FORMER before BASE: a block of the first arena
-    // finds its header whichever of the two this reads.
-    [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)].into_iter()
-        .find(|&base| base != 0 && (base..base + unsafe { (*(base as *const Header)).reserve }).contains(&at))
-        .map(|base| base as *mut Header)
+/// The arena AT is in, or None for a block outside the arenas.
+fn owner(at: *mut u8) -> Option<&'static Slot> {
+    [&IMAGE_ARENA, &FIRST_ARENA].into_iter().find(|slot| slot.holds(at as usize))
 }
 
 fn state() -> u8 {
     match STATE.load(Ordering::Acquire) {
         UNSET => {
-            lock();
+            let mut locked = Locked::take();
             if STATE.load(Ordering::Relaxed) == UNSET {
-                let state = unsafe { start() };
+                let state = start(&mut locked);
                 STATE.store(state, Ordering::Release);
             }
-            unlock();
+            drop(locked);
             STATE.load(Ordering::Acquire)
         }
         state => state,
     }
 }
 
-/// Reserve the window from BUILD up, inaccessible, a chunk at a time:
-/// nothing the process maps after its first allocation lands in a reserved
-/// chunk, and the ranges this module maps there replace the reservation
-/// (`place`). A chunk something is mapped in already stays unreserved.
-/// A reservation counts against an address-space limit, inaccessible as
-/// it is: under one that holds less than the arenas themselves nothing is
-/// tried, and the chunks stop where the limit is reached.
-unsafe fn reserve_window() {
-    if reserve() != Some(RESERVE) {
-        return;
-    }
-    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    let mut bits = 0u64;
-    let mut at = BUILD.0;
-    while at < WINDOW.1 {
-        let mapped = unsafe { libc::mmap(at as *mut libc::c_void, CHUNK, libc::PROT_NONE, flags, -1, 0) };
-        if mapped == at as *mut libc::c_void {
-            bits |= 1 << ((at - WINDOW.0) / CHUNK);
-        } else if mapped != libc::MAP_FAILED {
-            unsafe { libc::munmap(mapped, CHUNK) };
-        } else if errno() == libc::ENOMEM {
-            break;
-        }
-        at += CHUNK;
-    }
-    RESERVED.store(bits, Ordering::Relaxed);
-}
-
-/// The chunks of the window the range at AT, LEN bytes, spans, as bits of
-/// RESERVED; None for a range not within the window.
-fn chunks(at: usize, len: usize) -> Option<u64> {
-    if !(WINDOW.0..WINDOW.1).contains(&at) || len == 0 || len > WINDOW.1 - at {
-        return None;
-    }
-    let (first, last) = ((at - WINDOW.0) / CHUNK, (at + len - 1 - WINDOW.0) / CHUNK);
-    Some(((1u128 << (last + 1)) - (1u128 << first)) as u64)
-}
-
 /// Whether the range at AT, LEN bytes, is within this process's
-/// reservation of the window (`reserve_window`).
+/// reservation of the window (`map::reserve_window`).
 pub fn reserved(at: usize, len: usize) -> bool {
     state();
-    chunks(at, len).is_some_and(|mask| RESERVED.load(Ordering::Relaxed) & mask == mask)
-}
-
-/// The flags that map a range of this process at AT, LEN bytes: over the
-/// reservation where the range is within it, else only where nothing is
-/// mapped.
-fn place(at: usize, len: usize) -> i32 {
-    let within = chunks(at, len).is_some_and(|mask| RESERVED.load(Ordering::Relaxed) & mask == mask);
-    if within { libc::MAP_FIXED } else { libc::MAP_FIXED_NOREPLACE }
-}
-
-/// A GiB-aligned base for a range of RESERVE bytes in the part LOW..HIGH
-/// of the window, from RANDOM: in one of the part's reserved chunks when
-/// it has any, anywhere in the part otherwise.
-fn base_in(low: usize, high: usize, reserve: usize, random: usize) -> usize {
-    let mask = chunks(low, high - low).unwrap_or(0) & RESERVED.load(Ordering::Relaxed);
-    if mask == 0 {
-        return low + random % ((high - low - reserve) / ALIGN) * ALIGN;
-    }
-    let nth = random % mask.count_ones() as usize;
-    let chunk = (0..64).filter(|bit| mask & (1 << bit) != 0).nth(nth).unwrap();
-    WINDOW.0 + chunk * CHUNK + (random >> 8) % ((CHUNK - reserve) / ALIGN) * ALIGN
-}
-
-/// Give up the range at AT, LEN bytes, this module's mapping placed with
-/// PLACED (`place`): back to the reservation where it was mapped over it,
-/// else unmapped.
-unsafe fn unplace(at: usize, len: usize, placed: i32) {
-    if placed == libc::MAP_FIXED {
-        let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED;
-        unsafe { libc::mmap(at as *mut libc::c_void, len, libc::PROT_NONE, flags, -1, 0) };
-    } else {
-        unsafe { libc::munmap(at as *mut libc::c_void, len) };
-    }
+    map::within_reservation(at, len)
 }
 
 /// Reserve a fresh range at a random address in the window: a builder's
 /// in BUILD, where images are made, any other process's first arena in
 /// FIRST.
-unsafe fn start() -> u8 {
+fn start(locked: &mut Locked) -> u8 {
     unsafe { take_inventory() };
-    unsafe { reserve_window() };
+    map::reserve_window();
     // HOST(libc::getenv): the world allocator reads whether it runs in a builder at its first
     // allocation, before host.rs can run; it zeroes freed blocks and backs its arena with a file
     let building = !unsafe { libc::getenv(c"ROMACS_WORLD_BUILD".as_ptr()) }.is_null();
     SCRUB.store(building, Ordering::Relaxed);
     let Some(reserve) = reserve() else { return SYSTEM };
     let mut backing = if building { backing_file(reserve) } else { None };
-    let raw_backing = backing.as_ref().map_or(-1, AsRawFd::as_raw_fd);
-    let flags = libc::MAP_NORESERVE | if backing.is_some() { libc::MAP_SHARED } else { libc::MAP_PRIVATE | libc::MAP_ANONYMOUS };
     let (low, high) = if building { BUILD } else { FIRST };
     for _ in 0..8 {
         let mut random = [0u8; size_of::<usize>()];
@@ -503,25 +555,26 @@ unsafe fn start() -> u8 {
             break;
         }
         let random = usize::from_ne_bytes(random);
-        let base = base_in(low, high, reserve, random);
-        let at = unsafe { libc::mmap(base as *mut libc::c_void, reserve, libc::PROT_READ | libc::PROT_WRITE, flags | place(base, reserve), raw_backing, 0) };
-        if at == base as *mut libc::c_void {
+        let base = map::base_in(low, high, reserve, random);
+        let of = match &backing {
+            Some(fd) => map::Of::File { fd: fd.as_fd(), shared: true },
+            None => map::Of::Memory,
+        };
+        if let Ok(mapping) = map::map(&map::place(base, reserve), base, reserve, of) {
+            mapping.keep();
             if let Some(backing) = backing.take() {
                 // Set once: STATE starts the arena once, under the lock.
                 let _ = BACKING.set(backing);
             }
-            BASE.store(base, Ordering::Relaxed);
-            let h = unsafe { &mut *header() };
-            h.magic = MAGIC;
-            h.base = base;
-            h.reserve = reserve;
-            h.top = base + size_of::<Header>().next_multiple_of(PAGE);
-            h.zero = h.top;
-            h.dirty = h.top;
+            FIRST_ARENA.publish(base, reserve);
+            let Some(mut heap) = locked.heap(&FIRST_ARENA) else { return SYSTEM };
+            heap.magic = MAGIC;
+            heap.base = base;
+            heap.reserve = reserve;
+            heap.top = base + HEADER_BYTES;
+            heap.zero = heap.top;
+            heap.dirty = heap.top;
             return ARENA;
-        }
-        if at != libc::MAP_FAILED {
-            unsafe { libc::munmap(at, reserve) };
         }
     }
     SYSTEM
@@ -545,20 +598,23 @@ fn backing_file(reserve: usize) -> Option<OwnedFd> {
 /// Give the pages from AT, LEN bytes, back to the system. Their content is
 /// the allocator's no longer: memory below the zero mark is zeroed when a
 /// zeroed block is asked for.
-unsafe fn release(at: usize, len: usize) {
+fn release(heap: &Heap<'_>, at: usize, len: usize) {
+    heap.check(at, len);
     if let Some(backing) = BACKING.get().filter(|_| in_backing(at)) {
-        let offset = (at - BASE.load(Ordering::Relaxed)) as u64;
+        let offset = (at - heap.base) as u64;
         let punch = rustix::fs::FallocateFlags::PUNCH_HOLE | rustix::fs::FallocateFlags::KEEP_SIZE;
         let _ = rustix::fs::fallocate(backing, punch, offset, len as u64);
     } else {
+        // UNSAFE(madvise on memory this module maps has no safe wrapper: rustix's is unsafe)
+        // SAFETY: the LEN bytes from AT are free pages of the arena
+        // (`check`, and the free-list code's invariant), which nothing reads.
         unsafe { libc::madvise(at as *mut libc::c_void, len, libc::MADV_DONTNEED) };
     }
 }
 
 /// Whether AT is in the arena the backing file maps: a builder's only one.
 fn in_backing(at: usize) -> bool {
-    let base = BASE.load(Ordering::Relaxed);
-    FORMER.load(Ordering::Relaxed) == 0 && base != 0 && (base..base + unsafe { (*(base as *const Header)).reserve }).contains(&at)
+    IMAGE_ARENA.get().is_none() && FIRST_ARENA.holds(at)
 }
 
 /// How much address space an arena of this process reserves: RESERVE, or
@@ -592,10 +648,10 @@ pub fn adopt(file: &std::fs::File) -> Restore {
         return refuse(1, 0, false);
     }
     // The first image stays this process's: what became of it stays said.
-    if FORMER.load(Ordering::Acquire) != 0 {
+    if IMAGE_ARENA.get().is_some() {
         return refuse(2, 0, false);
     }
-    let outcome = unsafe { map_image_fd(file.as_fd()) };
+    let outcome = map_image_fd(file.as_fd());
     RESTORE.store(outcome as u8, Ordering::Release);
     outcome
 }
@@ -609,9 +665,6 @@ fn refuse(step: u8, errno: i32, reserved: bool) -> Restore {
     Restore::Map
 }
 
-fn errno() -> i32 {
-    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
-}
 
 /// What refused the image's range, once `adopt` has (`Restore::Map`): the
 /// step, the error number of the moment, 0 for none, and whether the range
@@ -621,12 +674,8 @@ pub fn map_failure() -> Option<(&'static str, i32, bool)> {
     (step != 0).then(|| (STEPS[step as usize], MAP_ERRNO.load(Ordering::Relaxed), MAP_RESERVED.load(Ordering::Relaxed)))
 }
 
-/// Whether the ranges AT, LEN bytes, and OTHER, OTHER_LEN bytes, share an address.
-fn overlaps(at: usize, len: usize, other: usize, other_len: usize) -> bool {
-    at < other + other_len && other < at + len
-}
 
-unsafe fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
+fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     let mut bytes = [0u8; size_of::<Header>()];
     let read = rustix::io::pread(fd, &mut bytes, 0);
     // HOST(rustix::file): the world allocator checks an image is whole before it adopts it; the
@@ -650,42 +699,32 @@ unsafe fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     };
     // Over the reservation, unless the range reaches this process's first
     // arena (an image made under another address-space limit could): then
-    // only where nothing is, which refuses it.
-    let first = unsafe { &*header() };
-    let placed = if overlaps(base, reserve, first.base, first.reserve) { libc::MAP_FIXED_NOREPLACE } else { place(base, reserve) };
-    let file = libc::MAP_PRIVATE | placed;
-    let at = unsafe { libc::mmap(base as *mut libc::c_void, len, libc::PROT_READ | libc::PROT_WRITE, file, fd.as_raw_fd(), 0) };
-    // What a failure leaves is given up (`unplace`): only what this
-    // module mapped, never what refused it, which the launch's source boot
-    // may be using.
-    if at != base as *mut libc::c_void {
-        let refused = refuse(4, errno(), placed == libc::MAP_FIXED);
-        if at != libc::MAP_FAILED {
-            unsafe { libc::munmap(at, len) };
-        } else if placed == libc::MAP_FIXED {
-            unsafe { unplace(base, len, placed) };
+    // only where nothing is, which refuses it (`map::place`). What a
+    // failure leaves is given up: only what this module mapped, never what
+    // refused it, which the launch's source boot may be using.
+    let place = map::place(base, reserve);
+    let mapped = match map::map(&place, base, len, map::Of::File { fd, shared: false }) {
+        Ok(mapped) => mapped,
+        Err(refused) => return refuse(4, refused.errno, refused.over_reservation),
+    };
+    match map::map(&place, base + len, reserve - len, map::Of::Memory) {
+        Ok(rest) => rest.keep(),
+        Err(refused) => {
+            mapped.undo();
+            return refuse(5, refused.errno, refused.over_reservation);
         }
-        return refused;
     }
-    let anon = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | placed;
-    let rest = unsafe { libc::mmap((base + len) as *mut libc::c_void, reserve - len, libc::PROT_READ | libc::PROT_WRITE, anon, -1, 0) };
-    if rest != (base + len) as *mut libc::c_void {
-        let refused = refuse(5, errno(), placed == libc::MAP_FIXED);
-        if rest != libc::MAP_FAILED {
-            unsafe { libc::munmap(rest, reserve - len) };
-        }
-        unsafe { unplace(base, if placed == libc::MAP_FIXED { reserve } else { len }, placed) };
-        return refused;
-    }
-    // This process's reservation, not the builder's.
-    unsafe { (*(base as *mut Header)).reserve = reserve };
     // The kernel reads the file ahead while the process starts.
-    unsafe { libc::madvise(base as *mut libc::c_void, len, libc::MADV_WILLNEED) };
-    lock();
-    FORMER.store(BASE.load(Ordering::Relaxed), Ordering::Release);
-    BASE.store(base, Ordering::Release);
+    mapped.will_need();
+    mapped.keep();
+    let mut locked = Locked::take();
+    IMAGE_ARENA.publish(base, reserve);
+    if let Some(mut heap) = locked.heap(&IMAGE_ARENA) {
+        // This process's reservation, not the builder's.
+        heap.reserve = reserve;
+    }
     ADOPTED.store(true, Ordering::Release);
-    unlock();
+    drop(locked);
     GUARD.store(guard_executable(image.image.executable) as u8, Ordering::Release);
     start_heap_file(reserve);
     Restore::Mapped
@@ -906,19 +945,13 @@ pub fn executable_base() -> usize {
 fn guard_executable(old: usize) -> Guard {
     let Some((_, span)) = executable() else { return Guard::Unknown };
     let (at, len) = (old + span.start, span.end - span.start);
-    let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_FIXED_NOREPLACE;
-    // SAFETY: an anonymous, inaccessible mapping where nothing of this
-    // process is (MAP_FIXED_NOREPLACE): it replaces nothing.
-    let mapped = unsafe { libc::mmap(at as *mut libc::c_void, len, libc::PROT_NONE, flags, -1, 0) };
-    if mapped == at as *mut libc::c_void {
-        return Guard::Reserved;
+    match map::map(&map::place(at, len), at, len, map::Of::Nothing) {
+        Ok(guard) => {
+            guard.keep();
+            Guard::Reserved
+        }
+        Err(_) => Guard::Taken,
     }
-    if mapped != libc::MAP_FAILED {
-        // A kernel that ignores MAP_FIXED_NOREPLACE placed it elsewhere.
-        // SAFETY: MAPPED is the mapping just made, which nothing refers to.
-        unsafe { libc::munmap(mapped, len) };
-    }
-    Guard::Taken
 }
 
 /// How the image this process adopted fared.
@@ -994,7 +1027,7 @@ fn started() -> bool {
 /// The range the arena's allocations come from: where it starts and how
 /// much address space it holds. None when the heap is the system's.
 pub fn current_range() -> Option<(usize, usize)> {
-    active().then(|| { let h = unsafe { &*header() }; (h.base, h.reserve) })
+    if active() { current().get() } else { None }
 }
 
 /// Where the arena's bytes are: the span handed out from its start
@@ -1019,7 +1052,7 @@ pub struct Census {
 /// It walks every free list under the allocator's lock.
 #[must_use]
 pub fn census() -> Option<Census> {
-    census_of(&[&BASE, &FORMER])
+    census_of(&[&IMAGE_ARENA, &FIRST_ARENA])
 }
 
 /// The census of the image this process mapped alone, as it was published
@@ -1029,22 +1062,22 @@ pub fn image_census() -> Option<Census> {
     if restore_outcome() != Restore::Mapped {
         return None;
     }
-    census_of(&[&BASE])
+    census_of(&[&IMAGE_ARENA])
 }
 
-/// The census of the arenas whose bases ARENAS hold.
-fn census_of(arenas: &[&AtomicUsize]) -> Option<Census> {
+/// The census of the arenas ARENAS hold.
+fn census_of(arenas: &[&Slot]) -> Option<Census> {
     if !started() {
         return None;
     }
     let mut c = Census { classes: vec![(0, 0); CLASSES], ..Census::default() };
-    lock();
-    for base in arenas.iter().map(|base| base.load(Ordering::Acquire)) {
-        if base != 0 {
-            unsafe { count(&*(base as *const Header), &mut c) };
+    let mut locked = Locked::take();
+    for arena in arenas {
+        if let Some(heap) = locked.heap(arena) {
+            count(&heap, &mut c);
         }
     }
-    unlock();
+    drop(locked);
     for (class, row) in c.classes.iter_mut().enumerate() {
         row.0 = class_size(class);
     }
@@ -1053,22 +1086,22 @@ fn census_of(arenas: &[&AtomicUsize]) -> Option<Census> {
     Some(c)
 }
 
-/// Add H's free lists to C. The caller holds the lock.
-unsafe fn count(h: &Header, c: &mut Census) {
-    c.used += h.top - h.base;
-    c.above_top += h.dirty.saturating_sub(h.top);
+/// Add HEAP's free lists to C.
+fn count(heap: &Heap<'_>, c: &mut Census) {
+    c.used += heap.top - heap.base;
+    c.above_top += heap.dirty.saturating_sub(heap.top);
     for class in 0..CLASSES {
-        let mut at = h.free[class];
+        let mut at = heap.free[class];
         while at != 0 {
             c.classes[class].1 += class_size(class);
-            at = unsafe { *(at as *const usize) };
+            at = heap.word(at);
         }
-        c.slab_rest += h.end[class] - h.cursor[class];
+        c.slab_rest += heap.end[class] - heap.cursor[class];
     }
     for b in 0..BINS {
-        let mut at = h.runs[b];
+        let mut at = heap.runs[b];
         while at != 0 {
-            let run = unsafe { &*(at as *const Run) };
+            let run = heap.run(at);
             if run.released {
                 c.runs_released += (run.pages - 1) * PAGE;
                 c.runs_kept += PAGE;
@@ -1091,31 +1124,31 @@ pub fn trim() {
     if ADOPTED.load(Ordering::Acquire) {
         romacs_allocator::release_free();
     }
-    lock();
-    for base in [BASE.load(Ordering::Acquire), FORMER.load(Ordering::Acquire)] {
-        if base == 0 {
-            continue;
-        }
-        let h = unsafe { &mut *(base as *mut Header) };
-        unsafe { trim_top(h, 0) };
+    let mut locked = Locked::take();
+    for arena in [&IMAGE_ARENA, &FIRST_ARENA] {
+        let Some(mut heap) = locked.heap(arena) else { continue };
+        trim_top(&mut heap, 0);
         for b in 0..BINS {
-            let mut at = h.runs[b];
+            let mut at = heap.runs[b];
             while at != 0 {
-                let run = unsafe { &mut *(at as *mut Run) };
+                let run = heap.run(at);
                 if !run.released && run.pages > 1 {
-                    unsafe { release(at + PAGE, (run.pages - 1) * PAGE) };
-                    run.released = true;
+                    release(&heap, at + PAGE, (run.pages - 1) * PAGE);
+                    heap.set_run(at, Run { released: true, ..run });
                 }
                 at = run.next;
             }
         }
     }
-    unlock();
+    drop(locked);
 }
 
 /// The fields of the image this process mapped.
 pub fn mapped_image() -> Option<ImageFields> {
-    (restore_outcome() == Restore::Mapped).then(|| unsafe { (*header()).image })
+    if restore_outcome() != Restore::Mapped {
+        return None;
+    }
+    Locked::take().heap(&IMAGE_ARENA).map(|heap| heap.image)
 }
 
 /// Write the arena to FILE as an image with FIELDS (its length is set
@@ -1140,41 +1173,43 @@ pub unsafe fn write_image(file: &std::fs::File, mut fields: ImageFields) -> std:
     if !active() {
         return Err(std::io::Error::other("the arena is not this process's heap"));
     }
-    let Some(backing) = BACKING.get().filter(|_| FORMER.load(Ordering::Relaxed) == 0) else {
+    let Some(backing) = BACKING.get().filter(|_| IMAGE_ARENA.get().is_none()) else {
         return Err(std::io::Error::other("only a builder's file-backed arena can be written as an image"));
     };
-    lock();
-    let h = unsafe { &mut *header() };
-    unsafe { scrub(h) };
-    fields.len = h.top - base();
-    let saved = h.image;
-    h.image = fields;
+    let mut locked = Locked::take();
+    let Some(mut heap) = locked.heap(&FIRST_ARENA) else {
+        return Err(std::io::Error::other("the arena is not this process's heap"));
+    };
+    scrub(&mut heap);
+    fields.len = heap.top - heap.base;
+    let saved = heap.image;
+    heap.image = fields;
     let result = copy_extents(backing.as_fd(), file.as_fd(), fields.len);
-    h.image = saved;
-    unlock();
+    heap.image = saved;
+    drop(locked);
     result.map(|()| fields.len)
 }
 
 /// Zero what free blocks still hold, but for their links, and give free
 /// runs' pages back: freed bytes are no part of a world, and a released
 /// page is a hole in its file.
-unsafe fn scrub(h: &mut Header) {
+fn scrub(heap: &mut Heap<'_>) {
     for class in 0..CLASSES {
         let size = class_size(class);
-        let mut at = h.free[class];
+        let mut at = heap.free[class];
         while at != 0 {
-            unsafe { std::ptr::write_bytes((at + 8) as *mut u8, 0, size - 8) };
-            at = unsafe { *(at as *const usize) };
+            heap.zero(at + 8, size - 8);
+            at = heap.word(at);
         }
     }
     for b in 0..BINS {
-        let mut at = h.runs[b];
+        let mut at = heap.runs[b];
         while at != 0 {
-            let run = unsafe { &mut *(at as *mut Run) };
-            unsafe { std::ptr::write_bytes((at + size_of::<Run>()) as *mut u8, 0, PAGE - size_of::<Run>()) };
+            let run = heap.run(at);
+            heap.zero(at + RUN_HEAD, PAGE - RUN_HEAD);
             if run.pages > 1 {
-                unsafe { release(at + PAGE, (run.pages - 1) * PAGE) };
-                run.released = true;
+                release(heap, at + PAGE, (run.pages - 1) * PAGE);
+                heap.set_run(at, Run { released: true, ..run });
             }
             at = run.next;
         }
@@ -1240,111 +1275,151 @@ fn copy_range(from: BorrowedFd<'_>, to: BorrowedFd<'_>, start: u64, end: u64) ->
     Ok(())
 }
 
+/// A block for LAYOUT from the current arena, 0 when it is spent, with the
+/// zero mark as it was: memory at or above it was never handed out.
+fn allocate(layout: Layout) -> (usize, usize) {
+    let mut locked = Locked::take();
+    let Some(mut heap) = locked.heap(current()) else { return (0, 0) };
+    let zero = heap.zero;
+    let at = match class_of(layout.size(), layout.align()) {
+        Some(class) => take_small(&mut heap, class),
+        None => take_pages(&mut heap, pages(layout.size()), layout.align().max(PAGE)),
+    };
+    grew(&mut heap);
+    (at, zero)
+}
+
+/// Give the block at AT, of LAYOUT, back to ARENA, the arena it lies in.
+fn free(arena: &Slot, at: usize, layout: Layout) {
+    let mut locked = Locked::take();
+    let Some(mut heap) = locked.heap(arena) else { return };
+    match class_of(layout.size(), layout.align()) {
+        Some(class) => give_small(&mut heap, at, class),
+        None => give_pages(&mut heap, at, pages(layout.size())),
+    }
+}
+
+/// Resize the page run at AT, of OLD pages, in ARENA to NEW pages where it
+/// lies: shrunk in place, or grown at the top. Whether it was.
+fn resize_run(arena: &Slot, at: usize, old: usize, new: usize) -> bool {
+    let mut locked = Locked::take();
+    let Some(mut heap) = locked.heap(arena) else { return false };
+    if new <= old {
+        if new < old {
+            give_pages(&mut heap, at + new * PAGE, old - new);
+        }
+        return true;
+    }
+    if at + old * PAGE == heap.top && heap.top + (new - old) * PAGE <= heap.base + heap.reserve
+        && !ADOPTED.load(Ordering::Relaxed)
+    {
+        heap.top += (new - old) * PAGE;
+        grew(&mut heap);
+        return true;
+    }
+    false
+}
+
+// UNSAFE(GlobalAlloc is an unsafe trait: the allocator promises its blocks are valid and disjoint)
+// SAFETY: blocks come from the free-list code (`Heap`), which hands out
+// each block once, aligned and sized for its layout, and takes back only
+// what a caller frees; blocks outside the arenas go to the allocator that
+// made them (`PLATFORM` once an image is adopted, the system's before).
 unsafe impl GlobalAlloc for Arena {
+    // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+    // SAFETY: the caller's contract is GlobalAlloc::alloc's.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if ADOPTED.load(Ordering::Relaxed) {
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: LAYOUT is the caller's, passed on unchanged.
             return unsafe { PLATFORM.alloc(layout) };
         }
         if state() != ARENA {
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: LAYOUT is the caller's, passed on unchanged.
             return unsafe { System.alloc(layout) };
         }
-        lock();
-        let h = unsafe { &mut *header() };
-        let at = match class_of(layout.size(), layout.align()) {
-            Some(class) => unsafe { take_small(h, class) },
-            None => unsafe { take_pages(h, pages(layout.size()), layout.align().max(PAGE)) },
-        };
-        grew(h);
-        unlock();
-        at as *mut u8
+        allocate(layout).0 as *mut u8
     }
 
+    // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+    // SAFETY: the caller's contract is GlobalAlloc::alloc_zeroed's.
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         if ADOPTED.load(Ordering::Relaxed) {
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: LAYOUT is the caller's, passed on unchanged.
             return unsafe { PLATFORM.alloc_zeroed(layout) };
         }
         if state() != ARENA {
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: LAYOUT is the caller's, passed on unchanged.
             return unsafe { System.alloc_zeroed(layout) };
         }
-        lock();
-        let h = unsafe { &mut *header() };
-        let zero = h.zero;
-        let at = match class_of(layout.size(), layout.align()) {
-            Some(class) => unsafe { take_small(h, class) },
-            None => unsafe { take_pages(h, pages(layout.size()), layout.align().max(PAGE)) },
-        };
-        grew(h);
-        unlock();
+        let (at, zero) = allocate(layout);
         // Memory at or above the old zero mark was never handed out.
         if at != 0 && at < zero {
+            // UNSAFE(a new block is raw memory until it is returned; no type owns it)
+            // SAFETY: AT is the block just taken for LAYOUT, LAYOUT.size()
+            // bytes this call alone holds.
             unsafe { std::ptr::write_bytes(at as *mut u8, 0, layout.size().min(zero - at)) };
         }
         at as *mut u8
     }
 
+    // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+    // SAFETY: the caller's contract is GlobalAlloc::dealloc's.
     unsafe fn dealloc(&self, at: *mut u8, layout: Layout) {
-        let Some(owner) = owner(at) else {
+        let Some(arena) = owner(at) else {
             // A block outside the arenas is the production allocator's in a
             // process that adopted an image (every earlier block is an
             // arena's), else the system's (an arena that never started).
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: AT and LAYOUT are the caller's, passed to the allocator that made the block.
             return unsafe {
                 if ADOPTED.load(Ordering::Acquire) { PLATFORM.dealloc(at, layout) } else { System.dealloc(at, layout) }
             };
         };
         if SCRUB.load(Ordering::Relaxed) {
+            // UNSAFE(a freed block is the caller's memory until this returns; no type owns it)
+            // SAFETY: by dealloc's contract, AT holds LAYOUT.size() bytes the caller gives up.
             unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
         }
-        lock();
-        let h = unsafe { &mut *owner };
-        match class_of(layout.size(), layout.align()) {
-            Some(class) => unsafe { give_small(h, at as usize, class) },
-            None => unsafe { give_pages(h, at as usize, pages(layout.size())) },
-        }
-        unlock();
+        free(arena, at as usize, layout);
     }
 
+    // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+    // SAFETY: the caller's contract is GlobalAlloc::realloc's.
     unsafe fn realloc(&self, at: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let Some(owner) = owner(at) else {
+        let Some(arena) = owner(at) else {
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: the arguments are the caller's, passed to the allocator that made the block.
             return unsafe {
                 if ADOPTED.load(Ordering::Acquire) { PLATFORM.realloc(at, layout, new_size) } else { System.realloc(at, layout, new_size) }
             };
         };
         let align = layout.align();
         if SCRUB.load(Ordering::Relaxed) && new_size < layout.size() {
+            // UNSAFE(a block's tail is the caller's memory; no type owns it)
+            // SAFETY: by realloc's contract, AT holds LAYOUT.size() bytes,
+            // and the bytes past NEW_SIZE are given up.
             unsafe { std::ptr::write_bytes(at.add(new_size), 0, layout.size() - new_size) };
         }
         match (class_of(layout.size(), align), class_of(new_size, align)) {
             (Some(old), Some(new)) if old == new => return at,
-            (None, None) if align <= PAGE => {
-                let (old, new) = (pages(layout.size()), pages(new_size));
-                lock();
-                let h = unsafe { &mut *owner };
-                let start = at as usize;
-                let grown = if new <= old {
-                    if new < old {
-                        unsafe { give_pages(h, start + new * PAGE, old - new) };
-                    }
-                    true
-                } else if start + old * PAGE == h.top && h.top + (new - old) * PAGE <= h.base + h.reserve
-                    && !ADOPTED.load(Ordering::Relaxed)
-                {
-                    h.top += (new - old) * PAGE;
-                    grew(h);
-                    true
-                } else {
-                    false
-                };
-                unlock();
-                if grown {
-                    return at;
-                }
-            }
+            (None, None) if align <= PAGE && resize_run(arena, at as usize, pages(layout.size()), pages(new_size)) => return at,
             _ => {}
         }
-        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, align) };
+        let Ok(new_layout) = Layout::from_size_align(new_size, align) else { return std::ptr::null_mut() };
+        // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+        // SAFETY: NEW_LAYOUT has a nonzero size, as realloc's contract gives NEW_SIZE.
         let moved = unsafe { self.alloc(new_layout) };
         if !moved.is_null() {
+            // UNSAFE(copying between two raw blocks has no safe form)
+            // SAFETY: AT holds LAYOUT.size() bytes, MOVED holds NEW_SIZE,
+            // and the two are different blocks.
             unsafe { std::ptr::copy_nonoverlapping(at, moved, layout.size().min(new_size)) };
+            // UNSAFE(GlobalAlloc's methods are unsafe fns by the trait)
+            // SAFETY: AT was allocated with LAYOUT, and is now moved.
             unsafe { self.dealloc(at, layout) };
         }
         moved
@@ -1421,21 +1496,6 @@ mod tests {
         for (offset, bytes) in segments {
             assert_eq!(&file[offset as usize..offset as usize + bytes.len()], bytes);
         }
-    }
-
-    #[test]
-    fn a_range_spans_the_chunks_of_the_window_it_lies_in() {
-        assert_eq!(chunks(WINDOW.0, CHUNK), Some(1));
-        assert_eq!(chunks(WINDOW.0 + CHUNK - PAGE, 2 * PAGE), Some(0b11));
-        assert_eq!(chunks(WINDOW.1 - CHUNK, CHUNK), Some(1 << 63));
-        assert_eq!(chunks(WINDOW.0, WINDOW.1 - WINDOW.0), Some(u64::MAX));
-        assert_eq!(chunks(BUILD.0, RESERVE), Some(1 << ((BUILD.0 - WINDOW.0) / CHUNK)));
-        assert_eq!((chunks(WINDOW.0 - PAGE, PAGE), chunks(WINDOW.1 - PAGE, 2 * PAGE), chunks(WINDOW.0, 0)), (None, None, None));
-        // At and above the window's end: no chunk, so never reserved.
-        assert_eq!((chunks(WINDOW.1, PAGE), chunks(WINDOW.1 + CHUNK, PAGE), chunks(usize::MAX, 1)), (None, None, None));
-        assert!(!reserved(WINDOW.1 + CHUNK, PAGE) && !reserved(WINDOW.0 - PAGE, PAGE));
-        // The parts a range is chosen from fit whole chunks, and FIRST is above BUILD.
-        assert!(BUILD.0 % CHUNK == 0 && BUILD.1 == FIRST.0 && FIRST.0 % CHUNK == 0 && FIRST.1 == WINDOW.1 && RESERVE < CHUNK);
     }
 
     #[test]
