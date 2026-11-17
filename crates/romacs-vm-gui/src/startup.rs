@@ -718,16 +718,21 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 /// Show each error of Romacs's Lisp this launch noted ([`load_lisp`]), once:
 /// in *Messages*, in the usage log and in a warning the first frame shows,
 /// as an init's error is shown. The form calls only what is defined, since
-/// the Lisp that failed may be what would show it.
+/// the Lisp that failed may be what would show it, and a way of showing
+/// one that signals keeps none of the others from being shown.
 pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
     vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
        (let ((errors (reverse {LISP_ERRORS})))
          (setq {LISP_ERRORS} nil)
          (while errors
            (let ((error (car errors)))
-             (message \"Romacs Lisp failed: %s\" error)
-             (when (fboundp 'romacs-usage-log-note) (romacs-usage-log-note \"lisp-error\" :error error))
-             (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error)))
+             (condition-case nil (message \"Romacs Lisp failed: %s\" error) (error nil))
+             (condition-case nil
+                 (when (fboundp 'romacs-usage-log-note) (romacs-usage-log-note \"lisp-error\" :error error))
+               (error nil))
+             (condition-case nil
+                 (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error))
+               (error nil)))
            (setq errors (cdr errors)))))")).map(drop)
 }
 
@@ -2311,30 +2316,48 @@ mod tests {
         assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
     }
 
-    /// A file of Romacs's Lisp that signals ends no launch: the launch goes
-    /// on with what the file defined before the error, notes the error with
-    /// the file and line, and reports it once, in *Messages*.
+    /// Files of Romacs's Lisp that signal end no launch: the launch goes on
+    /// with what each defined before its error, notes each error with its
+    /// file and line, and reports each once, in launch order, before the
+    /// session's last steps: in *Messages*, and in a warning and the usage
+    /// log where those are defined, a way of showing one that signals
+    /// keeping none of the others from being shown.
     #[test]
     fn a_romacs_file_that_signals_is_reported_not_fatal() {
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
-        let broken = format!("(error \"broken on purpose\")\n{}",
-                             std::fs::read_to_string(source.join("ui/romacs-key-hint.el")).unwrap());
-        let dir = scratch_runtime("broken-file", "", &[("ui/romacs-key-hint.el", &broken)]);
-        let (noted, reported, again) = on_evaluator(move || {
+        let broken = |path: &str| format!("(error \"broken on purpose\")\n{}", std::fs::read_to_string(source.join(path)).unwrap());
+        let files = [("completion/romacs-buffer-switch.el", broken("completion/romacs-buffer-switch.el")),
+                     ("ui/romacs-key-hint.el", broken("ui/romacs-key-hint.el"))];
+        let files: Vec<(&str, &str)> = files.iter().map(|(path, text)| (*path, text.as_str())).collect();
+        // Shown with nothing but `message': no usage log, no warnings.
+        let bare = scratch_runtime("broken-bare", "", &files);
+        // Shown where a warning signals and the usage log records.
+        let warned = scratch_runtime("broken-warned", "", &files);
+        let report = |dir: std::path::PathBuf, setup: &'static str| on_evaluator(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
             let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            let noted = printed(&mut vm, &format!("(length {LISP_ERRORS})"));
+            vm.eval_source(setup).unwrap();
+            report_lisp_errors(&mut vm).unwrap();
             finish_loadup(&mut vm, &started).unwrap();
             let messages = "(save-current-buffer (set-buffer \"*Messages*\") (buffer-string))";
-            let noted = printed(&mut vm, LISP_ERRORS);
-            report_lisp_errors(&mut vm).unwrap();
             let reported = printed(&mut vm, messages);
             report_lisp_errors(&mut vm).unwrap();
-            (noted, reported, printed(&mut vm, messages))
+            (noted, reported, printed(&mut vm, messages), printed(&mut vm, "(and (boundp 'romacs-test-shown) romacs-test-shown)"))
         });
-        assert!(noted.contains("ui/romacs-key-hint.el: line 1 ") && noted.contains("broken on purpose"), "{noted}");
-        assert!(reported.contains("Romacs Lisp failed: ") && reported.contains("romacs-key-hint.el: line 1 "), "{reported}");
+        let (noted, reported, again, _) = report(bare, "(fmakunbound 'romacs-usage-log-note)");
+        assert_eq!(noted, "2");
+        let at = |file: &str| reported.find(&format!("{file}: line 1 "));
+        assert!(at("completion/romacs-buffer-switch.el").is_some() && at("ui/romacs-key-hint.el").is_some(), "{reported}");
+        assert!(at("completion/romacs-buffer-switch.el") < at("ui/romacs-key-hint.el"), "in launch order: {reported}");
         assert_eq!(reported, again, "an error is reported once");
+        let (_, reported, _, shown) = report(warned, "(progn
+            (defvar romacs-test-shown nil)
+            (defun display-warning (&rest _) (error \"a warning that signals\"))
+            (defun romacs-usage-log-note (kind &rest plist) (setq romacs-test-shown (cons (list kind (plist-get plist :error)) romacs-test-shown))))");
+        assert!(reported.contains("romacs-buffer-switch.el: line 1 ") && reported.contains("romacs-key-hint.el: line 1 "), "{reported}");
+        assert_eq!(shown.matches("\"lisp-error\"").count(), 2, "{shown}");
     }
 
     /// `--gnu-lisp`/`--loadup`: GNU's directories come before every bundled
