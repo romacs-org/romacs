@@ -151,7 +151,8 @@ fn callback_preserves_an_open_builders_collection_hold() {
 fn a_held_collection_keeps_its_request_without_polling_at_every_return() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.eval_source("(defvar held-big nil)").unwrap();
+    // GNU's threshold, which the 4 MB string passes (VM2-GC-PACING).
+    vm.eval_source("(progn (setq gc-cons-threshold 800000) (defvar held-big nil))").unwrap();
     vm.gc_holds += 1;
     POLLS.with(|polls| polls.set(0));
     vm.eval_source("(progn (setq held-big (make-string 4000000 ?x)) (dotimes (_ 5000) (make-string 4 ?y)))").unwrap();

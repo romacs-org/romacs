@@ -1,4 +1,4 @@
-//! The window system a GUI embedder provides (DIVERGENCES.md VM2-WIN5):
+//! The window system a GUI embedder provides (ledger/divergences VM2-WIN5):
 //! the backend GNU's frames on it report, its display's name, and the
 //! fonts it draws with. The VM asks synchronously, as it asks the layout
 //! host; no Lisp value crosses. The display opens once the session leaves
@@ -10,7 +10,7 @@ pub(crate) use models::Surfaces;
 
 /// An installed font face: GNU's font-entity, with styles in font.c's
 /// numeric scales (Fontconfig's numbers).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FontEntity {
     pub foundry: Option<String>,
     pub family: String,
@@ -37,8 +37,9 @@ pub struct OpenedFont {
     pub max_width: i64,
     pub space_width: i64,
     pub average_width: i64,
-    /// Its OpenType GSUB and GPOS layout, as hbfont.c reports it.
-    pub otf: (OtfTable, OtfTable),
+    /// Its OpenType GSUB and GPOS layout, as hbfont.c reports it: shared,
+    /// as a host hands the same opened font out per character asked.
+    pub otf: std::sync::Arc<(OtfTable, OtfTable)>,
 }
 
 /// A glyph as text_extents measures it, in whole pixels.
@@ -131,6 +132,12 @@ pub trait DisplayHost {
     /// so its device-loss recovery runs (`romacs--debug-lose-device'). Whether
     /// the request reached a display that has a device to lose.
     fn lose_device(&mut self) -> bool { false }
+    /// What a launch is doing, for the screen it shows until its first
+    /// frame (`romacs-startup-progress'): STAGE a step's name (`init',
+    /// `agents', `restore'), LABEL what it is at, COUNT its (DONE . OF)
+    /// when it counts, FAILED when it failed.  Whether a screen took it:
+    /// past the first frame, or with none, a host ignores it.
+    fn startup_progress(&mut self, _stage: &str, _label: &str, _count: Option<(u64, u64)>, _failed: bool) -> bool { false }
     /// Decode QUERY's image as GNU's loaders do (`load_img'), keeping its
     /// pixels under the facts' id until `release_image'.  An error is the
     /// loader's message; the image then shows as a placeholder.
@@ -193,6 +200,15 @@ pub struct ModelCreate {
     pub size: (u32, u32),
 }
 
+/// Where each opened font's object is in `prim::FONT_OBJECTS`: by font,
+/// then pixel size, an index below LEN, the vector's slots in use (it
+/// doubles when full, so keeping one more is amortized constant).
+#[derive(Default)]
+pub(crate) struct FontObjects {
+    pub index: rustc_hash::FxHashMap<FontEntity, rustc_hash::FxHashMap<i64, usize>>,
+    pub len: usize,
+}
+
 /// The attached display: closed until the session opens it.
 pub(crate) struct Display {
     pub host: Box<dyn DisplayHost>,
@@ -201,6 +217,11 @@ pub(crate) struct Display {
     /// face realized to: `frame-parameters' and `face-font' name them on
     /// every call.
     pub face_fonts: rustc_hash::FxHashMap<(String, u32, u16, bool, u16), String>,
+    /// Each font opened at a pixel size, as the index of its font-object in
+    /// `prim::FONT_OBJECTS`: font.c `font_open_entity`'s object list, so a
+    /// font opened again (`char-displayable-p` in a mode line, at every
+    /// redisplay) is the same object, never a new one.
+    pub font_objects: FontObjects,
     /// The native surfaces Lisp holds on this display.
     pub surfaces: Surfaces,
 }
@@ -210,7 +231,10 @@ impl Vm {
     /// stays closed, the frame an initial-terminal frame, until
     /// [`Vm::open_display`].
     pub fn set_display_host(&mut self, host: Option<Box<dyn DisplayHost>>) {
-        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), surfaces: Surfaces::default() });
+        // Another display's font-objects are none of this one's.
+        let objects = self.slot(crate::prim::FONT_OBJECTS);
+        self.slots[objects].value = crate::Value::NIL;
+        self.display = host.map(|host| Display { host: Box::new(crate::host_calls::Counted(host)), open: false, face_fonts: rustc_hash::FxHashMap::default(), font_objects: FontObjects::default(), surfaces: Surfaces::default() });
     }
     /// Put the frame on the attached display, as GNU's window-system
     /// initialization does: from here `framep' and `window-system' answer

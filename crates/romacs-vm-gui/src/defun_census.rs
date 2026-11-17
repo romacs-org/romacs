@@ -22,13 +22,12 @@
 #[cfg(test)]
 mod tests {
     use crate::fonts::Display;
-    use romacs_vm::Vm;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     const STATUSES: [&str; 3] = ["needed", "elsewhere", "absent"];
-    /// The lisp/romacs/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
-    const LAZY_HALVES: [&str; 9] = ["keyboard.el", "minibuf.el", "window-change.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
+    /// The lisp/vm Lisp halves of prims/{keyboard,insdel,message,window_scroll,treesit,autosave,filename}.rs.
+    const LAZY_HALVES: [&str; 8] = ["keyboard.el", "minibuf.el", "insdel.el", "message.el", "window-scroll.el", "treesit.el", "auto-save.el", "dired.el"];
 
     fn root() -> PathBuf { PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")) }
 
@@ -52,20 +51,19 @@ mod tests {
     /// (fboundp, boundp) refuses.
     fn undefined(names: Vec<String>, predicate: &'static str) -> Vec<String> {
         std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-            let mut vm = Vm::new();
-            vm.set_frame_geometry(1200, 800, 24, 10).unwrap();
+            // The chain from a world, then the display, as a restored
+            // launch attaches it (main.rs), and the session.
+            let boot = crate::test_world::Boot { frame: (1200, 800, 24, 10), ..crate::test_world::Boot::LOADUP };
+            let (mut vm, loadup) = crate::test_world::chain(boot);
             vm.set_display_host(Some(Box::new(Display::new().unwrap())));
-            let home = std::env::temp_dir().join(format!("romacs-census-{predicate}-{}", std::process::id()));
-            std::fs::create_dir_all(&home).unwrap();
-            vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                    home.display())).unwrap();
-            let started = crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::Loadup, None).unwrap();
+            let home = crate::test_home::private_home(&mut vm, &format!("census-{predicate}"));
+            let started = crate::startup::resume_loadup(&mut vm, crate::startup::Launch::Loadup, loadup).unwrap();
             crate::startup::finish_loadup(&mut vm, &started).unwrap();
             // The Lisp halves primitives install on first use (the command
             // loop, the minibuffer, insdel, messages, scrolling, treesit),
             // as a session's first commands install them.
             for half in LAZY_HALVES {
-                vm.eval_source(&std::fs::read_to_string(root().join("lisp/romacs/vm").join(half)).unwrap()).unwrap();
+                vm.eval_source(&std::fs::read_to_string(root().join("lisp/vm").join(half)).unwrap()).unwrap();
             }
             let quoted: Vec<String> = names.iter().map(|n| serde_json::to_string(n).unwrap()).collect();
             // Written one name a line to a file, read back as UTF-8.

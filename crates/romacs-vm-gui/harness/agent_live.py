@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent sessions (lisp/romacs/romacs-agent.el, romacs-agent-host, the
+"""Agent sessions (lisp/agents/romacs-agent.el, romacs-agent-host, the
 reconnecting romacs-mcp relay) in a private headless labwc, HOME, XDG and
 TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 `claude' (no model is called).
@@ -50,9 +50,10 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              configuration directories two sessions.
   logging    a server keeps its own session record: errors with their
              functions, slow commands, its end.
-  home_keys  RET on the home page's other lines, real keys: a project
-             opens its newest, "more" shows every transcript, the help
-             line says how to reach a row.
+  board_keys  the agent board by real keys: RET on a project opens its
+             first row (a transcript where it has no thread), "more" shows
+             every transcript, a thread gone since the board was drawn is
+             said so and the board drawn again.
   chat_view  a chat keeps its transcript in view as turns come in.
   children   what runs under a session, in its header and C-c C-o menu,
              by real keys.
@@ -85,9 +86,13 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
 usage: agent_live.py --romacs BIN --output DIR [--workflow NAME]... [--tools DIR]
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
+import sqlite3
 import signal
 import subprocess
 import sys
@@ -102,6 +107,43 @@ HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
 RPC = Path(__file__).resolve().parent / 'fake_rpc.py'
 RPC_DRIVER = Path(__file__).resolve().parent / 'fakerpc.el'
+# What every process a run starts inherits, its value the run's private
+# tree: supervisors start detached (setsid) or as user units, out of the
+# harness's process tree, so they are found by it.
+MARK = 'AGENT_LIVE_RUN'
+
+
+def marked_processes(prefix):
+    """The processes whose MARK lies under PREFIX, a path."""
+    found = []
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            entries = (proc / 'environ').read_bytes().split(b'\0')
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.startswith(MARK.encode() + b'='):
+                value = entry[len(MARK) + 1:].decode(errors='replace')
+                if value == prefix or value.startswith(prefix.rstrip('/') + '/'):
+                    found.append(int(proc.name))
+    return found
+
+
+def end_marked(prefix, seconds=10):
+    """End every process marked under PREFIX, those started meanwhile too;
+    the pids it ended, all gone when it returns, else it raises."""
+    ended, deadline = [], time.time() + seconds
+    while (found := marked_processes(prefix)):
+        if time.time() > deadline:
+            raise RuntimeError(f'processes of {prefix} not ended: {found}')
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        ended += [pid for pid in found if pid not in ended]
+        time.sleep(0.05)
+    return ended
 
 
 class Agents(Server):
@@ -109,6 +151,7 @@ class Agents(Server):
         super().__init__(args, base, name, env_extra)
         self.calls = self.root / 'harness-calls.jsonl'
         self.env['FAKE_HARNESS_LOG'] = str(self.calls)
+        self.env[MARK] = str(self.root.resolve())
         self.work = self.root / 'work'
         # The default instance's directory, as a user who has run Claude Code has.
         (self.home / '.claude').mkdir()
@@ -174,11 +217,37 @@ class Agents(Server):
         return self.eval(f'(romacs-agent-state {self.s(sid)})')
 
     def idle(self, sid, seconds=30):
-        until(lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+        self.until(sid, lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+
+    def until(self, sid, ready, seconds, what):
+        """`until', and on its timeout what SID's session holds: what it
+        waits on is then in the failure, not lost with the run."""
+        try:
+            until(ready, seconds, what)
+        except RuntimeError as error:
+            raise RuntimeError(f'{error}; {self.held(sid)}') from None
+
+    def held(self, sid):
+        """SID's state, queue, selection and driver, as the editor has them."""
+        try:
+            return self.eval(f'(let ((s {self.s(sid)})) (if (not s) "no session" (prin1-to-string (list '
+                             ':state (romacs-agent-state s) :queue (romacs-agent-queue s) '
+                             ':selection (romacs-agent-pending-selection s) :driver (romacs-agent-driver-state s) '
+                             ':dispatch (romacs-agent-dispatch s) :caught-up (romacs-agent-caught-up s) '
+                             ':startup (romacs-agent-startup-pending s) :interrupted (romacs-agent-interrupted s) '
+                             ':input (romacs-agent-input-seq s) :completed (romacs-agent-completed-seq s) '
+                             ':connected (process-live-p (romacs-agent-connection s))))))')[:3000]
+        except Exception as error:  # A dead server says so, not hides the timeout.
+            return f'(state unreadable: {error!r})'
 
     def journal(self, sid):
-        path = self.home / '.local/state/romacs/agents' / sid / 'journal.jsonl'
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        """SID's records, as the editor reads them wherever they are kept:
+        its journal, or the agents' database once they are moved there."""
+        text = parity_live.read_sexp(self.eval(
+            f'(let ((session {self.s(sid)}) (records nil)) '
+            '(when session (romacs-agent--read-journal session (lambda (record) (push record records)))) '
+            '(decode-coding-string (json-serialize (vconcat (nreverse records))) (quote utf-8)))'))
+        return json.loads(text) if text else []
 
     def results(self, sid):
         return [r['out'].get('result') for r in self.journal(sid)
@@ -203,19 +272,14 @@ class Agents(Server):
                   "(romacs-agent-restore) t)")
 
     def close(self):
-        # Sessions started detached: end their supervisors and harnesses.
-        for host in (self.home / '.local/state/romacs/agents').glob('*/host.json'):
-            info = json.loads(host.read_text())
-            for pid in (info.get('harness'), info.get('pid')):
-                # Only while the pid is still this tree's process: an ended
-                # one's number may be another's now.
-                try:
-                    if str(self.root) in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace') \
-                            or 'romacs-agent-host' in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace'):
-                        os.kill(pid, signal.SIGKILL)
-                except (OSError, TypeError):
-                    pass
-        super().close()
+        # Every process this tree started carries MARK: the editor, its
+        # sessions' supervisors (detached or user units), their harnesses
+        # and MCP relays.  They end with it, whatever host.json still names
+        # (a workflow may remove a session's directory).
+        try:
+            end_marked(str(self.root.resolve()))
+        finally:
+            super().close()
 
 
 def lisp_text(text):
@@ -226,6 +290,8 @@ def session(args, base):
     a = Agents(args, base, 'ag')
     try:
         a.up()
+        # Asked, not allowed: the default allows every tool call unasked.
+        a.eval("(setq romacs-agent-approval-policy 'ask)")
         sid = a.start('say hello from the fake harness')
         a.idle(sid)
         a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "alpha beta\\n") t)')
@@ -255,8 +321,9 @@ def session(args, base):
         chat = a.chat(sid)
         result = {'edited': edited, 'evaluated': evaluated, 'approval': approval, 'interrupt_s': round(interrupt_s, 2),
                   'attached_after_reshow': attached,
-                  'chat_has': {k: k in chat for k in ('> say hello', 'hello from the fake harness',
-                                                      '✓ romacs_buffer_edit', '✓', '◆ Bash asks')}}
+                  'chat_has': {**{k: k in chat for k in ('> say hello', 'hello from the fake harness', '✓', '◆ Bash asks')},
+                               # A Romacs tool's row: its mark, then its name as words.
+                               '✓ ◈ buffer edit': bool(re.search(r'✓ \S+ buffer edit', chat))}}
         result['ok'] = (edited == '"ALPHA beta\\n"' and evaluated == '42'
                         and approval.get('behavior') == 'allow'
                         and approval.get('updatedInput', {}).get('run_in_background') is False
@@ -325,10 +392,16 @@ def providers(args, base):
         a.idle(first)
         a.idle(other)
         started = {'default': a.config_dirs(first), 'claude2': a.config_dirs(other)}
-        # The home page names each session's instance.
-        home = parity_live.read_sexp(a.eval('(with-temp-buffer (romacs-agents-mode) (romacs-agent-ui--home) '
-                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
-        shown = sorted({p for p in ('claude2', 'claude') if any(line.split('  ')[-1].startswith(p) or f' {p} ·' in line or line.rstrip().endswith(p) for line in home.splitlines())})
+        # The board names each session's harness, its account on hover.
+        hovers = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-board)) (with-temp-buffer (romacs-agent-board-mode) '
+                                              '(romacs-agent-board--draw (romacs-agent-board-rows (hash-table-values romacs-agent--sessions) '
+                                              'nil (romacs-agent-board--view)) 120) '
+                                              '(let ((pos (point-min)) (found nil)) '
+                                              '(while (setq pos (next-single-property-change pos (quote help-echo))) '
+                                              '(let ((h (get-text-property pos (quote help-echo)))) '
+                                              '(when (and (stringp h) (string-prefix-p "account " h)) (push (substring h 8) found)))) '
+                                              'found)))'))
+        shown = sorted(set(hovers))
         a.eval(f'(romacs-agent-stop {a.s(other)})')
         until(lambda: a.state(other) in ('ended', 'detached'), 15, 'session ended')
         a.client('--stop=none')
@@ -385,8 +458,10 @@ def outcome(args, base):
         time.sleep(.5)
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        # The relay holds a call while no Romacs listens (HOLD, 30 s,
+        # crates/romacs-mcp/src/reconnect.rs), then answers it not executed.
         until(lambda: sum(1 for e in a.logged() if e.get('tool') == 'romacs_eval' and 'not executed' in e.get('text', '')) >= 1,
-              20, 'not executed while down')
+              45, 'not executed while down')
         not_executed = not late.exists()
         a.restart()
         result = {'outcome_after_kill': asked, 'ran_once': ran_once, 'not_executed_had_no_effect': not_executed}
@@ -434,6 +509,64 @@ def budget(args, base):
         a.close()
 
 
+def sockets(args, base):
+    """romacs#262: the editor's sockets go back to their count once the
+    sessions it ran have ended, whether the editor ended them
+    (`romacs-agent-stop') or their directories went (a test's tree removed
+    with its harnesses waiting), and no supervisor of this tree is left."""
+    a = Agents(args, base, 'sk')
+    agents = a.home / '.local/state/romacs/agents'
+
+    def socks():
+        count = 0
+        for fd in Path(f'/proc/{a.pid}/fd').iterdir():
+            try:
+                count += os.readlink(fd).startswith('socket:')
+            except OSError:
+                pass
+        return count
+
+    def hosts():
+        found = []
+        for proc in Path('/proc').iterdir():
+            try:
+                argv = (proc / 'cmdline').read_bytes().split(b'\0')
+            except OSError:
+                continue
+            if argv and argv[0].endswith(b'romacs-agent-host') and str(agents).encode() in b' '.join(argv):
+                found.append(int(proc.name))
+        return found
+
+    def run(n, end):
+        ids = [a.start(f'say {i}') for i in range(n)]
+        for sid in ids:
+            a.idle(sid)
+        during = socks()
+        end(ids)
+        until(lambda: not hosts(), 30, 'every supervisor ended')
+        return during
+
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        # A first session: what the editor opens once and keeps (its
+        # routes' listener) is in the count the rest come back to.
+        run(1, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
+        baseline = socks()
+        stopped = run(3, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
+        until(lambda: socks() <= baseline, 30, 'sockets back after stops')
+        after_stop = socks()
+        removed = run(3, lambda ids: [shutil.rmtree(agents / sid) for sid in ids])
+        until(lambda: socks() <= baseline, 30, 'sockets back after removals')
+        after_removal = socks()
+        return {'baseline': baseline, 'with_3_stopped_later': stopped, 'after_stops': after_stop,
+                'with_3_removed_later': removed, 'after_removals': after_removal, 'hosts_left': len(hosts()),
+                'ok': stopped > baseline and removed > baseline and after_stop <= baseline
+                      and after_removal <= baseline and not hosts()}
+    finally:
+        a.close()
+
+
 def host(args, base):
     """The supervisor alone: a harness that writes 4 MB and exits 3, an
     attached server that never reads. The exit is journaled and the
@@ -443,9 +576,11 @@ def host(args, base):
     root = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / f'anh{os.getpid()}'
     root.mkdir(mode=0o700)
     sock, journal_dir = root / 'host.sock', base / 'host-session'
+    # Started here, not by an editor: marked as this run's all the same.
+    marked = {**os.environ, MARK: str((base / 'host').resolve())}
     process = subprocess.Popen([str(binary), '--dir', str(journal_dir), '--socket', str(sock), '--',
                                 'sh', '-c', 'sleep 0.5; yes line | head -c 4000000; exit 3'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
     try:
         until(lambda: sock.exists(), 10, 'supervisor listening')
         reader = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
@@ -465,7 +600,7 @@ def host(args, base):
         second, go = base / 'host-stuck', base / 'host-go'
         process = subprocess.Popen([str(binary), '--dir', str(second), '--socket', str(sock), '--',
                                     'sh', '-c', f'(sleep 30 <&0 >/dev/null &); while [ ! -e {go} ]; do sleep 0.05; done; exit 4'],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marked)
         until(lambda: sock.exists(), 10, 'second supervisor listening')
 
         def quietly(work):
@@ -507,6 +642,8 @@ def host(args, base):
     finally:
         if process.poll() is None:
             process.kill()
+        # And the stuck harness's descendant, left holding its stdin.
+        end_marked(marked[MARK])
         for leftover in (sock,):
             if leftover.exists():
                 leftover.unlink()
@@ -615,6 +752,18 @@ def probe(args, base):
         a.close()
 
 
+def user_manager_reachable(runtime):
+    """Let `systemd-run --user' reach the user manager from RUNTIME, a
+    private runtime directory a check gives the harness: it looks for the
+    manager's socket there (systemd/private, then bus).  Only those two are
+    linked to the real ones; the rest of RUNTIME stays private."""
+    real = Path(f'/run/user/{os.getuid()}')
+    for name in ('systemd', 'bus'):
+        link = Path(runtime) / name
+        if Path(runtime) != real and (real / name).exists() and not os.path.lexists(link):
+            link.symlink_to(real / name)
+
+
 def unit(args, base):
     bus = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
     if not bus:
@@ -622,6 +771,7 @@ def unit(args, base):
     a = Agents(args, base, f'au{os.getpid()}', {'DBUS_SESSION_BUS_ADDRESS': bus, 'ROMACS_SERVER_SLICE': 'romacs-build.slice'})
     a.env['WAYLAND_DISPLAY'] = str(a.runtime / a.env['WAYLAND_DISPLAY'])
     a.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+    user_manager_reachable(a.env['XDG_RUNTIME_DIR'])
     a.unit = f'romacs-server-{a.name}'
     try:
         a.up()
@@ -654,8 +804,11 @@ def unit(args, base):
 # check).  `tools' (fake harness) and `real' (Claude Code) both run it; a
 # tool the endpoint offers that is missing here fails the tour.
 # Tools the tour leaves to their own workflows: a restart ends the tour's
-# server (`restart'); gnosis's tools need its fixture database (`gnosis').
-ELSEWHERE = ['romacs_restart_request']
+# server (`restart'); gnosis's tools need its fixture database (`gnosis');
+# romacs_attach journals into a live chat (romacs-agent-attach-tests.el,
+# `mcp_tour'); romacs_dev_check checks a Romacs source tree
+# (romacs-mcp-dev-tests.el, `mcp_tour').
+ELSEWHERE = ['romacs_restart_request', 'romacs_restart', 'romacs_attach', 'romacs_dev_check']
 
 
 def tour(work, delegate_target):
@@ -673,13 +826,44 @@ def tour(work, delegate_target):
         ('romacs_send_keys', {'keys': 'C-f'}, lambda t: True),
         ('romacs_wait_idle', {'timeout': 5}, lambda t: True),
         ('romacs_call_outcome', {'id': 1}, lambda t: '"outcome"' in t),
+        ('romacs_restart_status', {}, lambda t: '"state"' in t),
         ('romacs_orchestrator_capabilities', {}, lambda t: '"codex"' in t and '"providers"' in t),
+        ('romacs_limits', {}, lambda t: '"harnesses"' in t),
+        ('romacs_dev_guide', {'query': 'car'}, lambda t: 'car' in t),
+        ('romacs_option_search', {'query': 'kill-ring'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_describe', {'name': 'kill-ring-max'}, lambda t: 'kill-ring-max' in t),
+        ('romacs_option_set', {'name': 'kill-ring-max', 'value': '61'}, lambda t: '61' in t),
+        ('romacs_option_save', {'name': 'kill-ring-max', 'value': '62'}, lambda t: '62' in t),
         ('romacs_delegate_task', {'task': delegate_target['task'], 'role': 'review', 'mode': 'wait',
                                   'target': delegate_target['target'], 'clientRequestId': 'tour-review'},
          lambda t: '"completed"' in t and 'APPROVE' in t),
         ('romacs_task_status', {'taskId': '<the taskId romacs_delegate_task returned>'}, lambda t: '"completed"' in t),
+        ('romacs_task_list', {}, lambda t: '"tasks"' in t),
+        ('romacs_task_watch', {'taskId': '<the same taskId>', 'file': 'tour.txt', 'stop': True}, lambda t: '"watching":[]' in t),
+        ('romacs_task_switch', {'taskId': '<the same taskId>', 'effort': 'low'}, lambda t: '"taskId"' in t),
+        ('romacs_task_send', {'taskId': '<the same taskId>', 'message': 'say again'}, lambda t: '"taskId"' in t),
+        ('romacs_task_renew', {'taskId': '<the same taskId>', 'why': 'the tour'}, lambda t: '"taskId"' in t),
+        ('romacs_orchestration_issues', {'hours': 1}, issues_summary),
         ('romacs_task_cancel', {'taskId': '<the same taskId>'}, lambda t: '"cancelled"' in t),
+        # Refused, and says why: the tour's session received no message.
+        ('romacs_task_reply', {'messageId': 'm-none', 'text': 'hello'},
+         lambda t: 'No message m-none among the ones this session received' in t),
     ]
+
+
+# Tour steps whose call is refused, its refusal checked.
+REFUSED_IN_TOUR = {'romacs_task_reply'}
+
+
+def issues_summary(text):
+    """Whether TEXT is romacs_orchestration_issues's summary: how many, by
+    kind, and where they are logged."""
+    try:
+        summary = json.loads(text)
+    except ValueError:
+        return False
+    return (isinstance(summary, dict) and isinstance(summary.get('total'), int)
+            and isinstance(summary.get('kinds'), list) and isinstance(summary.get('log'), str))
 
 
 DIFF = """--- a/greet.py
@@ -719,14 +903,14 @@ def tools(args, base):
         task_id = None
         for tool, arguments, _ in steps:
             if 'taskId' in arguments:
-                arguments = {'taskId': task_id}
+                arguments = {**arguments, 'taskId': task_id}
             # No instance: it is optional, and the tour shows each tool works without one.
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
             if tool == 'romacs_delegate_task':
                 task_id = json.loads(a.tool_results()[-1][1])['taskId']
         results = a.tool_results()[-len(steps):]
-        checked = {tool: (name == tool and not error and check(text))
+        checked = {tool: (name == tool and bool(error) == (tool in REFUSED_IN_TOUR) and check(text))
                    for (tool, _, check), (name, text, error) in zip(steps, results)}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         result = {'checked': checked, 'not_in_tour': missing,
@@ -734,6 +918,75 @@ def tools(args, base):
                   'file': (a.work / 'tour.txt').read_text(),
                   'failed': {t: x[:200] for (t, _, _), (_, x, e) in zip(steps, results) if not checked.get(t)}}
         result['ok'] = all(checked.values()) and not missing and result['file'] == 'written by the tour\n'
+        return result
+    finally:
+        a.close()
+
+
+def reap(args, base):
+    """A finished delegated task keeps no processes: reaped after its idle
+    time, it reads idle and completed (on the board too, not ended); a
+    task_send, and what a watch tells it, run its harness again on its own
+    conversation.  The user's own session, which no session delegated, is
+    never reaped."""
+    a = Agents(args, base, 'rp')
+    try:
+        a.up()
+        a.eval('(setq romacs-agent-reap-after 1)')
+        parent = a.start('say ready')
+        a.idle(parent)
+        a.send(parent, 'call romacs_delegate_task ' + json.dumps({'task': 'say first', 'mode': 'wait', 'clientRequestId': 'r1'}))
+        # The answer that started it: a call refused while the editor was
+        # not yet reachable is retried by the harness.
+        answer = until(lambda: next((e['text'] for e in a.logged()
+                                     if e.get('tool') == 'romacs_delegate_task' and not e.get('error')), None),
+                       60, 'task delegated')
+        a.idle(parent, 60)
+        child = json.loads(answer)['taskId']
+
+        def runs():
+            return [e for e in a.logged() if e.get('started') and e.get('started') == child]
+
+        def asleep():
+            return a.eval(f'(and (romacs-agent-reaped-p {a.s(child)}) (eq (romacs-agent-state {a.s(child)}) (quote idle)))') == 't'
+
+        def harness_gone(run):
+            return not Path(f'/proc/{run["pid"]}').exists()
+
+        def looks():
+            return {'state': a.state(child),
+                    'status': a.eval(f'(romacs-agent-tools--status {a.s(child)})').strip('"'),
+                    'board': a.eval(f'(romacs-agent-ui--state-key {a.s(child)})')}
+
+        until(asleep, 30, 'task reaped')
+        first = runs()[-1]
+        until(lambda: harness_gone(first), 15, 'reaped harness ended')
+        reaped = looks()
+        # A message from its parent: its conversation goes on.
+        a.send(parent, 'call romacs_task_send ' + json.dumps({'taskId': child, 'message': 'say second'}))
+        until(lambda: len(runs()) >= 2, 30, 'resumed by task_send')
+        second = runs()[-1]
+        a.idle(child, 60)
+        until(asleep, 30, 'reaped again')
+        until(lambda: harness_gone(second), 15, 'second harness ended')
+        # What a watch tells it (romacs-agent-tools--tell) resumes it the same way.
+        a.eval(f'(romacs-agent-tools--tell {a.s(child)} "say third")')
+        until(lambda: len(runs()) >= 3, 30, 'resumed by a tell')
+        third = runs()[-1]
+        a.idle(child, 60)
+        replies = a.results(child) if a.journal(child) else None
+        # Each resumed harness took its message: the task_send's (wrapped as
+        # one from another session) and the tell's.
+        inputs = [json.dumps(r['in']) for r in a.journal(child) if 'in' in r]
+        received = [any(word in i for i in inputs) for word in ('say second', 'say third')]
+        parent_alive = a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(parent)})) (not (romacs-agent-stopped {a.s(parent)})))') == 't'
+        resumed = [r['argv'][r['argv'].index('--resume') + 1] if '--resume' in r['argv'] else None for r in (second, third)]
+        result = {'reaped': reaped, 'first_argv_session': first['argv'][first['argv'].index('--session-id') + 1]
+                  if '--session-id' in first['argv'] else None,
+                  'resumed_on': resumed, 'parent_alive': parent_alive, 'received': received, 'replies': replies}
+        result['ok'] = (reaped == {'state': 'idle', 'status': 'completed', 'board': 'idle'}
+                        and resumed == [child, child] and first.get('started') == child and parent_alive
+                        and received == [True, True] and replies is not None and len(replies) == 3 and replies[2] == 'third')
         return result
     finally:
         a.close()
@@ -813,7 +1066,7 @@ def delegate(args, base):
         result['ok'] = (waited['status'] == 'completed' and waited['result'] == 'reviewed'
                         and run['codex_home'] == str(home) and run['model'] == 'm-test' and run['effort'] == 'low'
                         and result['same_request_same_task'] and asynced['status'] == 'running'
-                        and '[completed]' in wake and 'slow done' in wake and result['follow_up']
+                        and '[completed, 9 chars]' in wake and 'slow done' in wake and result['follow_up']
                         and cancel.get('status') == 'cancelled' and not result['cancelled_woke']
                         and cancelled_after == '"cancelled"' and interrupted == '"failed"' and expired.get('waitTimedOut')
                         # A wake per child turn end no wait answered, each with its own result: the
@@ -825,11 +1078,20 @@ def delegate(args, base):
         a.close()
 
 
+WOKEN = re.compile(r'Delegated task (\S+) \(.*?\) \[(\w+), (\d+) chars\]:\n(.*?)'
+                   r'(?=\n\nDelegated task |\n\nReply to this result|\Z)', re.S)
+
+
 def woken_ids(wakes, once, interrupted):
-    ids = [w.split()[2] for w in wakes]
-    told = [w for w in wakes if w.split()[2] == interrupted['taskId']]
+    """Each task's end the WAKES told, one entry each (ends that came
+    together share a wake): those of ONCE once each, and the INTERRUPTED
+    child's failed run and next turn."""
+    told = [m.groups() for w in wakes for m in WOKEN.finditer(w)]
+    ids = [t[0] for t in told]
+    mine = [(status, int(size), text) for task, status, size, text in told if task == interrupted['taskId']]
     return (all(ids.count(task['taskId']) == 1 for task in once) and len(ids) == len(once) + 2
-            and len(told) == 2 and '[failed]' in told[0] and told[1].endswith('[completed]:\nafter interrupt'))
+            and all(int(size) == len(text) for _, _, size, text in told)
+            and [m[0] for m in mine] == ['failed', 'completed'] and mine[1][2] == 'after interrupt')
 
 
 def build_dir(a, commit):
@@ -846,6 +1108,86 @@ def build_dir(a, commit):
         (d / root).symlink_to(runtime / root)
     (d / 'build.json').write_text(json.dumps({'commit': commit}))
     return d
+
+
+def restart_rollback(args, base):
+    """`romacs_restart' into a build that cannot start: its supervisor finds
+    it never serves, starts this build again with the session, and the
+    requester is told it rolled back and why, once."""
+    a = Agents(args, base, 'rb')
+    a.persist()
+    try:
+        a.up()
+        target = a.root / 'build-broken'
+        for sub in ('etc', 'lisp'):
+            (target / sub).mkdir(parents=True)
+        exe = target / 'romacs-vm-gui'
+        exe.write_text('#!/bin/sh\necho "this build cannot start" >&2\nexit 1\n')
+        exe.chmod(0o755)
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        old_pid = a.pid
+        a.send(requester, 'call romacs_restart ' + json.dumps({'target': str(target), 'delay': 1}))
+        until(lambda: any(e.get('tool') == 'romacs_restart' for e in a.logged()), 30, 'requested')
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 300, 'requester told')
+        told = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        a.pid = int(a.eval('(emacs-pid)'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
+        result = {'old_pid': old_pid, 'new_pid': a.pid, 'told': told, 'carried': carried,
+                  'verdict': record.get('verdict'), 'failed': record.get('failed'),
+                  'phases': [ph['phase'] for ph in record.get('phases', [])]}
+        result['ok'] = (a.pid != old_pid and len(told) == 1 and ' rolled back to ' in told[0]
+                        and record.get('verdict') == 'rolled-back' and (record.get('failed') or '').startswith('start:')
+                        and carried == '"carried across\\n"')
+        return result
+    finally:
+        a.close()
+
+
+def restart_hang(args, base):
+    """`romacs_restart' into a build whose session never serves (its init
+    loops for ever): past the start deadline its supervisor ends the hung
+    server, found by its command line, starts this build again with the
+    session, and the requester is told why, once."""
+    a = Agents(args, base, 'rh')
+    a.persist()
+    with open(a.home / '.config/romacs/init.el', 'a') as init:
+        init.write('(when (string-match-p "build-hang0000" (or (getenv "ROMACS_RUNTIME_ROOT") "")) (while t (sleep-for 0.2)))\n')
+    try:
+        a.up()
+        target = build_dir(a, 'hang0000')
+        a.eval("(setq romacs-restart-deadlines '(:exit 30 :start 25 :ready 60))")
+        a.eval('(with-current-buffer (get-buffer-create "notes") (erase-buffer) (insert "carried across\\n") t)')
+        requester = a.start('say ready')
+        a.idle(requester)
+        old_pid = a.pid
+        a.send(requester, 'call romacs_restart ' + json.dumps({'target': str(target), 'delay': 1}))
+        until(lambda: any(e.get('tool') == 'romacs_restart' for e in a.logged()), 30, 'requested')
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 300, 'requester told')
+        told = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        a.pid = int(a.eval('(emacs-pid)'))
+        carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
+        # A server of this tree's still running besides the one that serves: the hung target.
+        def ours(pid):
+            try:
+                return str(a.root) in Path(f'/proc/{pid}/environ').read_bytes().decode(errors='replace')
+            except OSError:
+                return False
+        hung = [line for line in subprocess.run(['pgrep', '-af', '--', '--serve rh'], capture_output=True, text=True).stdout.splitlines()
+                if line.split()[1].endswith('romacs-vm-gui') and int(line.split()[0]) != a.pid and ours(line.split()[0])]
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
+        result = {'old_pid': old_pid, 'new_pid': a.pid, 'told': told, 'carried': carried, 'hung_left': hung,
+                  'verdict': record.get('verdict'), 'failed': record.get('failed'),
+                  'phases': [ph['phase'] for ph in record.get('phases', [])]}
+        result['ok'] = (a.pid != old_pid and len(told) == 1 and ' rolled back to ' in told[0] and not hung
+                        and record.get('verdict') == 'rolled-back' and carried == '"carried across\\n"')
+        return result
+    finally:
+        a.close()
 
 
 def restart_unit(args, base):
@@ -876,6 +1218,7 @@ def restart(args, base, bus=None, race=False):
     if bus:
         a.env['WAYLAND_DISPLAY'] = str(a.runtime / a.env['WAYLAND_DISPLAY'])
         a.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        user_manager_reachable(a.env['XDG_RUNTIME_DIR'])
         a.unit = f'romacs-server-{name}'
     a.persist()
     try:
@@ -911,8 +1254,12 @@ def restart(args, base, bus=None, race=False):
         else:
             raise RuntimeError(f'not restarted: {pending}')
         a.pid = new_pid()
-        until(lambda: any('Romacs restarted' in e.get('wake', '') for e in a.logged()), 30, 'requester told')
-        told = next(e['wake'] for e in a.logged() if 'Romacs restarted' in e.get('wake', ''))
+        # The requester is told the supervisor's verdict, once.
+        until(lambda: any(e.get('wake', '').startswith('Romacs restart ') for e in a.logged()), 120, 'requester told')
+        told = next(e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart '))
+        verdicts = [e['wake'] for e in a.logged() if e.get('wake', '').startswith('Romacs restart')]
+        records = sorted((a.home / '.local/state/romacs/restarts').glob('*[0-9].json'))
+        record = json.loads(records[-1].read_text()) if records else {}
         until(lambda: any(e.get('prompt', '').startswith('Romacs restarted') for e in a.codex_runs()), 30, 'codex told')
         codex_told = next(e['prompt'] for e in a.codex_runs() if e.get('prompt', '').startswith('Romacs restarted'))
         carried = a.eval('(and (get-buffer "notes") (with-current-buffer "notes" (buffer-string)))')
@@ -927,8 +1274,11 @@ def restart(args, base, bus=None, race=False):
         # Racing, the launcher's server (this build) may win: it restores the
         # session in its own build, and says which.
         into = 'Romacs restarted into ' if race else 'Romacs restarted into abcdef01'
+        result.update(verdict=record.get('verdict'), told_count=len(verdicts),
+                      phases=[ph['phase'] for ph in record.get('phases', [])])
         result['ok'] = ('"scheduled"' in asked['text'] and a.pid != old_pid and result['harness_same']
-                        and told.startswith(into) and codex_told.startswith(into)
+                        and ' verified: ' in told and len(verdicts) == 1 and record.get('verdict') == 'verified'
+                        and codex_told.startswith(into)
                         and carried == '"carried across\\n"' and (race or str(target) in runtime) and served == f'"{name}"'
                         and not wake_files and (in_unit == 't') == bool(bus) and (not bus or result['unit_after'] == 'active'))
         return result
@@ -966,6 +1316,8 @@ def gnosis(args, base):
         ids = parity_live.read_sexp(parity_live.read_sexp(a.eval(GNOSIS_FIXTURE % (lisp(a.home / 'gnosis'), lisp(helpers)))))
         with RomacsMcp.for_server(a, agent_tools=True) as mcp:
             offered = [t for t in mcp.tools() if t.startswith('gnosis_')]
+            registered = sorted(t for t in parity_live.read_sexp(a.eval("(mapcar #'car romacs-mcp-tools)"))
+                                if t.startswith('gnosis_'))
             page1 = mcp.call('gnosis_content_search', limit=2)
             page2 = mcp.call('gnosis_content_search', limit=2, cursor=page1['next'])
             records = mcp.call('gnosis_content_fetch', ids=[str(i) for i in ids])
@@ -1017,7 +1369,7 @@ def gnosis(args, base):
                   'status': status.get('status'), 'cancel_refused': [refused, refusal[:120]], 'sessions': len(sessions['items']),
                   'review_rows': reviews, 'claude': claude, 'malformed': malformed, 'codex': codex,
                   'codex_turn_model': codex_run['model'] == 'm-luna', 'tutor': tutor, 'ask_states': asks}
-        result['ok'] = (len(offered) == 20 and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
+        result['ok'] = (sorted(offered) == registered and result['paged'] == [2, 1, True] and 'agent' in (result['applied_tags'] or [])
                         and practice.get('status') in ('pending', 'running') and refused and 'native review' in refusal
                         and reviews == '0' and 'resolved' in claude and 'pass' in claude
                         and 'rejected' in malformed and 'no grade recorded' in malformed
@@ -1136,17 +1488,17 @@ def launcher(args, base):
         two = start()
         until(lambda: reached(pinned, two) and reached(fresh, two), 60, 'both sessions reached editor 2')
         # Editor 3 starts while editor 2 is attached: the supervisors refuse
-        # it and no route moves.  Editor 2 then lets the fresh session go
-        # (its supervisor connection closed) and editor 3 attaches it: only
-        # that session's calls reach editor 3, the pinned one's editor 2.
+        # it and no route moves.  Editor 3 then takes the fresh session over
+        # (an attach that steals it: a connection editor 2 merely lost, its
+        # relay's next hello attaches it there again): only that session's
+        # calls reach editor 3, the pinned one's editor 2.
         three = start()
         until(lambda: own(three).is_socket(), 60, "editor 3's endpoint")
         # Longer than any supervisor takes to refuse (an earlier one, with no
         # acknowledgement, is taken as kept only after 3 s connected).
         time.sleep(4)
         kept = (os.readlink(fresh_route), os.readlink(old_socket))
-        ask(own(two), f'(progn (delete-process (romacs-agent-connection (romacs-agent-get {lisp_text(fresh)}))) t)')
-        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10) t)')
+        ask(own(three), f'(progn (romacs-agent--attach (romacs-agent-get {lisp_text(fresh)}) 10 t) t)')
         until(lambda: os.readlink(fresh_route) == str(own(three)), 15, "the fresh route led to editor 3")
         mark = time.time()
         ask(own(three), f'(romacs-agent-send (romacs-agent-get {lisp_text(fresh)}) {later})')
@@ -1159,7 +1511,9 @@ def launcher(args, base):
         late_id = '22222222-3333-4444-8555-666666666666'
         late_dir = a.home / '.local/state/romacs/agents' / late_id
         late_dir.mkdir(mode=0o700)
-        late_socket = runtime / 'agents/late.sock'
+        # Where Romacs looks for its supervisor: named by the session id alone.
+        late_socket = runtime / 'agents' / f'{late_id[:8]}-{hashlib.sha256(late_id.encode()).hexdigest()[:8]}' / 'host.sock'
+        late_socket.parent.mkdir(mode=0o700, parents=True)
         late = sockets.socket(sockets.AF_UNIX)
         late.bind(str(late_socket))
         late.listen()
@@ -1282,7 +1636,7 @@ def unicode(args, base):
              'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
             encoding='utf-8')
         a.providers([('claude', claude_dir)])
-        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) '
+        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
                                               '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
         view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
                                             f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
@@ -1316,13 +1670,13 @@ def environment(args, base):
     a = Agents(args, base, 'ev')
     try:
         a.up()
-        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp/gnu',
+        launch = {'ROMACS_RUNTIME_ROOT': '/installed/build', 'ROMACS_LISP_DIR': '/installed/build/lisp',
                   'ROMACS_USAGE_LOG': '/sessions/ended/usage.jsonl', 'ROMACS_GUI_FONT': 'Iosevka',
-                  'ROMACS_GUI_FONT_SIZE': '15', 'ROMACS_AGENT_TEST_KEPT': 'kept'}
+                  'ROMACS_GUI_FONT_SIZE': '15', 'AGENT_TEST_KEPT': 'kept'}
         parent = {'CLAUDECODE': '1', 'CLAUDE_CODE_SESSION_ID': 'parent', 'CLAUDE_CONFIG_DIR': '/parent/claude',
                   'CLAUDE_CODE_ENTRYPOINT': 'sdk-ts', 'T3CODE_THREAD_ID': 'thread-1', 'T3CODE_CLI_PATH': '/t3',
                   'CODEX_HOME': '/parent/codex', 'CODEX_THREAD_ID': 'parent-thread', 'CODEX_CI': '1'}
-        dropped = [k for k in {**launch, **parent} if k != 'ROMACS_AGENT_TEST_KEPT']
+        dropped = [k for k in {**launch, **parent} if k != 'AGENT_TEST_KEPT']
         a.eval('(progn ' + ' '.join(f'(setenv {lisp_text(k)} {lisp_text(v)})' for k, v in {**launch, **parent}.items()) + ' t)')
         codex_home = a.codex_instance()
         a.work.mkdir(parents=True, exist_ok=True)
@@ -1341,7 +1695,7 @@ def environment(args, base):
         sid, tid, claude, codex = children('unit')
         # A command the agent's own evaluation starts in the editor.
         a.send(sid, 'call romacs_eval ' + json.dumps(
-            {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_)\' | sort")'}))
+            {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_|AGENT_TEST_)\' | sort")'}))
         a.idle(sid)
         from_eval = a.tool_results()[-1][1]
         # The unit unsets them even from the user manager's environment.
@@ -1359,13 +1713,13 @@ def environment(args, base):
 
         def clean(env, own=None):
             return (not any(k in env for k in dropped if k != own)
-                    and env.get('ROMACS_AGENT_TEST_KEPT') == 'kept')
+                    and env.get('AGENT_TEST_KEPT') == 'kept')
         result = {'claude_env': claude, 'codex_env': codex, 'claude_detached': claude2, 'codex_detached': codex2,
                   'eval_env': from_eval, 'unit_unset': unset, 'detached_units': detached}
         result['ok'] = (clean(claude) and clean(claude2)
                         and clean(codex, 'CODEX_HOME') and codex.get('CODEX_HOME') == str(codex_home)
                         and clean(codex2, 'CODEX_HOME') and codex2.get('CODEX_HOME') == str(codex_home)
-                        and not any(k in from_eval for k in dropped) and 'ROMACS_AGENT_TEST_KEPT' in from_eval
+                        and not any(k in from_eval for k in dropped) and 'AGENT_TEST_KEPT' in from_eval
                         and (unset == 'no unit' or all(k in unset for k in dropped))
                         and detached == ['nil'])
         return result
@@ -1403,6 +1757,7 @@ def mcp_tour(args, base):
                 'romacs_file_write': {'path': str(note), 'text': 'two\n', 'save': True},
                 'romacs_send_keys': {'keys': 'C-a'}, 'romacs_wait_idle': {'timeout': 5},
                 'romacs_call_outcome': {'id': 'no-such-call'},
+                'romacs_restart_status': {},
                 'romacs_option_search': {'query': 'kill-ring'},
                 'romacs_option_describe': {'name': 'kill-ring-max'},
                 'romacs_option_set': {'name': 'kill-ring-max', 'value': '61'},
@@ -1439,8 +1794,10 @@ def mcp_tour(args, base):
                     errors[name] = text[:200]
                 return text
 
-            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_cancel')
-            for name in [n for n in names if n not in on_task + ('romacs_restart_request',)]:
+            on_task = ('romacs_task_status', 'romacs_task_send', 'romacs_task_switch', 'romacs_task_cancel')
+            # A restart would end the tour's server: the `restart' workflows call it.
+            elsewhere = ('romacs_restart',)
+            for name in [n for n in names if n not in on_task + ('romacs_restart_request',) + elsewhere]:
                 call(name, given(name))
             task = (json.loads(answered['romacs_delegate_task']).get('taskId')
                     if 'romacs_delegate_task' in answered and 'romacs_delegate_task' not in errors else None)
@@ -1461,7 +1818,8 @@ def mcp_tour(args, base):
                   'instructions': instructions, 'help': helped[:600],
                   'buffers_default': observed.get('buffers'), 'buffers_listed': listed.get('buffers'),
                   'project': observed.get('buffer', {}).get('project'), 'last_user_error': observed.get('lastUserError'),
-                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent]}
+                  'unanswered': [n for n in names if n not in answered and n not in protocol and n not in silent
+                                 and n not in elsewhere]}
         result['ok'] = (not result['unanswered'] and not protocol and not silent and len(names) >= 16
                         and all(n in instructions for n in ('romacs_identity', 'romacs_observe', 'romacs_eval', 'romacs_help'))
                         and helped.startswith('core:') and 'agents:' in helped
@@ -1470,9 +1828,13 @@ def mcp_tour(args, base):
                         and '*tour*' in listed['buffers'] and friend not in listed['buffers']
                         and friend in private['buffers']
                         # Gnosis's refuse without a session or database (none here); romacs_task_watch
-                        # without a running unit or a calling task.
+                        # without a running unit or a calling task; romacs_dev_check where no Romacs
+                        # tree is (the tour's project); romacs_attach, romacs_task_reply and
+                        # romacs_task_renew from a caller that is no agent session (the tour's client).
                         and all(n.startswith('gnosis_') or n in ('romacs_call_outcome', 'romacs_restart_request',
-                                                                  'romacs_task_watch')
+                                                                  'romacs_task_watch', 'romacs_dev_check',
+                                                                  'romacs_attach', 'romacs_task_reply',
+                                                                  'romacs_task_renew')
                                 for n in errors)
                         and task is not None)
         return result
@@ -1556,7 +1918,9 @@ def rpc(args, base):
         # server restores its sessions knowing it.
         setup = (f"(progn (load {lisp(RPC_DRIVER)}) (setq fakerpc-program (list \"python3\" {lisp(RPC)})) "
                  f"(setq romacs-agent-providers (list (cons \"fakerpc\" {lisp(homes[0])}) "
-                 f"(list \"fakerpc2\" :harness 'fakerpc :config-dir {lisp(homes[1])}))) t)")
+                 f"(list \"fakerpc2\" :harness 'fakerpc :config-dir {lisp(homes[1])})) "
+                 # Asked, not allowed: the default allows every tool call unasked.
+                 "romacs-agent-approval-policy 'ask) t)")
         (a.home / '.config/romacs').mkdir(parents=True, exist_ok=True)
         with open(a.home / '.config/romacs/init.el', 'a') as init:
             init.write(f"\n(setq romacs-agent-claude-program {lisp(HARNESS)})\n(with-eval-after-load 'romacs-agent {setup})\n")
@@ -1613,7 +1977,7 @@ def rpc(args, base):
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
         before = done(sid)
-        until(lambda: done(sid) > before, 30, 'held message answered')
+        a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
         a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
@@ -1635,7 +1999,7 @@ def rpc(args, base):
 
         # Its history: listed, viewed, imported; one id in two homes.
         items = parity_live.read_sexp(a.eval(
-            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
+            "(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) (mapcar (lambda (i) (mapconcat (function identity) (list (plist-get i :id) (plist-get i :provider) "
             "(plist-get i :title)) \"|\")) (seq-filter (lambda (i) (eq (plist-get i :harness) 'fakerpc)) (romacs-agent-history-items))))")) or []
         items = [i.split('|') for i in items]
         item = lambda ident, provider: (f"(seq-find (lambda (i) (and (equal (plist-get i :id) {lisp_text(ident)}) "
@@ -1832,17 +2196,18 @@ def composer(args, base, real=False):
 
         good = [typed('before_first_prompt', 'say hello from Romacs')]
         turn('first')
-        # A collapsed tool output is the transcript's last text while a turn
-        # runs: typing then, and after the turn ends, shows.
+        # A folded call is the transcript's last text while a turn runs (its
+        # output is drawn only when opened): typing then, and after the turn
+        # ends, shows.
         release = a.root / 'release-hold'
         a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
-        # Held until released: the folded output stays the transcript's last text.
+        # Held until released: the call's row stays the transcript's last text.
         until(lambda: a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                             '(quote romacs-agent-output)) t))') == 't', 15, 'tool output last')
+                             '(quote romacs-agent-tool)) t))') == 't', 15, 'tool row last')
         steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-ui--end))))')
         good.append(typed('while_output_last', 'typed while'))
         good.append(a.eval(f'(with-current-buffer {chat} (and (get-text-property (1- romacs-agent-ui--end) '
-                           '(quote romacs-agent-output)) t))') == 't' and a.state(sid) == 'running')
+                           '(quote romacs-agent-tool)) t))') == 't' and a.state(sid) == 'running')
         release.write_text('')
         a.idle(sid)
         good.append(typed('after_output_turn', ' and after', 'typed while and after'))
@@ -1850,7 +2215,7 @@ def composer(args, base, real=False):
         good.append(typed('after_first_turn', 'say again'))
         a.keys('-k', 'BackSpace', '-k', 'BackSpace')
         good.append(typed('after_del', 'x', 'say agax'))
-        # emacs-hermes's chat keys and its actions menu, with real keys.
+        # The chat's keys and its actions menu, with real keys.
         ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         popup = lambda: a.eval('(and (boundp (quote keymap-popup--buffer)) (buffer-live-p keymap-popup--buffer) t)') == 't'
         good.append(cleared('composer cleared for keys'))
@@ -1977,32 +2342,29 @@ def composer(args, base, real=False):
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) t)')
         good.append(typed('after_show_again', ' fifth', 'third fourth fifth'))
         # Point in the transcript (M-<, as a scroll leaves it): a key typed
-        # there goes to the composer (SPC there scrolls, as in hermes's
-        # chat); M-> from there reaches it too.
+        # there goes to the composer (SPC there scrolls); M-> from there
+        # reaches it too.
         a.keys('-M', 'alt', '<', '-m', 'alt')
         good.append(typed('typed_in_transcript', '+sixth', 'third fourth fifth+sixth'))
         a.keys('-M', 'alt', '<', '-m', 'alt')
         a.keys('-M', 'alt', '>', '-m', 'alt')
         good.append(typed('after_top_then_end', ' seventh', 'third fourth fifth+sixth seventh'))
         good.append(cleared('composer killed again'))
-        # A session started from the home page with c, its prompt typed in
-        # the minibuffer: its chat is shown, and its composer takes keys.
+        # A session started from the board with c: its chat opens with no
+        # prompt (asked only its directory), and its composer takes keys.
         a.eval(f'(progn (delete-other-windows) (romacs-agents) (delete-other-windows) (cd {lisp(a.work)}) t)')
         before = set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or [])
         a.keys('c')
         until(lambda: a.eval('(and (minibufferp (window-buffer (minibuffer-window))) (active-minibuffer-window) t)') == 't',
               10, 'directory asked')
         a.keys('-k', 'Return')
-        until(lambda: 'Prompt' in (parity_live.read_sexp(a.eval('(and (active-minibuffer-window) (minibuffer-prompt))')) or ''),
-              10, 'prompt asked')
-        a.keys('say hello from Romacs')
-        a.keys('-k', 'Return')
         until(lambda: set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))')) or []) - before,
               10, 'session started')
         sid = next(iter(set(parity_live.read_sexp(a.eval('(mapcar (function romacs-agent-id) (romacs-agent-sessions))'))) - before))
         chat = f'(romacs-agent-buffer {a.s(sid)})'
-        until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 120, 'home session answered')
-        a.idle(sid)
+        until(lambda: a.eval(f'(eq (window-buffer (selected-window)) {chat})') == 't', 10, 'home chat shown')
+        good.append(typed('home_first_prompt', 'say hello from Romacs'))
+        turn('home first')
         good.append(typed('home_session', 'say from home'))
         turn('home')
         good.append(typed('home_after_turn', 'more'))
@@ -2103,12 +2465,12 @@ def history(args, base):
         claude_run = [e for e in a.logged() if e.get('started') == cid]
         codex_run = [e for e in a.codex_runs() if e.get('codex') == tid]
         chats = {ident: a.chat(sid) for ident, sid in resumed.items()}
-        listed = text('(progn (romacs-agent-history-list) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
+        listed = text('(progn (romacs-agent-history-list t) (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)))') or []
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
         a.restart()
         a.providers(setting)
-        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list) '
+        again = text(f'(progn (require \'romacs-agent-history) (romacs-agent-history-list t) '
                      f'(list (mapcar (lambda (i) (plist-get i :id)) (romacs-agent-history-items)) '
                      f'(plist-get (romacs-agent-imported {a.s(resumed[cid])}) :path) '
                      f'(romacs-agent-harness-session {a.s(resumed[tid])})))')
@@ -2136,7 +2498,7 @@ def history(args, base):
         # Its directory, named by the conversation's identity.
         busy_dir = text(f'(romacs-agent--import-id \'codex {lisp_text(str(codex_home))} {lisp_text(busy)})')
         (a.home / '.local/state/romacs/agents' / busy_dir).mkdir()
-        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} "/nonexistent" {lisp(a.work)} '
+        refused = text(f'(condition-case err (romacs-agent-import \'codex {lisp_text(busy)} {lisp_text(str(transcript))} {lisp(a.work)} '
                        f'"x" "codex" {lisp_text(str(codex_home))}) (user-error (cadr err)))')
         # Two conversations whose time-ordered ids share their first
         # characters run overlapping turns, each with its own supervisor.
@@ -2179,8 +2541,8 @@ def history(args, base):
             and home.index(a.work.name) < home.index('◇')
             and all(v.split('|')[1] == 't' for v in views.values())
             and views[cid].startswith('*history: list the files here*')
-            and order(views[cid], '> list the files here', 'Two files') and '✓ Bash  ls' in views[cid]
-            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ Bash  wc -l a.txt' in views[tid]
+            and order(views[cid], '> list the files here', 'Two files') and '✓ $ ls' in views[cid]
+            and order(views[tid], '> count the lines of a.txt', 'a.txt has 3 lines') and '✓ $ wc -l a.txt' in views[tid]
             and claude_run and claude_run[-1]['argv'][claude_run[-1]['argv'].index('--resume') + 1] == cid
             and claude_run[-1].get('config_dir') == str(claude_dir)
             and codex_run and codex_run[-1]['resumed'] and codex_run[-1]['codex'] == tid
@@ -2248,7 +2610,8 @@ def real(args, base):
                         text = block.get('content')
                         text = ''.join(c.get('text', '') for c in text) if isinstance(text, list) else str(text)
                         outputs.setdefault(uses.get(block['tool_use_id']), (text, block.get('is_error')))
-        checked = {tool: tool in outputs and not outputs[tool][1] and check(outputs[tool][0]) for tool, _, check in steps}
+        checked = {tool: tool in outputs and bool(outputs[tool][1]) == (tool in REFUSED_IN_TOUR) and check(outputs[tool][0])
+                   for tool, _, check in steps}
         missing = sorted(set(offered(a)) - set(checked) - set(ELSEWHERE) - {t for t in offered(a) if t.startswith('gnosis_')})
         cost = [r['out'].get('total_cost_usd') for r in a.journal(sid)
                 if isinstance(r.get('out'), dict) and r['out'].get('type') == 'result']
@@ -2261,14 +2624,13 @@ def real(args, base):
         a.close()
 
 
-def home_keys(args, base):
-    """RET on the home page's lines that are no row, as real keys: on a
-    project, its newest session (by last activity, not by start, a
-    delegated one too) or, with
-    none, its newest transcript opens; on "◇ N more", every transcript is
-    shown; elsewhere a hint says n and p reach a row, and nothing opens; a
-    project whose newest session is gone since the page was drawn says so
-    and draws it again."""
+def board_keys(args, base):
+    """The agent board by real keys (C-x C-a a, RET): on a project, its
+    first row opens, the thread that wants the user most, else the newest
+    (a delegated one folds under its parent) or, with no thread, its
+    newest transcript; on "◇ N more", every transcript is shown and the
+    board stays; a thread gone since the board was drawn is said so, and
+    the board is drawn again."""
     a = Agents(args, base, 'hk')
     try:
         a.up()
@@ -2289,56 +2651,95 @@ def home_keys(args, base):
             until(lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})') != '0', 30, f'{prompt} answered')
             a.idle(sid)
             sids.append(sid)
-        # The third, delegated by the first (its row under the first's), is
-        # the most recently active; then the second.
+        # The third, delegated by the first, folds under it; of the two
+        # threads left, the second was active last.
         a.eval(f'(progn (setf (romacs-agent-options {a.s(sids[2])}) '
-               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) t)')
+               f'(plist-put (romacs-agent-options {a.s(sids[2])}) :parent {lisp_text(sids[0])})) '
+               f'(romacs-agent--index {a.s(sids[2])}) t)')
         for sid, at in zip(sids, (now - 30, now - 20, now - 10)):
             a.eval(f'(progn (setf (romacs-agent-last-time {a.s(sid)}) {at}) t)')
-        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) (romacs-agents) '
-               '(delete-other-windows) t)')
+        a.eval('(progn (setq romacs-agent-history-per-project 1) (delete-other-windows) t)')
         a.keyboard_ready()
-        shown = lambda: a.eval('(buffer-name (window-buffer (selected-window)))').strip('"')
+        board = '(get-buffer-window "*romacs-agents*" t)'
+        shown = lambda: a.eval(f'(and {board} (frame-visible-p (window-frame {board})) t)')
         # The session whose chat the selected window shows, if any.
         showing = lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
             '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
+        def open_board():
+            # A key typed as a layer hides or shows can be lost on a loaded
+            # host (seen: no command ran for it): keys must reach the frame,
+            # then the board, before one is relied on.
+            a.keyboard_ready()
+            a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
+            until(lambda: shown() == 't', 15, 'board shown')
+            def moved():
+                before = a.log().count('"native_command":"romacs-agent-board-next"')
+                a.keys('-k', 'n')
+                time.sleep(.3)
+                return a.log().count('"native_command":"romacs-agent-board-next"') > before
+            until(moved, 30, 'keys reach the board')
+
         def ret_on(regexp):
-            """Point to the home page's line REGEXP matches; RET there."""
-            a.eval('(progn (switch-to-buffer "*romacs-agents*") (delete-other-windows) (goto-char (point-min)) '
+            """Point to the board's line REGEXP matches; RET there."""
+            a.eval(f'(with-selected-window {board} (goto-char (point-min)) '
                    f'(re-search-forward {lisp_text(regexp)}) (beginning-of-line) t)')
             a.keys('-k', 'Return')
-            time.sleep(1)
+
+        def settled(read, want, seconds=15):
+            """READ's value once it is WANT, or its last after SECONDS: a
+            loaded host runs the key later than it is typed."""
+            end = time.time() + seconds
+            value = read()
+            while value != want and time.time() < end:
+                time.sleep(0.2)
+                value = read()
+            return value
 
         steps = {}
+        open_board()
+        # The transcripts are listed once their scan, aside, ends: the
+        # board is drawn again then.
+        until(lambda: a.eval(f'(with-selected-window {board} (save-excursion (goto-char (point-min)) '
+                             '(and (re-search-forward "^transcripts  " nil t) t)))') == 't', 30, 'transcripts listed')
         ret_on('^transcripts  ')
-        steps['project_without_session'] = parity_live.read_sexp(a.eval(
+        steps['project_without_session'] = settled(lambda: parity_live.read_sexp(a.eval(
             '(with-current-buffer (window-buffer (selected-window)) '
-            '(list buffer-read-only (plist-get romacs-agent-history--item :path)))'))
+            '(list buffer-read-only (plist-get (bound-and-true-p romacs-agent-history--item) :path)))')) + [shown()],
+            ['t', str(codex_file), 'nil'])
+        open_board()
         ret_on('^work  ')
-        steps['project_with_session'] = showing()
+        steps['project_with_session'] = settled(lambda: [showing(), shown()], [sids[1], 'nil'])
         steps['nested'] = parity_live.read_sexp(a.eval(
-            f'(mapcar (function romacs-agent-id) (gethash {lisp_text(sids[0])} (cdr (romacs-agent-ui--tree))))'))
-        ret_on('◇ [0-9]+ more')
-        steps['more'] = [shown(), a.eval('romacs-agents--all-history'),
-                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search "more  (h shows all)" (buffer-string)) t))')]
-        ret_on('^RET open')
-        steps['help_line'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
-        # The newest session forgotten after the page was drawn.
-        a.eval(f'(progn (remhash {lisp_text(sids[2])} romacs-agent--sessions) t)')
+            f'(length (plist-get (seq-find (lambda (row) (equal (plist-get row :id) {lisp_text(sids[0])})) '
+            '(romacs-agent-board-rows (hash-table-values romacs-agent--sessions) nil (romacs-agent-board--view))) '
+            ':children))'))
+        open_board()
+        ret_on('◇ +[0-9]+ more')
+        steps['more'] = settled(lambda: [shown(), a.eval('(buffer-local-value (quote romacs-agent-board--all-history) (get-buffer "*romacs-agents*"))'),
+                                         a.eval('(with-current-buffer "*romacs-agents*" (and (string-search " more  (" (buffer-string)) t))')],
+                                ['t', 't', 'nil'])
+        # The newest thread gone after the board was drawn: its records too
+        # (a session still recorded is listed from its row and loaded when asked).
+        # Removed from outside the editor, whose own connection only reads.
+        a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
+               '(remhash id romacs-agent--sessions) t)')
+        store = a.home / '.local/state/romacs/agents/sessions.sqlite'
+        if store.exists():
+            with sqlite3.connect(store, timeout=30) as db:
+                db.execute('delete from sessions where id = ?', (sids[1],))
+        ret_on('say two')
+        steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
+                                ['t', 'That thread is gone: the board is drawn again'])
         ret_on('^work  ')
-        steps['gone'] = [shown(), parity_live.read_sexp(a.eval('(current-message)'))]
-        ret_on('^work  ')
-        steps['after_gone'] = showing()
+        steps['after_gone'] = settled(showing, sids[0])
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
-        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file)]
-                        and steps['project_with_session'] == sids[2] and steps['nested'] == [sids[2]]
-                        and steps['more'] == ['*romacs-agents*', 't', 'nil']
-                        and steps['help_line'][0] == '*romacs-agents*'
-                        and 'n and p' in (steps['help_line'][1] or '')
-                        and steps['gone'][0] == '*romacs-agents*' and 'gone' in (steps['gone'][1] or '')
-                        and steps['after_gone'] == sids[1])
+        result['ok'] = (steps['project_without_session'] == ['t', str(codex_file), 'nil']
+                        and steps['project_with_session'] == [sids[1], 'nil'] and steps['nested'] == 1
+                        and steps['more'] == ['t', 't', 'nil']
+                        and steps['gone'][0] == 't' and 'gone' in (steps['gone'][1] or '')
+                        and steps['after_gone'] == sids[0])
         return result
     finally:
         a.close()
@@ -2348,9 +2749,10 @@ def start_picker(args, base):
     """Starting a session by real keys through the palette: C-u c on the
     home page, the directory of the project at point, a row found by typing
     (its instance's group, the harness's reported model among the catalogue's),
-    the effort, the prompt.  The fake harnesses record what they were given.
-    The first session of an instance asks its models once and keeps only
-    their rows; with one enabled instance no palette is asked."""
+    the effort, then the first message in the chat it opens.  The fake
+    harnesses record what they were given.
+    Each run's initialize answers its models, kept with only their rows;
+    with one enabled instance no palette is asked."""
     a = Agents(args, base, 'pk')
     try:
         a.up()
@@ -2406,10 +2808,21 @@ def start_picker(args, base):
             a.keys(effort)
             time.sleep(.5)
             a.keys('-k', 'Return')
-            asked('Prompt')
-            a.keys(text)
+            composed(text)
             a.keys('-k', 'Return')
             return directory
+
+        def chat_shown():
+            """Whether the selected window shows a chat, its composer the place to type."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) '
+                          '(and (bound-and-true-p romacs-agent-ui--session) (not (active-minibuffer-window)) t))') == 't'
+
+        def composed(text):
+            """TEXT typed in the chat a start opened: its first message."""
+            until(chat_shown, 15, 'chat opened')
+            a.keys(text)
+            until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
+                                 + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't', 15, f'{text} typed')
 
         # The palette, as drawn.
         on_project(other)
@@ -2440,18 +2853,19 @@ def start_picker(args, base):
         a.keys('c')
         asked('Project directory')
         a.keys('-k', 'Return')
-        asked('Prompt')
-        result['single'] = prompt()
-        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(chat_shown, 15, 'chat opened')
+        result['single'] = 'chat'
 
         after = lambda argv, flag: argv[argv.index(flag) + 1] if flag in argv else None
-        result['ok'] = (result['asked'] == 1 and kept_ok
+        # Each run initializes once (its hooks); the models it answers are
+        # kept, the account left out.
+        result['ok'] = (result['asked'] == 2 and kept_ok
                         and Path(result['directory'].rstrip('/')).name == other.name
                         and after(claude_argv, '--model') == 'claude-sonnet-5-5'
                         and after(claude_argv, '--effort') == 'high'
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
-                        and rows[0] == 'Claude · default' and 'Claude · Fake 1' in rows
-                        and 'Codex · GPT-6.1 Sol' in rows and 'Prompt' in result['single'])
+                        and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
+                        and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
         return result
     finally:
         a.close()
@@ -2549,6 +2963,10 @@ def children(args, base):
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
         a.codex_instance()
+        # A child waits for its approval only when the user is asked: every
+        # tool call is allowed by default.  Counts said in words, as read
+        # below (a glyph says them by default).
+        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
         parent = a.start('say ready')
         a.idle(parent)
 
@@ -2574,7 +2992,7 @@ def children(args, base):
         def header():
             return parity_live.read_sexp(a.eval(
                 f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (romacs-agent-ui--header-line)))'))
+                '(substring-no-properties header-line-format))'))
 
         def menu():
             return parity_live.read_sexp(a.eval(
@@ -2717,20 +3135,23 @@ def select(args, base):
                           'starts': len(starts(one))}
 
         # Armed during a turn: nothing mid-turn, the message waits for both.
-        a.send(one, 'slow 15')
+        # The turn is held until it has been looked at.
+        gate = a.work / 'release-armed'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (romacs-agent-ui--header-line)))'))
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
-        until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
+        gate.touch()
+        a.until(one, lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '── claude-sonnet-5-5 · low → claude-opus-5-5 · high ──'
+        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')
@@ -2740,8 +3161,10 @@ def select(args, base):
         result['divider'] = {'before': before.count(divider), 'after': replayed.count(divider),
                              'in_place': replayed.find(divider) < replayed.find('after')}
 
-        # A restart of the server while armed: applied at the live turn's end.
-        a.send(one, 'slow 40')
+        # A restart of the server while armed: applied at the live turn's end,
+        # the turn held until the restored selection has been read.
+        gate = a.work / 'release-restart'
+        a.send(one, f'wait {gate}')
         until(lambda: a.state(one) == 'running', 10, 'turn running')
         selected(one, 'claude-haiku-5-5', 'high')
         a.restart()
@@ -2749,6 +3172,7 @@ def select(args, base):
         a.eval('(progn (setq romacs-agent-select-timeout 1) t)')
         a.codex_instance()
         found = a.eval(f'(plist-get (romacs-agent-pending-selection {a.s(one)}) :model)')
+        gate.touch()
         settled(one, 30)
         result['restart_armed'] = {'found': found, 'options': options(one),
                                    'busy': [e['busy'] for e in a.logged() if e.get('control') == 'set_model'][-1]}
@@ -2764,7 +3188,7 @@ def select(args, base):
             a.send(sid, 'say again')
             settled(sid, 30)
             a.eval('(progn (setenv "FAKE_SELECT" nil) t)')
-            until(lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
+            a.until(sid, lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
             argv = starts(sid)[-1]
             restarts[how] = {'runs': len(starts(sid)), 'resume': after(argv, '--resume') == sid,
                              'model': after(argv, '--model')}
@@ -2795,10 +3219,14 @@ def select(args, base):
         result['died'] = {'options': options(dying), 'model': after(starts(dying)[-1], '--model')}
 
         # Codex: its next turn names them, once the running one ended.
-        run = a.start('slow 3', 'codex')
-        until(lambda: a.state(run) in ('running', 'starting'), 10, 'run running')
+        # Its turn under way, not starting (a selection made while it starts
+        # rightly reaches the first turn), and held until the next message waits.
+        gate = a.work / 'release-codex'
+        run = a.start(f'wait {gate}', 'codex')
+        until(lambda: a.state(run) == 'running', 15, 'run running')
         selected(run, 'gpt-6-luna', 'low')
         a.send(run, 'say next')
+        gate.touch()
         until(lambda: any(r['model'] == 'gpt-6-luna' for r in a.codex_runs()), 30, 'second turn')
         runs = a.codex_runs()
         result['codex'] = {'first': runs[0]['model'] == 'gpt-6-luna', 'second': runs[-1]['model'] == 'gpt-6-luna',
@@ -2808,7 +3236,7 @@ def select(args, base):
         live, armed_r, div = result['live'], result['armed'], result['divider']
         result['ok'] = (live['requests'] == ['set_model', 'apply_flag_settings'] and live['starts'] == 1
                         and live['options'] == ['claude-sonnet-5-5', 'low'] and not any(live['busy'])
-                        and armed_r['armed'] == 't' and 'claude-opus-5-5 · high next turn' in armed_r['header']
+                        and armed_r['armed'] == 't' and '→ claude-opus-5-5 · high' in armed_r['header']
                         and not any(armed_r['busy']) and armed_r['options'] == ['claude-opus-5-5', 'high']
                         and armed_r['written'][-3:] == [('control_request', 'set_model'),
                                                         ('control_request', 'apply_flag_settings'), ('user', None)]
@@ -2938,17 +3366,18 @@ def history_real(args, base):
         a.close()
 
 
-WORKFLOWS = {'host': host, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
-             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race,
+WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
+             'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'home_keys': home_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--romacs', required=True)
+    # --binary: the name romacs-check gives every live harness its binary by.
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--tools', default=parity_live.TOOLS)
     parser.add_argument('--emacsclient', default='emacsclient')
@@ -2965,15 +3394,26 @@ def main():
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
     results = {}
-    for name in args.workflow or ['host', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'home_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
-                                  'outcome', 'budget', 'deadline', 'probe']:
+    for name in args.workflow or ['host', 'sockets', 'reap', 'session', 'composer', 'providers', 'tools', 'delegate', 'restart', 'gnosis', 'history', 'launcher', 'unicode', 'environment', 'logging', 'board_keys', 'rpc', 'instances', 'mcp_tour', 'survive',
+                                  'outcome', 'budget', 'deadline', 'probe', 'select']:
         try:
             results[name] = WORKFLOWS[name](args, out)
         except Exception as error:  # a workflow's failure is its result
             results[name] = {'ok': False, 'error': repr(error)}
+        # No process a workflow started outlives it: one left fails it.
+        try:
+            outlived = end_marked(str(out.resolve()))
+        except RuntimeError as error:
+            outlived = repr(error)
+        if outlived:
+            results[name] = {**results[name], 'ok': False, 'outlived': outlived}
         print(name, json.dumps(results[name]), flush=True)
     (out / 'summary.json').write_text(json.dumps(results, indent=2))
-    return 0 if all(r.get('ok') is not False for r in results.values()) else 1
+    ok = all(r.get('ok') is not False for r in results.values())
+    # What romacs-check reads of a live harness.
+    (out / 'report.json').write_text(json.dumps({'status': 'PASS' if ok else 'FAIL',
+                                                 'failed': [n for n, r in results.items() if r.get('ok') is False]}))
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':

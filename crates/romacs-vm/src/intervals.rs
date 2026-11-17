@@ -5,14 +5,13 @@ use crate::{
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, romacs_snapshot::Snapshot)]
 struct Links {
     left: Option<usize>,
     right: Option<usize>,
     parent: Option<usize>,
 }
-romacs_snapshot::snapshot_struct!(Links { left, right, parent });
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 struct Node {
     value: Value,
     start: Anchor,
@@ -21,20 +20,18 @@ struct Node {
     group: usize,
     links: [Links; 2],
 }
-romacs_snapshot::snapshot_struct!(Node { value, start, end, bounds, group, links });
 impl Node {
     fn endpoint(&self, order: usize) -> Anchor {
         if order == 0 { self.start } else { self.end }
     }
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct IntervalIndex {
     nodes: Vec<Node>,
     slots: HashMap<Anchor, usize>,
     free: Vec<usize>,
     roots: [[Option<usize>; 4]; 2],
 }
-romacs_snapshot::snapshot_struct!(IntervalIndex { nodes, slots, free, roots });
 fn priority(i: usize) -> u64 {
     let mut x = (i as u64).wrapping_add(1).wrapping_mul(0x9e3779b97f4a7c15);
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -230,6 +227,9 @@ impl IntervalIndex {
         anchors: &AnchorTree,
         mut emit: impl FnMut(Value, u32, u32),
     ) -> usize {
+        if self.slots.is_empty() {
+            return 0;
+        }
         let mut visited = 0;
         fn visit(
             t: &IntervalIndex,
@@ -321,6 +321,27 @@ impl IntervalIndex {
             }
         }
         (best, visited)
+    }
+    /// The last overlay endpoint before `a`, or `floor` when none is
+    /// above it: [`Self::next`] backwards.
+    pub fn previous(&self, a: u32, floor: u32, anchors: &AnchorTree) -> u32 {
+        let mut best = floor;
+        for order in 0..2 {
+            for root in self.roots[order] {
+                let mut current = root;
+                while let Some(i) = current {
+                    let node = &self.nodes[i];
+                    let pos = anchors.resolve(node.endpoint(order)).unwrap();
+                    if pos < a {
+                        best = best.max(pos);
+                        current = node.links[order].right;
+                    } else {
+                        current = node.links[order].left;
+                    }
+                }
+            }
+        }
+        best
     }
     pub fn next(&self, a: u32, limit: u32, anchors: &AnchorTree) -> u32 {
         self.next_counted(a, limit, anchors).0

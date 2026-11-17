@@ -1122,16 +1122,6 @@ impl GlyphRow {
         })
     }
 
-    /// The next natural buffer row begins at the same boundary after a visual
-    /// wrap; a physical line end additionally consumes its newline.
-    pub(crate) fn next_buffer_row_start(&self) -> Option<usize> {
-        if self.continued {
-            Some(self.end_charpos)
-        } else {
-            self.end_charpos.checked_add(1)
-        }
-    }
-
     pub fn new(role: GlyphRowRole) -> Self {
         Self {
             glyphs: std::array::from_fn(|_| Vec::new()),
@@ -1542,15 +1532,6 @@ impl AsRef<GlyphRow> for MatrixRow {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GlyphMatrix {
     pub rows: Vec<MatrixRow>,
-    /// Per-row layout provenance for THIS frame (spec 4.6), parallel to
-    /// `rows`. Damage lives beside — not inside — the copy-on-write rows:
-    /// it is per-frame transient metadata, and stamping it on a shared
-    /// `MatrixRow` would force a deep copy of every reused row each frame.
-    /// PRIVATE so alignment with `rows` is owned entirely by the accessors
-    /// (`row_damage`/`set_row_damage`) and the resize paths — external code
-    /// cannot desynchronize the two vectors.
-    #[serde(default)]
-    row_damage: Vec<RowDamage>,
     pub nrows: usize,
     pub ncols: usize,
     pub matrix_x: usize,
@@ -1580,7 +1561,6 @@ impl GlyphMatrix {
             vec![MatrixRow::new(row); nrows]
         };
         Self {
-            row_damage: vec![RowDamage::New; nrows],
             rows,
             nrows,
             ncols,
@@ -1604,42 +1584,10 @@ impl GlyphMatrix {
             MatrixRow::new(row)
         });
         self.rows.truncate(nrows);
-        self.row_damage.resize(nrows, RowDamage::New);
         self.nrows = nrows;
         self.ncols = ncols;
     }
-
-    /// This frame's provenance for row `idx` (`New` when out of range or
-    /// never stamped this frame).
-    pub fn row_damage(&self, idx: usize) -> RowDamage {
-        self.row_damage.get(idx).copied().unwrap_or(RowDamage::New)
-    }
-
-    pub fn set_row_damage(&mut self, idx: usize, damage: RowDamage) {
-        if self.row_damage.len() < self.rows.len() {
-            self.row_damage.resize(self.rows.len(), RowDamage::New);
-        }
-        if let Some(slot) = self.row_damage.get_mut(idx) {
-            *slot = damage;
-        }
-    }
 }
-
-/// Per-row layout provenance for incremental redisplay (spec §4.6).
-/// Stored directly on [`GlyphRow`] so provenance and visual identity cannot
-/// drift apart before the render-side damage compositor consumes them.
-#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub enum RowDamage {
-    /// Row was laid out from scratch this cycle.
-    #[default]
-    New,
-    /// Row was reused verbatim from the retained matrix at the same `pixel_y`.
-    Reused,
-    /// Row was reused but shifted by a uniform vertical delta (scroll).
-    ReusedShifted { dvpos: Px },
-}
-
-impl RowDamage {}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WindowMatrixEntry {
@@ -1783,12 +1731,6 @@ pub struct ScrollBarItem {
 pub struct FrameDisplayState {
     #[serde(default)]
     pub scroll_input_policy: crate::ScrollInputPolicy,
-    /// Bounded body coverage, separate from authoritative query geometry.
-    #[serde(default)]
-    pub scroll_coverage: Vec<std::sync::Arc<crate::scroll_coverage::ScrollCoverage>>,
-    /// Completed native commands reflected in this immutable frame.
-    #[serde(default)]
-    pub input_checkpoint: Vec<crate::input_progress::InputCheckpoint>,
     /// Evaluator interaction snapshot paired with these exact pixels.
     pub presentation_id: PresentationId,
     /// Why this presentation was produced.
@@ -2344,8 +2286,6 @@ impl FrameDisplayState {
     pub fn new(frame_cols: usize, frame_rows: usize, char_width: f32, char_height: f32) -> Self {
         Self {
             scroll_input_policy: crate::ScrollInputPolicy::default(),
-            scroll_coverage: Vec::new(),
-            input_checkpoint: Vec::new(),
             presentation_id: PresentationId::default(),
             origin: crate::presentation_origin::PresentationOrigin::Ordinary,
             frame_placement: crate::presented_frame::PresentedFramePlacement::default(),
@@ -2610,12 +2550,6 @@ impl FrameDisplayState {
         let mut buf = FrameGlyphBuffer::with_size(self.frame_pixel_width, self.frame_pixel_height);
         buf.presentation_id = self.presentation_id;
         buf.scroll_input_policy = self.scroll_input_policy;
-        buf.input_checkpoint = self.input_checkpoint.clone();
-        buf.scroll_surfaces = self
-            .scroll_coverage
-            .iter()
-            .filter_map(|coverage| coverage.materialize(self))
-            .collect();
         buf.frame_placement = self.frame_placement;
         buf.origin = self.origin;
         buf.char_width = self.char_width;

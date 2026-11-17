@@ -5,6 +5,7 @@
 //! to the narrowing before a parse (`treesit_sync_visible_region`), and the
 //! line/column caches of tracking buffers. Byte positions are GNU's
 //! 1-based ones; `TextBody` offsets are 0-based.
+pub(crate) mod ahead;
 pub(crate) mod native;
 
 use crate::text::{FrozenText, TextBody};
@@ -17,13 +18,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-/// A grammar linked into the executable (DIVERGENCES VM2-TREESIT-BUNDLED):
+/// A grammar linked into the executable (ledger/divergences VM2-TREESIT-BUNDLED):
 /// GNU's language symbol name, its `tree_sitter_LANG` function, and the
 /// repository and commit of its sources.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct BundledGrammar {
     pub name: &'static str,
-    pub language: unsafe extern "C" fn() -> *const (),
+    pub language: tree_sitter_language::LanguageFn,
     pub url: &'static str,
     pub commit: &'static str,
 }
@@ -32,13 +33,7 @@ static BUNDLED: OnceLock<Vec<BundledGrammar>> = OnceLock::new();
 
 /// Make GRAMMARS the executable's bundled grammars, once per process,
 /// before any VM loads a language. A later call is ignored.
-///
-/// # Safety
-/// Each grammar's `language` must be a tree-sitter grammar function
-/// (`tree_sitter_LANG`) linked into this process: callable at any time
-/// from any thread, returning a pointer to a static `TSLanguage` of an
-/// ABI the runtime accepts or rejects through `ts_parser_set_language`.
-pub unsafe fn register_bundled_grammars(grammars: Vec<BundledGrammar>) {
+pub fn register_bundled_grammars(grammars: Vec<BundledGrammar>) {
     let _ = BUNDLED.set(grammars);
 }
 
@@ -48,13 +43,12 @@ pub(crate) fn bundled_grammars() -> &'static [BundledGrammar] {
 }
 
 /// GNU's `struct ts_linecol`; `bytepos` 0 is the empty linecol.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Linecol {
     pub line: i64,
     pub col: i64,
     pub bytepos: i64,
 }
-romacs_snapshot::snapshot_struct!(Linecol { line, col, bytepos });
 pub(crate) const BOB_LINECOL: Linecol = Linecol { line: 1, col: 0, bytepos: 1 };
 pub(crate) const EMPTY_LINECOL: Linecol = Linecol { line: 0, col: 0, bytepos: 0 };
 
@@ -71,6 +65,8 @@ pub(crate) struct Core {
     pub visible: (i64, i64),
     /// `visi_beg/end_linecol`; None unless the parser tracks linecols.
     pub linecols: Option<(Linecol, Linecol)>,
+    /// The reparse an edit's frame started on a thread (`ahead`).
+    pub ahead: Option<ahead::Ahead>,
 }
 
 /// One text change, GNU's `treesit_record_change` arguments: 1-based bytes
@@ -87,6 +83,7 @@ pub(crate) struct Change {
 /// first, and the text's linecol caches.
 #[derive(Default)]
 pub(crate) struct Registry {
+    // CELL(Plain): Tree-sitter's native state; the Lisp Values sit beside it, outside the cell.
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
@@ -94,6 +91,7 @@ pub(crate) struct Registry {
     /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
     /// parser out of view may never catch up, and one a query runs is not
     /// the frame.
+    // CELL(Plain)
     pub edited: std::cell::Cell<i64>,
 }
 /// A copy of a text (a snapshot or a cloned buffer) has no parsers.
@@ -106,6 +104,14 @@ impl Clone for Registry {
 // capture (`Object::foreign_resource`) and `world_quiescent` an early
 // parse, so a captured registry is empty.
 unsafe impl romacs_snapshot::SnapshotSafe for Registry {}
+// An image holds it empty: nothing to walk.
+impl romacs_snapshot::Schema for Registry {
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
+}
 
 /// The most first parses running at once, whatever a session visits.
 const EARLY_LIMIT: usize = 4;
@@ -152,6 +158,7 @@ pub(crate) struct Early {
     pub language: native::Language,
     pub visible: (i64, i64),
     /// The text's changes since the copy; None past EARLY_CHANGES_LIMIT.
+    // CELL(Plain)
     changes: RefCell<Option<Vec<Change>>>,
     result: mpsc::Receiver<Option<native::Loose>>,
     /// What the thread sent, once `ready' saw it.
@@ -163,14 +170,15 @@ impl Early {
     pub(crate) fn start(slot: EarlySlot, language: native::Language, text: FrozenText, visible: (i64, i64),
                         wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) -> Option<Self> {
         let (sender, result) = mpsc::channel();
+        let grammar = language.clone();
         std::thread::Builder::new().name("treesit-parse".into()).spawn(move || {
             // The slot outlives the text.
             let _slot = slot;
             let text = text;
             let mut parser = native::Parser::new();
-            parser.set_language(language);
-            let mut reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
-            let _ = sender.send(parser.parse(None, &mut reader).map(Tree::loose));
+            parser.set_language(&grammar);
+            let reader = Reader::new(Some(&text), ((visible.0 - 1) as usize, (visible.1 - 1) as usize));
+            let _ = sender.send(parser.parse(None, &reader).map(Tree::loose));
             note_early_landed();
             if let Some(wake) = wake { wake(); }
         }).ok()?;
@@ -250,11 +258,14 @@ fn edit(start: i64, old_end: i64, new_end: i64, points: [TSPoint; 3]) -> TSInput
 
 impl Core {
     pub(crate) fn new(visible: (i64, i64), linecols: Option<(Linecol, Linecol)>) -> Self {
-        Self { tree: None, need_reparse: true, fresh: false, visible, linecols }
+        Self { tree: None, need_reparse: true, fresh: false, visible, linecols, ahead: None }
     }
     /// treesit_record_change_1 for this parser: the change clipped to the
     /// visible region, the region moved, and the tree edited.
     fn record(&mut self, c: Change, text: &TextBody) {
+        if self.ahead.as_mut().is_some_and(|ahead| !ahead.record(c)) {
+            self.ahead = None;
+        }
         let Some(tree) = &self.tree else { return };
         let (visible_beg, visible_end) = self.visible;
         let start_offset = visible_end.min(visible_beg.max(c.start)) - visible_beg;
@@ -409,26 +420,22 @@ pub(crate) struct Reader<'a, T> {
     pub text: Option<&'a T>,
     /// 0-based bytes.
     pub visible: (usize, usize),
-    raw: [u8; 2],
 }
 impl<'a, T> Reader<'a, T> {
     pub(crate) fn new(text: Option<&'a T>, visible: (usize, usize)) -> Self {
-        Self { text, visible, raw: [0; 2] }
+        Self { text, visible }
     }
 }
 impl<T: Chunks> native::Source for Reader<'_, T> {
-    fn read(&mut self, offset: usize) -> &[u8] {
+    fn read(&self, offset: usize) -> native::Chunk<'_> {
         let at = self.visible.0 + offset;
-        let Some(text) = self.text.filter(|_| at < self.visible.1) else { return &[] };
+        let Some(text) = self.text.filter(|_| at < self.visible.1) else { return native::Chunk::Text(&[]) };
         let chunk = text.chunk_from(at);
         let chunk = &chunk[..chunk.len().min(self.visible.1 - at)];
         match text.raw_in(at..at + chunk.len()).first() {
-            Some(&p) if p as usize == at => {
-                self.raw = [chunk[0] - crate::text::RAW_LEAD_SHIFT, chunk[1]];
-                &self.raw
-            }
-            Some(&p) => &chunk[..p as usize - at],
-            None => chunk,
+            Some(&p) if p as usize == at => native::Chunk::Raw([chunk[0] - crate::text::RAW_LEAD_SHIFT, chunk[1]]),
+            Some(&p) => native::Chunk::Text(&chunk[..p as usize - at]),
+            None => native::Chunk::Text(chunk),
         }
     }
 }
@@ -454,7 +461,9 @@ pub(crate) struct Parser {
     pub embed_level: Value,
     pub notifiers: Value,
     pub last_set_ranges: Value,
+    // CELL(Plain)
     pub native: Rc<RefCell<native::Parser>>,
+    // CELL(Plain)
     pub core: Rc<RefCell<Core>>,
     pub timestamp: u64,
     pub deleted: bool,
@@ -529,6 +538,7 @@ impl Compiled {
 #[derive(Clone)]
 pub(crate) struct Task {
     pub values: Vec<Value>,
+    // CELL(Plain)
     pub state: Rc<RefCell<TaskState>>,
 }
 
@@ -552,6 +562,33 @@ pub(crate) struct Capture {
     /// Indices into MATCHES of the matches that passed.
     pub passed: Vec<usize>,
     pub timestamp: u64,
+    /// For `romacs--treesit-fontify`: the region the faces go in, the
+    /// settings the query's patterns belong to, and the order and progress
+    /// of applying the captures once the predicates have run.
+    pub fontify: Option<Fontify>,
+}
+
+/// The faces part of a capture task (`romacs--treesit-fontify`).
+pub(crate) struct Fontify {
+    pub start: i64,
+    pub end: i64,
+    /// Each setting's first pattern in the query, ascending.
+    pub settings: Vec<u32>,
+    /// The first match of the setting whose predicates and captures are
+    /// under way: the capture task's matches are in setting order, each
+    /// setting's in the order the query found them, and a setting's
+    /// predicates run only once the one before it is applied, as GNU runs
+    /// one setting's query after another.
+    pub batch: usize,
+    /// The next capture of the setting's passed matches: (index into
+    /// PASSED, capture of that match).
+    pub next: (usize, usize),
+}
+impl Fontify {
+    /// The setting PATTERN belongs to.
+    pub(crate) fn setting(&self, pattern: u32) -> usize {
+        self.settings.partition_point(|&first| first <= pattern).saturating_sub(1)
+    }
 }
 
 /// A walk of a tree (search, sparse tree, match) between predicate calls:

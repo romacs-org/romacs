@@ -5,7 +5,7 @@ use super::*;
 use crate::prim::Out;
 use crate::subprocess::Slot;
 use crate::tls::{self, BootError, Session, stage};
-use std::os::fd::AsRawFd;
+use std::os::fd::AsFd;
 
 type Result<T> = std::result::Result<T, Fault>;
 
@@ -17,7 +17,7 @@ pub(crate) enum Handshake {
 }
 
 impl Leaf<'_> {
-    fn plist_value(&self, mut plist: Value, key: Value) -> Value {
+    pub(crate) fn plist_value(&self, mut plist: Value, key: Value) -> Value {
         for _ in 0..self.list_limit() {
             let Some((k, rest)) = self.pair(plist) else { break };
             let Some((v, rest)) = self.pair(rest) else { break };
@@ -117,7 +117,7 @@ impl Leaf<'_> {
         // the session from its first round.
         session.active = non_blocking;
         let Some(channel) = self.channel_mut(proc) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
-        let Some(fd) = channel.infd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
+        let Some(fd) = channel.infd.as_ref().map(|f| f.as_fd()) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
         if channel.connecting.is_some() {
             // The handshake starts once the connection is made (the wait's
             // gnutls_try_handshake).
@@ -248,7 +248,7 @@ impl Leaf<'_> {
     pub(crate) fn gnutls_bye(&mut self, proc: Value) -> Out {
         self.process(proc)?;
         let Some(channel) = self.channel_mut(proc) else { return Ok(self.gnutls_make_error(-10)) };
-        let Some(fd) = channel.outfd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
+        let Some(fd) = channel.outfd.as_ref().map(|f| f.as_fd()) else { return Ok(self.gnutls_make_error(tls::code::PUSH_ERROR)) };
         let Some(session) = channel.tls.as_deref_mut() else { return Ok(self.gnutls_make_error(-10)) };
         let code = if session.bye(fd).is_ok() { 0 } else { tls::code::PUSH_ERROR };
         Ok(self.gnutls_make_error(code))
@@ -258,7 +258,7 @@ impl Leaf<'_> {
     /// session once its connection is made.
     pub(crate) fn gnutls_handshake_poll(&mut self, proc: Value) -> Handshake {
         let Some(channel) = self.channel_mut(proc) else { return Handshake::Failed(-10) };
-        let Some(fd) = channel.infd.as_ref().map(|f| f.as_raw_fd()) else { return Handshake::Failed(tls::code::PULL_ERROR) };
+        let Some(fd) = channel.infd.as_ref().map(|f| f.as_fd()) else { return Handshake::Failed(tls::code::PULL_ERROR) };
         let Some(session) = channel.tls.as_deref_mut() else { return Handshake::Failed(-10) };
         match session.handshake_step(fd) {
             Ok(true) => Handshake::Ready,

@@ -6,10 +6,12 @@
 //! icomplete shows the candidates in the mini-window as an overlay string,
 //! the mini-window grows to hold them and shrinks back when the minibuffer
 //! exits; GNU's `find-file-noselect' visits. The GUI delivers Return as C-j
-//! (DIVERGENCES VM2-HOSTIN1).
+//! (ledger/divergences VM2-HOSTIN1).
 use romacs_vm_gui::{command, fonts, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+#[path = "support/home.rs"]
+mod home;
 
 const LINE: u32 = 20;
 
@@ -91,7 +93,6 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
     let root = std::env::temp_dir().join(format!("romacs-gnu-completion-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("work/sub")).unwrap();
-    std::fs::create_dir_all(root.join("home/config")).unwrap();
     std::fs::write(root.join("work/sub/notes.txt"), "notes\n").unwrap();
     for dir in ["a", "b"] {
         std::fs::create_dir_all(root.join("work/uq").join(dir)).unwrap();
@@ -102,14 +103,10 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
         std::fs::write(root.join("work").join(name), "zq\n").unwrap();
     }
     let work = format!("{}/", root.join("work").display());
-    let home = root.join("home");
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
-        // The session's user directory is a private one, never the user's own.
-        vm.eval_source(&format!("(setq process-environment (append (list {} {}) process-environment))",
-            quoted(&format!("HOME={}", home.display())),
-            quoted(&format!("XDG_CONFIG_HOME={}", home.join("config").display())))).unwrap();
+        home::private_home(&mut vm, "gnu-completion");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let mut report = vec![];
         // Romacs's defaults are standard values, set through their :set.
@@ -195,7 +192,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
 }
 
 /// On a window system the defaults show the minibuffer in romacs-complete's
-/// layer (DIVERGENCES VM2-COMPLETE-DEFAULT), and Return takes the
+/// layer (ledger/divergences VM2-COMPLETE-DEFAULT), and Return takes the
 /// candidate of the input typed, even when typing outran the candidate
 /// updates after its first key: Return, `romacs-complete-directory-enter',
 /// once exited with a candidate computed for that first key.
@@ -205,6 +202,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "complete-default");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let mut report = vec![printed(&mut vm, "(list window-system romacs-complete-mode
             (eval (car (get 'romacs-complete-mode 'standard-value)) t) fido-vertical-mode icomplete-mode
@@ -297,7 +295,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
               (romacs-complete--message (current-message)) (push (funcall glow) r)
               (romacs-layer--note-command-error '(quit))
               (romacs-complete--message \"Saved\") (push (funcall glow) r))
-            (romacs-complete--message (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/romacs/romacs-defaults.el\" \"~\") \" \" (make-string 120 ?x)))
+            (romacs-complete--message (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/session/romacs-defaults.el\" \"~\") \" \" (make-string 120 ?x)))
             (let* ((f (romacs-layer--frame (caar romacs-layer--toasts))) (text (nth 1 (car romacs-layer--toasts))))
               ;; Its outer width, the glass padding included.
               (push (list (<= (frame-pixel-width f) 420)
@@ -324,7 +322,7 @@ fn romacs_complete_is_the_default_on_a_window_system_and_return_takes_the_typed_
         // ending in `...' where more follow (pinned GNU 32 batch: the same).
         report.push(printed(&mut vm, "(progn
             (mapcar (lambda (c) (string-to-multibyte (romacs-layer--toast-text (car c) (cadr c))))
-                    (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/romacs/romacs-defaults.el\" \"~\")) 36)
+                    (list (list (concat \"Wrote \" (expand-file-name \"Projects/rust/romacs/lisp/session/romacs-defaults.el\" \"~\")) 36)
                           (list \"Open /tmp/long-directory/test.el or https://example.org/tmp/long-directory/test.el\" 60)
                           (list (concat \"Wrote /tmp/\" (make-string 60 ?a) \".txt\") 40)
                           (list \"abcdefghijk lmnopqrstuv wxyzabcdefg\" 20)
@@ -435,6 +433,7 @@ fn chrome_colours_follow_the_theme() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "chrome-colours");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         // The default background; the panel's selected row and matches; then
         // as painted, the root frame's focus edge and hairline, and a toast's
@@ -537,6 +536,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "background-mode");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(defun bm-probe ()
             (romacs-layer-toast \"toast\")
@@ -573,7 +573,7 @@ fn a_theme_switch_recomputes_the_background_mode() {
         r##"(nil light "#7f7f7f" t)"##]);
 }
 
-/// lisp/romacs/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
+/// lisp/ui/romacs-theme.el's themes under Custom (tests/romacs-theme-custom-test.el):
 /// the session starts in the stock theme `default';
 /// defining a theme changes no face; a colour scheme replaces the stock
 /// theme once; disabling it gives GNU's faces.
@@ -626,7 +626,7 @@ fn romacs_theme_author_tests_pass() {
     theme_lisp_tests_pass("crates/romacs-vm-gui/tests/romacs-theme-author-test.el");
 }
 
-/// lisp/romacs's commands declare where they apply and its key hints come from
+/// Romacs's commands declare where they apply and its key hints come from
 /// bindings (tests/romacs-idioms-test.el).
 #[test]
 fn romacs_idioms_tests_pass() {
@@ -646,9 +646,10 @@ fn theme_lisp_tests_pass(file: &'static str) {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, std::path::Path::new(file).file_stem().unwrap().to_str().unwrap());
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for file in ["lisp/romacs/romacs-test.el", file] {
+        for file in ["lisp/emacs-lisp/romacs-test.el", file] {
             vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         }
         printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")
@@ -666,6 +667,7 @@ fn faces_paint_their_weight_and_slant() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "faces-weight");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         vm.eval_source("(progn (require 'org-faces) (delete-other-windows)
             (switch-to-buffer (get-buffer-create \"fw\")) (fundamental-mode)

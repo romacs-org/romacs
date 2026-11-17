@@ -9,21 +9,19 @@ use crate::{data::Object, *};
 use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
 
 /// What the bar's expansion depends on (`Vm::bar_key').
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct BarKey {
     epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
     line: LineKey,
 }
-romacs_snapshot::snapshot_struct!(BarKey { epoch, collections, faces, columns, focused, minibuffer, line });
 
 /// What the owner's line depends on (`Vm::line_key').
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct LineKey {
     id: u64, buffer: u64, name: Option<String>, format: u64, modiff: u64, modified: bool,
     point: i64, start: i64, size: (u32, u32), accessible: (usize, usize),
 }
-romacs_snapshot::snapshot_struct!(LineKey { id, buffer, name, format, modiff, modified, point, start, size, accessible });
 
 /// The corner radius of a segment's pill, in pixels.
 const PILL_RADIUS: u32 = 6;
@@ -46,39 +44,43 @@ impl Vm {
             _ => selected,
         })
     }
-    /// The window the status bar shows (`romacs-status-bar-window') and
-    /// whether it holds the focus: the real selected window while it is one
-    /// of the host frame's ordinary windows; while a child frame's window
-    /// is selected, the host frame's own selected window, unfocused.
-    pub(crate) fn status_bar_owner(&mut self) -> Result<(Value, bool)> {
+    /// The window top-level frame ROOT's status bar shows
+    /// (`romacs-status-bar-window') and whether it holds the focus: the
+    /// real selected window while it is one of ROOT's ordinary windows;
+    /// else ROOT's own selected window, unfocused.
+    pub(crate) fn status_bar_owner(&mut self, root: Value) -> Result<(Value, bool)> {
         let real = self.real_selected_window()?;
-        let host = self.host_frame_peek();
         let w = self.window(real)?;
-        if w.frame == host && !w.mini { return Ok((real, true)); }
-        let selected = self.frame(host)?.selected;
+        if w.frame == root && !w.mini { return Ok((real, true)); }
+        let selected = self.frame(root)?.selected;
         if self.window(selected).is_ok_and(|w| w.live() && !w.mini) { return Ok((selected, false)); }
-        // The host frame's mini-window is selected without a minibuffer:
-        // the ordinary window selected last.
-        let last = self.leaf_windows()?.into_iter().max_by_key(|&v| self.window(v).map_or(0, |w| w.use_time));
+        // ROOT's mini-window is selected without a minibuffer: the
+        // ordinary window selected last.
+        let mut leaves = vec![];
+        self.window_leaves(self.frame(root)?.root, &mut leaves)?;
+        let last = leaves.into_iter().max_by_key(|&v| self.window(v).map_or(0, |w| w.use_time));
         Ok((last.unwrap_or(selected), false))
     }
     /// The status bar the frame wants, whether or not its last layout
     /// found room for it (`status_bar_shown' says), so a bar dropped for
     /// its height is measured again. Runs the owning window's mode-line
     /// Lisp.
-    pub(crate) fn status_bar_snapshot(&mut self) -> Result<Option<StatusBarSnapshot>> {
-        let reserved = self.window_state.status_reserved;
-        if !self.status_bar_wanted() { return Ok(None); }
-        let (owner, focused) = self.status_bar_owner()?;
+    /// The frame is the top-level frame whose id is FRAME.
+    pub(crate) fn status_bar_snapshot(&mut self, frame: u64) -> Result<Option<StatusBarSnapshot>> {
+        let top = self.frame_of_id(frame)?;
+        let native = self.top_geometry(top)?;
+        let reserved = native.status_reserved;
+        if !self.status_bar_wanted(top) { return Ok(None); }
+        let (owner, focused) = self.status_bar_owner(top)?;
         let window = self.window(owner)?.id;
-        let [width, height] = self.window_state.text_area;
+        let [width, height] = native.text_area;
         let columns = StatusBarSnapshot::columns(width, self.window_state.column);
-        let border = self.host_border();
+        let border = self.host_border(top);
         // At the top the bar ends where the root window starts; at the
         // bottom it starts above the mini-window.
-        let root = self.window_root_peek(crate::window::ROOT);
-        let y = if self.status_bar_top() { self.window(root)?.y.saturating_sub(reserved) }
-                else { height - self.window_state.mini_reserved - reserved };
+        let root = self.frame(top)?.root;
+        let y = if self.status_bar_top(top) { self.window(root)?.y.saturating_sub(reserved) }
+                else { height - native.mini_reserved - reserved };
         let place = |bar: StatusBarSnapshot| StatusBarSnapshot { x: border, y: border + y, width, height: reserved, ..bar };
         // Expanded again only when GNU's redisplay would update the line
         // (`BarKey'); otherwise the last expansion is shown where the bar is now.
@@ -290,8 +292,10 @@ impl Vm {
     }
     /// What the bar shows now, as `romacs-status-bar-string' gives it.
     fn status_bar_shown_text(&mut self) -> Result<Option<String>> {
-        if self.window_state.status_reserved == 0 { return Ok(None); }
-        let Some(bar) = self.status_bar_snapshot()? else { return Ok(None) };
+        let top = self.selected_top_frame();
+        // No frame yet (before `ensure_windows'), no bar.
+        if self.top_geometry(top).map_or(0, |g| g.status_reserved) == 0 { return Ok(None); }
+        let Some(bar) = self.status_bar_snapshot(self.frame(top)?.id)? else { return Ok(None) };
         let column = self.window_state.column.max(1) as f32;
         let advances: Vec<f32> = if self.display_state.hosted && self.has_layout_host() {
             // The characters as painted: an icon in place of the one it marks.
@@ -412,14 +416,15 @@ impl Vm {
         for slot in [root, buffer_slot, saved, selection] { self.slots[slot].value = Value::UNBOUND; }
         outcome.map(Some)
     }
-    /// BAR, the bar the frame wants, when its last layout made room for it.
-    pub(crate) fn status_bar_shown(&self, bar: Option<StatusBarSnapshot>) -> Option<StatusBarSnapshot> {
-        bar.filter(|_| self.window_state.status_reserved > 0)
+    /// BAR, the bar top-level frame ROOT wants, when its last layout made
+    /// room for it.
+    pub(crate) fn status_bar_shown(&self, root: Value, bar: Option<StatusBarSnapshot>) -> Option<StatusBarSnapshot> {
+        bar.filter(|_| self.top_geometry(root).is_ok_and(|g| g.status_reserved > 0))
     }
     /// Whether BAR's row, as the host measures its faces, is a new height
-    /// for the bar: then it is recorded, and the frame must be laid out
-    /// again around it before it is painted.
-    pub(crate) fn refit_status_bar(&mut self, bar: Option<&StatusBarSnapshot>) -> Result<bool> {
+    /// for top-level frame ROOT's bar: then it is recorded, and ROOT must
+    /// be laid out again around it before it is painted.
+    pub(crate) fn refit_status_bar(&mut self, root: Value, bar: Option<&StatusBarSnapshot>) -> Result<bool> {
         let Some(bar) = bar else { return Ok(false) };
         if !self.display_state.hosted || !self.has_layout_host() { return Ok(false); }
         let mut runs: Vec<usize> = std::iter::once(0).chain(bar.text.face_runs.iter().map(|run| run.face.0 as usize)).collect();
@@ -437,8 +442,8 @@ impl Vm {
                 height
             }
         };
-        if measured == 0 || measured == self.window_state.status_height { return Ok(false); }
-        self.window_state.status_height = measured;
+        if measured == 0 || measured == self.top_geometry(root)?.status_height { return Ok(false); }
+        self.top_geometry_mut(root)?.status_height = measured;
         Ok(true)
     }
 }
@@ -448,7 +453,8 @@ impl crate::window::Windows<'_> {
     /// `romacs-status-bar-window': the window the status bar shows.
     pub(crate) fn status_bar_window(&mut self) -> std::result::Result<Value, crate::prim::Fault> {
         self.vm.ensure_windows().map_err(crate::prim::Fault::Error)?;
-        Ok(self.vm.status_bar_owner().map_err(crate::prim::Fault::Error)?.0)
+        let root = self.vm.selected_top_frame();
+        Ok(self.vm.status_bar_owner(root).map_err(crate::prim::Fault::Error)?.0)
     }
     /// `romacs--window-of-id': the live window whose display id is ID, the
     /// one a host's pointer event names, else nil.
@@ -479,10 +485,12 @@ impl crate::window::Windows<'_> {
         if window == Value::NIL || string == Value::NIL { return Ok(Value::NIL); }
         Ok(self.vm.list_value(&[window, string, column]))
     }
-    /// `romacs-status-bar-height': the pixels the root frame's last layout
-    /// left for the status bar, 0 while it shows none.
+    /// `romacs-status-bar-height': the pixels the selected frame's
+    /// top-level frame's last layout left for its status bar, 0 while it
+    /// shows none.
     pub(crate) fn status_bar_height(&mut self) -> u32 {
-        self.vm.window_state.status_reserved
+        let root = self.vm.selected_top_frame();
+        self.vm.top_geometry(root).map_or(0, |g| g.status_reserved)
     }
     /// The text the status bar shows (`romacs-status-bar-string'), placed
     /// as the painter places it (`StatusBarSnapshot::places') with the

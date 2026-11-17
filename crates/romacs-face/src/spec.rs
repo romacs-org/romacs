@@ -16,15 +16,11 @@ use crate::attr::{AttrError, Attribute, Attrs, Slot, validate_raw as validate};
 use crate::datum::{BoundedDatum, Datum};
 
 /// The frame background mode, the only display condition decided late.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub enum Background {
     Light,
     Dark,
 }
-romacs_snapshot::snapshot_enum!(Background {
-    Background::Light => (),
-    Background::Dark => (),
-});
 
 impl Background {
     /// The mode GNU's `frame--current-background-mode` derives from an
@@ -63,7 +59,7 @@ impl Background {
 }
 
 /// A face's own definition: its attributes and its inheritance edges.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, romacs_snapshot::Snapshot)]
 pub struct FaceDef {
     pub(crate) attrs: Attrs,
     /// `None` when `:inherit` is unspecified; `Some(vec![])` for `nil`.
@@ -72,7 +68,6 @@ pub struct FaceDef {
     /// `:extend` into a theme spec that leaves it unspecified.
     pub(crate) extend_mentioned: bool,
 }
-romacs_snapshot::snapshot_struct!(FaceDef { attrs, inherit, extend_mentioned });
 
 impl FaceDef {
     pub fn attrs(&self) -> &Attrs {
@@ -174,7 +169,7 @@ impl FaceDef {
                 }
                 // A font object cannot be expressed without a font backend;
                 // GNU also ignores :font on a non-window frame. Out of scope
-                // for this crate; see GNU-DIVERGENCES.md.
+                // for this crate; see ledger/divergences.
                 ":font" => {}
                 k => {
                     let Some(a) = Attribute::from_keyword(k) else {
@@ -245,12 +240,11 @@ pub enum FaceError {
 }
 
 /// A `defface` or theme spec, collapsed for the one render target.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Collapsed {
     light: Option<Arc<FaceDef>>,
     dark: Option<Arc<FaceDef>>,
 }
-romacs_snapshot::snapshot_struct!(Collapsed { light, dark });
 
 impl Collapsed {
     /// The definition for `mode`, or `None` when no branch matched (GNU's

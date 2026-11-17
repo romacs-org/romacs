@@ -4,6 +4,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.
@@ -28,10 +29,12 @@ each session gone on with, `delivered' what wakes the lead.  Nothing
 runs: harnesses are never started."
   (declare (indent 0))
   `(let* ((root (make-temp-file "romacs-lead-" t))
+          ;; Its sockets' directory is short: TMPDIR may not be.
+          (run (romacs-test-socket-directory "lead-"))
           (cwd (file-name-as-directory (expand-file-name "project" root)))
           (config (expand-file-name "claude" root))
           (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
-                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                             (concat "XDG_RUNTIME_DIR=" run))
                                        process-environment))
           (romacs-agent-providers (list (cons "claude" config)))
           (romacs-agent-restored-hook nil)
@@ -64,9 +67,14 @@ runs: harnesses are never started."
                ((symbol-function 'romacs-agent--continue) (lambda (session) (push session continued) session))
                ((symbol-function 'romacs-agent--input) (lambda (session text &rest _) (push (cons session text) sent)))
                ((symbol-function 'romacs-agent-tools--deliver)
-                (lambda (_session text done &optional _valid) (push text delivered) (funcall done)))
-               ((symbol-function 'run-at-time) #'ignore))
-       (unwind-protect (progn ,@body) (delete-directory root t)))))
+                (lambda (_session text done &rest _) (push text delivered) (funcall done)))
+               ((symbol-function 'run-at-time) #'ignore)
+               ;; No process starts here: the build's companions are not needed.
+               ((symbol-function 'romacs-agent--check-companions) #'ignore)
+               ;; Children start at once here (romacs-agent-launch-tests
+               ;; has one that never does).
+               ((symbol-function 'romacs-agent-tools--started) (lambda (_child then) (funcall then))))
+       (unwind-protect (progn ,@body) (delete-directory root t) (delete-directory run t)))))
 
 (defun romacs-agent-lead-tests--args (&rest pairs)
   "A tool's arguments of PAIRS, as the endpoint parses them."
@@ -268,6 +276,45 @@ what waited for that end goes."
       (should (equal (mapcar (lambda (w) (list (plist-get w :result) (plist-get w :state)))
                              (romacs-agent-tools--wakes-parse (car delivered)))
                      '(("landed abc123" "completed") ("" "failed")))))))
+
+(ert-deftest romacs-agent-lead-ends-no-one-is-woken-by-are-let-go ()
+  ;; Turn after turn that wakes no one, its parent never woken: none of
+  ;; them stays among the child's ends, nor does one a wait answered.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-lead-tests--child lead root)))
+      (dotimes (i 20) (romacs-agent-lead-tests--end child (+ 3 (* 2 i)) "[quiet] still building"))
+      (should-not delivered)
+      (should-not (romacs-agent-ends child))
+      (romacs-agent-lead-tests--end child 50 "landed abc123")
+      (should (equal (mapcar #'car (romacs-agent-ends child)) '(50)))
+      (romacs-agent-tools--answer child 50)
+      (should-not (romacs-agent-ends child)))))
+
+(ert-deftest romacs-agent-lead-quiet-ends-leave-the-pile-untouched ()
+  ;; Behind a parent at work, wanted ends pile up; a quiet one, and a
+  ;; replayed batch of them, go without the pile being walked or copied.
+  (romacs-agent-lead-tests--with
+    (let ((child (romacs-agent-lead-tests--child lead root)))
+      (setf (romacs-agent-state lead) 'running)
+      (dotimes (i 5) (romacs-agent-lead-tests--end child (+ 3 i) "landed"))
+      (let ((pile (romacs-agent-ends child)))
+        (romacs-agent-lead-tests--end child 20 "[quiet] still")
+        (should (eq (romacs-agent-ends child) pile))
+        (push (list 21 "[quiet] a" nil) (romacs-agent-ends child))
+        (push (list 22 "landed again" nil) (romacs-agent-ends child))
+        (push (list 23 "[quiet] b" nil) (romacs-agent-ends child))
+        (romacs-agent-tools--wake child)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 5 4 3)))
+        (should (eq (cdr (romacs-agent-ends child)) pile))
+        ;; A wait answering one of the pile takes it out alone.
+        (romacs-agent-tools--answer child 5)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))
+        ;; One already gone (a quiet end its hand-on let go) changes nothing.
+        (romacs-agent-tools--answer child 21)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4 3)))
+        (romacs-agent-tools--answer child 23)
+        (romacs-agent-tools--answer child 3)
+        (should (equal (mapcar #'car (romacs-agent-ends child)) '(22 7 6 4)))))))
 
 ;;; romacs_task_list
 

@@ -44,3 +44,58 @@ fn callable_and_arity() {
         check(&format!("(condition-case c (apply #'{name} '(1)) (wrong-number-of-arguments (car c)))"), "wrong-number-of-arguments", "ZERO_ARITY");
     }
 }
+
+/// SOURCE prints as pinned GNU prints it.
+fn agree(source: &str) {
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{source}: {}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let actual = Vm::new().eval_source(source).and_then(romacs_vm::Local::display);
+    assert_eq!(actual.as_deref(), Ok(expected.as_str()), "{source}");
+}
+
+#[test]
+fn predicates_at_narrowed_ends_agree_with_gnu() {
+    agree("(with-temp-buffer (insert \"é\\nab\\nЖ\\ncd\") (narrow-to-region 3 8) \
+           (let ((p 3) out) (while (<= p 8) (goto-char p) (setq out (cons (list p (bobp) (bolp) (eolp) (eobp)) out) p (1+ p))) (nreverse out)))");
+}
+
+#[test]
+fn unibyte_predicates_at_narrowed_ends_agree_with_gnu() {
+    agree("(with-temp-buffer (set-buffer-multibyte nil) (insert (unibyte-string 255 10 254 10 200)) (narrow-to-region 2 5) \
+           (let ((p 2) out) (while (<= p 5) (goto-char p) (setq out (cons (list p (bobp) (bolp) (eolp) (eobp)) out) p (1+ p))) (nreverse out)))");
+}
+
+/// An indirect buffer has its own point and narrowing over its base's text.
+#[test]
+fn indirect_buffer_predicates_agree_with_gnu() {
+    agree("(with-temp-buffer (insert \"ab\\ncd\\nef\") (goto-char 2) \
+           (let ((ind (make-indirect-buffer (current-buffer) \"ind\"))) \
+             (unwind-protect \
+                 (list (with-current-buffer ind (narrow-to-region 4 7) (goto-char 7) (list (point) (bobp) (bolp) (eolp) (eobp))) \
+                       (list (point) (bobp) (bolp) (eolp) (eobp)) \
+                       (with-current-buffer ind (goto-char 4) (list (point) (bobp) (bolp) (eolp) (eobp)))) \
+               (kill-buffer ind))))");
+}
+
+/// Selecting a killed buffer signals; killing the current buffer makes
+/// another current, whose bounds the predicates then read.
+#[test]
+fn killed_buffers_agree_with_gnu() {
+    agree("(let ((b (get-buffer-create \"point-predicates-dead\"))) (kill-buffer b) \
+           (list (condition-case e (with-current-buffer b (eobp)) (error e)) \
+                 (condition-case e (set-buffer b) (error e)) \
+                 (condition-case e (save-current-buffer (set-buffer b) (bobp)) (error e))))");
+    agree("(let ((k (get-buffer-create \"point-predicates-killed\"))) (with-current-buffer k (insert \"x\") (kill-buffer k) \
+           (list (buffer-live-p (current-buffer)) (eq (current-buffer) k) (eobp) (bobp))))");
+}
+
+/// Switching buffers back and forth reads each one's own point.
+#[test]
+fn switching_buffers_agrees_with_gnu() {
+    agree("(let ((a (get-buffer-create \"point-predicates-a\")) (b (get-buffer-create \"point-predicates-b\"))) (with-current-buffer a (insert \"xy\")) \
+           (prog1 (list (progn (set-buffer a) (goto-char 1) (eobp)) (progn (set-buffer b) (eobp)) (progn (set-buffer a) (eobp)) \
+                        (with-current-buffer b (insert \"z\") (bobp)) (eobp)) \
+             (kill-buffer a) (kill-buffer b)))");
+}

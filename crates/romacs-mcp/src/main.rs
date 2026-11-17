@@ -15,7 +15,7 @@ fn main() {
             match reconnecting(&args) {
                 Some(config) => reconnect::main(config),
                 None => {
-                    eprintln!("usage: romacs-mcp (--socket ABSOLUTE-PATH | --server NAME) --reconnect --session ID [--reply-timeout SECONDS]");
+                    eprintln!("usage: romacs-mcp (--socket ABSOLUTE-PATH | --server NAME) --reconnect --session ID [--reply-timeout SECONDS] [--restart-pending FILE]");
                     std::process::exit(1);
                 }
             }
@@ -72,7 +72,7 @@ pub(crate) fn inspect_answer(socket: &std::path::Path) -> std::io::Result<Vec<u8
     Ok(answer)
 }
 
-/// The native socket of the Romacs server NAME (lisp/romacs/romacs-server.el):
+/// The native socket of the Romacs server NAME (lisp/session/romacs-server.el):
 /// `$XDG_RUNTIME_DIR/romacs/NAME/server.sock'.
 #[cfg(unix)]
 pub(crate) fn server_socket(name: &str) -> Option<std::path::PathBuf> {
@@ -88,10 +88,11 @@ fn uid() -> u32 {
     std::os::unix::fs::MetadataExt::uid(&std::fs::metadata("/proc/self").expect("/proc/self"))
 }
 
-/// `--socket PATH | --server NAME', `--reconnect --session ID [--reply-timeout S]', in any order.
+/// `--socket PATH | --server NAME', `--reconnect --session ID [--reply-timeout S] [--restart-pending FILE]',
+/// in any order.
 #[cfg(unix)]
 fn reconnecting(args: &[String]) -> Option<reconnect::Config> {
-    let (mut socket, mut session) = (None, None);
+    let (mut socket, mut session, mut restart_pending) = (None, None, None);
     let mut reply_timeout = std::time::Duration::from_secs(120);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -101,10 +102,11 @@ fn reconnecting(args: &[String]) -> Option<reconnect::Config> {
             "--session" => session = args.next().cloned(),
             "--reply-timeout" => reply_timeout = std::time::Duration::from_secs_f64(
                 args.next()?.parse::<f64>().ok().filter(|s| *s > 0.0)?),
+            "--restart-pending" => restart_pending = args.next().map(std::path::PathBuf::from),
             "--reconnect" => {}
             _ => return None,
         }
     }
     let socket = socket.filter(|s| s.is_absolute())?;
-    Some(reconnect::Config { socket, session: session.filter(|s| !s.is_empty())?, reply_timeout })
+    Some(reconnect::Config { socket, session: session.filter(|s| !s.is_empty())?, reply_timeout, restart_pending })
 }

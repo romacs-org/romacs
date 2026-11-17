@@ -1,5 +1,5 @@
 //! Evaluation results as a chip after the evaluated sexp
-//! (lisp/romacs/romacs-eval-chip.el) on the real --loadup chain with a window
+//! (lisp/ui/romacs-eval-chip.el) on the real --loadup chain with a window
 //! system: each evaluation command's printed value or error shows once, in
 //! the chip, never also as a toast; the echo area's message and *Messages*
 //! stay GNU's; the next command that moves point or edits hides it; and
@@ -7,6 +7,8 @@
 use romacs_vm_gui::{command, fonts, measure, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::collections::VecDeque;
+#[path = "support/home.rs"]
+mod home;
 
 const LINE: u32 = 20;
 
@@ -65,6 +67,7 @@ fn eval_results_show_once_in_a_chip_after_the_sexp() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "eval-chip");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));

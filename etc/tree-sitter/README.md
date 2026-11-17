@@ -1,7 +1,7 @@
 # Bundled tree-sitter grammars
 
 The grammars Romacs links into its executable (`crates/romacs-grammars`,
-DIVERGENCES.md VM2-TREESIT-BUNDLED). Each one is the commit its GNU ts mode
+ledger/divergences VM2-TREESIT-BUNDLED). Each one is the commit its GNU ts mode
 pins in `treesit-language-source-alist`, so a ts mode parses with the
 grammar it was written against. A grammar the user installs in
 `treesit-extra-load-path` or `user-emacs-directory`'s `tree-sitter/`
@@ -30,8 +30,6 @@ repository has it at the commit.
 | javascript | https://github.com/tree-sitter/tree-sitter-javascript | `108b2d4d17a04356a340aea809e4dd5b801eb40d` | tree-sitter-javascript 0.23.1 (crates.io) | MIT, Copyright (c) 2014 Max Brunsfeld | `LICENSES/tree-sitter-javascript.LICENSE` |
 | jsdoc | https://github.com/tree-sitter/tree-sitter-jsdoc | `b253abf68a73217b7a52c0ec254f4b6a7bb86665` | tree-sitter-jsdoc 0.23.2 (crates.io) | MIT, Copyright (c) 2018 Max Brunsfeld | `LICENSES/tree-sitter-jsdoc.LICENSE` |
 | json | https://github.com/tree-sitter/tree-sitter-json | `4d770d31f732d50d3ec373865822fbe659e47c75` | tree-sitter-json 0.24.8 (crates.io) | MIT, Copyright (c) 2014 Max Brunsfeld | `LICENSES/tree-sitter-json.LICENSE` |
-| markdown | https://github.com/tree-sitter-grammars/tree-sitter-markdown | `413285231ce8fa8b11e7074bbe265b48aa7277f9` | tree-sitter-md 0.4.0 (git) | MIT, Copyright (c) 2021 Matthias Deiml | `LICENSES/tree-sitter-markdown.LICENSE` |
-| markdown-inline | https://github.com/tree-sitter-grammars/tree-sitter-markdown | `413285231ce8fa8b11e7074bbe265b48aa7277f9` | tree-sitter-md 0.4.0 (git) | MIT, Copyright (c) 2021 Matthias Deiml | `LICENSES/tree-sitter-markdown.LICENSE` |
 | python | https://github.com/tree-sitter/tree-sitter-python | `bffb65a8cfe4e46290331dfef0dbf0ef3679de11` | tree-sitter-python 0.23.6 (crates.io) | MIT, Copyright (c) 2016 Max Brunsfeld | `LICENSES/tree-sitter-python.LICENSE` |
 | rust | https://github.com/tree-sitter/tree-sitter-rust | `18b0515fca567f5a10aee9978c6d2640e878671a` | tree-sitter-rust 0.24.0 (crates.io) | MIT, Copyright (c) 2017 Maxim Sokolov | `LICENSES/tree-sitter-rust.LICENSE` |
 | toml | https://github.com/tree-sitter-grammars/tree-sitter-toml | `64b56832c2cffe41758f28e05c756a3a98d16f41` | tree-sitter-toml-ng 0.7.0 (crates.io) | MIT, Copyright (c) Ika | `LICENSES/tree-sitter-toml.LICENSE` |

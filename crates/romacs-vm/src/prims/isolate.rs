@@ -1,6 +1,6 @@
 //! Isolates' leaf primitives (vm-concurrency design §4): the substrate
-//! lisp/romacs/vm/isolate.el's `isolate-*' API runs on. Not in GNU
-//! (DIVERGENCES.md VM2-ISOLATE). Peer 0 is a worker's parent.
+//! lisp/vm/isolate.el's `isolate-*' API runs on. Not in GNU
+//! (ledger/divergences VM2-ISOLATE). Peer 0 is a worker's parent.
 use super::*;
 
 fn id(cx: &Leaf<'_>, isolate: Value) -> std::result::Result<u64, Fault> {

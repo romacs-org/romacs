@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Lint Lisp against a running Romacs (lisp/emacs-lisp/romacs-lint.el).
+
+The host loads each file and holds what it names to what the machine defines:
+unknown functions, wrong argument counts, untrue `declare-function`s, free and
+unused variables, line pins, and hints for what Romacs offers instead. One
+finding a line, with its fix.
+
+Each file is linted in a machine of its own, since loading a file can change
+the machine that loads it (a load script resets `load-path`, reloads
+libraries, or writes files), and that machine works in a private home, not in
+the tree; the launcher gives each finding's file from the root it is held to,
+whatever the judged code prints it from. By default it reports what the change
+adds: the files' text at the base (the
+merge-base with the trunk, or --base) is linted the same way, and a finding
+the base also gives is counted, not shown. --all shows every finding. Exit 1
+when an error or a warning is shown, 2 when the host gave no result.
+
+An installed host (one beside its `romacs-vm-gui.worlds`) restores its batch
+world, so a run takes about a second; a build's host boots from source.
+"""
+import argparse
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE', 'MAIL', 'MAILDIR')
+FINDING = re.compile(r'^(?P<file>.+?):\d+: (?P<level>error|warning|hint): (?P<text>.*)$')
+FAILING = ('error', 'warning')
+COMPLETE = re.compile(r'^romacs-lint: \d+ files?, ', re.MULTILINE)
+
+
+def host(given):
+    """The host to run: GIVEN, $ROMACS_TEST_BINARY, or the gate build."""
+    target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    return Path(given or os.environ.get('ROMACS_TEST_BINARY') or target / 'gate/romacs-vm-gui').expanduser().resolve()
+
+
+def merge_base(root, trunk):
+    """ROOT's merge-base with TRUNK, or None."""
+    found = subprocess.run(['git', '-C', str(root), 'merge-base', 'HEAD', trunk], capture_output=True, text=True)
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
+def environment(binary, home):
+    """The host's environment: a private HOME, and its installation's world when it has one."""
+    env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
+    env.update(HOME=str(home), TMPDIR=str(home))
+    for key in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'):
+        directory = home / key.lower()
+        directory.mkdir()
+        env[key] = str(directory)
+    if (binary.parent / (binary.name + '.worlds')).is_dir():
+        env.setdefault('ROMACS_RUNTIME_ROOT', str(binary.parent))
+    else:
+        env.setdefault('ROMACS_LISP_DIR', str(ROOT / 'lisp'))
+    return env
+
+
+def findings(output):
+    """The finding lines of a host's OUTPUT."""
+    return [line for line in output.splitlines() if FINDING.match(line)]
+
+
+def key(line):
+    """What makes two findings the same one: the file, the level and what is
+    wrong. Not the line, which moves, nor the fix, whose suggestion follows
+    what else the machine defines, nor the error of a file that does not load,
+    which follows the first form that fails."""
+    found = FINDING.match(line)
+    wrong = found['text'].split('; fix: ')[0]
+    return (found['file'], found['level'], 'does not load' if wrong.startswith('does not load: ') else wrong)
+
+
+def added(candidate, base):
+    """The findings of CANDIDATE that BASE does not also give, in order.
+    N findings alike on both sides are N old ones."""
+    left = Counter(key(line) for line in base)
+    fresh = []
+    for line in candidate:
+        if left[key(line)] > 0:
+            left[key(line)] -= 1
+        else:
+            fresh.append(line)
+    return fresh
+
+
+def summary(files, lines, base, older):
+    """The closing line: what was counted, and against what."""
+    levels = Counter(FINDING.match(line)['level'] for line in lines)
+    counts = ', '.join(f'{levels[level]} {level}{"" if levels[level] == 1 else "s"}' for level in ('error', 'warning', 'hint'))
+    since = f' new since {base[:12]} ({older} older not shown; --all shows them)' if base else ''
+    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}'
+
+
+def named_from(line, home, root):
+    """Finding LINE with its file, printed from the host's working directory
+    HOME, given from ROOT instead; any other line as it is."""
+    found = FINDING.match(line)
+    if not found:
+        return line
+    path = os.path.relpath(os.path.normpath(os.path.join(home, found['file'])), root)
+    return path + line[len(found['file']):]
+
+
+def lint(binary, arguments, timeout, root=ROOT):
+    """Run the host's lint with ARGUMENTS in a private home, its working
+    directory too: (STATUS, OUTPUT, ERRORS), each finding's file given from
+    ROOT. The lint loads the file it judges, which may be the lint itself in
+    another version, so the launcher, not the Lisp, says where a file is.
+    STATUS is None unless the lint ran to its closing line: a host that did
+    not start, a file that ended the host as it loaded, a timeout."""
+    command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
+    with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
+        try:
+            done = subprocess.run(command + arguments, env=environment(binary, Path(home)), cwd=home,
+                                  capture_output=True, text=True, errors='replace', timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None, '', f'no result within {timeout:g}s\n'
+    finished = done.returncode in (0, 1) and COMPLETE.search(done.stdout)
+    output = '\n'.join(named_from(line, home, root) for line in done.stdout.splitlines())
+    return (done.returncode if finished else None), output, done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n')
+
+
+def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
+    """Lint each of FILES in a machine of its own, with the lint's OPTIONS:
+    (FINDINGS, ERRORS), each finding's file given from ROOT; FINDINGS None
+    when a file's lint gave no result."""
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(files)))) as pool:
+        runs = list(pool.map(lambda file: lint(binary, [*options, str(file)], timeout, root), files))
+    errors = ''.join(errors for _, _, errors in runs)
+    if any(status is None for status, _, _ in runs):
+        return None, errors
+    return [line for _, output, _ in runs for line in findings(output)], errors
+
+
+def renames(status):
+    """{NEW: OLD} of `git diff -z --name-status -M` STATUS: the paths a change moved."""
+    fields, moved, i = status.split('\0'), {}, 0
+    while i < len(fields) and fields[i]:
+        if fields[i].startswith(('R', 'C')):
+            if fields[i].startswith('R'):
+                moved[fields[i + 2]] = fields[i + 1]
+            i += 3
+        else:
+            i += 2
+    return moved
+
+
+def base_files(root, base, files, into):
+    """Write each of FILES as BASE has it under INTO, at its path from ROOT; the ones BASE has.
+    A file the change moved is BASE's file at its old path, so its findings compare as one file's."""
+    status = subprocess.run(['git', '-C', str(root), 'diff', '-z', '--name-status', '-M', base],
+                            capture_output=True, text=True, errors='replace').stdout
+    moved = renames(status)
+    written = []
+    for path in files:
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        source = moved.get(relative.as_posix(), relative.as_posix())
+        shown = subprocess.run(['git', '-C', str(root), 'show', f'{base}:{source}'], capture_output=True)
+        if shown.returncode == 0:
+            (into / relative).parent.mkdir(parents=True, exist_ok=True)
+            (into / relative).write_bytes(shown.stdout)
+            written.append(str(relative))
+    return written
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('files', nargs='+', type=Path)
+    parser.add_argument('--binary', help='the host; default $ROMACS_TEST_BINARY, else the gate build')
+    parser.add_argument('--base', help='git revision to compare with; default the merge-base with $ROMACS_BASE (beta)')
+    parser.add_argument('--all', action='store_true', help='show every finding, not only what the change adds')
+    parser.add_argument('--timeout', type=float, default=300)
+    args = parser.parse_args()
+    binary = host(args.binary)
+    if not os.access(binary, os.X_OK):
+        parser.error(f'no host at {binary}: pass --binary, or build one with cargo build --profile gate -p romacs-vm-gui')
+    missing = [str(path) for path in args.files if not path.is_file()]
+    if missing:
+        parser.error('no such file: ' + ', '.join(missing))
+    files = [path.resolve() for path in args.files]
+    base = args.base or merge_base(ROOT, os.environ.get('ROMACS_BASE', 'beta'))
+    shown, errors = lint_each(binary, ['--base', base] if base else [], files, args.timeout)
+    if shown is None:
+        sys.stderr.write(errors)
+        print('romacs-lint: the host gave no result', file=sys.stderr)
+        return 2
+    older = 0
+    if base and not args.all:
+        with tempfile.TemporaryDirectory(prefix='romacs-lint-base-') as directory:
+            had = [Path(directory) / name for name in base_files(ROOT, base, files, Path(directory))]
+            before, base_errors = (lint_each(binary, ['--root', str(ROOT)], had, args.timeout, Path(directory))
+                                   if had else ([], ''))
+        if before is None:
+            sys.stderr.write(base_errors)
+            print('romacs-lint: the base did not lint: every finding counts as new', file=sys.stderr)
+            before = []
+        fresh = added(shown, before)
+        shown, older = fresh, len(shown) - len(fresh)
+    for line in shown:
+        print(line)
+    print(summary(len(files), shown, None if args.all else base, older))
+    return 1 if any(FINDING.match(line)['level'] in FAILING for line in shown) else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

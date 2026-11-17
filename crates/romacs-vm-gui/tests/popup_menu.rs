@@ -1,5 +1,5 @@
 //! menu.c's popup menus on the GUI's `pgtk' frame, through GNU's text
-//! menus (lisp/romacs/romacs-menu.el, DIVERGENCES VM2-MENU1), on the real
+//! menus (lisp/ui/romacs-menu.el, ledger/divergences VM2-MENU1), on the real
 //! `--loadup' chain with the GUI's display and its keyboard
 //! (`romacs_vm::HostInput`). tmm gives each item a shortcut key, the same
 //! in pinned GNU and Romacs. Expected values: pinned GNU's text menus
@@ -11,6 +11,8 @@
 use romacs_vm_gui::{command, fonts, measure, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::collections::VecDeque;
+#[path = "support/home.rs"]
+mod home;
 
 struct Keys(VecDeque<HostEvent>);
 impl HostInput for Keys {
@@ -43,15 +45,11 @@ const MENU: &str = "(let ((map (make-sparse-keymap \"Probe\")) (sub (make-sparse
 
 #[test]
 fn popup_menus_read_gnus_text_menus_with_gnus_contract() {
-    let root = std::env::temp_dir().join(format!("romacs-popup-menu-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("config")).unwrap();
     let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
-        vm.eval_source(&format!("(setq process-environment (append (list \"HOME={0}\" \"XDG_CONFIG_HOME={0}/config\") process-environment))",
-                                root.display())).unwrap();
+        let root = home::private_home(&mut vm, "popup-menu");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         // A plain buffer, whose position `popup-menu' takes for F10.
         printed(&mut vm, &format!("(progn (switch-to-buffer (get-buffer-create \"plain\")) (insert \"plain text\")

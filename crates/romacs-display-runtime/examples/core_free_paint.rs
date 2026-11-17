@@ -4,7 +4,7 @@ use romacs_display_protocol::{
     Color, DisplayFrameId, FrameGlyphBuffer, ParentFrameRect, PresentationId,
     PresentedFramePlacement,
 };
-use romacs_display_runtime::paint_host::{PRIMARY_FRAME, PaintHost};
+use romacs_display_runtime::paint_host::{INITIAL_FRAME, PaintHost};
 use romacs_display_runtime::thread_comm::InputEvent;
 
 fn main() -> Result<(), String> {
@@ -22,7 +22,7 @@ fn main() -> Result<(), String> {
             let mut frame = FrameGlyphBuffer::with_size(400.0, 300.0);
             frame.presentation_id = PresentationId::new(revision);
             frame.frame_placement = PresentedFramePlacement::new(
-                DisplayFrameId::new(PRIMARY_FRAME),
+                DisplayFrameId::new(INITIAL_FRAME),
                 frame.presentation_id,
                 None,
                 ParentFrameRect::new(0.0, 0.0, 400.0, 300.0).unwrap(),

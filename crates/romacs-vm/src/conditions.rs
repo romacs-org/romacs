@@ -5,9 +5,8 @@ use super::*;
 #[path = "conditions_builtin.rs"]
 mod builtins;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub(super) struct SymbolId(u64);
-romacs_snapshot::snapshot_tuple!(SymbolId(f0));
 impl SymbolId {
     pub(super) fn new(v: Value) -> Option<Self> {
         (v == Value::NIL || v == Value::TRUE || v.tag() == 7 && v != Value::UNBOUND)
@@ -17,18 +16,19 @@ impl SymbolId {
         Value(self.0)
     }
 }
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Entry {
     pub(super) properties: Vec<(Value, Value)>,
     ancestry: Option<Vec<SymbolId>>,
-    builtin: Option<(Vec<SymbolId>, &'static str)>,
+    /// A built-in condition's ancestry as declared; its message is found
+    /// by the condition's name (`builtin_message`), so the entry holds no
+    /// reference into the executable.
+    builtin: Option<Vec<SymbolId>>,
 }
-romacs_snapshot::snapshot_struct!(Entry { properties, ancestry, builtin });
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Registry {
     pub(super) entries: HashMap<SymbolId, Entry>,
 }
-romacs_snapshot::snapshot_struct!(Registry { entries });
 impl Registry {
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for entry in self.entries.values_mut() {
@@ -66,6 +66,22 @@ impl Fault {
 }
 type Checked<T> = std::result::Result<T, Fault>;
 
+/// Romacs's own built-in conditions, beside GNU's catalog (`builtins`):
+/// name, ancestry and message.
+const ROMACS_BUILTINS: &[(&str, &[&str], &str)] = &[
+    ("not-unicode-string", &["not-unicode-string", "error"], "String is not Unicode text"),
+];
+
+/// Every built-in condition: Romacs's own, then GNU's.
+fn all_builtins() -> impl Iterator<Item = &'static (&'static str, &'static [&'static str], &'static str)> {
+    ROMACS_BUILTINS.iter().chain(builtins::BUILTINS)
+}
+
+/// The message of the built-in condition NAME.
+fn builtin_message(name: &str) -> Option<&'static str> {
+    all_builtins().find(|(builtin, _, _)| *builtin == name).map(|&(_, _, text)| text)
+}
+
 impl Vm {
     fn intern_symbol(&mut self, name: &str) -> Value {
         match name {
@@ -80,13 +96,7 @@ impl Vm {
     pub(super) fn initialize_conditions(&mut self) {
         self.intern_symbol("error-conditions");
         self.intern_symbol("error-message");
-        let symbol = self.intern_symbol("not-unicode-string");
-        let error = self.intern_symbol("error");
-        let ancestors = vec![SymbolId::new(symbol).unwrap(), SymbolId::new(error).unwrap()];
-        self.conditions.entries.insert(SymbolId::new(symbol).unwrap(), Entry {
-            ancestry: Some(ancestors.clone()), builtin: Some((ancestors, "String is not Unicode text")), ..Entry::default()
-        });
-        for &(name, ancestors, text) in builtins::BUILTINS {
+        for &(name, ancestors, _) in all_builtins() {
             let symbol = self.intern_symbol(name);
             let id = SymbolId::new(symbol).unwrap();
             let ancestors = ancestors
@@ -95,7 +105,7 @@ impl Vm {
                 .collect::<Vec<_>>();
             let entry = self.conditions.entries.entry(id).or_default();
             entry.ancestry = Some(ancestors.clone());
-            entry.builtin = Some((ancestors, text));
+            entry.builtin = Some(ancestors);
         }
     }
     fn get_property(&mut self, id: SymbolId, property: Value) -> Value {
@@ -107,7 +117,7 @@ impl Vm {
         }) {
             return value;
         }
-        let Some((ancestors, text)) = self
+        let Some(ancestors) = self
             .conditions
             .entries
             .get(&id)
@@ -123,9 +133,8 @@ impl Vm {
                     .collect::<Vec<_>>(),
             )
         } else if property == self.intern_symbol("error-message") {
-            self.allocate_object(data::Object::String(Box::new(data::LispString::new(
-                text,
-            ))))
+            let Some(text) = self.symbol_name_of(id.value()).as_deref().and_then(builtin_message) else { return Value::NIL };
+            self.allocate_object(data::Object::String(Box::new(data::LispString::new(text))))
         } else {
             return Value::NIL;
         };
@@ -135,7 +144,7 @@ impl Vm {
     fn unobserved_condition_ancestry(&self, id: SymbolId, property: Value) -> Option<&[SymbolId]> {
         let entry = self.conditions.entries.get(&id)?;
         if entry.properties.iter().any(|(key, _)| *key == property) { return None; }
-        entry.builtin.as_ref().map(|(ancestry, _)| ancestry.as_slice())
+        entry.builtin.as_deref()
     }
     // Search retains this projection when a returning handler replaces its property.
     pub(super) fn signal_conditions(&mut self, condition: Value) -> Value {
@@ -247,8 +256,8 @@ impl Vm {
             && y != self.intern_symbol("error-message")
         {
             if p == Get {
-                if self.fence.is_some() {
-                    self.fence_property(x, Some(y), world::Access::Read, None);
+                if self.tracking.is_some() {
+                    self.tracked_property(x, Some(y), world::Access::Read, None);
                 }
                 return Ok(self.symbol_property(x, y).expect("checked symbol"));
             }

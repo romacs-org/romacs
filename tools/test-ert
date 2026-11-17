@@ -6,7 +6,9 @@ a private HOME, under SELECTOR, the default leaving out expensive and unstable
 tests.  With neither --module nor --file, every bundled package with suites
 runs.  A suite is a file under test/packages (the bundled packages') or
 test/romacs/lisp (Romacs's own Lisp's) that defines a test; the rest are
-support files its suites require.
+support files its suites require.  The run first prepares one batch world in a
+store of its own, which every file then restores rather than booting GNU's Lisp
+from source; a host that builds none runs each file from source.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'test/gnu'))
 sys.path.insert(0, str(ROOT / 'tools/lib'))
 from ert_report import PREFIX, ReportError, parse_report
-from bundled_autoloads import directories
+import lisp_layout
 
 SELECTOR_DEFAULT = '(not (or (tag :expensive-test) (tag :unstable)))'
 TIMEOUT_DEFAULT = 600.0
@@ -37,6 +39,13 @@ NOTHING = dict(selected=0, started=0, completed=0, passed=0, failed=0, skipped=0
 XDG = ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME')
 
 
+def directories(root):
+    """The load-path directories of Romacs's own Lisp beyond GNU's (lisp/bundled.json):
+    its subsystem directories, then each bundled package, in runtime_load_path order
+    (crates/romacs-vm-gui/src/startup.rs)."""
+    return lisp_layout.romacs_load_path(root)
+
+
 def is_suite(path):
     return b'(ert-deftest' in path.read_bytes()
 
@@ -46,14 +55,17 @@ def suites_under(directory):
 
 
 def bundled_names(bases):
-    """What a test directory or MODULE may name: bundled packages and libraries."""
-    return {base.name for base in bases} | {p.stem for base in bases for p in base.glob('*.el')}
+    """What a test directory or MODULE may name: bundled packages and the libraries on the
+    load-path (lisp/, its directories, Romacs's and the packages')."""
+    lisp = ROOT / 'lisp'
+    path = {lisp, *bases, *(p for p in lisp.iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p))}
+    return {base.name for base in bases} | {p.stem for d in path for p in d.glob('*.el')}
 
 
 def packages(bases):
     """Test directories of bundled code; GNU's own run under test/gnu."""
     names = bundled_names(bases)
-    gnu = {p.name for p in (ROOT / 'lisp/gnu').iterdir()}
+    gnu = {p.name for p in (ROOT / 'lisp').iterdir() if p.is_dir() and lisp_layout.is_gnu_directory(ROOT, p)}
     return sorted(d for tests in SUITES for d in tests.iterdir()
                   if d.is_dir() and d.name in names and d.name not in gnu)
 
@@ -84,11 +96,17 @@ def driver(path, selector):
             f"(setq ert-scoreboard-selector '{selector})\n(kill-emacs (progn {reporter}))\n")
 
 
-def host_environment(home, binary):
+def host_environment(home, binary, store):
+    """A file's private HOME, with worlds off unless the run has a world STORE: a
+    throwaway HOME would only start a world builder of its own."""
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
-    runtime = binary.parent / 'lisp/gnu'
-    env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'lisp/gnu'))
-    env.update(HOME=str(home), TMPDIR=str(home), ROMACS_WORLD='off', ROMACS_COMPILED_LISP='off')
+    runtime = binary.parent / 'lisp'
+    env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'lisp'))
+    env.update(HOME=str(home), TMPDIR=str(home), ROMACS_COMPILED_LISP='off')
+    if store is None:
+        env['ROMACS_WORLD'] = 'off'
+    else:
+        env.pop('ROMACS_WORLD', None)
     for key in XDG:
         directory = home / key.lower()
         directory.mkdir()
@@ -96,9 +114,47 @@ def host_environment(home, binary):
     return env
 
 
+def host_command(binary, store):
+    return [str(binary), *(['--world-store', str(store)] if store else []), '-Q', '--batch']
+
+
+def prepared_store(binary, directory, timeout):
+    """The run's batch world store in DIRECTORY, its world built once
+    (`--world-build --batch`) for every file to restore, or None and why: a host
+    that cannot build one runs each file booting from source, as before.  A world
+    is the runtime at the chain's end, the same in every process; each file still
+    takes its startup steps and runs its tests in its own process and HOME."""
+    store, home = directory / 'store', directory / 'home'
+    store.mkdir()
+    home.mkdir()
+    env = host_environment(home, binary, store)
+    status = run_host([str(binary), '--world-store', str(store), '--world-build', '--batch'],
+                      env, directory / 'prepare.log', timeout)
+    if status == 0 and any(store.glob('**/*.rwi')):
+        return store, None
+    log = (directory / 'prepare.log').read_text(encoding='utf-8', errors='replace').strip()
+    why = 'no result within the timeout' if status is None else f'exit {status}: {log[-300:] or "no world built"}'
+    return None, why
+
+
+def session_members(session):
+    """The processes of SESSION, by /proc: a host's own process groups, as a world
+    builder's, stay in the session it was started in."""
+    members = []
+    for stat in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = stat.read_text().rsplit(')', 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        if int(fields[3]) == session:
+            members.append(int(stat.parent.name))
+    return members
+
+
 def run_host(command, env, log, timeout):
-    """The host's status, or None when it ran out of TIMEOUT.  Its output goes to
-    a file: a descendant keeping it open cannot hold the run."""
+    """The host's status, or None when it ran out of TIMEOUT; either way nothing it
+    started outlives it.  Its output goes to a file: a descendant keeping it open
+    cannot hold the run."""
     with log.open('wb') as sink:
         process = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT, env=env,
                                    cwd=ROOT, start_new_session=True)
@@ -107,10 +163,11 @@ def run_host(command, env, log, timeout):
     except subprocess.TimeoutExpired:
         return None
     finally:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        for pid in [process.pid, *session_members(process.pid)]:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         process.wait()
 
 
@@ -129,13 +186,13 @@ def verdict(output, status):
                 failed=counts['failed'], skipped=counts['skipped'])
 
 
-def run_suite(path, selector, binary, timeout, load_paths):
+def run_suite(path, selector, binary, timeout, load_paths, store):
     with tempfile.TemporaryDirectory(prefix='romacs-ert-') as temp:
         home = Path(temp)
         script = home / 'driver.el'
         script.write_text(driver(path, selector))
-        env = host_environment(home, binary)
-        command = [str(binary), '-Q', '--batch']
+        env = host_environment(home, binary, store)
+        command = host_command(binary, store)
         for directory in load_paths + [path.parent]:
             command += ['-L', str(directory)]
         started = time.monotonic()
@@ -211,12 +268,17 @@ def main():
     print(f'ERT module={args.module or "all"} files={len(files)} selector={args.selector} '
           f'jobs={args.jobs} timeout={args.timeout:g}s host={binary}', flush=True)
     load_paths = directories(ROOT)
-    with ThreadPoolExecutor(args.jobs) as pool:
-        futures = [pool.submit(run_suite, p, args.selector, binary, args.timeout, load_paths) for p in files]
-        results = []
-        for future in futures:
-            results.append(future.result())
-            report(results[-1], args.logs)
+    with tempfile.TemporaryDirectory(prefix='romacs-ert-world-') as world:
+        before = time.monotonic()
+        store, why = prepared_store(binary, Path(world), args.timeout)
+        print(f'ERT batch world: prepared in {time.monotonic() - before:.2f}s' if store else
+              f'ERT batch world: none ({why}); each file boots from source', flush=True)
+        with ThreadPoolExecutor(args.jobs) as pool:
+            futures = [pool.submit(run_suite, p, args.selector, binary, args.timeout, load_paths, store) for p in files]
+            results = []
+            for future in futures:
+                results.append(future.result())
+                report(results[-1], args.logs)
     total = {key: sum(r[key] for r in results) for key in ('selected', 'started', 'completed', 'passed', 'failed', 'skipped')}
     classes = {name: sum(r['status'] == name for r in results) for name in ('fail', 'timeout', 'incomplete')}
     print(f"ERT complete: files={len(results)} selected={total['selected']} started={total['started']} "

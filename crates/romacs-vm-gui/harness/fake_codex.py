@@ -8,6 +8,8 @@ script on the prompt's first line:
   say TEXT      reply TEXT
   slow N        sleep N seconds, then reply `slow done' (a long turn; a
                 steer's text ends it early, `steered: TEXT')
+  wait FILE     a turn held until FILE exists (60 s at most), then reply
+                `released' (an interrupt ends it)
   fail          end the turn failed
   Evaluate ...  Gnosis's evaluator prompt: answered as fake_harness.py does
   anything else reply `VERDICT: APPROVE' and the prompt's line count
@@ -52,13 +54,27 @@ def reply_for(prompt, first):
     return f'VERDICT: APPROVE\nreviewed {len(prompt.splitlines())} lines'
 
 
+def script_line(prompt):
+    """The prompt's script: its first line, after a delegated task's role
+    preamble (`Act as the ROLE sub-agent for this task.')."""
+    lines = [l for l in prompt.strip().splitlines() if l.strip()]
+    if lines and lines[0].startswith('Act as the ') and lines[0].endswith(' sub-agent for this task.'):
+        lines = lines[1:]
+    return lines[0] if lines else ''
+
+
 def run_turn(thread, turn, prompt):
-    first = prompt.strip().splitlines()[0] if prompt.strip() else ''
+    first = script_line(prompt)
     notify('turn/started', threadId=thread.id, turn={'id': turn, 'status': 'inProgress'})
     status, error = 'completed', None
     if first == 'fail':
         status, error = 'failed', {'message': 'the fake model failed'}
         reply = None
+    elif first.startswith('wait '):
+        path, deadline = first.split(' ', 1)[1], time.monotonic() + 60
+        while not os.path.exists(path) and time.monotonic() < deadline and thread.turn == turn:
+            thread.stop.wait(.05)
+        status, error, reply = ('completed', None, 'released') if thread.turn == turn else ('interrupted', None, None)
     elif first.startswith('slow '):
         thread.stop.wait(float(first.split()[1]))
         if thread.turn != turn:
@@ -89,14 +105,14 @@ def text_of(params):
 
 def log_turn(thread, params, prompt):
     if LOG:
-        first = prompt.strip().splitlines()[0] if prompt.strip() else ''
+        first = script_line(prompt)
         with open(LOG, 'a') as handle:
             handle.write(json.dumps({'t': time.time(), 'codex': thread.id, 'resumed': thread.resumed,
                                      'model': params.get('model'), 'effort': params.get('effort'),
                                      'argv': sys.argv[1:], 'pid': os.getpid(),
                                      'codex_home': os.environ.get('CODEX_HOME'), 'prompt': first[:200],
                                      'env': {k: v for k, v in os.environ.items()
-                                             if k.startswith(('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_'))}}) + '\n')
+                                             if k.startswith(('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_', 'AGENT_TEST_'))}}) + '\n')
 
 
 def main():

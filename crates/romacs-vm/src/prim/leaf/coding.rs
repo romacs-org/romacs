@@ -420,7 +420,7 @@ fn coding_encode_eol(tokens: Vec<CodingToken>, mode: usize) -> Vec<CodingToken> 
 }
 
 /// The bytes detection reads: raw bytes as themselves; a character as its
-/// internal representation (DIVERGENCES.md VM2-CODING-DETECT-MULTIBYTE).
+/// internal representation (ledger/divergences VM2-CODING-DETECT-MULTIBYTE).
 fn coding_detection_bytes(tokens: &[CodingToken]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(tokens.len());
     for &token in tokens {
@@ -1549,7 +1549,7 @@ impl Leaf<'_> {
     /// with `coding-category-list' updated as coding.c updates it.  It
     /// gives back an order `coding-category-list' recorded, which
     /// `set-coding-system-priority' cannot for a category with no coding
-    /// system set up (startup's locale replay, lisp/romacs/romacs-loadup-bootstrap.el).
+    /// system set up (startup's locale replay, lisp/session/romacs-loadup-bootstrap.el).
     pub fn set_coding_category_order(&mut self, categories: &[Value]) -> super::super::Out {
         self.coding_init()?;
         let priorities = self.coding_category_state(PRIORITIES)?;

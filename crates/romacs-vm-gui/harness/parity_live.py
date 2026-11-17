@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The machinery the side-by-side parity harnesses share.
 
-A harness (gnosis_parity_live.py, hermes_parity_live.py) names its
+A harness (gnosis_parity_live.py, for one) names its
 workflows and how each engine's private tree and init are made; this module
 starts each engine in its own private headless labwc, drives the same keys
 into both through wtype, asks parity_probe.el for the same observable state
@@ -33,12 +33,12 @@ GRID = (120, 33)  # the root window's body columns and lines in both frames
 # Romacs's interactive defaults off (VM2-OOB-DEFAULTS), in an init that GNU
 # also loads; a -Q session never turns them on.
 ROMACS_DEFAULTS_OFF = "(when (fboundp 'romacs-defaults-mode) (romacs-defaults-mode -1))\n"
-# Completion as GNU's engine has it after loading lisp/romacs/romacs-completion-defaults.el,
+# Completion as GNU's engine has it after loading lisp/completion/romacs-completion-defaults.el,
 # which lacks the fzf style and romacs-complete, set in both engines' inits:
-# Romacs's own defaults complete with fzf (DIVERGENCES.md VM2-FZF-DEFAULT) in
+# Romacs's own defaults complete with fzf (ledger/divergences VM2-FZF-DEFAULT) in
 # romacs-complete's layer (VM2-COMPLETE-DEFAULT), and these harnesses compare
 # GNU's completion, displayed by fido-vertical.  Romacs's other interactive
-# defaults (lisp/romacs/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
+# defaults (lisp/session/romacs-defaults.el, VM2-OOB-DEFAULTS) go off with their
 # switch, so both engines edit with GNU's values; Romacs shows GNU's mode
 # line in each window (VM2-MODE-LINE).
 GNU_COMPLETION = ("(setq completion-styles '(basic partial-completion emacs22)\n"
@@ -173,6 +173,9 @@ class Engine:
         self.name, self.argv, self.root, self.lisp, self.timeout = name, argv, root, lisp, timeout
         self.env, self.serial, self.processes = env, 0, []
         self.probe_dir = root / 'probe'
+        # A runtime directory for the editor alone; the compositor keeps
+        # the root, where its socket's path is short enough to bind.
+        self.editor_runtime = None
 
     def start(self, tools):
         """Start the compositor and the editor; a failure leaves neither running."""
@@ -198,6 +201,8 @@ class Engine:
         time.sleep(.3)
         started = time.time()
         output = (self.root / 'engine.log').open('w')
+        if self.editor_runtime:
+            self.env.update(XDG_RUNTIME_DIR=str(self.editor_runtime), WAYLAND_DISPLAY=str(socket))
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
@@ -426,11 +431,14 @@ def prepare_world(romacs, env, cwd):
     return round(time.time() - started, 3) if done.returncode == 0 else None
 
 
-def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=()):
+def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None, args=(), check=False):
     """`romacs-vm-gui --loadup ARGS' on INIT, as ~/.config/romacs/init.el
     unless INIT is None, from a world prepared first (`prepare_world', its
     seconds in `world_seconds'), as a user's HOME holds one; CLS as
-    `gnu_engine'."""
+    `gnu_engine'.  With CHECK, `romacs-display-check' is on: every window
+    redisplay reuses is also built in full, which a harness that measures
+    must not ask for, and one that asks reads `check-mismatches' from
+    `romacs--display-stats' before it ends."""
     (home / '.config/romacs').mkdir()
     if init is not None:
         (home / '.config/romacs/init.el').write_text(init)
@@ -439,7 +447,8 @@ def romacs_engine(romacs, root, home, env, init, lisp, timeout, tools, cls=None,
         if os.environ.get(key):
             env[key] = os.environ[key]
     world_seconds = prepare_world(romacs, env, root / 'work')
-    engine = (cls or Engine)('romacs', [romacs, '--loadup', *args], root, lisp, env, timeout).start(tools)
+    checked = ('--eval', '(setq romacs-display-check t)') if check else ()
+    engine = (cls or Engine)('romacs', [romacs, '--loadup', *checked, *args], root, lisp, env, timeout).start(tools)
     engine.world_seconds = world_seconds
     return engine
 

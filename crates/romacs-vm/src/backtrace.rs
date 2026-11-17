@@ -5,6 +5,7 @@ use super::*;
 
 /// Where a call's arguments are read from, as GNU's `record_in_backtrace`
 /// keeps a pointer to the caller's pushed values (bytecode.c `Bcall`).
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) enum Arguments {
     /// The caller's argument registers: OFFSET..OFFSET+COUNT of the register
     /// file STACK (`Registers::file`; the live one is at `Registers::depth`).
@@ -16,10 +17,7 @@ pub(super) enum Arguments {
     /// spread window a nested `apply` reuses while the callee runs.
     Copied(std::ops::Range<usize>),
 }
-romacs_snapshot::snapshot_enum!(Arguments {
-    Arguments::Registers { stack, offset, count } => (stack, offset, count),
-    Arguments::Copied(f0) => (f0),
-});
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Activation {
     pub token: usize,
     pub function: Value,
@@ -27,21 +25,20 @@ pub(super) struct Activation {
     args: Arguments,
     pub dynamic: usize,
 }
-romacs_snapshot::snapshot_struct!(Activation { token, function, resolved, args, dynamic });
 /// A `save-excursion` in progress, for `backtrace-eval`'s unrewind (GNU
 /// SPECPDL_UNWIND_EXCURSION): its marker, the selected window when it
 /// showed the marker's buffer (else nil), and where it was made, as the
 /// activation count and the binding depth then. The pair orders it against
 /// both: one made in a caller just before a call is outside the callee's
 /// entry even at the same binding depth.
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Excursion {
     pub marker: Value,
     pub window: Value,
     pub frames: usize,
     pub dynamic: usize,
 }
-romacs_snapshot::snapshot_struct!(Excursion { marker, window, frames, dynamic });
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Backtrace {
     pub frames: Vec<Activation>,
     arguments: Vec<Value>,
@@ -65,7 +62,6 @@ pub(super) struct Backtrace {
     /// empty records every one.
     only: Vec<usize>,
 }
-romacs_snapshot::snapshot_struct!(Backtrace { frames, arguments, next_token, bindings, exit_flags, exit_pruned, excursions, observed, only });
 impl Backtrace {
     pub fn enter(
         &mut self,
@@ -390,12 +386,12 @@ impl Vm {
             let local = self.declaration_hash_get(self.slots[base].local, owner)?.ok_or("missing local binding")?;
             return Ok(self.slots[local.index(7)? - 1].value);
         }
-        self.fence_binding(slot, at, owner);
+        self.tracked_binding(slot, at, owner);
         match successor {
             // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
             // let's own, never the root's
             Some(next) => Ok(self.dynamic[next].1),
-            None => self.unfenced(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
+            None => self.untracked(slot, |vm| vm.backtrace_live_value(slot, owner, default)),
         }
     }
     /// Activation INDEX's own bindings, live ones only, as (SYMBOL . VALUE)
@@ -507,7 +503,7 @@ impl Vm {
     /// (SET_INTERNAL_THREAD_SWITCH). What it swapped, for
     /// `backtrace_rewind`, which swaps it back in the other order.
     pub(super) fn backtrace_unrewind(&mut self, index: usize) -> Result<[usize; 4]> {
-        if self.fence.is_some() {
+        if self.tracking.is_some() {
             return Err("backtrace-eval while a world is built".into());
         }
         let span = [
@@ -572,7 +568,7 @@ impl Vm {
     /// so it becomes a binding of nothing (GNU SPECPDL_NOP).
     fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
-        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+        // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
         let (slot, saved, owner, default) = self.dynamic[at];
         let symbol = self.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
@@ -600,7 +596,7 @@ impl Vm {
         let [current] = self.release_frame(frame);
         restored?;
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
-        // (eval.c specpdl_unrewind); refused while a world is built, so no fence sees it
+        // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
         self.dynamic[at].1 = current;
         Ok(())
     }
@@ -612,7 +608,7 @@ impl Vm {
         let nothing = self.intern(INERT_BINDING);
         let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
         // HOST(dynamic:saved): backtrace-eval's unrewind makes a binding whose buffer lost its
-        // local inert (eval.c SPECPDL_NOP); refused while a world is built, so no fence sees it
+        // local inert (eval.c SPECPDL_NOP); not done while a world is built, so no tracking sees it
         self.dynamic[at] = (slot, Value::NIL, Value::NIL, false);
         if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
             self.backtrace.bindings[i].1 = nothing;

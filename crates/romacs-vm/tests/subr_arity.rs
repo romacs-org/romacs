@@ -2,18 +2,11 @@ use romacs_vm::Vm;
 use serde_json::Value;
 
 #[test]
-fn subr_arity_matches_recorded_gnu_and_lisp_representation() {
+fn subr_arity_matches_recorded_gnu() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/subr_arity.json")).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
         let mut vm = Vm::new();
         vm.set_collection_floor(1);
-        if case["romacs_representation"] == "lisp" {
-            vm.install_lisp_prelude().unwrap();
-            let name = case["name"].as_str().unwrap();
-            let source = format!("(let ((f (symbol-function '{name}))) (condition-case e (subr-arity f) (wrong-type-argument (list (car e) (car (cdr e)) (eq f (car (cdr (cdr e))))))))");
-            assert_eq!(vm.eval_source(&source).unwrap().display().unwrap(), "(wrong-type-argument subrp t)");
-            continue;
-        }
         let source = case["source"].as_str().unwrap();
         let actual = vm.eval_source(source).and_then(|value| value.display());
         assert_eq!(

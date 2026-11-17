@@ -5,7 +5,7 @@
 //! (HL1), else left to right. A pure function of the accessible text, the
 //! starting byte and a regexp matcher; character classes are Unicode's
 //! (`unicode-bidi'). Text a display property covers counts as its own
-//! characters, where GNU counts one neutral (DIVERGENCES.md VM2-BIDI1).
+//! characters, where GNU counts one neutral (ledger/divergences VM2-BIDI1).
 use unicode_bidi::{BidiClass, bidi_class};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

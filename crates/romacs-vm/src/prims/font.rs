@@ -1,5 +1,5 @@
 //! GNU font.c's font objects over the open display's fonts
-//! (display_host.rs, DIVERGENCES.md VM2-FONT1). A font-spec, font-entity
+//! (display_host.rs, ledger/divergences VM2-FONT1). A font-spec, font-entity
 //! or font-object is a record whose type is that symbol, its slots GNU's
 //! property vector (font.h FONT_TYPE_INDEX ... FONT_EXTRA_INDEX), a
 //! font-object followed by its name, full name, file and metrics. On the
@@ -753,6 +753,18 @@ fn entity_of(cx: &mut Leaf<'_>, font: Value) -> Option<FontEntity> {
         index: u32::try_from(index.integer_value()?).ok()?,
     })
 }
+/// OPENED's font-object: the one made when the display first opened that
+/// font at that size, as font.c `font_open_entity` returns the object on the
+/// entity's list, else a new one, kept. So a font asked for again (by
+/// `char-displayable-p` in a mode line, at every redisplay) costs a lookup,
+/// not a record, two names and its OpenType tables.
+fn font_object(cx: &mut Leaf<'_>, opened: &OpenedFont) -> Out {
+    if let Some(object) = cx.cached_font_object(&opened.entity, opened.pixel_size) { return Ok(object); }
+    let object = make_object(cx, opened)?;
+    cx.cache_font_object(opened.entity.clone(), opened.pixel_size, object);
+    Ok(object)
+}
+
 /// font_build_object: the opened font's record, named as GNU names it.
 fn make_object(cx: &mut Leaf<'_>, opened: &OpenedFont) -> Out {
     let mut slots = vec![Value::NIL; OBJECT_SLOTS];
@@ -941,7 +953,7 @@ pub(super) fn fontset_name_parts(cx: &mut Leaf<'_>, name: &str) -> std::result::
 /// The XLFD name of the font a def was realized to.
 pub(super) fn opened_name(cx: &mut Leaf<'_>, font: &romacs_layout_input::OpenedDefFont) -> std::result::Result<Option<String>, Fault> {
     let Some(opened) = cx.font_host().and_then(|host| host.opened_def_font(font)) else { return Ok(None) };
-    let object = make_object(cx, &opened)?;
+    let object = font_object(cx, &opened)?;
     Ok(name_of(cx, slot(cx, object, NAME)))
 }
 
@@ -976,7 +988,7 @@ fn open(cx: &mut Leaf<'_>, font: Value) -> std::result::Result<Option<Value>, Fa
     };
     let Some(entity) = entity else { return Ok(None) };
     match cx.font_host().and_then(|host| host.open_font(&entity, size)) {
-        Some(opened) => Ok(Some(make_object(cx, &opened)?)),
+        Some(opened) => Ok(Some(font_object(cx, &opened)?)),
         None => Ok(None),
     }
 }
@@ -1190,7 +1202,7 @@ fn open_font(cx, font_entity: Value; optional size: Value, frame: Value) {
     };
     let Some(entity) = entity_of(cx, font_entity) else { return Ok(Value::NIL) };
     match cx.font_host().and_then(|host| host.open_font(&entity, pixels)) {
-        Some(opened) => make_object(cx, &opened),
+        Some(opened) => font_object(cx, &opened),
         None => Ok(Value::NIL),
     }
 }}
@@ -1368,6 +1380,7 @@ fn font_get_glyphs(cx, font_object: Value, from: Value, to: Value; optional obje
 defsubr! { name = "clear-font-cache", gnu = "font.c:4576", effect = Global,
 fn clear_font_cache(cx) {
     if let Some(host) = cx.font_host() { host.clear_font_cache(); }
+    cx.forget_font_objects();
     cx.fontsets_mut().touch();
     cx.note_fontset_change();
     Ok(Value::NIL)
@@ -1411,7 +1424,7 @@ fn char_font(cx: &mut Leaf<'_>, ch: i64) -> Out {
     let Some(ch) = u32::try_from(ch).ok().and_then(char::from_u32) else { return Ok(Value::NIL) };
     let request = cx.default_font_request()?;
     let Some((opened, code)) = cx.font_host().and_then(|host| host.char_font(&request, ch)) else { return Ok(Value::NIL) };
-    let object = make_object(cx, &opened)?;
+    let object = font_object(cx, &opened)?;
     Ok(cx.cons(object, Value::integer(i64::from(code)).unwrap()))
 }
 
@@ -1463,8 +1476,8 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
         return Ok(Step::Call { f, args: vec![Value::integer(at).unwrap()], then: font_object_of_char, saved: vec![] });
     }
     let at = position.integer_value().ok_or(Fault::Wrong("fixnump", position))?;
-    let text = cx.string_view(string)?;
-    let ch = usize::try_from(at).ok().and_then(|at| text.chars().nth(at));
+    cx.string_shape(string)?;
+    let ch = match usize::try_from(at) { Ok(at) => cx.string_char(string, at)?, Err(_) => None };
     let Some(ch) = ch else { return Err(Fault::Range(string, position)) };
     if cx.font_host().is_none() { return Ok(Step::Done(Value::NIL)); }
     font_object_of_char(cx, Value::integer(i64::from(ch)).unwrap(), &[])

@@ -11,8 +11,7 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / 'install.sh'
 NAME = 'romacs-x86_64-linux'
 # Stands in for the binary: records its arguments and succeeds.
-STUB = ('#!/bin/sh\nprintf "%s\\n" "$*" >>"$HOME/romacs-calls"\n'
-        'case "$1" in --compile-lisp-tree) exit "$(cat "$HOME/status" 2>/dev/null || echo 0)" ;; esac\n')
+STUB = '#!/bin/sh\nprintf "%s\\n" "$*" >>"$HOME/romacs-calls"\n'
 
 
 def release(root, damaged=False):
@@ -56,21 +55,17 @@ class InstallTests(unittest.TestCase):
         path = self.root / 'good'
         return path if path.exists() else release(path)
 
-    def test_installs_links_and_prepares_the_runtime(self):
-        run = self.run_script('--no-compile')
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual((self.home / '.local/bin/romacs').resolve(), self.prefix / 'bin/romacs')
-        self.assertTrue((self.home / '.local/share/applications/romacs.desktop').exists())
-        self.assertEqual((self.home / 'romacs-calls').read_text(), '-Q --loadup --world-build\n')
+    def test_installs_links_and_runs_nothing(self):
+        # Downloading, checking and unpacking is all: the first start
+        # prepares the startup image and the Lisp compiles in the background.
+        for args in ((), ('--no-compile',)):
+            run = self.run_script(*args)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual((self.home / '.local/bin/romacs').resolve(), self.prefix / 'bin/romacs')
+            self.assertTrue((self.home / '.local/share/applications/romacs.desktop').exists())
+            self.assertFalse((self.home / 'romacs-calls').exists(), 'the installer ran the binary')
         entry = (self.home / '.local/share/applications/romacs.desktop').read_text()
         self.assertEqual(entry, f'Exec="{self.home}/.local/bin/romacs" %F\n')
-
-    def test_compiling_runs_last_and_status_2_is_success(self):
-        (self.home / 'status').write_text('2\n')
-        self.assertEqual(self.run_script().returncode, 0)
-        calls = (self.home / 'romacs-calls').read_text().splitlines()
-        self.assertEqual(calls[0], '-Q --loadup --world-build')
-        self.assertRegex(calls[1], r'^--compile-lisp-tree --jobs \d+$')
 
     def test_a_reinstall_leaves_nothing_of_the_old_tree(self):
         self.run_script('--no-compile')

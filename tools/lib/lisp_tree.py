@@ -1,47 +1,88 @@
 #!/usr/bin/env python3
-"""The Lisp trees live under lisp/: GNU's in lisp/gnu, Romacs's in
-lisp/romacs, side by side under the runtime root.
+"""One Lisp tree under lisp/ (U1): lisp/gnu/X -> lisp/X, and lisp/romacs/ by
+subsystem, as tools/lib/lisp_moves.tsv says.
 
-  python3 -B tools/lib/lisp_tree.py move [ROOT]      git mv gnu-lisp -> lisp/gnu, rlisp -> lisp/romacs,
-                                                     and fixture trees so named alike
-  python3 -B tools/lib/lisp_tree.py relink [ROOT]    rewrite the old names in every tracked file
-  python3 -B tools/lib/lisp_tree.py check [ROOT]     exit 1 while an old tree or an old name is left
+  python3 -B tools/lib/lisp_tree.py move [ROOT]      git mv every file under lisp/gnu/ and lisp/romacs/
+  python3 -B tools/lib/lisp_tree.py relink [ROOT]    rewrite the old paths in every tracked file
+  python3 -B tools/lib/lisp_tree.py check [ROOT]     exit 1 while an old tree or an old path is left
 
 A reference is a path relative to the runtime root (the checkout, or an
-installed share/romacs), so `gnu-lisp' becomes `lisp/gnu' wherever it names
-the tree: in a path, a string, a comment.  Left alone: the pinned GNU trees
-(lisp/gnu, test/gnu/test), the vendored packages (lisp/romacs/deps), and
-the `--gnu-lisp' options and identifiers that merely contain a name.
+installed share/romacs): `lisp/gnu/subr.el' becomes `lisp/subr.el',
+`lisp/romacs/romacs-agent.el' becomes `lisp/agents/romacs-agent.el', in a
+path, a string or a comment.  A reference that names no file the map places
+(`lisp/romacs' alone, a pattern) is listed by `relink' for a hand fix.  Left
+alone: GNU's pinned test tree (test/gnu/test), the bundled packages' own text,
+and this tool, its map and the tests that hold the old paths as data.  Every
+other file under lisp/, GNU's included, is ours and is rewritten like any.
 
-Deterministic and idempotent: each command run twice changes nothing more.
-A branch that merges the move resolves its conflicts, then runs `move' (for
-files it added under an old tree), then `relink', then `check'.
-
-Transition code: it goes, with its test and its line in check-derived, once
-every branch that predates the move has merged it and the smell floors no
-longer list the old trees.
+Deterministic and idempotent.  A branch that merges the move resolves its
+conflicts, then runs `move' (for files it added under an old tree), `relink'
+and `check'.  Transition code: it goes, with its map and test, once no open
+branch predates the move.
 """
 from __future__ import annotations
 
-import os
+import fnmatch
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-MOVES = (('gnu-lisp', 'lisp/gnu'), ('rlisp', 'lisp/romacs'))
-NEW = dict(MOVES)
+HERE = Path(__file__).resolve().parent
+MAP = HERE / 'lisp_moves.tsv'
+OLD_TREES = ('lisp/gnu', 'lisp/romacs')
+EXEMPT = ('test/gnu/test/', 'lisp/packages/', 'lisp/romacs/gnosis/', 'lisp/romacs/jabber/',
+          'lisp/romacs/deps/', 'tools/lib/lisp_tree.py', 'tools/lib/lisp_moves.tsv',
+          'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
+# A path into an old tree: not inside a longer name (`lisp/gnu-tests'), its
+# segments plain file-name characters.
+OLD = re.compile(r'(?<![\w-])lisp/(?:gnu|romacs)(?![\w-])(?:/[\w.+@-]+)*/?')
 
-# GNU's pinned text and the vendored packages; this tool, its test and the
-# layout test, which hold the old names as data; and the smell floors, which
-# keep the old entries until the trunk lowers them at a checkpoint.
-EXEMPT = ('lisp/gnu/', 'lisp/romacs/deps/', 'test/gnu/test/', 'ledger/smell-floors.json',
-          'tools/lib/lisp_tree.py', 'tools/tests/test_lisp_tree.py', 'tools/tests/test_lisp_layout.py')
 
-# An old name standing alone: not inside `--gnu-lisp' or `owned_in_rlisp',
-# nor after a backslash, except a string's `\n' or `\t' (`\rlisp' is `\r'
-# and `lisp').
-OLD = re.compile(r'(?:(?<=\\[nt])|(?<![-\w\\]))(gnu-lisp|rlisp)(?![-\w])')
+class Unplaced(Exception):
+    pass
+
+
+def load_map(text: str) -> list[tuple[str, str, str]]:
+    rows = []
+    for line in text.splitlines():
+        if line.strip() and not line.startswith('#'):
+            kind, old, new = line.split('\t')
+            if kind not in ('file', 'dir', 'rule', 'gone'):
+                raise ValueError(f'lisp_moves.tsv: unknown kind {kind}')
+            rows.append((kind, old, new))
+    return rows
+
+
+def target(path: str, rows) -> str:
+    """Where PATH, a file under an old tree, goes."""
+    for kind, old, new in rows:
+        if kind == 'file' and path == old:
+            return new
+    for kind, old, why in rows:
+        if kind == 'gone' and path.startswith(old):
+            raise Unplaced(f'{path}: {why}; merge that first')
+    dirs = sorted((r for r in rows if r[0] == 'dir'), key=lambda r: -len(r[1]))
+    for _, old, new in dirs:
+        if path.startswith(old):
+            return new + path[len(old):]
+    head, _, name = path.rpartition('/')
+    if head == 'lisp/romacs':
+        for kind, pattern, new in rows:
+            if kind == 'rule' and fnmatch.fnmatchcase(name, pattern):
+                return new + name
+    raise Unplaced(f'place {path}: add a rule to tools/lib/lisp_moves.tsv or git mv it')
+
+
+def directory_target(path: str, rows) -> str | None:
+    """Where a directory reference goes, when the map says: a dir row's own
+    directory, or a directory under lisp/gnu/."""
+    for kind, old, new in sorted((r for r in rows if r[0] == 'dir'), key=lambda r: -len(r[1])):
+        if path + '/' == old:
+            return new.rstrip('/')
+        if (path + '/').startswith(old):
+            return (new + path[len(old):]).rstrip('/')
+    return None
 
 
 def git(root: Path, *args) -> str:
@@ -53,12 +94,56 @@ def tracked(root: Path) -> list[str]:
     return sorted(p for p in git(root, 'ls-files', '-z').split('\0') if p)
 
 
+NESTED = re.compile(r'^(.*/)(lisp/(?:gnu|romacs)/.*)$')
+
+
+def old_files(paths: list[str]) -> list[str]:
+    """Files under an old tree: the runtime's, and test fixtures that mirror
+    the layout (a `lisp/romacs/' or `lisp/gnu/' inside another directory)."""
+    return [p for p in paths if p.startswith(tuple(t + '/' for t in OLD_TREES)) or NESTED.match(p)]
+
+
+def placed(path: str, rows) -> str:
+    """Where PATH goes: a fixture's own tree moves as the runtime's does."""
+    nested = NESTED.match(path)
+    if nested and not path.startswith(tuple(t + '/' for t in OLD_TREES)):
+        return nested.group(1) + target(nested.group(2), rows)
+    return target(path, rows)
+
+
+def move(root: Path, rows) -> list[str]:
+    if git(root, 'ls-files', '--unmerged'):
+        raise SystemExit('unmerged paths: resolve the merge first (keep your name for a file you renamed)')
+    paths = tracked(root)
+    plan, problems = {}, []
+    for path in old_files(paths):
+        try:
+            plan[path] = placed(path, rows)
+        except Unplaced as error:
+            problems.append(str(error))
+    clashes = [f'{p}: {t} exists' for p, t in plan.items() if (root / t).exists()]
+    if problems or clashes:
+        raise SystemExit('\n'.join(problems + clashes))
+    for path, new in plan.items():
+        (root / new).parent.mkdir(parents=True, exist_ok=True)
+        git(root, 'mv', path, new)
+    for path in plan:
+        prune(root, (root / path).parent)
+    return [f'{p} -> {t}' for p, t in plan.items()]
+
+
+def prune(root: Path, directory: Path) -> None:
+    """Remove DIRECTORY and its parents below ROOT while the move left them empty."""
+    while directory != root and directory.is_dir() and not any(directory.iterdir()):
+        directory.rmdir()
+        directory = directory.parent
+
+
 def texts(root: Path) -> dict[str, str]:
-    """{path: text} of the tracked text files a rewrite may touch."""
     tree = {}
     for path in tracked(root):
         full = root / path
-        if path.startswith(EXEMPT) or not full.is_file() or full.is_symlink():
+        if path.startswith(EXEMPT) or path.startswith(('lisp/gnu/',)) or not full.is_file() or full.is_symlink():
             continue
         data = full.read_bytes()
         if b'\0' in data[:8192]:
@@ -70,78 +155,56 @@ def texts(root: Path) -> dict[str, str]:
     return tree
 
 
-def rewrite(text: str) -> str:
-    return OLD.sub(lambda m: NEW[m[1]], text)
+def rewrite(text: str, rows) -> tuple[str, list[str]]:
+    """TEXT with each old path replaced, and the references the map cannot place."""
+    unplaced = []
+
+    def one(match: re.Match) -> str:
+        ref = match.group(0)
+        for candidate in (ref, ref.rstrip('.,;:')):
+            tail = ref[len(candidate):]
+            bare = candidate.rstrip('/')
+            slash = '/' if candidate.endswith('/') else ''
+            if bare == 'lisp/gnu':
+                return 'lisp' + slash + tail
+            moved = directory_target(bare, rows)
+            if moved is None:
+                try:
+                    moved = target(bare, rows)
+                except Unplaced:
+                    # A library's load name: `(load "lisp/romacs/foo")' is foo.el's.
+                    if slash or '.' in bare.rsplit('/', 1)[-1]:
+                        continue
+                    try:
+                        moved = target(bare + '.el', rows)[:-len('.el')]
+                    except Unplaced:
+                        continue
+            return moved + slash + tail
+        unplaced.append(ref)
+        return ref
+
+    return OLD.sub(one, text), unplaced
 
 
-def plan(root: Path) -> dict[str, str]:
-    """The rewritten text of each file that changes."""
-    return {p: new for p, t in texts(root).items() if (new := rewrite(t)) != t}
+def plan(root: Path, rows) -> tuple[dict[str, str], dict[str, list[str]]]:
+    changes, unplaced = {}, {}
+    for path, text in texts(root).items():
+        new, left = rewrite(text, rows)
+        if new != text:
+            changes[path] = new
+        if left:
+            unplaced[path] = left
+    return changes, unplaced
 
 
-def old_trees(paths: list[str]) -> list[str]:
-    """Each directory named gnu-lisp or rlisp that holds a tracked file: the
-    trees, and test fixtures that mirror the layout.  The outermost one of a
-    path only."""
-    trees = set()
-    for path in paths:
-        parts = path.split('/')
-        old = next((i for i, part in enumerate(parts[:-1]) if part in NEW), None)
-        if old is not None:
-            trees.add('/'.join(parts[:old + 1]))
-    return sorted(trees)
-
-
-def moved(tree: str) -> str:
-    """Where the old tree TREE goes: its name replaced by the new path."""
-    head, _, name = tree.rpartition('/')
-    return f'{head}/{NEW[name]}' if head else NEW[name]
-
-
-def move(root: Path) -> list[str]:
-    """Move each old tree, or what a branch added under it after the move."""
-    if git(root, 'ls-files', '--unmerged'):
-        raise SystemExit('unmerged paths: resolve the merge first (keep your name for a file you renamed)')
-    done, paths = [], tracked(root)
-    for old in old_trees(paths):
-        new = moved(old)
-        files = [p for p in paths if p.startswith(old + '/')]
-        if not (root / new).exists():
-            (root / new).parent.mkdir(parents=True, exist_ok=True)
-            git(root, 'mv', old, new)
-            done.append(f'{old} -> {new}')
-            continue
-        for path in files:
-            target = new + path[len(old):]
-            if (root / target).exists():
-                raise SystemExit(f'{path}: {target} exists; merge them by hand')
-            (root / target).parent.mkdir(parents=True, exist_ok=True)
-            git(root, 'mv', path, target)
-            done.append(f'{path} -> {target}')
-        prune(root / old)
-    return done
-
-
-def prune(tree: Path) -> None:
-    """Remove the directories a file-by-file move left empty."""
-    for directory in sorted((p for p in tree.rglob('*') if p.is_dir()), key=lambda p: -len(p.parts)) + [tree]:
-        if not any(directory.iterdir()):
-            directory.rmdir()
-
-
-def links(root: Path, paths: list[str]) -> list[str]:
-    """Tracked symbolic links whose target names an old tree."""
-    return [p for p in paths if not p.startswith(EXEMPT) and (root / p).is_symlink()
-            and OLD.search(os.readlink(root / p))]
-
-
-def leftovers(root: Path) -> list[str]:
-    paths = tracked(root)
-    stale = {*old_trees(paths), *(old for old, _ in MOVES if (root / old).exists())}
-    problems = [f'{old}/ still exists' for old in sorted(stale)]
-    problems += [f'{new}/ is missing' for _, new in MOVES if not (root / new).is_dir()]
-    problems += [f'{p}: a link into an old tree; point it at the new one' for p in links(root, paths)]
-    return problems + [f'{p}: names an old tree' for p in sorted(plan(root))]
+def leftovers(root: Path, rows) -> list[str]:
+    problems = [f'{t}/ still exists' for t in OLD_TREES if (root / t).exists()]
+    problems += [f'{p}: still under an old tree' for p in old_files(tracked(root))]
+    changes, unplaced = plan(root, rows)
+    problems += [f'{p}: names an old path' for p in sorted(changes)]
+    problems += [f'{p}: names {", ".join(sorted(set(refs)))}, which the map cannot place'
+                 for p, refs in sorted(unplaced.items())]
+    return problems
 
 
 def main(argv: list[str]) -> int:
@@ -149,16 +212,19 @@ def main(argv: list[str]) -> int:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     root = Path(argv[1] if len(argv) > 1 else '.').resolve()
+    rows = load_map(MAP.read_text())
     if argv[0] == 'move':
-        print('\n'.join(move(root)) or 'nothing to move')
+        print('\n'.join(move(root, rows)) or 'nothing to move')
     elif argv[0] == 'relink':
-        changes = plan(root)
+        changes, unplaced = plan(root, rows)
         for path, text in sorted(changes.items()):
             (root / path).write_bytes(text.encode('utf-8'))
             print(path)
-        print(f'{len(changes)} files relinked', file=sys.stderr)
+        for path, refs in sorted(unplaced.items()):
+            print(f'hand fix: {path}: {", ".join(sorted(set(refs)))}', file=sys.stderr)
+        print(f'{len(changes)} files relinked, {len(unplaced)} need a hand fix', file=sys.stderr)
     else:
-        problems = leftovers(root)
+        problems = leftovers(root, rows)
         print('\n'.join(problems) or 'lisp tree: ok')
         return 1 if problems else 0
     return 0

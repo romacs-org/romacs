@@ -1,15 +1,17 @@
 # Linux release tarballs, published with the GitHub CLI.
 #
-# A push to master replaces the assets of the rolling `nightly` prerelease
-# with a build of that commit and moves its tag there; a newer push cancels an
-# older run. A pushed `v*` tag, which must name the workspace version, creates
-# a permanent release marked latest. Both publish romacs-x86_64-linux.tar.gz
-# and its SHA256SUMS, after tools/ci/smoke-release has run the tarball.
+# A push to beta, the development branch, replaces the assets of the rolling
+# `nightly` prerelease with a build of that commit and moves its tag there; a
+# newer push cancels an older run. A pushed `v*` tag, which must name the
+# workspace version, creates a permanent release marked latest. A push to
+# master, which holds releases only, publishes nothing: its release is its tag.
+# Both publish romacs-x86_64-linux.tar.gz and its SHA256SUMS, after
+# tools/ci/smoke-release has run the tarball.
 name: release
 
 on:
   push:
-    branches: [master]
+    branches: [beta]
     tags: ['v*']
 
 permissions:
@@ -57,7 +59,7 @@ jobs:
           save-if: ${{ github.ref_type == 'branch' }}
 
       - name: Build
-        run: cargo build --release --locked -p romacs-vm-gui -p romacs-mcp
+        run: cargo build --release --locked -p romacs-vm-gui -p romacs-keeper -p romacs-mcp
 
       - name: Package
         run: |
@@ -76,7 +78,7 @@ jobs:
           gh release upload nightly "dist/$ASSET" dist/SHA256SUMS --clobber
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
             -f sha="$GITHUB_SHA" -F force=true
-          gh release edit nightly --notes "Built from $GITHUB_SHA, the latest push to master. Install steps: README.md."
+          gh release edit nightly --notes "Built from $GITHUB_SHA, the latest push to beta. Install steps: README.md."
 
       - name: Publish release
         if: github.ref_type == 'tag'

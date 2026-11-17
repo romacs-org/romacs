@@ -22,7 +22,7 @@ const NAME: &str = "a_world_restores_randomized_and_refuses_a_damaged_image";
 const INTERRUPTED: &str = "an_interrupted_build_leaves_nothing_in_the_way";
 const FAILED: &str = "a_failed_build_is_retried_after_a_backoff";
 const PUBLISH: &str = "a_build_that_fails_to_publish_records_its_failure";
-const REFUSED: &str = "a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset";
+const UNCAPTURED: &str = "an_uncaptured_build_stays_so_until_its_inputs_change_or_a_reset";
 const FOREIGN: &str = "a_launch_on_a_directory_that_is_no_store_boots_from_source_and_says_why";
 const PAUSED: &str = "pruning_waits_for_a_launcher_between_opening_and_locking";
 const PAUSED_BUILDER: &str = "pruning_waits_for_a_builder_between_opening_and_locking";
@@ -104,8 +104,13 @@ fn act_in_role() -> bool {
         Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
+        Ok("heap-file") => heap_file(&store.unwrap()),
         Ok("trim") => trim(),
         Ok("alone") => alone(),
+        Ok("census") => census(&store.unwrap()),
+        Ok("guard") => guard(&store.unwrap()),
+        #[cfg(target_arch = "x86_64")]
+        Ok("stray") => stray(&store.unwrap()),
         _ => return false,
     }
     true
@@ -120,7 +125,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn restored() -> String {
-    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "moved": true, "forked": false}).to_string()
+    json!({"mode": "restored", "carry": 42, "value": "(built 1)", "forked": false}).to_string()
 }
 
 /// What a child printed of its outcome.
@@ -152,6 +157,22 @@ fn world(store: &Path) -> World {
     World::new(store.to_owned(), vec!["consumer world-image-test".into()]).unwrap()
 }
 
+/// The census of the world in STORE, restored read only as it was
+/// published: what the walk met, by kind and by note, beside the image's
+/// own arena, as long as the file.
+fn census(store: &Path) {
+    let (_, vm, carry) = World::restore_read_only::<u64>(store, vec!["consumer world-image-test".into()]).unwrap();
+    let census = romacs_vm::world::image::census(&vm, &carry);
+    let count = |kind: &str| census["kinds"].as_array().unwrap().iter().find(|k| k["type"] == kind).map(|k| k["count"].clone());
+    let published = std::fs::metadata(image(store)).unwrap().len();
+    println!("WORLD-IMAGE {}", json!({
+        "vm": count("romacs_vm::Vm"), "image": census["image"]["used"].as_u64() == Some(published),
+        "primitives": census["notes"]["ordinal: a primitive, by its index in the primitive table"].as_u64() > Some(0),
+        "executable": census["notes"].get(romacs_snapshot::EMPTY_HASH_TABLE).is_none(),
+        "within": census["totals"]["owned_bytes"].as_u64() <= census["image"]["used"].as_u64(),
+    }));
+}
+
 thread_local! {
     /// The forks this thread made since `launch` registered the handler.
     static FORKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -172,19 +193,17 @@ fn launch(store: &Path) {
             return;
         }
     };
-    match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, || println!("WAITING-FOR-BUILD")) {
+    match world.launch::<u64>(|| std::env::args_os().skip(1).collect(), true, |_| println!("WAITING-FOR-BUILD")) {
         Launch::Restored { mut vm, carry, .. } => {
             vm.world_reinit();
             let value = vm.eval_source("(world-image-probe)").and_then(|v| v.display()).unwrap();
-            let builder = arena::mapped_image().unwrap().executable;
             println!("WORLD-IMAGE {}", json!({"mode": "restored", "carry": carry, "value": value,
-                                               "moved": builder != arena::executable_base(),
                                                "forked": FORKS.with(std::cell::Cell::get) > 0}));
         }
         Launch::Build => {
             // An input beside the store: the word "fail" in it fails the build.
             let input = store.parent().unwrap().join("input");
-            world.begin_build(&world.build_roots(vec![input.clone()])).unwrap();
+            world.begin_build().unwrap();
             // As the GUI and the runner build: steps given to World::build.
             let built = world.build(|| {
                 let flag = romacs_vm::host::read_to_string(input.join("flag")).unwrap_or_default();
@@ -196,7 +215,8 @@ fn launch(store: &Path) {
                 }
                 let mut vm = Vm::new();
                 if flag.trim() == "sqlite" {
-                    // A resource of this process: the capture refuses it.
+                    // A resource of this process, which a build does not
+                    // open (`host::sqlite_open'): the build notes it as not captured.
                     vm.eval_source("(defvar world-image-db (sqlite-open))").unwrap();
                 }
                 vm.world_begin();
@@ -204,7 +224,10 @@ fn launch(store: &Path) {
                 vm.eval_source("(defalias 'world-image-probe (let ((table (make-hash-table :test 'equal))) \
                                 (puthash \"key\" 'built table) (lambda () (list (gethash \"key\" table) (hash-table-count table)))))")
                     .unwrap();
-                Ok((vm, 42u64, json!({})))
+                // An address of this executable, which no image should
+                // hold: the stray test's carry.
+                let carry = if flag.trim() == "stray" { std::ptr::addr_of!(STRAY_BYTE) as u64 } else { 42 };
+                Ok((vm, carry, json!({})))
             });
             let len = match built {
                 Ok(len) => len,
@@ -268,9 +291,130 @@ fn launch_reserved(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"taken_after": mapping_at(base) == Some(libc::EEXIST)}));
 }
 
+/// Where the executable of the process that built the image in STORE
+/// loaded, from the image's header: past the arena's own fields, the
+/// image's length, root and counters.
+fn image_executable(store: &Path) -> usize {
+    const AT: usize = 8 * (6 + 3 * 84 + 40) + 8 * 6;
+    let bytes = std::fs::read(image(store)).unwrap();
+    usize::from_le_bytes(bytes[AT..AT + 8].try_into().unwrap())
+}
+
+/// The permissions of the mapping that holds AT, from /proc/self/maps.
+fn permissions_at(at: usize) -> Option<String> {
+    std::fs::read_to_string("/proc/self/maps").unwrap().lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let (start, end) = fields.next()?.split_once('-')?;
+        let range = usize::from_str_radix(start, 16).ok()?..usize::from_str_radix(end, 16).ok()?;
+        range.contains(&at).then(|| fields.next().map(str::to_owned)).flatten()
+    })
+}
+
+/// Launch as `launch` does, the range the builder's executable lay in first
+/// taken by a readable page of this process's when the parent asks
+/// (`ROMACS_WORLD_IMAGE_TEST_TAKE`): what the restore made of that range.
+fn guard(store: &Path) {
+    let old = image_executable(store);
+    if std::env::var_os("ROMACS_WORLD_IMAGE_TEST_TAKE").is_some() {
+        let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED_NOREPLACE;
+        // SAFETY: a new anonymous page where nothing of this process is
+        // (MAP_FIXED_NOREPLACE): it replaces nothing, and is never freed.
+        unsafe { libc::mmap(old as *mut libc::c_void, 4096, libc::PROT_READ, flags, -1, 0) };
+    }
+    launch(store);
+    println!("WORLD-IMAGE {}", json!({"guard": format!("{:?}", arena::executable_guard()),
+                                       "inaccessible": permissions_at(old).as_deref() == Some("---p")}));
+}
+
+/// A byte of this executable's read-only data, whose address a stray
+/// world carries.
+static STRAY_BYTE: u8 = 7;
+
+#[cfg(target_arch = "x86_64")]
+/// Restore the world in STORE, whose carry is an address in its builder's
+/// executable: what the restore made of that range is printed first, and,
+/// where the range is reserved, a load from the address faults.
+fn stray(store: &Path) {
+    use std::io::Write;
+    let Launch::Restored { carry, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    let guard = arena::executable_guard();
+    println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
+    std::io::stdout().flush().unwrap();
+    if guard == arena::Guard::Reserved {
+        // SAFETY: a load, in assembly, from a page this process reserved
+        // inaccessible: it faults, which is what the parent expects. Rust
+        // code never reads the address, and the instruction writes nothing.
+        unsafe {
+            std::arch::asm!("mov {0}, byte ptr [{1}]", out(reg_byte) _, in(reg) carry as usize, options(nostack, readonly));
+        }
+        println!("WORLD-IMAGE {}", json!({"read": true}));
+    }
+}
+
 /// Adopt FILE as an image in a child: what its arena made of it.
 fn probe_file(store: &Path, file: &Path) -> String {
     outcome(child("probe", store).env("ROMACS_WORLD_IMAGE_TEST_FILE", file))
+}
+
+const GUARD: &str = "a_restore_keeps_the_builders_executable_range_inaccessible_and_restores_when_it_is_taken";
+
+/// An image holds no address of its builder's executable, so the range the
+/// builder's executable lay in is no restore's to need. A restore keeps it
+/// inaccessible when it is free, so an address left by mistake faults; and
+/// restores all the same when something of the process lies there, where it
+/// once refused the image.
+#[test]
+fn a_restore_keeps_the_builders_executable_range_inaccessible_and_restores_when_it_is_taken() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(GUARD);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(GUARD, "launch", &store)), restored());
+    // Free (but in the few restores whose own mappings lie there): reserved.
+    let free = outcomes(&mut child_of(GUARD, "guard", &store));
+    let reserved = json!({"guard": "Reserved", "inaccessible": true}).to_string();
+    let taken = json!({"guard": "Taken", "inaccessible": false}).to_string();
+    assert!(free[0] == restored() && (free[1] == reserved || free[1] == taken), "{free:?}");
+    // Taken: the image restores, and the range is left as it was.
+    let held = outcomes(child_of(GUARD, "guard", &store).env("ROMACS_WORLD_IMAGE_TEST_TAKE", "1"));
+    assert_eq!(held, [restored(), taken]);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const STRAY: &str = "an_address_of_the_builders_executable_left_in_an_image_faults_when_followed";
+
+/// An image that holds an address of its builder's executable, which a
+/// capture should never leave, is caught loudly: following it in a restored
+/// process faults where the range is reserved, instead of reading what lies
+/// there. (Where something of the process took the range, one restore in
+/// thousands, there is nothing to show.)
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn an_address_of_the_builders_executable_left_in_an_image_faults_when_followed() {
+    use std::os::unix::process::ExitStatusExt;
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(STRAY);
+    let store = scratch.join("store");
+    std::fs::create_dir_all(scratch.join("input")).unwrap();
+    std::fs::write(scratch.join("input").join("flag"), "stray").unwrap();
+    let built: serde_json::Value = serde_json::from_str(&outcome(&mut child_of(STRAY, "launch", &store))).unwrap();
+    assert_eq!(built["mode"], "restored", "{built}");
+    let output = child_of(STRAY, "stray", &store).output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = text.lines().filter_map(|l| l.split_once("WORLD-IMAGE ").map(|(_, o)| o)).collect();
+    if lines.first() == Some(&json!({"guard": "Reserved"}).to_string().as_str()) {
+        assert_eq!((lines.len(), output.status.signal()), (1, Some(libc::SIGSEGV)), "{text}");
+    } else {
+        assert_eq!(lines, [json!({"guard": "Taken"}).to_string()], "{text}");
+        assert!(output.status.success(), "{text}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
 }
 
 #[test]
@@ -289,6 +433,12 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // theirs is kept in the store to stand in for that.
     let kept: Vec<String> = std::fs::read_dir(store.join("ids")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     assert!(kept.iter().all(|name| !name.starts_with("library-")), "{kept:?}");
+    // Its census, read in a process that restores it read only: the VM met,
+    // the image's arena alone counted, the primitives it names by this
+    // build's table counted, no empty hash table pointing into the
+    // executable (each got its own allocation at capture), and the walk's
+    // owned bytes within the image.
+    assert_eq!(outcome(&mut child("census", &store)), json!({"vm": 1, "image": true, "primitives": true, "executable": true, "within": true}).to_string());
 
     // A byte changed in place: the content is not the one the manifest
     // binds. The launch rebuilds the world, a new image, and boots from it.
@@ -402,7 +552,7 @@ fn resident() -> usize {
 /// whether the arena's used span stayed as it was over a large block's
 /// life and the VM's drop.
 fn heap(store: &Path) {
-    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, || {}) else {
+    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
         println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
         return;
     };
@@ -455,6 +605,80 @@ fn a_restored_process_allocates_from_the_system_and_an_arena_returns_a_freed_pea
     assert_eq!(outcome(&mut child_of(HEAP, "launch", &store)), restored());
     assert_eq!(outcome(&mut child_of(HEAP, "heap", &store)), json!({"outside": true, "used_kept": true}).to_string());
     assert_eq!(outcome(&mut child_of(HEAP, "trim", &store)), json!({"returned": true, "slack": true, "collected": true}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const HEAP_FILE: &str = "a_restored_process_that_asks_for_the_file_heap_allocates_from_it_and_its_twins_map_it";
+
+/// After a restore, on as many collector threads as the parent asks: whether
+/// the file heap started, as asked or not, and the census says so; whether a
+/// new block is the file heap's and none of the arena's; and, after rounds
+/// that each make conses, strings and a vector, collect, drop them and
+/// collect again, each collection forking a mark twin whose marks it checks
+/// against its own (a difference ends the process), how the twins were
+/// forked, whether the collector ran threads, and whether the heap is whole.
+/// The threads free the dead strings' and vector's storage, the VM's own
+/// blocks, while the next rounds run.
+fn heap_file(store: &Path) {
+    use romacs_allocator::file_heap;
+    let Launch::Restored { mut vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    vm.world_reinit();
+    let threads: usize = std::env::var("ROMACS_WORLD_IMAGE_TEST_THREADS").unwrap().parse().unwrap();
+    vm.set_gc_threads(threads);
+    let started = arena::heap_file().map(|started| started.map(|_| ()).map_err(|refused| format!("{refused:?}")));
+    let (base, reserve) = arena::current_range().unwrap();
+    let block = vec![1u8; 64 << 20];
+    let at = block.as_ptr() as usize;
+    let (file, arena) = (file_heap::owns(at), (base..base + reserve).contains(&at));
+    drop(block);
+    vm.eval_source("(dotimes (_ 6) (let ((strings nil)) (dotimes (_ 20000) (setq strings (cons (make-string 100 ?x) strings))) \
+                      (setq world-image-junk (list (make-list 200000 nil) strings (make-vector 100000 nil)))) \
+                    (garbage-collect) (setq world-image-junk nil) (garbage-collect))").unwrap();
+    // The pages a twin's fork folds straight after a fold, with three million conses held: its
+    // record of held entries, a byte each, is made after the fork, or it would be among them.
+    let in_fork = if file { vm.eval_source("(progn (setq world-image-junk (make-list 3000000 nil)) (garbage-collect) (romacs--heap-file-fold) \
+        (let ((before (plist-get (plist-get (romacs--arena-census) :heap-file) :folded-pages))) (garbage-collect) \
+          (- (plist-get (plist-get (romacs--arena-census) :heap-file) :folded-pages) before)))")
+        .and_then(romacs_vm::Local::display).unwrap().parse::<u64>().unwrap() } else { 0 };
+    let value = vm.eval_source("(world-image-probe)").and_then(romacs_vm::Local::display).unwrap();
+    let census = vm.eval_source("(and (plist-member (romacs--arena-census) :heap-file) t)").and_then(romacs_vm::Local::display).unwrap();
+    let stats = arena::heap_file().and_then(Result::ok).unwrap_or_default();
+    println!("WORLD-IMAGE {}", json!({"started": started, "census": census, "file": file, "arena": arena, "value": value,
+                                       "lazy": stats.lazy_forks, "plain": stats.plain_forks, "failed": stats.failed_folds,
+                                       "threads": collector_threads(), "in_fork": in_fork}));
+}
+
+#[test]
+fn a_restored_process_that_asks_for_the_file_heap_allocates_from_it_and_its_twins_map_it() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(HEAP_FILE);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(HEAP_FILE, "launch", &store)), restored());
+    let run = |asked: bool, threads: usize| -> serde_json::Value {
+        let mut command = child_of(HEAP_FILE, "heap-file", &store);
+        command.env("ROMACS_GC_TWIN", "1").env("ROMACS_WORLD_IMAGE_TEST_THREADS", threads.to_string());
+        if asked { command.env("ROMACS_HEAP_FILE", "1") } else { command.env_remove("ROMACS_HEAP_FILE") };
+        serde_json::from_str(&outcome(&mut command)).unwrap()
+    };
+    // Asked for, on one collector thread and on four: every twin is forked
+    // lazily, each gone before the next collection, and agrees.
+    for threads in [1, 4] {
+        let ran = run(true, threads);
+        assert_eq!((&ran["started"], &ran["census"], &ran["file"], &ran["arena"], &ran["value"]),
+                   (&json!({"Ok": null}), &json!("t"), &json!(true), &json!(false), &json!("(built 1)")), "{threads} threads: {ran}");
+        assert!(ran["lazy"].as_u64() >= Some(12) && ran["plain"] == 0 && ran["failed"] == 0, "{threads} threads: {ran}");
+        assert!(ran["in_fork"].as_u64() < Some(3_000_000 / 4096 / 2), "{threads} threads: {ran}");
+        assert_eq!(ran["threads"].as_u64() > Some(1), threads > 1, "{threads} threads: {ran}");
+    }
+    // Not asked for, none of it exists, the census's row included.
+    let ran = run(false, 4);
+    assert_eq!((&ran["started"], &ran["census"], &ran["file"], &ran["lazy"], &ran["plain"]),
+               (&json!(null), &json!("nil"), &json!(false), &json!(0), &json!(0)), "{ran}");
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -638,30 +862,30 @@ fn a_build_that_fails_to_publish_records_its_failure() {
 }
 
 #[test]
-fn a_refused_capture_stays_refused_until_its_inputs_change_or_a_reset() {
+fn an_uncaptured_build_stays_so_until_its_inputs_change_or_a_reset() {
     if act_in_role() {
         return;
     }
-    let scratch = scratch(REFUSED);
+    let scratch = scratch(UNCAPTURED);
     let store = scratch.join("store");
     std::fs::create_dir_all(scratch.join("input")).unwrap();
     std::fs::write(scratch.join("input/flag"), "sqlite").unwrap();
-    let first = outcome(&mut child_of(REFUSED, "launch", &store));
+    let first = outcome(&mut child_of(UNCAPTURED, "launch", &store));
     assert!(first.contains(r#""mode":"source""#), "{first}");
-    assert!(failure(&store).is_none(), "a refusal is no transient failure");
+    assert!(failure(&store).is_none(), "what a build cannot capture is no transient failure");
     // However long since: no retry while the inputs hold.
     let before = files(&store);
-    let second = outcome(&mut child_of(REFUSED, "launch", &store));
-    assert!(second.contains("refused") && second.contains("a live sqlite object") && !second.contains("retry_in"), "{second}");
+    let second = outcome(&mut child_of(UNCAPTURED, "launch", &store));
+    assert!(second.contains("uncaptured") && second.contains("open sqlite database") && !second.contains("retry_in"), "{second}");
     assert_eq!(files(&store), before, "no builder ran");
-    // A reset forgets the refusal: the next launch builds again.
+    // A reset forgets what was not captured: the next launch builds again.
     assert_eq!(romacs_vm::world::store::reset(&store, false).unwrap(), 1);
-    let third = outcome(&mut child_of(REFUSED, "launch", &store));
-    assert!(third.contains("refused"), "{third}");
+    let third = outcome(&mut child_of(UNCAPTURED, "launch", &store));
+    assert!(third.contains("uncaptured"), "{third}");
     assert_ne!(files(&store), before, "a builder ran");
     // Another input: built and booted from.
     std::fs::write(scratch.join("input/flag"), "ok").unwrap();
-    assert_eq!(outcome(&mut child_of(REFUSED, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(UNCAPTURED, "launch", &store)), restored());
     // Every world and cache goes with `all`, and only the store's own
     // files: the marker, the store's lock and directories, and a stranger stay.
     std::fs::write(store.join("unrelated"), "kept").unwrap();

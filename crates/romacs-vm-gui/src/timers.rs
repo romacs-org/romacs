@@ -28,7 +28,7 @@ pub struct Idle {
 /// busy connection never starves the workers, ripe timers, the idle
 /// auto-save (SAVE),
 /// then, on a pass where none of those ran and no message waits to be
-/// shown, whether to collect (`romacs--idle-collect', lisp/romacs/vm/keyboard.el).
+/// shown, whether to collect (`romacs--idle-collect', lisp/vm/keyboard.el).
 macro_rules! idle_form {
     ($save:literal) => {
         concat!("(let* ((notified (romacs--file-notify-idle))
@@ -45,7 +45,7 @@ macro_rules! idle_form {
 const IDLE: &str = idle_form!("nil");
 const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) (romacs--idle-auto-save))");
 
-/// With AUTO_SAVE, the idle auto-save (lisp/romacs/vm/keyboard.el) is checked
+/// With AUTO_SAVE, the idle auto-save (lisp/vm/keyboard.el) is checked
 /// too, once the command loop's Lisp half is installed, and its delay joins
 /// the timers'. A save that ran is redisplayed, as read_char's is: its
 /// hooks may change buffers. The loop leaves it out while a paint it has
@@ -55,8 +55,14 @@ const IDLE_AUTO_SAVE: &str = idle_form!("(and (fboundp 'romacs--idle-auto-save) 
 /// code it compiled retires too. A key press arriving while it still
 /// marks abandons it (`Vm::collect_garbage_until_key'): the key is read
 /// at once, and the collection waits for the next quiet moment.
+/// The pass is `read_char`'s wait (`Vm::eval_as_wait`): a C-g that ends it,
+/// typed as it began or left by a timer (`with-local-quit`), is the next
+/// key read, and the pass counts as having run.
 pub fn idle(vm: &mut Vm, auto_save: bool) -> Result<Idle, String> {
-    let (ran, rest) = vm.eval_source(if auto_save { IDLE_AUTO_SAVE } else { IDLE })?.cons_pair()?;
+    let Some(value) = vm.eval_as_wait(if auto_save { IDLE_AUTO_SAVE } else { IDLE })? else {
+        return Ok(Idle { ran: true, message: false, delay: None });
+    };
+    let (ran, rest) = value.cons_pair()?;
     let ran = !ran.is_nil();
     let (message, rest) = rest.cons_pair()?;
     let message = !message.is_nil();
@@ -100,10 +106,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(timers_body).unwrap().join().unwrap();
     }
     fn timers_body() {
-        let mut vm = Vm::new();
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-timers");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The idle collection has its own test below.
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil probe nil romacs-gc-idle-delay nil) (message nil)");
@@ -143,7 +148,7 @@ mod tests {
         let failed = idle(&mut vm, true).unwrap();
         assert!(failed.ran && failed.message, "{failed:?}");
         assert_eq!(printed(&mut vm, "(current-message)"), "\"Error running timer: (error \\\"boom\\\")\"");
-        // read_char's own wait (lisp/romacs/vm/keyboard.el): a prompt idles and runs
+        // read_char's own wait (lisp/vm/keyboard.el): a prompt idles and runs
         // timers until its key comes; `read-event' with a time limit runs
         // ordinary timers only and answers nil once the limit passes.
         vm.timer_stop_idle();
@@ -255,10 +260,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(first_wait_body).unwrap().join().unwrap();
     }
     fn first_wait_body() {
-        let mut vm = Vm::new();
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-first-wait");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         // As the session does once its Lisp is ready (main.rs).
         crate::echo::install(&mut vm).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
@@ -309,7 +313,7 @@ mod tests {
         }
     }
 
-    /// The idle collection (lisp/romacs/vm/keyboard.el): nothing is scheduled
+    /// The idle collection (lisp/vm/keyboard.el): nothing is scheduled
     /// until enough was allocated; then one collection once the session has
     /// been idle for the delay, on a pass where nothing else ran, made by
     /// the host outside any request.
@@ -320,10 +324,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(command_end_body).unwrap().join().unwrap();
     }
     fn command_end_body() {
-        let mut vm = Vm::new();
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-command-end");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         vm.eval_source("(read-event nil nil 0)").unwrap();
         vm.eval_source("(defun collected-command () (interactive)) (global-set-key \"q\" 'collected-command)").unwrap();
@@ -341,11 +344,10 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(idle_collect_body).unwrap().join().unwrap();
     }
     fn idle_collect_body() {
-        let mut vm = Vm::new();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-idle-collect");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         printed(&mut vm, "(read-event nil nil 0)");
@@ -401,12 +403,11 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(prompt_collect_body).unwrap().join().unwrap();
     }
     fn prompt_collect_body() {
-        let mut vm = Vm::new();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-prompt-collect");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
-        vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
+        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         printed(&mut vm, "(read-event nil nil 0)");
@@ -435,11 +436,10 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(scheduled_body).unwrap().join().unwrap();
     }
     fn scheduled_body() {
-        let mut vm = Vm::new();
-        vm.set_echo_area_host(true);
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
-        vm.eval_source(include_str!("../../../lisp/romacs/vm/process.el")).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-scheduled");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
+        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let schedule = "(run-with-timer 0.2 nil (lambda () (setq log (cons (list 'timer (- (float-time) start)) log))))";
         // A background command completes while C-x waits (it outlasts the
@@ -469,7 +469,7 @@ mod tests {
     /// wait, which reads a queued key and ends at its time limit between
     /// rounds. Pinned GNU 45b0f7699df, -nw: the key typed 0.3s in is read
     /// then; its time limit waits for the rescheduling to stop
-    /// (DIVERGENCES.md VM2-KBD1). A starved wait ends only when the
+    /// (ledger/divergences VM2-KBD1). A starved wait ends only when the
     /// rescheduling does, after 10 s; half that bounds a loaded host's
     /// slowness.
     #[test]
@@ -477,9 +477,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(rescheduling_body).unwrap().join().unwrap();
     }
     fn rescheduling_body() {
-        let mut vm = Vm::new();
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-rescheduling");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let rescheduling = "(setq timer-list nil timer-idle-list nil unread-command-events nil runs 0 start (float-time))
             (defun rescheduling () (setq runs (1+ runs)) (when (< (- (float-time) start) 10) (run-with-timer 0 nil #'rescheduling)))
@@ -528,9 +528,9 @@ mod tests {
             .stdin(std::process::Stdio::piped()).output().unwrap();
         let expected = String::from_utf8(gnu.stdout).unwrap();
         assert_eq!(expected, "(nil (\"open\") (\"hi\") t)", "pinned GNU");
-        let mut vm = Vm::new();
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-process");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         vm.set_host_input(Some(Box::new(Waiting(vec![]))));
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil)");
@@ -566,9 +566,9 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(streaming_body).unwrap().join().unwrap();
     }
     fn streaming_body() {
-        let mut vm = Vm::new();
-        vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
-        crate::startup::initialize_loadup(&mut vm, crate::startup::Launch::GnuOnly, None).unwrap();
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::GNU_ONLY);
+        crate::test_home::private_home(&mut vm, "timers-streaming");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         printed(&mut vm, "(setq timer-list nil timer-idle-list nil bytes 0)");
         // Output for 5 s, faster than its filter, which works on each
@@ -655,6 +655,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A C-g that ends the loop's idle pass is the next key read, as GNU's
+    /// `read_char` returns the quit character: one a timer's Lisp took
+    /// (isearch's lazy highlight quits under `with-local-quit`, which leaves
+    /// `quit-flag` set for later), one that stops the idle auto-save, and one
+    /// already waiting as the pass begins, raised before any of its Lisp.
+    #[test]
+    fn a_quit_a_timer_left_is_the_next_key() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(quit_left_body).unwrap().join().unwrap();
+    }
+    fn quit_left_body() {
+        let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
+        crate::test_home::private_home(&mut vm, "timers-quit-left");
+        crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
+        vm.eval_source("(setq timer-list nil timer-idle-list nil romacs-gc-idle-delay nil)
+                        (run-with-idle-timer 0 nil (lambda () (with-local-quit (signal 'quit nil))))").unwrap();
+        vm.enter_busy();
+        let pass = idle(&mut vm, false);
+        vm.leave_busy();
+        assert!(pass.as_ref().is_ok_and(|pass| pass.ran), "the pass ran, and its quit is no error: {pass:?}");
+        assert!(vm.take_quit_key(), "the quit is the next key");
+        // A C-g during the idle auto-save stops the save, which GNU keeps
+        // quittable (fileio.c Fdo_auto_save), and is the next key too.
+        vm.eval_source("(defvar saved nil)
+                        (fset 'romacs--idle-auto-save
+                              (lambda () (let ((n 0)) (while (< n 400) (sleep-for 0.005) (setq n (1+ n))))
+                                (setq saved t)))").unwrap();
+        let signal = vm.quit_signal();
+        vm.enter_busy();
+        let presser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            signal.interrupt()
+        });
+        let pass = idle(&mut vm, true);
+        assert!(presser.join().unwrap(), "the busy pass took the press");
+        vm.leave_busy();
+        assert!(pass.is_ok(), "the save's quit is no error: {pass:?}");
+        assert_eq!(vm.eval_source("saved").unwrap().display().unwrap(), "nil", "the C-g stopped the save");
+        assert!(vm.take_quit_key(), "the quit that stopped the save is the next key");
+        vm.eval_source("(fset 'romacs--idle-auto-save #'ignore)").unwrap();
+        vm.enter_busy();
+        assert!(vm.quit_signal().interrupt(), "the busy pass takes the press");
+        let pass = idle(&mut vm, false);
+        vm.leave_busy();
+        assert!(pass.is_ok(), "a quit raised as the pass begins is no error: {pass:?}");
+        assert!(vm.take_quit_key(), "the quit waiting as the pass began is the next key");
     }
 
     #[test]

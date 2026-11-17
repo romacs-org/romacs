@@ -13,7 +13,7 @@ use crate::gc::RootFrame;
 use crate::prim::Fault;
 
 /// What a native write does: the watchers are told, then its store.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum WriteKind {
     /// GNU `Fset` of VALUE.
     Set,
@@ -34,26 +34,15 @@ pub(crate) enum WriteKind {
     /// definition, then a non-nil docstring is put (data.c:1021).
     Defalias,
 }
-romacs_snapshot::snapshot_enum!(WriteKind {
-    WriteKind::Set => (),
-    WriteKind::Bound => (),
-    WriteKind::SetDefault => (),
-    WriteKind::Alias => (),
-    WriteKind::Report => (),
-    WriteKind::ClearLocal => (),
-    WriteKind::StoreLocal => (),
-    WriteKind::Defalias => (),
-});
 const WRITE_KINDS: [WriteKind; 8] = [WriteKind::Set, WriteKind::Bound, WriteKind::SetDefault, WriteKind::Alias,
     WriteKind::Report, WriteKind::ClearLocal, WriteKind::StoreLocal, WriteKind::Defalias];
 /// A write of the variable at SLOT that its watchers hear.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 pub(crate) struct NativeWrite {
     pub(crate) kind: WriteKind,
     pub(crate) slot: usize,
     pub(crate) value: Value,
 }
-romacs_snapshot::snapshot_struct!(NativeWrite { kind, slot, value });
 impl NativeWrite {
     pub(crate) fn set(slot: usize, value: Value) -> Self {
         Self { kind: WriteKind::Set, slot, value }
@@ -170,7 +159,7 @@ impl Vm {
                     return Ok(());
                 };
                 // A global variable's set_internal reports again.
-                if self.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Fence(_))) {
+                if self.forwarding(slot).is_some_and(|fwd| !matches!(fwd, crate::forwarded::Fwd::Buffer(_) | crate::forwarded::Fwd::Tracked(_))) {
                     reported(self, self.rooted(frame, 0), "set", Value::NIL)?;
                 }
                 self.set_forwarded_default(slot, fwd, self.rooted(frame, 0), crate::forwarded::SetFlag::Set)

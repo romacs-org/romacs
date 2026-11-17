@@ -16,7 +16,7 @@ Every deftest gets exactly one VERDICT:
                       harness could not get that far
 and every verdict other than `passed` gets exactly one CATEGORY:
     intentional-divergence  ONLY via an ledger/gnu-test-exclusions.toml row bound to a
-                            DIVERGENCES.md entry (validated; see below)
+                            ledger/divergences entry (validated; see below)
     out-of-scope            ONLY via an ledger/gnu-test-exclusions.toml row, same validation
     not-yet-implemented     names what is missing (`missing`), derived
                             mechanically from the failure, never asserted
@@ -25,7 +25,7 @@ plus two neutral categories that are not romacs's doing and are reported apart:
     gnu-fails-too           GNU itself does not give the expected result here
     gnu-skips-too           GNU skips it too
 The ONLY way to put a test in an exclusion category is a ledger row that names
-an existing DIVERGENCES.md id, a Lisp symbol that row lists AND that the test's
+an existing ledger/divergences id, a Lisp symbol that row lists AND that the test's
 source uses, and GNU's behaviour, ours and why it is intentional. A row that
 fails any check stops the run (exit 2) before anything is measured; a row for a
 test that now passes stops it too. There is no other skip switch.
@@ -58,6 +58,8 @@ import tomllib
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(ROOT / 'tools/lib'))
+import lisp_layout  # noqa: E402
 TESTS = HERE / 'test'
 PIN_FILE = ROOT / 'ledger/gnu-tests-pin.json'
 LEDGER = ROOT / 'ledger/gnu-test-exclusions.toml'
@@ -87,9 +89,9 @@ ORDERED_BOOTSTRAP_CHAIN = [
     'emacs-lisp/find-func', 'emacs-lisp/pp', 'emacs-lisp/map', 'help-mode',
 ]
 # The gnu-ert regime: GNU's whole preloaded world, as the dumped Emacs the
-# GNU tests assume has it (lisp/romacs/romacs-loadup-bootstrap.el).
-ERT_SOURCE_BOOTSTRAP = ['lisp/romacs/romacs-loadup-bootstrap.el']
-ERT_REPORT_BOOTSTRAP = ['lisp/gnu/help-fns.el', 'lisp/romacs/romacs-cl-print.el']
+# GNU tests assume has it (lisp/session/romacs-loadup-bootstrap.el).
+ERT_SOURCE_BOOTSTRAP = ['lisp/session/romacs-loadup-bootstrap.el']
+ERT_REPORT_BOOTSTRAP = ['lisp/help-fns.el', 'lisp/emacs-lisp/romacs-cl-print.el']
 
 
 def source_bootstrap_chain(args):
@@ -389,8 +391,8 @@ def load_ledger(path: pathlib.Path = LEDGER, plans: dict | None = None) -> dict[
             errors.append(f'{where}: no globs; one row names exactly one deftest')
         div = divergences.get(row['divergence'])
         if div is None:
-            errors.append(f'{where}: divergence {row["divergence"]!r} is not an entry in DIVERGENCES.md '
-                          f'(or a crate GNU-DIVERGENCES.md); record the divergence there first')
+            errors.append(f'{where}: divergence {row["divergence"]!r} is not an entry in ledger/divergences; '
+                          f'record the divergence there first')
         elif row['symbol'] not in div['symbols']:
             errors.append(f'{where}: symbol {row["symbol"]!r} is not one of the symbols ledger entry '
                           f'{row["divergence"]} covers {div["symbols"]}')
@@ -657,12 +659,28 @@ def load_path() -> list[str]:
     """GNU's installed load-path: the Lisp root, then the immediate
     subdirectories named by its generated subdirs.el (build-aux/update-subdirs):
     reverse name order, obsolete last, term and VCS/backup names omitted."""
-    lisp = ROOT / 'lisp/gnu'
-    names = sorted(p.name for p in lisp.iterdir() if p.is_dir()
+    lisp = ROOT / 'lisp'
+    # Which names are Romacs's own is this checkout's layout, whatever tree ROOT is.
+    own = lisp_layout.own_directories(HERE.parents[1])
+    names = sorted(p.name for p in lisp.iterdir() if p.is_dir() and p.name not in own
                    and p.name not in ('term', 'RCS', 'CVS', 'Old')
                    and not p.name.startswith('=') and not p.name.endswith(('~', '.orig', '.rej')))
     ordered = [n for n in reversed(names) if n != 'obsolete'] + (['obsolete'] if 'obsolete' in names else [])
     return [str(lisp)] + [str(lisp / name) for name in ordered]
+
+
+def pristine_gnu_file(rel: str, directory: pathlib.Path) -> pathlib.Path:
+    """GNU's REL at the suite's pinned commit (the oracle binary's), from the oracle's source
+    checkout, written into DIRECTORY: our tree's copy is ours and may differ."""
+    try:
+        data = subprocess.run(['git', '-C', str(GNU_MIRROR), 'show', f'{PIN_COMMIT}:{rel}'],
+                              check=True, capture_output=True).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Refusal(3, f'cannot read pristine {rel} at the pin: {error}') from error
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / pathlib.PurePosixPath(rel).name
+    path.write_bytes(data)
+    return path
 
 
 def build_adapter() -> pathlib.Path:
@@ -692,12 +710,14 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
         for d in [str((RUN_TESTS / rel).parent)]:
             cmd += ['--load-path', d]
         if bootstrap == 'ert':
-            cmd += ['--bootstrap-regime', 'gnu-ert', '--load-path', str(ROOT / 'lisp/romacs')]
+            cmd += ['--bootstrap-regime', 'gnu-ert']
+            for d in lisp_layout.romacs_load_path(ROOT):
+                cmd += ['--load-path', str(d)]
             for link in ERT_SOURCE_BOOTSTRAP:
                 cmd += ['--preload', str(ROOT / link)]
         else:
             for link in BOOTSTRAP_CHAIN:
-                cmd += ['--preload', str(ROOT / 'lisp/gnu' / f'{link}.el')]
+                cmd += ['--preload', str(ROOT / 'lisp' / f'{link}.el')]
         for name in skip:
             cmd += ['--skip-test', name]
         cmd += list(extra_args)  # the runner's own tests only
@@ -711,9 +731,11 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             for line in stream:
                 lines.put(line)
             lines.put(None)
-        threading.Thread(target=pump, daemon=True).start()
         stderr_chunks: list[str] = []
-        threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True).start()
+        readers = [(proc.stdout, threading.Thread(target=pump, daemon=True)),
+                   (proc.stderr, threading.Thread(target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True))]
+        for _, reader in readers:
+            reader.start()
         current = None
         done = False
         deadline = setup_timeout
@@ -740,6 +762,12 @@ def run_romacs(binary: pathlib.Path, rel: str, plan: dict, scratch: pathlib.Path
             elif kind == 'done':
                 done = True
         proc.wait()
+        # Its output read to the end before it is reported, and each pipe
+        # closed; a descendant that keeps one open bounds the wait instead.
+        for stream, reader in readers:
+            reader.join(timeout=5)
+            if not reader.is_alive():
+                stream.close()
         log.write(f'# attempt {attempt}: exit {proc.returncode}\n')
         if stderr_chunks and stderr_chunks[0]:
             log.write('# stderr: ' + stderr_chunks[0][-4000:].replace('\n', '\n# ') + '\n')
@@ -1095,24 +1123,12 @@ def scoreboard_rows(rel, reference, results, engine, ledger):
     return rows
 
 
-def verify_real_lisp(pin):
-    command = [sys.executable, str(ROOT / 'tools/lib/lisp_oracle.py'), 'check',
-               '--root', str(ROOT), '--gnu', str(GNU_MIRROR), '--pin', pin]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True)
-    except OSError as error:
-        raise Refusal(3, f'cannot verify real ERT Lisp tree: {error}') from error
-    if result.returncode:
-        raise Refusal(3, f'real ERT Lisp tree validation failed: {result.stdout}{result.stderr}')
-
-
 def cmd_scoreboard(args) -> int:
     """Real ERT execution; no mini classification or stale baseline can bless it."""
     from ert_report import ReportError, parse_report, run_native
     sys.path.insert(0, str(ROOT / 'tools/lib'))
     import gnu_oracle
     p = verify_pin()
-    verify_real_lisp(p['gnu_commit'])
     # The oracle's binary identity, not the checkout name, binds GNU evidence.
     oracle_binary = os.environ.get('ROMACS_GNU_ORACLE') or os.environ.get('ROMACS_FORCE_ORACLE_PATH')
     ident = gnu_oracle.require(oracle_binary)
@@ -1128,10 +1144,12 @@ def cmd_scoreboard(args) -> int:
     ledger = load_ledger(LEDGER)
     engine = 'gnu' if args.harness_fidelity else args.engine
     binary = (pathlib.Path(args.bin) if args.bin else build_adapter()) if engine == 'romacs' else None
-    ert = ROOT / 'lisp/gnu' / 'emacs-lisp' / 'ert.el'
     rows, defects, reports, errors, executions = [], [], {}, {}, {}
     with ScratchTree(), tempfile.TemporaryDirectory(prefix='gts-real-') as tmp:
         scratch = pathlib.Path(tmp)
+        # Both sides run GNU's ert.el at the commit the oracle and the suite are pinned to, so the
+        # harness is GNU ERT by construction; our editable lisp/emacs-lisp/ert.el is the subject's.
+        ert = pristine_gnu_file('lisp/emacs-lisp/ert.el', scratch / 'reference')
 
         def one(rel):
             home = scratch / rel.replace('/', '__')
@@ -1152,14 +1170,14 @@ def cmd_scoreboard(args) -> int:
                            '--plan', plan['path'], '--selector', getattr(args, 'selector', 't')]
                     if getattr(args, 'ert_adapter', 'none') != 'none':
                         cmd += ['--ert-adapter', args.ert_adapter]
-                    for directory in load_path() + [str(ROOT / 'lisp/romacs'), str(target.parent)]:
+                    for directory in load_path() + [str(d) for d in lisp_layout.romacs_load_path(ROOT)] + [str(target.parent)]:
                         cmd += ['--load-path', directory]
                     if getattr(args, 'bootstrap', 'standard') == 'ordered':
                         cmd += ['--measurement-regime', 'retained-bindings-prefix']
                     if getattr(args, 'bootstrap', 'standard') == 'ert':
                         cmd += ['--bootstrap-regime', 'gnu-ert']
                     for link in source_bootstrap_chain(args):
-                        path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'lisp/gnu' / f'{link}.el'
+                        path = ROOT / link if getattr(args, 'bootstrap', 'standard') == 'ert' else ROOT / 'lisp' / f'{link}.el'
                         cmd += ['--preload', str(path)]
                     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                           text=True, errors='replace',
@@ -1208,7 +1226,7 @@ def cmd_scoreboard(args) -> int:
     summary = {'harness': 'gnu-ert', 'is_gnu_ert': True, 'engine': engine,
                'is_unmodified_gnu_ert': getattr(args, 'ert_adapter', 'none') == 'none',
                'ert_adapter': {'name': getattr(args, 'ert_adapter', 'none'),
-                               'sha256': hashlib.sha256((ROOT / 'lisp/romacs/romacs-ert-batch.el').read_bytes()).hexdigest()
+                               'sha256': hashlib.sha256((ROOT / 'lisp/emacs-lisp/romacs-ert-batch.el').read_bytes()).hexdigest()
                                if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else None,
                                'condition_format': 'native-prin1' if getattr(args, 'ert_adapter', 'none') == 'romacs-batch' else 'gnu-pp',
                                'automatic_window_isolation': getattr(args, 'ert_adapter', 'none') == 'none'},

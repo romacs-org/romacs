@@ -9,21 +9,16 @@ use crate::prim::{Fault, Leaf};
 #[path = "map_keymap_gc_tests.rs"]
 mod gc_tests;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 enum Phase {
     Read,
     Child,
     Parent(Value),
     Emitted(Value),
 }
-romacs_snapshot::snapshot_enum!(Phase {
-    Phase::Read => (),
-    Phase::Child => (),
-    Phase::Parent(f0) => (f0),
-    Phase::Emitted(f0) => (f0),
-});
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 struct Frame {
+    // CELL(Held)
     node: CharTableNodeHandle,
     top: Value,
     from: usize,
@@ -32,7 +27,6 @@ struct Frame {
     phase: Phase,
     decoder: bool,
 }
-romacs_snapshot::snapshot_struct!(Frame { node, top, from, to, index, phase, decoder });
 impl Frame {
     fn new(node: CharTableNodeHandle, top: Value, from: usize, to: i64) -> Self {
         let n = node.lock().unwrap();
@@ -49,7 +43,7 @@ impl Frame {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 struct Chartab {
     table: Value,
     frames: Vec<Frame>,
@@ -60,7 +54,6 @@ struct Chartab {
     range: Option<Value>,
     final_decoder: bool,
 }
-romacs_snapshot::snapshot_struct!(Chartab { table, frames, val, from, to, final_emitted, range, final_decoder });
 impl Chartab {
     fn new(cx: &mut Leaf<'_>, table: Value) -> std::result::Result<Self, Fault> {
         cx.map_table_validate(table)?;
@@ -271,7 +264,7 @@ impl Chartab {
         self.frames[n].from = c;
         self.advance(cx, n);
     }
-    fn visit(&mut self, seen: &mut HashSet<usize>, visit: &mut impl FnMut(&mut Value)) {
+    fn visit(&mut self, seen: &mut HashSet<usize>, since: u64, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.table);
         visit(&mut self.val);
         if let Some(range) = &mut self.range {
@@ -283,7 +276,7 @@ impl Chartab {
                 Phase::Parent(v) | Phase::Emitted(v) => visit(v),
                 Phase::Read | Phase::Child => {}
             }
-            collector_visit_node(&f.node, seen, visit);
+            collector_visit_node(&f.node, seen, since, visit);
         }
     }
 }
@@ -292,7 +285,7 @@ fn key(cx: &mut Leaf<'_>, from: usize, to: i64) -> Value {
     let to = Value::integer(to as i64).unwrap();
     if from == to { from } else { cx.cons(from, to) }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 enum MapFrame {
     Resolve {
         object: Value,
@@ -313,27 +306,17 @@ enum MapFrame {
         table: Chartab,
     },
 }
-romacs_snapshot::snapshot_enum!(MapFrame {
-    MapFrame::Resolve { object, required } => (object, required),
-    MapFrame::Outer(f0) => (f0),
-    MapFrame::Embedded(f0) => (f0),
-    MapFrame::Tail(f0) => (f0),
-    MapFrame::Advance(f0) => (f0),
-    MapFrame::Vector { tail, vector, index, len } => (tail, vector, index, len),
-    MapFrame::Table { tail, table } => (tail, table),
-});
 pub(super) enum Advance {
     Binding(Value, Value),
     Load(Value, Value),
     Done(Value),
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Cursor {
     stack: Vec<MapFrame>,
     internal: bool,
     result: Value,
 }
-romacs_snapshot::snapshot_struct!(Cursor { stack, internal, result });
 impl Cursor {
     pub(super) fn new(map: Value, internal: bool) -> Self {
         Self {
@@ -488,9 +471,17 @@ impl Cursor {
         }
         Ok(Advance::Done(self.result))
     }
+    /// Leave unwalked the autoloaded keymap `next` just asked to load, as
+    /// `map_keymap` without AUTOLOAD does: whether the walk requires it (an
+    /// embedded keymap, which `get_keymap` then refuses) or may end there (a
+    /// parent).
+    pub(super) fn decline_load(&mut self) -> bool {
+        matches!(self.stack.pop(), Some(MapFrame::Resolve { required: true, .. }))
+    }
     pub(super) fn collector_visit_values(
         &mut self,
         seen: &mut HashSet<usize>,
+        since: u64,
         visit: &mut impl FnMut(&mut Value),
     ) {
         visit(&mut self.result);
@@ -507,7 +498,7 @@ impl Cursor {
                 }
                 MapFrame::Table { tail, table } => {
                     visit(tail);
-                    table.visit(seen, visit);
+                    table.visit(seen, since, visit);
                 }
             }
         }

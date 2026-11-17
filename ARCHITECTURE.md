@@ -40,10 +40,9 @@ frozen snapshots.
 | Faces, themes, fonts | `crates/romacs-face`, `crates/romacs-font`, `crates/romacs-font-materializer` |
 | Drawing | `crates/romacs-display-runtime` (the render thread), `romacs-renderer-wgpu`, `romacs-scene` |
 | Images and video | `crates/romacs-imaging`, `crates/romacs-video`, `crates/romacs-video-model` |
-| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/romacs/romacs-agent*.el` |
-| GNU's Lisp, pinned | `lisp/gnu/` (pin: `ledger/lisp-pin.json`) |
-| Romacs's own Lisp and bundled packages | `lisp/romacs/`; bundled roots in `lisp/bundled.json` |
-| What a session loads, in order | `lisp/romacs/romacs-loadup-bootstrap.el` |
+| Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/` |
+| The Lisp | `lisp/` by subsystem, ours (GNU's files at GNU's paths; GNU's later changes: `tools/lisp-upstream`); Romacs's own directories and `lisp/packages/` in `lisp/bundled.json` |
+| What a session loads, in order | `lisp/session/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
 | GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
@@ -51,10 +50,31 @@ frozen snapshots.
 | Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
 | Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
-| Decisions checks enforce | `ledger/`: pins, smell and unsafe floors, censuses, the parity ratchet, `divergences/` |
+| Decisions checks enforce | `ledger/`: pins, censuses, the parity ratchet, `divergences/` |
 | Where Romacs differs from GNU, and why | `ledger/divergences/<ID>.md` |
 | Packaging | `nix/`, `flake.nix`, `tools/package-release` |
 | Documentation | `doc/` |
+
+## Top level
+
+Each top-level entry, and what it holds:
+
+- `crates/`: the Rust packages, with upstream ones we carry patched under
+  `crates/vendor/` (outside the workspace and our censuses); `lisp/`:
+  Romacs's and GNU's Lisp; `etc/`: runtime data; `assets/`: fonts, icons,
+  branding; `test/`: the test suites; `tools/`: commands and their modules;
+  `ledger/`: decisions checks enforce; `doc/`: documentation; `nix/`:
+  packaging.
+- `Cargo.toml` and `Cargo.lock`: the workspace; `.cargo/`: Cargo and
+  cargo-deny configuration; `.config/`: nextest; `rust-toolchain.toml`.
+- `flake.nix` and `flake.lock`: the toolchain and packages.
+- `Makefile`: the gates and Lisp checks; `scripts/`: forwarding stubs for
+  moved commands; `.github/`: CI.
+- `.gitattributes`, `.gitignore`, `README.md`, `AGENTS.md`,
+  `ARCHITECTURE.md`, `COPYING`.
+
+A new top-level entry is named here; `tools/lib/smells.py` fails while one is
+not.
 
 ## Invariants
 
@@ -64,7 +84,7 @@ frozen snapshots.
 - `romacs-display-protocol`, `romacs-layout-input`, `romacs-layout`,
   `romacs-face`, `romacs-font` and `romacs-regex` hold no evaluator and are
   tested without a VM.
-- GNU's files under `lisp/gnu/` and `test/gnu/test/` are byte-identical to
+- GNU's files under `lisp/` and `test/gnu/test/` are byte-identical to
   the pin, less its declared exclusions; `tools/check-derived` verifies it.
 - A deliberate difference from GNU is one file in `ledger/divergences/`.
 
@@ -73,8 +93,9 @@ frozen snapshots.
 - **Checks:** `tools/check-derived` (derived files, pins, the smell and unsafe
   ratchets, the Python tests), `make gate-small` and `make gate-full` (Rust),
   `make check` (Lisp). AGENTS.md says how to work here.
-- **Unsafe:** a `// SAFETY:` comment on every site, counted against
-  `ledger/unsafe-floors.json`.
-- **Smells:** counted against `ledger/smell-floors.json`, including this
-  directory's top-level entries.
+- **Unsafe:** a `// SAFETY:` comment on every site; a new site declares
+  itself with `UNSAFE(reason)`.
+- **Smells:** each total held to the merge-base's by `tools/lib/smells.py`;
+  a new instance is declared where it occurs. The top level holds only what
+  the Top level section names.
 - **GNU:** a source of behaviour, not of architecture.

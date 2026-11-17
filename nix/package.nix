@@ -11,7 +11,9 @@ let
   cargoSrc = lib.cleanSourceWith {
     src = source;
     name = "romacs-cargo-source";
-    filter = craneLib.filterCargoSources;
+    # Upstream packages under crates/vendor/ build from their C sources and
+    # data files too, which the Cargo-only filter would drop.
+    filter = path: type: lib.hasInfix "/crates/vendor/" path || craneLib.filterCargoSources path type;
   };
   # VM2 has no legacy video feature forwarding or dump pipeline.
   productionCapabilities = {
@@ -180,7 +182,7 @@ craneLib.buildPackage (
         ${lib.concatStringsSep " \\\n        " wrapArgs}
 
       # Refuse to produce a package whose runtime Lisp is not the source's:
-      # every lisp/gnu/, lisp/romacs/ and etc/ file byte-identical, and the
+      # every lisp/ and etc/ file byte-identical, and the
       # wrapper pointing the binary at it. This once installed 0 of 229.
       bash tools/check-installed-runtime.sh "$out" .
     '';

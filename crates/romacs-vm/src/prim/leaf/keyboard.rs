@@ -17,6 +17,17 @@ impl Leaf<'_> {
     pub(crate) fn host_input_pending(&mut self) -> bool {
         self.vm.quit_input_pending() || self.vm.host_input_pending()
     }
+
+    /// `romacs--take-key-repeats`: (REPEATS AFTER-PRESS LONGEST-HOLD-MS)
+    /// from the attached host's display, else nil.
+    pub(crate) fn take_key_repeats(&mut self) -> crate::prim::Out {
+        let Some(counts) = self.vm.host_input.as_mut().and_then(|host| host.take_key_repeats()) else { return Ok(Value::NIL) };
+        let int = |n: u64| Value::integer(i64::try_from(n).unwrap_or(i64::MAX)).map_err(Fault::Error);
+        let after_press = counts.after_press.iter().map(|&n| int(n)).collect::<std::result::Result<Vec<_>, _>>()?;
+        let after_press = self.vector_from(after_press);
+        let items = [int(counts.repeats)?, after_press, int(counts.longest_hold_ms)?];
+        Ok(items.iter().rev().fold(Value::NIL, |tail, &v| self.cons(v, tail)))
+    }
 }
 
 impl Leaf<'_> {
@@ -54,5 +65,16 @@ impl Leaf<'_> {
         crate::host::call_deadline::arm(self.vm.quit.clone(), generation as u64,
                                    std::time::Duration::from_millis(milliseconds as u64));
         Ok(Value::TRUE)
+    }
+}
+
+impl Leaf<'_> {
+    /// keyboard.c parse_modifiers' cache of SYMBOL's elements (keymap.rs).
+    pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> std::result::Result<(), Fault> {
+        self.vm.cache_event_symbol_elements(symbol).map_err(Fault::Error)
+    }
+    /// keyboard.c Fevent_convert_list over keymap.rs's port of it.
+    pub(crate) fn event_convert_list(&mut self, event_desc: Value) -> crate::prim::Out {
+        self.vm.key_event_from_list(event_desc).map_err(Fault::Error)
     }
 }

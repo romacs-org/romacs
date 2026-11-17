@@ -4,22 +4,16 @@ pub mod cluster;
 pub mod fontset;
 pub use fontset::{Alternative, Alternatives, FontDef, Fontset, FontsetMode, FontsetState, FontsetTarget, OpenedDefFont, OtfSpec};
 
-/// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// GNU font-sort attributes. Height scoring remains deferred (ledger/divergences).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum FontSelectionAttribute { Width, Height, Weight, Slant }
-romacs_snapshot::snapshot_enum!(FontSelectionAttribute {
-    FontSelectionAttribute::Width => (),
-    FontSelectionAttribute::Height => (),
-    FontSelectionAttribute::Weight => (),
-    FontSelectionAttribute::Slant => (),
-});
 pub(crate) const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [
     FontSelectionAttribute::Width, FontSelectionAttribute::Height,
     FontSelectionAttribute::Weight, FontSelectionAttribute::Slant,
 ];
 
 /// Effective GNU font-sort metadata, including history omitted by the raw order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct FontSelectionState {
     order: [FontSelectionAttribute; 4],
     // Width, height, weight, slant. GNU font.c:2338-2354 overwrites only
@@ -27,7 +21,6 @@ pub struct FontSelectionState {
     shifts: [u8; 4],
     revision: u64,
 }
-romacs_snapshot::snapshot_struct!(FontSelectionState { order, shifts, revision });
 
 impl Default for FontSelectionState {
     fn default() -> Self {
@@ -62,12 +55,11 @@ impl FontSelectionState {
 /// Owned publication of GNU's alternative-font family alist. Validation and
 /// family interning belong to the evaluator before publication.
 /// Empty rows, duplicates and entry order are preserved, not normalized.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct FontAlternativeState {
     family_alist: Vec<Vec<String>>,
     revision: u64,
 }
-romacs_snapshot::snapshot_struct!(FontAlternativeState { family_alist, revision });
 
 impl FontAlternativeState {
     pub fn family_alist(&self) -> &[Vec<String>] { &self.family_alist }
@@ -111,14 +103,8 @@ pub struct FrameSnapshot {
 /// lookup_glyphless_char_display reads it for C -1 (the graphical half of
 /// a cons; nil, `zero-width' or an unknown method is `empty-box').
 /// `hex-code' is GNU's default (`glyphless-char-display-control').
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum NoFont { ThinSpace, EmptyBox, #[default] HexCode, Acronym(String) }
-romacs_snapshot::snapshot_enum!(NoFont {
-    NoFont::ThinSpace => (),
-    NoFont::EmptyBox => (),
-    NoFont::HexCode => (),
-    NoFont::Acronym(text) => (text),
-});
 
 /// The paint-only pane chrome of the root frame's windows but the
 /// mini-window MINIBUFFER (`romacs-pane-*' frame parameters): corners of
@@ -142,7 +128,7 @@ pub struct FrameChrome {
 }
 
 /// The material a frame's layers are drawn in, from its `romacs-style'
-/// parameter (lisp/romacs/romacs-chrome.el); the default is the `flat' style.
+/// parameter (lisp/ui/romacs-chrome.el); the default is the `flat' style.
 /// LAYER_RADIUS is the corners of a layer that names none, BAND_RADIUS of a
 /// picker's selected row; SHADOW is a layer's (reach, drop, opacity), GLOW
 /// its (reach, opacity), in pixels.
@@ -171,21 +157,32 @@ impl FrameSnapshot {
     /// Whether OTHER lays out to the same glyphs as this frame, cursors
     /// aside: equal but for publication versions and cursor visibility.
     /// Child frames lay out apart, so they do not count.
-    pub fn lays_out_like(&self, other: &Self) -> bool {
+    #[must_use]
+    pub fn lays_out_like(&self, other: &Self) -> bool { self.lays_out_like_with(other, true) }
+
+    /// `lays_out_like`, points aside unless POINT: equal but for where
+    /// point is in windows where point moves no glyph (`point_moves_glyphs`).
+    #[must_use]
+    pub fn lays_out_like_with(&self, other: &Self, point: bool) -> bool {
+        self.tab_bar == other.tab_bar && self.status_bar == other.status_bar && self.windows_lay_out_like(other, point)
+    }
+
+    /// Whether OTHER's windows lay out to the same glyphs as this frame's,
+    /// cursors and bars aside, points too unless POINT.
+    #[must_use]
+    pub fn windows_lay_out_like(&self, other: &Self, point: bool) -> bool {
         (self.font_selection, self.width, self.height) == (other.font_selection, other.width, other.height)
             && self.font_alternatives == other.font_alternatives
             && self.fontsets == other.fontsets
-            && self.tab_bar == other.tab_bar
             && self.chrome == other.chrome
-            && self.status_bar == other.status_bar
             && self.no_font == other.no_font
-            && windows_lay_out_like(&self.windows, &other.windows)
+            && windows_lay_out_like(&self.windows, &other.windows, point)
     }
 }
 
 /// Whether window lists A and B lay out alike (`WindowSnapshot::lays_out_like').
-pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like(&b.snapshot))
+pub(crate) fn windows_lay_out_like(a: &[PlacedWindowSnapshot], b: &[PlacedWindowSnapshot], point: bool) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| (a.x, a.y) == (b.x, b.y) && a.snapshot.lays_out_like_with(&b.snapshot, point))
 }
 
 /// A child frame (GNU's `parent-frame'): its own windows in a rect over the
@@ -241,11 +238,10 @@ pub struct PlacedWindowSnapshot {
     pub snapshot: WindowSnapshot,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct FaceHandle(pub u32);
-romacs_snapshot::snapshot_tuple!(FaceHandle(f0));
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Face {
     pub foreground: [u8; 3],
     pub background: [u8; 3],
@@ -261,10 +257,9 @@ pub struct Face {
     /// `:strike-through').
     pub decor: Decor,
 }
-romacs_snapshot::snapshot_struct!(Face { foreground, background, family, pixel_size, weight, italic, width, decor });
 
 /// A face's lines, GNU's `:underline', `:overline' and `:strike-through'.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct Decor {
     pub underline: Option<Line>,
     pub overline: Option<Line>,
@@ -272,58 +267,53 @@ pub struct Decor {
     /// GNU's `:box'.
     pub boxed: Option<BoxLine>,
 }
-romacs_snapshot::snapshot_struct!(Decor { underline, overline, strike, boxed });
 
 /// A face's box (xfaces.c realize_gui_face): VERTICAL the left and right
 /// edges' width, HORIZONTAL the top and bottom edges', in device pixels,
 /// each drawn outside the text when positive (widening the run and the
 /// row) and inside it when negative; COLOR, else the foreground; STYLE 1 a
 /// line, 2 a released button, 3 a pressed one (protocol `BoxType' codes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct BoxLine {
     pub vertical: i16,
     pub horizontal: i16,
     pub color: Option<[u8; 3]>,
     pub style: u8,
 }
-romacs_snapshot::snapshot_struct!(BoxLine { vertical, horizontal, color, style });
 
 /// One line a face draws: STYLE is romacs-display-protocol's
 /// `UnderlineStyle' code (1 line, 2 double, 3 wave, 4 dotted, 5 dashed;
 /// overlines and strike-throughs are 1), COLOR the line's own colour, else
 /// the face's foreground; for an underline POSITION, `:position' (at the
 /// descent line, that many pixels above it), else where the font says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct Line {
     pub style: u8,
     pub color: Option<[u8; 3]>,
     pub position: Option<u16>,
 }
-romacs_snapshot::snapshot_struct!(Line { style, color, position });
 
 /// Where a window's underlines go (xterm.c x_draw_glyph_string): its
 /// buffer's `underline-minimum-offset', `x-underline-at-descent-line' and
 /// `x-use-underline-position-properties'.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct UnderlineRules {
     pub minimum_offset: u32,
     pub at_descent_line: bool,
     pub use_position: bool,
 }
-romacs_snapshot::snapshot_struct!(UnderlineRules { minimum_offset, at_descent_line, use_position });
 
 impl Default for UnderlineRules {
     fn default() -> Self { Self { minimum_offset: 1, at_descent_line: false, use_position: true } }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct FaceRun {
     pub bytes: Range<usize>,
     pub face: FaceHandle,
 }
-romacs_snapshot::snapshot_struct!(FaceRun { bytes, face });
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct TextSlice {
     pub utf8: String,
     pub face_runs: Vec<FaceRun>,
@@ -334,17 +324,15 @@ pub struct TextSlice {
     /// each with the face it paints in; sorted by byte.
     pub extends: Vec<Extend>,
 }
-romacs_snapshot::snapshot_struct!(TextSlice { utf8, face_runs, raw, extends });
 
 /// xdisp.c extend_face_to_end_of_line's face for the row the newline at
 /// BYTE of a text ends: the merge of only those faces there whose
 /// `:extend' is non-nil.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct Extend {
     pub byte: u32,
     pub face: FaceHandle,
 }
-romacs_snapshot::snapshot_struct!(Extend { byte, face });
 impl TextSlice {
     /// Whether the character at BYTE is a raw byte.
     pub fn is_raw(&self, byte: usize) -> bool {
@@ -352,7 +340,7 @@ impl TextSlice {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct WindowSnapshot {
     pub id: u64,
     pub width: u32,
@@ -403,15 +391,13 @@ pub struct WindowSnapshot {
     /// text area's left edge, as GNU's display of a band measures it.
     pub band_stretches: BandStretches,
 }
-romacs_snapshot::snapshot_struct!(WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version, text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off, cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches });
 
 /// A window's header-line and mode-line stretches (`WindowSnapshot').
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct BandStretches {
     pub header_line: Vec<Stretch>,
     pub mode_line: Vec<Stretch>,
 }
-romacs_snapshot::snapshot_struct!(BandStretches { header_line, mode_line });
 
 /// A window's horizontal scroll in pixels (GNU's first_visible_x): the x
 /// on each line, from its start after any line number, that shows at the
@@ -419,12 +405,11 @@ romacs_snapshot::snapshot_struct!(BandStretches { header_line, mode_line });
 /// shows from POINT_ROW: they differ only under `auto-hscroll-mode'
 /// `current-line', where the other rows keep `min_hscroll' (init_iterator,
 /// display_line's hscroll_this_line). Scrolled rows are truncated.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct Hscroll {
     pub rows: u32,
     pub point_row: u32,
 }
-romacs_snapshot::snapshot_struct!(Hscroll { rows, point_row });
 
 impl Hscroll {
     /// The same scroll for every row.
@@ -441,7 +426,7 @@ impl Hscroll {
 /// fringes show; and the window's right and bottom dividers (window.h:707),
 /// right of and below its box, outside the snapshot's width and height. A
 /// window with neither margins nor fringes has the default.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct WindowChrome {
     pub left_margin: u32,
     pub right_margin: u32,
@@ -460,7 +445,6 @@ pub struct WindowChrome {
     /// `\\' a window without a fringe shows.
     pub line_glyphs: [Option<char>; 2],
 }
-romacs_snapshot::snapshot_struct!(WindowChrome { left_margin, right_margin, left_fringe, right_fringe, outside_margins, fringe_face, border, indicators, right_divider, bottom_divider, line_glyphs });
 
 impl WindowChrome {
     /// The pixels left and right of the text area inside the window's box:
@@ -475,7 +459,7 @@ impl WindowChrome {
 /// where that side shows none. BOB and EOB say whether the window's text
 /// starts at the buffer's accessible start and reaches its end, which the
 /// boundary indicators mark.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct Indicators {
     pub truncation: [Option<FringeBitmap>; 2],
     pub continuation: [Option<FringeBitmap>; 2],
@@ -488,13 +472,12 @@ pub struct Indicators {
     pub bob: bool,
     pub eob: bool,
 }
-romacs_snapshot::snapshot_struct!(Indicators { truncation, continuation, top, bottom, top_bottom, up, down, empty_line, bob, eob });
 
 /// One fringe bitmap (fringe.c `struct fringe_bitmap`): a row of BITS per
 /// pixel row, its leftmost of WIDTH pixels in the most significant bit,
 /// drawn centred in its fringe in FACE's foreground, placed in its row as
 /// ALIGN says and, with a PERIOD, repeated down the whole row.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct FringeBitmap {
     /// GNU's bitmap number (the symbol's `fringe' property).
     pub number: u16,
@@ -504,15 +487,9 @@ pub struct FringeBitmap {
     pub period: u8,
     pub face: FaceHandle,
 }
-romacs_snapshot::snapshot_struct!(FringeBitmap { number, bits, width, align, period, face });
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum BitmapAlign { #[default] Center, Top, Bottom }
-romacs_snapshot::snapshot_enum!(BitmapAlign {
-    BitmapAlign::Center => (),
-    BitmapAlign::Top => (),
-    BitmapAlign::Bottom => (),
-});
 
 /// The frame's tab bar (GNU's tab bar window, xdisp.c display_tab_bar):
 /// one row of TEXT across the top of the frame, HEIGHT pixels tall, on
@@ -531,7 +508,7 @@ pub struct TabBarSnapshot {
 /// frame, on FACE's background, its faces indexing FACES. FOCUSED says
 /// whether WINDOW holds the input focus rather than a child frame's
 /// window.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct StatusBarSnapshot {
     pub x: u32,
     pub y: u32,
@@ -545,39 +522,35 @@ pub struct StatusBarSnapshot {
     /// Its segments and icons.
     pub marks: BandMarks,
 }
-romacs_snapshot::snapshot_struct!(StatusBarSnapshot { x, y, width, height, text, face, faces, window, focused, marks });
 
 /// What the status bar's painter reads of its text besides faces
 /// (VM2-STATUS-BAR): the segments it is made of, each a pill on its own
 /// background or not, and the characters drawn as icons (byte, the icon's
 /// character). A segment named `right-align' splits the bar: what comes
 /// after it is laid out from the right edge.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, romacs_snapshot::Snapshot)]
 pub struct BandMarks {
     pub segments: Vec<Segment>,
     pub icons: Vec<(usize, char)>,
 }
-romacs_snapshot::snapshot_struct!(BandMarks { segments, icons });
 
 /// One segment of a band: its bytes, its name, and its pill.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Segment {
     pub bytes: Range<usize>,
     pub name: String,
     pub pill: Option<Pill>,
 }
-romacs_snapshot::snapshot_struct!(Segment { bytes, name, pill });
 
 /// A rounded background behind a segment's text: its colour, corner
 /// radius in pixels, and the colour of the text on it where the pill
 /// gives its own (`romacs-pill-text').
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub struct Pill {
     pub background: [u8; 3],
     pub radius: u32,
     pub foreground: Option<[u8; 3]>,
 }
-romacs_snapshot::snapshot_struct!(Pill { background, radius, foreground });
 
 impl BandMarks {
     /// The bytes of the `right-align' marker, where the band splits.
@@ -731,7 +704,7 @@ impl BandMarks {
 /// (CURRENT for point's line), else as many blanks as its line's label
 /// has glyphs (COLUMNS before any label); a TAB stop and `:align-to'
 /// count from after them.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct LineNumbers {
     pub columns: u32,
     pub face: FaceHandle,
@@ -739,17 +712,15 @@ pub struct LineNumbers {
     /// (byte of a line start in the text, its label, whether point's line).
     pub labels: Vec<(usize, String, bool)>,
 }
-romacs_snapshot::snapshot_struct!(LineNumbers { columns, face, current, labels });
 
 /// A `(space ...)' display specification the host lays out in place of
 /// the character of a window's text at BYTE (a placeholder space in the
 /// stretch's face, which gives its height and background).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct Stretch {
     pub byte: usize,
     pub width: StretchWidth,
 }
-romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 
 /// An `(image ...)' display specification the host lays out in place of
 /// the character of a window's text at BYTE (a placeholder space in the
@@ -763,7 +734,7 @@ romacs_snapshot::snapshot_struct!(Stretch { byte, width });
 /// A `(surface :id ID ...)` specification is laid out the same way, IMAGE
 /// 0 and SURFACE its native surface (a model): the renderer composites
 /// that surface in the slot.  SURFACE is 0 for an image.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct InlineImage {
     pub byte: usize,
     pub image: u32,
@@ -778,22 +749,14 @@ pub struct InlineImage {
     pub relief: i64,
     pub relief_background: Option<u32>,
 }
-romacs_snapshot::snapshot_struct!(InlineImage { byte, image, surface, width, ascent, descent, body_x, body_y, source, full, relief, relief_background });
 
 /// A stretch's width before it depends on where it is laid out, in pixels
 /// (GNU's produce_stretch_glyph): `:width', which may be zero when ZERO_OK,
 /// or `:align-to' TARGET pixels from the text area's left edge.
 /// A cursor's shape (xdisp.c text_cursor_kinds), with a bar's width or an
 /// hbar's height in pixels.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum CursorKind { #[default] Box, Hollow, Bar(u32), Hbar(u32), None }
-romacs_snapshot::snapshot_enum!(CursorKind {
-    CursorKind::Box => (),
-    CursorKind::Hollow => (),
-    CursorKind::Bar(width) => (width),
-    CursorKind::Hbar(height) => (height),
-    CursorKind::None => (),
-});
 
 impl CursorKind {
     /// The kind a `cursor-type' value names (xdisp.c
@@ -813,9 +776,8 @@ impl CursorKind {
 }
 
 /// A window's cursor when selected and when not.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct CursorKinds { pub selected: CursorKind, pub unselected: CursorKind }
-romacs_snapshot::snapshot_struct!(CursorKinds { selected, unselected });
 
 impl Default for CursorKinds {
     fn default() -> Self { Self { selected: CursorKind::Box, unselected: CursorKind::Hollow } }
@@ -835,12 +797,8 @@ impl CursorKinds {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum StretchWidth { Width { width: i64, zero_ok: bool }, AlignTo(i64) }
-romacs_snapshot::snapshot_enum!(StretchWidth {
-    StretchWidth::Width { width, zero_ok } => (width, zero_ok),
-    StretchWidth::AlignTo(target) => (target),
-});
 
 /// What laying a window out established about the text it published, in
 /// byte offsets into that text: where its last displayed row ends (GNU's
@@ -892,13 +850,8 @@ pub struct Row {
 /// GNU's `it->line_wrap': `truncate-lines' (or a partial-width window
 /// under `truncate-partial-width-windows') truncates, `word-wrap'
 /// continues at word boundaries, else lines continue at the window edge.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum LineWrap { Truncate, #[default] Window, Word }
-romacs_snapshot::snapshot_enum!(LineWrap {
-    LineWrap::Truncate => (),
-    LineWrap::Window => (),
-    LineWrap::Word => (),
-});
 
 /// Whether face lists A and B agree on every handle both can hold. A list
 /// is a table's as far as it had grown, and a handle past the shorter one
@@ -913,12 +866,25 @@ impl WindowSnapshot {
     /// for `buffer_version' (the VM's conservative redraw signal, which also
     /// moves when nothing shown changed) and `cursor_off' (a blink, which
     /// the last layout shows less that cursor).
-    pub fn lays_out_like(&self, other: &Self) -> bool {
+    #[must_use]
+    pub fn lays_out_like(&self, other: &Self) -> bool { self.lays_out_like_with(other, true) }
+
+    /// Whether where point is can move a glyph of this window: only under
+    /// `auto-hscroll-mode` `current-line`, which scrolls point's line apart
+    /// from the others (`Hscroll`).
+    #[must_use]
+    pub fn point_moves_glyphs(&self) -> bool { self.hscroll.point_row != self.hscroll.rows }
+
+    /// `lays_out_like`, point aside unless POINT or point can move a glyph.
+    #[must_use]
+    pub fn lays_out_like_with(&self, other: &Self, point: bool) -> bool {
         // Exhaustive, so a new field must be placed on one side or the other.
         let WindowSnapshot { id, width, height, start_byte, point_byte, buffer_version: _,
             text, mode_line, mode_line_face, header_line, header_line_face, vscroll_px, hscroll, faces, tab_width, wrap, cursor_off: _, cursor, stretches, images, wrap_flips, line_numbers, chrome, underline_rules, band_stretches } = self;
-        (*id, *width, *height, *start_byte, *point_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
-            == (other.id, other.width, other.height, other.start_byte, other.point_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
+        let point = point || self.point_moves_glyphs();
+        (*id, *width, *height, *start_byte, *mode_line_face, *header_line_face, *vscroll_px, *hscroll, *tab_width)
+            == (other.id, other.width, other.height, other.start_byte, other.mode_line_face, other.header_line_face, other.vscroll_px, other.hscroll, other.tab_width)
+            && (!point || *point_byte == other.point_byte)
             && *wrap == other.wrap && *stretches == other.stretches && *images == other.images && *wrap_flips == other.wrap_flips && *line_numbers == other.line_numbers && *text == other.text && *mode_line == other.mode_line && *header_line == other.header_line && faces_agree(faces, &other.faces) && *chrome == other.chrome
             && *underline_rules == other.underline_rules && *band_stretches == other.band_stretches
             && *cursor == other.cursor

@@ -48,19 +48,19 @@ fn the_sealed_api_is_usable() {
     assert_eq!(read, Some(("(a . b)".to_string(), 7)));
 }
 
-/// Data listed field by field and variant by variant is `SnapshotSafe`, and a
+/// Data that derives Snapshot is `SnapshotSafe`, and a
 /// capture takes it as the embedder's carry.
 #[test]
 fn listed_data_is_snapshot_safe() {
-    use romacs_vm::world::safe::{SnapshotSafe, snapshot_enum, snapshot_struct, snapshot_tuple};
+    use romacs_vm::world::safe::SnapshotSafe;
 
-    pub struct Report { name: String, rows: Vec<(u32, f64)>, note: Option<&'static str> }
-    snapshot_struct!(Report { name, rows, note });
+    #[derive(romacs_snapshot::Snapshot)]
+    pub struct Report { name: String, rows: Vec<(u32, f64)>, note: Option<Box<str>> }
+    #[derive(romacs_snapshot::Snapshot)]
     pub struct Pair(u8, Box<str>);
-    snapshot_tuple!(Pair(a, b));
     #[expect(dead_code, reason = "listed for its type, and never built")]
+    #[derive(romacs_snapshot::Snapshot)]
     pub enum Shape { Dot, Line(u32), Area { width: u32, height: u32 } }
-    snapshot_enum!(Shape { Shape::Dot => (), Shape::Line(n) => (n), Shape::Area { width, height } => (width, height) });
 
     fn carry<T: SnapshotSafe>() {}
     carry::<(Report, Pair, Shape)>();

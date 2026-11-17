@@ -909,11 +909,12 @@ fn model_commands_create_update_and_free_a_model() {
 /// (`romacs-model-available-p`).
 #[test]
 fn renderer_liveness_reaches_the_evaluator() {
-    use std::sync::atomic::Ordering;
     let (mut app, emacs) = app_with_channel();
-    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    let liveness = |emacs: &crate::thread_comm::EmacsComms| emacs.facts_rx.try_iter()
+        .filter_map(|fact| match fact { crate::thread_comm::Fact::ModelRenderer { live } => Some(live), _ => None }).collect::<Vec<_>>();
+    assert_eq!(liveness(&emacs), Vec::<bool>::new());
     app.note_models_renderer_ready();
-    assert!(emacs.model_renderer.load(Ordering::Acquire));
+    assert_eq!(liveness(&emacs), vec![true]);
     app.note_models_renderer_lost();
-    assert!(!emacs.model_renderer.load(Ordering::Acquire));
+    assert_eq!(liveness(&emacs), vec![false]);
 }

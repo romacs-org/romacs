@@ -17,7 +17,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import time
 
 import fileio_live as fio
@@ -37,23 +36,6 @@ QUESTIONS = (
 )
 
 
-def private_env(root: Path) -> dict:
-    """Allowlist the child environment, omitting every ambient display/socket."""
-    home = root / 'home'
-    home.mkdir()
-    env = {'PATH': TOOLS + ':/usr/bin:/bin', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-           'XDG_RUNTIME_DIR': str(root), 'TMPDIR': str(root),
-           'XDG_CONFIG_DIRS': str(home / 'config'), 'XDG_DATA_DIRS': '/usr/local/share:/usr/share',
-           'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',
-           'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop',
-           'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': '/usr/bin/bash'}
-    for suffix in ('CONFIG', 'CACHE', 'DATA', 'STATE'):
-        directory = home / suffix.lower()
-        directory.mkdir()
-        env['XDG_' + suffix + '_HOME'] = str(directory)
-    return env
-
-
 def executable(value: str, path: str) -> str:
     resolved = shutil.which(value, path=path)
     if resolved is None:
@@ -61,54 +43,35 @@ def executable(value: str, path: str) -> str:
     return str(Path(resolved).resolve())
 
 
-def run(args, output: Path, report: dict) -> None:
-    # Keep short socket paths and all temporary writes under owned scratch.
-    scratch = Path(os.environ.get('TMPDIR', str(Path.home() / '.cache' / 'romacs-tests'))).resolve()
-    scratch.mkdir(parents=True, exist_ok=True)
-    if len(os.fsencode(str(scratch))) + 32 >= 108:
-        raise ValueError('TMPDIR is too long for a private Wayland socket')
-    with tempfile.TemporaryDirectory(prefix='eq-', dir=scratch) as temporary:
-        root = Path(temporary)
-        root.chmod(0o700)
-        env = private_env(root)
-        init = Path(env['XDG_CONFIG_HOME']) / 'romacs' / 'init.el'
-        init.parent.mkdir()
-        init.write_text('(setq romacs-qol-init-proof "PRIVATE_INIT_LOADED")\n', encoding='utf-8')
-        tools = {name: executable(name, env['PATH'])
-                 for name in ('wtype', 'wl-copy', 'wl-paste', 'grim')}
-        labwc = executable(live.LABWC, env['PATH'])
-        randr = executable(live.RANDR, env['PATH'])
-        work, config = root / 'work', root / 'compositor'
-        work.mkdir()
-        config.mkdir()
-        (config / 'rc.xml').write_text(live.RC_XML.replace('</labwc_config>',
-            '<keyboard><keybind key="A-F4"><action name="Close"/></keybind></keyboard></labwc_config>'),
-            encoding='utf-8')
-        ordinary = work / 'ordinary.txt'
-        ordinary.write_bytes(ORDINARY)
-        pasted = work / 'clipboard.txt'
-        pasted.write_bytes(b'')
-        for name in ('control-word.txt', 'meta-word.txt'):
-            (work / name).write_bytes(WORDS)
-        compositor = keyboard = process = owner = None
-        log_path = output / 'binary.stderr'
-        try:
-            with (output / 'compositor.log').open('w') as compositor_log, \
-                    log_path.open('w') as log, (output / 'clipboard-fixture.log').open('w') as clipboard_log:
-                compositor = subprocess.Popen([labwc, '-C', str(config)], env=env, cwd=work,
-                                              stdout=compositor_log, stderr=compositor_log)
-                fio.wait(lambda: any(p.is_socket() for p in root.glob('wayland-*')),
-                         args.timeout, 'private compositor', compositor)
-                env['WAYLAND_DISPLAY'] = next(p.name for p in root.glob('wayland-*') if p.is_socket())
-                report['private_display'] = {'runtime': str(root), 'socket': env['WAYLAND_DISPLAY']}
-                subprocess.run([randr, '--output', 'HEADLESS-1', '--custom-mode', '2532x1347'],
-                               env=env, check=True, timeout=15, stdout=compositor_log, stderr=compositor_log)
-                keyboard = subprocess.Popen([tools['wtype'], '-s', '120000', '-k', 'Shift_L'],
-                                            env=env, cwd=work, stdout=log, stderr=log)
-                time.sleep(.3)
-                process = subprocess.Popen([str(args.binary), '--trace-scene', str(ordinary)],
-                                           env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+def prepare(s) -> None:
+    """The files the journey edits, in S's work directory, and XDG's
+    config search path kept to the private HOME."""
+    s.env['XDG_CONFIG_DIRS'] = str(s.home / 'config')
+    (s.work / 'ordinary.txt').write_bytes(ORDINARY)
+    (s.work / 'clipboard.txt').write_bytes(b'')
+    for name in ('control-word.txt', 'meta-word.txt'):
+        (s.work / name).write_bytes(WORDS)
 
+
+def run(args, output: Path, report: dict) -> None:
+    rc_xml = live.RC_XML.replace('</labwc_config>',
+        '<keyboard><keybind key="A-F4"><action name="Close"/></keybind></keyboard></labwc_config>')
+    extra = {'XDG_DATA_DIRS': '/usr/local/share:/usr/share',
+             'ROMACS_GUI_FONT': 'Iosevka', 'ROMACS_GUI_FONT_SIZE': '20', 'SHELL': '/usr/bin/bash'}
+    # Each child's state as the journey ends, before the session stops it.
+    children = dict.fromkeys(('binary', 'clipboard_fixture', 'keyboard', 'compositor'))
+    induced = {}
+    try:
+        with live.session(args.binary, output, prefix='eq-', init='(setq romacs-qol-init-proof "PRIVATE_INIT_LOADED")\n',
+                          args=('--trace-scene', 'ordinary.txt'), rc_xml=rc_xml, env=extra, size='2532x1347', tools=TOOLS,
+                          prepare=prepare) as s, (output / 'clipboard-fixture.log').open('w') as clipboard_log:
+            root, env, work, process, log_path = s.root, s.env, s.work, s.process, s.log
+            children.update(binary=process, compositor=s.processes[0], keyboard=s.processes[1])
+            ordinary, pasted = work / 'ordinary.txt', work / 'clipboard.txt'
+            tools = {name: executable(name, env['PATH']) for name in ('wtype', 'wl-copy', 'wl-paste', 'grim')}
+            report['private_display'] = {'runtime': str(root), 'socket': env['WAYLAND_DISPLAY']}
+            owner = None
+            try:
                 def trace():
                     return log_path.read_text(encoding='utf-8', errors='replace')
 
@@ -118,7 +81,7 @@ def run(args, output: Path, report: dict) -> None:
 
                 def keys(*parts):
                     subprocess.run([tools['wtype'], '-d', '10', *parts], env=env,
-                                   check=True, timeout=30, stdout=log, stderr=log)
+                                   check=True, timeout=30)
                     time.sleep(.15)
 
                 def control(key):
@@ -184,6 +147,9 @@ def run(args, output: Path, report: dict) -> None:
                     owner = subprocess.Popen([tools['wl-copy'], '--foreground', '--type',
                                               'text/plain;charset=utf-8'], env=env, cwd=work,
                                              stdin=subprocess.PIPE, stdout=clipboard_log, stderr=clipboard_log)
+                    # The session stops it with the others.
+                    s.processes.append(owner)
+                    children['clipboard_fixture'] = owner
                     if owner.stdin is None:
                         raise RuntimeError('clipboard fixture stdin pipe missing')
                     try:
@@ -266,19 +232,17 @@ def run(args, output: Path, report: dict) -> None:
                 if process.returncode != 0:
                     raise AssertionError('native exit was not zero: ' + str(process.returncode))
                 report['status'] = 'PASS'
-        except Exception:
-            if process is not None and process.poll() is None:
-                fio.shot(output / 'failure.png', env, report)
-            raise
-        finally:
-            report['native_exit_before_cleanup'] = None if process is None else process.poll()
-            for label, child in (('binary', process), ('clipboard_fixture', owner),
-                                 ('keyboard', keyboard), ('compositor', compositor)):
-                if child is not None:
-                    induced = child.poll() is None
-                    live.stop(child)
-                    report['cleanup'][label] = {'exit': child.returncode, 'induced': induced}
-
+            except Exception:
+                if process.poll() is None:
+                    fio.shot(output / 'failure.png', env, report)
+                raise
+            finally:
+                report['native_exit_before_cleanup'] = process.poll()
+                induced = {label: child.poll() is None for label, child in children.items() if child is not None}
+    finally:
+        for label, child in children.items():
+            if child is not None:
+                report['cleanup'][label] = {'exit': child.returncode, 'induced': induced.get(label)}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

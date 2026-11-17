@@ -5,7 +5,7 @@ use super::*;
 use serde_json::{Value as Json, json};
 use std::{collections::BTreeMap, path::Path};
 
-const ABI: &str = "VM2CODE9";
+const ABI: &str = "VM2CODE10";
 fn array(v: &Json) -> Result<&[Json]> {
     v.as_array()
         .map(Vec::as_slice)
@@ -122,7 +122,7 @@ impl Vm {
             // Keep stable image ordinals without serializing retired request IR.
             if !self.request_code.live[id] {
                 builder.strings[id + 1] = json!({"ops":[encode_op(Op::Const(0, Value::NIL)), encode_op(Op::Return(0))],"sites":[],"roots":{}}).to_string();
-                functions.push(json!([1, 0, 0, 0, false]));
+                functions.push(json!([1, 0, 0, 0, false, null]));
                 continue;
             }
             // A compiled-Lisp body still pending is published decoded.
@@ -163,7 +163,7 @@ impl Vm {
                 code.push(encode_op(op));
             }
             builder.strings[id + 1] = json!({"ops":code,"sites":f.sites,"roots":roots}).to_string();
-            functions.push(json!([f.regs, f.captures, f.arity, f.required, f.rest]));
+            functions.push(json!([f.regs, f.captures, f.arity, f.required, f.rest, f.key.map(|key| format!("{key:032x}"))]));
         }
         let closures: Vec<_> = self
             .closures
@@ -285,9 +285,13 @@ impl Vm {
         }
         for (id, meta) in array(field(&directory, "functions")?)?.iter().enumerate() {
             let m = array(meta)?;
-            if m.len() != 5 {
+            if m.len() != 6 {
                 return Err("invalid function metadata".into());
             }
+            let key = match &m[5] {
+                Json::Null => None,
+                k => Some(k.as_str().and_then(|k| u128::from_str_radix(k, 16).ok()).ok_or("invalid function key")?),
+            };
             let f = Function {
                 capture_mutations: Vec::new(),
                 mapped_code: Some(id + 1),
@@ -302,6 +306,7 @@ impl Vm {
                 pending: None,
                 dynamic: None,
                 params: None,
+                key,
             };
             if f.regs == 0
                 || f.required > f.arity
@@ -523,6 +528,7 @@ impl Vm {
             pending: None,
             dynamic: f.dynamic,
             params: f.params.clone(),
+            key: f.key,
         };
         self.validate_image_function(&f)?;
         let roots = field(&body, "roots")?.as_object().ok_or("invalid image literal roots")?;
@@ -548,7 +554,8 @@ impl Vm {
     /// or pending in a compiled-Lisp artifact (`decode_pending`).
     pub(super) fn materialize_image_function(&mut self, id: usize) -> Result<()> {
         if self.functions.get(id).ok_or("invalid function")?.pending.is_some() {
-            self.functions[id] = Arc::new(self.decode_pending(id)?);
+            let decoded = Arc::new(self.decode_pending(id)?);
+            self.functions.set(id, decoded);
             return Ok(());
         }
         if self
@@ -558,7 +565,8 @@ impl Vm {
             .mapped_code
             .is_some()
         {
-            self.functions[id] = Arc::new(self.decode_image_function(id)?);
+            let decoded = Arc::new(self.decode_image_function(id)?);
+            self.functions.set(id, decoded);
         }
         Ok(())
     }
@@ -722,7 +730,7 @@ mod image_alias_tests {
         source.collect_garbage();
         let entry = source.compile(&Form::Sym("image-texts".into())).unwrap();
         let key = source.publish_code_image(&path, entry, [65; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, _) = Vm::from_code_image(image, [65; 32]).unwrap();
         let kinds = loaded.eval_source("(list (multibyte-string-p (car image-texts)) (multibyte-string-p (car (cdr image-texts))))").unwrap();
         assert_eq!(kinds.display().unwrap(), "(nil t)");
@@ -745,7 +753,7 @@ mod image_alias_tests {
         assert!(source.objects.unused() > 0 && source.closures.unused() > 0, "the sweep left free entries below live ones");
         let entry = source.compile(&Form::Sym("image-kept".into())).unwrap();
         let key = source.publish_code_image(&path, entry, [64; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [64; 32]).unwrap();
         let value = loaded.execute_raw(entry).unwrap();
         assert_eq!(loaded.display(value).unwrap(), "(\"kkkk\" 7)");
@@ -768,7 +776,7 @@ mod image_alias_tests {
         assert_eq!(source.execute_raw(entry).unwrap(), root, "PRE_IMAGE_COLD_ALIAS_IDENTITY");
         assert_eq!(source.slots[plist_slot].plist, root, "PRE_IMAGE_PLIST_ALIAS_IDENTITY");
         let key = source.publish_code_image(&path, entry, [63; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [63; 32]).unwrap();
         loaded.collect_garbage();
         let cold = loaded.execute_raw(entry).unwrap();

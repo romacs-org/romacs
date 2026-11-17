@@ -1,4 +1,6 @@
 use romacs_vm::Vm;
+#[path = "support/own_test.rs"]
+mod own_test;
 
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/pinned_gnu.rs"));
 
@@ -215,7 +217,7 @@ fn filename_case_measures_a_real_casefold_directory() {
         let fixture = Fixture::new();
         let output = std::process::Command::new("unshare")
             .args(["-rm", "sh", "-c", "mount -t tmpfs -o casefold=utf8-12.1.0 none \"$1\" && exec \"$2\" --exact \"$3\" --nocapture", "sh"])
-            .arg(&fixture.0).arg(std::env::current_exe().unwrap()).arg(NAME)
+            .arg(&fixture.0).arg(std::env::current_exe().unwrap()).arg(own_test::name(module_path!(), NAME))
             .env("ROMACS_CASEFOLD_MOUNT", &fixture.0)
             .output().expect("unshare is required");
         let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();

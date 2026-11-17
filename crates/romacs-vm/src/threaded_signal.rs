@@ -1,7 +1,7 @@
 //! Pre-unwind signal search shared by ordinary and reentrant engines.
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) enum SignalHandler {
     Condition(Value),
     Catch(Value),
@@ -17,14 +17,6 @@ pub(crate) enum SignalHandler {
     /// (`Vm::isolate_claim').
     Job(u64),
 }
-romacs_snapshot::snapshot_enum!(SignalHandler {
-    SignalHandler::Condition(f0) => (f0),
-    SignalHandler::Catch(f0) => (f0),
-    SignalHandler::Bind { conditions, function, group } => (conditions, function, group),
-    SignalHandler::Mask(f0) => (f0),
-    SignalHandler::Boundary => (),
-    SignalHandler::Job(f0) => (f0),
-});
 
 impl SignalHandler {
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
@@ -125,7 +117,7 @@ pub(super) fn speculative(e: &mut Engine<'_>, condition: Value) -> bool {
 /// need no Lisp. It is considered with `debug-on-signal', when no handler
 /// catches the error, or when the catching clause lists `debug' (the
 /// command loop's catch-all is `(debug t)', GNU's C handler `error').
-/// `romacs--call-debugger-p' (lisp/romacs/vm/prelude.el) makes the rest.
+/// `romacs--call-debugger-p' (lisp/vm/prelude.el) makes the rest.
 fn debugger_wanted(e: &mut Engine<'_>) -> bool {
     let Some(Escape::Error { conditions, target, .. }) = e.escape.as_ref() else { return false; };
     let (conditions, clause) = match target.and_then(|at| e.vm.signal_handlers.get(at)) {

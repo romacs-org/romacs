@@ -10,6 +10,7 @@
 //! `visit_values` traces (forwarded.rs COLLECTOR CONTRACT).
 use super::*;
 use crate::coordinates::{ByteOffset, CharOffset};
+use crate::properties::Key;
 
 /// What GNU's insert/write code reads about `current_buffer` before it acts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,24 +74,15 @@ impl Leaf<'_> {
     }
 
     pub fn fileio_sync_output(&self, file: &std::fs::File) -> std::io::Result<()> {
-        use std::os::fd::AsRawFd as _;
-        if unsafe { libc::fsync(file.as_raw_fd()) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
+        file.sync_all()
     }
 
     pub fn fileio_close_output(&self, file: std::fs::File) -> std::io::Result<()> {
-        use std::os::fd::IntoRawFd as _;
-        if unsafe { libc::close(file.into_raw_fd()) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
+        crate::host::close_file(file)
     }
 
     pub fn fileio_write_output(&self, file: &mut std::fs::File, mut bytes: &[u8]) -> std::io::Result<()> {
         use std::io::Write as _;
-        use std::os::fd::AsRawFd as _;
         let deadline = crate::host::monotonic() + std::time::Duration::from_secs(1);
         while !bytes.is_empty() {
             if crate::host::monotonic() >= deadline {
@@ -103,10 +95,11 @@ impl Leaf<'_> {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     let remaining = deadline.saturating_duration_since(crate::host::monotonic());
                     let timeout = remaining.as_millis().clamp(1, 100) as i32;
-                    let mut pollfd = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
-                    if unsafe { libc::poll(&mut pollfd, 1, timeout) } < 0 {
-                        let error = std::io::Error::last_os_error();
-                        if error.kind() != std::io::ErrorKind::Interrupted { return Err(error) }
+                    let mut fds = [rustix::event::PollFd::new(&*file, rustix::event::PollFlags::OUT)];
+                    let timeout = rustix::event::Timespec { tv_sec: 0, tv_nsec: i64::from(timeout) * 1_000_000 };
+                    match rustix::event::poll(&mut fds, Some(&timeout)) {
+                        Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                        Err(error) => return Err(error.into()),
                     }
                 }
                 Err(e) => return Err(e),
@@ -145,13 +138,13 @@ impl Leaf<'_> {
 
     /// GNU textget: direct property, category fallback, then defaults. Values
     /// are copied out of the rope before interning can grow VM storage.
-    fn fileio_text_property(&mut self, at: ByteOffset, key: &str) -> std::result::Result<Value, Fault> {
+    fn fileio_text_property(&mut self, at: ByteOffset, key: Key) -> std::result::Result<Value, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(Value::NIL) };
         let direct = t.properties.get_property(at, key);
-        let category = t.properties.get_property(at, "category").unwrap_or(Value::NIL);
+        let category = t.properties.get_property(at, Key::CATEGORY).unwrap_or(Value::NIL);
         if let Some(value) = direct { return Ok(value) }
-        let symbol = self.intern(key);
+        let symbol = key.symbol();
         if self.kind(category) == Kind::Symbol {
             let value = self.vm.symbol_property(category, symbol).map_err(Fault::Error)?;
             if value != Value::NIL { return Ok(value) }
@@ -174,11 +167,10 @@ impl Leaf<'_> {
                 seen_alternatives.push(alternatives);
                 let (alias, tail) = self.vm.cons_pair(alternatives).map_err(Fault::Error)?;
                 alternatives = tail;
-                if self.kind(alias) != Kind::Symbol { continue }
-                let alias = self.symbol_name(alias)?;
+                let Some(alias) = Key::of(alias) else { continue };
                 let index = self.vm.buffer_index().map_err(Fault::Error)?;
                 if let data::Object::Buffer(t) = &self.vm.objects[index]
-                    && let Some(value) = t.properties.get_property(at, &alias)
+                    && let Some(value) = t.properties.get_property(at, alias)
                     && value != Value::NIL { return Ok(value) }
             }
             break;
@@ -188,7 +180,7 @@ impl Leaf<'_> {
         Ok(self.vm.plist_lookup(defaults, symbol))
     }
 
-    pub fn fileio_property_at_point(&mut self, key: &str) -> std::result::Result<Value, Fault> {
+    pub fn fileio_property_at_point(&mut self, key: Key) -> std::result::Result<Value, Fault> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = &self.vm.objects[index] else { return Ok(Value::NIL) };
         let at = t.point;
@@ -220,9 +212,9 @@ impl Leaf<'_> {
         let cat = self.intern("category");
         for (pos, front) in [(left, false), (right, true)] {
             let Some(pos) = pos else { continue };
-            let value = self.fileio_text_property(pos, "read-only")?;
+            let value = self.fileio_text_property(pos, Key::READ_ONLY)?;
             if value == Value::NIL || self.fileio_memq(value, inhibit)? { continue }
-            let sticky = self.fileio_text_property(pos, if front { "front-sticky" } else { "rear-nonsticky" })?;
+            let sticky = self.fileio_text_property(pos, if front { Key::FRONT_STICKY } else { Key::REAR_NONSTICKY })?;
             let member = |this: &Self, key| -> std::result::Result<bool, Fault> {
                 if sticky == Value::NIL { Ok(false) }
                 else if this.kind(sticky) != Kind::Cons { Ok(true) }
@@ -230,7 +222,7 @@ impl Leaf<'_> {
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             let data::Object::Buffer(t) = &self.vm.objects[index] else { unreachable!() };
-            let direct = t.properties.get_property(pos, "read-only").unwrap_or(Value::NIL);
+            let direct = t.properties.get_property(pos, Key::READ_ONLY).unwrap_or(Value::NIL);
             let sticks = member(self, ro)? || (direct == Value::NIL && member(self, cat)?);
             if front == sticks {
                 let condition = self.intern("text-read-only");
@@ -295,22 +287,15 @@ impl Leaf<'_> {
     /// inserted at point of the current multibyte buffer, byte for byte.
     pub fn fileio_copy_string_properties(&mut self, string: Value) -> std::result::Result<(), Fault> {
         let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(string) else { return Ok(()) };
-        let map = s.properties.to_map();
-        if map.is_empty() { return Ok(()) }
+        if s.properties.is_empty() { return Ok(()) }
+        let runs = s.properties.runs(ByteOffset(0)..ByteOffset(s.bytes().len()));
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let data::Object::Buffer(t) = self.vm.objects.entry_mut(index) else { return Ok(()) };
         let at = t.point.0;
-        // to_map gives each byte's properties; put them back as runs.
-        let mut runs: Vec<(usize, usize, &std::collections::BTreeMap<String, Value>)> = vec![];
-        for (offset, values) in &map {
-            match runs.last_mut() {
-                Some((_, end, run)) if *end == offset.0 && *run == values => *end += 1,
-                _ => runs.push((offset.0, offset.0 + 1, values)),
-            }
-        }
-        for (start, end, values) in runs {
-            for (key, value) in values {
-                t.properties.put(ByteOffset(at + start)..ByteOffset(at + end), key, *value);
+        for (range, values) in runs {
+            // The newest is written last, to stay first.
+            for (key, value) in values.into_iter().rev() {
+                t.properties.put(ByteOffset(at + range.start.0)..ByteOffset(at + range.end.0), key, value);
             }
         }
         Ok(())

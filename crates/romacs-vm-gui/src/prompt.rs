@@ -4,11 +4,12 @@
 //! the wait is a plain blocking receive on that channel; the redisplay uses
 //! the same layout engine and presentation sequence as the outer loop.
 //!
-//! Shared state is per evaluator thread (Rc/RefCell): the outer loop parks
-//! the rest of its input batch here before it dispatches a command and takes
-//! back whatever the prompt did not consume afterwards, so keys typed ahead of
-//! a prompt reach it in order. A RefCell borrow held across a dispatch would
-//! panic the moment a prompt waits: a re-entry is loud, never silent.
+//! Shared state is per evaluator thread (Rc/RefCell). Its queue is the outer
+//! loop's only one, so keys typed ahead of a prompt reach it in order, and a
+//! key any read took from the channel (an `input-pending-p` in a redisplay,
+//! the look a collection takes) stays queued for the loop. A RefCell borrow
+//! held across a dispatch would panic the moment a prompt waits: a re-entry
+//! is loud, never silent.
 use romacs_display_runtime::paint_host::PaintSender;
 use romacs_display_runtime::thread_comm::InputEvent;
 use romacs_vm::{HostEvent, HostFrame, HostInput};
@@ -20,10 +21,14 @@ use std::time::Duration;
 
 #[derive(Default)]
 pub struct Shared {
-    /// Events received but not yet dispatched (the outer batch's remainder).
+    /// Events received but not yet dispatched: the outer loop's one input
+    /// queue (main.rs `queue`), which every read takes from and adds to.
     pub pending: VecDeque<InputEvent>,
     /// Last presentation id submitted, by either loop.
     pub presentation: u64,
+    /// The launch screen while it shows (loading.rs): whichever loop
+    /// paints first ends it (`end_loading`).
+    pub loading: Option<crate::loading::Loading>,
     /// The paint in flight and when its oldest undrawn paint was submitted
     /// (presentation.rs): the outer loop's, until a prompt's own replaces it.
     pub in_flight: Option<(u64, std::time::Instant)>,
@@ -60,6 +65,12 @@ pub struct ServerWindow {
 }
 
 impl Shared {
+    /// End the launch screen, if it shows: the next paint follows every
+    /// frame it submitted.
+    pub fn end_loading(&mut self) {
+        if let Some(loading) = self.loading.take() { self.presentation = self.presentation.max(loading.finish()); }
+    }
+
     /// Whether painting has a window to go to.
     pub fn window_shown(&self) -> bool {
         self.server.as_ref().is_none_or(|server| server.shown)
@@ -186,29 +197,31 @@ fn forget_window(shared: &mut Shared) {
 }
 
 impl GuiHost {
-    /// Move every queued channel event into `pending`, dropping the ones a
-    /// prompt ignores (releases, activations), so "pending" means a real event.
+    /// Move every queued channel event into `pending`, in order. Each stays
+    /// for whoever handles it: a prompt's read skips what it ignores
+    /// (releases, activations), and the loop takes the clicks on its bars
+    /// that no read returns.
     fn drain(&mut self) {
-        let mut shared = self.shared.borrow_mut();
-        let available = self.sender.input().len();
-        shared.pending.extend(self.sender.input().try_iter().take(available));
-        let kept = std::mem::take(&mut shared.pending)
-            .into_iter()
-            .filter(|event| classify(event).is_some())
-            .collect();
-        shared.pending = kept;
+        take_arrivals(&mut self.shared.borrow_mut(), self.sender.input());
     }
-
-
 }
 
-/// Whether SENDER's window shows animation drawn frame by frame: on a GPU,
-/// and on a software rasterizer, every headless harness's, only when
-/// ROMACS_LAYER_ANIMATION is 1 or more, as for layers.  None until the
-/// window has chosen its adapter.
-pub(crate) fn display_animates(sender: &PaintSender) -> Option<bool> {
-    let forced = || std::env::var("ROMACS_LAYER_ANIMATION").ok().and_then(|v| v.parse::<f32>().ok()).is_some_and(|n| n >= 1.0);
-    sender.software_adapter().map(|software| !software || forced())
+/// The events INPUT holds now, queued in SHARED after those already there.
+fn take_arrivals(shared: &mut Shared, input: &crossbeam_channel::Receiver<InputEvent>) {
+    let available = input.len();
+    shared.pending.extend(input.try_iter().take(available));
+}
+
+/// Whether SHARED's queue holds input a read returns: GNU's
+/// `input-pending-p`, which counts no special event and nothing a read
+/// skips. A closed frame is not repainted, so it counts too.
+fn input_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(|event| classify(event).is_some() && !special(event))
+}
+
+/// Whether SHARED's queue holds a key press that ends idleness.
+fn key_waits(shared: &Shared) -> bool {
+    shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
 }
 
 /// A key read in a prompt and the paint that carries it, timed until the
@@ -244,7 +257,7 @@ impl GuiHost {
     fn settle_drawn(&self) -> bool {
         let mut shared = self.shared.borrow_mut();
         let Some((presentation, _)) = shared.in_flight else { return false };
-        if self.sender.wait_for_render(presentation, Duration::ZERO).is_err() { return true; }
+        if self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_err() { return true; }
         shared.in_flight = None;
         let now = std::time::Instant::now();
         shared.settled = Some((presentation, now));
@@ -267,27 +280,32 @@ impl HostInput for GuiHost {
     }
 
     fn display_animates(&mut self) -> Option<bool> {
-        display_animates(&self.sender)
+        romacs_vm_gui::presentation::display_animates(&self.sender)
     }
 
     fn pointer(&mut self) -> Option<(i32, i32)> {
-        self.sender.pointer()
+        // The evaluator's host reads the pointer over the one frame it shows.
+        self.sender.pointer().and_then(|(frame, at)| (frame == romacs_display_runtime::paint_host::INITIAL_FRAME).then_some(at))
+    }
+
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        Some(self.sender.take_key_repeats())
     }
 
     fn native_window(&mut self, action: romacs_vm::NativeWindow) -> Option<bool> {
         let mut shared = self.shared.borrow_mut();
         let Some(server) = shared.server.as_mut() else {
             // A session that is its window shows it while it runs.
-            if action == romacs_vm::NativeWindow::Show { let _ = self.sender.raise_primary(); }
+            if action == romacs_vm::NativeWindow::Show { let _ = self.sender.raise(romacs_display_runtime::paint_host::INITIAL_FRAME); }
             return Some(true);
         };
         let shown = server.shown;
         match action {
             romacs_vm::NativeWindow::Query => {}
-            romacs_vm::NativeWindow::Show if shown => { let _ = self.sender.raise_primary(); }
+            romacs_vm::NativeWindow::Show if shown => { let _ = self.sender.raise(romacs_display_runtime::paint_host::INITIAL_FRAME); }
             romacs_vm::NativeWindow::Show => {
                 let (width, height) = server.size;
-                let made = self.sender.show_primary(width, height, server.title.clone())
+                let made = self.sender.realize(romacs_display_runtime::paint_host::INITIAL_FRAME, width, height, server.title.clone())
                     .and_then(|ready| ready.recv_timeout(Duration::from_secs(30)).map_err(|e| e.to_string())?);
                 match made {
                     Ok(()) => {
@@ -300,7 +318,7 @@ impl HostInput for GuiHost {
             }
             romacs_vm::NativeWindow::Hide if !shown => {}
             romacs_vm::NativeWindow::Hide => {
-                if let Err(error) = self.sender.hide_primary() { eprintln!("romacs: server window: {error}"); }
+                if let Err(error) = self.sender.hide(romacs_display_runtime::paint_host::INITIAL_FRAME) { eprintln!("romacs: server window: {error}"); }
                 server.shown = false;
                 forget_window(&mut shared);
             }
@@ -309,25 +327,24 @@ impl HostInput for GuiHost {
     }
 
     fn images_behind(&mut self) -> bool {
-        // Not while a paint is in flight (a stalled render is not spun on),
-        // nor with no window to paint. A paint drawn since (its render woke
-        // this read) is settled first, so the next batch of images goes on.
+        // Pixels landed, or the renderer lost the images it had (a device
+        // reset woke this read): paint again. Not while a paint is in
+        // flight (a stalled render is not spun on), nor with no window to
+        // paint. A paint drawn since (its render woke this read) is
+        // settled first, so the next batch of images goes on.
         self.settle_drawn();
         let shared = self.shared.borrow();
-        self.images.borrow().behind() && shared.in_flight.is_none() && shared.window_shown()
+        self.images.borrow().must_repaint(self.sender.as_ref()) && shared.in_flight.is_none() && shared.window_shown()
     }
 
     fn input_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        // A closed frame is not repainted.
-        shared.closed || shared.pending.iter().any(|event| !special(event))
+        input_waits(&self.shared.borrow())
     }
 
     fn key_pending(&mut self) -> bool {
         self.drain();
-        let shared = self.shared.borrow();
-        shared.closed || shared.pending.iter().any(crate::timers::ends_idle)
+        key_waits(&self.shared.borrow())
     }
 
     fn redisplay(&mut self, frame: HostFrame) -> Result<Vec<romacs_vm::WindowEnd>, String> {
@@ -336,6 +353,7 @@ impl HostInput for GuiHost {
         // since, submits no frame and answers that paint's window ends.
         // A server with no window shows nothing; the layout stays as it is.
         if !self.shared.borrow().window_shown() { return Ok(Vec::new()); }
+        self.shared.borrow_mut().end_loading();
         if let Some((painted, selected, presentation, ends, animations)) = &self.shared.borrow().painted {
             let shared = self.shared.borrow();
             if *presentation == shared.presentation && shared.in_flight.is_none_or(|(p, _)| p == *presentation)
@@ -362,7 +380,7 @@ impl HostInput for GuiHost {
             self.settle_drawn();
             let mut shared = self.shared.borrow_mut();
             let since = shared.in_flight.map_or(submitted, |(_, since)| since);
-            let drawn = self.sender.wait_for_render(presentation, Duration::ZERO).is_ok();
+            let drawn = self.sender.wait_for_render(romacs_display_runtime::paint_host::INITIAL_FRAME, presentation, Duration::ZERO).is_ok();
             shared.in_flight = (!drawn).then_some((presentation, since));
             if drawn { shared.settled = Some((presentation, std::time::Instant::now())); }
             shared.painted = Some((frame.frame.clone(), frame.selected, presentation, ends.clone(), frame.text_animations.clone()));
@@ -423,6 +441,36 @@ mod tests {
         }
         assert_eq!(shared.pending.len(), 1, "nothing more is consumed once closed");
         assert!(matches!(next_queued(&mut Shared::default()), Next::Wait));
+    }
+
+    /// Looking for input leaves every event queued, in order: a click on
+    /// the status bar is the loop's though no read returns it, and a key
+    /// release stays ahead of the key after it. Only what a read returns
+    /// is input. The look used to drop every event a prompt ignores.
+    #[test]
+    fn looking_for_input_keeps_every_event() {
+        use romacs_display_runtime::host_types::FrontendKey;
+        use romacs_display_runtime::thread_comm::{PointerAction, PointerPosition, PointerTarget, PositionedPointerInput};
+        let click = InputEvent::PositionedPointer(PositionedPointerInput {
+            position: PointerPosition { x: 17.0, y: 765.0, target_frame_id: 1 }, target: PointerTarget::Unpresented,
+            action: PointerAction::Button { button: 1, pressed: false, modifiers: 0 } });
+        let key = |pressed| InputEvent::Key { key: FrontendKey::Character('a'), modifiers: 0, pressed, emacs_frame_id: 1 };
+        let (sender, input) = crossbeam_channel::unbounded();
+        let mut shared = Shared::default();
+        sender.send(click).unwrap();
+        sender.send(key(false)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(!input_waits(&shared) && !key_waits(&shared), "a click and a release are no input");
+        sender.send(key(true)).unwrap();
+        take_arrivals(&mut shared, &input);
+        assert!(input_waits(&shared) && key_waits(&shared));
+        let kinds: Vec<_> = shared.pending.iter().map(|event| match event {
+            InputEvent::PositionedPointer(_) => "click",
+            InputEvent::Key { pressed: false, .. } => "release",
+            InputEvent::Key { pressed: true, .. } => "key",
+            _ => "other",
+        }).collect();
+        assert_eq!(kinds, ["click", "release", "key"]);
     }
 
     /// A queued special event is not input: only an event a read returns is.

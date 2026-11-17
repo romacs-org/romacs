@@ -49,6 +49,6 @@ The codepoint list, the provenance list and the scripts are Romacs's,
 under the GNU General Public License, version 3 or (at your option) any
 later version (see COPYING).
 
-assets/fonts/RomacsIcons.ttf is built from the glyphs by
-tools/build-icon-font, under the SIL Open Font License 1.1
+Romacs Icons (RomacsIcons.ttf) is built from the glyphs by
+crates/romacs-icon-font, under the SIL Open Font License 1.1
 (../fonts/OFL.txt), its glyphs under their sets' licences above as well.

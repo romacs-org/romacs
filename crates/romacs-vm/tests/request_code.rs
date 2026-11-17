@@ -1,11 +1,13 @@
 use romacs_vm::{Form, Vm};
+#[path = "support/own_test.rs"]
+mod own_test;
 
 fn isolated(name: &str) -> bool {
     if std::env::var("VM2_GC_PROBE_CHILD").as_deref() == Ok(name) {
         return true;
     }
     let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", name, "--nocapture"])
+        .args(["--exact", &own_test::name(module_path!(), name), "--nocapture"])
         .env("VM2_GC_PROBE_CHILD", name)
         .status()
         .unwrap();

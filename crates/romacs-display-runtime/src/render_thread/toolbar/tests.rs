@@ -75,7 +75,7 @@ fn toolbar_decode_completion_redraws_without_an_evaluator_frame() {
         .reconcile(HashSet::from([icon.clone()]), &mut images);
     let image = app.toolbar.textures()[&icon];
     let primary = app.frame_windows.primary_window_mut().unwrap();
-    primary.render.compositor.current_frame = Some(FrameGlyphBuffer::with_size(800.0, 600.0));
+    primary.render.compositor.current_frame = Some(std::sync::Arc::new(FrameGlyphBuffer::with_size(800.0, 600.0)));
     primary.render.set_dirty(false);
 
     let completion = |image| ImageCacheEvent::Ready {

@@ -73,7 +73,7 @@ fn defvaralias(cx, new_alias: Value, base_variable: Value; optional docstring: V
 // GNU eval.c:2411. Installs `(autoload FILE DOCSTRING INTERACTIVE TYPE)` in
 // FUNCTION's cell through defalias's fset (data.c:971-1000), unless FUNCTION
 // is already defined other than as an autoload. Calling the object later is
-// the evaluator's business, not this primitive's (DIVERGENCES.md
+// the evaluator's business, not this primitive's (ledger/divergences
 // VM2-AUTOLOAD1: VM2 does not load FILE on call).
 defsubr! { name = "autoload", gnu = "eval.c:2411", effect = Global,
 fn autoload(cx, function: Value, file: Value; optional docstring: Value, interactive: Value, kind: Value) {
@@ -93,7 +93,6 @@ fn autoload(cx, function: Value, file: Value; optional docstring: Value, interac
     let entry = cx.cons(defun, function);
     cx.attach_load_history(entry)?;
     cx.defalias_function(function, descriptor)?;
-    cx.note_init_declared(file);
     Ok(function)
 }}
 
@@ -171,7 +170,7 @@ pub(crate) fn function_p(cx: &mut Leaf<'_>, mut object: Value) -> std::result::R
 // is its current binding, a `let' binding included (set_internal); a localized
 // variable's default cell is written whatever buffer is current. VM2 holds
 // both in the slot at the end of the alias chain (Leaf::default_cell_set).
-// Variable watchers are not modelled (DIVERGENCES.md VM2-VARALIAS1).
+// Variable watchers are not modelled (ledger/divergences VM2-VARALIAS1).
 defsubr! { name = "set-default", gnu = "data.c:2130", effect = Global,
 fn set_default(cx, symbol: Value, value: Value) {
     let symbol = self::symbol(cx, symbol)?;

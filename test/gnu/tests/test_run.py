@@ -43,7 +43,7 @@ class LoadPath(unittest.TestCase):
     """load_path() reproduces GNU's installed load-path (lisp/subdirs.el)."""
 
     def tree(self, root, relatives):
-        lisp = root / 'lisp/gnu'
+        lisp = root / 'lisp'
         for relative in relatives:
             (lisp / relative).parent.mkdir(parents=True, exist_ok=True)
             (lisp / relative).write_text(';; fixture\n')
@@ -74,9 +74,9 @@ class LoadPath(unittest.TestCase):
     def test_missing_directories_are_not_added(self):
         with tempfile.TemporaryDirectory(prefix='gts-load-path-') as tmp:
             root = pathlib.Path(tmp)
-            (root / 'lisp/gnu/textmodes').mkdir(parents=True)
+            (root / 'lisp/textmodes').mkdir(parents=True)
             with patch.object(run, 'ROOT', root):
-                self.assertEqual(run.load_path(), [str(root / 'lisp/gnu'), str(root / 'lisp/gnu/textmodes')])
+                self.assertEqual(run.load_path(), [str(root / 'lisp'), str(root / 'lisp/textmodes')])
 
 
 class SourceDirectory(unittest.TestCase):
@@ -449,7 +449,7 @@ class Ledger(unittest.TestCase):
                       self.refused(VALID_ROW.replace('src/editfns.c:3611-3653', 'etc/NEWS:1-2')))
 
     def test_an_unknown_divergence_is_refused(self):
-        self.assertIn('not an entry in DIVERGENCES.md', self.refused(VALID_ROW.replace('"VM2-FMT1"', '"D999"')))
+        self.assertIn('not an entry in ledger/divergences', self.refused(VALID_ROW.replace('"VM2-FMT1"', '"D999"')))
 
     def test_a_missing_justification_is_refused(self):
         text = '\n'.join(l for l in VALID_ROW.splitlines() if not l.startswith('why'))
@@ -624,13 +624,13 @@ class EndToEnd(unittest.TestCase):
         assert BIN is not None
         with tempfile.TemporaryDirectory(prefix='gts-owner-path-') as tmp:
             root = pathlib.Path(tmp)
-            lisp = root / 'lisp/gnu'
+            lisp = root / 'lisp'
             for relative in ['emacs-lisp/debug.el', 'cedet/semantic/debug.el',
                              'textmodes/extra-owner.el']:
                 destination = lisp / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 source = 'emacs-lisp/debug.el' if relative.endswith('extra-owner.el') else relative
-                shutil.copyfile(run.ROOT / 'lisp/gnu' / source, destination)
+                shutil.copyfile(run.ROOT / 'lisp' / source, destination)
             plan = root / 'plan.json'
             plan.write_text(json.dumps({'file': 'owner-resolution', 'forms': []}))
             command = [BIN, '--harness', str(run.HARNESS), '--plan', str(plan)]
@@ -762,7 +762,21 @@ class EndToEnd(unittest.TestCase):
 
     def test_a_gnu_file_runs_end_to_end_with_honest_exit_status(self):
         with tempfile.TemporaryDirectory(prefix='gts-e2e-') as tmp:
-            status = run.main(['run', 'src/fns-tests.el', '--bin', BIN, '--out', tmp, '--jobs', '1'])
+            said = io.StringIO()
+            with contextlib.redirect_stderr(said):
+                status = run.main(['run', 'src/fns-tests.el', '--bin', BIN, '--out', tmp, '--jobs', '1'])
+            sys.stderr.write(said.getvalue())
+            if not (os.environ.get('ROMACS_VACUITY_RECEIPT') or os.environ.get('ROMACS_MEMBER_EVIDENCE')):
+                # Only tools/gate makes the run-local subject evidence a run
+                # measures against (SUBJECT-VACUITY.md).  Without it the run
+                # must refuse for that reason alone and measure nothing.
+                self.assertEqual(status, 3, 'a run without subject evidence was not refused')
+                self.assertIn('subject evidence refused: run-local evidence required', said.getvalue(),
+                              'the run refused for another reason than the missing evidence')
+                self.assertFalse((pathlib.Path(tmp) / 'summary.json').exists(), 'a refused run wrote a summary')
+                print('REFUSED (environment): no run-local subject evidence; tools/gate supplies it, '
+                      'and the end-to-end measurement runs there', file=sys.stderr)
+                return
             if json.loads(run.baseline_path('src/fns-tests.el').read_text())['gnu']['sha256'] != PIN_SHA:
                 # Every committed baseline is distro-recorded until a pinned
                 # re-record: nothing may be measured against it.

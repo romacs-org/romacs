@@ -1,0 +1,5 @@
+error: only a `#[snapshot(root)]` has at-rest fields: no restore remakes one anywhere else
+ --> tests/snapshot_safe/fail/at_rest_inside.rs:7:5
+  |
+7 |     scratch: Vec<u8>,
+  |     ^^^^^^^

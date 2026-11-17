@@ -18,7 +18,7 @@ use crate::spec::{FaceDef, FaceError};
 use crate::theme::{Base, Generation, Theme, resolve_reset};
 
 /// One face reference, as `merge_face_ref` (xfaces.c) accepts them.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) enum Layer {
     Named(Arc<str>),
     Anonymous(Arc<AnonymousFace>),
@@ -29,19 +29,13 @@ pub(crate) enum Layer {
         layers: Vec<Layer>,
     },
 }
-romacs_snapshot::snapshot_enum!(Layer {
-    Layer::Named(f0) => (f0),
-    Layer::Anonymous(f0) => (f0),
-    Layer::Filtered { parameter, value, layers } => (parameter, value, layers),
-});
 
 /// An anonymous face: an attribute plist, possibly inheriting.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) struct AnonymousFace {
     pub attrs: Attrs,
     pub inherit: Vec<Layer>,
 }
-romacs_snapshot::snapshot_struct!(AnonymousFace { attrs, inherit });
 
 /// Parse a face reference into layers, highest precedence first.
 ///
@@ -121,7 +115,7 @@ fn push_face_ref(r: &Datum, out: &mut Vec<Layer>) -> Result<(), FaceError> {
 /// An anonymous plist. Unlike GNU, where an attribute *before* `:inherit` in
 /// the plist is overridden by the inherited face, the plist's own attributes
 /// always win over what it inherits, wherever `:inherit` appears; see
-/// GNU-DIVERGENCES.md. Invalid attributes are skipped, as GNU's merge skips
+/// ledger/divergences. Invalid attributes are skipped, as GNU's merge skips
 /// them (it logs and carries on).
 fn parse_anonymous(plist: &[Datum]) -> Result<AnonymousFace, FaceError> {
     let mut attrs = Attrs::default();
@@ -172,13 +166,12 @@ impl FaceSource for Theme {
 }
 
 /// An immutable `face-remapping-alist`.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 pub struct Remap {
     generation: Generation,
     entries: FxHashMap<Arc<str>, Vec<Layer>>,
     order: Vec<Arc<str>>,
 }
-romacs_snapshot::snapshot_struct!(Remap { generation, entries, order });
 
 impl Remap {
     pub fn empty() -> Arc<Remap> {
@@ -297,14 +290,13 @@ fn for_window(layers: &[Layer], matches: &dyn Fn(&str, &Datum) -> bool) -> Vec<L
 }
 
 /// A theme and a buffer-local remapping, resolved as immutable values.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 pub struct View {
     theme: Theme,
     remap: Arc<Remap>,
     resolved: Arc<Remap>,
     default_realized: Attrs,
 }
-romacs_snapshot::snapshot_struct!(View { theme, remap, resolved, default_realized });
 
 impl View {
     /// Reject cycles between remapping entries, not valid inheritance backrefs.
@@ -406,7 +398,7 @@ impl View {
 /// as what is shown asks for them, so nothing here scales with the faces a
 /// session has defined. GNU's realized faces work the same way: an lface
 /// vector is read when a face is shown, and a change empties the cache.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 pub struct LiveView {
     /// Each face asked for: its definition, or None for no such face.
     defs: FxHashMap<Arc<str>, Option<FaceDef>>,
@@ -415,7 +407,6 @@ pub struct LiveView {
     base: Attrs,
     default_realized: Attrs,
 }
-romacs_snapshot::snapshot_struct!(LiveView { defs, aliases, resolved, base, default_realized });
 
 impl FaceSource for LiveView {
     fn canonical<'a>(&'a self, mut face: &'a str) -> &'a str {

@@ -165,8 +165,8 @@ impl Leaf<'_> {
             let from = self.vm.text_property_position(start)?.min(self.vm.text_property_position(end)?);
             (text.view().chars().collect::<Vec<u32>>(), from)
         } else {
-            let view = self.string_view(string)?;
-            let size = view.chars as i64;
+            let (size, multibyte) = self.string_shape(string)?;
+            let size = size as i64;
             let index = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
                 if v == Value::NIL { return Ok(default); }
                 let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
@@ -174,8 +174,8 @@ impl Leaf<'_> {
             };
             let (f, t) = (index(start, 0)?, index(end, size)?);
             if !(0 <= f && f <= t && t <= size) { return Err(Fault::Range3(string, start, end)); }
-            if !view.multibyte { return Ok(Value::NIL); }
-            let codes: Vec<u32> = view.chars().skip(f as usize).take((t - f) as usize).collect();
+            if !multibyte { return Ok(Value::NIL); }
+            let codes: Vec<u32> = self.string_view_from(string, f as usize)?.chars().take((t - f) as usize).collect();
             if ascii_compatible && codes.iter().all(|&c| c < 0x80) { return Ok(Value::NIL); }
             (codes, f)
         };

@@ -139,6 +139,26 @@ fn literal_malformed_geometry_is_retained_but_lookup_and_write_refuse() {
     assert!(vm.print_render(value, true, Value::NIL, false).is_ok());
 }
 
+/// A write refused for a malformed node below it writes nothing: not the
+/// slots of its range before that node, nor a split of them.
+#[test]
+fn a_refused_write_changes_nothing() {
+    let mut vm = Vm::new();
+    // Characters 4096..8191 sit under a depth-two node claiming to start at 17.
+    let bad = sub(&mut vm, 2, 17, integer(5));
+    let mut fields = vec![integer(1), integer(0)];
+    fields.extend((0..CharTableNode::SIZES[1]).map(|i| if i == 1 { bad } else { integer(7) }));
+    let middle = vm.sub_char_table_from_literal(&fields).unwrap();
+    let value = raw(&mut vm, Value::NIL, middle);
+    let writes = super::tests::WROTE.with(std::cell::Cell::get);
+    let data::Object::CharTable(t) = vm.objects.entry_mut(value.index(0).unwrap() - 1) else { panic!() };
+    assert_eq!(t.set_range(100, 4200, integer(9)).unwrap_err(), "invalid sub-char-table geometry");
+    assert_eq!(t.set(4200, integer(9)).unwrap_err(), "invalid sub-char-table geometry");
+    assert_eq!(super::tests::WROTE.with(std::cell::Cell::get), writes);
+    assert_eq!(t.get(200).unwrap(), integer(7));
+    assert!(matches!(node(&vm, middle).lock().unwrap().slots[0], CharTableSlot::Value(v) if v == integer(7)));
+}
+
 #[test]
 fn literal_image_publication_explicitly_refuses_native_graph() {
     let mut vm = Vm::new();

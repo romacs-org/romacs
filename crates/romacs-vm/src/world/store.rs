@@ -23,9 +23,9 @@
 //!   recipe in build mode (`Launch::Build`), then `finish_build` publishes
 //!   the world.
 //!
-//! A build that fails is recorded, and how depends on why. A deterministic
-//! refusal, the fence's or a capture's (a resource of the builder, a VM not
-//! at rest), is a manifest bound to the records the build read: launches
+//! A build that fails is recorded, and how depends on why. What a build
+//! deterministically cannot capture, the tracking's or a capture's (a resource
+//! of the builder, a VM not at rest), is a manifest bound to the records the build read: launches
 //! boot from source until one of those changes. Any other failure (an I/O
 //! error, a full disk, a builder killed or timed out) is transient:
 //! `KEY.failed` counts the attempts, and a launch retries one minute after
@@ -53,6 +53,10 @@ const LOCK_ENV: &str = "ROMACS_WORLD_LOCK_FD";
 /// How long a launch waits for a builder before it boots from source and
 /// counts the build as failed.
 const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// A file's identity, as a publication changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileIdentity { device: u64, inode: u64, modified: (i64, i64) }
+
 /// How long after the Nth transient failure a launch builds again.
 const BACKOFF: [u64; 4] = [60, 600, 3600, 86400];
 
@@ -88,17 +92,17 @@ pub enum Launch<T> {
     Chain { reason: Json },
 }
 
-/// Why the arena refused an image, for a launch's reason: a range the
+/// Why the arena could not restore an image, for a launch's reason: a range the
 /// process could not map says at which step, with what error, and whether
 /// the range was reserved (not under an address-space limit, nor where
 /// something was mapped before the process's first allocation).
-fn refusal(refused: arena::Restore) -> Json {
+fn arena_reason(failed: arena::Restore) -> Json {
     match arena::map_failure() {
-        Some((step, errno, reserved)) if refused == arena::Restore::Map => {
+        Some((step, errno, reserved)) if failed == arena::Restore::Map => {
             let error = (errno != 0).then(|| std::io::Error::from_raw_os_error(errno).to_string());
             json!({"image": "Map", "step": step, "error": error, "reserved": reserved})
         }
-        _ => json!({"image": format!("{refused:?}")}),
+        _ => json!({"image": format!("{failed:?}")}),
     }
 }
 
@@ -111,11 +115,21 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(data).into()
 }
 
+/// Ok when MANIFEST's build captured everything it read, else what it did not.
+fn captured(manifest: &Json) -> Result<(), Json> {
+    match manifest["uncaptured"].as_array().filter(|r| !r.is_empty()) {
+        Some(uncaptured) => Err(json!({"uncaptured": uncaptured})),
+        None => Ok(()),
+    }
+}
+
 /// The content digest of FILE (`content_digest`), cached in STORE by the
 /// file's identity and change times: hashing tens or hundreds of megabytes
 /// at every launch would cost more than the rest of a restore. A write, a
-/// truncation or a change of mode changes the identity.
-fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> {
+/// truncation or a change of mode changes the identity. Without REMEMBER
+/// the cache is read, never filled: a store this process only reads
+/// (`World::restore_read_only`).
+fn file_digest(store: &Path, file: &std::fs::File, remember: bool) -> std::io::Result<[u8; 32]> {
     let meta = host::file_metadata(file)?;
     let cached = store.join("ids").join(identity_name(&meta));
     if let Ok(text) = host::read_store_file(&cached)
@@ -124,7 +138,9 @@ fn file_digest(store: &Path, file: &std::fs::File) -> std::io::Result<[u8; 32]> 
         return Ok(digest.try_into().expect("32 bytes"));
     }
     let digest = content_digest(file, meta.len())?;
-    let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
+    if remember {
+        let _ = store_subdir(&store.join("ids")).and_then(|()| host::write_store_file(&cached, hex(&digest)));
+    }
     Ok(digest)
 }
 
@@ -255,19 +271,35 @@ const STORE_LOCK: &str = "store.lock";
 const MARKER_TEXT: &str = "romacs-world-store 1\n";
 
 /// The store directory: made, private and marked, where no directory is
-/// or an empty one is; any other is refused unless it holds a valid marker
+/// or an empty one is; any other is not used unless it holds a valid marker
 /// (`marker_error`). It must be owned by this user, private to them (§9.2),
-/// no symlink, and neither $HOME nor `/` (`owned_store`).
+/// and no symlink (`owned_store`); $HOME or `/` is used with a warning.
 fn private_store(store: &Path) -> std::io::Result<()> {
     let home = host::getenv("HOME").map(PathBuf::from);
     // Made, with whatever is missing on the way, relative to directories
     // checked on the way down.
     let dir = host::open_store_dir(store, true)?;
     owned_store(&dir, store, home.as_deref())?;
-    if host::store_dir_is_empty(dir.as_fd())? {
-        return write_marker(&dir);
+    // Marked and read under a lock on the directory itself, released as it
+    // closes: processes that start at once on a new store all find it
+    // empty, and one must make and write the marker before any other reads
+    // it, or the others' exclusive creation of it fails (EEXIST).
+    host::lock(&dir, host::Flock::Exclusive)?;
+    // Read through the directory opened again under the lock: btrfs lists
+    // to a directory's reader only the entries it had when the reader
+    // opened it, so a marker made since would not be seen through DIR.
+    let now = host::open_store_dir(store, false)?;
+    let identity = |fd: &std::os::fd::OwnedFd| -> std::io::Result<(u64, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        host::file_metadata(&std::fs::File::from(fd.try_clone()?)).map(|m| (m.dev(), m.ino()))
+    };
+    if identity(&now)? != identity(&dir)? {
+        return Err(std::io::Error::other(format!("world store {}: replaced while it was opened", store.display())));
     }
-    match marker_error(&dir) {
+    if host::store_dir_is_empty(now.as_fd())? {
+        return write_marker(&now);
+    }
+    match marker_error(&now) {
         None => Ok(()),
         Some(why) => Err(std::io::Error::other(format!("{} is no world store: {why}", store.display()))),
     }
@@ -318,21 +350,32 @@ fn marker_error(dir: &std::os::fd::OwnedFd) -> Option<String> {
     None
 }
 
-/// Refuse the store DIR, at STORE, unless this user owns it and no one
+/// Fail on the store DIR, at STORE, unless this user owns it and no one
 /// else may enter, and it is neither HOME nor `/`.
 fn owned_store(dir: &std::os::fd::OwnedFd, store: &Path, home: Option<&Path>) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let refuse = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
+    let fail = |why: &str| Err(std::io::Error::other(format!("world store {}: {why}", store.display())));
     let meta = host::file_metadata(&std::fs::File::from(dir.try_clone()?))?;
     if !meta.file_type().is_dir() {
-        return refuse("not a directory");
+        return fail("not a directory");
     }
-    if meta.uid() != host::euid() || meta.permissions().mode() & 0o777 != 0o700 {
-        return refuse("not private to this user (0700)");
+    if meta.uid() != host::euid() {
+        return fail("not this user's");
     }
+    // The home or the root directory as the store is the user's own doing (a
+    // store marks only a directory it found empty, `private_store`): it is
+    // used, with a warning, and never made private, which would change who
+    // may read them. Reset and prune remove only a world's own files there.
     let same = |other: &Path| host::metadata(other).is_ok_and(|m| (m.dev(), m.ino()) == (meta.dev(), meta.ino()));
-    if same(Path::new("/")) || home.is_some_and(same) {
-        return refuse("the home or root directory");
+    let home_or_root = same(Path::new("/")) || home.is_some_and(same);
+    if home_or_root {
+        host::event_line("romacs-world", &json!({"warning": "the world store is the home or root directory", "store": store.display().to_string()}));
+    }
+    // The user's own store, open to others: made private again, as a world
+    // maps its images and its directory holds no one else's.
+    if !home_or_root && meta.permissions().mode() & 0o777 != 0o700
+        && host::make_store_private(dir).is_err() {
+        return fail("open to others, and not made private (0700)");
     }
     Ok(())
 }
@@ -367,43 +410,84 @@ fn identity_entry(name: &str) -> bool {
         && fields[3..].iter().all(|f| f.split_once('.').is_some_and(|(a, b)| digits(a) && digits(b)))
 }
 
+/// The key of this executable, the libraries it loaded and RECIPE, the
+/// executable's digest through STORE's cache (REMEMBER as `file_digest`).
+fn world_key(store: &Path, recipe: &[String], remember: bool) -> std::io::Result<[u8; 32]> {
+    let executable = file_digest(store, &host::open_world_file("/proc/self/exe")?, remember)?;
+    let libraries = libraries_digest()
+        .map_err(|e| std::io::Error::other(format!("the libraries this process loaded cannot all be identified: {e}")))?;
+    let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
+    for line in recipe {
+        text.push_str(line);
+        text.push('\n');
+    }
+    Ok(sha256(text.as_bytes()))
+}
+
 impl World {
     /// RECIPE's world in STORE: the key of this executable and RECIPE.
     pub fn new(store: PathBuf, recipe: Vec<String>) -> std::io::Result<World> {
         let store = store_path(&store)?;
         private_store(&store)?;
-        let executable = file_digest(&store, &host::open_world_file("/proc/self/exe")?)?;
-        let libraries = libraries_digest()
-            .map_err(|e| std::io::Error::other(format!("the libraries this process loaded cannot all be identified: {e}")))?;
-        let mut text = format!("{FORMAT}\nexecutable {}\nlibraries {}\n", hex(&executable), hex(&libraries));
-        for line in &recipe {
-            text.push_str(line);
-            text.push('\n');
-        }
-        Ok(World { store, key: sha256(text.as_bytes()), recipe })
+        let key = world_key(&store, &recipe, true)?;
+        Ok(World { store, key, recipe })
     }
 
-    /// The world LINES add to this one's recipe: keyed by this world's key
-    /// and LINES, so it binds all this one does (an init layer,
-    /// `super::layer`).
-    pub fn layered(&self, lines: Vec<String>) -> World {
-        let text = format!("{FORMAT}\nbase {}\n{}\n", hex(&self.key), lines.join("\n"));
-        let mut recipe = self.recipe.clone();
-        recipe.extend(lines);
-        World { store: self.store.clone(), key: sha256(text.as_bytes()), recipe }
+    /// Whether RECIPE's world in STORE, a store this process only reads,
+    /// is current, writing nothing there: what an installer asks before it
+    /// keeps an installation's world, so every record is asked again, as a
+    /// build would (a Lisp tree updated in place stales it). A launch only
+    /// restores it (`restore_read_only`).
+    #[must_use]
+    pub fn ready_read_only(store: &Path, recipe: Vec<String>) -> bool {
+        World::read_only(store, recipe, true).is_ok()
+    }
+
+    /// RECIPE's world in STORE, read only, and its image opened, when it was
+    /// published for this executable and RECIPE and the image is the one
+    /// bound; with REPLAY, when its records also still hold.
+    fn read_only(store: &Path, recipe: Vec<String>, replay: bool) -> Result<(World, std::fs::File), Json> {
+        let fail = |e: std::io::Error| json!({"store": e.to_string()});
+        let store = store_path(store).map_err(fail)?;
+        checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
+        let key = world_key(&store, &recipe, false).map_err(fail)?;
+        let world = World { store, key, recipe };
+        let manifest = if replay { world.valid_manifest() } else { world.published_manifest() }
+            .map_err(|reason| world.explained(reason))?;
+        let image = world.checked_image(&manifest, false)?;
+        Ok((world, image))
+    }
+
+    /// RECIPE's world restored from STORE, a store this process only reads:
+    /// an installation's (`EXECUTABLE.worlds`), which its installer built
+    /// with the executable and the copy of the Lisp tree beside it. Its key
+    /// binds the executable, its libraries and RECIPE; what else its build
+    /// read is the installation's own, so its records are kept in its
+    /// manifest (`lisp_identity` reads them) but not asked again. Nothing is
+    /// made or written there, no lock taken, no use stamped and the digest
+    /// cache, which the installer's build filled, is only read. No launch
+    /// prunes such a store or builds in it.
+    ///
+    /// # Errors
+    ///
+    /// Why the world is not usable: worlds unavailable to this process, a
+    /// store that is no private one of this user's, a missing manifest, or
+    /// an image the arena cannot adopt.
+    pub fn restore_read_only<T: super::safe::SnapshotSafe + 'static>(store: &Path, recipe: Vec<String>)
+        -> Result<(World, Box<Vm>, T), Json> {
+        if !arena::active() {
+            return Err(json!("no arena"));
+        }
+        let (world, image) = World::read_only(store, recipe, false)?;
+        match arena::adopt(&image) {
+            arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
+                .ok_or_else(|| json!({"image": "made for another key"})),
+            failed => Err(arena_reason(failed)),
+        }
     }
 
     fn file(&self, suffix: &str) -> PathBuf {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
-    }
-
-    /// The refusals of a build on these very inputs, when one stands: its
-    /// records all hold, so building again would refuse the same.
-    pub fn standing_refusal(&self) -> Option<Vec<Json>> {
-        match self.valid_manifest() {
-            Err(reason) => reason.get("refused")?.as_array().cloned(),
-            Ok(_) => None,
-        }
     }
 
     /// The identity of this world's Lisp, from its published manifest
@@ -430,18 +514,23 @@ impl World {
         self.usable().is_ok()
     }
 
-    /// Hold this world in use for the process's life (`prune` keeps it),
-    /// as a restored launch holds the world it restored: for a world a
-    /// launch boots beside, its layer's base.
-    pub fn keep(&self) {
-        self.mark_use();
+    /// The manifest as its build published it.
+    fn published(&self) -> Result<Json, Json> {
+        let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
+        serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))
+    }
+
+    /// The manifest, when its build captured everything it read.
+    fn published_manifest(&self) -> Result<Json, Json> {
+        let manifest = self.published()?;
+        captured(&manifest)?;
+        Ok(manifest)
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
     /// read, asked again, gives the same answer.
     fn valid_manifest(&self) -> Result<Json, Json> {
-        let text = host::read_store_file(self.file(".json")).map_err(|e| json!({"missing": e.to_string()}))?;
-        let manifest: Json = serde_json::from_str(&text).map_err(|e| json!({"manifest": e.to_string()}))?;
+        let manifest = self.published()?;
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let mut expected = record.clone();
             if let Some(fields) = expected.as_object_mut() { fields.remove("site"); }
@@ -450,17 +539,15 @@ impl World {
                 now => return Err(json!({"stale": expected, "now": now})),
             }
         }
-        if let Some(refusals) = manifest["refusals"].as_array().filter(|r| !r.is_empty()) {
-            return Err(json!({"refused": refusals}));
-        }
+        captured(&manifest)?;
         Ok(manifest)
     }
 
     /// The image MANIFEST names, opened, when its content is the one it
-    /// binds.
-    fn checked_image(&self, manifest: &Json) -> Result<std::fs::File, Json> {
+    /// binds; REMEMBER as `file_digest` takes it.
+    fn checked_image(&self, manifest: &Json, remember: bool) -> Result<std::fs::File, Json> {
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| json!({"missing": e.to_string()}))?;
-        let digest = file_digest(&self.store, &image).map_err(|e| json!({"image": e.to_string()}))?;
+        let digest = file_digest(&self.store, &image, remember).map_err(|e| json!({"image": e.to_string()}))?;
         match manifest["image"].as_str() {
             Some(bound) if bound == hex(&digest) => Ok(image),
             bound => Err(json!({"image": {"bound": bound, "now": hex(&digest)}})),
@@ -472,9 +559,10 @@ impl World {
     /// them: every path absolute. With WAIT a missing or stale world is
     /// built first, or the running build waited for, and the launch then
     /// boots from it; ON_WAIT runs once before the launch blocks for that,
-    /// so its embedder can say so.
+    /// with why the world was not usable (`explained`), so its embedder can
+    /// say so.
     pub fn launch<T: super::safe::SnapshotSafe + 'static>(&self, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool,
-                                                          on_wait: impl FnOnce()) -> Launch<T> {
+                                                          on_wait: impl FnOnce(&Json)) -> Launch<T> {
         if building() {
             host::unset_env(BUILD_ENV);
             return Launch::Build;
@@ -495,7 +583,7 @@ impl World {
         let (image, manifest) = usable;
         // Mapped and marked in use under the store's lock: `prune` then
         // finds this world held, or does not find it at all.
-        let _store = self.store_lock(libc::LOCK_SH);
+        let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
                 Some((vm, carry)) => {
@@ -504,33 +592,90 @@ impl World {
                 }
                 None => Launch::Chain { reason: json!({"image": "made for another key"}) },
             },
-            refused => Launch::Chain { reason: refusal(refused) },
+            failed => Launch::Chain { reason: arena_reason(failed) },
         }
     }
 
     /// The world made usable without mapping it: its manifest when it
     /// already holds, else once a build made it so (built here, holding the
-    /// lock from the check through the spawn, or waited for). The reason it
-    /// could not be, otherwise, as `launch` would boot from source for.
-    pub fn prepare(&self, builder_args: impl FnOnce() -> Vec<OsString>) -> Result<Json, Json> {
+    /// lock from the check through the spawn, or waited for); ON_BUILD runs
+    /// first, as `launch`'s ON_WAIT does. The reason it could not be,
+    /// otherwise, as `launch` would boot from source for.
+    pub fn prepare(&self, builder_args: impl FnOnce() -> Vec<OsString>, on_build: impl FnOnce(&Json)) -> Result<Json, Json> {
         if disabled() {
             return Err(json!("ROMACS_WORLD=off"));
         }
         match self.usable() {
             Ok((_, manifest)) => Ok(manifest),
-            Err(reason) => self.build_for(reason, builder_args, true, || {}).map(|(_, manifest)| manifest),
+            Err(reason) => self.build_for(reason, builder_args, true, on_build).map(|(_, manifest)| manifest),
+        }
+    }
+
+    /// A test's costly boot from RECIPE's world in STORE: its VM restored,
+    /// reinitialized and past `romacs-world-restart`, so the test takes the
+    /// startup steps in its own process (its environment, temporary
+    /// directory and user are its own, not the builder's), with what the
+    /// builder carried; None to boot from source. Only a process that runs
+    /// one test (`host::one_test_process`), whose global allocator is the
+    /// arena and which maps no image yet may map one: under libtest's
+    /// threads, which run many tests in one process, the mapping would be
+    /// raced, and a process maps one image. A missing or stale world is built
+    /// first by a builder that runs the same test again (this process's own
+    /// arguments); BUILD gives it the VM and the carry, in build mode. The
+    /// builder first deletes the worlds of this executable before it was
+    /// rebuilt, and exits once it has built, or failed to; the test then
+    /// boots from source.
+    ///
+    /// # Panics
+    ///
+    /// When the restored VM's `romacs-world-restart` fails: the world is
+    /// the test's to answer for.
+    #[must_use]
+    pub fn for_test<T: super::safe::SnapshotSafe + super::safe::Schema + 'static>(store: PathBuf, recipe: &[String],
+                                                            build: impl FnOnce() -> Result<(Vm, T), String>) -> Option<(Vm, T)> {
+        // Before the key, which reads this executable.
+        if !host::one_test_process() || !arena::serves_heap() || arena::mapped_image().is_some() {
+            return None;
+        }
+        // Its family (`family`) is the whole recipe's and this
+        // executable's: the worlds a build prunes are those of this
+        // executable before it was rebuilt, never another boot's.
+        let exe = host::current_exe().ok()?;
+        let world = World::new(store, vec![format!("consumer test: {}", recipe.join("; ")), format!("exe {}", exe.display())]).ok()?;
+        match world.launch::<T>(host::own_arguments, true, |_| {}) {
+            Launch::Restored { mut vm, carry, .. } => {
+                vm.world_reinit();
+                if let Err(error) = vm.eval_source("(romacs-world-restart)") {
+                    panic!("a restored test world: romacs-world-restart: {error}");
+                }
+                Some((*vm, carry))
+            }
+            Launch::Build => {
+                // The family's other worlds are of this executable before it
+                // was rebuilt, which nothing restores: gone before the build.
+                if let Err(error) = world.prune_family_to_current() {
+                    eprintln!("test world: prune failed: {error}");
+                }
+                let outcome = world.begin_build().map_err(|e| e.to_string())
+                    .and_then(|()| world.build(|| build().map(|(vm, carry)| (vm, carry, Json::Null))));
+                if let Err(error) = &outcome {
+                    eprintln!("test world: {error}");
+                }
+                host::exit_at_once(i32::from(outcome.is_err()))
+            }
+            Launch::Chain { .. } => None,
         }
     }
 
     /// The world restored, when it is usable now, without building: for a
     /// worker isolate, which runs its spawner's exact world or nothing
-    /// (lisp/romacs/vm/isolate.el `isolate-world-unavailable').
+    /// (lisp/vm/isolate.el `isolate-world-unavailable').
     pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
         if !arena::active() {
             return Err(json!("no arena"));
         }
         let (image, _manifest) = self.usable()?;
-        let _store = self.store_lock(libc::LOCK_SH);
+        let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
                 Some((vm, carry)) => {
@@ -539,7 +684,7 @@ impl World {
                 }
                 None => Err(json!({"image": "made for another key"})),
             },
-            refused => Err(json!({"image": format!("{refused:?}")})),
+            failed => Err(json!({"image": format!("{failed:?}")})),
         }
     }
 
@@ -547,23 +692,24 @@ impl World {
     /// record and the image's content.
     fn usable(&self) -> Result<(std::fs::File, Json), Json> {
         let manifest = self.valid_manifest()?;
-        Ok((self.checked_image(&manifest)?, manifest))
+        Ok((self.checked_image(&manifest, true)?, manifest))
     }
 
     /// The world's image and manifest once a build made them usable, for a
     /// launch that found them not for REASON: built here, holding the lock from its
     /// check through the spawn; or waited for while another builds. Without
     /// WAIT a builder is started, and the launch boots from source. The
-    /// reason to boot from source otherwise: a refusal on these inputs, a
+    /// reason to boot from source otherwise: what these inputs left uncaptured, a
     /// transient failure not yet due a retry, or a failed or timed-out
     /// build.
     fn build_for(&self, reason: Json, builder_args: impl FnOnce() -> Vec<OsString>, wait: bool,
-                 on_wait: impl FnOnce()) -> Result<(std::fs::File, Json), Json> {
+                 on_wait: impl FnOnce(&Json)) -> Result<(std::fs::File, Json), Json> {
+        let mut reason = self.explained(reason);
+        let first = reason.clone();
         let mut on_wait = Some(on_wait);
-        let mut announce = || if let Some(f) = on_wait.take() { f() };
-        let mut reason = reason;
+        let mut announce = || if let Some(f) = on_wait.take() { f(&first) };
         let lock = loop {
-            if reason.get("refused").is_some() {
+            if reason.get("uncaptured").is_some() {
                 return Err(json!({"world": reason}));
             }
             if let Some(seconds) = self.retry_in() {
@@ -592,6 +738,7 @@ impl World {
             return Ok(usable);
         }
         let attempts = self.failures().map(|f| f.0);
+        let published = self.publication();
         if wait {
             announce();
         }
@@ -607,21 +754,24 @@ impl World {
             std::thread::spawn(move || {
                 let mut child = child;
                 let status = child.wait();
-                world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts);
+                world.note_builder_end(status.map(|s| s.to_string()).map_err(|e| e.to_string()), attempts, published);
             });
             return Err(json!({"world": reason, "builder": pid}));
         }
         let ended = wait_bounded(child, BUILD_TIMEOUT);
-        self.note_builder_end(ended.clone(), attempts);
+        self.note_builder_end(ended.clone(), attempts, published);
         self.usable().map_err(|now| json!({"world": now, "builder": ended.err().unwrap_or_else(|| "built".into())}))
     }
 
     /// After a builder ended (ENDED, its status or why there is none):
-    /// record a failure it could not record itself, unless it published or
-    /// recorded one since ATTEMPTS.
-    fn note_builder_end(&self, ended: Result<String, String>, attempts: Option<u64>) {
-        let recorded = self.failures().map(|f| f.0) != attempts || self.usable().is_ok()
-            || self.valid_manifest().is_err_and(|r| r.get("refused").is_some());
+    /// record a failure it could not record itself, unless it recorded one
+    /// since ATTEMPTS or published since the manifest was PUBLISHED. A world
+    /// it published is no builder failure even when it is stale already, its
+    /// inputs changed while it built (a Lisp tree edited meanwhile): a later
+    /// launch builds it again as it builds any stale world, with no backoff.
+    fn note_builder_end(&self, ended: Result<String, String>, attempts: Option<u64>, published: Option<FileIdentity>) {
+        let recorded = self.failures().map(|f| f.0) != attempts || self.publication() != published
+            || self.usable().is_ok() || self.valid_manifest().is_err_and(|r| r.get("uncaptured").is_some());
         if !recorded {
             let why = match ended { Ok(status) => format!("the builder ended: {status}"), Err(e) => e };
             let _ = self.record_transient(&why);
@@ -630,11 +780,10 @@ impl World {
 
     /// The world's lock, if no builder holds it.
     fn try_lock(&self) -> std::io::Result<Option<std::fs::File>> {
-        use std::os::fd::AsRawFd;
-        let _store = self.store_lock(libc::LOCK_SH)?;
+        let _store = self.store_lock(host::Flock::Shared)?;
         let file = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
         pause_for_test();
-        Ok((unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file))
+        Ok(host::lock(&file, host::Flock::TryExclusive)?.then_some(file))
     }
 
     /// The store-wide lock, `STORE/store.lock`, taken as KIND and held
@@ -643,8 +792,8 @@ impl World {
     /// world's own lock or use file, or maps an image; `prune` and `reset`
     /// hold it exclusive while they unlink: no process is then between
     /// opening such a file and locking it.
-    fn store_lock(&self, kind: i32) -> std::io::Result<std::fs::File> {
-        lock_store(&self.store, kind)
+    fn store_lock(&self, how: host::Flock) -> std::io::Result<std::fs::File> {
+        lock_store(&self.store, how)
     }
 
     /// Wait up to TIMEOUT for the builder holding the lock to end: whether
@@ -684,6 +833,14 @@ impl World {
         command.spawn()
     }
 
+    /// The published manifest's identity: a publication renames a new file
+    /// into place, so another identity means another publication.
+    fn publication(&self) -> Option<FileIdentity> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = host::metadata(&self.file(".json")).ok()?;
+        Some(FileIdentity { device: meta.dev(), inode: meta.ino(), modified: (meta.mtime(), meta.mtime_nsec()) })
+    }
+
     /// The transient failures recorded since the last success: how many,
     /// and when the last one was (seconds since the epoch).
     fn failures(&self) -> Option<(u64, u64)> {
@@ -710,11 +867,10 @@ impl World {
     /// Hold `KEY.use` shared for this process's life, stamped with the time:
     /// the world is in use, and was just now (`prune`).
     fn mark_use(&self) {
-        use std::os::fd::AsRawFd;
-        let Ok(_store) = self.store_lock(libc::LOCK_SH) else { return };
+        let Ok(_store) = self.store_lock(host::Flock::Shared) else { return };
         if let Ok(file) = host::open_store_file(self.file(".use"), host::StoreOpen::Write { create: true, truncate: false }) {
             let _ = file.set_modified(host::clock());
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
+            if host::lock(&file, host::Flock::TryShared).unwrap_or(false) {
                 std::mem::forget(file);
             }
         }
@@ -733,51 +889,49 @@ impl World {
         Ok(p)
     }
 
-    /// A builder's read roots beside RECIPE's: the pinned table and the
-    /// binary's own (`sandbox::build_roots`).
-    pub fn build_roots(&self, recipe: Vec<PathBuf>) -> Vec<PathBuf> {
-        super::sandbox::build_roots(recipe, &self.store)
-    }
-
-    /// A builder, once it holds the lock: confine this thread to ROOTS,
-    /// writing only in the store, and record in build mode. The lock is
-    /// held until the process exits.
-    pub fn begin_build(&self, roots: &[PathBuf]) -> std::io::Result<()> {
+    /// A builder, once it holds the lock: record in build mode. The builder
+    /// reads what its user can; the host boundary records each read, and
+    /// nothing it cannot capture reaches the image. The lock is held until
+    /// the process exits.
+    pub fn begin_build(&self) -> std::io::Result<()> {
         // The launcher's lock, handed on; taking it again on the same open
         // file only confirms it.
-        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::fd::FromRawFd;
         let handed = host::getenv(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
         host::unset_env(LOCK_ENV);
         // Without one, the world's lock is opened and locked under the
         // store's, held until the flock is: `prune` cannot unlink it between.
         let mut store = None;
         let lock = match handed {
+            // UNSAFE(a descriptor inherited by number has no safe owner: from_raw_fd is unsafe)
+            // SAFETY: the launcher handed this process the world's lock at FD,
+            // named in LOCK_ENV, which is read once and removed above, so no
+            // other owner in this process holds it.
             Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
             None => {
-                store = Some(self.store_lock(libc::LOCK_SH)?);
+                store = Some(self.store_lock(host::Flock::Shared)?);
                 let lock = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
                 pause_for_test();
                 lock
             }
         };
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        if !host::lock(&lock, host::Flock::TryExclusive)? {
             return Err(std::io::Error::other("another builder holds the lock"));
         }
         drop(store);
-        unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
+        host::close_on_exec(&lock)?;
         std::mem::forget(lock);
         self.remove_abandoned()?;
-        super::sandbox::confine_publishing(roots, &self.store)?;
         let seed = self.key[..4].try_into().expect("4 bytes");
         host::enter_build(host::Pinned { clock: host::clock(), pid: 4242, seed });
         Ok(())
     }
 
-    /// The manifest of a build that read TRACE, with REFUSALS and EVENTS.
-    fn manifest(&self, trace: &Json, refusals: Json, events: Json) -> Json {
+    /// The manifest of a build that read TRACE, with LIVE_ENTRIES and EVENTS.
+    fn manifest(&self, trace: &Json, uncaptured: Json, events: Json) -> Json {
         let records: Vec<&Json> = trace["records"].as_array().map(|r| r.iter().filter(|r| host::keyed(r)).collect()).unwrap_or_default();
         json!({"format": FORMAT, "key": hex(&self.key), "recipe": self.recipe,
-               "records": records, "refusals": refusals, "events": events,
+               "records": records, "uncaptured": uncaptured, "events": events,
                "built": host::clock().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())})
     }
 
@@ -796,7 +950,7 @@ impl World {
     /// failure leaves: a step's failure is transient, retried after a while
     /// (`retry_in`), and `finish_build` records its own. The image's
     /// length, or the failure to report.
-    pub fn build<T: super::safe::SnapshotSafe + 'static>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
+    pub fn build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, steps: impl FnOnce() -> Result<(Vm, T, Json), String>)
         -> Result<usize, String> {
         match steps() {
             Ok((vm, carry, events)) => self.finish_build(vm, carry, events),
@@ -808,10 +962,10 @@ impl World {
         }
     }
 
-    /// Record a build's refusal on its inputs, REFUSALS with the records of
+    /// Record what a build on its inputs could not capture, UNCAPTURED, with the records of
     /// TRACE: launches boot from source until a record changes.
-    fn record_refusal(&self, trace: &Json, refusals: Json) -> std::io::Result<()> {
-        let manifest = self.manifest(trace, refusals, json!({}));
+    fn record_uncaptured(&self, trace: &Json, uncaptured: Json) -> std::io::Result<()> {
+        let manifest = self.manifest(trace, uncaptured, json!({}));
         self.publish(".json", &serde_json::to_vec(&manifest).map_err(std::io::Error::other)?)
     }
 
@@ -842,26 +996,26 @@ impl World {
 
     /// The builder's end: check what startup read, then publish VM, with
     /// CARRY beside it, as this world's image, and EVENTS, what the recipe
-    /// printed, in its manifest. A build with any refusal publishes its
+    /// printed, in its manifest. A build that could not capture anything publishes its
     /// manifest only, so launches boot from source until its records
     /// change. The image's length.
-    fn finish_build<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
+    fn finish_build<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, events: Json) -> Result<usize, String> {
         vm.world_check_inputs();
         // Kept to the end: whatever fails from here on is recorded with it.
         let trace = host::leave_build().ok_or("no world build was recording")?;
-        if trace["refusals"].as_array().is_some_and(|r| !r.is_empty()) {
-            self.record_refusal(&trace, trace["refusals"].clone()).map_err(|e| e.to_string())?;
-            return Err(format!("world build refused: {}", trace["refusals"]));
+        if trace["uncaptured"].as_array().is_some_and(|r| !r.is_empty()) {
+            self.record_uncaptured(&trace, trace["uncaptured"].clone()).map_err(|e| e.to_string())?;
+            return Err(format!("world not captured: {}", trace["uncaptured"]));
         }
         match self.publish_world(vm, carry, &trace, events) {
             Ok(len) => {
                 let _ = host::remove_file(self.file(".failed"));
                 Ok(len)
             }
-            // A capture refusal is the VM's state, which the same inputs
+            // A VM a capture cannot take is the VM's state, which the same inputs
             // make again; anything else (a full disk, an I/O error) may pass.
-            Err(error) if error.starts_with("world capture refused") => {
-                let _ = self.record_refusal(&trace, json!([{"kind": "capture", "error": error}]));
+            Err(error) if error.starts_with("no world captured") => {
+                let _ = self.record_uncaptured(&trace, json!([{"kind": "capture", "error": error}]));
                 Err(error)
             }
             Err(error) => {
@@ -873,8 +1027,8 @@ impl World {
 
     /// Capture VM and CARRY as this world's image and publish it with the
     /// manifest of TRACE and EVENTS: the image's length.
-    fn publish_world<T: super::safe::SnapshotSafe + 'static>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
-        let mut manifest = self.manifest(trace, trace["refusals"].clone(), events);
+    fn publish_world<T: super::safe::SnapshotSafe + super::safe::Schema>(&self, mut vm: Vm, carry: T, trace: &Json, events: Json) -> Result<usize, String> {
+        let mut manifest = self.manifest(trace, trace["uncaptured"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
         vm.collect_compacting();
@@ -882,13 +1036,17 @@ impl World {
             return Err("world image: the tables did not compact".into());
         }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
-        let len = image::capture(vm, carry, &file, self.key)?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        read_only(&temporary).map_err(|e| e.to_string())?;
-        host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string())?;
+        let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
+            file.sync_all().map_err(|e| e.to_string())?;
+            read_only(&temporary).map_err(|e| e.to_string())?;
+            host::rename(&temporary, self.file(".rwi")).map_err(|e| e.to_string()).map(|()| len)
+        });
+        // An image not placed goes now: what it holds of a full store (in
+        // memory, a tmpfs) is not to wait for the next build's sweep.
+        let len = placed.inspect_err(|_| { let _ = host::remove_file(&temporary); })?;
         // Hashed from the file as published, which also caches it.
         let image = host::open_store_file(self.file(".rwi"), host::StoreOpen::Read).map_err(|e| e.to_string())?;
-        let digest = file_digest(&self.store, &image).map_err(|e| e.to_string())?;
+        let digest = file_digest(&self.store, &image, true).map_err(|e| e.to_string())?;
         manifest["image"] = json!(hex(&digest));
         self.publish(".json", &serde_json::to_vec(&manifest).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         Ok(len)
@@ -913,37 +1071,38 @@ struct Stored {
     bytes: u64,
     /// A builder or a restored process holds it.
     busy: bool,
-    /// It has a manifest and no image: a build's refusal on its inputs,
-    /// which a launch resolving a layer reads (romacs-vm-gui world.rs).
-    refusal: bool,
+    /// It has a manifest and no image: what a build on its inputs could not
+    /// capture, which keeps a launch from building it again.
+    uncaptured: bool,
 }
 
-/// The worlds of WORLDS to delete, family by family (`plan_family`).
-fn prune_plan(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+/// The worlds of WORLDS to delete, family by family (`plan_family`), each
+/// keeping at most MOST beside those it must.
+fn prune_plan(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let mut families: Vec<&str> = worlds.iter().map(|w| w.family.as_str()).collect();
     families.sort_unstable();
     families.dedup();
     families.into_iter()
-        .flat_map(|family| plan_family(&worlds.iter().filter(|w| w.family == family).cloned().collect::<Vec<_>>(), current, now))
+        .flat_map(|family| plan_family(&worlds.iter().filter(|w| w.family == family).cloned().collect::<Vec<_>>(), current, now, most))
         .collect()
 }
 
 /// The worlds of WORLDS, one family's, to delete, CURRENT's kept: those a
 /// builder or a restored process holds are kept too, and the others, most
 /// recently used first, while they were used within `UNUSED` and the family
-/// stays within `MOST_WORLDS` worlds and `MOST_BYTES` bytes. A refusal is
+/// stays within MOST worlds (`MOST_WORLDS` but for a test's) and
+/// `MOST_BYTES` bytes. A manifest of what was not captured is
 /// kept while it is within `UNUSED`, outside the bounds: forgotten, the
-/// next launch would build its refused inputs again, as an init layer's
-/// resolution does after each one it forgets.
-fn plan_family(worlds: &[Stored], current: &str, now: u64) -> Vec<String> {
+/// next launch would build its inputs again.
+fn plan_family(worlds: &[Stored], current: &str, now: u64, most: usize) -> Vec<String> {
     let kept = |w: &&Stored| w.key == current || w.busy;
-    let refusal = |w: &&Stored| w.refusal && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
+    let uncaptured = |w: &&Stored| w.uncaptured && !kept(w) && now.saturating_sub(w.used) <= UNUSED;
     let (mut count, mut bytes) = worlds.iter().filter(kept).fold((0, 0), |(c, b), w| (c + 1, b + w.bytes));
-    let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w) && !refusal(w)).collect();
+    let mut others: Vec<&Stored> = worlds.iter().filter(|w| !kept(w) && !uncaptured(w)).collect();
     others.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.key.cmp(&b.key)));
     let mut delete = vec![];
     for world in others {
-        if now.saturating_sub(world.used) <= UNUSED && count < MOST_WORLDS && bytes + world.bytes <= MOST_BYTES {
+        if now.saturating_sub(world.used) <= UNUSED && count < most && bytes + world.bytes <= MOST_BYTES {
             count += 1;
             bytes += world.bytes;
         } else {
@@ -960,7 +1119,7 @@ fn world_file(name: &str) -> Option<(&str, &str)> {
 }
 
 /// Forget STORE's failure records: every world's transient failures and
-/// refused manifests, so its next launch builds again. With EVERYTHING,
+/// manifests of what was not captured, so its next launch builds again. With EVERYTHING,
 /// every world, the plans, the digest cache and the pinned table too,
 /// leaving the marker and the store lock. Only a marked store is touched
 /// (`checked_store`), and in it only regular files and real directories
@@ -975,20 +1134,20 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         return Ok(0);
     }
     checked_store(store, home)?;
-    let _store = lock_store(store, libc::LOCK_EX)?;
+    let _store = lock_store(store, host::Flock::Exclusive)?;
     let mut removed = 0;
     for entry in host::read_dir(store)? {
         let name = entry?.file_name();
         let Some(name) = name.to_str() else { continue };
         let path = store.join(name);
-        let refused = || host::read_store_file(&path).ok()
+        let uncaptured = || host::read_store_file(&path).ok()
             .and_then(|text| serde_json::from_str::<Json>(&text).ok())
-            .is_some_and(|m| m["refusals"].as_array().is_some_and(|r| !r.is_empty()));
+            .is_some_and(|m| m["uncaptured"].as_array().is_some_and(|r| !r.is_empty()));
         // A world's lock or use file goes only when no process holds it.
         let held = |suffix: &str| ["lock", "use"].contains(&suffix) && host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
-            .is_ok_and(|file| { use std::os::fd::AsRawFd; (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0 });
+            .is_ok_and(|file| !host::lock(&file, host::Flock::TryExclusive).unwrap_or(false));
         match world_file(name) {
-            Some((_, suffix)) if regular(&path) && !held(suffix) && (everything || suffix == "failed" || (suffix == "json" && refused())) => {
+            Some((_, suffix)) if regular(&path) && !held(suffix) && (everything || suffix == "failed" || (suffix == "json" && uncaptured())) => {
                 host::remove_file(&path)?;
                 removed += 1;
             }
@@ -1018,7 +1177,11 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         if real_dir(&plans) {
             for entry in host::read_dir(&plans)? {
                 let name = entry?.file_name().to_string_lossy().into_owned();
-                if super::layer::plan_file(&name) && regular(&plans.join(&name)) {
+                // The plans of the init layers Romacs once kept: a hex
+                // digest and `.json`, or `.last.json`.
+                let key = name.strip_suffix(".last.json").or_else(|| name.strip_suffix(".json"));
+                let plan = key.is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()));
+                if plan && regular(&plans.join(&name)) {
                     host::remove_file(plans.join(&name))?;
                     removed += 1;
                 }
@@ -1034,22 +1197,32 @@ impl World {
     /// for files no kept world or executable is, once they are a week old.
     /// The worlds deleted.
     pub fn prune(&self) -> std::io::Result<Vec<String>> {
-        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), false)
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), false, MOST_WORLDS)
     }
 
     /// `prune` within this world's family only: what a batch builder
     /// bounds, so it never deletes a GUI's world, however long unused.
     pub fn prune_family(&self) -> std::io::Result<Vec<String>> {
-        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true)
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true, MOST_WORLDS)
     }
 
-    fn prune_in(&self, home: Option<&Path>, own_family: bool) -> std::io::Result<Vec<String>> {
-        use std::os::fd::AsRawFd;
+    /// `prune_family` keeping no world beside this one and those in use: a
+    /// test executable's (`for_test`), whose others are of the executables
+    /// it was before it was rebuilt, which no process can restore.
+    ///
+    /// # Errors
+    ///
+    /// When the store cannot be read or a world's files removed.
+    pub fn prune_family_to_current(&self) -> std::io::Result<Vec<String>> {
+        self.prune_in(host::getenv("HOME").map(PathBuf::from).as_deref(), true, 0)
+    }
+
+    fn prune_in(&self, home: Option<&Path>, own_family: bool, most: usize) -> std::io::Result<Vec<String>> {
         use std::os::unix::fs::MetadataExt;
         checked_store(&self.store, home)?;
         // No process is between opening a world's lock or use file and
         // locking it while this is held: each lock below is as it is.
-        let _store = self.store_lock(libc::LOCK_EX)?;
+        let _store = self.store_lock(host::Flock::Exclusive)?;
         let mut files: std::collections::BTreeMap<String, Vec<(String, std::fs::Metadata)>> = Default::default();
         for entry in host::read_dir(&self.store)? {
             let entry = entry?;
@@ -1062,7 +1235,7 @@ impl World {
         }
         let held = |path: PathBuf| -> bool {
             host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
-                .is_ok_and(|file| (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0)
+                .is_ok_and(|file| !host::lock(&file, host::Flock::TryExclusive).unwrap_or(false))
         };
         let worlds: Vec<Stored> = files.iter().map(|(key, files)| Stored {
             key: key.clone(),
@@ -1070,18 +1243,18 @@ impl World {
             used: files.iter().filter(|(n, _)| [".use", ".json", ".rwi"].iter().any(|s| n.ends_with(s))).map(|(_, m)| m.mtime().max(0) as u64).max().unwrap_or(0),
             bytes: files.iter().map(|(_, m)| m.blocks() * 512).sum(),
             busy: held(self.store.join(format!("{key}.lock"))) || held(self.store.join(format!("{key}.use"))),
-            refusal: files.iter().any(|(n, _)| n.ends_with(".json")) && !files.iter().any(|(n, _)| n.ends_with(".rwi")),
+            uncaptured: files.iter().any(|(n, _)| n.ends_with(".json")) && !files.iter().any(|(n, _)| n.ends_with(".rwi")),
         }).collect();
         let current = hex(&self.key);
         let mine = self.family(&current);
         let worlds: Vec<Stored> = worlds.into_iter().filter(|w| !own_family || w.family == mine).collect();
         let mut deleted = vec![];
-        for key in prune_plan(&worlds, &current, now_seconds()) {
+        for key in prune_plan(&worlds, &current, now_seconds(), most) {
             // Taken now, these say no builder or restored process came since.
             let locks: Vec<std::fs::File> = ["lock", "use"].iter()
                 .filter_map(|s| host::open_store_file(self.store.join(format!("{key}.{s}")), host::StoreOpen::Write { create: false, truncate: false }).ok())
                 .collect();
-            if locks.iter().any(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0) {
+            if locks.iter().any(|f| !host::lock(f, host::Flock::TryExclusive).unwrap_or(false)) {
                 continue;
             }
             for (name, _) in &files[&key] {
@@ -1123,6 +1296,60 @@ impl World {
     }
 }
 
+impl World {
+    /// REASON, why this world is not usable, with the store's nearest world
+    /// when its manifest is missing (`nearest`): a miss says which recipe
+    /// line differed.
+    fn explained(&self, mut reason: Json) -> Json {
+        if reason.get("missing").is_some() && let Some(nearest) = self.nearest() {
+            reason["nearest"] = nearest;
+        }
+        reason
+    }
+
+    /// For a world this store lacks: of the `NEAREST_LOOKED` worlds it
+    /// published last, the latest of this one's family whose recipe differs
+    /// from this one's in the fewest lines, with its key and those lines
+    /// (`recipe_differences`); when none differ, the executable or the
+    /// libraries it loaded did. None when the store holds no such world.
+    fn nearest(&self) -> Option<Json> {
+        use std::os::unix::fs::MetadataExt;
+        let own = hex(&self.key);
+        let mut published: Vec<(i64, String)> = host::read_dir(&self.store).ok()?.flatten().filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let (key, suffix) = world_file(&name)?;
+            let meta = host::symlink_metadata(entry.path()).ok().filter(|m| m.file_type().is_file())?;
+            (suffix == "json" && key != own).then(|| (meta.mtime(), key.to_owned()))
+        }).collect();
+        published.sort_unstable_by(|a, b| b.cmp(a));
+        let now: Vec<&str> = self.recipe.iter().map(String::as_str).collect();
+        let mine = family(now.iter().copied());
+        let (lines, key) = published.into_iter().take(NEAREST_LOOKED).filter_map(|(_, key)| {
+            let manifest: Json = serde_json::from_str(&host::read_store_file(self.store.join(format!("{key}.json"))).ok()?).ok()?;
+            let was: Vec<&str> = manifest["recipe"].as_array()?.iter().filter_map(Json::as_str).collect();
+            (family(was.iter().copied()) == mine).then(|| (recipe_differences(&was, &now), key))
+        }).min_by_key(|(lines, _)| lines.len())?;
+        let differs = if lines.is_empty() { json!("the executable or the libraries it loaded") } else { json!(lines) };
+        Some(json!({"key": key, "differs": differs}))
+    }
+}
+
+/// How many of the worlds a store published last a miss looks at
+/// (`World::nearest`): each manifest is read whole.
+const NEAREST_LOOKED: usize = 8;
+
+/// The lines in which recipe WAS and recipe NOW differ, each paired with
+/// the other's line of its name (its first word) when there is one:
+/// `{"was": LINE, "now": LINE}`, null for the side that lacks it.
+fn recipe_differences(was: &[&str], now: &[&str]) -> Vec<Json> {
+    let name = |line: &str| line.split(' ').next().unwrap_or_default().to_owned();
+    let gone: Vec<&str> = was.iter().copied().filter(|line| !now.contains(line)).collect();
+    let added: Vec<&str> = now.iter().copied().filter(|line| !was.contains(line)).collect();
+    let paired = gone.iter().map(|line| json!({"was": line, "now": added.iter().find(|new| name(new) == name(line))}));
+    let alone = added.iter().filter(|new| !gone.iter().any(|line| name(line) == name(new))).map(|new| json!({"was": null, "now": new}));
+    paired.chain(alone).collect()
+}
+
 /// The lines of RECIPE that say which consumer, launch and executable a
 /// world is for: its family.
 fn family<'a>(recipe: impl Iterator<Item = &'a str>) -> String {
@@ -1130,11 +1357,10 @@ fn family<'a>(recipe: impl Iterator<Item = &'a str>) -> String {
 }
 
 /// STORE's store-wide lock (`World::store_lock`), taken as KIND.
-fn lock_store(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
-    use std::os::fd::AsRawFd;
+fn lock_store(store: &Path, how: host::Flock) -> std::io::Result<std::fs::File> {
     let file = host::open_store_file(store.join(STORE_LOCK), host::StoreOpen::Write { create: true, truncate: false })?;
-    if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
-        return Err(std::io::Error::last_os_error());
+    if !host::lock(&file, how)? {
+        return Err(std::io::ErrorKind::WouldBlock.into());
     }
     Ok(file)
 }
@@ -1271,16 +1497,21 @@ mod tests {
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(plain.join(format!("{key}.failed")), "{}").unwrap();
         assert!(reset_in(&plain, true, None).is_err());
-        assert!(world(&plain).prune_in(None, false).is_err());
+        assert!(world(&plain).prune_in(None, false, MOST_WORLDS).is_err());
         assert!(plain.join(format!("{key}.failed")).exists());
-        // Marked, but open to others: refused.
+        // Marked and the user's, but open to others: made private, then reset.
         let open = marked_store("open");
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(reset_in(&open, true, None).is_err());
-        // The home directory, or the root, even marked: refused.
+        assert!(reset_in(&open, true, None).is_ok());
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o700);
+        // The home directory, marked by its user: used, with a warning,
+        // and never made private.
         let home = marked_store("home");
-        assert!(reset_in(&home, true, Some(&home)).is_err());
-        assert!(world(&home).prune_in(Some(&home), false).is_err());
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(reset_in(&home, true, Some(&home)).is_ok());
+        assert!(world(&home).prune_in(Some(&home), false, MOST_WORLDS).is_ok());
+        assert_eq!(std::fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o755);
+        // The root, unmarked, is no store.
         assert!(reset_in(Path::new("/"), true, None).is_err());
         // Symlinks: never followed, their targets intact.
         let outside = std::env::temp_dir().join(format!("romacs-store-{}-outside", std::process::id()));
@@ -1297,7 +1528,7 @@ mod tests {
         assert!(outside.join("1-2-3-4.5-6.7").exists() && outside.join("cwd").exists());
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         assert!(!store.join(format!("{key}.json")).exists() && store.join(MARKER).exists());
-        world(&store).prune_in(None, false).unwrap();
+        world(&store).prune_in(None, false, MOST_WORLDS).unwrap();
         assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "mine");
         for dir in [plain, open, home, outside, store] {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
@@ -1356,10 +1587,46 @@ mod tests {
         // Nor are reset and prune led through one to a real store.
         private_store(&elsewhere.join("store")).unwrap();
         assert!(reset_in(&root.join("linked/store"), true, None).is_err());
-        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
+        assert!(World { store: root.join("linked/store"), key: [0; 32], recipe: vec![] }.prune_in(None, false, MOST_WORLDS).is_err());
         assert!(elsewhere.join("store").join(MARKER).exists());
         mode(&shared, 0o700);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Launches that start at once on a new store each find it a store:
+    /// one marks it, the others read its marker once written. Its failure
+    /// on btrfs, whose reader of a directory sees only the entries it had
+    /// when opened, was a temporary directory there (the train's).
+    #[test]
+    fn a_new_store_opened_at_once_by_many_is_marked_once() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-at-once", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        let start = std::sync::Barrier::new(16);
+        let opened: Vec<std::io::Result<()>> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..16).map(|_| scope.spawn(|| { start.wait(); private_store(&store) })).collect();
+            threads.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        let marker = std::fs::read_to_string(store.join(MARKER));
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(opened.iter().all(Result::is_ok), "{}: {opened:?}", store.display());
+        assert_eq!(marker.unwrap(), MARKER_TEXT);
+    }
+
+    /// A build whose image cannot be written or placed leaves no image
+    /// behind in the store: here no image is captured, as this test process's
+    /// heap is not a builder's arena.
+    #[test]
+    fn an_image_not_placed_is_removed() {
+        let store = std::env::temp_dir().join(format!("romacs-store-{}-unplaced", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        private_store(&store).unwrap();
+        let world = World { store: store.clone(), key: [7; 32], recipe: vec![] };
+        let error = world.publish_world(Vm::new(), (), &json!({"uncaptured": []}), json!({})).unwrap_err();
+        assert!(error.contains("arena"), "{error}");
+        let left: Vec<String> = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".rwi")).collect();
+        let _ = std::fs::remove_dir_all(&store);
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]
@@ -1404,7 +1671,7 @@ mod tests {
         symlink(&target, linked.join(MARKER)).unwrap();
         assert!(private_store(&linked).is_err());
         assert!(reset_in(&linked, true, None).is_err());
-        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None, false).is_err());
+        assert!(World { store: linked.clone(), key: [0; 32], recipe: vec![] }.prune_in(None, false, MOST_WORLDS).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), MARKER_TEXT);
         // A dangling one: never created through.
         let dangling = dir("dangling");
@@ -1420,8 +1687,8 @@ mod tests {
     }
 
     fn fifo(path: &Path) {
-        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "{}", path.display());
+        use rustix::fs::{FileType, Mode, CWD};
+        rustix::fs::mknodat(CWD, path, FileType::Fifo, Mode::from_raw_mode(0o600), 0).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     }
 
     /// Run F on a thread of its own: its result, unless it blocks.
@@ -1450,7 +1717,7 @@ mod tests {
         let w = world.clone();
         assert!(bounded("the manifest", move || w.valid_manifest()).is_err());
         let w = world.clone();
-        assert!(bounded("the image", move || w.checked_image(&json!({"image": "00"}))).is_err());
+        assert!(bounded("the image", move || w.checked_image(&json!({"image": "00"}), true)).is_err());
         // As the digest cache's entry for a real file: not read, and the
         // digest made from the file itself.
         let input = dir.join("input");
@@ -1459,7 +1726,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("ids")).unwrap();
         fifo(&dir.join("ids").join(identity_name(&meta)));
         let store = dir.clone();
-        let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap())).unwrap();
+        let digest = bounded("the digest cache", move || file_digest(&store, &std::fs::File::open(input).unwrap(), true)).unwrap();
         assert_eq!(digest, tree_digest(b"bytes"));
         let w = world.clone();
         assert!(bounded("the world's lock", move || w.try_lock()).is_err());
@@ -1470,13 +1737,13 @@ mod tests {
         let w = world.clone();
         assert!(bounded("the builder's log", move || w.start_builder(vec![], tempfile_lock(&w))).is_err());
         let w = world.clone();
-        bounded("pruning", move || w.prune_in(None, false)).unwrap();
+        bounded("pruning", move || w.prune_in(None, false, MOST_WORLDS)).unwrap();
         let store = dir.clone();
         bounded("reset", move || reset_in(&store, true, None)).unwrap();
         std::fs::remove_file(dir.join(STORE_LOCK)).unwrap();
         fifo(&dir.join(STORE_LOCK));
         let store = dir.clone();
-        assert!(bounded("the store lock", move || lock_store(&store, libc::LOCK_SH)).is_err());
+        assert!(bounded("the store lock", move || lock_store(&store, host::Flock::Shared)).is_err());
         let _ = std::fs::remove_dir_all(marked);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1551,7 +1818,7 @@ mod tests {
     }
 
     fn stored(key: &str, days_ago: u64, mib: u64, busy: bool) -> Stored {
-        Stored { key: key.repeat(64 / key.len()), family: String::new(), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy, refusal: false }
+        Stored { key: key.repeat(64 / key.len()), family: String::new(), used: 100 * 86400 - days_ago * 86400, bytes: mib << 20, busy, uncaptured: false }
     }
 
     #[test]
@@ -1562,32 +1829,35 @@ mod tests {
         // to three worlds in all.
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
                       stored("d", 3, 300, false), stored("e", 8, 300, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("d"), key("e")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("d"), key("e")]);
         // The current world and held ones stay, whatever their age or the
         // cap; they count toward it.
         let worlds = [stored("a", 30, 300, false), stored("b", 20, 300, true), stored("c", 1, 300, false), stored("d", 0, 300, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("c")]);
         // Four GiB at most: the older of two large worlds goes.
         let worlds = [stored("a", 0, 1024, false), stored("b", 1, 2048, false), stored("c", 2, 2048, false)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("c")]);
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("c")]);
         // Each family is bounded alone: three batch worlds beside three of
         // a GUI's, whichever family the current world is of.
         let batch = |k, days| Stored { family: "launch batch".into(), ..stored(k, days, 300, false) };
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
                       batch("d", 0), batch("e", 1), batch("f", 2), batch("g", 3)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("g")]);
-        assert_eq!(prune_plan(&worlds, &key("g"), now), [key("f")]);
-        // A refusal within a week stays beside three worlds and counts toward
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("g")]);
+        assert_eq!(prune_plan(&worlds, &key("g"), now, MOST_WORLDS), [key("f")]);
+        // What was not captured within a week stays beside three worlds and counts toward
         // nothing; an older one goes.
-        let refusal = |k, days| Stored { refusal: true, ..stored(k, days, 1, false) };
+        let uncaptured = |k, days| Stored { uncaptured: true, ..stored(k, days, 1, false) };
         let worlds = [stored("a", 0, 300, false), stored("b", 1, 300, false), stored("c", 2, 300, false),
-                      refusal("d", 0), refusal("e", 8)];
-        assert_eq!(prune_plan(&worlds, &key("a"), now), [key("e")]);
+                      uncaptured("d", 0), uncaptured("e", 8)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now, MOST_WORLDS), [key("e")]);
+        // A test's family keeps none beside the current and the held
+        // (`prune_family_to_current`), however recent.
+        let worlds = [stored("a", 0, 300, false), stored("b", 0, 300, false), stored("c", 0, 300, true), uncaptured("d", 0)];
+        assert_eq!(prune_plan(&worlds, &key("a"), now, 0), [key("b")]);
     }
 
     #[test]
     fn pruning_deletes_an_old_worlds_files_and_spares_one_in_use() {
-        use std::os::fd::AsRawFd;
         let dir = marked_store("prune");
         std::fs::create_dir_all(dir.join("ids")).unwrap();
         let current = World { store: dir.clone(), key: [0xaa; 32], recipe: vec![] };
@@ -1605,7 +1875,7 @@ mod tests {
         std::fs::File::options().write(true).open(&stale_id).unwrap().set_modified(week_ago).unwrap();
         // A restored process maps HELD: it holds its use lock shared.
         let in_use = std::fs::File::open(dir.join(format!("{held}.use"))).unwrap();
-        assert_eq!(unsafe { libc::flock(in_use.as_raw_fd(), libc::LOCK_SH) }, 0);
+        assert!(host::lock(&in_use, host::Flock::Shared).unwrap());
         assert_eq!(current.prune().unwrap(), [old.clone()]);
         let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         assert!(!names.iter().any(|n| n.starts_with(&old)), "{names:?}");
@@ -1637,6 +1907,64 @@ mod tests {
         // world of it unused for over a week, which `prune` deletes.
         assert_eq!(current.prune_family().unwrap(), ["b".repeat(64)]);
         assert_eq!(current.prune().unwrap(), ["f".repeat(64)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A builder that published a world has not failed, even when the world
+    /// is stale already because its inputs changed while it built (a Lisp
+    /// tree edited meanwhile): no failure is counted, so no backoff holds the
+    /// next launch, which builds it again as any stale world. A builder that
+    /// published nothing has failed.
+    #[test]
+    fn a_world_published_stale_is_no_builder_failure() {
+        let dir = marked_store("published-stale");
+        let world = World { store: dir.clone(), key: [0xab; 32], recipe: vec!["consumer t".into()] };
+        // A record that no longer holds: a variable the build saw set, unset now.
+        let manifest = json!({"records": [{"kind": "env", "form": "process", "name": "ROMACS_TEST_PUBLISHED_STALE", "value": "built"}],
+                              "uncaptured": []});
+        let before = world.publication();
+        world.publish(".json", manifest.to_string().as_bytes()).unwrap();
+        assert!(world.usable().is_err(), "the world holds");
+        world.note_builder_end(Ok("exit status: 0".into()), None, before);
+        assert_eq!(world.failures(), None, "a published world counted as a builder failure");
+        // Nothing published since the manifest was read: the builder failed.
+        world.note_builder_end(Ok("exit status: 0".into()), None, world.publication());
+        assert_eq!(world.failures().map(|f| f.0), Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_miss_names_the_recipe_lines_that_differ_from_the_nearest_world() {
+        let dir = marked_store("nearest");
+        let recipe = |lines: &[&str]| lines.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>();
+        let gui = ["consumer g", "launch live", "geometry 800 600", "font default", "lisp /l"];
+        let now = host::clock();
+        // Published worlds: the latest a batch world, of another family;
+        // the oldest differing in two lines; one between them differing in
+        // its geometry alone.
+        let worlds: [(&str, Vec<String>, u64); 3] = [
+            ("b", recipe(&["consumer g", "launch batch", "geometry 80 25"]), 1),
+            ("c", recipe(&["consumer g", "launch live", "geometry 800 600", "font Iosevka", "lisp /other"]), 3),
+            ("d", recipe(&["consumer g", "launch live", "geometry 900 700", "font default", "lisp /l"]), 2),
+        ];
+        for (key, lines, hours) in &worlds {
+            let file = std::fs::File::create(dir.join(format!("{}.json", key.repeat(64)))).unwrap();
+            std::io::Write::write_all(&mut &file, json!({"recipe": lines}).to_string().as_bytes()).unwrap();
+            file.set_modified(now - std::time::Duration::from_secs(hours * 3600)).unwrap();
+        }
+        let missing = World { store: dir.clone(), key: [0xaa; 32], recipe: recipe(&gui) };
+        let reason = missing.explained(json!({"missing": "No such file"}));
+        assert_eq!(reason["nearest"], json!({"key": "d".repeat(64), "differs": [{"was": "geometry 900 700", "now": "geometry 800 600"}]}), "{reason}");
+        // A line only one side has is named alone; the same recipe means
+        // another executable or its libraries.
+        assert_eq!(recipe_differences(&["consumer g", "init /i"], &["consumer g", "floor 5"]),
+                   [json!({"was": "init /i", "now": null}), json!({"was": null, "now": "floor 5"})]);
+        let same = World { recipe: worlds[2].1.clone(), ..missing.clone() };
+        assert_eq!(same.explained(json!({"missing": "x"}))["nearest"]["differs"], "the executable or the libraries it loaded");
+        // A stale world says which record changed already: nothing is added.
+        assert_eq!(missing.explained(json!({"stale": {}})), json!({"stale": {}}));
+        let alone = World { recipe: recipe(&["consumer other", "launch live"]), ..missing };
+        assert_eq!(alone.explained(json!({"missing": "x"})), json!({"missing": "x"}));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

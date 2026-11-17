@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """perkey_live's validation, without a compositor or binary."""
+import argparse
+from pathlib import Path
 import unittest
 
 import perkey_live as pk
@@ -20,6 +22,36 @@ class Counters(unittest.TestCase):
         self.assertEqual(pk.perf_count(line, idle=True), 0)
         with self.assertRaises(pk.Invalid):
             pk.perf_count('<not counted>,,instructions:u,5000,100.00,,', idle=True)
+
+    def test_a_count_takes_in_threads_started_inside_it_only_when_it_inherits(self):
+        # perf stat -t counts a thread the counted one starts while it runs:
+        # a decode worker started inside a phase is not the evaluator's work.
+        alone = pk.perf_stat(42, 'out.txt', inherit=False)
+        self.assertIn('--no-inherit', alone)
+        self.assertNotIn('--no-inherit', pk.perf_stat(42, 'out.txt', inherit=True))
+        self.assertEqual(alone[alone.index('-t') + 1], '42')
+        self.assertEqual(alone[alone.index('-o') + 1], 'out.txt')
+
+
+class Options(unittest.TestCase):
+    BASE = ['--binary', 'romacs-vm-gui', '--output', 'out']
+
+    def test_a_session_counts_the_evaluator_alone_unless_inherit_is_asked(self):
+        self.assertFalse(pk.arguments(self.BASE).inherit)
+        self.assertFalse(pk.Session(pk.arguments(self.BASE), None, False).inherit)
+        self.assertTrue(pk.Session(pk.arguments(self.BASE + ['--inherit']), None, False).inherit)
+
+    def test_a_harness_with_options_of_its_own_counts_the_evaluator_alone(self):
+        # images_typing_live, theme_live and the others build perkey's
+        # Session over options that name no `inherit'.
+        self.assertFalse(pk.Session(argparse.Namespace(keys=40), None, False).inherit)
+
+    def test_a_shared_home_is_absolute_and_keeps_no_state(self):
+        session = pk.Session(pk.arguments(self.BASE + ['--home', 'shared']), Path('/tmp/perkey-x'), False)
+        env = session.env()
+        self.assertTrue(Path(env['HOME']).is_absolute() and Path(env['XDG_CACHE_HOME']).is_absolute())
+        self.assertEqual(env['XDG_STATE_HOME'], '/tmp/perkey-x/state')              # the session's own
+        self.assertEqual(pk.Session(pk.arguments(self.BASE), Path('/tmp/perkey-x'), False).env()['HOME'], '/tmp/perkey-x/home')
 
 
 class Expectations(unittest.TestCase):

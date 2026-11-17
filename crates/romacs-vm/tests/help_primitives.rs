@@ -1,4 +1,4 @@
-//! The help primitives (lisp/romacs/romacs-help.el, keymap.c and syntax.c in
+//! The help primitives (lisp/romacs-help.el, keymap.c and syntax.c in
 //! GNU) against pinned GNU 32.0.50 on the loadup chain, each case's value
 //! with the text it inserted and that text's `font-lock-face' runs:
 //! `text-char-description', `internal-describe-syntax-value',
@@ -7,30 +7,10 @@
 //! ranges split by shadowing, `current-minor-mode-maps' and
 //! `describe-buffer-bindings' under a prefix and with an overriding map.
 //! A character above #x10FFFF, which a Romacs buffer cannot hold, is
-//! U+FFFD in GNU's text too (DIVERGENCES.md VM2-HELP-EXTENDED).
-use romacs_vm::Vm;
-use std::path::Path;
-
-fn bootstrapped(root: &Path) -> Vm {
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('=')
-            && !name.ends_with('~') && !name.ends_with(".orig") && !name.ends_with(".rej"))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+//! U+FFFD in GNU's text too (ledger/divergences VM2-HELP-EXTENDED).
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// Definitions both sides evaluate first: HP-OUT runs BODY in a temporary
 /// buffer and gives its value, text and face runs.
@@ -96,11 +76,10 @@ fn gnu(oracle: &str, form: &str) -> String {
 
 #[test]
 fn help_primitives_match_pinned_gnu() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
     let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let expected: Vec<String> = CASES.iter().map(|form| gnu(&oracle, form)).collect();
     let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
-        let mut vm = bootstrapped(&root);
+        let mut vm = gnu_lisp(&[]);
         vm.eval_source(SETUP).unwrap();
         CASES.iter().map(|form| vm.eval_source(&format!("(prin1-to-string {form})")).and_then(|v| v.display())
             .map(|s| serde_json::from_str::<String>(&s).unwrap_or(s))).collect::<Vec<_>>()

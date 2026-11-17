@@ -41,6 +41,21 @@ fn replay_entire_observed_gnu_condition_catalog() {
     }
 }
 
+/// Romacs's own built-in condition, which GNU's catalog lacks, reads as
+/// GNU's do: its ancestry and its message, found by its name.
+#[test]
+fn romacs_builtin_condition_has_its_conditions_and_message() {
+    let mut vm = Vm::new();
+    for (property, expected) in [
+        ("error-conditions", "(not-unicode-string error)"),
+        ("error-message", "\"String is not Unicode text\""),
+    ] {
+        let form = json!(["get", ["quote", "not-unicode-string"], ["quote", property]]);
+        let entry = vm.compile(&Form::from_json(form).unwrap()).unwrap();
+        assert_eq!(vm.execute(entry).and_then(romacs_vm::Local::display), Ok(expected.to_owned()), "{property}");
+    }
+}
+
 #[test]
 fn replay_live_gnu_conditions_with_moving_projection_graphs() {
     let evidence: serde_json::Value =

@@ -43,6 +43,8 @@ const SIDES: &[(&str, Side)] = &[
     ("display.family_fonts", Own), ("display.font_families", Own), ("display.open_font", Own),
     ("display.char_font", Own), ("display.glyph_metrics", Own), ("display.clear_font_cache", Own),
     ("display.set_fontsets", Own), ("display.opened_def_font", Own),
+    // fonts.rs: the launch screen's report, a lock in the host's own process.
+    ("display.startup_progress", Own),
     // main.rs: hooks that call the paint sender.
     ("display.set_frame_alpha", Through), ("display.set_visual_config", Through), ("display.lose_device", Through),
     // fonts.rs: native models go to the renderer through the paint sender.
@@ -63,33 +65,38 @@ const SIDES: &[(&str, Side)] = &[
     // window or pointer.
     ("input.input_pending", Through), ("input.key_pending", Through), ("input.redisplay", Through), ("input.next_event", Through),
     ("input.clipboard_text", Through), ("input.set_clipboard_text", Through), ("input.display_animates", Through),
-    ("input.native_window", Through), ("input.pointer", Through),
+    ("input.native_window", Through), ("input.pointer", Through), ("input.take_key_repeats", Through),
+    ("input.top_level_frames", Through), ("input.focus_frame", Through), ("input.event_frame", Through),
     // prompt.rs: a list kept for the next wait, and the images' own flag.
     ("input.watch_processes", Own), ("input.images_behind", Own),
-    // terminal_service.rs: each session's terminal is locked against its
-    // pty thread, and the mailbox against every session's.
-    ("terminal.create", Cross), ("terminal.send", Cross), ("terminal.resize", Cross), ("terminal.input_state", Cross),
-    ("terminal.changed_sessions", Cross), ("terminal.snapshot", Cross), ("terminal.close", Cross),
+    // terminal_service.rs: each session's mirror is locked against the
+    // thread that reads its helper's pushes, and the mailbox against every
+    // session's.
+    ("terminal.create", Cross), ("terminal.adopt", Cross), ("terminal.send", Cross), ("terminal.resize", Cross),
+    ("terminal.input_state", Cross), ("terminal.changed_sessions", Cross), ("terminal.snapshot", Cross),
+    ("terminal.close", Cross), ("terminal.transport_counts", Cross), ("terminal.helper_version", Cross),
     // paint_host.rs, one-way commands queued for the render thread:
     ("sender.submit_scene", Cross), ("sender.load_image", Cross), ("sender.retire_image", Cross),
     ("sender.debug_lose_device", Cross), ("sender.set_frame_alpha", Cross), ("sender.set_title", Cross),
-    ("sender.hide_primary", Cross), ("sender.set_visual_config", Cross), ("sender.raise_primary", Cross),
+    ("sender.hide", Cross), ("sender.set_visual_config", Cross), ("sender.raise", Cross),
     ("sender.shutdown", Cross), ("sender.on_render", Cross), ("sender.create_model", Cross), ("sender.update_model", Cross), ("sender.free_surface", Cross),
     // requests that block for the render thread's answer (a rendered
     // presentation, the clipboard, a window made):
     ("sender.wait_for_render", Cross), ("sender.clipboard_text", Cross), ("sender.set_clipboard_text", Cross),
-    ("sender.show_primary", Cross),
-    // and reads of state the render thread writes: its input channel,
-    // the latest rendered presentation, the lost images, the adapter and
-    // the pointer.
-    ("sender.input", Cross), ("sender.render_poll", Cross), ("sender.take_lost_images", Cross),
-    ("sender.images_reset_pending", Cross), ("sender.software_adapter", Cross), ("sender.pointer", Cross),
-    ("sender.model_renderer_live", Cross),
+    ("sender.realize", Cross),
+    // and reads of what the evaluator's own input bridge keeps of the
+    // render thread's events (romacs-display-runtime `input_bridge'): the
+    // queue of the rest, the latest rendered presentation, the lost images,
+    // the adapter, the pointer, key-repeat timing and the model renderer.
+    ("sender.input", Own), ("sender.render_poll", Own), ("sender.take_lost_images", Own),
+    ("sender.images_reset_pending", Own), ("sender.software_adapter", Own), ("sender.pointer", Own),
+    ("sender.take_key_repeats", Own),
+    ("sender.model_renderer_live", Own),
 ];
 
 /// The host.rs results that are the process's own: its clocks, counters,
 /// identity, entropy and environment.
-const OWN: &[&str] = &["monotonic", "clock", "boot-clock", "run-time", "instructions", "tid", "pid", "ppid", "processors",
+const OWN: &[&str] = &["monotonic", "clock", "boot-clock", "run-time", "instructions", "display-instructions", "tid", "pid", "ppid", "processors",
                        "entropy", "getenv", "environment", "cwd", "umask"];
 
 /// NAME's side.
@@ -165,6 +172,7 @@ impl DisplayHost for Counted<Box<dyn DisplayHost>> {
         fn set_frame_alpha(&mut self, frame: u64, alpha: [f32; 2], limit: f32);
         fn set_visual_config(&mut self, config: &romacs_display_protocol::VisualConfig);
         fn lose_device(&mut self) -> bool;
+        fn startup_progress(&mut self, stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) -> bool;
         fn decode_image(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
         fn release_image(&mut self, id: u64);
         fn begin_decode(&mut self, query: ImageQuery) -> Result<ImageFacts, String>;
@@ -190,18 +198,25 @@ impl HostInput for Counted<Box<dyn HostInput>> {
         fn display_animates(&mut self) -> Option<bool>;
         fn native_window(&mut self, action: NativeWindow) -> Option<bool>;
         fn pointer(&mut self) -> Option<(i32, i32)>;
+        fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts>;
+        fn top_level_frames(&mut self) -> bool;
+        fn event_frame(&mut self) -> Option<u64>;
+        fn focus_frame(&mut self, frame: u64);
     }
 }
 
 impl TerminalHost for Counted<Box<dyn TerminalHost>> {
     counted! { "terminal";
         fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String>;
+        fn adopt(&mut self, control: std::os::fd::OwnedFd, pty: Option<std::os::fd::OwnedFd>, columns: u16, rows: u16) -> Result<u64, String>;
         fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String>;
         fn resize(&mut self, session: u64, columns: u16, rows: u16) -> Result<(), String>;
         fn input_state(&mut self, session: u64) -> Result<TerminalInputState, String>;
         fn changed_sessions(&mut self) -> Vec<u64>;
         fn snapshot(&mut self, session: u64) -> Result<TerminalSnapshot, String>;
         fn close(&mut self, session: u64) -> Result<(), String>;
+        fn transport_counts(&mut self, session: u64) -> Option<(u64, u64)>;
+        fn helper_version(&mut self, session: u64) -> Option<u16>;
     }
 }
 

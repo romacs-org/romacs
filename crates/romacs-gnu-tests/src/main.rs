@@ -61,7 +61,7 @@ struct Args {
     invocation: Option<PathBuf>,
     /// `--world-trace OUT`: write the recipe's world-build trace to OUT.
     world_trace: Option<PathBuf>,
-    /// `--world-trace-child DIR`: set in the confined child that
+    /// `--world-trace-child DIR`: set in the child that
     /// `--world-trace` runs, with the directory of its pinned table.
     world_child: Option<PathBuf>,
     /// `--world-store DIR`: boot from the world of the loadup chain in DIR,
@@ -356,7 +356,7 @@ fn fresh_vm(args: &Args) -> Vm {
         }
     }
     // GNU batch runs on its initial terminal frame: 80 columns by 25 lines
-    // of 1x1 characters (DIVERGENCES.md VM2-WIN5).
+    // of 1x1 characters (ledger/divergences VM2-WIN5).
     if let Err(error) = vm.set_frame_geometry(80, 25, 1, 1) {
         emit(json!({"event": "setup", "ok": false, "phase": "batch-geometry", "error": error.to_string()}));
         std::process::exit(3);
@@ -441,9 +441,8 @@ fn evaluate() {
     let file = plan["file"].as_str().unwrap_or_else(|| usage()).to_owned();
     let forms = plan["forms"].as_array().cloned().unwrap_or_default();
 
-    if let Some((out, dir)) = &world_out {
-        let recipe = args.load_path.iter().chain(&args.preload).chain([&args.harness, &args.plan]).chain(&args.reporter);
-        world::begin(recipe.cloned().collect(), out, dir);
+    if world_out.is_some() {
+        world::begin();
     }
     let (mut vm, mut chain, from) = world::boot(&args);
     load_chain(&mut vm, &args, from, args.preload.len(), &mut chain);

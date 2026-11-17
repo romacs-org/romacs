@@ -278,8 +278,14 @@ impl Leaf<'_> {
     fn position_or_nil(position: Option<i64>) -> super::super::Out {
         position.map_or(Ok(Value::NIL), |p| Value::integer(p).map_err(Fault::Error))
     }
+    /// The start `recenter` gives WINDOW: a position, t when it keeps its
+    /// own, nil when no host lays it out.
     pub(crate) fn window_recenter_start(&mut self, window: Value, arg: Option<i64>, lines: (i64, i64)) -> super::super::Out {
-        Self::position_or_nil(self.vm.recenter_start(window, arg, lines).map_err(Fault::Error)?)
+        match self.vm.recenter_start(window, arg, lines).map_err(Fault::Error)? {
+            crate::window::Recentred::Start(start) => Value::integer(start).map_err(Fault::Error),
+            crate::window::Recentred::Kept => Ok(Value::TRUE),
+            crate::window::Recentred::Unlaid => Ok(Value::NIL),
+        }
     }
     pub(crate) fn window_scroll_start(&mut self, window: Value, start: i64, forward: bool, context: i64) -> super::super::Out {
         Self::position_or_nil(self.vm.scroll_start(window, start, forward, context).map_err(Fault::Error)?)
@@ -906,18 +912,18 @@ impl Leaf<'_> {
         Ok((b.line_of_byte(at).map_err(Fault::Error)? - b.line_of_byte(r.start).map_err(Fault::Error)?) as i64)
     }
 
-    /// How WINDOW labels its lines from its start, its buffer current.
-    pub(crate) fn window_line_numbers(&mut self, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
+    /// How WINDOW labels its lines shown from position FIRST, its buffer
+    /// current: GNU's iterator sizes the labels from the line it starts on.
+    pub(crate) fn window_line_numbers(&mut self, window: Value, first: i64) -> std::result::Result<Option<LineLabels>, Fault> {
         // Most windows show none: say so before measuring the window.
         let buffer = self.vm.window(window).map_err(Fault::Error)?.buffer;
         let mode = self.intern("display-line-numbers");
         if self.with_buffer(buffer, |leaf| leaf.variable_value(mode))?.is_none_or(|v| v == Value::NIL) { return Ok(None); }
         let area = self.windows().text_area(window, "redisplay")?;
-        let top = self.windows().window_end(window)?.2;
         self.with_buffer(area.buffer, |leaf| {
             // Redisplay makes the window's point the buffer's.
             let point = leaf.vm.window_point_value(window).map_err(Fault::Error)?.as_integer().map_err(Fault::Error)?;
-            leaf.line_numbers(&area, top, point)
+            leaf.line_numbers(&area, first, point)
         })
     }
 
@@ -1037,7 +1043,7 @@ impl Leaf<'_> {
     }
 
     /// The tab, header and mode lines MODE-LINES asks for. VM2 draws no
-    /// tab line (DIVERGENCES.md VM2-WIN3).
+    /// tab line (ledger/divergences VM2-WIN3).
     fn mode_line_heights(&mut self, area: &TextArea, mode_lines: Value) -> std::result::Result<i64, Fault> {
         let (mode_line, header_line) = (self.intern("mode-line"), self.intern("header-line"));
         let all = mode_lines == Value::TRUE;

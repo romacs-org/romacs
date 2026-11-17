@@ -5,6 +5,8 @@
 //! `eval-buffer' or an `eval' of a `defvar' (VM2-LATE-SPECIAL1).  Each case
 //! runs in pinned GNU and in Romacs's batch session; the printed values
 //! must be GNU's.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 /// (NAME, FORM): FORM's printed value, or its signal.
@@ -29,11 +31,10 @@ const CASES: &[(&str, &str)] = &[
     ("initializer-eval-defvar", "(list (let ((late-v 1) (late-k (eval '(defvar late-v 5) t))) (list late-v (symbol-value 'late-v) late-k)) late-v)"),
 ];
 
-fn run(binary: &str, dir: &std::path::Path, form: &str, romacs: bool) -> String {
+fn run(binary: &str, dir: &std::path::Path, form: &str) -> String {
     let wrapped = format!("(progn (add-to-list 'load-path {:?}) (prin1 (condition-case e {form} (error (list 'signal e)))))", dir.display().to_string());
     let mut command = Command::new(binary);
     command.args(["-Q", "--batch", "--eval", &wrapped]).current_dir(dir).env("HOME", dir).env("TMPDIR", dir);
-    if romacs { command.env("ROMACS_WORLD", "off"); }
     let output = command.output().unwrap();
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -46,7 +47,7 @@ fn late_specials_in_evaluated_forms_bind_as_gnu() {
     std::fs::write(dir.join("late-special-lib.el"), ";;; late-special-lib.el -*- lexical-binding: t -*-\n(defvar late-lib-var 1)\n(provide 'late-special-lib)\n").unwrap();
     let mut failures = vec![];
     for (name, form) in CASES {
-        let (expected, actual) = (run(&gnu, &dir, form, false), run(env!("CARGO_BIN_EXE_romacs-vm-gui"), &dir, form, true));
+        let (expected, actual) = (run(&gnu, &dir, form), run(installed::romacs(), &dir, form));
         if expected.is_empty() || actual != expected { failures.push(format!("{name}\n  GNU    {expected}\n  Romacs {actual}")); }
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -99,9 +100,11 @@ fn late_specials_in_loaded_files_bind_as_gnu() {
     assert_eq!(run(&gnu, &compiled, false), compiled_answer, "GNU loading .elc");
     assert_eq!(run_probe(&gnu, &compiled, false, &explicit(&compiled)), "(2 2)", "GNU loading the .el beside its .elc");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
-    // Source GNU would interpret: without a store, and with one but no `.elc'.
+    // Source GNU would interpret: without a store Romacs reads it as GNU
+    // does; with one it compiles the library into the store, as package.el
+    // compiles a package it installs, and runs it compiled.
     assert_eq!(run(romacs, &source, false), interpreted, "Romacs loading source");
-    assert_eq!(run(romacs, &source, true), interpreted, "Romacs loading source beside a store");
+    assert_eq!(run(romacs, &source, true), compiled_answer, "Romacs compiling a load-path library through a store");
     // A sibling `.elc': GNU would load compiled code.  Without a store
     // Romacs reads the source as GNU's compiled load would have it; with
     // one, the store's compile process makes the artifact, then a load runs it.

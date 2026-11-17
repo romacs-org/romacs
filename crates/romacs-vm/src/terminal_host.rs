@@ -4,16 +4,8 @@ use crate::{Value, Vm};
 /// sixteen base colours (`ansi-color-*' faces) a session has not set
 /// itself; a colour the session set, and the 256-colour cube and greys,
 /// remain literal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub enum TerminalColor { Foreground, Background, DimForeground, Ansi(u8), DimAnsi(u8), Rgb([u8; 3]) }
-romacs_snapshot::snapshot_enum!(TerminalColor {
-    TerminalColor::Foreground => (),
-    TerminalColor::Background => (),
-    TerminalColor::DimForeground => (),
-    TerminalColor::Ansi(f0) => (f0),
-    TerminalColor::DimAnsi(f0) => (f0),
-    TerminalColor::Rgb(f0) => (f0),
-});
 
 /// The sixteen base colours where no theme gives them: Alacritty's.
 pub const DEFAULT_ANSI: [[u8; 3]; 16] = [
@@ -27,14 +19,13 @@ pub const DEFAULT_ANSI: [[u8; 3]; 16] = [
 fn dim(rgb: [u8; 3]) -> [u8; 3] { rgb.map(|v| (f32::from(v) * 0.66) as u8) }
 
 /// An immutable cell colour projected without creating global Lisp faces.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct TerminalStyle {
     pub foreground: TerminalColor,
     pub background: TerminalColor,
     pub inverse: bool,
     pub hidden: bool,
 }
-romacs_snapshot::snapshot_struct!(TerminalStyle { foreground, background, inverse, hidden });
 
 impl Default for TerminalStyle {
     fn default() -> Self {
@@ -62,9 +53,8 @@ impl TerminalStyle {
 }
 
 /// A half-open UTF-8 byte range in the terminal's logical text projection.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub struct TerminalStyleRun { pub bytes: std::ops::Range<usize>, pub style: TerminalStyle }
-romacs_snapshot::snapshot_struct!(TerminalStyleRun { bytes, style });
 
 /// An owned terminal publication; no evaluator values cross the PTY boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,6 +97,17 @@ impl TerminalSnapshot {
 /// Per-evaluator native terminal service. Calls must not evaluate Lisp.
 pub trait TerminalHost {
     fn create(&mut self, shell: &str, directory: &str, columns: u16, rows: u16) -> Result<u64, String>;
+    /// A terminal that already runs, behind the control socket of its
+    /// helper process: one a keeper spawned for this session, or kept for
+    /// it across a restart. PTY is the master of the pty the spawner made
+    /// for it, when it made one: the helper takes it if its shell is not
+    /// started yet. A host with no helper processes has none.
+    ///
+    /// # Errors
+    /// The helper does not answer, or speaks a version this session cannot read.
+    fn adopt(&mut self, _control: std::os::fd::OwnedFd, _pty: Option<std::os::fd::OwnedFd>, _columns: u16, _rows: u16) -> Result<u64, String> {
+        Err("This terminal host adopts no helper process".into())
+    }
     fn send(&mut self, session: u64, bytes: &[u8]) -> Result<(), String>;
     fn resize(&mut self, session: u64, columns: u16, rows: u16) -> Result<(), String>;
     fn input_state(&mut self, session: u64) -> Result<TerminalInputState, String>;
@@ -114,8 +115,15 @@ pub trait TerminalHost {
     fn changed_sessions(&mut self) -> Vec<u64>;
     fn snapshot(&mut self, session: u64) -> Result<TerminalSnapshot, String>;
     fn close(&mut self, session: u64) -> Result<(), String>;
+    /// How many of SESSION's updates arrived as the whole grid, and how
+    /// many as a change to it; `None` for a host that has no such transport.
+    fn transport_counts(&mut self, _session: u64) -> Option<(u64, u64)> { None }
+    /// The record version SESSION's helper process speaks, for as long as
+    /// it lives; `None` for a host with no helper processes.
+    fn helper_version(&mut self, _session: u64) -> Option<u16> { None }
 }
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct TerminalBinding {
     pub(crate) buffer: Value,
     pub(crate) session: u64,
@@ -141,7 +149,6 @@ pub(crate) struct TerminalBinding {
     pub(crate) unremapped: Option<(u64, bool)>,
     pub(crate) unremapped_maps: Vec<Value>,
 }
-romacs_snapshot::snapshot_struct!(TerminalBinding { buffer, session, revision, away, columns, rows, styles, default_colors, cursor_byte, screen_start_byte, alternate, unremapped, unremapped_maps });
 
 impl TerminalBinding {
     pub(crate) fn new(buffer: Value, session: u64, columns: u16, rows: u16) -> Self {
@@ -549,9 +556,9 @@ impl Vm {
         let send = self.intern("romacs-term-send-key");
         // A keymap or local-map property at point comes first: the
         // character's (`get-char-property'), or the one an insertion there
-        // would inherit (`get-pos-property'), as romacs-keymap--local-map
-        // and keymap.c get_local_map find them.
-        // The reader widens before it looks (romacs-keymap--local-map): a
+        // would inherit (`get-pos-property'), as keymap.c get_local_map
+        // finds them (`Vm::current_active_maps').
+        // The reader widens before it looks: a
         // narrowed buffer goes through the loop.
         let point = match self.object(buffer)? {
             crate::data::Object::Buffer(text) if text.accessible() == (crate::coordinates::ByteOffset(0)..crate::coordinates::ByteOffset(text.as_str().len())) =>

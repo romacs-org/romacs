@@ -2,7 +2,7 @@
 use super::*;
 
 // GNU replaces its gstring cache and clears the face cache. VM2 composes no
-// characters and keeps neither cache (DIVERGENCES.md VM2-COMPOSITE1).
+// characters and keeps neither cache (ledger/divergences VM2-COMPOSITE1).
 defsubr! { name = "clear-composition-cache", gnu = "composite.c:692", effect = Global,
 fn clear_composition_cache(cx) {
     let _ = cx;
@@ -39,7 +39,7 @@ fn compose_region_internal(cx, start: Value, end: Value; optional components: Va
 defsubr! { name = "compose-string-internal", gnu = "composite.c:2029", effect = Global,
 fn compose_string_internal(cx, string: Value, start: Value, end: Value; optional components: Value, modification_func: Value) -> Step {
     // CHECK_STRING, then validate_subarray (fns.c).
-    let size = cx.string_view(string).map_err(|_| Fault::Wrong("stringp", string))?.chars as i64;
+    let size = cx.string_shape(string)?.0 as i64;
     let bound = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
         if v == Value::NIL { return Ok(default); }
         let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;

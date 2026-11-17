@@ -64,16 +64,22 @@ pub(super) struct DecorationRect {
 /// under the same descent-line rule and pixels above it, takes that
 /// glyph's position and thickness, so the run keeps its first glyph's font
 /// metrics (xdisp.c font_for_underline_metrics).  A wave is drawn apart:
-/// it neither takes nor gives a run's line.
+/// it neither takes nor gives a run's line.  A run is one window's, as GNU
+/// draws a window's underlines within its own glyph rows: a glyph of
+/// another window beside it starts its own.
 #[derive(Default)]
-pub(super) struct UnderlineRun(Option<(f32, f32, romacs_display_protocol::face::UnderlinePosition, romacs_display_protocol::face::UnderlineGeometry)>);
+pub(super) struct UnderlineRun(Option<((i64, f32, f32), romacs_display_protocol::face::UnderlinePosition, romacs_display_protocol::face::UnderlineGeometry)>);
+
+/// Where an underlined glyph is: its window, its x, its row's y, its width.
+pub(super) type UnderlineCell = (i64, f32, f32, f32);
 
 impl UnderlineRun {
-    /// The geometry of the underline of a glyph X..X+WIDTH on the row at
-    /// ROW placed by RULE, a WAVE or not, RESOLVE giving its own.
-    pub(super) fn geometry(&mut self, x: f32, row: f32, width: f32, rule: romacs_display_protocol::face::UnderlinePosition,
+    /// The geometry of the underline of a glyph in CELL (its window, x, row
+    /// and width) placed by RULE, a WAVE or not, RESOLVE giving its own.
+    pub(super) fn geometry(&mut self, cell: UnderlineCell, rule: romacs_display_protocol::face::UnderlinePosition,
                            wave: bool, resolve: impl FnOnce() -> romacs_display_protocol::face::UnderlineGeometry)
         -> romacs_display_protocol::face::UnderlineGeometry {
+        let (window, x, row, width) = cell;
         if wave {
             self.0 = None;
             return resolve();
@@ -85,10 +91,12 @@ impl UnderlineRun {
             _ => false,
         };
         let geometry = match self.0 {
-            Some((at, end, before, geometry)) if at == row && (end - x).abs() < 0.5 && same_rule(before, rule) => geometry,
+            // The run's window, row and right end.
+            Some(((in_window, at, end), before, geometry))
+                if in_window == window && at == row && (end - x).abs() < 0.5 && same_rule(before, rule) => geometry,
             _ => resolve(),
         };
-        self.0 = Some((row, x + width, rule, geometry));
+        self.0 = Some(((window, row, x + width), rule, geometry));
         geometry
     }
 
@@ -240,6 +248,7 @@ impl WgpuRenderer {
 
         let mut stats = GlyphRenderStats::new();
         stats.total_frame_glyphs = frame.glyphs.len();
+        crate::cost::add(crate::cost::GLYPHS_WALKED, frame.glyphs.len());
         let mut seen_single_keys: HashSet<GlyphKey> = HashSet::new();
         let mut seen_composed_keys: HashSet<ComposedGlyphKey> = HashSet::new();
         let faces = &frame.faces;
@@ -862,6 +871,7 @@ impl WgpuRenderer {
         let mut underline_run = UnderlineRun::default();
         for (glyph_index, glyph) in frame.glyphs.iter().enumerate() {
             if let FrameGlyph::Char {
+                window_id,
                 x,
                 y,
                 baseline,
@@ -918,7 +928,7 @@ impl WgpuRenderer {
                     if *underline == UnderlineStyle::None { underline_run.end(); }
                     if *underline != UnderlineStyle::None {
                         let ul_color = underline_color.as_ref().unwrap_or(fg);
-                        let geometry = underline_run.geometry(gx, gy, *width, ul_position, *underline == UnderlineStyle::Wave,
+                        let geometry = underline_run.geometry((window_id.get(), gx, gy, *width), ul_position, *underline == UnderlineStyle::Wave,
                                                               || ul_position.resolve(gy, *height, baseline_y, ul_thick));
                         let ul_y = geometry.top_y;
                         let line_thickness = geometry.thickness;
@@ -1770,6 +1780,7 @@ impl WgpuRenderer {
         stats.cache_hits = glyph_atlas.cache_hits_this_frame;
         stats.cache_misses = glyph_atlas.cache_misses_this_frame;
         stats.glyph_texture_uploads = glyph_atlas.cache_misses_this_frame;
+        glyph_atlas.count_font_identities();
         stats.log_if_enabled();
 
         #[cfg(feature = "video")]

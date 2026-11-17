@@ -181,6 +181,8 @@ impl ImageRenderState {
         load: ImageLoadToken,
         timeout: std::time::Duration,
     ) -> Option<ImageDecodeTerminal> {
+        // CLOCK: a Condvar::wait_timeout run on the Lisp thread, not the
+        // render loop: it bounds a wait, and samples nothing a frame shows.
         let deadline = std::time::Instant::now() + timeout;
         let mut terminals = self.lock_terminals();
         loop {
@@ -193,6 +195,7 @@ impl ImageRenderState {
             {
                 return Some(terminal);
             }
+            // CLOCK: what is left of that wait, on the Lisp thread.
             let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
             match self.terminal_changed.wait_timeout(terminals, remaining) {
                 Ok((guard, result)) => {
@@ -327,6 +330,8 @@ impl Default for FpsCounter {
             frame_count: 0,
             display_value: 0.0,
             frame_time_ms: 0.0,
+            // CLOCK: seeds the stopwatch over CPU render work
+            // (`begin_fps_cpu_span`), which a frame sample cannot measure.
             cpu_span_start: Instant::now(),
         }
     }
@@ -430,10 +435,6 @@ pub(super) struct PendingPointerDamage {
 impl PendingPointerDamage {
     pub(super) const fn new(key: PresentedAppearanceKey, rect: FrameRect) -> Self {
         Self { key, rect }
-    }
-
-    pub(super) const fn key(self) -> PresentedAppearanceKey {
-        self.key
     }
 
     #[cfg(test)]
@@ -840,12 +841,15 @@ pub(super) struct RenderApp {
 
     pub(super) gpu: Option<RenderGpuContext>,
     pub(super) gpu_startup: Option<super::gpu_startup::PendingGpu>,
+    /// Every GPU startup worker's thread, joined when the app is dropped.
+    pub(super) gpu_workers: super::gpu_startup::GpuWorkers,
     /// Last usable editor area for recreating a window during GPU startup.
     pub(super) pending_content_size: super::startup::InitialWindowSize,
     pub(super) gpu_startup_cancelled: Arc<std::sync::atomic::AtomicBool>,
     pub(super) startup_error: Option<String>,
     pub(super) startup_commands: std::collections::VecDeque<crate::thread_comm::RenderCommand>,
-    pub(super) frame_leases: HashMap<u64, Arc<std::sync::atomic::AtomicBool>>,
+    /// GNU's whole-frame opacity controls and native focus: the display's own.
+    pub(super) frame_opacity: crate::thread_comm::FrameOpacityState,
     pub(super) renderer: Option<WgpuRenderer>,
     /// Native decoder workers signal this callback after replacing a latest
     /// frame or publishing control state. Production installs a winit proxy;
@@ -893,6 +897,8 @@ pub(super) struct RenderApp {
     /// from the physical modifier keys' own key events.
     pub(super) modifier_sides: super::modifier_sides::ModifierSides,
     pub(super) key_repeats: super::key_repeat::KeyRepeats,
+    /// The frame counters' diagnostic lines (`frame_stats.rs`).
+    pub(super) stats_lines: super::frame_stats::StatsLines,
     /// The evaluator's busy indicator (busy_toast.rs).
     pub(super) busy_toast: super::busy_toast::BusyToast,
     /// How far the last scene from the evaluator got (`draw_fresh_scene').
@@ -1044,7 +1050,7 @@ impl RenderApp {
     ) -> Self {
         let mut frame_windows = GuiFrameWindowManager::new();
         // A deferred connection is not a frame transaction. Only a consumed
-        // RealizeFrame may publish its primary identity and cancellation lease.
+        // RealizeFrame may publish its primary identity.
         if !comms.keep_alive_without_frames {
             frame_windows.set_primary_pending(GuiFrameWindowState {
                 pending_scale_factor: None,
@@ -1081,11 +1087,12 @@ impl RenderApp {
             clipboard: Err("clipboard is unavailable before display initialization".to_owned()),
             gpu: None,
             gpu_startup: None,
+            gpu_workers: Default::default(),
             pending_content_size: super::startup::InitialWindowSize { width, height },
             gpu_startup_cancelled: Default::default(),
             startup_error: None,
             startup_commands: Default::default(),
-            frame_leases: Default::default(),
+            frame_opacity: Default::default(),
             menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
             #[cfg(feature = "video")]
@@ -1104,6 +1111,7 @@ impl RenderApp {
             modifier_state: winit::keyboard::ModifiersState::empty(),
             modifier_sides: super::modifier_sides::ModifierSides::default(),
             key_repeats: super::key_repeat::KeyRepeats::default(),
+            stats_lines: super::frame_stats::StatsLines::default(),
             busy_toast: super::busy_toast::BusyToast::default(),
             scene: SceneDraw::Drawn,
             pending_file_drops: Default::default(),

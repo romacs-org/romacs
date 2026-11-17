@@ -20,7 +20,6 @@ use super::glyphs::{
     glyph_geometry_diagnostics_enabled, log_cursor_glyph_alignment, log_rendered_char_overlaps,
     trace_face_debug_enabled,
 };
-use super::row_reuse;
 use super::{GlyphRenderStats, WgpuRenderer};
 
 /// Per-pass glyph vertex batches keyed by atlas entry, split by pipeline.
@@ -85,18 +84,10 @@ impl WgpuRenderer {
             self.draw_text_glyph_batches(ctx, want_overlay, glyph_atlas, &batches, stats);
             self.draw_text_decorations(ctx, want_overlay);
         }
-
-        // Both passes ran: promote this frame's captured rows to the cache.
-        self.row_reuse.commit_frame();
     }
 
-    /// Build the glyph vertex batches for one text pass.
-    ///
-    /// Rows whose layout damage says `Reused`/`ReusedShifted` and whose
-    /// defensive keys all match splice last frame's cached vertex streams;
-    /// everything else tessellates through the atlas as before. Assembly is
-    /// per-row in glyph order, so the output is byte-identical to a full
-    /// tessellation of the same frame.
+    /// Build the glyph vertex batches for one text pass: every glyph of the
+    /// pass tessellated through the atlas, in glyph order.
     fn build_text_glyph_batches(
         &mut self,
         params: &FrameParams<'_>,
@@ -123,65 +114,24 @@ impl WgpuRenderer {
             );
         }
 
-        let frame_id = frame_glyphs.frame_placement.frame().get();
-        let chunks = row_reuse::chunk_text_rows(&frame_glyphs.glyphs, want_overlay, frame_id);
-        let window_origins = row_reuse::window_origin_bits(frame_glyphs);
-        let cursor_row = frame_glyphs
-            .active_cursor()
-            .map(|cursor| (cursor.window_id.get(), cursor.slot_id.row));
-        // These effects mutate vertex colors/positions per frame; cached rows
-        // would bake stale values in, so reuse and capture shut off entirely.
-        let global_effects_active = frame_glyphs.background_alpha != 1.0
-            || params.has_line_anims
-            || !self.fx.text_fade.active.is_empty()
-            || !self.fx.mode_line_fade.active.is_empty();
-        let pointer_invalidated_rows = chunks
-            .iter()
-            .filter(|chunk| {
-                params
-                    .pointer_override
-                    .affects_glyph_range(&frame_glyphs.glyphs, chunk.glyphs.clone())
-            })
-            .map(|chunk| chunk.key)
-            .collect::<HashSet<_>>();
         let enable_subpixel =
             glyph_atlas.subpixel_enabled() && frame_glyphs.background_alpha == 1.0;
-        let ctx = row_reuse::ReusePassCtx {
-            damage: params.row_damage,
-            scale_bits: self.scale_factor.to_bits(),
-            scale_pow2: row_reuse::scale_is_power_of_two(self.scale_factor),
-            scale_factor: self.scale_factor,
-            atlas_generation: glyph_atlas.eviction_generation(),
-            font_bindings_identity: glyph_atlas.frame_font_bindings_identity(),
-            cursor_row,
-            global_effects_active,
-            invalidated_rows: Some(&pointer_invalidated_rows),
-            window_origins: &window_origins,
-            allow_store: !want_overlay && params.row_damage.is_some(),
-        };
-
-        let (out, captures, reuse_stats) = {
-            let renderer: &WgpuRenderer = self;
-            let cache = &renderer.row_reuse;
-            let mut tessellator = LiveRowTessellator {
-                renderer,
-                atlas: glyph_atlas,
-                params,
-                want_overlay,
-                enable_subpixel,
-                seen_single_keys,
-                seen_composed_keys,
-                glyph_face_cache: None,
-                geometry_diagnostics,
-            };
-            row_reuse::assemble_rows_with_reuse(&chunks, &ctx, cache, &mut tessellator)
-        };
-
-        self.row_reuse.stage(captures);
-        stats.rows_tessellated += reuse_stats.rows_tessellated;
-        stats.rows_reused_verbatim += reuse_stats.rows_reused_verbatim;
-        stats.rows_reused_shifted += reuse_stats.rows_reused_shifted;
-        stats.row_reuse_bails += reuse_stats.reuse_bails;
+        let mut out = TextStreams::default();
+        TextTessellator {
+            renderer: self,
+            atlas: glyph_atlas,
+            params,
+            want_overlay,
+            enable_subpixel,
+            seen_single_keys,
+            seen_composed_keys,
+            glyph_face_cache: None,
+            geometry_diagnostics,
+        }
+        .tessellate(&mut out);
+        let rows = text_rows(&frame_glyphs.glyphs, want_overlay);
+        stats.rows_tessellated += rows;
+        crate::cost::add_rows(rows);
 
         TextGlyphBatches {
             mask_data: out.mask,
@@ -192,9 +142,38 @@ impl WgpuRenderer {
     }
 }
 
-/// The production [`row_reuse::RowTessellator`]: the pre-existing per-glyph
-/// atlas tessellation loop, scoped to one row chunk per call.
-struct LiveRowTessellator<'r, 'p> {
+/// The text rows of one pass: runs of its glyphs on one window's row.
+fn text_rows(glyphs: &[FrameGlyph], want_overlay: bool) -> usize {
+    let mut last = None;
+    let mut rows = 0;
+    for glyph in glyphs {
+        let FrameGlyph::Char { window_id, slot_id, row_role, .. } = glyph else {
+            continue;
+        };
+        if row_role.is_chrome() != want_overlay {
+            continue;
+        }
+        let row = Some((window_id.get(), slot_id.row));
+        if row != last {
+            rows += 1;
+            last = row;
+        }
+    }
+    rows
+}
+
+/// One pass's glyph vertex streams, split by pipeline, with the drawn
+/// characters' bounds for the geometry diagnostics.
+#[derive(Default)]
+struct TextStreams {
+    mask: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])>,
+    subpixel: Vec<(AnyAtlasEntry, [CoverageGlyphVertex; 6])>,
+    color: Vec<(AnyAtlasEntry, [GlyphVertex; 6])>,
+    bounds: Vec<RenderedCharBounds>,
+}
+
+/// The per-glyph atlas tessellation of one text pass.
+struct TextTessellator<'r, 'p> {
     renderer: &'r WgpuRenderer,
     atlas: &'r mut WgpuGlyphAtlas,
     params: &'r FrameParams<'p>,
@@ -207,16 +186,8 @@ struct LiveRowTessellator<'r, 'p> {
     geometry_diagnostics: bool,
 }
 
-impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
-    fn revalidate_and_pin(&mut self, entry: AnyAtlasEntry) -> bool {
-        self.atlas.revalidate_and_pin(entry)
-    }
-
-    fn tessellate(
-        &mut self,
-        chunk: &row_reuse::RowChunk,
-        out: &mut row_reuse::RowStreams,
-    ) -> row_reuse::RowTessellation {
+impl TextTessellator<'_, '_> {
+    fn tessellate(&mut self, out: &mut TextStreams) {
         let frame_glyphs = self.params.frame_glyphs;
         let faces = self.params.faces;
         let face_debug_call_id = self.params.face_debug_call_id;
@@ -224,10 +195,8 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
         let has_line_anims = self.params.has_line_anims;
         let want_overlay = self.want_overlay;
         let enable_subpixel = self.enable_subpixel;
-        let mut tessellation = row_reuse::RowTessellation::default();
 
-        for glyph_index in chunk.glyphs.clone() {
-            let glyph = &frame_glyphs.glyphs[glyph_index];
+        for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
             if let FrameGlyph::Char {
                 slot_id,
                 char,
@@ -273,12 +242,6 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                     let overstrike = rf.overstrike;
 
                     let face = faces.get(&face_id);
-                    if face.is_some_and(|face| face.background_gradient.is_some()) {
-                        // sample_face_background samples the gradient at this
-                        // glyph's y; the color lands in vertex bytes, so the row
-                        // may never be spliced at a different y.
-                        tessellation.verbatim_only = true;
-                    }
 
                     // Snap glyph origins to whole physical pixels via the SAME
                     // shared helper the child-frame path uses (see
@@ -393,6 +356,13 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                         let glyph_w = content_rect.width() as f32 / sf;
                         let glyph_h = content_rect.height() as f32 / sf;
                         let raster_bounds = Rect::new(glyph_x, glyph_y, glyph_w, glyph_h);
+                        // An overstruck glyph is drawn a device pixel right again.
+                        let struck = if overstrike { 1.0 / sf } else { 0.0 };
+                        super::root_picture::reach::note(
+                            slot_id.window_id.get(),
+                            Rect::new(*x, *y, *width, *height),
+                            Rect::new(glyph_x, glyph_y, glyph_w + struck, glyph_h),
+                        );
 
                         let tex_u_min = uv.min()[0];
                         let tex_u_max = uv.max()[0];
@@ -441,11 +411,6 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                                 let mut v1 = tex_v_max_base;
                                 let top = clip.y;
                                 let bottom = clip.y + clip.height;
-                                if row_reuse::glyph_extent_touches_band(y0, h0, top, bottom) {
-                                    // Trimmed (or trim-prone under any shift): the
-                                    // baked v-range depends on absolute y vs the band.
-                                    tessellation.verbatim_only = true;
-                                }
                                 if y0 < top {
                                     let cut = top - y0;
                                     if cut >= h0 {
@@ -713,7 +678,6 @@ impl row_reuse::RowTessellator for LiveRowTessellator<'_, '_> {
                 }
             }
         }
-        tessellation
     }
 }
 
@@ -970,6 +934,7 @@ impl WgpuRenderer {
             let mut underline_run = super::content::UnderlineRun::default();
             for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
                 if let FrameGlyph::Char {
+                    window_id,
                     x,
                     y,
                     baseline,
@@ -1031,7 +996,7 @@ impl WgpuRenderer {
                         if *underline == UnderlineStyle::None { underline_run.end(); }
                         if *underline != UnderlineStyle::None {
                             let ul_color = underline_color.as_ref().unwrap_or(fg);
-                            let geometry = underline_run.geometry(*x, ya, *width, ul_position, *underline == UnderlineStyle::Wave,
+                            let geometry = underline_run.geometry((window_id.get(), *x, ya, *width), ul_position, *underline == UnderlineStyle::Wave,
                                                                   || ul_position.resolve(ya, *height, baseline_y, ul_thick));
                             let ul_y = geometry.top_y;
                             let line_thickness = geometry.thickness;
@@ -1168,6 +1133,12 @@ impl WgpuRenderer {
                             decoration_start,
                             effective_clip.as_ref(),
                         );
+                        // A wave or a low underline can leave the cell.
+                        super::root_picture::reach::note_points(
+                            window_id.get(),
+                            Rect::new(*x, *y, *width, *height),
+                            decoration_vertices[decoration_start..].iter().map(|v| v.position),
+                        );
                     }
                 }
             }
@@ -1177,6 +1148,7 @@ impl WgpuRenderer {
             // underline/overline/strike-through attributes.
             for (glyph_index, glyph) in frame_glyphs.glyphs.iter().enumerate() {
                 if let FrameGlyph::Stretch {
+                    window_id,
                     x,
                     y,
                     width,
@@ -1344,6 +1316,12 @@ impl WgpuRenderer {
                             decoration_start,
                             effective_clip.as_ref(),
                         );
+                        // A wave or a low underline can leave the cell.
+                        super::root_picture::reach::note_points(
+                            window_id.get(),
+                            Rect::new(*x, *y, *width, *height),
+                            decoration_vertices[decoration_start..].iter().map(|v| v.position),
+                        );
                     }
                 }
             }
@@ -1390,6 +1368,7 @@ impl WgpuRenderer {
 
             for &span_idx in &pass_spans {
                 let span = &box_spans[span_idx];
+                let (sharp_start, rounded_start) = (sharp_border_vertices.len(), rounded_border_vertices.len());
                 if let Some(face) = faces.get(&span.face_id)
                     && self.append_box_border_geometry(
                         &mut sharp_border_vertices,
@@ -1403,6 +1382,14 @@ impl WgpuRenderer {
                 {
                     self.fx.has_animated_borders = true;
                 }
+                super::root_picture::reach::note_points(
+                    span.window,
+                    Rect::new(span.x, span.y, span.width, span.height),
+                    sharp_border_vertices[sharp_start..]
+                        .iter()
+                        .map(|v| v.position)
+                        .chain(rounded_border_vertices[rounded_start..].iter().map(|v| v.position)),
+                );
             }
 
             // Draw sharp box borders

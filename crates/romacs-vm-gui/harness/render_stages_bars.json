@@ -1,0 +1,132 @@
+{
+ "chat-tick-second": {
+  "rows_tessellated": 1,
+  "rows_reused": 38,
+  "cursor_rows": 1,
+  "glyphs_walked": 99,
+  "font_identities": 185,
+  "bytes_uploaded": 61300,
+  "own_instructions": 4430000,
+  "extra_frames": 0
+ },
+ "chat-cursor": {
+  "rows_tessellated": 1,
+  "rows_reused": 38,
+  "cursor_rows": 1,
+  "glyphs_walked": 76,
+  "font_identities": 137,
+  "bytes_uploaded": 53500,
+  "own_instructions": 4670000,
+  "extra_frames": 0
+ },
+ "cursor-move": {
+  "rows_tessellated": 1,
+  "rows_reused": 37,
+  "cursor_rows": 1,
+  "glyphs_walked": 97,
+  "font_identities": 179,
+  "bytes_uploaded": 51300,
+  "own_instructions": 3580000,
+  "extra_frames": 0
+ },
+ "typed": {
+  "rows_tessellated": 2,
+  "rows_reused": 36,
+  "cursor_rows": 1,
+  "glyphs_walked": 196,
+  "font_identities": 370,
+  "bytes_uploaded": 95600,
+  "own_instructions": 5000000,
+  "extra_frames": 0
+ },
+ "typed-elements": {
+  "rows_tessellated": 2,
+  "rows_reused": 36,
+  "cursor_rows": 1,
+  "glyphs_walked": 190,
+  "font_identities": 357,
+  "bytes_uploaded": 93400,
+  "own_instructions": 4850000,
+  "extra_frames": 0
+ },
+ "chat-stream-1k": {
+  "rows_tessellated": 2,
+  "rows_reused": 37,
+  "cursor_rows": 1,
+  "glyphs_walked": 128,
+  "font_identities": 231,
+  "bytes_uploaded": 84800,
+  "own_instructions": 5140000,
+  "extra_frames": 0
+ },
+ "chat-stream-10k": {
+  "rows_tessellated": 2,
+  "rows_reused": 37,
+  "cursor_rows": 1,
+  "glyphs_walked": 128,
+  "font_identities": 231,
+  "bytes_uploaded": 84800,
+  "own_instructions": 5190000,
+  "extra_frames": 0
+ },
+ "fontify-open-org-folded": {
+  "rows_tessellated": 2,
+  "rows_reused": 31,
+  "cursor_rows": 1,
+  "glyphs_walked": 88,
+  "font_identities": 154,
+  "bytes_uploaded": 53800,
+  "own_instructions": 2750000,
+  "extra_frames": 0
+ },
+ "fontify-typed-org-folded": {
+  "rows_tessellated": 2,
+  "rows_reused": 30,
+  "cursor_rows": 1,
+  "glyphs_walked": 92,
+  "font_identities": 161,
+  "bytes_uploaded": 54300,
+  "own_instructions": 2800000,
+  "extra_frames": 0
+ },
+ "fontify-unfold-org": {
+  "rows_tessellated": 9,
+  "rows_reused": 41,
+  "cursor_rows": 1,
+  "glyphs_walked": 385,
+  "font_identities": 737,
+  "bytes_uploaded": 166000,
+  "own_instructions": 6820000,
+  "extra_frames": 0
+ },
+ "fontify-typed-elisp": {
+  "rows_tessellated": 2,
+  "rows_reused": 36,
+  "cursor_rows": 1,
+  "glyphs_walked": 193,
+  "font_identities": 363,
+  "bytes_uploaded": 92600,
+  "own_instructions": 7190000,
+  "extra_frames": 0
+ },
+ "typed-three-windows": {
+  "rows_tessellated": 2,
+  "rows_reused": 54,
+  "cursor_rows": 1,
+  "glyphs_walked": 201,
+  "font_identities": 370,
+  "bytes_uploaded": 127000,
+  "own_instructions": 5970000,
+  "extra_frames": 0
+ },
+ "scroll-line": {
+  "rows_tessellated": 3,
+  "rows_reused": 35,
+  "cursor_rows": 1,
+  "glyphs_walked": 223,
+  "font_identities": 425,
+  "bytes_uploaded": 105000,
+  "own_instructions": 6170000,
+  "extra_frames": 0
+ }
+}

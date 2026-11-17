@@ -1,6 +1,7 @@
 ;;; romacs-agent-attach-tests.el --- Images in the composer and transcript -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
@@ -16,8 +17,6 @@
          (with-temp-buffer
            (romacs-agent-chat-mode)
            (setq romacs-agent-ui--session ,var
-                 romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-                 romacs-agent-ui--tasks (make-hash-table :test #'equal)
                  romacs-agent-ui--messages (make-hash-table :test #'equal)
                  romacs-agent-ui--end (point-marker)
                  romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
@@ -271,7 +270,6 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-adjacent-tables-both-refit ()
   (romacs-agent-attach-tests--with-chat session
-    (romacs-agent-ui--helpers)
     (let ((table "| A | B |\n|---|---|\n| one | a rather long cell of text to wrap |\n"))
       (let ((width 70))
         (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))
@@ -330,7 +328,6 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-table-is-a-grid-and-refits ()
   (romacs-agent-attach-tests--with-chat session
-    (romacs-agent-ui--helpers)
     (let ((body "Before\n\n| Where | Cost |\n|---|---|\n| notmuch | a long description of what costs the time |\n\nAfter")
           (width 70))
       (cl-letf (((symbol-function 'romacs-agent-ui--table-width) (lambda () width)))
@@ -685,7 +682,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
 
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
   "A process of another HOME has no record of a live session: its route stays."
-  (let* ((root (file-name-as-directory (make-temp-file "sweep" t)))
+  (let* ((root (file-name-as-directory (romacs-test-socket-directory "sweep")))
          (routes (expand-file-name "route/" root))
          (socket (expand-file-name "s.sock" root))
          (server nil))

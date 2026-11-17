@@ -214,21 +214,28 @@ pub(crate) fn call_source<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc
 pub(crate) fn redisplay<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, b: B,
     then: impl FnOnce(&mut Vm, B, (std::time::Instant, Result<romacs_layout_input::FrameSnapshot>)) -> R + Copy + 'static) -> R {
     m.request(&EngineKey, gc, |vm| {
-        let (width, height) = (vm.window_state.width, vm.window_state.height);
+        let native = vm.ensure_windows().and_then(|()| vm.top_geometry(vm.selected_top_frame()));
+        let (width, height) = native.map_or((0, 0), |native| (native.width, native.height));
         let started = crate::host::monotonic();
+        vm.redisplay_begin();
         (started, vm.frame_snapshot(width, height))
     }, b, then)
 }
-/// The frame resized to WIDTH and HEIGHT: its root window first, whose Lisp
-/// may collect, as a request; then the frame's geometry, at the line height
-/// and column width it had before.
-pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (width, height): (u32, u32)) -> Result<()> {
+/// The top-level frame whose id is FRAME (None, the selected frame's)
+/// resized to WIDTH and HEIGHT: its root window first, whose Lisp may
+/// collect, as a request; then the frame's geometry, at the line height and
+/// column width it had before. A frame gone meanwhile is left.
+pub(crate) fn resize<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, (frame, width, height): (Option<u64>, u32, u32)) -> Result<()> {
     m.request(&EngineKey, gc, |vm| {
         let cell = (vm.window_state.line, vm.window_state.column);
-        (cell, vm.resize_root_window(width, height))
+        let frame = vm.ensure_windows().and_then(|()| match frame {
+            Some(id) => Ok(id),
+            None => Ok(vm.frame(vm.selected_top_frame())?.id),
+        });
+        (cell, frame.and_then(|frame| vm.resize_root_window(frame, width, height).map(|()| frame)))
     }, (width, height), |vm, (width, height), ((line, column), resized)| {
-        resized?;
-        vm.set_frame_geometry(width, height, line, column)
+        let Ok(root) = vm.frame_of_id(resized?) else { return Ok(()) };
+        vm.set_top_frame_geometry(root, width, height, line, column)
     })
 }
 /// A writer whose Values are rooted: its watchers are free to collect.
@@ -263,7 +270,8 @@ pub(crate) fn unwind_to<'b>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark: usize)
 
 /// Lisp a suspended engine runs nested.
 pub(super) enum Nested<'f> {
-    /// Compile FORM and run it as an `eval` (the signal hook, the debugger).
+    /// Compile FORM as request code and run it as an `eval` (the signal
+    /// hook, the debugger).
     Form(&'f Form),
     /// `autoload-do-load' of FUNDEF and FUNCTION, rooted in the frame
     /// (FUNCTION first: the call is retried from it).
@@ -279,10 +287,14 @@ impl Nested<'_> {
     fn run(self, vm: &mut Vm, gc: Gc<'_, '_>) -> Result<Value> {
         stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || match self {
             Nested::Form(form) => {
-                let function = vm.compile(form)?;
+                // Request code, as `eval_form_raw' compiles: the next
+                // collection retires it and the objects it quotes (a
+                // signal's data), where code compiled outright would stay.
+                let (function, _) = vm.compile_request(form)?;
                 vm.propagate_next = true;
                 let result = vm.execute_raw(function);
                 vm.propagate_next = false;
+                vm.release_request_entry(function);
                 result
             }
             Nested::Autoload(frame) => {

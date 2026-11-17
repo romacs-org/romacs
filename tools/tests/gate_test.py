@@ -53,6 +53,20 @@ class GraphicalOracleEnvironment(unittest.TestCase):
         environment = gate.test_env(pathlib.Path('/source'), pathlib.Path('/private'), names=set())
         self.assertEqual(environment.get('ROMACS_TEST_LABWC'), gate.LABWC)
 
+    def test_no_running_editors_launch_variable_reaches_the_tests(self):
+        saved = {k: os.environ.get(k) for k in gate.EDITOR_LAUNCH}
+        try:
+            os.environ.update({k: 'set' for k in gate.EDITOR_LAUNCH})
+            environment = gate.test_env(pathlib.Path('/source'), pathlib.Path('/private'), names=set())
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertIn('ROMACS_SOURCE_DIRECTORY', gate.EDITOR_LAUNCH)
+        self.assertFalse(set(gate.EDITOR_LAUNCH) & set(environment))
+
 
 class FixtureProvisioning(unittest.TestCase):
     """The gate fills the pinned test-fixture cache before tests, which only read it."""
@@ -129,9 +143,12 @@ class StressProtocol(unittest.TestCase):
 class BuildAndRun(unittest.TestCase):
     def setUp(self):
         def source(*args, **kwargs):
+            if args[-2:] == ('tools/lib/test_modules.py', 'modules'):
+                return self.modules
             self.assertEqual(args[-1], 'source')
             self.assertTrue(args[-2].endswith('/test/gnu/tools/gate_vacuity.py'))
             return b'{}'
+        self.modules = b''
         self.enterContext(mock.patch.object(gate, 'out', side_effect=source))
 
     def test_native_stress_uses_zero_retries_and_retains_all_iterations(self):
@@ -156,6 +173,39 @@ class BuildAndRun(unittest.TestCase):
             self.assertEqual(argv[argv.index('--stress-count') + 1], '2')
             self.assertEqual(argv[argv.index('--retries') + 1], '0')
             self.assertIn('--no-fail-fast', argv)
+
+    def test_a_file_that_is_a_module_of_all_is_neither_built_alone_nor_run_twice(self):
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.modules = b'romacs-vm quit\nromacs-vm fileio\n'
+        targets = {'romacs-vm': ('all', 'quit', 'fileio', 'alone'), 'romacs-layout': ('quit', 'rows')}
+        def metadata(*cmd, **kw):
+            if cmd[:2] == ('cargo', 'metadata'):
+                json.dump({'workspace_members': list(targets), 'packages': [
+                    dict(id=name, name=name, targets=[dict(name=name, kind=['lib']), dict(name='tool', kind=['bin']),
+                                                      *(dict(name=test, kind=['test']) for test in tests)])
+                    for name, tests in targets.items()]}, kw['stdout'])
+        builds = []
+        def built(cmd, **kw):
+            builds.append(cmd)
+            # Cargo builds romacs-vm's `quit` too: romacs-layout has a test of that name.
+            ids = ['romacs-vm', 'romacs-vm::all', 'romacs-vm::alone', 'romacs-vm::quit',
+                   'romacs-layout', 'romacs-layout::quit', 'romacs-layout::rows']
+            json.dump({'rust-build-meta': {}, 'rust-binaries': {i: {'binary-id': i} for i in ids}}, kw['stdout'])
+            return 0
+        with mock.patch.multiple(gate, SHORT=root / 'ng', sh=metadata, cargo_flags=lambda s: []), \
+             mock.patch.object(gate.subprocess, 'call', built):
+            self.assertEqual(gate.build_and_run(root, root, 'all()', {}, False, time.monotonic(), {}), [])
+        build = builds[0]
+        self.assertEqual(build[build.index('--lib'):build.index('--list-type')],
+                         ['--lib', '--bins', '--test', 'all', '--test', 'alone',
+                          '--test', 'quit', '--test', 'rows'])
+        ran = {suite: set(json.loads((root / f'{suite}-binaries.json').read_text())['rust-binaries'])
+               for suite in ('vm2', 'display')}
+        self.assertEqual(ran, {'vm2': {'romacs-vm', 'romacs-vm::all', 'romacs-vm::alone'},
+                               'display': {'romacs-layout', 'romacs-layout::quit', 'romacs-layout::rows'}})
+
+    def test_a_tree_without_an_all_target_builds_every_target(self):
+        self.assertEqual(gate.test_targets({'packages': []}, {'romacs-vm'}, set()), [])
 
     def test_stress_zero_exit_cannot_hide_a_failed_body(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -294,7 +344,7 @@ class BuildAndRun(unittest.TestCase):
 
     def test_run_environment_drops_a_running_editors_launch_variables(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
-        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp/gnu',
+        editor = dict(ROMACS_RUNTIME_ROOT='/installed/build', ROMACS_LISP_DIR='/installed/build/lisp',
                       ROMACS_USAGE_LOG='/sessions/ended/usage.jsonl', ROMACS_GUI_FONT='Iosevka',
                       ROMACS_GUI_FONT_SIZE='15')
         with mock.patch.dict(os.environ, editor):
@@ -590,7 +640,7 @@ class GateArguments(unittest.TestCase):
         with mock.patch.object(gate.sys, 'argv', payload[1:]), \
              mock.patch.object(gate, 'sync'), mock.patch.object(gate, 'sh', side_effect=command), \
              mock.patch.object(gate, 'environment_identity', return_value=('fixture', {}, {})), \
-             mock.patch.object(gate, 'out', return_value=archive), \
+             mock.patch.object(gate, 'out', side_effect=lambda *a, **k: b'' if 'tools/lib/test_modules.py' in a else archive), \
              mock.patch.object(gate.subprocess, 'call', side_effect=listed_binaries) as builds, \
              mock.patch.object(gate.subprocess, 'Popen', side_effect=popen):
             self.assertEqual(gate.main(), 0)

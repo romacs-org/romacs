@@ -1,6 +1,6 @@
-//! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S]`:
+//! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S] [--restart-pending FILE]`:
 //! the relay an agent session's harness runs as its Romacs MCP server
-//! (lisp/romacs/romacs-agent.el). Unlike the plain relay it reads the lines it
+//! (lisp/agents/romacs-agent.el). Unlike the plain relay it reads the lines it
 //! copies, so the harness's MCP session outlives the Romacs server it
 //! reaches:
 //!
@@ -9,8 +9,16 @@
 //!   `notifications/initialized';
 //! - when the server goes away, each call it had sent and not seen answered
 //!   is answered `outcome unknown' (it may have run: the harness asks
-//!   `romacs_call_outcome'), and a call made while no server listens is
-//!   answered `not executed' (safe to repeat);
+//!   `romacs_call_outcome'); a call made while no server listens, or queued
+//!   to one that went away before taking it, is held and sent once a server
+//!   does listen, and answered `not executed' (safe to repeat) if none has
+//!   within `HOLD` (a harness started a moment ahead of its server, a
+//!   resumed session's route relinked), or, while a restart of the server
+//!   is under way (FILE, its pending record, exists), within the reply
+//!   timeout: a restart however slow, never an hour's wait for a server
+//!   that crashed or never started;
+//! - held calls go in the order they came; one the harness cancels before a
+//!   server takes it is dropped, never sent and never answered;
 //! - a call unanswered past the reply timeout (the editor busy) is
 //!   withdrawn with `romacs/cancel': answered `not executed' when the
 //!   server says it was still queued, else `outcome unknown'; a reply that
@@ -47,6 +55,8 @@ pub struct Config {
     pub socket: PathBuf,
     pub session: String,
     pub reply_timeout: Duration,
+    /// The record a restart of the server keeps while it is under way.
+    pub restart_pending: Option<PathBuf>,
 }
 
 /// How long a withdrawal waits for the server's answer.
@@ -55,6 +65,9 @@ const CANCEL_GRACE: Duration = Duration::from_secs(10);
 /// A call sent upstream and not answered.
 /// Lines waiting for the server; past it a call is refused.
 const QUEUE: usize = 64;
+/// How long a call is held for a server to listen, no restart under way:
+/// a harness started ahead of its server, a route relinked on a resume.
+const HOLD: Duration = Duration::from_secs(30);
 /// How long `initialize' and `tools/list' wait for the server.
 const DISCOVERY: Duration = Duration::from_secs(2);
 /// The tool the relay answers itself.
@@ -83,6 +96,10 @@ struct Call {
     token: u64,
     /// `initialize''s requested protocol version.
     version: Option<Json>,
+    /// Its line, sent again when it is held (`queued' false).
+    text: String,
+    /// In a connection's queue; false while held for the next connection.
+    queued: bool,
 }
 
 impl Call {
@@ -122,9 +139,17 @@ struct State {
     provisional: bool,
     /// The relay's `tools/list' probe, which ends that.
     probe: Option<String>,
+    /// The harness's own `tools/list' params, which the probe carries: a
+    /// stateless client's protocol metadata travels in each request, and
+    /// the server refuses a list asked without it.
+    list_params: Option<Json>,
     probes: u64,
     /// Connections in a row the server ended within `REFUSED_WITHIN`.
     refusals: u32,
+    /// When a restart of the server was last seen under way: a held call's
+    /// `HOLD` runs from then, as the successor claims the restart's record
+    /// before its server listens.
+    restart_seen: Option<Instant>,
 }
 
 /// How long to wait before the next connection attempt, after FAILURES
@@ -230,7 +255,9 @@ impl Relay {
         if !state.provisional || state.probe.is_some() { return; }
         state.probes += 1;
         let id = format!("romacs-relay-probe-{}", state.probes);
-        let request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"}).to_string();
+        let mut request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/list"});
+        if let Some(params) = &state.list_params { request["params"] = params.clone(); }
+        let request = request.to_string();
         if Self::send(state, request, None) { state.probe = Some(key(&json!(id))); }
     }
 
@@ -282,8 +309,18 @@ impl Relay {
             return;
         }
         let mut state = self.lock();
+        // The harness cancels a call no server has taken (held, or queued and
+        // not written): it is never sent, and, cancelled, never answered.
+        if method == "notifications/cancelled" {
+            let target = message.as_ref().and_then(|m| m.pointer("/params/requestId")).map(key);
+            if let Some(target) = target.filter(|k| state.inflight.get(k).is_some_and(|call| !call.written)) {
+                state.inflight.remove(&target);
+                return;
+            }
+        }
         if method == "initialize" { state.initialize = message.clone(); }
         if method == "notifications/initialized" { state.initialized = Some(line.to_owned()); }
+        if method == "tools/list" { state.list_params = message.as_ref().and_then(|m| m.get("params")).cloned(); }
         let Some(id) = id else {
             Self::send(&state, line.to_owned(), None);
             return;
@@ -291,12 +328,21 @@ impl Relay {
         state.tokens += 1;
         let token = state.tokens;
         let version = message.as_ref().and_then(|m| m.pointer("/params/protocolVersion")).cloned();
-        let call = Call { id, method, sent: Instant::now(), cancel: None, written: false, token, version };
+        let mut call = Call { id, method, sent: Instant::now(), cancel: None, written: false, token, version,
+                              text: line.to_owned(), queued: true };
         // `initialize' reaches the server even when answered here first:
         // the calls after it need the handshake.
         let tracked = (call.method != "initialize").then(|| (key(&call.id), token));
         if Self::send(&state, line.to_owned(), tracked) {
             // Under the lock the writer needs, so it finds the call.
+            state.inflight.insert(key(&call.id), call);
+            return;
+        }
+        // No server listening: held for the next one (`hold'), but for
+        // discovery, answered here, and a call past a full queue (a server
+        // that stops reading), refused.
+        if state.upstream.is_none() && !call.discovery() {
+            call.queued = false;
             state.inflight.insert(key(&call.id), call);
             return;
         }
@@ -306,6 +352,20 @@ impl Relay {
             if call.method == "tools/list" { self.listed_locally(); }
         } else {
             self.to_harness(&refusal(&call.id, &call.method, NOT_EXECUTED));
+        }
+    }
+
+    /// Send the held calls to the server now listening, in the order they
+    /// came; those its queue has no room for stay held for the next tick.
+    fn send_held(state: &mut State) {
+        let mut held: Vec<(u64, String)> = state.inflight.iter()
+            .filter(|(_, call)| !call.queued)
+            .map(|(k, call)| (call.token, k.clone())).collect();
+        held.sort();
+        for (token, call_key) in held {
+            let text = state.inflight[&call_key].text.clone();
+            if !Self::send(state, text, Some((call_key.clone(), token))) { return; }
+            if let Some(call) = state.inflight.get_mut(&call_key) { call.queued = true; }
         }
     }
 
@@ -366,13 +426,23 @@ impl Relay {
         }
         // A full queue refused the last probe: try again while it matters.
         Self::probe(&mut state);
+        Self::send_held(&mut state);
+        let restarting = self.config.restart_pending.as_ref().is_some_and(|file| file.exists());
+        if restarting { state.restart_seen = Some(now); }
+        let restart_seen = state.restart_seen;
         let late: Vec<String> = state.inflight.iter()
-            .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && now.duration_since(call.sent) >= self.config.reply_timeout)
+            .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && {
+                let held_since = restart_seen.map_or(call.sent, |seen| seen.max(call.sent));
+                now.duration_since(call.sent) >= self.config.reply_timeout
+                    || (!call.queued && !restarting && now.duration_since(held_since) >= HOLD)
+            })
             .map(|(k, _)| k.clone()).collect();
         for call_key in late {
-            // Still queued: the writer finds it gone and never sends it.
+            // Still queued, or held: never sent, the writer finds it gone.
             if !state.inflight[&call_key].written {
-                if let Some(call) = state.inflight.remove(&call_key) { answers.push(refusal(&call.id, &call.method, WITHDRAWN)); }
+                if let Some(call) = state.inflight.remove(&call_key) {
+                    answers.push(refusal(&call.id, &call.method, if call.queued { WITHDRAWN } else { NOT_EXECUTED }));
+                }
                 continue;
             }
             let cancel_id = format!("romacs-relay-cancel-{call_key}");
@@ -411,16 +481,22 @@ impl Relay {
             }
             state.cancels.clear();
             state.probe = None;
-            let left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
-            for call in left {
+            let mut left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
+            // In the order they came, as their new tokens keep it.
+            left.sort_by_key(|call| call.token);
+            for mut call in left {
                 listed |= call.method == "tools/list";
-                answers.push(if call.discovery() {
-                    Self::settled(&call)
+                if call.discovery() {
+                    answers.push(Self::settled(&call));
                 } else if call.written {
-                    refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran"))
+                    answers.push(refusal(&call.id, &call.method, &unknown(&call.id, "Romacs stopped while this call ran")));
                 } else {
-                    refusal(&call.id, &call.method, NOT_EXECUTED)
-                });
+                    // Never taken: held for the next server, under a new
+                    // token, so the old connection's writer skips it.
+                    state.tokens += 1;
+                    (call.token, call.queued) = (state.tokens, false);
+                    state.inflight.insert(key(&call.id), call);
+                }
             }
         }
         for answer in answers { self.to_harness(&answer); }
@@ -468,6 +544,7 @@ impl Relay {
         }
         state.upstream = Some(Upstream { number, since: Instant::now(), queue, control });
         Self::probe(&mut state);
+        Self::send_held(&mut state);
         drop(state);
         let relay = self.clone();
         std::thread::spawn(move || relay.write_lines(waiting, stream));
@@ -501,7 +578,8 @@ pub fn main(config: Config) -> ! {
                 }
             }
             let connected = keeper.connected();
-            if connected { keeper.watch(); }
+            // Held calls expire with no server too.
+            keeper.watch();
             std::thread::sleep(if connected { TICK } else { TICK.min(retry_after(failures, keeper.lock().refusals)) });
         }
     });

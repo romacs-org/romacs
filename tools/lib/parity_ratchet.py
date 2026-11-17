@@ -86,8 +86,6 @@ RATCHET_NAME = 'ledger/parity-ratchet.json'
 # Where a revision from before the records moved into ledger/ keeps the
 # ratchet; it goes once no open branch reaches back past the move.
 RATCHET_BEFORE = 'parity-ratchet.json'
-GNU_PIN = '45b0f7699df36b3849edc3bdef37d4cb9e75b9ea'
-GNU_SOURCE = pathlib.Path(os.environ.get('CENSUS_GNU_SOURCE', str(_PortablePath(_portable_os.environ.get('ROMACS_GNU_SOURCE', _PortablePath(_portable_os.environ.get('GNU_ORACLE_ROOT', _PortablePath(_portable_os.environ.get('XDG_CACHE_HOME', _PortablePath.home() / '.cache')) / 'gnu-emacs-pin')) / 'src')) / '')))
 CHARACTERISED = ('src/fns-tests.el', 'src/data-tests.el', 'lisp/subr-tests.el')
 CENSUS_MODES = ('warm', 'cold')
 GATE_SHARDS = 71
@@ -248,26 +246,6 @@ def sha256_file(path) -> str:
 # --------------------------------------------------------------------------
 # Measurement: the Lisp census
 
-def gnu_lisp_paths() -> set[str]:
-    """GNU's lisp/*.el at the pin, read from GNU's object store (no copy)."""
-    p = subprocess.run(['git', '-C', str(GNU_SOURCE), 'ls-tree', '-r', '-z', GNU_PIN, '--', 'lisp'],
-                       capture_output=True)
-    if p.returncode:
-        raise Refusal(EXIT_NOT_MEASURED, f'cannot read GNU {GNU_PIN[:11]} from {GNU_SOURCE}: '
-                      + p.stderr.decode(errors='replace')[-600:])
-    paths = set()
-    for entry in p.stdout.decode().split('\0'):
-        if not entry:
-            continue
-        meta, path = entry.split('\t', 1)
-        mode, kind, _ = meta.split()
-        if kind == 'blob' and mode in ('100644', '100755') and path.endswith('.el'):
-            paths.add(path)
-    if not paths:
-        raise Refusal(EXIT_NOT_MEASURED, 'GNU pin lists no lisp/*.el')
-    return paths
-
-
 # tools/lisp-census kills a file after 10 s. A loading file takes under a
 # second (max 0.73 s measured), but the gate runs beside other lanes' builds,
 # so the ratchet allows 30 s: only a file that hangs pays for it, and a loaded
@@ -276,21 +254,17 @@ CENSUS_TIMEOUT = 30
 
 
 def census_population(root: pathlib.Path) -> tuple[set[str], set[str]]:
-    """Validate the pristine pin and declared support before choosing targets."""
-    oracle = load_module(root / 'tools/lib/lisp_oracle.py', 'census_lisp_oracle')
-    diagnostic = io.StringIO()
+    """The census targets of the tree: its libraries, and the generated files it keeps as support
+    (tools/lib/lisp_layout.py census_files and generated_files)."""
+    layout = load_module(root / 'tools/lib/lisp_layout.py', 'census_lisp_layout')
     try:
-        with contextlib.redirect_stdout(diagnostic), contextlib.redirect_stderr(diagnostic):
-            status = oracle.check(root, GNU_SOURCE, GNU_PIN)
-        if status:
-            raise Refusal(EXIT_NOT_MEASURED, 'invalid census population:\n' + diagnostic.getvalue())
-        pinned = oracle.pin_tree(GNU_SOURCE, GNU_PIN)
-        support, problems = oracle.generated_support(root, GNU_SOURCE, GNU_PIN, pinned, required=True)
-    except (SystemExit, ValueError, OSError) as error:
-        raise Refusal(EXIT_NOT_MEASURED, f'cannot validate census population: {error}') from error
-    if problems:
-        raise Refusal(EXIT_NOT_MEASURED, 'invalid generated census support:\n  ' + '\n  '.join(problems))
-    return {oracle.local_path(p) for p in pinned if p.endswith('.el')}, set(support)
+        census = {str(p.relative_to(root)) for p in layout.census_files(root)}
+        support = layout.generated_files(root) & census
+    except (OSError, ValueError, KeyError) as error:
+        raise Refusal(EXIT_NOT_MEASURED, f'cannot read the census population: {error}') from error
+    if not census:
+        raise Refusal(EXIT_NOT_MEASURED, 'empty census population')
+    return census - support, support
 
 
 def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, timeout: float = CENSUS_TIMEOUT) -> dict:
@@ -307,7 +281,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
     gnu, support = census_population(root)
     files = [root / rel for rel in sorted(gnu | support)]
     if not files:
-        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "lisp/gnu"}')
+        raise Refusal(EXIT_NOT_MEASURED, f'no Lisp files under {root / "lisp"}')
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='parity-census-') as tmp:
         manifest = pathlib.Path(tmp) / 'manifest.json'
@@ -322,6 +296,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
         # The binary is copied so a concurrent rebuild cannot swap it mid-run.
         copy = pathlib.Path(tmp) / 'romacs-vm-census'
         shutil.copy2(binary, copy)
+        name_runtime(pathlib.Path(tmp), root)
         digest = hashlib.sha256(copy.read_bytes()).hexdigest()
         load_paths = lc.load_path(root)
         preload = lc.bootstrap_chain(root) if mode == 'warm' else ()
@@ -346,9 +321,9 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
                   'forms_completed': c.get('forms_completed')} for c in chain]
     reported = sum(1 for r in rows if r['forms_evaluated'] is not None and r['file'] in gnu)
     if reported == 0:
-        raise Refusal(EXIT_NOT_MEASURED, f'the census binary reported on none of {len(gnu)} pristine GNU files')
+        raise Refusal(EXIT_NOT_MEASURED, f'the census binary reported on none of {len(gnu)} libraries')
     # Floor members retain their GNU source identities across checkout moves.
-    loaded = sorted('lisp' + r['file'][len('lisp/gnu'):]
+    loaded = sorted('lisp' + r['file'][len('lisp'):]
                     for r in rows if r['loaded'] and r['file'] in gnu)
 
     def why(r):
@@ -364,7 +339,7 @@ def measure_census(root: pathlib.Path, mode: str, binary: str, workers: int, tim
             'unreported': sorted(r['file'] for r in rows if r['forms_evaluated'] is None and r['file'] in gnu),
             'gnu_target_total': len(gnu), 'shared_total': len(gnu),
             'members': {f'census-{mode}': loaded},
-            'verdicts': {('lisp' + r['file'][len('lisp/gnu'):] if r['file'] in gnu else r['file']):
+            'verdicts': {('lisp' + r['file'][len('lisp'):] if r['file'] in gnu else r['file']):
                          ('loaded' if r['loaded'] else why(r)) for r in rows},
             'chain': chain, 'binary_sha256': digest, 'seconds': round(time.monotonic() - started, 1)}
 
@@ -914,7 +889,7 @@ def measure_unit(root: pathlib.Path, unit: str, gnu_ert: str | None, census: str
 UNCONFIRMED_WINDOW_DAYS = 14
 UNCONFIRMED_ALLOWED = 1   # per member per window; the next forgiveness FAILS
 LEDGER_NAME = 'parity-ratchet-unconfirmed.jsonl'
-FINGERPRINTED = ('lisp/gnu', 'lisp/romacs', 'test/gnu/test', 'test/gnu/harness', 'test/gnu/tools', 'test/gnu/baseline',
+FINGERPRINTED = ('lisp', 'test/gnu/test', 'test/gnu/harness', 'test/gnu/tools', 'test/gnu/baseline',
                  'test/gnu/run.py', 'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml', 'tools/lisp-census',
                  'tools/lib/lisp-census-oracle.el', 'tools/lib/parity_ratchet.py', 'test/gnu/member-evidence-policy.json',
                  'ledger/parity-reference.toml',
@@ -1127,10 +1102,18 @@ def confirm_losses(root: pathlib.Path, data: dict, m: dict, gnu_ert, census, job
     return forgive(m, conf['forgiven'], again.get('classes'))
 
 
-def freeze(binary: str | None, into: pathlib.Path, name: str) -> str | None:
-    """A private copy used for every run of this check, so no rebuild can mix runs."""
+def name_runtime(directory: pathlib.Path, root: pathlib.Path) -> None:
+    """Say beside the executables copied into DIRECTORY that ROOT is their runtime tree: a copy
+    has left its build, and no longer assumes the tree it was built in."""
+    (directory / 'romacs-runtime-root').write_text(f'{root}\n')
+
+
+def freeze(binary: str | None, into: pathlib.Path, name: str, root: pathlib.Path) -> str | None:
+    """A private copy used for every run of this check, so no rebuild can mix runs. It runs on
+    ROOT's runtime tree."""
     if not binary or not pathlib.Path(binary).is_file():
         return binary  # measure_* refuses a missing binary itself
+    name_runtime(into, root)
     return str(shutil.copy2(binary, into / name))
 
 
@@ -1145,9 +1128,9 @@ def cmd_check(args) -> int:
         census = str(cargo_build(root, ['-p', 'romacs-vm', '--bin', 'romacs-vm-census']) / 'romacs-vm-census')
     with tempfile.TemporaryDirectory(prefix='parity-check-bin-') as frozen:
         if any(u.startswith('gnu-') for u in units):
-            gnu_ert = freeze(gnu_ert, pathlib.Path(frozen), 'romacs-gnu-ert')
+            gnu_ert = freeze(gnu_ert, pathlib.Path(frozen), 'romacs-gnu-ert', root)
         if any(u.startswith('census-') for u in units):
-            census = freeze(census, pathlib.Path(frozen), 'romacs-vm-census')
+            census = freeze(census, pathlib.Path(frozen), 'romacs-vm-census', root)
         fingerprint = input_fingerprint(root)
         # Always measured here, never replayed from a file: a saved measurement
         # could say anything, so there is no option to supply one.
@@ -1178,11 +1161,11 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
     """Anything that would make a measurement describe something other than HEAD."""
-    measured = ['lisp/gnu', 'lisp/romacs', 'test/gnu', 'crates/romacs-gnu-tests', 'tools', 'ledger/parity-reference.toml',
+    measured = ['lisp', 'test/gnu', 'crates/romacs-gnu-tests', 'tools', 'ledger/parity-reference.toml',
                 'ledger/gnu-tests-pin.json', 'ledger/gnu-test-exclusions.toml']
     dirty = [line for line in git(root, 'status', '--porcelain', '--', *(measured if measured_only else [])).splitlines()
              if line[3:] != RATCHET_NAME]
-    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp/gnu', 'lisp/romacs', 'test/gnu/test',
+    ignored = [line for line in git(root, 'status', '--porcelain', '--ignored', '--', 'lisp', 'test/gnu/test',
                                     'test/gnu/baseline', 'test/gnu/harness', 'test/gnu/tools', 'tools').splitlines()
                if line.startswith('!!') and not python_cache(line[3:])]
     return dirty + ignored
@@ -1190,7 +1173,7 @@ def contamination(root: pathlib.Path, measured_only: bool = False) -> list[str]:
 
 def python_cache(path: str) -> bool:
     """Only Python's own bytecode cache next to the scripts is harmless;
-    anything ignored under lisp/gnu/ or the GNU import can change a measurement."""
+    anything ignored under lisp/ or the GNU import can change a measurement."""
     parts = pathlib.PurePosixPath(path.rstrip('/')).parts
     return (parts[:1] == ('tools',) and '__pycache__' in parts
             and (parts[-1] == '__pycache__' or parts[-1].endswith('.pyc')))
@@ -1294,8 +1277,8 @@ def cmd_record(args) -> int:
     # Freeze both binaries for the WHOLE recording: every run uses these copies
     # and the provenance hashes them, so a concurrent rebuild cannot mix runs.
     frozen = tempfile.TemporaryDirectory(prefix='parity-record-bin-')
-    gnu_ert = str(shutil.copy2(gnu_ert, pathlib.Path(frozen.name) / 'romacs-gnu-ert'))
-    census = str(shutil.copy2(census, pathlib.Path(frozen.name) / 'romacs-vm-census'))
+    gnu_ert = freeze(gnu_ert, pathlib.Path(frozen.name), 'romacs-gnu-ert', root)
+    census = freeze(census, pathlib.Path(frozen.name), 'romacs-vm-census', root)
     frozen_sha = {b: hashlib.sha256(pathlib.Path(b).read_bytes()).hexdigest() for b in (gnu_ert, census)}
     commit_before = git(root, 'rev-parse', 'HEAD').strip()
     files = suite_files(root)

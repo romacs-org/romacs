@@ -53,7 +53,8 @@ impl super::gc::Consed {
     }
 }
 
-#[derive(Clone)]
+// CELL(Held)
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) enum Object {
     SyntaxTable(std::collections::BTreeMap<u32, romacs_regex::SyntaxClass>),
     Float(f64),
@@ -62,7 +63,13 @@ pub(super) enum Object {
     Frame(Box<frame::Frame>),
     Terminal(Box<frame::Terminal>),
     WindowConfiguration(Box<crate::window::WindowConfiguration>),
+    /// At rest in an image: `foreign_resource` refuses a live connection or
+    /// statement, whose handles are SQLite's, in its own heap.
+    #[snapshot(at_rest)]
     Sqlite(Box<crate::sqlite::Handle>),
+    /// At rest in an image: `foreign_resource` refuses every live treesit
+    /// object.
+    #[snapshot(at_rest)]
     Treesit(Box<crate::treesit::Object>),
     Process(Box<crate::subprocess::Process>),
     Finalizer(Value), // alloc.c's: its function, nil once called (gc.rs dooms it)
@@ -85,43 +92,10 @@ pub(super) enum Object {
     HashTable(Box<hash::HashTable>),
     Obarray(Box<obarray::Obarray>),
     /// A free table entry (table.rs `sweep`): no Value names it but a
-    /// stale one, which finds no object here.
+    /// stale one, which finds no object here. Never in an image, whose
+    /// tables are dense (gc.rs `collect_compacting`).
     Free,
 }
-romacs_snapshot::snapshot_enum!(Object {
-    Object::SyntaxTable(f0) => (f0),
-    Object::Float(f0) => (f0),
-    Object::Bignum(f0) => (f0),
-    Object::Window(f0) => (f0),
-    Object::Frame(f0) => (f0),
-    Object::Terminal(f0) => (f0),
-    Object::WindowConfiguration(f0) => (f0),
-    // At rest: `foreign_resource` refuses a live connection or statement,
-    // whose handles are SQLite's, in its own heap.
-    Object::Sqlite(f0) => (),
-    // At rest: `foreign_resource` refuses every live treesit object.
-    Object::Treesit(f0) => (),
-    Object::Process(f0) => (f0),
-    Object::Finalizer(f0) => (f0),
-    Object::Thread => (),
-    Object::String(f0) => (f0),
-    Object::RawString(f0) => (f0),
-    Object::Vector(f0) => (f0),
-    Object::BoolVector(f0) => (f0),
-    Object::Record(f0) => (f0),
-    Object::CharTable(f0) => (f0),
-    Object::SubCharTable(f0) => (f0),
-    Object::MapKeymapCursor(f0) => (f0),
-    Object::Buffer(f0) => (f0),
-    Object::Marker(f0) => (f0),
-    Object::Overlay(f0) => (f0),
-    Object::Bytes(f0) => (f0),
-    Object::ByteBuffer(f0) => (f0),
-    Object::HashTable(f0) => (f0),
-    Object::Obarray(f0) => (f0),
-    // Never captured: an image's tables are dense (gc.rs `collect_compacting`).
-    Object::Free => (),
-});
 const _: [(); 32] = [(); size_of::<Object>()];
 impl Object {
     /// The resource of this process an object holds, which no other
@@ -146,19 +120,21 @@ impl Object {
     }
 }
 /// String slots contain valid UTF-8; RawString slots contain all other bytes.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct LispString {
     bytes: Vec<u8>,
     chars: usize,
     flags: u8,
     pub(crate) properties: crate::properties::Properties,
+    // CELL(Plain)
     cursors: [std::cell::Cell<(usize, usize)>; 2],
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) scanned: std::cell::Cell<usize>,
+    // CELL(Plain)
     #[cfg(test)]
     pub(super) flag_scanned: std::cell::Cell<usize>,
 }
-romacs_snapshot::snapshot_struct!(LispString { bytes, chars, flags, properties, cursors, #[cfg(test)] scanned, #[cfg(test)] flag_scanned });
 const MULTIBYTE: u8 = 1;
 const ASCII: u8 = 2;
 const UTF8: u8 = 4;
@@ -379,6 +355,12 @@ impl LispString {
         self.cursors[1].set((self.chars, self.bytes.len()));
         Ok(())
     }
+    /// Overwrite the text's storage with zeros, spare capacity included:
+    /// `clear-string` replaces the object afterwards, and dropping the old
+    /// bytes unwiped would leave the text in freed memory.
+    pub(crate) fn wipe(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.bytes);
+    }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
         size_of::<Self>()
             + self.properties.storage_bytes()
@@ -453,6 +435,23 @@ impl Vm {
             }),
             _ => None,
         }
+    }
+    /// VALUE's text from character FROM on: a string's through its own
+    /// character/byte cursor (`LispString::byte_offset`, GNU's
+    /// `string_char_to_byte`), so reads at increasing FROM cost the
+    /// characters stepped, not FROM; a unibyte or ASCII text's directly.
+    /// Empty past the end; None for no string.
+    pub(crate) fn str_view_from(&self, value: Value, from: usize) -> Option<crate::lstring::StrView<'_>> {
+        let view = self.str_view(value)?;
+        if from >= view.chars {
+            return Some(crate::lstring::StrView { bytes: &[], chars: 0, multibyte: view.multibyte });
+        }
+        let byte = match self.object_if(value) {
+            Some(Object::String(s) | Object::RawString(s)) => s.byte_offset(coordinates::CharOffset(from))?,
+            _ if !view.multibyte || view.chars == view.bytes.len() => from,
+            _ => view.bytes.iter().enumerate().filter(|&(_, &b)| b & 0xC0 != 0x80).nth(from).map_or(view.bytes.len(), |(at, _)| at),
+        };
+        Some(crate::lstring::StrView { bytes: &view.bytes[byte..], chars: view.chars - from, multibyte: view.multibyte })
     }
     pub(crate) fn make_lisp_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
         if !multibyte {

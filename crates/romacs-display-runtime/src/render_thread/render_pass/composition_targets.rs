@@ -166,8 +166,8 @@ pub(super) fn report_unpooled_gpu_textures(
         Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedStaticScene),
     }
-    match render.compositor.retained_root.as_ref() {
-        Some(retained) => renderer.record_full_frame_texture(owner, &retained.texture),
+    match render.compositor.root_picture.as_ref() {
+        Some(picture) => renderer.record_full_frame_texture(owner, picture.texture()),
         None => renderer.retire_full_frame_texture(owner, UnpooledTexture::RetainedRootScene),
     }
     let atlas_bytes = render
@@ -200,7 +200,7 @@ pub(super) fn prepare_frame_targets(
     surface: romacs_display_protocol::DrawableSurface,
     plan: &crate::render_thread::render_quality::RenderFeaturePlan,
 ) -> Result<FrameTargets, super::surface::FrameRenderFailure> {
-    prepare_frame_targets_for_scene(renderer, render, surface, plan, true, false)
+    prepare_frame_targets_for_scene(renderer, render, surface, plan, true)
 }
 
 pub(super) fn prepare_frame_targets_for_scene(
@@ -209,7 +209,6 @@ pub(super) fn prepare_frame_targets_for_scene(
     surface: romacs_display_protocol::DrawableSurface,
     plan: &crate::render_thread::render_quality::RenderFeaturePlan,
     compositor_only_hint: bool,
-    has_gradient: bool,
 ) -> Result<FrameTargets, super::surface::FrameRenderFailure> {
     let content = surface
         .content_surface()
@@ -244,7 +243,6 @@ pub(super) fn prepare_frame_targets_for_scene(
     {
         render.compositor.retained_static = None;
     }
-    super::retained_scroll::retire_unusable(renderer, render, has_gradient, surface.device_scale());
     // A dropped unpooled picture must stop charging admission in this retry,
     // not in a successful draw which that stale census could prevent.
     report_unpooled_gpu_textures(renderer, render);
@@ -318,7 +316,6 @@ fn reclaim_finished_child_composition(
         // of the old animated scene as well as requesting its final repaint.
         render.compositor.current_scene_generation =
             crate::render_thread::frame_state::next_scene_generation();
-        render.compositor.current_row_damage = None;
         render.mark_dirty();
     }
 }

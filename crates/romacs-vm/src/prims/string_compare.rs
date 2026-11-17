@@ -1,24 +1,27 @@
 //! GNU fns.c string comparison, including representation and range semantics.
 use super::*;
-use crate::lstring::BYTE8_OFFSET;
+use crate::prim::leaf::Span;
 use std::cmp::Ordering;
 
 defsubr! { name = "compare-strings", gnu = "fns.c:361", effect = Reads,
 fn compare_strings(cx, first: Value, from: Value, to: Value, second: Value,
                    other_from: Value, other_to: Value; optional fold: Value) {
-    let a = cx.string_view(first)?;
-    let b = cx.string_view(second)?;
-    let (start, end) = bounds(first, from, to, a.chars)?;
-    let (other_start, other_end) = bounds(second, other_from, other_to, b.chars)?;
-    let a = codes(&a);
-    let b = codes(&b);
-    let (order, matched) = compare(cx, &a[start..end], &b[other_start..other_end], fold != Value::NIL)?;
+    let (length, other_length) = (chars(cx, first)?, chars(cx, second)?);
+    let (start, end) = bounds(first, from, to, length)?;
+    let (other_start, other_end) = bounds(second, other_from, other_to, other_length)?;
+    let (a, b) = (Span { text: first, start, end }, Span { text: second, start: other_start, end: other_end });
+    let (order, matched) = cx.compare_text(a, b, fold != Value::NIL)?;
     Ok(match order {
         Ordering::Equal => Value::TRUE,
         Ordering::Less => Value::integer(-((matched + 1) as i64)).unwrap(),
         Ordering::Greater => Value::integer((matched + 1) as i64).unwrap(),
     })
 }}
+
+/// STRING's length in characters.
+pub(super) fn chars(cx: &Leaf<'_>, string: Value) -> std::result::Result<usize, Fault> {
+    cx.string_chars(string).ok_or(Fault::Wrong("stringp", string))
+}
 
 fn bounds(
     string: Value,
@@ -49,43 +52,8 @@ fn bounds(
     Ok((start as usize, finish as usize))
 }
 
-pub(super) fn codes(string: &crate::lstring::OwnedStr) -> Vec<u32> {
-    string
-        .chars()
-        .map(|c| {
-            if !string.multibyte && c >= 128 {
-                c + BYTE8_OFFSET
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-pub(super) fn compare(
-    cx: &mut Leaf<'_>,
-    a: &[u32],
-    b: &[u32],
-    fold: bool,
-) -> std::result::Result<(Ordering, usize), Fault> {
-    for (index, (&x, &y)) in a.iter().zip(b).enumerate() {
-        if x == y {
-            continue;
-        }
-        let upper =
-            |cx: &mut Leaf<'_>, c| -> std::result::Result<u32, Fault> { cx.completion_upcase(c) };
-        let (x, y) = if fold {
-            (upper(cx, x)?, upper(cx, y)?)
-        } else {
-            (x, y)
-        };
-        if x != y {
-            return Ok((x.cmp(&y), index));
-        }
-    }
-    Ok((a.len().cmp(&b.len()), a.len().min(b.len())))
-}
-
+/// The order of the first LENGTH characters of the strings A and B, and
+/// how many of them match.
 pub(super) fn prefix(
     cx: &mut Leaf<'_>,
     a: Value,
@@ -93,41 +61,23 @@ pub(super) fn prefix(
     length: usize,
     fold: bool,
 ) -> std::result::Result<(Ordering, usize), Fault> {
-    let a = codes(&cx.string_view(a)?);
-    let b = codes(&cx.string_view(b)?);
-    compare(
-        cx,
-        &a[..length.min(a.len())],
-        &b[..length.min(b.len())],
-        fold,
-    )
-}
-
-/// Symbol names compare as their strings (minibuf.c Fassoc_string).
-fn name_string(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Option<Vec<u32>>, Fault> {
-    if cx.kind(value) == crate::prim::leaf::Kind::Symbol {
-        let name = cx.symbol_name(value)?;
-        let name = cx.string(&name);
-        return Ok(Some(codes(&cx.string_view(name)?)));
-    }
-    if matches!(cx.kind(value), crate::prim::leaf::Kind::String | crate::prim::leaf::Kind::Bytes) {
-        return Ok(Some(codes(&cx.string_view(value)?)));
-    }
-    Ok(None)
+    chars(cx, a)?;
+    chars(cx, b)?;
+    cx.compare_text(Span { text: a, start: 0, end: length }, Span { text: b, start: 0, end: length }, fold)
 }
 
 defsubr! { name = "assoc-string", gnu = "minibuf.c:2203", effect = Reads,
 fn assoc_string(cx, key: Value, list: Value; optional fold: Value) {
-    // GNU checks KEY only when an element's string is compared with it.
-    let key_codes = name_string(cx, key)?;
     let mut tail = list;
     let mut seen = std::collections::HashSet::new();
     while let Some((element, rest)) = cx.pair(tail) {
         if !seen.insert(tail.0) { return Err(Fault::Circular(list)); }
+        // A symbol's name compares as its string (minibuf.c Fassoc_string).
         let candidate = cx.pair(element).map_or(element, |(car, _)| car);
-        if let Some(candidate) = name_string(cx, candidate)? {
-            let key = key_codes.as_deref().ok_or(Fault::Wrong("stringp", key))?;
-            let (order, _) = compare(cx, &candidate, key, fold != Value::NIL)?;
+        if cx.compared_text_p(candidate) {
+            // GNU checks KEY only when an element's string is compared with it.
+            if !cx.compared_text_p(key) { return Err(Fault::Wrong("stringp", key)); }
+            let (order, _) = cx.compare_text(Span::whole(candidate), Span::whole(key), fold != Value::NIL)?;
             if order == Ordering::Equal { return Ok(element); }
         }
         tail = rest;

@@ -2,7 +2,7 @@
 //! code instead of a function call. Byte code never consults the function
 //! cell (`src/bytecode.c`: `Bcar` reads the cons, `Bplus` adds), so compiled
 //! GNU code ignores a redefinition or advice of these names, and so does
-//! every Romacs call of them (DIVERGENCES.md VM2-SEALED1).
+//! every Romacs call of them (ledger/divergences VM2-SEALED1).
 //!
 //! The rows are `bytecomp.el`'s `byte-defop-compiler` forms with an opcode,
 //! in file order, with the arities GNU's handlers emit the opcode for: a call
@@ -223,7 +223,7 @@ mod tests {
     /// `(byte-defop-compiler SPEC [HANDLER])` rows of the pinned bytecomp.el
     /// that name an opcode: (function, primitive, min, max).
     fn gnu_rows() -> Vec<(String, String, usize, usize)> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/gnu/emacs-lisp/bytecomp.el");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lisp/emacs-lisp/bytecomp.el");
         let text = std::fs::read_to_string(path).unwrap();
         let mut rows = vec![];
         for line in text.lines() {

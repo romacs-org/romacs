@@ -1,6 +1,7 @@
 ;;; romacs-agent-compact-tests.el --- Compaction and thinking in the transcript -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'romacs-mcp)
+(require 'romacs-test-socket)
 
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
@@ -30,8 +31,6 @@
      (with-temp-buffer
        (romacs-agent-chat-mode)
        (setq romacs-agent-ui--session ,var
-             romacs-agent-ui--tool-lines (make-hash-table :test #'equal)
-             romacs-agent-ui--tasks (make-hash-table :test #'equal)
              romacs-agent-ui--messages (make-hash-table :test #'equal)
              romacs-agent-ui--end (point-marker))
        ,@body)))
@@ -103,7 +102,7 @@
       (kill-buffer "*agent compaction*"))))
 
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
-  (let* ((root (make-temp-file "rs" t)) (routes (expand-file-name "route/" root))
+  (let* ((root (romacs-test-socket-directory "rs")) (routes (expand-file-name "route/" root))
          (live (expand-file-name "live.sock" root)) (server nil)
          (answering (expand-file-name "a.sock" routes)) (dead (expand-file-name "d.sock" routes)))
     (unwind-protect
@@ -128,7 +127,8 @@
     (should (equal (buffer-substring-no-properties (point-min) romacs-agent-ui--end) "  · Session compacted\n"))
     (goto-char (point-min))
     (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-chat-show-compaction))
-    (should (eq (get-text-property (+ (point-min) 5) 'face) 'romacs-agent-link))
+    ;; A link, in a note's row.
+    (should (equal (get-text-property (+ (point-min) 5) 'face) '(romacs-agent-link romacs-agent-note)))
     (let ((chat (current-buffer)))
       (save-window-excursion
         (romacs-agent-chat-show-compaction)

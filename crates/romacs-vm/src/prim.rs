@@ -96,6 +96,9 @@ pub(crate) const ECHO_AREA_PRINTED: &str = "#:vm2-echo-area-printed";
 pub(crate) const FONT_ALTERNATIVE_FAMILIES: &str = "#:vm2-font-alternative-families";
 /// xfaces.c Vface_alternative_font_registry_alist: staticpro'd, not a Lisp variable.
 pub(crate) const FONT_ALTERNATIVE_REGISTRIES: &str = "#:vm2-font-alternative-registries";
+/// The open display's font-objects, a vector `Display::font_objects` indexes:
+/// traced as this slot's value, as GNU's font cache is.
+pub(crate) const FONT_OBJECTS: &str = "#:vm2-font-objects";
 
 /// A T2 continuation. A plain `fn` pointer: it cannot capture Rust state, so
 /// the only Values it sees are the callback's result and the saved registers.
@@ -280,15 +283,15 @@ mod leaf {
                 None => { self.vm.display_state.face_heights.remove(&name); }
             }
         }
-        /// The bytes of a DOC file, read once per path and modification time.
-        pub(crate) fn doc_file_bytes(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
+        /// A DOC file, read and indexed once per path and modification time.
+        pub(crate) fn doc_file_read(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<crate::prim::prims::doc::DocFile>> {
             let modified = crate::host::metadata(path).and_then(|m| m.modified()).ok()?;
-            if let Some((cached, at, bytes)) = &self.vm.doc_file && cached == path && *at == modified {
-                return Some(bytes.clone());
+            if let Some((cached, at, file)) = &self.vm.doc_file && cached == path && *at == modified {
+                return Some(file.clone());
             }
-            let bytes = std::sync::Arc::new(crate::host::read_file(path).ok()?);
-            self.vm.doc_file = Some((path.to_path_buf(), modified, bytes.clone()));
-            Some(bytes)
+            let file = std::sync::Arc::new(crate::prim::prims::doc::DocFile::new(crate::host::read_file(path).ok()?));
+            self.vm.doc_file = Some((path.to_path_buf(), modified, file.clone()));
+            Some(file)
         }
         pub(crate) fn mktime_offset(&self) -> i64 { self.vm.mktime_offset }
         pub(crate) fn idle_since(&self) -> Option<std::time::Instant> { self.vm.idle_since }
@@ -388,6 +391,20 @@ mod leaf {
         }
         /// A line boundary without moving point (GNU editfns.c).
         pub fn line_boundary_position(&mut self, count: Value, end: bool) -> super::Out {
+            let byte = self.line_boundary_byte(count, end)?;
+            self.position_of_byte(byte)
+        }
+        /// The position of byte BYTE of the current buffer's text.
+        pub(crate) fn position_of_byte(&mut self, byte: usize) -> super::Out {
+            let index = self.vm.buffer_index().map_err(Fault::Error)?;
+            let position = match &self.vm.objects[index] {
+                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(Fault::Error)?.0,
+                _ => byte,
+            };
+            Value::integer(position as i64 + 1).map_err(Fault::Error)
+        }
+        /// `line_boundary_position' as the byte offset of the current buffer's text.
+        pub(crate) fn line_boundary_byte(&mut self, count: Value, end: bool) -> std::result::Result<usize, Fault> {
             // CHECK_INTEGER: a bignum counts past either end of the buffer.
             let count = if count == Value::NIL { 1 } else if let Some(n) = count.integer_value() { n } else {
                 match self.bigint_value(count) {
@@ -397,7 +414,6 @@ mod leaf {
                 }
             };
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
-            let error = |e: String| Fault::Error(e);
             // Byte scans: a newline byte is never part of another character.
             let (text, point, low, high): (&dyn crate::text::Newlines, usize, usize, usize) = match &self.vm.objects[index] {
                 data::Object::Buffer(b) => { let range = b.accessible(); (b.body(), b.point.0, range.start.0, range.end.0) }
@@ -407,13 +423,8 @@ mod leaf {
             // editfns.c eol: find_before_next_newline (PT, 0, N - (N <= 0)):
             // the COUNTth newline from point, or the accessible end when
             // there are fewer; bol: the start of the line COUNT - 1 lines on.
-            let byte = if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
-                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) };
-            let position = match &self.vm.objects[index] {
-                data::Object::Buffer(b) => b.char_of_byte(crate::coordinates::ByteOffset(byte)).map_err(error)?.0,
-                _ => byte,
-            };
-            Ok(Value::integer(position as i64 + 1).unwrap())
+            Ok(if end { crate::prim::line_end_after(text, low, high, point, count - i64::from(count <= 0)) }
+                else { crate::prim::line_beginning(text, low, high, point, count.saturating_sub(1)) })
         }
         /// Point of the current buffer as a 1-based character position.
         pub(crate) fn point(&mut self) -> std::result::Result<i64, Fault> {
@@ -594,6 +605,22 @@ mod leaf {
                 .map(|view| view.to_owned())
                 .ok_or(Fault::Wrong("stringp", v))
         }
+        /// String V's text from character FROM on, through its own cursor
+        /// (`Vm::str_view_from`), borrowed.
+        pub(crate) fn string_view_from(&self, v: Value, from: usize) -> std::result::Result<crate::lstring::StrView<'_>, Fault> {
+            self.vm.str_view_from(v, from).ok_or(Fault::Wrong("stringp", v))
+        }
+        /// String V's length in characters and whether it is multibyte, with
+        /// nothing copied.
+        pub(crate) fn string_shape(&self, v: Value) -> std::result::Result<(usize, bool), Fault> {
+            self.vm.str_view(v).map(|view| (view.chars, view.multibyte)).ok_or(Fault::Wrong("stringp", v))
+        }
+        /// The character at index N of string V, read through the string's
+        /// own cursor (`Vm::str_view_from`), with nothing copied; None past
+        /// the end.
+        pub(crate) fn string_char(&self, v: Value, n: usize) -> std::result::Result<Option<u32>, Fault> {
+            Ok(self.vm.str_view_from(v, n).ok_or(Fault::Wrong("stringp", v))?.chars().next())
+        }
         /// GNU string-lessp's order, compared in place: a symbol orders by
         /// its name, a string by its characters.
         pub(crate) fn string_order(&self, a: Value, b: Value) -> std::result::Result<std::cmp::Ordering, Fault> {
@@ -627,11 +654,11 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let lookup = |table, code| self.vm.regexp_table_class(table, code);
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let lookup = |table: &crate::char_table::TableReader<'_>, code| table.get(code).ok().map(|entry| self.vm.syntax_entry_class(entry));
             Ok(codes.iter().zip(defaults).map(|(&code, &default)| {
-                let class = lookup(table, code)
-                    .or_else(|| standard.and_then(|t| lookup(t, code)))
+                let class = lookup(&table, code)
+                    .or_else(|| lookup(&standard, code))
                     .unwrap_or(match default { 1 => SyntaxClass::Word, 2 => SyntaxClass::Symbol, _ => SyntaxClass::Punctuation });
                 class == SyntaxClass::Word || (symbols && class == SyntaxClass::Symbol)
             }).collect())
@@ -645,13 +672,22 @@ mod leaf {
                 data::Object::ByteBuffer(b) => b.syntax_table,
                 _ => unreachable!("buffer_index validates"),
             };
-            let standard = self.vm.names.get("#:vm2-standard-syntax").map(|&s| self.vm.slots[s].value);
-            let code_of = |table: Value, code: u32| self.vm.char_table_get(table, code as usize).ok()
+            let [table, standard] = self.syntax_tables(table).map(|table| self.vm.char_table_reader(table));
+            let code_of = |table: &crate::char_table::TableReader<'_>, code: u32| table.get(code).ok()
                 .and_then(|entry| self.vm.cons_pair(entry).ok()).and_then(|(n, _)| n.integer_value());
             Ok(codes.iter().map(|&code| {
-                let entry = code_of(table, code).or_else(|| standard.and_then(|t| code_of(t, code)));
+                let entry = code_of(&table, code).or_else(|| code_of(&standard, code));
                 entry.is_some_and(|n| (n >> 20) & 1 != 0)
             }).collect())
+        }
+        /// TABLE, a buffer's syntax table or nil, and the standard syntax
+        /// table once it is made, each ready to read flat: a reader of
+        /// what is no table gives no entry.
+        fn syntax_tables(&mut self, table: Value) -> [Value; 2] {
+            let standard = self.vm.names.get("#:vm2-standard-syntax").map_or(Value::NIL, |&slot| self.vm.slots[slot].value);
+            self.vm.flatten_table(table);
+            self.vm.flatten_table(standard);
+            [table, standard]
         }
         pub fn make_string(&mut self, bytes: Vec<u8>, multibyte: bool) -> Value {
             self.vm.make_lisp_string(bytes, multibyte)
@@ -702,6 +738,7 @@ mod leaf {
             let mut properties = crate::properties::Properties::new();
             for &(value, offset) in parts {
                 if let Some(data::Object::String(s) | data::Object::RawString(s)) = self.vm.object_if(value) {
+                    if s.properties.is_empty() { continue; }
                     if multibyte && !s.is_multibyte() {
                         // A unibyte part widened: its runs stretch with it.
                         crate::buffer::widened_properties(&s.properties, s.bytes(), offset, &mut properties);
@@ -718,23 +755,40 @@ mod leaf {
             self.vm.allocate_object(object)
         }
         pub fn concat_ascii(&mut self, args: &[Value]) -> Option<Value> {
-            let mut size=0;
-            for &arg in args {
-                let view=self.vm.str_view(arg)?;
-                if !(view.is_multibyte() && view.len()==view.bytes().len()) && !view.bytes().is_ascii() { return None; }
-                size+=view.bytes().len();
+            self.concat_ascii_joined(args, None)
+        }
+        /// `concat_ascii` of ARGS with SEPARATOR between each two, or `None`
+        /// when one is not an ASCII string. Each part is looked up once.
+        pub fn concat_ascii_joined(&mut self, args: &[Value], separator: Option<Value>) -> Option<Value> {
+            let ascii = |view: &crate::lstring::StrView<'_>| (view.is_multibyte() && view.len() == view.bytes().len()) || view.bytes().is_ascii();
+            let mut parts = Vec::with_capacity(2 * args.len());
+            let mut bytes = Vec::new();
+            {
+                let separator = match separator {
+                    Some(value) => Some((value, self.vm.str_view(value).filter(|view| ascii(view))?.bytes())),
+                    None => None,
+                };
+                for (index, &arg) in args.iter().enumerate() {
+                    if let (Some((value, text)), true) = (separator, index > 0) {
+                        parts.push((value, bytes.len()));
+                        bytes.extend_from_slice(text);
+                    }
+                    let view = self.vm.str_view(arg).filter(|view| ascii(view))?;
+                    parts.push((arg, bytes.len()));
+                    bytes.extend_from_slice(view.bytes());
+                }
             }
-            let mut bytes=Vec::with_capacity(size);
-            let mut parts=Vec::with_capacity(args.len());
-            for &arg in args {
-                parts.push((arg, bytes.len()));
-                bytes.extend_from_slice(self.vm.str_view(arg)?.bytes());
-            }
-            Some(self.concat_result(bytes,false,&parts))
+            Some(self.concat_result(bytes, false, &parts))
         }
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
+            // The old text is wiped where it lies, not only replaced.
+            match self.object_mut(value)? {
+                data::Object::String(string) | data::Object::RawString(string) => string.wipe(),
+                data::Object::Bytes(old) => zeroize::Zeroize::zeroize(old),
+                _ => {}
+            }
             *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }
@@ -834,7 +888,7 @@ mod leaf {
         pub fn propertized_copy(
             &mut self,
             string: Value,
-            properties: &[(String, Value)],
+            properties: &[(crate::properties::Key, Value)],
         ) -> std::result::Result<Value, Fault> {
             let view = self.string_view(string)?;
             let mut copy = data::LispString::from_bytes(view.bytes, view.multibyte);
@@ -843,7 +897,7 @@ mod leaf {
             }
             let all = coordinates::ByteOffset(0)..coordinates::ByteOffset(copy.bytes().len());
             for (key, value) in properties {
-                copy.properties.put(all.clone(), key, *value);
+                copy.properties.put(all.clone(), *key, *value);
             }
             let object = if copy.is_utf8() {
                 data::Object::String(Box::new(copy))
@@ -858,7 +912,7 @@ mod leaf {
             let multibyte = !text.is_ascii();
             let mut string = data::LispString::from_bytes(text.into_bytes(), multibyte);
             for (range, face) in runs {
-                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), "face", *face);
+                string.properties.put(coordinates::ByteOffset(range.start)..coordinates::ByteOffset(range.end), crate::properties::Key::FACE, *face);
             }
             self.vm.allocate_object(if string.is_utf8() { data::Object::String(Box::new(string)) } else { data::Object::RawString(Box::new(string)) })
         }
@@ -1073,8 +1127,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1083,9 +1137,9 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.default_toplevel_binding(slot) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
             self.vm.check_boolean_default(slot, value).map_err(Fault::Error)?;
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1097,8 +1151,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(None); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(None) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedRead);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedRead);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             let value = self.vm.dynamic[binding].1;
             if value == Value::UNBOUND { Err(Fault::VoidVariable(v)) } else { Ok(Some(value)) }
         }
@@ -1107,8 +1161,8 @@ mod leaf {
             if v == Value::NIL || v == Value::TRUE { return Ok(false); }
             let slot = self.symbol_slot(v)?;
             let Some(binding) = self.vm.local_toplevel_binding(slot, buffer) else { return Ok(false) };
-            self.vm.fence_saved(slot, binding, crate::world::Access::SavedWrite);
-            // HOST(dynamic:saved): saved-binding accessor: checks the fence on the entry first (F2)
+            self.vm.tracked_saved(slot, binding, crate::world::Access::SavedWrite);
+            // HOST(dynamic:saved): saved-binding accessor: checks the tracking on the entry first (F2)
             self.vm.dynamic[binding].1 = value;
             Ok(true)
         }
@@ -1491,6 +1545,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
+            self.vm.permanent_names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.
@@ -1502,6 +1557,8 @@ mod leaf {
             self.vm.literal(form).map_err(Fault::Error)
         }
         pub fn intern(&mut self, name: &str) -> Value {
+            #[cfg(test)]
+            super::NAME_LOOKUPS.with(|lookups| lookups.set(lookups.get() + 1));
             self.vm.intern(name)
         }
         /// The private object V names, for writing; a frozen or image value
@@ -1548,9 +1605,6 @@ mod leaf {
         pub fn current_local_map(&mut self) -> std::result::Result<Value, Fault> {
             let index = self.vm.buffer_index().map_err(Fault::Error)?;
             Ok(*self.vm.local_keymap(index))
-        }
-        pub fn keymap_at_point(&mut self, property: Value) -> super::Out {
-            self.vm.keymap_at_point(property).map_err(Fault::Error)
         }
         pub fn obarray_lookup(&self, name: &str) -> Option<Value> {
             match name {
@@ -1869,11 +1923,20 @@ mod leaf {
             }
             Ok(self.vm.make_lisp_string(bytes, multibyte))
         }
+        /// The current buffer's text from character position START to END as
+        /// one run of bytes in GNU's internal form, and whether the buffer is
+        /// multibyte, for a scan (prims/scanner.rs). None when the positions
+        /// are not in order within the accessible text.
+        pub fn scan_region<R>(&mut self, start: i64, end: i64, scan: impl FnOnce(&[u8], bool) -> R) -> std::result::Result<Option<R>, Fault> {
+            self.vm.with_region_bytes(start, end, scan).map_err(Fault::Error)
+        }
     }
     // Buffer text for prims/fileio.rs (src/prim/leaf/fileio.rs). A child
     // module, so it sees `vm`.
     mod map_keymap;
     mod keymap_copy;
+    mod active_keymaps;
+    mod where_is;
     mod category;
     mod fileio;
     mod filelock;
@@ -1881,6 +1944,7 @@ mod leaf {
     mod terminal;
     mod process_jobs;
     mod animate;
+    mod load_progress;
     mod model;
     mod effects;
     mod clipboard;
@@ -1898,12 +1962,18 @@ mod leaf {
     mod buffer_locals;
     mod frozen;
     mod isolate;
+    mod keeper;
     mod flight;
     mod host_calls;
+    mod display_stats;
+    mod fontify_stops;
+    mod markdown;
     mod compiled_lisp;
     mod casetab;
     mod casing;
     pub(crate) use casing::RegionCase;
+    mod string_compare;
+    pub(crate) use string_compare::Span;
     mod modification;
     mod buffer_lifecycle;
     mod editor_mark;
@@ -1934,6 +2004,8 @@ mod leaf {
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
     mod random;
+    mod labeled_restrictions;
+    mod hash_walk;
     mod width;
     pub(crate) mod graphics;
     mod coding_safe;
@@ -1948,6 +2020,16 @@ mod leaf {
     mod session;
     mod world;
     mod finalizer;
+}
+#[cfg(test)]
+thread_local! {
+    /// The symbols this thread's primitives have found by name (`Leaf::intern`).
+    static NAME_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The symbols this thread's primitives have found by name so far.
+#[cfg(test)]
+pub(crate) fn name_lookups() -> usize {
+    NAME_LOOKUPS.with(std::cell::Cell::get)
 }
 pub(crate) use leaf::{Leaf, Kind, SyntaxOp, SyntaxOutcome, CallOutput, Target, strerror, TextSizeArgs, FaceKey, FaceKeys, FaceProps, Shown, ShownKind, LineLabels};
 
@@ -1975,9 +2057,9 @@ pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, 
     Leaf::new(vm).window_text_shows_glyphs(window, from, to)
 }
 
-/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
-pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
-    Leaf::new(vm).window_line_numbers(window)
+/// The line numbers WINDOW shows from position FIRST (`Leaf::window_line_numbers`).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value, first: i64) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window, first)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary
@@ -2489,7 +2571,8 @@ impl Vm {
         self.eval_source_raw(prims::PRELUDE)?;
         self.eval_source_raw(prims::PROCESS_PRELUDE)?;
         self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)
+        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
+        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
     }
 }
 
@@ -2810,45 +2893,28 @@ mod tests {
 /// TEXT, within LOW..HIGH (`forward-line' from that line's start): at LOW
 /// or HIGH when there are fewer lines.
 pub(crate) fn line_beginning(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, lines: i64) -> usize {
-    let start_of = |at: usize| text.previous_newline(at, low).map_or(low, |i| i + 1);
-    let mut pos = start_of(point);
-    if lines >= 0 {
-        for _ in 0..lines {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-    } else {
-        for _ in lines..0 {
-            if pos == low { break; }
-            pos = start_of(pos - 1);
-        }
+    if lines < 0 {
+        // Point's line start is one newline back, then -LINES more.
+        let wanted = crate::text::newline_count(lines).saturating_add(1);
+        let found = text.newlines_before(point, low, wanted);
+        return found.last.filter(|_| found.count == wanted).map_or(low, |i| i + 1);
     }
-    pos
+    let start = text.previous_newline(point, low).map_or(low, |i| i + 1);
+    if lines == 0 { return start; }
+    let wanted = crate::text::newline_count(lines);
+    let found = text.newlines_after(start, high, wanted);
+    found.last.filter(|_| found.count == wanted).map_or(high, |i| i + 1)
 }
 
 /// GNU find_before_next_newline from byte POINT of TEXT within LOW..HIGH:
 /// for COUNT > 0 the COUNTth newline on, else the -COUNTth newline back;
 /// with fewer newlines, HIGH or LOW.
 pub(crate) fn line_end_after(text: &(impl crate::text::Newlines + ?Sized), low: usize, high: usize, point: usize, count: i64) -> usize {
-    let mut pos = point;
-    if count > 0 {
-        for _ in 0..count {
-            match text.next_newline(pos, high) {
-                Some(i) => pos = i + 1,
-                None => return high,
-            }
-        }
-        return pos - 1;
-    }
-    for _ in count..0 {
-        match text.previous_newline(pos, low) {
-            Some(i) => pos = i,
-            None => return low,
-        }
-    }
-    pos
+    if count == 0 { return point; }
+    let wanted = crate::text::newline_count(count);
+    let (found, short) = if count > 0 { (text.newlines_after(point, high, wanted), high) }
+        else { (text.newlines_before(point, low, wanted), low) };
+    found.last.filter(|_| found.count == wanted).unwrap_or(short)
 }
 
 #[cfg(test)]

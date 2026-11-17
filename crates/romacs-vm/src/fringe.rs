@@ -57,7 +57,7 @@ impl Vm {
     /// bitmaps its buffer's indicators resolve to (in the `fringe' face
     /// unless their own), unless only the widths, which lay rows out, are
     /// WANTED.  Where the frame draws pane chrome (`romacs-pane-chrome',
-    /// lisp/romacs/romacs-chrome.el) the fringes are part of the pane: their
+    /// lisp/ui/romacs-chrome.el) the fringes are part of the pane: their
     /// background is the window's default face's, whatever the theme gives
     /// `fringe' (VM2-PANE-CHROME); else the `fringe' face's, as GNU's.
     pub(crate) fn window_chrome(&mut self, window: Value, table: &FaceTable, indicators: bool) -> Result<romacs_layout_input::WindowChrome> {
@@ -68,8 +68,8 @@ impl Vm {
         let (x, frame, buffer, mini) = (w.x, w.frame, w.buffer, w.mini);
         let root_x = self.frame(frame).ok().and_then(|f| self.window(f.root).ok()).map_or(0, |r| r.x);
         let fringe_face = self.named(&table, "fringe").unwrap_or_default();
-        let host = self.host_frame_peek();
-        let pane = self.frame_parameter_of(host, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
+        let top = self.top_frame(frame);
+        let pane = self.frame_parameter_of(top, "romacs-pane-chrome")?.is_some_and(|v| v != Value::NIL);
         let fringe_background = if pane { self.named(&table, "default").unwrap_or_default() } else { fringe_face };
         let [right_divider, bottom_divider] = self.window_dividers(window)?;
         // A frame with right dividers draws them instead (gui_draw_vertical_border).

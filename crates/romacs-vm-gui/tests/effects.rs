@@ -1,4 +1,4 @@
-//! The renderer's options (lisp/romacs/romacs-effects.el) on the real --loadup
+//! The renderer's options (lisp/ui/romacs-effects.el) on the real --loadup
 //! chain with a window system: every way of setting one reaches the
 //! display as a visual configuration, a refused value warns and leaves the
 //! display as it was, and each option starts at the renderer's default.
@@ -6,6 +6,8 @@ use romacs_vm_gui::{fonts, startup};
 use romacs_display_protocol::VisualConfig;
 use romacs_vm::Vm;
 use std::{cell::RefCell, rc::Rc, time::Duration};
+#[path = "support/home.rs"]
+mod home;
 
 fn printed(vm: &mut Vm, source: &str) -> String {
     vm.eval_source(source).and_then(|v| v.display()).unwrap_or_else(|e| format!("VM-ERROR {e}"))
@@ -19,6 +21,7 @@ fn session() -> (Vm, Rc<RefCell<Vec<VisualConfig>>>) {
     vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
     vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap()
         .with_visual_hook(move |config| seen.borrow_mut().push(config.clone())))));
+    home::private_home(&mut vm, "effects");
     startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
     (vm, sent)
 }

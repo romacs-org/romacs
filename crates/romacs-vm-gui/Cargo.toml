@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 romacs-vm = { path = "../romacs-vm" }
+romacs-icon-font = { path = "../romacs-icon-font" }
 romacs-grammars = { path = "../romacs-grammars" }
 romacs-snapshot = { path = "../romacs-snapshot" }
 romacs-layout-input = { path = "../romacs-layout-input" }
@@ -18,8 +19,11 @@ romacs-imaging.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-display-runtime = { path = "../romacs-display-runtime" }
 serde_json.workspace = true
-rustix = { workspace = true, features = ["termios", "time"] }
+rustix = { workspace = true, features = ["process", "termios", "time"] }
+libc.workspace = true
 crossbeam-channel.workspace = true
+romacs-record = { path = "../romacs-record" }
+romacs-keeper = { path = "../romacs-keeper" }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 alacritty_terminal = { git = "https://github.com/alacritty/alacritty.git", rev = "29dc55375da817d53540f4caefbe708703c57b07", default-features = false }
@@ -29,6 +33,8 @@ rustix = { workspace = true, features = ["process"] }
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-test-fonts.workspace = true
 wgpu.workspace = true
+# The `all` target's module list (tests/all/main.rs), made when the tests build.
+romacs-vm-gui-test-build = { path = "../romacs-vm-gui-test-build" }
 
 [lints]
 workspace = true

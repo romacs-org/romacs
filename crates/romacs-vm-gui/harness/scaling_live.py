@@ -12,23 +12,40 @@ The empirical exponent is
 1 for linear work, about 1.15 for n log n at these sizes, 2 for quadratic.
 A probe passes when its exponent is within its budget (default 1.25); a
 probe whose super-linear cost is a known, ticketed debt (:known) reports
-KNOWN instead of failing.  A body that does under MIN_WORK instructions at
+KNOWN instead of failing.  A probe that claims N costs it nothing gives a
+:slope instead: the most instructions its work may grow by per unit of N
+and step,
+
+    (work(K*N) - work(N)) / ((K - 1) * N * steps),
+
+which holds what it claims however large the fixed cost under it is (an
+exponent over total work moves when that cost moves, either way); the
+exponent is still reported.  A body that does under MIN_WORK instructions at
 N is refused: its exponent would measure the probe's own overhead.  A
 :stack probe also passes only if the native stack room it records at each
 `scaling-stack-mark' varies by under STACK_SLACK bytes at K*N: a loader that
 keeps a native frame per form fails it long before it exhausts the stack.
 
 Batch probes run as `BINARY -Q --batch -l probes.el --eval (scaling-run ...)'
-sessions restored from a batch world prepared once in a private HOME.  GUI
-probes (:gui) run as `BINARY -Q --loadup' windows in a private headless
-labwc: once idle the session sets the probe up, then runs its R steps from
+sessions restored from a batch world prepared once, in a store every job
+shares (OUTPUT/worlds); each job's sessions run in a private
+HOME of its own.  GUI probes (:gui) run as `BINARY -Q --loadup' windows,
+restored from the GUI world prepared in their HOME's own store (a GUI world
+is keyed on HOME, and a session prunes its store to a few), in a private
+headless labwc per job, the jobs side by side: each session is measured by its own counter,
+which sessions beside it do not move.  Once idle the session sets the probe up, then runs its R steps from
 a chain of timers, each once the host has redisplayed the step before
 (`romacs--redisplay-since-mark': a paint in flight holds the next one
 back), and counts from before the first step to after the last step's
 layout and paint submission; the steps' work includes the redisplay they
 cause.  A GUI measurement is refused
 unless the host's diagnostics show a paint submitted (laid out by the
-evaluator) after every step, before the next step's mark or the end mark.
+evaluator) after every step, before the next step's mark or the end mark;
+an :idle probe's steps change nothing shown, so a step a paint followed is
+set aside: the host repaints for reasons of its own now and then, and that
+paint is no part of an idle step's work.  Its work is that of the steps no
+paint followed, scaled to all of them, and its measurement is refused when
+more than a tenth of its steps were set aside.
 
 --record profiles the body of every batch probe over its budget at K*N
 with `perf record --call-graph fp', counting only while the probe enables
@@ -53,6 +70,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import shutil
 import signal
 import subprocess
@@ -64,6 +82,8 @@ PROBES = HERE / 'scaling' / 'probes.el'
 MIN_WORK = 1_000_000
 STACK_SLACK = 64 * 1024
 DEFAULT_BUDGET = 1.25
+# The share of an :idle GUI probe's steps a stray paint may set aside.
+IDLE_ODD = 0.1
 # A session that spends no CPU for this many times its CPU bound is hung.
 WALL_FACTOR = 10
 
@@ -79,6 +99,13 @@ def exponent(work_n, work_kn, k):
     return math.log(work_kn / work_n) / math.log(k)
 
 
+def slope(work_n, work_kn, probe):
+    """The instructions WORK_N grows by to WORK_KN per unit of PROBE's N and
+    per step: a batch probe's body runs once, whatever its :steps."""
+    steps = probe.get('steps', 1) if probe['gui'] else 1
+    return (work_kn - work_n) / ((probe['k'] - 1) * probe['n'] * steps)
+
+
 def stack_growth(marks):
     """The spread of a :stack probe's room marks, in bytes (0 without marks)."""
     return max(marks) - min(marks) if marks else 0
@@ -92,13 +119,20 @@ def verdict(probe, small, large):
     if work_n is None or work_kn is None:
         return {**row, 'status': 'FAIL', 'reason': 'no instruction counter (romacs-instructions is nil)'}
     row.update(work_n=work_n, work_kn=work_kn)
+    disturbed = small.get('disturbed', 0) + large.get('disturbed', 0)
+    if disturbed:
+        row['disturbed'] = disturbed
     if work_n < MIN_WORK:
         return {**row, 'status': 'FAIL', 'reason': f'body does {work_n} instructions at N, under {MIN_WORK}'}
     if work_kn <= 0:
         return {**row, 'status': 'FAIL', 'reason': f'body does {work_kn} instructions at K*N'}
     row['exponent'] = round(exponent(work_n, work_kn, probe['k']), 3)
     problems = []
-    if row['exponent'] > probe['budget']:
+    if probe.get('slope') is not None:
+        row.update(slope=round(slope(work_n, work_kn, probe), 2), slope_budget=probe['slope'])
+        if row['slope'] > probe['slope']:
+            problems.append(f"slope {row['slope']} over budget {probe['slope']} instructions per unit of N a step")
+    elif row['exponent'] > probe['budget']:
         problems.append(f"exponent {row['exponent']} over budget {probe['budget']}")
     if probe.get('stack'):
         row['stack_growth'] = stack_growth(large.get('stack') or [])
@@ -109,7 +143,7 @@ def verdict(probe, small, large):
     if not problems:
         stale = {'reason': 'within budget: its known override can go'} if probe.get('known') else {}
         return {**row, 'status': 'PASS', **stale}
-    status = 'KNOWN' if probe.get('known') and all(p.startswith('exponent') for p in problems) else 'FAIL'
+    status = 'KNOWN' if probe.get('known') and all(p.startswith(('exponent', 'slope')) for p in problems) else 'FAIL'
     return {**row, 'status': status, 'reason': '; '.join(problems)}
 
 
@@ -129,8 +163,15 @@ def table(rows):
             note = f"{note}; known: {r['known']}" if note else f"known: {r['known']}"
         if 'stack_growth' in r:
             note = f"{note}; stack spread {r['stack_growth']} B" if note else f"stack spread {r['stack_growth']} B"
+        if 'slope' in r:
+            held = f"slope {r['slope']} a unit of N a step"
+            note = f'{note}; {held}' if note else held
+        if r.get('disturbed'):
+            aside = f"{r['disturbed']} idle steps set aside for a paint"
+            note = f'{note}; {aside}' if note else aside
         lines.append(f"| {r['name']}{' (gui)' if r.get('gui') else ''} | {r['n']} | {r['k']} | {work(r.get('work_n'))}"
-                     f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')} | {r['budget']} | {r['status']}"
+                     f" | {work(r.get('work_kn'))} | {r.get('exponent', '-')}"
+                     f" | {'slope ' + str(r['slope_budget']) if 'slope_budget' in r else r['budget']} | {r['status']}"
                      f"{' — ' + note if note else ''} |")
     return '\n'.join(lines) + '\n'
 
@@ -164,11 +205,31 @@ def step_paints(stderr_text):
     return counts
 
 
+def paints_problem(probe, paints):
+    """What is wrong with PAINTS, the paints submitted after each step of
+    PROBE: every step paints, and at most a tenth of an :idle probe's do."""
+    odd = sum(map(bool, paints)) > IDLE_ODD * probe['steps'] if probe['idle'] else 0 in paints
+    if len(paints) != probe['steps'] or odd:
+        return f"paints after each of {probe['steps']} {'idle ' if probe['idle'] else ''}steps: {paints}"
+    return None
+
+
+def idle_work(deltas, paints):
+    """An :idle probe's work from its steps' instructions DELTAS and the
+    paints after each: the steps no paint followed, scaled to all of them
+    (None with a step uncounted, or none kept), and how many were set aside."""
+    kept = [delta for delta, painted in zip(deltas, paints) if not painted]
+    if None in deltas or not kept:
+        return None, len(deltas) - len(kept)
+    return round(sum(kept) * len(deltas) / len(kept)), len(deltas) - len(kept)
+
+
 def probe_entry(raw):
     """A probe from `scaling-list''s JSON, nulls and defaults normalised."""
     return {'name': raw['name'], 'n': int(raw['n']), 'k': int(raw.get('k') or 4),
             'budget': float(raw.get('budget') or DEFAULT_BUDGET), 'known': raw.get('known') or None,
-            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True}
+            'gui': raw.get('gui') is True, 'steps': int(raw.get('steps') or 1), 'stack': raw.get('stack') is True,
+            'idle': raw.get('idle') is True, 'slope': None if raw.get('slope') is None else float(raw['slope'])}
 
 
 # Sessions.
@@ -178,7 +239,9 @@ def private_env(home, extra=None):
     on the evaluating thread alone, so that thread's instructions are all the work."""
     env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_GC_WORKERS': '1',
            'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
-           'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(home / 'tmp')}
+           'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'), 'TMPDIR': str(home / 'tmp'),
+           # Its own, never the user's: no socket or lock of a live session.
+           'XDG_RUNTIME_DIR': str(home / 'run')}
     for name in ('ROMACS_RUNTIME_ROOT', 'ROMACS_LISP_DIR', 'ROMACS_GNU_SOURCE', 'ROMACS_GATE_FONTCONFIG'):
         if name in os.environ:
             env[name] = os.environ[name]
@@ -204,46 +267,74 @@ def bounded(what, argv, timeout, **kwargs):
     return done
 
 
-def batch(binary, home, form, timeout, prefix=(), env=None):
-    """Run FORM after loading the probes in a batch session; its SCALING lines."""
-    argv = [*prefix, str(binary), '-Q', '--batch', '-l', str(PROBES), '--eval', form]
+def stored(store):
+    """The arguments that name STORE as a session's world store; none for
+    HOME's own (the user's cache)."""
+    return ['--world-store', str(store)] if store else []
+
+
+def batch(binary, home, form, timeout, prefix=(), env=None, world=False, loads=(), store=None):
+    """Run FORM after loading the probes and LOADS in a batch session; its
+    SCALING lines. WORLD: the session must run from its batch world (STORE's,
+    else HOME's), as every measured one does: one from source is another
+    regime, not a measure."""
+    argv = [*prefix, str(binary), *stored(store), '-Q', '--batch',
+            *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))), '--eval', form]
+    # A session tells its world mode on stderr only with its diagnostics on.
+    env = {**(env or {}), 'ROMACS_DIAGNOSTICS': '1'} if world else env
     done = bounded(form, argv, timeout, env=private_env(home, env), cwd=home)
     lines = scaling_lines(done.stdout)
     if done.returncode != 0 or not lines:
         raise Refused(f'{form}: exit {done.returncode}: {done.stderr.strip()[-600:]}')
+    source = next((line for line in done.stderr.splitlines() if line.startswith('romacs-world: {"mode":"source"')), None)
+    if world and source:
+        raise Refused(f'{form}: ran from source, not its world: {source[:300]}')
     return lines
 
 
-def prepare(binary, home, timeout):
-    """Build the GUI and batch worlds in HOME, as a first session does."""
+def make_home(home):
+    """HOME's private directories."""
     for sub in ('config', 'cache', 'data', 'state', 'tmp'):
         (home / sub).mkdir(parents=True, exist_ok=True)
-    built = bounded('--world-build', [str(binary), '--loadup', '--world-build'], timeout, env=private_env(home), cwd=home)
+    (home / 'run').mkdir(mode=0o700, exist_ok=True)
+
+
+def prepare(binary, home, timeout, store=None, gui=True):
+    """Make HOME, then build the worlds in STORE (else HOME's own): the GUI
+    world and the batch world beside it, or with GUI nil the batch world
+    alone. --world-build returns once they are built, or waits for a build
+    another run of the same STORE started. The probes."""
+    make_home(home)
+    if store:
+        # Made here, private as every store is.
+        store.mkdir(mode=0o700, parents=True, exist_ok=True)
+    build = ['--loadup', '--world-build'] if gui else ['--world-build', '--batch']
+    built = bounded('--world-build', [str(binary), *stored(store), *build], timeout, env=private_env(home), cwd=home)
     if built.returncode != 0:
         raise Refused(f'--world-build: exit {built.returncode}: {built.stderr.strip()[-600:]}')
-    probes = [probe_entry(raw) for raw in batch(binary, home, '(scaling-list)', timeout)]
-    store = home / 'cache' / 'romacs' / 'worlds'
-    deadline = time.monotonic() + timeout
-    while sum(1 for image in store.glob('*.rwi') if image.with_suffix('.json').is_file()) < 2:
-        if time.monotonic() > deadline:
-            raise Refused('no batch world after the first session')
-        time.sleep(.2)
-    return probes
+    return [probe_entry(raw) for raw in batch(binary, home, '(scaling-list)', timeout, store=store)]
 
 
-def run_batch_probe(binary, home, probe, timeout):
-    """PROBE's row from batch sessions at N and K*N."""
-    small, large = (batch(binary, home, f"(scaling-run '{probe['name']} {n})", timeout)[-1]
+def run_batch_probe(binary, home, store, probe, timeout):
+    """PROBE's row from batch sessions in HOME at N and K*N, both from STORE's world."""
+    small, large = (batch(binary, home, f"(scaling-run '{probe['name']} {n})", timeout, world=True, store=store)[-1]
                     for n in (probe['n'], probe['n'] * probe['k']))
     return verdict(probe, small, large)
+
+
+def compositor_env():
+    """What ROMACS_HARNESS_WLR_ENV adds to a private compositor's
+    environment: `NAME=VALUE' pairs that put it on the host's GPU, where
+    Romacs then draws too.  Nothing without it: a software compositor."""
+    return dict(pair.split('=', 1) for pair in os.environ.get('ROMACS_HARNESS_WLR_ENV', '').split())
 
 
 class Gui:
     """A private headless labwc for --wayland sessions."""
 
-    def __init__(self, home, runtime, timeout):
+    def __init__(self, binary, home, runtime, timeout):
         import live_oracle as live
-        self.live, self.home, self.runtime, self.timeout = live, home, runtime, timeout
+        self.live, self.binary, self.home, self.runtime, self.timeout = live, binary, home, runtime, timeout
         (runtime / 'config').mkdir()
         (runtime / 'config' / 'rc.xml').write_text(live.RC_XML)
         self.env = private_env(home, {'XDG_RUNTIME_DIR': str(runtime), 'ROMACS_DIAGNOSTICS': '1',
@@ -252,8 +343,8 @@ class Gui:
                                       'LIBSEAT_BACKEND': 'noop'})
         labwc = shutil.which(os.environ.get('ROMACS_TEST_LABWC', 'labwc'), path=self.env['PATH'])
         self.log = (home / 'compositor.log').open('w')
-        self.compositor = subprocess.Popen([labwc or 'labwc', '-C', str(runtime / 'config')], env=self.env,
-                                           stdout=self.log, stderr=self.log)
+        self.compositor = subprocess.Popen([labwc or 'labwc', '-C', str(runtime / 'config')],
+                                           env=self.env | compositor_env(), stdout=self.log, stderr=self.log)
         deadline = time.monotonic() + timeout
         while not any(p.is_socket() for p in runtime.glob('wayland-*')):
             if self.compositor.poll() is not None or time.monotonic() > deadline:
@@ -265,50 +356,79 @@ class Gui:
         subprocess.run([randr or 'wlr-randr', '--output', 'HEADLESS-1', '--custom-mode', '1600x1000'],
                        env=self.env, check=True, timeout=15, stdout=subprocess.DEVNULL)
 
-    def measure(self, probe, n):
-        """The steps' instructions of PROBE at N in a fresh --loadup session,
-        refused unless the host submitted a paint after every step."""
-        out = self.home / 'tmp' / f"{probe['name']}-{n}.json"
-        stderr = self.home / f"{probe['name']}-{n}.stderr"
-        form = f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")'
-        # Append mode: the probe's marks append to the same file.
+    def session(self, tag, form, loads=(), env=None, prefix=(), wait=None):
+        """A fresh --loadup session named TAG that loads the probes and LOADS
+        and evaluates FORM of a file name, which writes that file and ends
+        the session: what it wrote, as JSON, and the session's stderr.
+        Refused unless it exits 0 having written the file within WAIT
+        seconds (a fifth of the batch sessions' bound unless given)."""
+        out = self.home / 'tmp' / f'{tag}.json'
+        stderr = self.home / f'{tag}.stderr'
+        argv = [*prefix, str(self.binary), '-Q', '--loadup', *(arg for load in (PROBES, *loads) for arg in ('-l', str(load))),
+                '--eval', form(out)]
+        # Append mode: the session's marks append to the same file.
         with stderr.open('a') as log:
-            proc = subprocess.Popen([str(self.binary), '-Q', '--loadup', '-l', str(PROBES), '--eval', form],
-                                    env=self.env, cwd=self.home, stdin=subprocess.DEVNULL,
+            proc = subprocess.Popen(argv, env={**self.env, **(env or {})}, cwd=self.home, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=log)
             try:
-                proc.wait(timeout=self.timeout / 5)
+                proc.wait(timeout=wait or self.timeout / 5)
             except subprocess.TimeoutExpired:
-                raise Refused(f"{probe['name']} at {n}: GUI session timed out") from None
+                raise Refused(f'{tag}: GUI session timed out') from None
             finally:
                 self.live.stop(proc)
+        text = stderr.read_text(errors='replace')
         if proc.returncode != 0 or not out.is_file():
-            raise Refused(f"{probe['name']} at {n}: exit {proc.returncode}: {stderr.read_text(errors='replace')[-600:]}")
-        paints = step_paints(stderr.read_text(errors='replace'))
-        if len(paints) != probe['steps'] or 0 in paints:
-            raise Refused(f"{probe['name']} at {n}: paints after each of {probe['steps']} steps: {paints}")
-        return json.loads(out.read_text())
+            raise Refused(f'{tag}: exit {proc.returncode}: {text[-600:]}')
+        return json.loads(out.read_text()), text
+
+    def measure(self, probe, n):
+        """The steps' instructions of PROBE at N in a fresh --loadup session,
+        refused unless the host submitted a paint after every step; an :idle
+        probe's are those of the steps no paint followed (`idle_work'),
+        refused when a paint followed more than a tenth of them."""
+        tag = f"{probe['name']}-{n}"
+        result, stderr = self.session(tag, lambda out: f'(scaling-gui-start (quote {probe["name"]}) {n} "{out}")')
+        paints = step_paints(stderr)
+        problem = paints_problem(probe, paints)
+        if problem:
+            raise Refused(f'{tag}: {problem}')
+        if not probe['idle']:
+            return result
+        work, disturbed = idle_work(result.get('steps') or [None], paints)
+        return {**result, 'instructions': work, 'disturbed': disturbed}
 
     def close(self):
         self.live.stop(self.compositor)
         self.log.close()
 
 
-def run_gui_probes(binary, home, probes, timeout):
+def run_gui_probes(binary, homes, probes, timeout):
+    """PROBES' rows, by name: one compositor per HOME, side by side, each
+    taking the next probe when it is done with one."""
     runtime = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/1000'))
-    rows = []
-    with tempfile.TemporaryDirectory(prefix='scaling-', dir=runtime) as temporary:
-        Path(temporary).chmod(0o700)
-        gui = Gui(home, Path(temporary), timeout)
-        gui.binary = binary
-        try:
-            for probe in probes:
-                try:
-                    rows.append(verdict(probe, *(gui.measure(probe, n) for n in (probe['n'], probe['n'] * probe['k']))))
-                except (Refused, RuntimeError, OSError, ValueError) as error:
-                    rows.append(refused(probe, error))
-        finally:
-            gui.close()
+    waiting, rows = queue.Queue(), {}
+    for probe in probes:
+        waiting.put(probe)
+
+    def worker(home):
+        with tempfile.TemporaryDirectory(prefix='scaling-', dir=runtime) as temporary:
+            Path(temporary).chmod(0o700)
+            gui = Gui(binary, home, Path(temporary), timeout)
+            try:
+                while True:
+                    try:
+                        probe = waiting.get_nowait()
+                    except queue.Empty:
+                        return
+                    try:
+                        rows[probe['name']] = verdict(probe, *(gui.measure(probe, n) for n in (probe['n'], probe['n'] * probe['k'])))
+                    except (Refused, RuntimeError, OSError, ValueError) as error:
+                        rows[probe['name']] = refused(probe, error)
+            finally:
+                gui.close()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(homes)) as pool:
+        for done in [pool.submit(worker, home) for home in homes[:max(1, len(probes))]]:
+            done.result()
     return rows
 
 
@@ -317,7 +437,7 @@ def refused(probe, error):
             'known': probe.get('known'), 'gui': probe['gui'], 'status': 'FAIL', 'reason': str(error)}
 
 
-def record(binary, home, row, output, timeout):
+def record(binary, home, store, row, output, timeout):
     """A call-graph profile of ROW's probe body at K*N, its top inclusive symbols.
     perf starts disabled; the probe enables it around the body alone."""
     data = output / f"{row['name']}.perf.data"
@@ -325,7 +445,7 @@ def record(binary, home, row, output, timeout):
     os.mkfifo(fifo)
     form = f"(scaling-run '{row['name']} {row['n'] * row['k']})"
     try:
-        batch(binary, home, form, timeout, env={'SCALING_PERF_CTL': str(fifo)},
+        batch(binary, home, form, timeout, env={'SCALING_PERF_CTL': str(fifo)}, store=store,
               prefix=('perf', 'record', '-q', '-D', '-1', '--control', f'fifo:{fifo}', '-e', 'instructions:u',
                       '--call-graph', 'fp', '-o', str(data), '--'))
         report = subprocess.run(['perf', 'report', '-i', str(data), '--stdio', '--children', '--percent-limit', '3',
@@ -353,11 +473,32 @@ def main():
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
     binary = args.binary.resolve()
-    home = args.output / 'home'
+    # One HOME per job: probes run side by side never share one (files,
+    # locks, sockets). The batch world serves every HOME, so one store holds
+    # it for all; each HOME's GUI world is in that HOME's own store. A job's
+    # probes run one after another.
+    homes = [args.output / f'home-{job}' for job in range(max(1, args.jobs))]
+    home = homes[0]
+    store = args.output / 'worlds'
     report = {'binary': str(binary), 'probes_file': str(PROBES), 'status': 'FAIL', 'rows': []}
     started = time.monotonic()
     try:
-        probes = prepare(binary, home, args.timeout)
+        probes = prepare(binary, home, args.timeout, store, gui=False)
+        for h in homes[1:]:
+            make_home(h)
+        if args.mode != 'batch':
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(homes)) as pool:
+                list(pool.map(lambda h: prepare(binary, h, args.timeout), homes))
+        free = queue.Queue()
+        for h in homes:
+            free.put(h)
+
+        def run_in_own_home(probe):
+            own = free.get()
+            try:
+                return run_batch_probe(binary, own, store, probe, args.timeout)
+            finally:
+                free.put(own)
         if args.only is not None:
             unknown = set(args.only) - {p['name'] for p in probes}
             if unknown:
@@ -367,20 +508,19 @@ def main():
         gui_probes = [p for p in probes if p['gui'] and args.mode != 'batch']
         rows = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {pool.submit(run_batch_probe, binary, home, p, args.timeout): p for p in batch_probes}
+            futures = {pool.submit(run_in_own_home, p): p for p in batch_probes}
             for future, probe in futures.items():
                 try:
                     rows[probe['name']] = future.result()
                 except Refused as error:
                     rows[probe['name']] = refused(probe, error)
         if gui_probes:
-            for row in run_gui_probes(binary, home, gui_probes, args.timeout):
-                rows[row['name']] = row
+            rows.update(run_gui_probes(binary, homes, gui_probes, args.timeout))
         report['rows'] = [rows[p['name']] for p in batch_probes + gui_probes]
         if args.record:
             for row in report['rows']:
                 if row['status'] != 'PASS' and not row.get('gui') and 'exponent' in row:
-                    row['callgraph'] = record(binary, home, row, args.output, args.timeout)
+                    row['callgraph'] = record(binary, home, store, row, args.output, args.timeout)
         report['status'] = overall(report['rows'])
     except (Refused, subprocess.SubprocessError, OSError) as error:
         report['error'] = str(error)

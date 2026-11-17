@@ -112,11 +112,6 @@ and its comparison policy in its docstring:
   and tags, review, adding and editing a thema), each engine on its own copy
   of a Gnosis database (`--db`, or a profile config's; a live database is
   refused).
-* `hermes_parity_live.py`: hermes (lisp/romacs's copy, or a profile config's
-  `hermes_sources`), read-only against a running dashboard (hermes's
-  default URL, or the profile's `hermes_url`), never started (dashboard, session browser and
-  search, a session's history), its token discovered by hermes and never
-  reported.
 * `notmuch_parity_live.py`: the real notmuch package (the system's
   site-lisp) through a user's mail settings as a Romacs init holds them
   (`--snippet`): notmuch-hello, a saved search, tagging and archiving,
@@ -156,21 +151,21 @@ and its comparison policy in its docstring:
 GNU pgtk and `romacs-vm-gui --loadup`, each on a headless labwc with a private
 HOME, on one of two profiles (`real_init.py`).  The default, `stock`, loads
 no one's init: both engines run `-Q` and load only the bench's endpoint
-with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/gnu and lisp/romacs, on a
+with `-l` (Romacs as `--loadup -Q -l`).  Both use only the stock lisp/, on a
 generic project at `~/src/tally` (`bench/fixture.py`: Emacs Lisp, C, Rust,
 Markdown, Org and a Makefile, with a five-commit history whose authors and
 dates are fixed, so the hashes match everywhere).  `init` is a real-init
 profile, described by a JSON profile config kept outside the repository
 (`--profile-config FILE` or `ROMACS_BENCH_PROFILE`): the init's blocks, the
-package sources it loads, the project to clone, an org file, a gnosis
-database copy and the hermes dashboard URL; `real_init.py`'s docstring
+package sources it loads, the project to clone, an org file, and a gnosis
+database copy; `real_init.py`'s docstring
 lists the keys.  Both
 profiles give GNU the settings Romacs's `--loadup` makes by design, as the
 parity harnesses do, and Romacs GNU's completion: fido-vertical, not its
 own completion layer (`romacs-complete-mode`), which takes the root
 window's last line, and the completion styles without fzf.  Each engine serves
-`lisp/romacs/romacs-mcp.el` with the session tools from
-`lisp/romacs/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
+`lisp/agents/romacs-mcp.el` with the session tools from
+`lisp/agents/romacs-mcp-session.el`.  The same Lisp runs in both engines, so both
 expose the same tools with the same result shapes:
 
 * `romacs_send_keys`: `kbd` keys or literal text, fed through
@@ -205,12 +200,7 @@ Data safety: the project is a `git clone --no-hardlinks` copy and the org
 file a copy, both in the private HOME.  The gnosis database is a reflink copy
 of the copy named by `--gnosis-db` or the profile config, never the live
 database: gnosis's default locations and the profile's `live_gnosis_db` are
-refused.  Hermes attaches to a running dashboard and never starts one: an
-init that sets another start mode is refused, and every acquisition is made
-remote.  A key that sends a hermes prompt
-must carry `effect=hermes-prompt`.  The bench allows one per engine per
-session, and replay skips such keys unless `--allow-effect hermes-prompt` is
-given.
+refused.
 
 ```sh
 # in the project environment (pinned GNU, ROMACS_GNU_SOURCE)
@@ -274,152 +264,242 @@ calls and their verdicts are recorded, and a run's `results.jsonl` stays
 local.  Gnosis due cards and model replies depend on the day, so on
 replay those steps can diverge for reasons outside Romacs.
 
-# Standing benchmarks: fixed workloads against pinned GNU
+# Standing benchmarks against pinned GNU
 
-`perfbench/perfbench.py` runs one fixed set of workloads in GNU Emacs and
-in a given Romacs build and prints one table: per workload, each engine's
-`instructions:u` (the reliable metric) and wall time (median of `--runs`,
-default 3), the Romacs/GNU ratio of each, and the change of Romacs's
-figures since the previous saved run.  Each run is saved as
-`results.json` and `table.md` under `OUT/<commit>/<UTC time>/` (default
-OUT `~/.cache/romacs/perf-bench`, or `$ROMACS_PERFBENCH_OUT`), so a rerun after every master
-shows the trend.
+`perfbench/perfbench.py` compares one Romacs build with pinned GNU Emacs
+(`$ROMACS_GNU_ORACLE`, or `--gnu BIN`) row by row, on what using an editor
+feels like and on the Elisp speeds under it.  It is meant to run often: the
+whole suite takes under 15 minutes on a quiet machine, and `--only` picks
+rows, so a lane compares its own area in a minute or two.
 
-The GNU engine is this machine's own installation, `/usr/bin/emacs`, run with
-`LD_LIBRARY_PATH` unset, or `--gnu BIN`.  Each run records its version,
-repository commit, package and whether it is natively compiled, in results.json
-and README's headers, since an upgrade moves it.  The parity harnesses keep the
-pinned oracle.  `$ROMACS_GNU_SOURCE` still supplies the pinned tree: fixture
-files and ERT test files, the same inputs for every engine, whatever commit the
-GNU engine is at.
+```sh
+# in the project environment (ROMACS_GNU_ORACLE, ROMACS_GNU_SOURCE)
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --only syntax,typing
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY --only '*c-ts-mode'
+python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --list   # every row and its areas
+```
+
+`--only` takes areas, row names and globs, comma or space separated:
+
+* `startup`: `-Q --batch` to exit; a GUI launch to Romacs's first paint and
+  to the first idle moment after startup.
+* `typing`: per key in a GUI session, self-insert, `C-f` and `C-n` in text,
+  and self-insert in the middle of `xdisp.c` (c-ts-mode) and `subr.el`; and
+  the syntax rows' key in the middle.
+* `scroll`: per key, `C-v` down `xdisp.c` (c-ts-mode) and `subr.el`, each
+  screen fontified as it comes.
+* `find-file`: `C-x C-f` over 5,000 files in fido-vertical and in Romacs's
+  own completion; `xdisp.c` and a generated 15 MB header opened in c-ts-mode
+  to the window's final faces; dired of the 5,000 files.
+* `completion`: the `C-x C-f` rows and `M-x` in fido-vertical.
+* `font-lock`: the typing and scroll rows in code, the syntax rows' key and
+  `font-lock-ensure`, and Org's `ORG-NEWS`.
+* `syntax`: `syntax-ppss` after an edit, `scan-lists`, `forward-comment`, a
+  key in the middle and `font-lock-ensure`, on `subr.el` in emacs-lisp-mode
+  and `fileio.c` and `xdisp.c` in c-mode and c-ts-mode.  `xdisp.c`'s c-mode
+  `font-lock-ensure` is left out: `fileio.c`'s says the same at a fraction of
+  the time.  Also by file and mode: `c-ts-mode`, `xdisp.c`, ...
+* `lisp`: the call path (named and closure calls, `mapcar`, `dolist` +
+  `funcall`), uncompiled Lisp (less a run that only loads it), core primitives (hash tables, `assq`,
+  `plist-get`, `format`, `concat`, `string-match`, `intern`, insertion), and
+  three members of GNU ELPA's elisp-benchmarks (smie, eieio, pack-unpack).
+* `search` (occur, project-find-regexp), `vc` (the whole history log),
+  `theme` (a theme switch, cycled and on first visit), `commands`
+  (describe-function, 20 `shell-command-to-string`).
+* `elb`, by name: every member of elisp-benchmarks 1.16, the suite GNU
+  evaluates native compilation with, and their geometric mean and median.
+  The published tables, from a whole run, hold the three `lisp` members.
+
+Instructions (`instructions:u`, every thread of the process) are the main
+figure, wall time the median of `--runs` (default 3) beside them, each with
+the Romacs/GNU ratio and the change of Romacs's figure since the newest earlier
+saved run that has the row.  Each run is saved as `results.json` and `table.md` under
+`OUT/<commit>/<UTC time>/` (OUT `~/.cache/romacs/perf-bench`, or
+`$ROMACS_PERFBENCH_OUT`), with each runner's time.
+
+How rows count:
+
+* Batch and syntax rows run `-Q --batch -l perfbench/perfbench.el`, one
+  process per run: instructions are the run's less a run doing only its setup
+  (perf/font-lock's method), so a tree-sitter mode's background parsing counts
+  on whatever thread it runs.  Wall is the body's own time.  Rows with one
+  setup share its setup-only runs.  Each engine's result (match counts,
+  positions) is compared, and a difference is noted.  The syntax rows are the
+  syntax-ppss lane's rig: every operation but `font-lock-ensure` starts warm
+  (the buffer's syntax state computed, one key typed), `font-lock-ensure`
+  starts with the mode just turned on, so a tree-sitter mode's first parse is
+  part of it; its result is the number of parsers, compared across engines.
+* Lisp rows loop 1,000,000 times in a file compiled in both engines, GNU
+  byte-compiled and Romacs from its compiled store, per iteration beyond an
+  empty loop.  `uncompiled` rows read source in both, GNU into its
+  interpreter, per whole iteration less a run that only loads the file.  elisp-benchmarks members load GNU's
+  `.elc` and, when GNU has native compilation, its `.eln` (a third column),
+  and Romacs's store; the compiled package is kept between runs.
+* Per-key rows run in one GUI session per engine on headless labwc, as the
+  parity harnesses run both.  Instructions are the whole process's over the
+  keys less its idle rate, every thread but llvmpipe's (Mesa's software GL
+  stands in for the GPU there); wall runs from `pre-command-hook` to the next
+  idle moment, after redisplay (`perfbench-gui.el`).  Romacs takes GNU's
+  completion there (fido-vertical, the styles without fzf,
+  `real_init.GNU_COMPLETION_UI`), but in the `romacs-complete` row.  Code rows
+  visit their file afresh each round, C in c-ts-mode in both.
+* Session rows (opening files, the history log, themes) run in a session as
+  each engine ships.  Wall runs from the key to the result; block is the
+  longest gap between ticks of a 5 ms timer, which cannot run while the main
+  VM is busy (`perfbench-session.el`).  These are read by wall and block: a
+  worker VM's path does more work in total to keep the main VM free.  The log
+  is upstream master's whole history with `vc-log-show-limit` 0, its commits
+  and the buffer's hash compared across engines.
 
 Romacs runs as an installation runs it.  Before anything is measured,
 perfbench stages the binary beside its Lisp trees and compiles them with
-`--compile-lisp-tree`, as an installer does, into a store of its own,
-cached under OUT per binary and runtime (minutes the first time, not part
-of any row).  Batch rows set `ROMACS_COMPILED_LISP=on` and boot from a
-batch world perfbench prepares first; a user's is built by their first
-batch run once their cache holds a world store, so the very first batch
-run of an installation is slower than these rows.  GUI rows have the store
-and their world by default.  A workload's own file (micro, elb) loads by
-name with an `.elc` beside it, as an installed package does.  A load the
-store cannot satisfy reads source without saying so, so each row's note
-counts the loads the store's use log confirms, names any read as source,
-and says if anything compiled during the row.  Perfbench's own Lisp, its
-init and ERT's test files read as source in both engines, and a world
-build reads source by design.  The init and apps rows load private copies
-of their packages, which read as source, and their notes say so.
-`--romacs-source` measures the old way, with no store or world.
+`--compile-lisp-tree`, as an installer does, cached under OUT per binary and
+runtime (a minute or two the first time, not part of any row).  Batch rows
+set `ROMACS_COMPILED_LISP=on` and boot from a batch world prepared first.  A
+workload's own file loads by name with an `.elc` beside it, as an installed
+package does.  Each row's note counts the loads the store's use log confirms
+and names any read as source.  `--romacs-source` measures with no store or
+world.  `--neomacs BIN` adds neomacs as a third engine with its own column.
 
-`--neomacs BIN` adds neomacs as a third engine with its own column: the same
-workloads in private homes, as it installs, its dump and its `.elc` files,
-with a workload's own file byte-compiled by its own compiler.
-`--neomacs-commit SHA` records the commit it was built from, which it does
-not report itself.  Its batch runs are limited to 8 GiB of address space,
-because one ERT file otherwise grows without bound.  A row it cannot run says why.  The `init` and `apps`
-rows are GNU's and Romacs's alone, and so is ERT.
+When the 1-minute load average exceeds `--max-load` (default 8) during a row,
+its wall times are withheld; instructions are still reported.  The inputs are
+pinned: the Emacs tree is a `--shared` clone of `$ROMACS_GNU_SOURCE` at the
+oracle's commit, checked clean, its fixture files checked against SHA-256s,
+and the 5,000 files have fixed contents and mtimes.  Every engine runs in
+private HOME/XDG/TMPDIR trees, and no row writes a user's data.
 
-The workloads, and how each is counted, are in the script's docstring:
+After a whole run (it refuses one made with `--only`),
+`perfbench/readme.py OUT/COMMIT/TIME/results.json` writes
+the tables below, every row kept, and fills README's lead (`perfbench/lead.md`,
+each `{{name}}` from the run; a name with no value stops it and leaves both
+files as they were, and a wall refused for load counts as none).  It also
+lists the headlines: every row where Romacs is 0.80x or better against a rival
+on every metric measured, and names on standard error any headline the run
+lost.  A block the run did not measure is left as it was.
 
-* batch, `-Q --batch` on `perfbench/perfbench.el` in both engines:
-  startup; font-lock-ensure on fileio.c, subr.el and ORG-NEWS; dired of
-  5,000 files; project-find-regexp over the Emacs repository; vc-log of
-  2,000 commits; occur and how-many over xdisp.c; find-file of xdisp.c;
-  describe-function of find-file; 20 shell-command-to-string and 20 eshell
-  commands.  Instructions are a run's
-  less a run doing only the setup (perf/font-lock's method).  Each engine's
-  result (match counts, line counts) is compared, and a difference is noted.
-* micro: named call, closure call, mapcar of 1 and 10, dolist + funcall,
-  per iteration beyond an empty loop; GNU byte-compiled, Romacs from its store.
-* elb: GNU ELPA's elisp-benchmarks 1.16 (a pinned tarball, checked by
-  SHA-256), the suite GNU evaluates native compilation with.  One row per
-  entry point the suite defines in either engine, and their geometric
-  mean.  GNU loads the member files byte-compiled (JIT native compilation
-  off) and, when it has native compilation, natively compiled at the
-  suite's own speed and safety, a third column; Romacs loads them from its
-  store.
-  A member an engine does not define, or whose run reported an error,
-  has no figure there and says why.  The geometric mean compares Romacs
-  with GNU `.elc` alone.  A median of the per-member ratios covers every
-  column: native compilation reduces some members to almost nothing, and one
-  such ratio would decide a mean.  Pure Lisp compute rather than an editor
-  workload, so it has its own table and is not in `--quick`.
-* ERT: 25 GNU ERT files with the same `-l ert ... -f
-  ert-run-tests-batch-and-exit` command in both engines.  These totals are
-  not comparable with `test/gnu/run.py`'s, which run romacs-gnu-ert
-  through the romacs-batch adapter.
-* session, real commands and keys in a GUI session on headless labwc:
-  dired, occur, project-find-regexp, project-find-file, vc-log, vc-diff,
-  vc-dir, `M-x shell` and org-agenda on a key, and per-key kill, yank, undo,
-  isearch and Org editing.  Then, in a session with Romacs's shipped defaults
-  on, the rows README's lead quotes: find-file of `xdisp.c` and of a generated
-  15 MB header to the window's final faces (every visible character
-  `fontified`), `vc-print-root-log` over upstream master's whole history with
-  `vc-log-show-limit` 0 (commits, complete, first screen, median key while it
-  streams, the buffer's hash compared across engines), and a theme switch,
-  cycled and on first visit, among each engine's own shipped themes, since
-  Romacs ships none of GNU's.  Wall runs from the key to the result.
-  Block is the longest gap between ticks of a 5 ms timer, which cannot run
-  while the main VM is busy (`perfbench-session.el`).  Instructions are
-  reported, but these rows are read by wall and block: a worker VM's path does
-  more work in total to keep the main VM free, and its processes are not
-  counted.  Writing rows use a private clone of the pinned tree.
-* GUI, each engine on its own headless labwc as the parity harnesses run
-  them: first-start world build (Romacs only), warm launch to first paint
-  (Romacs only) and to idle, per-key self-insert, C-f and C-n, and C-x C-f
-  over 5,000 files in fido-vertical, then (Romacs only) in its default
-  completion, the `romacs-complete-mode` layer with the fzf style.  The
-  comparison rows give Romacs GNU's completion, as the bench's profiles do
-  (`real_init.GNU_COMPLETION_UI`): fido-vertical, not the layer, which takes
-  the root window's last line, and the styles without fzf.  Per-key instructions count every
-  thread but llvmpipe's: the headless compositor has no GPU, so Mesa's
-  software GL does the GPU's work there.  The parity probe's polling is
-  paused while a phase is counted.  Wall per key runs from
-  `pre-command-hook` to the next idle moment, after redisplay
-  (`perfbench-gui.el`).
-* `init`, by name only (`--only init`): the real-init profile's init body (`--profile-config`), GNU against Romacs from
-  source and from its init layer; wall only.
-* `apps`, by name only (`--only apps`): gnosis dashboard open and back (`gnosis_parity_live.py` on a database
-  copy given with `--gnosis-db` and `--gnosis-db-repo`, or the profile
-  config's), and hermes
-  dashboard open (`hermes_parity_live.py`, read-only, only when the
-  dashboard answers), one run each.
+## Latest results
 
-When the 1-minute load average exceeds `--max-load` (default 8) during a
-workload, its wall times are withheld and the load is printed beside them.
-Instructions are still reported.  The inputs are pinned.  The Emacs tree
-is a `--shared` clone of `$ROMACS_GNU_SOURCE` at the oracle's commit,
-checked clean, and its fixture files are checked against SHA-256s.  The
-5,000 files have fixed contents and mtimes.  Every engine runs in private
-HOME/XDG/TMPDIR trees, and no workload writes a user's data.
+<!-- perfbench-table-begin -->
+Measured 2026-11-14 on build `c4f4cebe` against GNU Emacs 32.0.50 pinned at commit `45b0f769`, natively compiled, the inputs pinned there too, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each workload ran 3 times per engine in private home directories; instructions (`instructions:u`, every thread) are the main figure and wall time the median beside them; wall times measured above load 8 are left out.  The whole run took 13 min 3 s.  Rerun: `python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY`, then `python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json`; one area or row: `--only AREA` or `--only 'ROW'`.  Romacs ran as an installation does: 1956 of the 2005 files of its Lisp compiled ahead of use into its store by `--compile-lisp-tree`, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.
 
-```sh
-# in the project environment (ROMACS_GNU_SOURCE for the pinned tree)
-python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py \
-  --romacs INSTALLED/romacs-vm-gui  # about an hour, most of it elb
-python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BIN --quick  # about 4
-```
+| Workload | Per | GNU instructions | Romacs instructions | Romacs/GNU (instructions) | GNU time | Romacs time | Romacs/GNU (time) | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| startup -Q --batch | run | 259M | 457M | 1.77x | - | - | - | wall refused: load 8.4 > 8.0; process to exit; Romacs: compiled store, 0 of 0 loads compiled |
+| dired 5000 files | run | 800M | 1.6G | 2.00x | 110 ms | 210 ms | 1.91x | less its setup; Romacs: compiled store, 3 of 3 loads compiled |
+| occur xdisp.c | run | 183M | 248M | 1.36x | 20.6 ms | 32.1 ms | 1.56x | less its setup; Romacs: compiled store, 0 of 0 loads compiled |
+| project-find-regexp repo | run | 2.63G | 3.59G | 1.36x | 404 ms | 579 ms | 1.43x | less its setup; Romacs: compiled store, 25 of 26 loads compiled, read as source: cus-load.el |
+| describe-function find-file | run | 590M | 776M | 1.32x | 44.6 ms | 68.7 ms | 1.54x | less its setup; Romacs: compiled store, 6 of 7 loads compiled, read as source: shortdoc-doc.el |
+| shell-command 20 runs | run | 42.4M | 57.4M | 1.36x | 31.3 ms | 36.8 ms | 1.18x | less its setup; Romacs: compiled store, 0 of 0 loads compiled |
+| font-lock-ensure ORG-NEWS | run | 1.39G | 4.38G | 3.14x | 115 ms | 437 ms | 3.80x | less its setup; Romacs: compiled store, 171 of 172 loads compiled, read as source: org-version.el |
+| syntax-ppss subr.el emacs-lisp-mode | run | 1.69G | 2.56G | 1.52x | 97.4 ms | 175 ms | 1.80x | 10 edits near the start, each then (syntax-ppss (point-max)); less its setup; Romacs: compiled store, 1 of 1 loads compiled |
+| scan-lists subr.el emacs-lisp-mode | run | 186M | 249M | 1.34x | 6.74 ms | 20.4 ms | 3.02x | 500 times out of the top-level form around the middle, both ways; less its setup; Romacs: compiled store, 1 of 1 loads compiled |
+| forward-comment subr.el emacs-lisp-mode | run | 611M | 682M | 1.12x | 28.8 ms | 53.6 ms | 1.86x | 1000 times over the file's leading comments and back; less its setup; Romacs: compiled store, 1 of 1 loads compiled |
+| key in the middle subr.el emacs-lisp-mode | run | 54.1M | 21.9M | 0.41x | 565 µs | 3.57 ms | 6.32x | 20 self-inserted keys, each line refontified and its paren shown; less its setup; Romacs: compiled store, 1 of 1 loads compiled |
+| font-lock-ensure subr.el emacs-lisp-mode | run | 1.78G | 3.27G | 1.83x | 128 ms | 322 ms | 2.52x | the whole buffer, the mode just turned on; less its setup; Romacs: compiled store, 1 of 1 loads compiled |
+| syntax-ppss fileio.c c-mode | run | 378M | 130M | 0.34x | 21 ms | 12.6 ms | 0.60x | 10 edits near the start, each then (syntax-ppss (point-max)); less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| scan-lists fileio.c c-mode | run | 219M | 401M | 1.83x | 10.8 ms | 33.4 ms | 3.09x | 500 times out of the top-level form around the middle, both ways; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| forward-comment fileio.c c-mode | run | 363M | 478M | 1.32x | 17.3 ms | 38.1 ms | 2.21x | 1000 times over the file's leading comments and back; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| key in the middle fileio.c c-mode | run | 239M | 497M | 2.08x | 21.4 ms | 59.6 ms | 2.79x | 20 self-inserted keys, each line refontified and its paren shown; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| font-lock-ensure fileio.c c-mode | run | 10.4G | 19.2G | 1.85x | 883 ms | 2.19 s | 2.48x | the whole buffer, the mode just turned on; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| syntax-ppss xdisp.c c-mode | run | 2.08G | 454M | 0.22x | 113 ms | 38 ms | 0.34x | 10 edits near the start, each then (syntax-ppss (point-max)); less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| scan-lists xdisp.c c-mode | run | 1.9G | 3.51G | 1.85x | 95.7 ms | 273 ms | 2.86x | 500 times out of the top-level form around the middle, both ways; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| forward-comment xdisp.c c-mode | run | 11.9G | 14.9G | 1.25x | 549 ms | 1.18 s | 2.15x | 1000 times over the file's leading comments and back; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| key in the middle xdisp.c c-mode | run | 332M | 786M | 2.37x | 27 ms | 76.1 ms | 2.82x | 20 self-inserted keys, each line refontified and its paren shown; less its setup; Romacs: compiled store, 11 of 11 loads compiled |
+| syntax-ppss fileio.c c-ts-mode | run | 361M | 29.8M | 0.08x | 19.2 ms | 2.45 ms | 0.13x | 10 edits near the start, each then (syntax-ppss (point-max)); less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| scan-lists fileio.c c-ts-mode | run | 211M | 354M | 1.68x | 10.7 ms | 28.8 ms | 2.69x | 500 times out of the top-level form around the middle, both ways; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| forward-comment fileio.c c-ts-mode | run | 110M | 273M | 2.48x | 12.7 ms | 33.5 ms | 2.63x | 1000 times over the file's leading comments and back; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| key in the middle fileio.c c-ts-mode | run | 5.58G | 1.99G | 0.36x | 409 ms | 166 ms | 0.40x | 20 self-inserted keys, each line refontified and its paren shown; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| font-lock-ensure fileio.c c-ts-mode | run | 2.24G | 1.56G | 0.69x | 164 ms | 116 ms | 0.71x | the whole buffer, the mode just turned on; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| syntax-ppss xdisp.c c-ts-mode | run | 2.01G | 40M | 0.02x | 109 ms | 3.38 ms | 0.03x | 10 edits near the start, each then (syntax-ppss (point-max)); less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| scan-lists xdisp.c c-ts-mode | run | 1.93G | 3.21G | 1.66x | 101 ms | 251 ms | 2.48x | 500 times out of the top-level form around the middle, both ways; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| forward-comment xdisp.c c-ts-mode | run | 138M | 398M | 2.88x | 15.8 ms | 52.6 ms | 3.33x | 1000 times over the file's leading comments and back; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| key in the middle xdisp.c c-ts-mode | run | 3.62G | 1.39G | 0.38x | 290 ms | 118 ms | 0.41x | 20 self-inserted keys, each line refontified and its paren shown; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| font-lock-ensure xdisp.c c-ts-mode | run | 11.4G | 8.26G | 0.73x | 844 ms | 637 ms | 0.75x | the whole buffer, the mode just turned on; less its setup; Romacs: compiled store, 4 of 4 loads compiled |
+| micro named call | iteration | 216 | 115 | 0.53x | 10.1 ns | 5.4 ns | 0.53x | (m-id i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro closure call | iteration | 213 | 427 | 2.01x | 9.75 ns | 21.7 ns | 2.22x | (funcall f0 i); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro mapcar 10 | iteration | 8.23k | 9.78k | 1.19x | 657 ns | 583 ns | 0.89x | (mapcar f0 l); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| micro dolist + funcall 10 | iteration | 3.1k | 5.03k | 1.62x | 190 ns | 290 ns | 1.53x | (dolist (x l) (funcall f0 x)); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim gethash | iteration | 424 | 1.1k | 2.59x | 24.5 ns | 62.1 ns | 2.54x | (gethash (% i 1000) m-h); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim puthash | iteration | 327 | 1.19k | 3.63x | 18.4 ns | 66.9 ns | 3.63x | (puthash (% i 1000) i m-h); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim assq | iteration | 292 | 573 | 1.96x | 10.8 ns | 41.3 ns | 3.84x | (assq 'j m-al); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim plist-get | iteration | 529 | 557 | 1.05x | 25.4 ns | 71.8 ns | 2.83x | (plist-get m-pl :j); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim format | iteration | 3.54k | 4.55k | 1.28x | 283 ns | 378 ns | 1.33x | (format "%d-%s" i "x"); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim concat | iteration | 1.85k | 2.17k | 1.17x | 165 ns | 186 ns | 1.13x | (concat (car m-s) "_row"); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim string-match | iteration | 2.37k | 4.17k | 1.76x | 157 ns | 352 ns | 2.24x | (string-match "_\\([a-z]+\\)_" "glyph_row_struct"); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim intern | iteration | 359 | 1.9k | 5.30x | 21.6 ns | 113 ns | 5.21x | (intern "glyph_row"); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| prim insert + delete-char | iteration | 9.41k | 20.2k | 2.14x | 702 ns | 1.78 µs | 2.53x | (let ((buffer-undo-list t)) (insert "x") (delete-char -1)); GNU compiled; Romacs: compiled store, 1 of 1 loads compiled |
+| uncompiled arithmetic | iteration | 3.35k | 243 | 0.07x | 147 ns | 16.8 ns | 0.11x | (setq s (+ s (% i 97))); GNU interpreted; less a run that only loads it; Romacs: compiled store, 0 of 1 loads compiled, read as source: 7c68928cf438.el |
+| uncompiled named call | iteration | 3.96k | 253 | 0.06x | 228 ns | 13.4 ns | 0.06x | (m-id i); GNU interpreted; less a run that only loads it; Romacs: compiled store, 0 of 1 loads compiled, read as source: be2225980221.el |
+| uncompiled dolist 10 | iteration | 44.3k | 2.3k | 0.05x | 2.73 µs | 158 ns | 0.06x | (dolist (x l) (setq s (+ s x))); GNU interpreted; less a run that only loads it; Romacs: compiled store, 0 of 1 loads compiled, read as source: 4b1ecf859fad.el |
+| launch to first paint | run | - | - | - | - | 291 ms | - | Romacs only (its --trace-latency first-paint); GNU has no paint mark; Romacs: compiled store, 2 of 2 loads compiled |
+| launch to idle | run | 3.26G | 3.17G | 0.97x | 421 ms | 326 ms | 0.77x | spawn to the first idle after emacs-startup-hook; instructions to exit there; Romacs: compiled store, 2 of 2 loads compiled |
+| key self-insert text | key | 32.3M | 35.6M | 1.10x | 1.09 ms | 1.02 ms | 0.94x | 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| key C-f text | key | 20.4M | 34.2M | 1.68x | 85.9 µs | 768 µs | 8.93x | 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| key C-n text | key | 22M | 37.4M | 1.70x | 273 µs | 1.14 ms | 4.19x | 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| key self-insert xdisp.c c-ts-mode | key | 208M | 119M | 0.57x | 15.2 ms | 1.15 ms | 0.08x | from the middle, each round in the file visited afresh; 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| key self-insert subr.el emacs-lisp-mode | key | 26M | 31.9M | 1.23x | 506 µs | 1.81 ms | 3.57x | from the middle, each round in the file visited afresh; 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| scroll C-v xdisp.c c-ts-mode | key | 48.3M | 52.8M | 1.09x | 1.94 ms | 3.39 ms | 1.75x | from the top, each round in the file visited afresh; 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| scroll C-v subr.el emacs-lisp-mode | key | 51.4M | 62.2M | 1.21x | 2.33 ms | 3.82 ms | 1.64x | from the top, each round in the file visited afresh; 20 keys a round, latencies GNU 60, Romacs 60; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| C-x C-f 5000 files fido | key | 700M | 629M | 0.90x | 73.1 ms | 70.3 ms | 0.96x | fido-vertical; the keys of file-1, latencies GNU 18, Romacs 18; candidates GNU 1000, Romacs 1000; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| M-x fido | key | 121M | 111M | 0.91x | 15.9 ms | 8.35 ms | 0.52x | fido-vertical; the keys of find-fi, latencies GNU 21, Romacs 21; candidates GNU 62, Romacs 63; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+| C-x C-f 5000 files romacs-complete | key | - | 50.8M | - | - | 3.63 ms | - | Romacs only: its default completion (the layer, fzf); the keys of file-1, latencies Romacs 18; candidates Romacs 2084; Romacs: compiled store, 22 of 23 loads compiled, read as source: cus-load.el |
+<!-- perfbench-table-end -->
 
-After a full run, `perfbench/readme.py OUT/COMMIT/TIME/results.json` rewrites the
-tables in `doc/benchmarks.md` from that run, keeping every
-row: the editor workloads between `<!-- perfbench-table-begin -->` and
-`<!-- perfbench-table-end -->`, and the elisp-benchmarks members between
-`<!-- perfbench-elb-begin -->` and `<!-- perfbench-elb-end -->`.  A block the run did not
-measure is left as it was.  `perfbench/lead.md` is README's lead: each `{{name}}`
-in it is filled from the run and written between `<!-- perfbench-lead-begin -->` and
-`<!-- perfbench-lead-end -->`.  A name with no value fails the run and stops `readme.py`
-with that README untouched, and a wall time refused for load counts as none, so
-the lead takes a quiet run.  A whole run also rewrites the headlines between
-`<!-- perfbench-headlines-begin -->` and `<!-- perfbench-headlines-end -->`: every row where
-Romacs is 0.80x or better against a rival on every metric measured, with build
-and rerun command.  It names on standard error any headline the run lost.
+### Sessions
 
-A binary installed beside its runtime (`lisp/gnu/`, `lisp/romacs/`, as an
-installed build has them) runs that runtime; otherwise give
-`--runtime`.  The commit comes from the `build.json` beside the binary, or
-from `--commit`.  `--only` takes groups (`batch micro ert elb session gui init apps`)
-or workloads: a batch row's name, `micro`, `ERT 25 files`, `elb`, `session`, `launch`,
-`keys`, `init` or `apps`.
+<!-- perfbench-session-begin -->
+Real commands and keys in a GUI session.  Wall runs from the key to the result.  Block is the longest gap between ticks of a 5 ms timer, which cannot run while the main VM is busy: how long the session stopped answering.  Read these rows by wall and block: work moved to a worker VM adds instructions and removes block.
+
+Measured 2026-11-14 on build `c4f4cebe` against GNU Emacs 32.0.50 pinned at commit `45b0f769`, natively compiled, the inputs pinned there too, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each row ran 3 times per engine in private home directories; instructions (`instructions:u`, every thread) are the main figure and wall time the median beside them; wall times measured above load 8 are left out.  The whole run took 13 min 3 s.  Rerun: `python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY`, then `python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json`; one area or row: `--only AREA` or `--only 'ROW'`.  Romacs ran as an installation does: 1956 of the 2005 files of its Lisp compiled ahead of use into its store by `--compile-lisp-tree`, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.
+
+| Row | Per | GNU | Romacs | GNU block | Romacs block | Romacs/GNU (time) | Romacs/GNU (block) | Romacs/GNU (instructions) | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| open xdisp.c c-ts-mode | run | 436 ms | 218 ms | 407 ms | 43.7 ms | 0.50x | 0.11x | 0.57x | first shown GNU 22 ms, Romacs 31.3 ms; CPU cores GNU 0.6, Romacs 0.5; mode GNU c-ts-mode, Romacs c-ts-mode; Romacs: compiled store, 38 of 45 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| open 15 MB header c-ts-mode | run | 1.96 s | 1.07 s | 1.88 s | 129 ms | 0.55x | 0.07x | 0.50x | first shown GNU 42.8 ms, Romacs 129 ms; CPU cores GNU 0.8, Romacs 0.8; mode GNU c-ts-mode, Romacs c-ts-mode; Romacs: compiled store, 38 of 45 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| vc-print-root-log whole history | run | 14.7 s | 3 s | 46.5 ms | 53.4 ms | 0.20x | 1.15x | 0.22x | first shown GNU 53 ms, Romacs 53.4 ms; median key GNU 4.89 ms, Romacs 4.86 ms; CPU cores GNU 1.2, Romacs 2.5; Romacs: compiled store, 38 of 45 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more |
+| theme switch first visit | run | 30.2 ms | 18.7 ms | 29.1 ms | 18.6 ms | 0.62x | 0.64x | 6.56x | CPU cores GNU 0.2, Romacs 0.2; Romacs: compiled store, 38 of 45 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
+| theme switch cycled | run | 5.08 ms | 5.7 ms | 4.51 ms | 5.67 ms | 1.12x | 1.26x | - | CPU cores GNU 0.2, Romacs 0.1; Romacs: compiled store, 38 of 45 loads compiled, read as source: cus-load.el, dracula-theme.el, gruvbox-dark-theme.el, nord-theme.el, solarized-dark-theme.el, tokyonight-night-theme.el and 1 more; each engine on its own shipped themes |
+<!-- perfbench-session-end -->
+
+### elisp-benchmarks
+
+<!-- perfbench-elb-begin -->
+This is GNU's own benchmark suite, GNU ELPA's elisp-benchmarks (the one GNU uses to evaluate native compilation), not ours, and it measures pure Lisp compute, not editor responsiveness.
+
+Measured 2026-11-14 on build `c4f4cebe` against GNU Emacs 32.0.50 pinned at commit `45b0f769`, natively compiled, the inputs pinned there too, on AMD Ryzen 9 5950X 16-Core Processor, 32 threads, 47 GB.  Each member ran 3 times per engine in private home directories; instructions (`instructions:u`, every thread) are the main figure and wall time the median beside them; wall times measured above load 8 are left out.  The whole run took 13 min 3 s.  Rerun: `python3 -B crates/romacs-vm-gui/harness/perfbench/perfbench.py --romacs BINARY`, then `python3 -B crates/romacs-vm-gui/harness/perfbench/readme.py OUT/COMMIT/TIME/results.json`; one area or row: `--only AREA` or `--only 'ROW'`.  GNU loads the member files byte-compiled, with JIT native compilation off, and natively compiled at the suite's own speed and safety; its own Lisp libraries are natively compiled in both columns, as this GNU is built with native compilation.  Romacs ran as an installation does: 1956 of the 2005 files of its Lisp compiled ahead of use into its store by `--compile-lisp-tree`, before anything was timed; batch rows booted from a batch world prepared first, which a user's first batch run builds, and a workload's own file loaded compiled.  Each row's note counts the loads the store confirms and names any it does not.  A member an engine does not define, or whose run reported an error, has no figure there.  A ratio is Romacs over the other engine: below 1.00x, Romacs is faster.
+
+| Member | GNU .elc | GNU native | Romacs | Romacs/GNU .elc (time) | Romacs/GNU native (time) | Romacs/GNU .elc (instructions) | Romacs/GNU native (instructions) | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| eieio | 802 ms | 779 ms | 2.98 s | 3.72x | 3.83x | 3.59x | 3.60x | Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
+| pack-unpack | 211 ms | 212 ms | 880 ms | 4.17x | 4.16x | 4.14x | 4.30x | Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
+| smie | 917 ms | 896 ms | 3.18 s | 3.47x | 3.55x | 2.28x | 2.29x | Romacs: compiled store, 65 of 66 loads compiled, read as source: org-version.el |
+<!-- perfbench-elb-end -->
+
+### Headlines
+
+<!-- perfbench-headlines-begin -->
+Every row of this run where Romacs beats a rival by at least 20%: 0.80x or better on every metric the run measured.  Build `c4f4cebe`.  The tables keep every row, losses included.
+
+| Row | Against | Instructions | Time | Block | Build | Rerun |
+| --- | --- | --- | --- | --- | --- | --- |
+| syntax-ppss fileio.c c-mode | GNU | 0.34x | 0.60x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'syntax-ppss fileio.c c-mode'` |
+| syntax-ppss xdisp.c c-mode | GNU | 0.22x | 0.34x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'syntax-ppss xdisp.c c-mode'` |
+| syntax-ppss fileio.c c-ts-mode | GNU | 0.08x | 0.13x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'syntax-ppss fileio.c c-ts-mode'` |
+| key in the middle fileio.c c-ts-mode | GNU | 0.36x | 0.40x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'key in the middle fileio.c c-ts-mode'` |
+| font-lock-ensure fileio.c c-ts-mode | GNU | 0.69x | 0.71x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'font-lock-ensure fileio.c c-ts-mode'` |
+| syntax-ppss xdisp.c c-ts-mode | GNU | 0.02x | 0.03x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'syntax-ppss xdisp.c c-ts-mode'` |
+| key in the middle xdisp.c c-ts-mode | GNU | 0.38x | 0.41x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'key in the middle xdisp.c c-ts-mode'` |
+| font-lock-ensure xdisp.c c-ts-mode | GNU | 0.73x | 0.75x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'font-lock-ensure xdisp.c c-ts-mode'` |
+| micro named call | GNU | 0.53x | 0.53x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'micro named call'` |
+| uncompiled arithmetic | GNU | 0.07x | 0.11x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'uncompiled arithmetic'` |
+| uncompiled named call | GNU | 0.06x | 0.06x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'uncompiled named call'` |
+| uncompiled dolist 10 | GNU | 0.05x | 0.06x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'uncompiled dolist 10'` |
+| key self-insert xdisp.c c-ts-mode | GNU | 0.57x | 0.08x | - | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'key self-insert xdisp.c c-ts-mode'` |
+| open xdisp.c c-ts-mode | GNU | 0.57x | 0.50x | 0.11x | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'open xdisp.c c-ts-mode'` |
+| open 15 MB header c-ts-mode | GNU | 0.50x | 0.55x | 0.07x | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'open 15 MB header c-ts-mode'` |
+| theme switch first visit | GNU | 6.56x | 0.62x | 0.64x | `c4f4cebe` | `perfbench.py --romacs BINARY --only 'theme switch first visit'` |
+<!-- perfbench-headlines-end -->
 
 ## Line numbers in programming buffers
 
@@ -429,6 +509,33 @@ text glyphs in the scene diagnostics, so a harness that matches a
 programming buffer's rows by their glyph text starts its init with
 `live_oracle.NO_LINE_NUMBERS`, which turns them off the way a user's init
 does (`fontify_live.py`, `lines_live.py`).
+
+## The render thread at rest (`rest_live.py`)
+
+What the render thread draws, and why, while nothing on screen changes.
+Under `ROMACS_DIAGNOSTICS=1` it writes its frame counters as `frame-stats`
+lines on stderr (`render_thread/frame_stats.rs`): frames planned and
+presented per demand reason (`redisplay` for dirty content, `platform_redraw`
+for a redraw nothing of ours asked for, an effect's own name beside
+`redisplay` while it animates), redraw requests and events, the scenes the
+evaluator sent (`scene_commits`) and loop wakeups; one line a second while
+they move, none once they rest, so the last line holds the totals. The
+harness holds one `--loadup` session in four states by real keys and takes
+each state's frames from those lines: idle with the blink off (no frame,
+the main thread under 1% of a core), GNU's blink (two frames a second), an
+agent chat whose turn runs (its clock, one frame a second) and the same
+with a timer 20 times a second that changes nothing. A frame that answers
+no scene of the evaluator's, or names another reason, fails its state, and
+so does a blink or a clock that draws too little for the time it was held.
+`ROMACS_HARNESS_WLR_ENV` (`KEY=VALUE ...`) is added to the session's
+environment to run the private compositor on a real GPU, where effects the
+software renderer suppresses can stand.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/rest_live.py --binary BIN --output DIR \
+  [--seconds 3..6] [--tools LABWC-DIR]   # about 1 minute
+```
+
 ## Typing while background work allocates (`gc_typing_live.py`)
 
 Key latency against collections: one isolated `-Q --loadup` session with
@@ -447,6 +554,71 @@ evaluates more Lisp with the setup, such as a variant's
 ```sh
 python3 -B crates/romacs-vm-gui/harness/gc_typing_live.py --binary BIN --output DIR \
   [--prompt] [--seed N] [--tools LABWC-DIR:WLR-RANDR-DIR]   # about 3 minutes
+```
+
+## What one redisplay costs (`display_stages_live.py`)
+
+Redisplay's cost by scenario, in instructions, held to bars. Each scenario
+of `display_stages.el` (synthetic buffers: plain text, text with invisible
+and `display` parts, an agent chat) runs in a fresh `-Q --loadup` session
+in a private headless labwc: a buffer shown one way, then 30 steps, each a
+timer that makes the scenario's change followed by the loop's own
+redisplay and those of what the change set off. A step ends once it has
+settled: its redisplay ran, no timer is ripe, and a redisplay ran after any
+timer that ran since. So a follow-up redisplay, such as the one
+`jit-lock-force-redisplay` asks for when a fontified chunk reaches back
+before its start (the folded Org scenarios), counts in its step however
+fast the host is, not in this step or the next by a race with a poll. The
+session reads `romacs-instructions` and `romacs--display-stats` at each
+step's start, all before it writes anything, so the report has, per step
+and as medians, the redisplays run, the instructions and conses spent
+inside them beside what Romacs ran for the whole step (its change, the
+timers it set off and its redisplays, each counted once; not the loop's
+own polls nor the host's wait for a frame to render, which grow with the
+machine's load, nor the host's own passes for process output and the
+echo area's sync after a message, which no scenario sets work for;
+collections fall where allocating makes them due, as the host's idle
+collection is off), the windows rebuilt, the
+bands expanded, the layouts asked of the layout host and the frames
+submitted. `display_stages_bars.json` holds each scenario's figures:
+instructions and conses under a ceiling, the counts exactly, so a step
+that no longer does its change fails too. So does a scenario more than a
+tenth of whose steps run more or fewer redisplays than the others, or
+paint when they change nothing, or do not when they do, and one whose
+step waits inside its change, running a timer or a redisplay there,
+which would count its waiting as its work. Work that removes cost lowers the bars in the same change:
+`--write-bars FILE` writes the ones a run would pass. `--record` adds a
+call graph of each scenario's steps (a frame-pointer build).
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/display_stages_live.py --binary BIN --output DIR \
+  [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
+```
+
+## What one frame costs the render thread (`render_stages_live.py`)
+
+The render thread's side of the same scenarios, held to bars. Under
+`ROMACS_DIAGNOSTICS=1` the render thread writes a `frame-cost` line for
+every frame it draws (the display runtime's `frame_cost`): what it added,
+since the frame before, to the renderer's counts (text rows met,
+tessellated and reused, glyph records handed to glyph passes, font
+identities hashed, bytes uploaded) and the instructions it retired in the
+scene's ingestion and the frame's draw, with the part inside the surface's
+acquire, the queue's submit and the present apart. The harness runs each
+painting scenario of `display_stages.el` and of `render_stages.el` (three
+windows with one typed in, a scroll by a line) as `display_stages_live.py`
+does, and takes medians over the frames that carried a new scene: its own
+instructions are a frame's less the driver's part. Frames drawn with no
+new scene (an animation's) are counted apart, per ten steps.
+`render_stages_bars.json` holds each scenario's figures, measured on a
+software adapter: the rows exactly, every cost under a ceiling. The
+compositor, and so Romacs, runs on the host's GPU when
+`ROMACS_HARNESS_WLR_ENV` gives it one; a GPU draws the animations a
+software adapter is spared, so a GPU run takes its own `--bars`.
+
+```sh
+python3 -B crates/romacs-vm-gui/harness/render_stages_live.py --binary BIN --output DIR \
+  [--only NAME ...] [--bars FILE] [--write-bars FILE] [--record]
 ```
 
 ## Typing while jabber catches up its archives (`jabber_live.py`, `xmpp_fixture.py`)

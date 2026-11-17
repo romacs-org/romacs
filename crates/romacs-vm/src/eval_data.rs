@@ -92,7 +92,7 @@ impl Vm {
 
     fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
         // `print-symbols-bare' only changes how a positioned symbol prints,
-        // and Romacs makes none (DIVERGENCES.md VM2-SYMPOS1).
+        // and Romacs makes none (ledger/divergences VM2-SYMPOS1).
         for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;
@@ -335,8 +335,8 @@ impl Vm {
     }
 
     // Properties use byte coordinates; printed intervals use Lisp characters.
-    // This snapshot borrows keys and copies Values without allocating Lisp data.
-    fn print_string_properties(&self, value: Value) -> Vec<(usize, usize, Vec<(&str, Value)>)> {
+    // This snapshot copies keys and Values without allocating Lisp data.
+    fn print_string_properties(&self, value: Value) -> Vec<(usize, usize, Vec<(crate::properties::Key, Value)>)> {
         let Some(data::Object::String(s) | data::Object::RawString(s)) = self.object_if(value) else { return Vec::new(); };
         if s.properties.is_empty() { return Vec::new(); }
         let offsets: Vec<_> = (0..=s.len()).map(|i| s.byte_offset(coordinates::CharOffset(i)).unwrap()).collect();
@@ -446,8 +446,7 @@ impl Vm {
                         let mut parts = Vec::with_capacity(limit);
                         for (key, v) in plist {
                             if parts.len() >= limit { break; }
-                            let slot = self.names.get(key).ok_or("unknown text-property symbol")?;
-                            parts.push(self.print_object(Value::reference(slot + 1, 7), true, options, depth + 2)?);
+                            parts.push(self.print_object(key.symbol(), true, options, depth + 2)?);
                             if parts.len() >= limit { break; }
                             parts.push(self.print_object(v, true, options, depth + 2)?);
                         }
@@ -679,6 +678,7 @@ impl PrintGraph {
 }
 /// What a print does with an unreadable object (print.c
 /// print_vectorlike_unreadable) for `print-unreadable-function'.
+// CELL(Held): The printer's state for one print, which can call Lisp.
 enum Unreadable {
     /// The variable is nil: print it as usual.
     Ignored,
@@ -690,6 +690,7 @@ enum Unreadable {
     Refused,
 }
 struct PrintOptions {
+    // CELL(Held)
     graph: std::cell::RefCell<PrintGraph>,
     unreadable: Unreadable,
     length: Option<usize>, level: Option<i64>, quoted: bool, newlines: bool,

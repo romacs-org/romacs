@@ -347,6 +347,7 @@ impl WgpuRenderer {
         // backgrounds so they sit below text — magit section fold arrows). ---
         for glyph in &frame_glyphs.glyphs {
             if let FrameGlyph::FringeBitmap {
+                window_id,
                 x,
                 y,
                 width,
@@ -360,6 +361,7 @@ impl WgpuRenderer {
                     continue;
                 };
                 let face = frame_glyphs.resolved_face(*face_id);
+                let start = foreground_rect_vertices.len();
                 self.render_fringe_bitmap(
                     &mut foreground_rect_vertices,
                     *x,
@@ -368,6 +370,12 @@ impl WgpuRenderer {
                     *height,
                     &face.fg,
                     bitmap,
+                );
+                // A bitmap wider than its column spills past it.
+                super::root_picture::reach::note_points(
+                    window_id.get(),
+                    romacs_display_protocol::types::Rect::new(*x, *y, *width, *height),
+                    foreground_rect_vertices[start..].iter().map(|v| v.position),
                 );
             }
         }
@@ -404,8 +412,9 @@ impl WgpuRenderer {
             let char_w = frame_glyphs.char_width.max(1.0);
             let tab_w = 4; // default tab width; we infer from the glyph spacing
 
-            // Collect row info: group chars by Y coordinate to find rows,
-            // then detect indent (leading space/tab) per row.
+            // Collect row info: group chars by window and Y coordinate to
+            // find rows (a row is one window's: two windows' rows at one Y
+            // are two rows), then detect indent (leading space/tab) per row.
             struct RowInfo {
                 y: f32,
                 height: f32,
@@ -414,6 +423,7 @@ impl WgpuRenderer {
             }
             let mut rows: Vec<RowInfo> = Vec::new();
             let mut current_row_y: f32 = -1.0;
+            let mut current_window: Option<romacs_display_protocol::types::DisplayWindowId> = None;
             let mut current_row_h: f32 = 0.0;
             let mut first_non_space_x: f32 = f32::MAX;
             let mut text_start_x: f32 = f32::MAX;
@@ -421,6 +431,7 @@ impl WgpuRenderer {
 
             for glyph in &frame_glyphs.glyphs {
                 if let FrameGlyph::Char {
+                    window_id,
                     x,
                     y,
                     width: _,
@@ -434,9 +445,9 @@ impl WgpuRenderer {
                         continue;
                     }
                     let gy = *y;
-                    if (gy - current_row_y).abs() > 0.5 {
+                    if (gy - current_row_y).abs() > 0.5 || current_window != Some(*window_id) {
                         // New row — save previous
-                        if has_chars && first_non_space_x > text_start_x + char_w {
+                        if has_chars && first_non_space_x < f32::MAX && first_non_space_x > text_start_x + char_w {
                             rows.push(RowInfo {
                                 y: current_row_y,
                                 height: current_row_h,
@@ -445,6 +456,7 @@ impl WgpuRenderer {
                             });
                         }
                         current_row_y = gy;
+                        current_window = Some(*window_id);
                         current_row_h = *height;
                         first_non_space_x = f32::MAX;
                         text_start_x = f32::MAX;
@@ -459,7 +471,7 @@ impl WgpuRenderer {
                 }
             }
             // Save last row
-            if has_chars && first_non_space_x > text_start_x + char_w {
+            if has_chars && first_non_space_x < f32::MAX && first_non_space_x > text_start_x + char_w {
                 rows.push(RowInfo {
                     y: current_row_y,
                     height: current_row_h,
@@ -473,12 +485,12 @@ impl WgpuRenderer {
             let use_rainbow = self.effects.indent_guides.rainbow_enabled
                 && !self.effects.indent_guides.rainbow_colors.is_empty();
             for row in &rows {
-                let mut col_x = row.text_start_x + tab_px;
-                let mut depth: usize = 0;
-                while col_x < row.first_non_space_x - 1.0 {
+                let end = row.first_non_space_x - 1.0;
+                for (col_x, depth) in guide_stops(row.text_start_x, tab_px, end, frame_glyphs.width) {
+                    let colors = &self.effects.indent_guides.rainbow_colors;
                     let color = if use_rainbow {
-                        let (r, g, b, a) = self.effects.indent_guides.rainbow_colors
-                            [depth % self.effects.indent_guides.rainbow_colors.len()];
+                        let at = usize::try_from(depth % colors.len() as u64).unwrap_or(0);
+                        let (r, g, b, a) = colors[at];
                         Color::new(r, g, b, a)
                     } else {
                         guide_color
@@ -491,8 +503,6 @@ impl WgpuRenderer {
                         row.height,
                         &color,
                     );
-                    col_x += tab_px;
-                    depth += 1;
                 }
             }
         }
@@ -829,3 +839,35 @@ impl WgpuRenderer {
         }
     }
 }
+
+/// The indent guides of a row whose text starts at START, tab stops TAB
+/// apart (above zero), before END, on a frame WIDTH wide: each stop's x
+/// and its depth, the stops before it from the row's start. Stops are
+/// counted, not stepped to, in f64: only those on the frame are made, at
+/// most one per TAB of its width, however far the row's coordinates lie.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "counts of tab stops, whole and clamped not negative; stop positions back in the f32 the pass draws in"
+)]
+pub(super) fn guide_stops(start: f32, tab: f32, end: f32, width: f32) -> impl Iterator<Item = (f32, u64)> {
+    let (start, tab, end) = (f64::from(start), f64::from(tab), f64::from(end.min(width)));
+    // Stop k lies at start + k tab, k from one: the first on the frame, and
+    // the last before END.
+    let first = (-start / tab).ceil().max(1.0);
+    let last = ((end - start) / tab).ceil() - 1.0;
+    let count = (last - first + 1.0).clamp(0.0, (f64::from(width) / tab).ceil() + 1.0);
+    // Past f64's precision a far row's stop can land off the frame: none
+    // such is drawn.
+    (0..count as u64)
+        .map(move |i| {
+            let k = first + i as f64;
+            (start + k * tab, (k - 1.0) as u64)
+        })
+        .filter(move |&(x, _)| (0.0..end).contains(&x))
+        .map(|(x, depth)| (x as f32, depth))
+}
+
+#[cfg(test)]
+mod tests;

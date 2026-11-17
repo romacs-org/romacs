@@ -9,9 +9,7 @@
 //! GNU's Lisp on a window-system frame 100 columns by 24 lines of its
 //! real font, laid out by romacs-layout as the GUI lays it out.
 use romacs_vm::Vm;
-use std::{cell::RefCell, path::Path, rc::Rc};
-#[path = "support/gnu_ert_vm.rs"]
-mod gnu_ert_vm;
+use std::{cell::RefCell, rc::Rc};
 #[path = "support/gui_probe.rs"]
 mod gui_probe;
 
@@ -28,8 +26,7 @@ impl romacs_vm::LayoutHost for Engine {
 struct Session { vm: Vm, engine: Rc<RefCell<romacs_layout::LayoutEngine>>, width: u32, height: u32, presentation: u64 }
 
 fn session() -> Session {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gui_probe::gnu_ert_vm::bootstrapped();
     vm.eval_source("(setq noninteractive nil)").unwrap();
     let (line, column) = romacs_layout::frame_metrics(&vm.display_default_face().unwrap()).unwrap();
     // 100 columns of text between fringes a column wide (the probe sets
@@ -121,6 +118,16 @@ fn a_window_shows_a_unibyte_buffer_as_pinned_gnu() {
 #[test]
 fn window_end_and_recentring_over_a_hidden_tail_as_pinned_gnu() {
     replay(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500);
+}
+
+/// `recenter_pixels.el`: `recenter` in a window redisplay has not laid out
+/// in the current faces (a new window, a face changed since its paint)
+/// chooses GNU's start over mixed row heights, line numbers, hidden and
+/// replaced text, scroll margins, narrowing, partial rows and a window
+/// shorter than the rows it would keep below point, and the paint keeps it.
+#[test]
+fn recentring_a_window_not_painted_as_pinned_gnu() {
+    replay(include_str!("recenter_pixels.el"), include_str!("recenter_pixels.gnu"), 40);
 }
 
 /// A collection moves every object but changes no answer: what a window

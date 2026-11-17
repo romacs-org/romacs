@@ -3,7 +3,7 @@
 
 Each grammar is the commit its GNU ts mode pins in
 `treesit-language-source-alist', linked into the executable
-(DIVERGENCES.md VM2-TREESIT-BUNDLED).
+(ledger/divergences VM2-TREESIT-BUNDLED).
 
   check [--root ROOT]   Every source file Cargo compiles for a grammar is the
                         one crates/romacs-grammars/sources.json records for
@@ -32,8 +32,6 @@ CRATE = Path('crates/romacs-grammars')
 NOTICES = Path('etc/tree-sitter')
 # The grammar directory inside its crate, where it is not `src'.
 SOURCE_DIRS = {
-    'markdown': 'tree-sitter-markdown/src',
-    'markdown-inline': 'tree-sitter-markdown-inline/src',
     'tsx': 'tsx/src',
     'typescript': 'typescript/src',
 }

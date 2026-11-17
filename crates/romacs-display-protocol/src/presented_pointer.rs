@@ -6,7 +6,7 @@
 
 use crate::{
     DisplaySlotId, DisplayWindowId, FaceId, FrameGlyph, FrameGlyphBuffer, FrameRect, FrameSize,
-    InteractionId, PresentationId, Rect,
+    InteractionId, PresentationId,
 };
 
 /// Semantic area resolved from the immutable geometry of one presentation.
@@ -494,29 +494,6 @@ pub struct PresentedHit {
 }
 
 impl PresentedHit {
-    /// Preserve source identity while describing the actual scrolled pixels.
-    /// The caller owns a validated, body-only coverage projection.
-    pub(crate) fn project_scrolled_body(
-        mut self,
-        viewport: Rect,
-        offset: f32,
-        row_delta: i64,
-    ) -> Self {
-        self.region.bounds =
-            FrameRect::new(viewport.x, viewport.y, viewport.width, viewport.height)
-                .expect("validated scroll viewport");
-        if let Some(position) = self.text_position.as_mut() {
-            let bounds = position.bounds;
-            let top = (bounds.y() - offset).max(viewport.y);
-            let bottom = (bounds.y() + bounds.height() - offset).min(viewport.bottom());
-            position.bounds =
-                FrameRect::new(bounds.x(), top, bounds.width(), (bottom - top).max(0.0))
-                    .expect("validated scroll hit");
-            position.row += row_delta;
-        }
-        self
-    }
-
     #[must_use]
     pub const fn region(self) -> PresentedHitRegion {
         self.region
@@ -1042,11 +1019,6 @@ impl PresentedHitIndex {
     #[must_use]
     pub fn text_positions(&self) -> &[PresentedTextPosition] {
         &self.text.parts().positions
-    }
-
-    #[must_use]
-    pub(crate) fn string_positions(&self) -> &[PresentedStringPosition] {
-        &self.string_positions
     }
 
     /// Pointer regions this index would examine for a hit at `(x, y)`.
@@ -1689,8 +1661,6 @@ pub struct PresentedPointerAppearance {
     pressed: PointerDrawMode,
     #[serde(skip)]
     damage_bounds: Option<FrameRect>,
-    #[serde(skip)]
-    damage_rows: Vec<PresentedPointerDamageRow>,
 }
 
 impl PartialEq for PresentedPointerAppearance {
@@ -1698,30 +1668,6 @@ impl PartialEq for PresentedPointerAppearance {
         self.paint_spans == other.paint_spans
             && self.hover == other.hover
             && self.pressed == other.pressed
-    }
-}
-
-/// One matrix row whose cached vertices can be affected by an appearance.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PresentedPointerDamageRow {
-    window_id: crate::DisplayWindowId,
-    row: u32,
-}
-
-impl PresentedPointerDamageRow {
-    #[must_use]
-    pub const fn new(window_id: crate::DisplayWindowId, row: u32) -> Self {
-        Self { window_id, row }
-    }
-
-    #[must_use]
-    pub const fn window_id(self) -> crate::DisplayWindowId {
-        self.window_id
-    }
-
-    #[must_use]
-    pub const fn row(self) -> u32 {
-        self.row
     }
 }
 
@@ -1775,7 +1721,6 @@ impl PresentedPointerAppearance {
             hover,
             pressed,
             damage_bounds: None,
-            damage_rows: Vec::new(),
         };
         appearance.rebuild_damage_bounds();
         appearance
@@ -1800,11 +1745,6 @@ impl PresentedPointerAppearance {
     pub fn damage_bounds(&self) -> FrameRect {
         self.damage_bounds
             .expect("validated pointer appearance has paint bounds")
-    }
-
-    #[must_use]
-    pub fn damage_rows(&self) -> &[PresentedPointerDamageRow] {
-        &self.damage_rows
     }
 
     fn rebuild_damage_bounds(&mut self) {
@@ -2140,7 +2080,6 @@ pub enum PresentedPointerMapError {
     Semantic(PresentedHitError),
     UnknownAppearance(PointerAppearanceId),
     MissingRegionBehavior,
-    MissingSourceMap,
     EmptyAppearance,
     EmptyPaintSpan,
     OverlappingPaintSpans,
@@ -2267,38 +2206,24 @@ impl PresentedPointerMap {
         Ok(())
     }
 
-    pub(crate) fn rebuild_damage_index(&mut self, frame: &FrameGlyphBuffer) {
+    /// The frame's glyphs were compacted, glyph I now at NEW_INDEX[I] or
+    /// gone: each paint span keeps those of its glyphs that stayed, which
+    /// stay contiguous, and a span left with none goes.
+    pub(crate) fn remap_glyphs(&mut self, new_index: &[Option<u32>]) {
         for appearance in &mut self.appearances {
-            appearance.rebuild_damage_bounds();
-            appearance.damage_rows.clear();
-            for span in &appearance.paint_spans {
+            appearance.paint_spans.retain_mut(|span| {
                 let first = span.first as usize;
-                let end = first + span.len as usize;
-                for primitive in &frame.glyphs[first..end] {
-                    let slot = match primitive {
-                        FrameGlyph::Char { slot_id, .. } | FrameGlyph::Stretch { slot_id, .. } => {
-                            Some(*slot_id)
-                        }
-                        FrameGlyph::Image {
-                            slot_id: Some(slot_id),
-                            ..
-                        } => Some(*slot_id),
-                        _ => None,
-                    };
-                    if let Some(slot) = slot {
-                        let row = PresentedPointerDamageRow::new(slot.window_id, slot.row);
-                        appearance.damage_rows.push(row);
-                    }
-                }
-            }
-            appearance
-                .damage_rows
-                .sort_unstable_by_key(|row| (row.window_id().get(), row.row()));
-            appearance.damage_rows.dedup();
+                let end = first.saturating_add(span.len as usize);
+                let mut kept = new_index.get(first..end).unwrap_or(&[]).iter().flatten();
+                let Some(&start) = kept.next() else { return false };
+                span.first = start;
+                span.len = 1 + u32::try_from(kept.count()).unwrap_or(u32::MAX - 1);
+                true
+            });
         }
     }
 
-    fn rebuild_damage_bounds(&mut self) {
+    pub(crate) fn rebuild_damage_bounds(&mut self) {
         for appearance in &mut self.appearances {
             appearance.rebuild_damage_bounds();
         }
@@ -2461,8 +2386,6 @@ fn rect_has_valid_geometry(rect: FrameRect) -> bool {
         && (rect.x() + rect.width()).is_finite()
         && (rect.y() + rect.height()).is_finite()
 }
-
-mod scroll;
 
 /// Source role of one point rectangle. This byte-sized numeric role survives
 /// compact row storage and transport; it carries no Lisp identity or cache.

@@ -13,6 +13,7 @@ pub(crate) const FILE_START: usize = 4096;
 /// A file longer than this is cut back to `FILE_START` when its engine ends.
 pub(crate) const SPARE_CAP: usize = 131_072;
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Registers {
     /// The running engine's file, or the kernel's while a native borrows it;
     /// empty outside any engine.
@@ -39,7 +40,7 @@ impl DerefMut for Registers {
 
 impl Registers {
     /// No file at all. Only `Vm::new` makes one, and the engine's modules may
-    /// not (`tools/lib/smells.py`, `vm-replacement`): a second owner would
+    /// not (`tools/lib/smells.py`, `vm_replacements`): a second owner would
     /// let safe code swap a running engine's file away.
     pub(crate) const fn new() -> Self {
         Registers { current: Vec::new(), suspended: Vec::new(), kernel: Vec::new() }
@@ -138,7 +139,6 @@ impl Registers {
         &mut self.current
     }
 }
-romacs_snapshot::snapshot_struct!(Registers { current, suspended, kernel });
 
 #[cfg(test)]
 mod tests {

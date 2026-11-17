@@ -1,10 +1,12 @@
-//! Attachments' Lisp (lisp/romacs/romacs-attach.el, attachments.md stage A1) in a
+//! Attachments' Lisp (lisp/agents/romacs-attach.el, attachments.md stage A1) in a
 //! `--loadup' session with a window system: items sniffed without decoding,
 //! plans, the pure list operations, the tray's cached string and batch
 //! insertion, edit mode, drafts reconciliation and preparation through the
 //! helper (tests/romacs-attach-test.el).
 use romacs_vm_gui::{fonts, startup};
 use romacs_vm::Vm;
+#[path = "support/home.rs"]
+mod home;
 
 const LINE: u32 = 20;
 
@@ -24,12 +26,13 @@ fn romacs_attach_lisp_tests_pass() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, LINE, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "attach");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         assert!(vm.open_display());
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let tool = helper().map_or("nil".to_owned(), |p| format!("{:?}", p.display().to_string()));
         printed(&mut vm, &format!("(setq romacs-attach-test-helper {tool})"));
-        for file in ["lisp/romacs/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-attach-test.el"] {
+        for file in ["lisp/emacs-lisp/romacs-test.el", "crates/romacs-vm-gui/tests/romacs-attach-test.el"] {
             vm.load_file(&root.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
         }
         printed(&mut vm, "(let ((s (romacs-test-run t))) (format \"%S\" s))")

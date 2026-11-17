@@ -2,6 +2,8 @@
 //! whatever point is, and with a window recreated in the same place counting as
 //! the same (window.c compare_window_configurations).  The expected answers are
 //! pinned GNU's.
+#[path = "support/installed.rs"]
+mod installed;
 use std::process::Command;
 
 const FORMS: &str = "
@@ -25,7 +27,7 @@ const FORMS: &str = "
 fn window_configurations_compare_by_layout() {
     let home = std::env::temp_dir().join(format!("romacs-window-config-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+    let output = Command::new(installed::romacs())
         .args(["-Q", "--batch", "--eval", &format!("(progn {FORMS})")])
         .env("HOME", &home)
         .env("XDG_CONFIG_HOME", &home)

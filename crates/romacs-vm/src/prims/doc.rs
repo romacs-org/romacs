@@ -16,22 +16,53 @@ fn doc_file(cx: &mut Leaf<'_>) -> std::result::Result<Option<std::path::PathBuf>
     Ok(Some(if path.is_absolute() { path.to_path_buf() } else { std::path::Path::new(&cx.string_text(dir)?).join(path) }))
 }
 
-/// Snarf-documentation's position for a primitive: the byte after its
-/// "\037FNAME\n" record header, or None when DOC has no record for it.
-fn subr_position(bytes: &[u8], name: &str) -> Option<usize> {
-    let header = format!("\x1fF{name}\n");
-    let header = header.as_bytes();
-    bytes.windows(header.len()).position(|w| w == header).map(|at| at + header.len())
+/// A DOC file as read: its bytes, and Snarf-documentation's position for each
+/// primitive, the byte after its "\037FNAME\n" record header. The positions
+/// are found in one walk when the file is read: found by a scan at each
+/// lookup, a docstring cost a read of the whole file.
+#[derive(romacs_snapshot::Snapshot)]
+pub(crate) struct DocFile {
+    pub(crate) bytes: Vec<u8>,
+    subrs: std::collections::HashMap<Vec<u8>, usize>,
+}
+// The VM keeps the file it read, and a world image holds every field of the
+// VM: both fields are plain data (the image leaves the file out all the same).
+
+impl DocFile {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        let subrs = subr_records(&bytes);
+        Self { bytes, subrs }
+    }
+    /// The position of primitive NAME's text, or None when DOC has no record for it.
+    fn subr_position(&self, name: &str) -> Option<usize> {
+        self.subrs.get(name.as_bytes()).copied()
+    }
+}
+
+/// Each "\037FNAME\n" record's name with the position of its text; the first
+/// record of a name is the one a scan from the start finds.
+fn subr_records(bytes: &[u8]) -> std::collections::HashMap<Vec<u8>, usize> {
+    let mut records = std::collections::HashMap::new();
+    let mut at = 0;
+    while let Some(found) = bytes[at..].windows(2).position(|w| w == b"\x1fF") {
+        let name = at + found + 2;
+        let Some(newline) = bytes[name..].iter().position(|&b| b == b'\n') else { break };
+        let text = name + newline + 1;
+        records.entry(bytes[name..name + newline].to_vec()).or_insert(text);
+        at = text;
+    }
+    records
 }
 
 /// get_doc_string for a fixnum position: the text up to the next ^_, with
 /// ^A^A, ^A0 and ^A_ unquoted; the data decide multibyteness.
 fn doc_string(cx: &mut Leaf<'_>, position: i64) -> Out {
     let Some(path) = doc_file(cx)? else { return Ok(Value::NIL); };
-    let Some(bytes) = cx.doc_file_bytes(&path) else {
+    let Some(file) = cx.doc_file_read(&path) else {
         let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
         return Ok(cx.string(&format!("Cannot open doc string file \"{name}\"\n")));
     };
+    let bytes = &file.bytes;
     // Reading at or past the end yields the empty text, as lseek+read does.
     let start = (position.unsigned_abs() as usize).min(bytes.len());
     let end = bytes[start..].iter().position(|&b| b == 0x1f).map_or(bytes.len(), |n| start + n);
@@ -68,7 +99,7 @@ fn variable_records(bytes: &[u8]) -> Vec<(&[u8], usize)> {
 }
 
 // Internal: the scan half of Snarf-documentation (doc.c:500), which
-// lisp/romacs/romacs-loadup-bootstrap.el finishes in Lisp. FILENAME is in
+// lisp/session/romacs-loadup-bootstrap.el finishes in Lisp. FILENAME is in
 // `doc-directory'; the value lists each variable record as (NAME . POSITION).
 defsubr! { name = "romacs--doc-variable-records", gnu = "doc.c:500", effect = Reads,
 fn doc_variable_records(cx, filename: Value) {
@@ -77,11 +108,11 @@ fn doc_variable_records(cx, filename: Value) {
     if !matches!(cx.kind(directory), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", directory)); }
     if !matches!(cx.kind(filename), Kind::String | Kind::Bytes) { return Err(Fault::Wrong("stringp", filename)); }
     let path = std::path::Path::new(&cx.string_text(directory)?).join(cx.string_text(filename)?);
-    let Some(bytes) = cx.doc_file_bytes(&path) else {
+    let Some(file) = cx.doc_file_read(&path) else {
         return Err(Fault::Error(format!("Opening doc string file: No such file or directory, {}", path.display())));
     };
     let mut list = Value::NIL;
-    for (name, position) in variable_records(&bytes).into_iter().rev() {
+    for (name, position) in variable_records(&file.bytes).into_iter().rev() {
         let name = cx.make_string(name.to_vec(), crate::environment::multibyte(name));
         let position = Value::integer(position as i64).map_err(Fault::Error)?;
         let record = cx.cons(name, position);
@@ -95,8 +126,8 @@ fn internal_subr_documentation(cx, function: Value) {
     if cx.kind(function) != Kind::Subr { return Ok(Value::TRUE); }
     // XSUBR (function)->doc: 0 when DOC has no record for the primitive.
     let name = crate::prim::name(function).unwrap_or("");
-    let position = doc_file(cx)?.and_then(|path| cx.doc_file_bytes(&path))
-        .and_then(|bytes| subr_position(&bytes, name)).unwrap_or(0);
+    let position = doc_file(cx)?.and_then(|path| cx.doc_file_read(&path))
+        .and_then(|file| file.subr_position(name)).unwrap_or(0);
     Ok(Value::integer(position as i64).map_err(Fault::Error)?)
 }}
 
@@ -159,3 +190,26 @@ fn documentation(cx, function: Value; optional raw: Value) -> Step {
     Ok(Step::Call { f: property, args: vec![fun], then: documented, saved: vec![raw] })
 }}
 fn documented(cx: &mut Leaf<'_>, doc: Value, saved: &[Value]) -> Next { finish(cx, doc, saved[0], false) }
+
+#[cfg(test)]
+mod doc_file_tests {
+    use super::DocFile;
+
+    /// A primitive's position is the one a scan of the file from its start
+    /// finds: after its first record's header, whatever stands around it.
+    #[test]
+    fn a_primitives_position_is_after_its_first_record() {
+        let text = b"\x1fFcar\nReturn the car.\x1fVfill-column\nA column.\x1fFcdr\nReturn the cdr.\x1fFcar\nAgain.\x1fFlast";
+        let file = DocFile::new(text.to_vec());
+        let scan = |name: &str| {
+            let header = format!("\x1fF{name}\n");
+            text.windows(header.len()).position(|w| w == header.as_bytes()).map(|at| at + header.len())
+        };
+        for name in ["car", "cdr", "fill-column", "ca", "last", "", "nowhere"] {
+            assert_eq!(file.subr_position(name), scan(name), "{name}");
+        }
+        assert_eq!(file.subr_position("car"), Some(6));
+        assert_eq!(file.subr_position("cdr").map(|at| &text[at..at + 6]), Some(&b"Return"[..]));
+        assert_eq!(file.subr_position("fill-column"), None);
+    }
+}

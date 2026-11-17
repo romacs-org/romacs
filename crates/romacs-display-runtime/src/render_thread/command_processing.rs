@@ -12,7 +12,6 @@ impl RenderApp {
                 .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
             return true;
         }
-        self.retire_cancelled_frames();
         for _ in 0..64 {
             let Ok(command) = self.comms.cmd_rx.try_recv_startup_for(
                 self.startup_commands.len() == 64,
@@ -50,7 +49,6 @@ impl RenderApp {
                 other => self.startup_commands.push_back(other),
             }
         }
-        self.retire_cancelled_frames();
         false
     }
 
@@ -82,7 +80,6 @@ impl RenderApp {
                 .request_shutdown(super::state::RenderShutdownReason::EvaluatorShutdown);
             return true;
         }
-        self.retire_cancelled_frames();
         let mut should_exit = false;
 
         while let Some(cmd) = self
@@ -91,7 +88,10 @@ impl RenderApp {
             .or_else(|| self.comms.cmd_rx.try_recv().ok())
         {
             match cmd {
-                RenderCommand::Paint(scene) => self.ingest_paint(*scene),
+                RenderCommand::Paint(scene) => romacs_display_protocol::meter::spent(
+                    super::frame_cost::INGEST,
+                    || self.ingest_paint(*scene),
+                ),
                 RenderCommand::Lifecycle(LifecycleCommand::Shutdown) => {
                     tracing::info!("Render thread received shutdown command");
                     self.lifecycle_flags
@@ -106,14 +106,16 @@ impl RenderApp {
             }
         }
 
-        self.retire_cancelled_frames();
         should_exit
     }
 
     fn handle_clipboard(&mut self, command: ClipboardCommand) {
         match &self.clipboard {
             Ok(clipboard) => clipboard.submit(command),
-            Err(err) => crate::clipboard::reject_command(command, err.clone()),
+            Err(err) => {
+                let (request, reply) = crate::clipboard::reject_command(command, err.clone());
+                self.comms.tell(crate::thread_comm::Fact::Reply { request, reply });
+            }
         }
     }
 }

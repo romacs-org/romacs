@@ -83,9 +83,7 @@ impl RenderApp {
         }
         let backend_profile =
             super::render_quality::RenderBackendProfile::from_device_type(adapter_info.device_type);
-        if let Some(diagnostics) = &self.comms.paint_diagnostics {
-            diagnostics.publish_adapter(adapter_info.device_type == wgpu::DeviceType::Cpu);
-        }
+        self.comms.tell(crate::thread_comm::Fact::AdapterChosen { software: adapter_info.device_type == wgpu::DeviceType::Cpu });
         tracing::info!(
             "wgpu adapter: {} (vendor={:04x}, device={:04x}, type={:?}, backend={:?})",
             adapter_info.name,
@@ -290,7 +288,7 @@ impl RenderApp {
     /// kept, so the next redraw re-renders the same scene (media quads stay
     /// blank for a moment while the native video system reopens its retained
     /// GPU-independent recovery manifests; other media is re-resolved after
-    /// `InputEvent::DisplayReset`.
+    /// `Fact::DisplayReset`.
     pub(super) fn recover_from_device_loss(&mut self, event_loop: &dyn ActiveEventLoop) -> bool {
         tracing::error!(
             "wgpu device lost — rebuilding GPU state and asking the evaluator to re-resolve media"
@@ -313,8 +311,8 @@ impl RenderApp {
                 .reconcile_video_service_deadline(None);
         }
 
-        // Per-window GPU-resident compositor state. `current_frame` /
-        // `current_row_damage` (CPU glyph data) are deliberately kept.
+        // Per-window GPU-resident compositor state. `current_frame` (CPU
+        // glyph data) is deliberately kept.
         self.frame_windows.clear_gpu_resident_state();
 
         // Toolbar icon ids point into the dropped renderer's image cache;
@@ -379,8 +377,7 @@ impl RenderApp {
         // next redisplay walk, video memo IDs remain stable for the restored
         // native sessions, the frame shader/images are re-uploaded, and a
         // full redisplay is forced.
-        self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).reset = true;
-        self.comms.send_input(InputEvent::DisplayReset);
+        self.comms.tell(crate::thread_comm::Fact::DisplayReset);
         true
     }
 }

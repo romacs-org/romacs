@@ -46,10 +46,7 @@ mod composition_targets;
 mod full_render;
 pub(in crate::render_thread) mod model_provenance;
 mod present;
-mod retained_scroll;
-pub(in crate::render_thread) mod retained_root;
 pub(in crate::render_thread) mod retained_static;
-pub(super) use retained_scroll::RetainedScroll;
 mod scene;
 pub(in crate::render_thread) mod surface;
 
@@ -73,7 +70,7 @@ use romacs_renderer_wgpu::{SnapshotSize, WgpuRenderer};
 /// against pixels nobody saw.
 struct RenderedFrameSurface {
     output: wgpu::SurfaceTexture,
-    frame: romacs_display_protocol::frame_glyphs::FrameGlyphBuffer,
+    frame: std::sync::Arc<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
     projection: Option<romacs_display_protocol::InteractionProjection>,
     /// What the composed picture holds of the native models (design §6.2).
     models: super::models::ModelPicture,
@@ -100,7 +97,6 @@ struct FrameDrawInputs<'a> {
     bg_gradient: Option<((f32, f32, f32), (f32, f32, f32))>,
     child_frame_style: &'a ChildFrameStyle,
     scroll_indicators_enabled: bool,
-    retain_scroll_body: bool,
     toolbar: &'a ToolbarResources,
     /// What every native model's texture shows for this frame.
     models: &'a super::models::ModelPicture,
@@ -126,7 +122,6 @@ fn render_frame_window_contents(
         cursor_visible,
         inputs.root_animated_cursor,
         inputs.bg_gradient,
-        inputs.retain_scroll_body,
     );
     let _non_root = romacs_renderer_wgpu::diagnostics::Span::new(
         romacs_display_protocol::present_trace::Stage::NonRootStart,
@@ -210,7 +205,6 @@ fn render_frame_window_contents_to_surface(
         surface,
         &feature_plan,
         compositor_only_hint,
-        bg_gradient.is_some() || extra_line_spacing != 0.0 || extra_letter_spacing != 0.0,
     )?;
     window_state.render.child_opacity_src = targets.picture;
     let result = render_frame_window_contents_reserved(
@@ -269,7 +263,6 @@ fn render_frame_window_contents_reserved(
     let animated_cursor = render.cursor.animated_cursor().filter(|_| !RenderApp::cursor_blinked_off(render));
     let root_animated_cursor = animated_cursor.filter(|cursor| {
         cursor.frame_id == DisplayFrameId::new(render.emacs_frame_id)
-            && !render.compositor.input_scroll.active()
     });
     // The slide animation is composed at draw time: emit_cursor_visual reads
     // the interpolated rect from animated_cursor for the active window's
@@ -304,7 +297,9 @@ fn render_frame_window_contents_reserved(
             render.emacs_frame_id,
             present_mapping.presentation(),
         );
-        surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)?
+        romacs_display_protocol::meter::spent(crate::render_thread::frame_cost::ACQUIRE, || {
+            surface::acquire_current_texture(surface, device_lost, render.emacs_frame_id)
+        })?
     };
 
     // Placed here, after the surface is in hand: `sample_pane_layout`
@@ -361,7 +356,7 @@ fn render_frame_window_contents_reserved(
     // running.
     let need_offscreen = feature_plan.compose_offscreen || !pane_blits.is_empty();
 
-    let mut frame = render
+    let (mut frame, mut hints) = render
         .take_current_frame_for_render(&acquired)
         .ok_or(FrameRenderFailure::AwaitingContent)?;
     romacs_display_protocol::present_trace::record(
@@ -369,9 +364,12 @@ fn render_frame_window_contents_reserved(
         render.emacs_frame_id,
         frame.presentation_id,
     );
-    feature_plan.prepare_frame(&mut frame);
+    feature_plan.prepare_frame(&mut frame, &mut hints);
     render.begin_presentable_render();
     if extra_line_spacing != 0.0 || extra_letter_spacing != 0.0 {
+        let frame = std::sync::Arc::make_mut(&mut frame);
+        // Moved glyphs are no longer the layout's (see `layout_identity`).
+        frame.layout_identity = 0;
         RenderApp::apply_extra_spacing(
             &mut frame.glyphs,
             &mut frame.window_cursors,
@@ -431,7 +429,6 @@ fn render_frame_window_contents_reserved(
         bg_gradient,
         child_frame_style,
         scroll_indicators_enabled,
-        retain_scroll_body: extra_line_spacing == 0.0 && extra_letter_spacing == 0.0,
         toolbar,
         models,
     };
@@ -527,7 +524,8 @@ fn render_frame_window_contents_reserved(
             render,
             composition,
             &composition_view,
-            &mut frame,
+            &frame,
+            &hints,
             &inputs,
             feature_plan.accept_derived_effects,
             &pane_blits,
@@ -538,7 +536,8 @@ fn render_frame_window_contents_reserved(
             native,
             render,
             &composition_view,
-            &mut frame,
+            &frame,
+            &hints,
             &inputs,
             feature_plan.accept_derived_effects,
         ),

@@ -4,7 +4,7 @@ use super::*;
 /// The symbols the face primitives compare against, interned once: a
 /// recalculation runs through thousands of these per theme switch, and
 /// interning by name hashes a string each time. Symbols never move.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 pub(crate) struct FaceKeys {
     pub unspecified: Value,
     pub ignore_defface: Value,
@@ -47,7 +47,6 @@ pub(crate) struct FaceKeys {
     /// What a memo holds for a slot the replay did not write.
     pub unwritten: Value,
 }
-romacs_snapshot::snapshot_struct!(FaceKeys { unspecified, ignore_defface, reset, normal, bold, italic, default, scroll_bar, border, cursor, mouse, face_alias, face_no_inherit, theme_face, defface_spec, override_spec, customized_face, saved_face, bold_key, italic_key, background_mode, display_type, reverse, face_x_resources, type_condition, min_colors, class, background, supports, graphic, keywords, frame_tables, defaults, display_record, memos, unwritten });
 
 pub(crate) const LFACE_VECTOR_SLOTS: usize = romacs_face::registry::LFACE_VECTOR_SIZE - 1;
 
@@ -303,7 +302,7 @@ impl Leaf<'_> {
 
     /// The frame whose faces FRAME shows: FRAME, unless it is a child
     /// frame that never had faces of its own, which shows its parent's
-    /// (DIVERGENCES.md VM2-CHILD-FRAME).
+    /// (ledger/divergences VM2-CHILD-FRAME).
     pub(crate) fn face_owner(&mut self, mut frame: Value) -> super::super::Out {
         loop {
             if self.face_table(frame, false)? != Value::NIL { return Ok(frame); }
@@ -325,6 +324,13 @@ impl Leaf<'_> {
     pub(crate) fn face_own(&mut self, frame: Value) -> super::super::Out {
         let owner = self.face_owner(frame)?;
         if owner == frame { return Ok(frame); }
+        self.face_copy(frame, owner)
+    }
+
+    /// Give FRAME a copy of each face OWNER shows, with the default colours
+    /// and the background mode they were computed for, as make-terminal-frame
+    /// copies the selected frame's (frame.c:1879).
+    pub(crate) fn face_copy(&mut self, frame: Value, owner: Value) -> super::super::Out {
         // The default colours it showed stay its own, as its default face's.
         let entries = self.windows().frame_parameter_entries(owner)?;
         let own = self.windows().frame_parameter_entries(frame)?;

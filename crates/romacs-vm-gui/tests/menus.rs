@@ -1,10 +1,12 @@
-//! Romacs's floating menus (lisp/romacs/romacs-popup.el) on the real --loadup
+//! Romacs's floating menus (lisp/ui/romacs-popup.el) on the real --loadup
 //! chain with a window system: every kind takes its look and motion from
 //! one table, a key grid lays groups out in bands that fit, which-key's
 //! popup is a `panel', an eval chip a `cursor', and the host fades a
 //! `fade' layer without sliding it.
 use romacs_vm_gui::{command, fonts, measure, presentation, startup};
 use romacs_vm::{CommandEvent, Vm};
+#[path = "support/home.rs"]
+mod home;
 
 const META: i64 = 1 << 27;
 
@@ -35,6 +37,7 @@ fn menus_share_one_look_and_motion() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "menus");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
@@ -395,6 +398,7 @@ fn key_hint_cards() {
         let mut vm = Vm::new();
         vm.set_frame_geometry(1280, 800, 20, 10).unwrap();
         vm.set_display_host(Some(Box::new(fonts::Display::new().unwrap())));
+        home::private_home(&mut vm, "key-hints");
         startup::initialize_loadup(&mut vm, startup::Launch::Loadup, None).unwrap();
         let engine: Engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new().unwrap()));
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));

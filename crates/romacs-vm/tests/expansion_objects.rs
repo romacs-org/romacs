@@ -4,7 +4,7 @@
 //! objects return themselves, quoted ones are the identical object, and a
 //! function object in head position is called.
 //!
-//! The case that blocked GNU's own Lisp: macroexp.el:955
+//! The case that blocked GNU's own Lisp, macroexp.el's
 //!     (eval-when-compile (add-hook 'emacs-startup-hook (lambda () ...)))
 //! `eval-when-compile' (byte-run.el:674) expands to `(quote VALUE)' where
 //! VALUE is the hook list add-hook returns -- a list holding a closure.
@@ -37,7 +37,7 @@ fn macro_may_expand_to_a_quoted_closure() {
 
 #[test]
 fn eval_when_compile_returning_a_hook_list_holding_a_closure() {
-    // The exact shape of macroexp.el:955.
+    // The exact shape of macroexp.el's startup-hook form.
     let mut vm = Vm::new();
     vm.eval_source(EVAL_WHEN_COMPILE).unwrap();
     vm.eval_source("(defvar eo-hook nil)").unwrap();
@@ -46,7 +46,7 @@ fn eval_when_compile_returning_a_hook_list_holding_a_closure() {
         "1"
     );
     // The expansion carries the identical closure the body built. (Its list
-    // cells are copied, unlike GNU: DIVERGENCES.md VM2-EVAL2.)
+    // cells are copied, unlike GNU: ledger/divergences VM2-EVAL2.)
     assert_eq!(shown(&mut vm, "(eq (car eo-hook) (car (eo-ewc eo-hook)))"), "t");
 }
 
@@ -201,8 +201,8 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/emacs-lisp/byte-run.el")).unwrap();
     // subr.el stops at its own frontier (pinned in bootstrap_descriptors.rs).
     // Since Phase 0 restored GNU's subr.el that frontier (form 139, the radix
     // reader gap G1) comes BEFORE `add-hook` (subr.el:2295), which is all
@@ -210,8 +210,8 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     // closure-in-quoted-expansion representation, not subr's frontier, so it
     // loads GNU's own `add-hook` defun, verbatim from lisp/subr.el, through the
     // loader (lazy body, as GNU defines it) instead of depending on the frontier.
-    let _ = vm.load_file(&root.join("lisp/gnu/subr.el"));
-    let subr = std::fs::read_to_string(root.join("lisp/gnu/subr.el")).unwrap();
+    let _ = vm.load_file(&root.join("lisp/subr.el"));
+    let subr = std::fs::read_to_string(root.join("lisp/subr.el")).unwrap();
     let start = subr.find("\n(defun add-hook (hook function &optional depth local)\n").expect("GNU add-hook") + 1;
     let end = start + subr[start..].find("\n(defun remove-hook ").expect("GNU remove-hook follows add-hook");
     let add_hook = std::env::temp_dir().join(format!("gnu-add-hook-{}.el", std::process::id()));
@@ -219,14 +219,18 @@ fn macroexp_el_loads_past_its_eval_when_compile_add_hook_form() {
     let loaded = vm.load_file(&add_hook);
     let _ = std::fs::remove_file(&add_hook);
     loaded.unwrap();
-    let path = root.join("lisp/gnu/emacs-lisp/macroexp.el").canonicalize().unwrap();
+    let path = root.join("lisp/emacs-lisp/macroexp.el").canonicalize().unwrap();
     let result = vm.load_file(&path).map(|_| ());
     let report = vm.load_report();
+    // The form's line, found by its text: the file's edits move it.
+    let macroexp = std::fs::read_to_string(&path).unwrap();
+    let form = "\n(eval-when-compile\n  (add-hook 'emacs-startup-hook";
+    let line = macroexp[..=macroexp.find(form).expect("macroexp's startup-hook form")].matches('\n').count() + 1;
     let step = report["steps"].as_array().unwrap().iter()
-        .find(|s| s["file"] == path.to_string_lossy().as_ref() && s["line"] == 956)
+        .find(|s| s["file"] == path.to_string_lossy().as_ref() && s["line"] == line)
         .cloned();
-    let step = step.expect("macroexp.el:956 must be reached");
-    assert_eq!(step["status"], "ok", "macroexp.el:956: {step}");
+    let step = step.expect("macroexp's startup-hook form must be reached");
+    assert_eq!(step["status"], "ok", "macroexp.el:{line}: {step}");
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(shown(&mut vm, "(featurep 'macroexp)"), "t");
     // The startup hook now holds GNU's closure, callable as a function.

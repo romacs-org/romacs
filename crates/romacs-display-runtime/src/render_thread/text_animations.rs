@@ -15,7 +15,7 @@
 //! Under ROMACS_DIAGNOSTICS=1 each change of how an animation is drawn
 //! (scene and where, cells, or out of view) is a line on stderr.
 use romacs_display_protocol::{FrameGlyph, FrameGlyphBuffer};
-use romacs_display_protocol::text_animation::{TextAnimation, paint};
+use romacs_display_protocol::text_animation::{TextAnimation, clear, paint};
 use romacs_renderer_wgpu::{WgpuGlyphAtlas, WgpuRenderer};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -92,6 +92,11 @@ impl TextAnimations {
     }
 
     /// Scenes to free.
+    /// Whether any animation runs: whether `paint` changes a frame.
+    pub(crate) fn is_running(&self) -> bool {
+        !self.running.is_empty()
+    }
+
     pub(crate) fn take_retired(&mut self) -> Vec<PageScene> {
         std::mem::take(&mut self.retired)
     }
@@ -158,7 +163,7 @@ impl TextAnimations {
     }
 
     /// Paint every animation over FRAME, the copy about to be drawn: a
-    /// scene's surface over blank cells, or its cells. Its glyphs then
+    /// scene's surface over its block, its cells taken out, or its cells. Its glyphs then
     /// differ from the producer's, so it no longer promises to paint as
     /// another frame of its layout identity does (a retained root picture
     /// would show a still animation).
@@ -176,8 +181,9 @@ impl TextAnimations {
                 (_, None) => Drawn::Hidden,
             });
             if let Some(glyph) = shown {
-                let blank = vec![(' ', None); (running.animation.cols * running.animation.rows) as usize];
-                paint(frame, &running.animation, &blank);
+                // The scene covers the block: its cells are taken out, not
+                // blanked, so a tick draws the scene and the rest alone.
+                clear(frame, &running.animation);
                 frame.glyphs.push(glyph);
                 continue;
             }
@@ -202,7 +208,7 @@ impl Running {
     fn report(&mut self, drawn: Drawn) {
         if self.drawn == Some(drawn) { return; }
         self.drawn = Some(drawn);
-        if !diagnostics() { return; }
+        if !super::diagnostics() { return; }
         let window = self.animation.window;
         match drawn {
             Drawn::Scene(r) => eprintln!("romacs-text-animation: window={window} drawn=scene x={} y={} width={} height={}",
@@ -211,12 +217,6 @@ impl Running {
             Drawn::Hidden => eprintln!("romacs-text-animation: window={window} drawn=hidden"),
         }
     }
-}
-
-/// Whether ROMACS_DIAGNOSTICS=1 asks for diagnostics on stderr.
-fn diagnostics() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("ROMACS_DIAGNOSTICS").is_some_and(|v| v == "1"))
 }
 
 impl super::state::RenderApp {
@@ -233,7 +233,6 @@ impl super::state::RenderApp {
 fn redraw(window: &mut super::frame_windows::GuiFrameWindowState) {
     let compositor = &mut window.render.compositor;
     compositor.current_scene_generation = super::frame_state::next_scene_generation();
-    compositor.current_row_damage = None;
     window.render.mark_dirty();
     window.request_redraw();
 }

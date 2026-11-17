@@ -26,7 +26,7 @@ const END: u32 = u32::MAX;
 /// GNU's index cannot exceed 2^31 - 1 buckets: `:size` 2^30 and above fail.
 const MAXIMUM_SIZE: i64 = 1 << 30;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Test {
     Eq,
     Eql,
@@ -36,7 +36,7 @@ pub(super) enum Test {
     User(Value, Native),
 }
 /// The predicates a user-defined test may name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Native {
     /// profiler.el's `profiler-function-equal': closures by their code.
     FunctionEqual,
@@ -44,10 +44,6 @@ pub(super) enum Native {
     /// hashes, which agrees with it.
     EqualIncludingProperties,
 }
-romacs_snapshot::snapshot_enum!(Native {
-    Native::FunctionEqual => (),
-    Native::EqualIncludingProperties => (),
-});
 impl Test {
     /// The test as one byte, for content hashes.
     pub(super) fn code(self) -> u8 {
@@ -60,13 +56,7 @@ impl Test {
         }
     }
 }
-romacs_snapshot::snapshot_enum!(Test {
-    Test::Eq => (),
-    Test::Eql => (),
-    Test::Equal => (),
-    Test::User(name, native) => (name, native),
-});
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(super) enum Weakness {
     None,
     Key,
@@ -74,13 +64,6 @@ pub(super) enum Weakness {
     KeyOrValue,
     KeyAndValue,
 }
-romacs_snapshot::snapshot_enum!(Weakness {
-    Weakness::None => (),
-    Weakness::Key => (),
-    Weakness::Value => (),
-    Weakness::KeyOrValue => (),
-    Weakness::KeyAndValue => (),
-});
 impl Weakness {
     /// GNU `keep_entry_p`.
     pub(super) fn keep(self, key: bool, value: bool) -> bool {
@@ -103,7 +86,7 @@ impl Weakness {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct HashTable {
     pub(super) test: Test,
     pub(super) weakness: Weakness,
@@ -123,7 +106,6 @@ pub(super) struct HashTable {
     count: usize,
     stale: bool,
 }
-romacs_snapshot::snapshot_struct!(HashTable { test, weakness, local_bindings, size, keys, values, hashes, moving, next, buckets, free, count, stale });
 impl HashTable {
     pub(super) fn new(test: Test, weakness: Weakness, size: usize) -> Self {
         Self {
@@ -389,11 +371,15 @@ enum Shape<'a> {
     Vector(&'a [Value]),
     BoolVector(&'a data::BoolVector),
     Record(&'a [Value]),
-    Closure(usize, &'a [Value]),
+    /// Its function, captures, docstring (its own slot, as GNU's) and the
+    /// slots it keeps (`make-interpreted-closure`'s), empty for an ordinary
+    /// compiled closure.
+    Closure(usize, &'a [Value], Value, &'a [Value]),
     Marker(Value, Option<u32>),
     Overlay(Value, Option<(u32, u32)>, &'a [(Value, Value)]),
     /// A tree-sitter node: the tree and node `ts_node_eq' compares.
     TreesitNode((usize, usize)),
+    CharTable(&'a crate::char_table::CharTable),
     Opaque,
 }
 
@@ -411,11 +397,38 @@ impl Vm {
     fn anchor_byte(&self, buffer: Value, anchor: anchors::Anchor) -> Option<u32> {
         self.marker_anchors(buffer).ok()?.resolve(anchor)
     }
+    /// Whether closures of functions F and G are of one lambda for `equal`:
+    /// the same compiled function, or two whose source keys agree
+    /// (`closure_key`), as GNU's `equal` compares closures slot by slot.
+    fn same_lambda(&self, f: usize, g: usize) -> bool {
+        f == g || matches!((self.functions.get(f).and_then(|f| f.key), self.functions.get(g).and_then(|g| g.key)), (Some(a), Some(b)) if a == b)
+    }
+    /// A closure's capture as `equal` reads it: the value a cell holds.
+    fn captured(&self, capture: Value) -> Value {
+        capture.index_if(5).map_or(capture, |cell| self.read_capture_cell(cell))
+    }
+    /// Whether two closure environments (GNU's alist of `(NAME . VALUE)`
+    /// bindings, bare special declarations and `t`) have the same entries in
+    /// order, a binding by its name alone.
+    fn same_environment_shape(&self, mut a: Value, mut b: Value) -> bool {
+        loop {
+            match (self.cons_pair(a), self.cons_pair(b)) {
+                (Ok((x, rest_a)), Ok((y, rest_b))) => {
+                    let name = |v: Value| self.cons_pair(v).map_or(v, |(name, _)| name);
+                    if self.cons_pair(x).is_ok() != self.cons_pair(y).is_ok() || name(x) != name(y) { return false; }
+                    (a, b) = (rest_a, rest_b);
+                }
+                (Err(_), Err(_)) => return a == b,
+                _ => return false,
+            }
+        }
+    }
+
     fn shape(&self, v: Value) -> Shape<'_> {
         match v.tag() {
             3 => Shape::Cons,
             4 => match self.closures.get(v.payload() as usize) {
-                Some(c) => Shape::Closure(c.function, &c.captures),
+                Some(c) => Shape::Closure(c.function, &c.captures, c.metadata.get(4).copied().unwrap_or(c.document), &c.metadata),
                 None => Shape::Opaque,
             },
             0 if v == Value::NIL => Shape::Atom,
@@ -440,6 +453,7 @@ impl Vm {
                 Some(data::Object::Vector(a)) => Shape::Vector(a),
                 Some(data::Object::BoolVector(a)) => Shape::BoolVector(a),
                 Some(data::Object::Record(a)) => Shape::Record(a),
+                Some(data::Object::CharTable(t)) => Shape::CharTable(t),
                 Some(data::Object::Marker(m)) => Shape::Marker(
                     m.buffer,
                     m.anchor.and_then(|a| self.anchor_byte(m.buffer, a)),
@@ -505,12 +519,14 @@ impl Vm {
                 .fold(items.len() as u64, |h, &x| {
                     combine(h, self.sxhash_mode(x, depth + 1, moving, public))
                 }),
-            Shape::Closure(function, captures) => captures
-                .iter()
-                .take(SXHASH_MAX_LEN)
-                .fold(function as u64, |h, &x| {
-                    combine(h, self.sxhash_mode(x, depth + 1, moving, public))
-                }),
+            // What every two `equal' closures share, whichever way they were
+            // compared: how many values their environments hold now (a kept
+            // environment's bindings, else the captures). Nothing that
+            // moves enters it.
+            Shape::Closure(_, captures, _, slots) => match slots.get(2) {
+                Some(&env) => crate::closure_key::environment_values(self, env).map_or(0, |values| values.len()) as u64,
+                None => captures.len() as u64,
+            },
             Shape::Marker(buffer, at) => {
                 *moving |= Self::moving_reference(buffer);
                 combine(if public { 0 } else { buffer.0 }, at.map_or(0, u64::from))
@@ -522,6 +538,11 @@ impl Vm {
             // Coherent with `equal' (VM2-TREESIT-HASH): GNU hashes the
             // node object's address, so `equal' nodes differ there.
             Shape::TreesitNode((tree, id)) => combine(tree as u64, id as u64),
+            // What every two `equal' tables share without a walk of their
+            // characters: purpose, default and how many extra slots.
+            Shape::CharTable(t) => combine(
+                combine(self.sxhash_mode(t.purpose(), depth + 1, moving, public), self.sxhash_mode(t.default(), depth + 1, moving, public)),
+                t.extras().len() as u64),
             Shape::Opaque => {
                 *moving |= Self::moving_reference(v);
                 if public { 0 } else { v.0 }
@@ -656,14 +677,57 @@ impl Vm {
                 }
                 (Shape::Vector(x), Shape::Vector(y))
                 | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen, props),
-                (Shape::Closure(f, x), Shape::Closure(g, y)) => {
-                    return Ok(f == g && self.equal_items(x, y, depth, seen, props)?);
+                (Shape::Closure(f, x, doc_x, slots_x), Shape::Closure(g, y, doc_y, slots_y)) => {
+                    // Closures that keep their slots (make-interpreted-closure)
+                    // are compared by what those slots hold now, as GNU's
+                    // `equal' compares the slot vector: a caller may have
+                    // changed the body or the interactive modes since. The
+                    // environment slot (2) is compared by its shape (special
+                    // declarations, bound names), its values as the captures,
+                    // which hold them current. Other closures, which expose
+                    // no body, compare by their source key.
+                    if !slots_x.is_empty() && !slots_y.is_empty() {
+                        if slots_x.len() != slots_y.len() { return Ok(false); }
+                        for (i, (&a, &b)) in slots_x.iter().zip(slots_y).enumerate() {
+                            let same = if i == 2 { self.same_environment_shape(a, b) } else { self.equal_at(a, b, depth + 1, seen, props)? };
+                            if !same { return Ok(false); }
+                        }
+                    } else if slots_x.is_empty() && slots_y.is_empty() {
+                        if !self.same_lambda(f, g) { return Ok(false); }
+                    } else {
+                        // One keeps its slots: its key as they stand now. GNU
+                        // gives an ordinary lexical closure the environment
+                        // of its captured bindings alone, or `(t)` when it
+                        // captures nothing, so a kept environment matches it
+                        // only when it ends in `t` exactly then.
+                        let current = |slots: &[Value], f: usize| if slots.is_empty() { self.functions.get(f).and_then(|f| f.key) } else { crate::closure_key::of_slots(self, slots) };
+                        if !matches!((current(slots_x, f), current(slots_y, g)), (Some(a), Some(b)) if a == b) { return Ok(false); }
+                        let (kept, captures) = if slots_x.is_empty() { (slots_y, x) } else { (slots_x, y) };
+                        let marked = self.list_values(kept[2]).is_ok_and(|env| env.contains(&Value::TRUE));
+                        if kept[2] != Value::NIL && marked != captures.is_empty() { return Ok(false); }
+                    }
+                    // GNU compares the environment's values: those its slot
+                    // holds now for a closure that keeps its slots (a caller
+                    // may have replaced a binding), else what the captures'
+                    // cells hold.
+                    if !self.equal_at(doc_x, doc_y, depth + 1, seen, props)? { return Ok(false); }
+                    let values = |slots: &[Value], captures: &[Value]| match slots.get(2) {
+                        Some(&env) => crate::closure_key::environment_values(self, env),
+                        None => Some(captures.iter().map(|&c| self.captured(c)).collect()),
+                    };
+                    let (Some(x), Some(y)) = (values(slots_x, x), values(slots_y, y)) else { return Ok(false) };
+                    if x.len() != y.len() { return Ok(false); }
+                    for (&x, &y) in x.iter().zip(&y) {
+                        if !self.equal_at(x, y, depth + 1, seen, props)? { return Ok(false); }
+                    }
+                    return Ok(true);
                 }
                 (Shape::Marker(x, p), Shape::Marker(y, q)) => {
                     return Ok(x == y && (x == Value::NIL || p == q));
                 }
                 // fns.c internal_equal: treesit_node_eq.
                 (Shape::TreesitNode(x), Shape::TreesitNode(y)) => return Ok(x == y),
+                (Shape::CharTable(x), Shape::CharTable(y)) => return self.char_tables_equal((a, x), (b, y), depth, seen, props),
                 (Shape::Overlay(x, r, p), Shape::Overlay(y, s, q)) => {
                     if x != y || r != s || p.len() != q.len() {
                         return Ok(false);
@@ -680,6 +744,51 @@ impl Vm {
                 _ => return Ok(false),
             }
         }
+    }
+    /// fns.c internal_equal over two char-tables, by what they hold: the
+    /// same purpose, default, parent and extra slots, and `equal' values
+    /// for every character, read a run of equal slots at a time, a
+    /// compressed Unicode property block decoded. GNU compares their
+    /// sub-char-table layout too (VM2-CHAR-TABLE-EQUAL). A pair met again
+    /// inside itself is taken as equal from the first, as GNU takes every
+    /// pair past its depth limit, so a table that holds itself is no
+    /// exponential walk.
+    fn char_tables_equal(&self, (a, x): (Value, &crate::char_table::CharTable), (b, y): (Value, &crate::char_table::CharTable),
+                         depth: usize, seen: &mut Seen, props: bool) -> Hashed<bool> {
+        let pairs = seen.get_or_insert_default().entry(a.0).or_default();
+        if pairs.contains(&b.0) { return Ok(true); }
+        pairs.push(b.0);
+        let same = |a: Value, b: Value, seen: &mut Seen| self.equal_at(a, b, depth + 1, seen, props);
+        if !same(x.purpose(), y.purpose(), seen)? || !same(x.default(), y.default(), seen)?
+            || !same(x.parent(), y.parent(), seen)? || x.extras().len() != y.extras().len() {
+            return Ok(false);
+        }
+        for (&a, &b) in x.extras().iter().zip(y.extras()) {
+            if !same(a, b, seen)? { return Ok(false); }
+        }
+        let internal = |e: String| HashFault::Internal(e);
+        // A compressed block's 128 values, its nil ones the default
+        // (char_table_own's decoding), or None for a plain value.
+        let block = |t: &crate::char_table::CharTable, value: Value| -> Hashed<Option<Vec<Value>>> {
+            if !self.is_uniprop_table(t) { return Ok(None); }
+            let Some(codes) = self.uniprop_compressed(value) else { return Ok(None) };
+            Ok(Some(crate::char_table::uniprop_block(&codes).map_err(internal)?.into_iter()
+                .map(|v| if v == Value::NIL { t.default() } else { v }).collect()))
+        };
+        let mut at = 0usize;
+        while at <= crate::lstring::MAX_CHAR as usize {
+            let ((u, _, to_a), (v, _, to_b)) = (x.span(at).map_err(internal)?, y.span(at).map_err(internal)?);
+            let to = to_a.min(to_b);
+            match (block(x, u)?, block(y, v)?) {
+                (None, None) => if !same(u, v, seen)? { return Ok(false); },
+                (p, q) => for c in at..=to {
+                    let one = |values: &Option<Vec<Value>>, plain: Value| values.as_ref().map_or(plain, |values| values[c % 128]);
+                    if !same(one(&p, u), one(&q, v), seen)? { return Ok(false); }
+                },
+            }
+            at = to + 1;
+        }
+        Ok(true)
     }
     /// compare_string_intervals: the same properties, with `equal' values,
     /// over every run of either string (the texts are already equal).
@@ -960,7 +1069,7 @@ impl Vm {
             MakeHashTable => true,
             Gethash => (2..=3).contains(&n),
             Puthash | DefineHashTableTest => n == 3,
-            Remhash | Maphash | HashTableContainsP | HashNext | HashKeyAt | HashValueAt => n == 2,
+            Remhash | HashTableContainsP | HashNext | HashKeyAt | HashValueAt => n == 2,
             _ => n == 1,
         };
         if !arity {
@@ -1041,18 +1150,6 @@ impl Vm {
                     .collect();
                 items.reverse();
                 Ok(self.list_value(&items))
-            }
-            Maphash => {
-                // Direct calls are lowered to the slot walk in `expand`. A
-                // primitive cannot call Lisp: an indirect call that would have
-                // to invoke FUNCTION fails explicitly rather than skip entries.
-                if self.table(args[1])?.count() == 0 {
-                    return Ok(Value::NIL);
-                }
-                Err(HashFault::Error(
-                    "VM2 cannot call maphash indirectly on a non-empty table",
-                    Some(args[0]),
-                ))
             }
             DefineHashTableTest => {
                 let property = self.intern("hash-table-test");

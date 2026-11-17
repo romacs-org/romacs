@@ -1,11 +1,12 @@
 //! GNU process.c and callproc.c operating-system mechanics: process objects'
 //! native state, descriptors, spawning, reaping and polling. Nothing here
 //! calls Lisp; the wait loop that runs filters, sentinels and timers is Lisp
-//! (lisp/romacs/vm/subprocess.el) over the leaf primitives in prims/process.rs.
+//! (lisp/vm/subprocess.el) over the leaf primitives in prims/process.rs.
 use crate::Value;
 use std::collections::BTreeMap;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use rustix::termios::Termios;
+use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 
 /// Lisp-visible slots of GNU's `struct Lisp_Process`, traced by the collector.
 #[derive(Clone, Copy)]
@@ -31,7 +32,7 @@ pub(crate) const SLOTS: usize = Slot::Thread as usize + 1;
 
 /// A process object. Its descriptors live in [`Table`] under `serial`, so a
 /// moved or copied object never owns an OS resource.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct Process {
     pub slots: [Value; SLOTS],
     pub serial: u64,
@@ -49,7 +50,6 @@ pub(crate) struct Process {
     pub nbytes_read: u64,
     pub readmax: usize,
 }
-romacs_snapshot::snapshot_struct!(Process { slots, serial, pid, alive, tick, update_tick, raw_status, kill_without_query, inherit_coding, pty_in, pty_out, nbytes_read, readmax });
 
 impl Process {
     pub(crate) fn new(serial: u64, readmax: usize) -> Self {
@@ -200,6 +200,7 @@ struct Orphan {
 /// reused one.
 #[derive(Default)]
 struct Reaper {
+    // CELL(Plain)
     state: std::sync::Mutex<Reaping>,
 }
 
@@ -285,28 +286,29 @@ fn reap(orphan: &Orphan) -> bool {
 /// Wait for PID without blocking: true once it is no longer this host's
 /// child to wait for (reaped now, or not a child).
 fn reaped(pid: i32) -> bool {
-    let mut status = 0;
+    let Some(pid) = child(pid) else { return true };
     loop {
-        // SAFETY: `status' is a live local the call may write.
-        let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-        if r >= 0 || last_error().kind() != io::ErrorKind::Interrupted {
-            return r != 0;
+        match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::NOHANG) {
+            Err(rustix::io::Errno::INTR) => {}
+            Ok(None) => return false,
+            Ok(Some(_)) | Err(_) => return true,
         }
     }
+}
+
+/// The child PID names: None for 0 or a negative number, which waitpid
+/// would read as a process group.
+fn child(pid: i32) -> Option<rustix::process::Pid> {
+    if pid > 0 { rustix::process::Pid::from_raw(pid) } else { None }
 }
 
 pub(crate) fn last_error() -> io::Error {
     io::Error::last_os_error()
 }
 
-pub(crate) fn set_nonblocking(fd: RawFd) -> io::Result<()> {
-    // SAFETY: F_GETFL takes and returns integers only.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    // SAFETY: F_SETFL takes and returns integers only.
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-        return Err(last_error());
-    }
-    Ok(())
+pub(crate) fn set_nonblocking(fd: BorrowedFd<'_>) -> io::Result<()> {
+    let flags = rustix::fs::fcntl_getfl(fd)?;
+    Ok(rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?)
 }
 
 pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
@@ -314,47 +316,41 @@ pub(crate) fn dup(fd: &OwnedFd) -> io::Result<OwnedFd> {
 }
 
 /// The terminal modes of the pty on FD, or None if it is not one.
-fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
-    // SAFETY: termios is plain integers and arrays, for which all zeroes is
-    // a valid value.
-    let mut s: libc::termios = unsafe { std::mem::zeroed() };
-    // SAFETY: tcgetattr writes only the live local it is given.
-    (unsafe { libc::tcgetattr(fd, &mut s) } == 0).then_some(s)
+pub(crate) fn terminal_modes(fd: BorrowedFd<'_>) -> Option<Termios> {
+    rustix::termios::tcgetattr(fd).ok()
 }
 
 /// sysdep.c child_setup_tty: the terminal modes a pty child starts with.
-pub(crate) fn child_setup_tty(fd: RawFd) {
+pub(crate) fn child_setup_tty(fd: BorrowedFd<'_>) {
+    use rustix::termios::{ControlModes, InputModes, LocalModes, OptionalActions, OutputModes, SpecialCodeIndex};
     let Some(mut s) = terminal_modes(fd) else { return };
-    s.c_oflag |= libc::OPOST;
-    s.c_oflag &= !libc::ONLCR;
-    s.c_oflag &= !(libc::NLDLY | libc::CRDLY | libc::TABDLY | libc::BSDLY | libc::VTDLY | libc::FFDLY);
-    s.c_lflag &= !libc::ECHO;
-    s.c_lflag |= libc::ISIG;
-    s.c_iflag &= !(libc::IUCLC | libc::ISTRIP);
-    s.c_oflag &= !(libc::OLCUC | libc::TAB3);
-    s.c_cflag = (s.c_cflag & !libc::CSIZE) | libc::CS8;
-    s.c_cc[libc::VERASE] = 0xff;
-    s.c_cc[libc::VKILL] = 0xff;
+    s.output_modes |= OutputModes::OPOST;
+    s.output_modes &= !OutputModes::ONLCR;
+    s.output_modes &= !(OutputModes::NLDLY | OutputModes::CRDLY | OutputModes::TABDLY | OutputModes::BSDLY
+        | OutputModes::VTDLY | OutputModes::FFDLY);
+    s.local_modes &= !LocalModes::ECHO;
+    s.local_modes |= LocalModes::ISIG;
+    s.input_modes &= !(InputModes::IUCLC | InputModes::ISTRIP);
+    s.output_modes &= !(OutputModes::OLCUC | OutputModes::TAB3);
+    s.control_modes = (s.control_modes & !ControlModes::CSIZE) | ControlModes::CS8;
+    s.special_codes[SpecialCodeIndex::VERASE] = 0xff;
+    s.special_codes[SpecialCodeIndex::VKILL] = 0xff;
     // GNU keeps ICANON on and sets VEOF to C-d (sysdep.c:588-606).
-    s.c_lflag |= libc::ICANON;
-    s.c_cc[libc::VEOF] = 4;
-    s.c_cc[libc::VEOL] = 0xff;
-    // SAFETY: tcsetattr reads only the live termios it is given.
-    unsafe { libc::tcsetattr(fd, libc::TCSANOW, &s) };
+    s.local_modes |= LocalModes::ICANON;
+    s.special_codes[SpecialCodeIndex::VEOF] = 4;
+    s.special_codes[SpecialCodeIndex::VEOL] = 0xff;
+    let _ = rustix::termios::tcsetattr(fd, OptionalActions::Now, &s);
 }
 
 /// The pty's end-of-file character (process_send_eof sends it).
-pub(crate) fn tty_eof_char(fd: RawFd) -> u8 {
-    terminal_modes(fd).map_or(4, |s| s.c_cc[libc::VEOF])
+pub(crate) fn tty_eof_char(fd: BorrowedFd<'_>) -> u8 {
+    terminal_modes(fd).map_or(4, |s| s.special_codes[rustix::termios::SpecialCodeIndex::VEOF])
 }
 
 /// A close-on-exec duplicate of FD numbered 3 or above, so placing a child's
 /// standard descriptors cannot close it first.
-fn duplicate_above_stdio(fd: RawFd) -> io::Result<OwnedFd> {
-    // SAFETY: F_DUPFD_CLOEXEC takes and returns integers only.
-    let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
-    // SAFETY: the new descriptor is this call's alone, so one owner closes it.
-    if duplicate < 0 { Err(last_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(duplicate) }) }
+fn duplicate_above_stdio(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+    Ok(rustix::io::fcntl_dupfd_cloexec(fd, 3)?)
 }
 
 /// What a spawned child gets: GNU emacs_spawn's arguments.
@@ -362,9 +358,9 @@ pub(crate) struct Spawn<'a> {
     pub argv: &'a [Vec<u8>],
     pub env: &'a [Vec<u8>],
     pub dir: &'a [u8],
-    pub stdin: RawFd,
-    pub stdout: RawFd,
-    pub stderr: RawFd,
+    pub stdin: BorrowedFd<'a>,
+    pub stdout: BorrowedFd<'a>,
+    pub stderr: BorrowedFd<'a>,
     /// pty_in: make STDIN the controlling terminal.
     pub controlling_tty: bool,
 }
@@ -395,9 +391,10 @@ pub(crate) fn spawn(spec: &Spawn<'_>) -> io::Result<i32> {
         }
     }
     command.current_dir(os(spec.dir));
-    let stdio = |fd: RawFd| duplicate_above_stdio(fd).map(std::process::Stdio::from);
+    let stdio = |fd: BorrowedFd<'_>| duplicate_above_stdio(fd).map(std::process::Stdio::from);
     command.stdin(stdio(spec.stdin)?).stdout(stdio(spec.stdout)?).stderr(stdio(spec.stderr)?);
     let tty = spec.controlling_tty;
+    // UNSAFE(std runs code between fork and exec only through the unsafe pre_exec)
     // SAFETY: the hook runs in the forked child before exec, and calls only
     // async-signal-safe functions (setsid, ioctl, signal), allocating nothing.
     unsafe {
@@ -432,35 +429,32 @@ pub(crate) fn accessible_directory(dir: &[u8]) -> io::Result<()> {
 }
 
 /// child_status_changed: a nonblocking waitpid, or None if unchanged.
-pub(crate) fn wait_status(pid: i32, options: i32) -> Option<i32> {
-    let mut status = 0;
+pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Option<i32> {
+    let child = child(pid)?;
     loop {
-        // SAFETY: `status' is a live local the call may write.
-        let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG | options) };
-        if r == pid {
-            if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) { crate::isolate::child_reaped(pid); }
-            return Some(status);
+        match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::NOHANG | options) {
+            Ok(Some((_, status))) => {
+                if status.exited() || status.signaled() { crate::isolate::child_reaped(pid); }
+                return Some(status.as_raw());
+            }
+            Err(rustix::io::Errno::INTR) => {}
+            Ok(None) | Err(_) => return None,
         }
-        if r < 0 && last_error().kind() == io::ErrorKind::Interrupted {
-            continue;
-        }
-        return None;
     }
 }
 
 /// wait_for_termination: block until PID ends; its wait status.
 pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
-    let mut status = 0;
+    let child = child(pid).ok_or(rustix::io::Errno::CHILD)?;
     loop {
-        // SAFETY: `status' is a live local the call may write.
-        let r = unsafe { libc::waitpid(pid, &mut status, 0) };
-        if r == pid {
-            crate::isolate::child_reaped(pid);
-            return Ok(status);
-        }
-        let error = last_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        match rustix::process::waitpid(Some(child), rustix::process::WaitOptions::empty()) {
+            Ok(Some((_, status))) => {
+                crate::isolate::child_reaped(pid);
+                return Ok(status.as_raw());
+            }
+            Err(rustix::io::Errno::INTR) => {}
+            Ok(None) => return Err(rustix::io::Errno::CHILD.into()),
+            Err(error) => return Err(error.into()),
         }
     }
 }
@@ -468,65 +462,45 @@ pub(crate) fn wait_blocking(pid: i32) -> io::Result<i32> {
 /// Whether child PID has exited, without reaping it: its number stays pinned
 /// until a wait takes it.
 pub(crate) fn child_exited(pid: i32) -> io::Result<bool> {
+    let child = child(pid).ok_or(rustix::io::Errno::CHILD)?;
+    let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
     loop {
-        // SAFETY: siginfo_t is plain data, valid as all zeroes; waitid writes
-        // only the live local it is given, and si_pid reads what that left:
-        // zero while the child runs (WNOHANG).
-        let (result, exited) = unsafe {
-            let mut info: libc::siginfo_t = std::mem::zeroed();
-            let result = libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT);
-            (result, info.si_pid() != 0)
-        };
-        if result == 0 {
-            return Ok(exited);
-        }
-        let error = last_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        // NOHANG answers None while the child runs.
+        match rustix::process::waitid(rustix::process::WaitId::Pid(child), options) {
+            Ok(status) => return Ok(status.is_some()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
         }
     }
 }
 
 /// emacs_read: Ok(0) at end of file.
-pub(crate) fn read(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
+pub(crate) fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
     loop {
-        // SAFETY: read writes at most `buf.len()' bytes into `buf'.
-        let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
-        if n >= 0 {
-            return Ok(n as usize);
-        }
-        let error = last_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        match rustix::io::read(fd, &mut *buf) {
+            Err(rustix::io::Errno::INTR) => {}
+            read => return Ok(read?),
         }
     }
 }
 
 /// One nonblocking write: bytes written, 0 when it would block.
-pub(crate) fn write(fd: RawFd, buf: &[u8]) -> io::Result<usize> {
+pub(crate) fn write(fd: BorrowedFd<'_>, buf: &[u8]) -> io::Result<usize> {
     loop {
-        let n = send_or_write(fd, buf);
-        if n >= 0 {
-            return Ok(n as usize);
-        }
-        let error = last_error();
-        match error.kind() {
-            io::ErrorKind::Interrupted => continue,
-            io::ErrorKind::WouldBlock => return Ok(0),
-            _ => return Err(error),
+        match send_or_write(fd, buf) {
+            Err(rustix::io::Errno::INTR) => {}
+            Err(rustix::io::Errno::WOULDBLOCK) => return Ok(0),
+            written => return Ok(written?),
         }
     }
 }
 
 /// write(2), except that a socket never raises SIGPIPE.
-fn send_or_write(fd: RawFd, buf: &[u8]) -> isize {
-    // SAFETY: send reads at most `buf.len()' bytes from `buf'.
-    let n = unsafe { libc::send(fd, buf.as_ptr().cast(), buf.len(), libc::MSG_NOSIGNAL) };
-    if n < 0 && last_error().raw_os_error() == Some(libc::ENOTSOCK) {
-        // SAFETY: write reads at most `buf.len()' bytes from `buf'.
-        return unsafe { libc::write(fd, buf.as_ptr().cast(), buf.len()) };
+fn send_or_write(fd: BorrowedFd<'_>, buf: &[u8]) -> rustix::io::Result<usize> {
+    match rustix::net::send(fd, buf, rustix::net::SendFlags::NOSIGNAL) {
+        Err(rustix::io::Errno::NOTSOCK) => rustix::io::write(fd, buf),
+        sent => sent,
     }
-    n
 }
 
 /// Poll FDS (descriptor, events) for at most TIMEOUT; the revents of each.
@@ -576,7 +550,10 @@ pub(crate) fn poll(fds: &[(RawFd, i16)], timeout: Option<std::time::Duration>) -
         // Round up, so a wait never returns before its deadline.
         Some(d) => i32::try_from(d.as_nanos().div_ceil(1_000_000)).unwrap_or(i32::MAX),
     };
-    // SAFETY: poll reads and writes the `set.len()' pollfds `set' owns.
+    // UNSAFE(rustix's poll takes borrowed descriptors; these are numbers polled across threads)
+    // SAFETY: poll reads and writes the `set.len()' pollfds `set' owns. A
+    // descriptor is only a number to it: one closed meanwhile answers
+    // POLLNVAL, and no memory is reached through it.
     let n = unsafe { libc::poll(set.as_mut_ptr(), set.len() as libc::nfds_t, millis) };
     if n < 0 {
         let error = last_error();
@@ -596,90 +573,72 @@ pub(crate) enum Address {
     Local(Vec<u8>),
 }
 
-/// The address LEN bytes of STORAGE hold, in GNU's families; None for another.
-fn decode_sockaddr(storage: &libc::sockaddr_storage, len: libc::socklen_t) -> Option<Address> {
-    let base = (storage as *const libc::sockaddr_storage).cast::<u8>();
-    match i32::from(storage.ss_family) {
-        libc::AF_INET => {
-            // SAFETY: the family says the storage holds a sockaddr_in, which
-            // sockaddr_storage is sized and aligned for.
-            let sin = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in>() };
-            Some(Address::V4(sin.sin_addr.s_addr.to_ne_bytes(), u16::from_be(sin.sin_port)))
+/// ADDRESS in GNU's families; None for another.
+fn decode_sockaddr(address: rustix::net::SocketAddrAny) -> Option<Address> {
+    match address.address_family() {
+        rustix::net::AddressFamily::INET => {
+            let v4 = std::net::SocketAddrV4::try_from(address).ok()?;
+            Some(Address::V4(v4.ip().octets(), v4.port()))
         }
-        libc::AF_INET6 => {
-            // SAFETY: the family says the storage holds a sockaddr_in6, which
-            // sockaddr_storage is sized and aligned for.
-            let sin6 = unsafe { &*(storage as *const libc::sockaddr_storage).cast::<libc::sockaddr_in6>() };
-            let octets = sin6.sin6_addr.s6_addr;
-            let segments = std::array::from_fn(|i| u16::from_be_bytes([octets[2 * i], octets[2 * i + 1]]));
-            Some(Address::V6(segments, u16::from_be(sin6.sin6_port)))
+        rustix::net::AddressFamily::INET6 => {
+            let v6 = std::net::SocketAddrV6::try_from(address).ok()?;
+            Some(Address::V6(v6.ip().segments(), v6.port()))
         }
-        libc::AF_UNIX => {
-            // The name is what fits in LEN past the family; a NUL ends a
-            // path, while a Linux abstract name (leading NUL) may hold NULs.
-            let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
-            let available = (len as usize).saturating_sub(offset).min(std::mem::size_of::<libc::sockaddr_un>() - offset);
-            // SAFETY: `offset + available' is at most sockaddr_un's size,
-            // within STORAGE, whose bytes are initialised.
-            let path = unsafe { std::slice::from_raw_parts(base.add(offset), available) };
-            let name = if path.first().is_some_and(|&b| b != 0) { path.iter().position(|&b| b == 0).map_or(path, |end| &path[..end]) } else { path };
-            Some(Address::Local(name.to_vec()))
-        }
+        rustix::net::AddressFamily::UNIX => Some(Address::Local(local_name(&address))),
         _ => None,
     }
 }
 
-/// getsockname (LOCAL) or getpeername of the socket FD.
-pub(crate) fn socket_address(fd: RawFd, local: bool) -> io::Result<Option<Address>> {
-    // SAFETY: sockaddr_storage is plain integers and arrays, valid as all
-    // zeroes.
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    let sa = (&mut storage as *mut libc::sockaddr_storage).cast::<libc::sockaddr>();
-    // SAFETY: getsockname and getpeername write at most LEN bytes into the
-    // storage, and LEN back.
-    let result = if local { unsafe { libc::getsockname(fd, sa, &mut len) } } else { unsafe { libc::getpeername(fd, sa, &mut len) } };
-    if result != 0 {
-        return Err(last_error());
+/// A local socket's name, as the LEN bytes of ADDRESS hold it past the
+/// family: a NUL ends a path; a Linux abstract name keeps its leading NUL
+/// and may hold NULs; an unnamed socket's is empty. Read from the bytes,
+/// not through rustix's `SocketAddrUnix`, which reads an unnamed socket as
+/// an empty abstract name and indexes past `sun_path` for a path that
+/// fills it.
+fn local_name(address: &rustix::net::SocketAddrAny) -> Vec<u8> {
+    let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+    let len = (address.addr_len() as usize).min(size_of::<libc::sockaddr_un>());
+    // UNSAFE(rustix's SocketAddrAny has no safe view of its bytes, and its unix decoding misreads these)
+    // SAFETY: the storage is a sockaddr_storage the kernel filled, with
+    // its first ADDR_LEN bytes initialised; LEN is at most that and at
+    // most a sockaddr_un, which the storage is sized for.
+    let bytes = unsafe { std::slice::from_raw_parts(address.as_ptr().cast::<u8>(), len) };
+    let path = bytes.get(offset..).unwrap_or_default();
+    match path.first() {
+        Some(&b) if b != 0 => path.split(|&b| b == 0).next().unwrap_or(path).to_vec(),
+        _ => path.to_vec(),
     }
-    Ok(decode_sockaddr(&storage, len))
+}
+
+/// getsockname (LOCAL) or getpeername of the socket FD.
+pub(crate) fn socket_address(fd: BorrowedFd<'_>, local: bool) -> io::Result<Option<Address>> {
+    let address = if local { Some(rustix::net::getsockname(fd)?) } else { rustix::net::getpeername(fd)? };
+    Ok(address.and_then(decode_sockaddr))
 }
 
 /// server_accept_connection's accept: the connection, close-on-exec, with
 /// the peer's address.
-pub(crate) fn accept(listener: RawFd) -> io::Result<(OwnedFd, Option<Address>)> {
-    let (fd, storage, len) = crate::host::accept(listener)?;
-    Ok((fd, decode_sockaddr(&storage, len)))
+pub(crate) fn accept(listener: BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<Address>)> {
+    let (fd, address) = crate::host::accept(listener)?;
+    Ok((fd, address.and_then(decode_sockaddr)))
 }
 
 /// SO_ERROR of the socket FD: how its nonblocking connect ended.
-pub(crate) fn socket_error(fd: RawFd) -> i32 {
-    let mut error: libc::c_int = 0;
-    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
-    // SAFETY: getsockopt writes at most LEN bytes into the live int `error'.
-    if unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, (&mut error as *mut libc::c_int).cast(), &mut len) } != 0 {
-        return last_error().raw_os_error().unwrap_or(libc::ECONNREFUSED);
+pub(crate) fn socket_error(fd: BorrowedFd<'_>) -> i32 {
+    match rustix::net::sockopt::socket_error(fd) {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) | Err(error) => error.raw_os_error(),
     }
-    error
 }
 
 /// emacs_get_tty_pgrp: the foreground group of the pty on FD.
-pub(crate) fn tty_pgrp(fd: RawFd) -> Option<i32> {
-    let mut group: libc::pid_t = -1;
-    // SAFETY: TIOCGPGRP writes one pid_t into the live local it is given.
-    (unsafe { libc::ioctl(fd, libc::TIOCGPGRP, &mut group) } != -1).then_some(group)
+pub(crate) fn tty_pgrp(fd: BorrowedFd<'_>) -> Option<i32> {
+    rustix::termios::tcgetpgrp(fd).ok().map(rustix::process::Pid::as_raw_nonzero).map(std::num::NonZeroI32::get)
 }
 
 /// GNU's strsignal text for SIGNAL (glibc's English table).
 pub(crate) fn signal_description(signal: i32) -> Option<String> {
-    // SAFETY: strsignal accepts any number.
-    let text = unsafe { libc::strsignal(signal) };
-    if text.is_null() {
-        return None;
-    }
-    // SAFETY: strsignal's text is NUL-terminated and valid until the next
-    // call on this thread; it is copied before that.
-    Some(unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned())
+    crate::host::signal_text(signal)
 }
 
 /// gnulib sig2str's name for SIGNUM on GNU/Linux: the first name its table
@@ -719,6 +678,29 @@ pub(crate) fn signal_number(name: &str) -> Option<i32> {
 mod tests {
     use super::*;
 
+    /// A bound path, an abstract name with a NUL in it, and an unnamed
+    /// socket each read back as GNU's process.c names them.
+    #[test]
+    fn local_socket_names_keep_their_shape() {
+        use std::os::unix::net::{SocketAddr, UnixDatagram};
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::fd::AsFd;
+        let dir = std::env::temp_dir().join(format!("romacs-names-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s");
+        let named = UnixDatagram::bind(&path).unwrap();
+        let name = |fd: &UnixDatagram| match socket_address(fd.as_fd(), true).unwrap() {
+            Some(Address::Local(name)) => name,
+            _ => panic!("not a local address"),
+        };
+        assert_eq!(name(&named), path.as_os_str().as_encoded_bytes());
+        let abstract_name = format!("romacs\0names-{}", std::process::id()).into_bytes();
+        let hidden = UnixDatagram::bind_addr(&SocketAddr::from_abstract_name(&abstract_name).unwrap()).unwrap();
+        assert_eq!(name(&hidden), [&[0], &abstract_name[..]].concat());
+        assert_eq!(name(&UnixDatagram::unbound().unwrap()), b"");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// The child's /proc state letter, or None once no such process exists.
     fn state(pid: i32) -> Option<char> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -756,9 +738,8 @@ mod tests {
         reaper.adopt(Vec::new(), spawn_reaper);
         assert!(reaper.lock().wake.is_some());
         poll_until("the orphan to be reaped", || reaper.lock().orphans.is_empty());
-        // SAFETY: waitpid accepts a null status pointer.
-        assert_eq!(unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
-        assert_eq!(last_error().raw_os_error(), Some(libc::ECHILD));
+        let pid = rustix::process::Pid::from_raw(pid).unwrap();
+        assert_eq!(rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::NOHANG).err(), Some(rustix::io::Errno::CHILD));
         assert!(!file.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }

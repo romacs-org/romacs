@@ -1,0 +1,16 @@
+[package]
+name = "romacs-icon-font"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Romacs Icons, the mode line's icon font, built from assets/icons when the package builds"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+# Each table's bytes; build.rs lays out the font file around them.
+allsorts.workspace = true
+# The drawings' outlines and bounds.
+kurbo.workspace = true
+svgtypes.workspace = true

@@ -1,6 +1,6 @@
 //! Isolates: worker VMs in child processes that exchange frozen values
 //! (vm-concurrency design §4, §4.6). This is the substrate the Lisp half
-//! (lisp/romacs/vm/isolate.el) drives: spawning a worker with a control socket,
+//! (lisp/vm/isolate.el) drives: spawning a worker with a control socket,
 //! packets of frozen values in either direction, waiting on the sockets and
 //! on the workers' pidfds, signals, and the children a worker reports so the
 //! parent can reach their process groups after a kill.
@@ -275,7 +275,7 @@ impl Worker {
     fn exited(&self) -> Option<Exit> {
         match self.zygote {
             Some(_) => Some(self.reported.map_or(Exit::Unknown, Exit::Status)),
-            None => crate::subprocess::wait_status(self.pid, 0).map(Exit::Status),
+            None => crate::subprocess::wait_status(self.pid, rustix::process::WaitOptions::empty()).map(Exit::Status),
         }
     }
 }
@@ -286,6 +286,7 @@ impl Worker {
 #[derive(Default)]
 struct PoolMemory {
     /// The processes to measure, as the evaluator last saw them.
+    // CELL(Plain)
     pids: std::sync::Mutex<Vec<i32>>,
     /// Their proportional memory together, in kilobytes.
     kilobytes: std::sync::atomic::AtomicU64,
@@ -565,6 +566,7 @@ impl Vm {
         self.finalizers.clear();
         self.doomed_finalizers.clear();
         self.post_gc_due = false;
+        self.undo_offers_due = false;
         let hello = Payload::Text(hello("fork"));
         self.isolates.parent.as_ref().expect("adopted").send(Kind::Hello, 0, &hello, true).map_err(|e| e.to_string())
     }
@@ -749,7 +751,7 @@ impl Vm {
         let exited: Vec<i32> = self.isolates.forked.iter().filter(|(_, fd)| ready.contains(&fd.as_raw_fd())).map(|(&pid, _)| pid).collect();
         let mut reaped = false;
         for pid in exited {
-            let Some(status) = crate::subprocess::wait_status(pid, 0) else { continue };
+            let Some(status) = crate::subprocess::wait_status(pid, rustix::process::WaitOptions::empty()) else { continue };
             self.isolates.forked.remove(&pid);
             reaped = true;
             if let Some(parent) = &self.isolates.parent {
@@ -930,6 +932,7 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     }
     crate::host::catch_isolate_signals().map_err(|e| e.to_string())?;
     crate::host::limit_termination(TERMINATION_SECONDS);
+    // UNSAFE(a descriptor inherited by number has no safe owner: from_raw_fd is unsafe)
     // SAFETY: the launcher put the socket at FD and nothing else owns it, so
     // this one owner closes it once.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })

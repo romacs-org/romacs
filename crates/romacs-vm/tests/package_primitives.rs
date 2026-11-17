@@ -1,4 +1,4 @@
-//! C primitives and variables emacs-hermes reaches, against pinned GNU:
+//! C primitives and variables bundled packages reach, against pinned GNU:
 //! line-number-at-pos, text-property-any, get-buffer-process (no process
 //! exists), frame-first-window, timer-idle-list, and the subrs in the
 //! special forms' function cells, print-gensym as gnosis's serializer
@@ -6,6 +6,8 @@
 //! overlay-properties, byte-to-string, the base64 region coders,
 //! command-modes, local-minor-modes, replace-region-contents and
 //! insert-before-markers into a unibyte buffer.
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
 use romacs_vm::Vm;
 
 /// One expression per line.
@@ -95,14 +97,13 @@ fn package_primitives_with_prelude_match_pinned_gnu() {
 }
 
 fn matches_gnu(cases: &str, vm: fn() -> Vm) {
-    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let mut failures = Vec::new();
-    for expression in cases.lines().filter(|line| !line.is_empty()) {
-        // As character codes, as tests/json.rs compares.
-        let source = format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
-        let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let expected = String::from_utf8(output.stdout).unwrap();
+    // As character codes, as tests/json.rs compares.
+    let source = |expression: &str| format!("(append (prin1-to-string (condition-case e {expression} (error (list 'signal e)))) nil)");
+    let expressions: Vec<&str> = cases.lines().filter(|line| !line.is_empty()).collect();
+    let answers = gnu_batch::outputs(&expressions.iter().map(|e| format!("(prin1 {})", source(e))).collect::<Vec<_>>());
+    for (expression, expected) in expressions.iter().zip(answers) {
+        let source = source(expression);
         let actual = vm().eval_source(&source).and_then(|v| v.display());
         if actual.as_deref() != Ok(expected.as_str()) {
             let text = |codes: &str| codes.trim_matches(|c| c == '(' || c == ')').split_whitespace()

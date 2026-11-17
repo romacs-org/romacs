@@ -15,7 +15,7 @@
 
 use super::{RenderApp, RenderedFrameSurface};
 use crate::render_thread::frame_sched::SubmissionResult;
-use crate::render_thread::{frame_stats, surface_readback};
+use crate::render_thread::{frame_cost, frame_stats, surface_readback};
 
 impl RenderApp {
     /// Render and present one top-level frame window, preserving the precise
@@ -37,12 +37,7 @@ impl RenderApp {
         self.refresh_frame_opacity();
         use crate::render_thread::frame_sched::RenderWork;
         let compositor_only_hint = matches!(plan.work, RenderWork::CompositeOnly { .. });
-        let class = match plan.work {
-            RenderWork::None => "none",
-            RenderWork::CompositeOnly { .. } => "composite",
-            RenderWork::RepaintLayers { .. } => "repaint",
-            RenderWork::RebuildScene => "rebuild",
-        };
+        let class = plan.work.class();
         let presentation = self
             .frame_windows
             .get(emacs_frame_id)
@@ -62,7 +57,11 @@ impl RenderApp {
                 reasons,
             )
         });
-        self.render_frame_window_impl(emacs_frame_id, compositor_only_hint)
+        let result = romacs_display_protocol::meter::spent(frame_cost::FRAME, || {
+            self.render_frame_window_impl(emacs_frame_id, compositor_only_hint)
+        });
+        frame_cost::say(presentation.get(), class, result);
+        result
     }
 
     fn render_frame_window_impl(
@@ -253,7 +252,9 @@ impl RenderApp {
                 emacs_frame_id,
                 Some(frame.presentation_id),
             );
-            renderer.queue().present(output);
+            romacs_display_protocol::meter::spent(frame_cost::PRESENT, || {
+                renderer.queue().present(output);
+            });
         }
         romacs_display_protocol::present_trace::record(
             romacs_display_protocol::present_trace::Stage::Present,
@@ -262,16 +263,18 @@ impl RenderApp {
         );
         // Read the actual per-window renderer atlas only after successful drawing
         // and presentation. Missing atlas is missing evidence, never zero.
-        if let Some(diagnostics) = &self.comms.paint_diagnostics
-            && is_primary_frame
-            && let Some(atlas) = self
-                .frame_windows
-                .get(emacs_frame_id)
-                .and_then(|window| window.render.compositor.glyph_atlas.as_ref())
+        // Once per presentation: a frame the render thread draws again on
+        // its own (effects, video) renders nothing new.
+        if let Some(window) = self.frame_windows.get_mut(emacs_frame_id)
+            && window.render.reported_presentation < frame.presentation_id.get()
+            && let Some(atlas) = window.render.compositor.glyph_atlas.as_ref()
         {
-            diagnostics.publish(crate::paint_host::PaintDiagnostic {
+            let unresolved_face_text_total = atlas.unresolved_face_text_total();
+            window.render.reported_presentation = frame.presentation_id.get();
+            self.comms.tell(crate::thread_comm::Fact::PresentationRendered {
+                frame: emacs_frame_id,
                 presentation: frame.presentation_id.get(),
-                unresolved_face_text_total: atlas.unresolved_face_text_total(),
+                unresolved_face_text_total,
             });
         }
         // This projection describes the frame just handed to the compositor.

@@ -33,6 +33,17 @@ examples.
    change that moves work around must show no per-key regression, and a
    new collection must have a probe, one file under
    =crates/romacs-vm-gui/harness/scaling/probes/=.
+6. Separate redisplay from the command that caused it.
+   =romacs--display-stats= counts, since its last reset, the redisplay
+   cycles, the instructions and conses spent inside them, the windows
+   reused and rebuilt, the bands expanded, the layouts asked of the layout
+   host and the frames submitted. =display_stages_live.py= (the harness
+   README) holds a set of scenarios to bars on those figures.
+7. Read the render thread's side per frame. Under =ROMACS_DIAGNOSTICS=1=
+   it writes a =frame-cost= line for each frame it draws: the rows it
+   tessellated and reused, the glyphs it walked, the bytes it uploaded,
+   and its instructions in the frame, with the driver's part apart.
+   =render_stages_live.py= holds the same scenarios to bars on those.
 
 * Attack cost in order
 

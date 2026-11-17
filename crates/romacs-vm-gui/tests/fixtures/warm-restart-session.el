@@ -16,7 +16,7 @@
 (require 'warm-restart)
 
 ;; A handler-owned buffer: its package's data, never its text; the
-;; handler defers its attachment while passive, as hermes's does.
+;; handler defers its attachment while passive.
 (defvar wrt-attached nil "Buffers the test handler attached.")
 (define-derived-mode wrt-view-mode special-mode "WRT-View")
 (defun wrt-view-save (_dir) (list :topic (buffer-name)))

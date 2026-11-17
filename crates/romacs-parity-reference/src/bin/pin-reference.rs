@@ -270,7 +270,7 @@ fn rewrite(text: &str, proposed: &ReferenceManifest, reason: &Reason) -> Result<
         }
         // A key line: emit the whole new block in place of the first one and
         // drop the rest, so the order is always what `render_manifest_keys`
-        // produces and the two readers never see a stale ordering.
+        // produces and a reader never sees a stale ordering.
         if !keys_written {
             out.push_str(&render_manifest_keys(proposed));
             keys_written = true;

@@ -52,8 +52,7 @@ fn replay(family: &str, expected_rows: usize) {
         }
         // Mapped executable image: primitive indices must be stable ABI.
         if let Ok(key) = key {
-            // SAFETY: the content-addressed store is private and never overwritten.
-            let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+            let image = ImageRegion::open(&store, &key).unwrap();
             let (mut mapped, entry) = Vm::from_code_image(image, [0; 32]).unwrap();
             mapped.set_collection_floor(1);
             let actual = mapped.execute(entry).map(|value| value.root()).and_then(|value| {
@@ -306,18 +305,19 @@ fn maphash_survives_collections_inside_its_body() {
     );
 }
 
-/// Recorded divergences (GNU-DIVERGENCES.md H1-H3): each fails loudly or is
+/// Recorded divergences (ledger/divergences H2, H3): each fails loudly or is
 /// pinned to its exact VM2 answer, so a change in either direction is seen.
 #[test]
 fn divergences_are_loud_and_pinned() {
     let mut vm = Vm::new();
-    // H1: GNU calls FUNCTION through an indirect maphash; VM2 cannot.
+    // GNU calls FUNCTION however maphash was reached: here through `apply'
+    // and a variable, which the inline walk of a written call never sees.
     assert_eq!(
         eval(
             &mut vm,
-            "(let ((h (make-hash-table))) (puthash 'a 1 h) (condition-case e (apply #'maphash (list #'ignore h)) (error e)))"
+            "(let ((h (make-hash-table)) (f #'maphash) r) (puthash 'a 1 h) (puthash 'b 2 h) (list (apply #'maphash (list (lambda (k v) (push (cons k v) r)) h)) (funcall f (lambda (k _) (push k r)) h) r))"
         ),
-        "(error \"VM2 cannot call maphash indirectly on a non-empty table\" ignore)"
+        "(nil nil (b a (b . 2) (a . 1)))"
     );
     // H2: GNU accepts a test installed by define-hash-table-test.
     assert_eq!(
@@ -327,12 +327,13 @@ fn divergences_are_loud_and_pinned() {
         ),
         "(error \"VM2 does not support user-defined hash table tests\" my-test)"
     );
-    // H3: GNU compares closures element-wise; VM2 requires the same lambda site.
+    // Closures of two lambdas with the same source are equal keys, as GNU's
+    // element-wise `equal' makes them (closure_key.rs).
     assert_eq!(
         eval(
             &mut vm,
             "(let ((h (make-hash-table :test 'equal)) (make (lambda () (lambda (x) x)))) (puthash (lambda (x) x) 'first h) (list (gethash (lambda (x) x) h) (progn (puthash (funcall make) 'site h) (gethash (funcall make) h))))"
         ),
-        "(nil site)"
+        "(first site)"
     );
 }

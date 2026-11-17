@@ -9,14 +9,14 @@ init and your muscle memory come with you.
 
 | | Romacs | GNU Emacs |
 | --- | ---: | ---: |
-| Log the entire Emacs history, 183,254 commits | **2.82 s** | 18 s |
-| Open a 15 MB C header, tree-sitter in both | **1.05 s** | 1.94 s |
-| Open `xdisp.c`, tree-sitter in both | **228 ms** | 433 ms |
-| Switch themes | **4.5 ms** | 23.7 ms |
-| Uncompiled Lisp, one function call | **16.2 ns** | 257 ns |
+| Log the entire Emacs history, 183,254 commits | **3 s** | 14.7 s |
+| Open a 15 MB C header, tree-sitter in both | **1.07 s** | 1.96 s |
+| Open `xdisp.c`, tree-sitter in both | **218 ms** | 436 ms |
+| Switch to a theme the first time | **18.7 ms** | 30.2 ms |
+| Uncompiled Lisp, one function call | **13.4 ns** | 228 ns |
 
 The clip is the real program; the race runs at real speed.  Every number, losses
-included, is in [doc/benchmarks.md](doc/benchmarks.md).
+included, is in [the benchmark tables](crates/romacs-vm-gui/harness/README.md#latest-results).
 
 - **Worker VMs.**  Searches, syncs and background loads run off the main VM, and
   `C-g` reaches long work.
@@ -40,7 +40,8 @@ checks the download against its `SHA256SUMS`, installs under `~/.local`, and
 asks before using `sudo`, only to add missing system libraries.
 
 Options go after `bash -s --`.  `--nightly` installs the rolling build of
-`master`, and `--uninstall` removes Romacs and leaves your init and data:
+`beta`, the development branch, and `--uninstall` removes Romacs and leaves
+your init and data:
 
 ```sh
 curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --nightly
@@ -49,8 +50,8 @@ curl -fsSL https://thanosapollo.org/romacs/install.sh | bash -s -- --uninstall
 
 ## Where things are
 
-`crates/` is the Rust, `lisp/` the Lisp (`lisp/gnu/` GNU's, pinned; `lisp/romacs/`
-Romacs's own and the bundled packages), `test/` the test suites (`test/gnu/` GNU's,
+`crates/` is the Rust, `lisp/` the Lisp (one tree by subsystem: GNU's files at
+GNU's paths, pinned, beside Romacs's own; `lisp/packages/` the bundled packages), `test/` the test suites (`test/gnu/` GNU's,
 `test/romacs/` Romacs's, `test/packages/` the bundled packages'), `tools/` the
 scripts, `etc/` and `assets/` runtime data, and `ledger/` the pins and floors we
 hold ourselves to. [ARCHITECTURE.md](ARCHITECTURE.md) says where to look

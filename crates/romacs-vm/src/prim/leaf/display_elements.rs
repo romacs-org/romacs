@@ -234,7 +234,7 @@ impl<'l, 'a> Source<'l, 'a> {
     }
     fn property(&mut self, pos: i64, key: Value) -> R<(Value, Value)> {
         let byte = self.leaf.buffer_byte(self.view.buffer, pos)?;
-        self.leaf.vm.window_char_property(self.view.buffer, byte, key, self.view.window).map_err(Fault::Error)
+        self.leaf.vm.char_property_at_byte(self.view.buffer, byte, key, Some(self.view.window)).map_err(Fault::Error)
     }
 
     fn emit(&mut self, elem: Elem) {
@@ -334,26 +334,11 @@ impl<'l, 'a> Source<'l, 'a> {
         Ok(end.integer_value().unwrap_or(self.view.zv))
     }
 
-    /// handle_invisible_prop over buffer text: the first visible position
-    /// at or after P, checked where properties or overlays may change, and
-    /// whether any of the skipped text asks for an ellipsis.
-    fn skip_invisible(&mut self, p: i64, mut ellipsis: bool) -> R<(i64, bool)> {
-        let zv_byte = self.leaf.buffer_byte(self.view.buffer, self.view.zv)?;
-        let mut pos = p;
-        loop {
-            self.step()?;
-            let byte = self.leaf.buffer_byte(self.view.buffer, pos)?;
-            let next = self.leaf.vm.next_property_boundary(self.view.buffer, ByteOffset(byte), ByteOffset(zv_byte))
-                .map_err(Fault::Error)?;
-            pos = (self.text().char_of_byte(next).map_err(Fault::Error)?.0 as i64 + 1).max(pos + 1);
-            if pos >= self.view.zv { return Ok((self.view.zv, ellipsis)); }
-            let property = self.property(pos, self.syms.invisible)?.0;
-            match self.leaf.invisible_kind(property)? {
-                0 => return Ok((pos, ellipsis)),
-                2 => ellipsis = true,
-                _ => {}
-            }
-        }
+    /// `handle_invisible_prop` over buffer text from P (`Leaf::skip_hidden`):
+    /// the first visible position after it, and whether any of the skipped
+    /// text asks for an ellipsis.
+    fn skip_invisible(&mut self, p: i64, ellipsis: bool) -> R<(i64, bool)> {
+        self.leaf.skip_hidden(self.view.buffer, self.view.window, (p, self.view.zv), ellipsis)
     }
 
     /// The overlays at P that apply to the window, with their start and end.
@@ -859,7 +844,7 @@ impl<'l, 'a> Source<'l, 'a> {
         let relative = self.plist_get(plist, s.relative_width);
         if let Some(factor) = self.leaf.number_value(relative).filter(|&f| f > 0.0) {
             let c = if origin.string == Value::NIL { self.char_at(self.leaf.buffer_byte(self.view.buffer, origin.charpos)?) }
-                else { self.leaf.vm.str_view(origin.string).and_then(|v| v.chars().nth(origin.strpos.unwrap_or(0))).unwrap_or(0x20) };
+                else { self.leaf.vm.str_view_from(origin.string, origin.strpos.unwrap_or(0)).and_then(|v| v.chars().next()).unwrap_or(0x20) };
             // In pixels, FACTOR times the host's glyph of C (Org's table
             // separators); a TAB's would depend on x.
             if self.view.pixels {

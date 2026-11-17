@@ -16,7 +16,7 @@
 //! way out, and a nested load that succeeded is not undone by its caller's
 //! failure (the inner level reset its queue to `t` before returning).
 //!
-//! VM2 has no `function-history` (DIVERGENCES.md VM2-AUTOLOAD1), so a symbol's
+//! VM2 has no `function-history` (ledger/divergences VM2-AUTOLOAD1), so a symbol's
 //! record is `(SYMBOL . OLD-DEFINITION)` captured at the `defalias`, where GNU
 //! re-reads the previous definition from that symbol property when it undoes.
 //!
@@ -152,9 +152,6 @@ impl Vm {
                 return Err(self.signal_error("wrong-type-argument", &[listp, fundef], error));
             }
         };
-        if self.loader.recording.is_some() && let Some(name) = self.source_string_if(file).map(str::to_owned) {
-            self.note_init_load(crate::world::layer::Kind::Autoload, name, None, ignore_errors);
-        }
         self.set_rooted(args, OUT, file);
         Ok(Some(ignore_errors))
     }

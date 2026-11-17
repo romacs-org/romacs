@@ -291,7 +291,9 @@ impl<'a> Encoder<'a> {
                     out.n(range.end.0);
                     out.n(props.len());
                     for (key, value) in props {
-                        let key = self.names.of(&key);
+                        // Keys are written by name, which only an interned symbol's gives back.
+                        let name = self.vm.property_key_name(key).ok_or("a text property keyed by a symbol that is not interned")?;
+                        let key = self.names.of(name);
                         out.n(key);
                         let r = self.value(value)?;
                         Self::write_ref(&mut out, r);
@@ -351,6 +353,13 @@ impl<'a> Encoder<'a> {
                 for p in params {
                     self.form(&mut out, p)?;
                 }
+            }
+        }
+        match f.key {
+            None => out.byte(0),
+            Some(key) => {
+                out.byte(1);
+                for byte in key.to_le_bytes() { out.byte(byte); }
             }
         }
         let mut body = Writer::default();
@@ -625,7 +634,7 @@ impl Install<'_> {
             })
         }).collect::<Result<Vec<_>>>()?;
         for (pending, &id) in bodies.into_iter().zip(&ids) {
-            Arc::get_mut(&mut vm.functions[id]).expect("a function just installed is private").pending = Some(Box::new(pending));
+            Arc::get_mut(vm.functions.change(id)).expect("a function just installed is private").pending = Some(Box::new(pending));
         }
         vm.claim_caches(&cache_ids);
         Ok(ids[entry])
@@ -643,13 +652,22 @@ impl Install<'_> {
             }
             _ => return Err("bad parameter list".into()),
         };
+        let key = match r.byte()? {
+            0 => None,
+            1 => {
+                let mut bytes = [0; 16];
+                for byte in &mut bytes { *byte = r.byte()?; }
+                Some(u128::from_le_bytes(bytes))
+            }
+            _ => return Err("bad structural key".into()),
+        };
         let values = read_refs(r)?;
         let list = |r: &mut Reader| -> Result<Vec<usize>> { let n = r.count()?; (0..n).map(|_| r.n()).collect() };
         let (children, caches) = (list(r)?, list(r)?);
         let body = r.data()?;
         let start = body.as_ptr() as usize - self.bytes.as_ptr() as usize;
         let function = Function { capture_mutations: vec![], mapped_code: None, code: vec![], regs, captures, arity, required, rest,
-                                  sites: vec![], lazy: None, dynamic, params, pending: None };
+                                  sites: vec![], lazy: None, dynamic, params, pending: None, key };
         Ok((function, BodyRefs { values, children, caches, body: start..start + body.len() }))
     }
 }
@@ -737,7 +755,7 @@ impl Vm {
         }
         let decoded = Function { capture_mutations, mapped_code: None, code, regs: f.regs, captures: f.captures, arity: f.arity,
                                  required: f.required, rest: f.rest, sites, lazy: None, dynamic: f.dynamic,
-                                 params: f.params.clone(), pending: None };
+                                 params: f.params.clone(), pending: None, key: f.key };
         validate_body(&decoded, |child| self.functions.get(child).map(|f| f.captures), self.slots.len(), self.caches.len())?;
         Ok(decoded)
     }
@@ -919,10 +937,10 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                     }
                     for (key, value) in props {
                         let key = names.get(*key).ok_or("compiled Lisp artifact: bad property name")?;
-                        let key = vm.symbol_names[*key].clone();
+                        let key = vm.property_key(&vm.symbol_names[*key]).ok_or("compiled Lisp artifact: bad property name")?;
                         let value = resolve(value)?;
                         if let Object::String(s) | Object::RawString(s) = vm.object_mut(v)? {
-                            s.properties.put(crate::coordinates::ByteOffset(*start)..crate::coordinates::ByteOffset(*end), &key, value);
+                            s.properties.put(crate::coordinates::ByteOffset(*start)..crate::coordinates::ByteOffset(*end), key, value);
                         }
                     }
                 }

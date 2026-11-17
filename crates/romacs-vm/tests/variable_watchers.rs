@@ -10,6 +10,9 @@
 //! it, and defvar, defconst and the toplevel-value setters. Last, the
 //! variables `load' binds, and an unlet watcher's signal after a load.
 use romacs_vm::Vm;
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// One expression per line. LOG is a watcher recording its arguments, with
 /// WHERE as a buffer name, and the value the variable had when it ran.
@@ -114,26 +117,6 @@ fn prelude() -> Vm {
     vm
 }
 
-/// The loadup chain (process.rs's), for coding systems and commands.
-fn bootstrapped() -> Vm {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
-
 /// EXPRESSION's printed value from pinned GNU and from Romacs, as a failure
 /// report when they differ.
 fn compare(binary: &str, expression: &str, mut vm: Vm) -> Option<String> {
@@ -193,7 +176,7 @@ fn bootstrap_mode_writes_watchers_may_collect() {
 
 /// A primitive's queued write (`watchers.rs`) differs from GNU's in place in
 /// one way Lisp can see: the rest of the primitive has run when its watcher
-/// does, so what it did stands if the watcher signals. DIVERGENCES VM2-WATCH1.
+/// does, so what it did stands if the watcher signals. ledger/divergences VM2-WATCH1.
 #[test]
 fn a_queued_write_runs_after_the_rest_of_its_primitive() {
     let mut vm = prelude();
@@ -215,7 +198,7 @@ fn a_queued_write_runs_after_the_rest_of_its_primitive() {
 fn native_assignments_match_pinned_gnu() {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let failures: Vec<_> = LOADED_CASES.lines().filter(|line| !line.is_empty())
-        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG), bootstrapped())).collect();
+        .filter_map(|expression| compare(&binary, &expression.replace("LOG", LOG), gnu_lisp(&[]))).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

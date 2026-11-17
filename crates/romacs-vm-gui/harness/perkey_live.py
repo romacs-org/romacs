@@ -9,8 +9,17 @@ typed text lands in the second idle phase.  A session runs, in order:
 
   idle, self-insert (N x `a'), C-n (N), C-f (N), idle, then C-x C-s.
 
-Counted sessions count the evaluator thread alone (`perf stat -t`,
-instructions:u) over each phase; latency sessions run without perf and
+Its C-n steps that scroll do so under Romacs's `scroll-conservatively'
+101 (just enough to show point), the cost of that path alone: GNU's
+default 0 recentres instead, a different and cheaper redisplay
+(scroll_invisible_live runs both).
+
+Counted sessions count the evaluator thread alone (`perf stat -t
+--no-inherit`, instructions:u) over each phase: a worker the evaluator
+starts during a phase (an image decoder, a tree-sitter parse, a process's
+watcher) does work of its own, which is not the keys'.  With --inherit the
+count takes in such threads too, as `perf stat' does by default, for the
+whole work a phase set going.  Latency sessions run without perf and
 with --trace-latency, and read key-enqueue -> render-observed samples: one
 per key, each rendered or explicitly unchanged, or the phase is refused.
 
@@ -73,7 +82,7 @@ usage: perkey_live.py --binary PATH --output DIR [--regime loadup|workspace]
                       [--lines 200] [--sessions 5] [--latency-sessions 1]
                       [--record PHASE] [--tools DIR:DIR] [--classic] [--state]
                       [--mode WxH] [--populate] [--line-numbers TYPE] [--sample FILE]
-                      [--host-calls] [--setup FORM]...
+                      [--host-calls] [--setup FORM]... [--inherit] [--home DIR]
 """
 import argparse
 import hashlib
@@ -164,6 +173,16 @@ def perf_count(output, idle=False):
                 raise Invalid(f'counter ran under 100%: {line}')
             return int(fields[0])
     raise Invalid(f'no instructions line: {output!r}')
+
+
+def perf_stat(tid, out, inherit=True):
+    """The command counting thread TID's instructions into OUT until it is
+    interrupted.  With INHERIT the count takes in the threads TID starts
+    while it runs, as `perf stat' does by default; a thread already running
+    is never counted, so what that adds is whatever happens to start in
+    the counted interval."""
+    return ['perf', 'stat', '-x,', *([] if inherit else ['--no-inherit']),
+            '-e', 'instructions:u', '-t', str(tid), '-o', str(out)]
 
 
 def delivery(replies, command, keys):
@@ -364,15 +383,27 @@ def text_point(stderr_records):
 class Session:
     def __init__(self, args, root, latency):
         self.args, self.root, self.latency = args, root, latency
+        # --home DIR: one HOME for every session that names it, so sessions of one binary restore one
+        # world (romacs#252 keys a world by its HOME); its state directory stays the session's own,
+        # as the last launch's profile there (launch-profile.json) moved C-f by 50% between sessions.
+        self.shared_home = getattr(args, 'home', None)
+        # Whether a count takes in the threads the evaluator starts during
+        # it (`perf_stat'): only when asked, here or by a harness's own
+        # options naming `inherit'.
+        self.inherit = getattr(args, 'inherit', False)
         self.compositor = self.keyboard = self.process = None
 
+    @property
+    def home(self):
+        return Path(self.shared_home).resolve() if self.shared_home else self.root / 'home'   # absolute: Romacs runs elsewhere
+
     def env(self):
-        home = self.root / 'home'
+        home = self.home
         path = os.environ.get('PATH', '/usr/bin:/bin')
         env = {'PATH': f'{self.args.tools}:{path}' if self.args.tools else path,
                'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1', 'XDG_RUNTIME_DIR': str(self.root),
                'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
-               'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(home / 'state'),
+               'XDG_DATA_HOME': str(home / 'data'), 'XDG_STATE_HOME': str(self.root / 'state' if self.shared_home else home / 'state'),
                'TMPDIR': str(self.root), 'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman',
                'WLR_HEADLESS_OUTPUTS': '1', 'WLR_LIBINPUT_NO_DEVICES': '1', 'LIBSEAT_BACKEND': 'noop'}
         for key in ('ROMACS_LISP_DIR', 'ROMACS_RUNTIME_ROOT', 'ROMACS_WORLD', 'ROMACS_GNU_SOURCE'):
@@ -384,7 +415,8 @@ class Session:
 
     def start(self):
         work, config = self.root / 'work', self.root / 'config'
-        for directory in (self.root / 'home', work, config):
+        self.home.mkdir(parents=True, exist_ok=True)
+        for directory in (work, config):
             directory.mkdir()
         (config / 'rc.xml').write_text(live.RC_XML)
         sample = getattr(self.args, 'sample', None)
@@ -393,7 +425,7 @@ class Session:
         if self.args.populate:
             git = ['git', '-C', str(work), '-c', 'user.name=perkey', '-c', 'user.email=perkey@localhost', '-c', 'commit.gpgsign=false']
             for command in (['init', '-q', '-b', 'main'], ['add', self.file.name], ['commit', '-q', '-m', 'text']):
-                subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.root / 'home')})
+                subprocess.run(git + command, check=True, capture_output=True, env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(self.home)})
         self.stdout, self.stderr = self.root / 'binary.stdout', self.root / 'binary.stderr'
         self.environ = env = self.env()
         log = (self.root / 'compositor.log').open('w')
@@ -450,6 +482,10 @@ class Session:
                          ' (switch-to-buffer (car others))'
                          f'{" (select-window (split-window-below)) (switch-to-buffer (cadr others))" if getattr(self.args, 'split', 1) > 2 else ""}))')
         forms += getattr(self.args, 'setup', None) or []
+        # Last, a full collection: what the world image's own allocation history left for the
+        # first minor collection would otherwise land in the counted keys, so two sessions of
+        # one binary, each restoring an image of its own, differed by up to 60% per key.
+        forms.append('(garbage-collect)')
         return f"(progn {' '.join(forms)})"
 
     def state_form(self):
@@ -486,6 +522,20 @@ class Session:
         self.wait(done, self.args.timeout, 'M-: (setq auto-save-timeout nil)')
         if any(r.get('signal') or r.get('native_error') for r in done()):
             raise Invalid(f'M-: (setq auto-save-timeout nil) signalled: {done()}')
+
+    def collect(self):
+        """M-: (garbage-collect), then quiet again: each counted phase starts from a heap just
+        collected, so a minor collection the phase did not cause cannot land in its count. Not with
+        --host-calls, whose rows are read after the session's last M-:."""
+        if getattr(self.args, 'host_calls', False):
+            return
+        before = len(records(self.stdout))
+        self.type(['-M', 'alt', ':', '-m', 'alt'])
+        self.type(['(garbage-collect)'])
+        self.type(['-k', 'Return'])
+        done = lambda: [r for r in records(self.stdout)[before:] if r.get('native_command') == 'eval-expression']
+        self.wait(done, self.args.timeout, 'M-: (garbage-collect)')
+        self.quiesce()
 
     def evaluator(self):
         for task in Path(f'/proc/{self.process.pid}/task').iterdir():
@@ -555,8 +605,7 @@ class Session:
             result = action()
             return None, time.monotonic() - started, result
         out = self.root / f'perf-{time.monotonic_ns()}.txt'
-        perf = subprocess.Popen(['perf', 'stat', '-x,', '-e', 'instructions:u', '-t', str(self.tid), '-o', str(out)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        perf = subprocess.Popen(perf_stat(self.tid, out, self.inherit), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(.3)
         started = time.monotonic()
         result = action()
@@ -593,6 +642,7 @@ class Session:
         commands = {'self-insert': 'self-insert-command', 'C-f': 'forward-char', 'C-n': self.commands.get('[14]')}
         commands['region'] = 'forward-char'
         for name in phases(self.args):
+            self.collect()
             if name == 'region':
                 mark = self.run_keys(KEYS['mark'], 1)
                 result['mark'] = delivery(mark, 'set-mark-command', 1)
@@ -722,7 +772,8 @@ def latencies(sessions):
     return found
 
 
-def main():
+def arguments(argv=None):
+    """The command line ARGV (default the process's), parsed and checked."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -734,6 +785,7 @@ def main():
     parser.add_argument('--sessions', type=int, default=5)
     parser.add_argument('--latency-sessions', type=int, default=1)
     # GNU's undo-auto--boundary-timer fires 10s after the visit's first change.
+    parser.add_argument('--home', type=Path, help='a HOME every session shares (not its state directory); default each its own')
     parser.add_argument('--settle', type=float, default=12, help='quiet evaluator seconds before measuring')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--record', choices=PHASES, help='after the first counted session, profile this phase')
@@ -746,9 +798,16 @@ def main():
     parser.add_argument('--mode', default='1600x1000', help="the output's size")
     parser.add_argument('--setup', action='append', help='a form the M-: setup also evaluates (--regime loadup)')
     parser.add_argument('--host-calls', action='store_true', help='count the calls out of the VM per command, by side')
-    args = parser.parse_args()
+    parser.add_argument('--inherit', action='store_true',
+                        help='also count the threads the evaluator starts during a phase (default: the evaluator alone)')
+    args = parser.parse_args(argv)
     if (args.line_numbers or args.setup) and args.regime != 'loadup':
         parser.error('--line-numbers and --setup need --regime loadup, whose M-: setup evaluates them')
+    return args
+
+
+def main():
+    args = arguments()
     args.binary = args.binary.resolve()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
@@ -759,7 +818,7 @@ def main():
     good = [r for r in counted if not invalid(r)]
     report = {'binary': str(args.binary), 'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
               'regime': args.regime, 'lines': args.lines, 'sample': str(args.sample) if args.sample else None, 'keys_per_phase': args.keys, 'gap_s': args.gap,
-              'counter': 'instructions:u, evaluator thread, idle-subtracted',
+              'counter': f"instructions:u, evaluator thread{' and the threads it starts' if args.inherit else ' alone'}, idle-subtracted",
               'latency': 'key enqueue to render observed (--trace-latency), perf-free sessions',
               'instructions_per_key': per_key(good, args.keys) if good else None,
               'refused_phases': {f'{kind}-{i}': {n: p['problems'] for n, p in r['phases'].items() if p['problems']}

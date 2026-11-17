@@ -41,25 +41,18 @@ use crate::world::Access;
 /// GNU `Lisp_Fwd` kinds (lisp.h). The payload indexes the matching vector
 /// of [`Forwarded`]. `Lisp_Fwd_Kboard_Obj` is not modelled (no variable the
 /// chain or census reaches needs it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum Fwd {
     Obj(u16),
     Bool(u16),
     Int(u16),
     Buffer(u16),
-    /// A world build's fence (`crate::world`) around the variable at this
-    /// slot: its own redirect is kept by the fence, and every access checks
-    /// the fence, then acts through that redirect. Only `native_forwarding`
+    /// A world build's tracking (`crate::world`) around the variable at this
+    /// slot: its own redirect is kept by the tracking, and every access checks
+    /// the tracking, then acts through that redirect. Only `native_forwarding`
     /// sees it; the kind queries see the redirect it keeps.
-    Fence(u32),
+    Tracked(u32),
 }
-romacs_snapshot::snapshot_enum!(Fwd {
-    Fwd::Obj(f0) => (f0),
-    Fwd::Bool(f0) => (f0),
-    Fwd::Int(f0) => (f0),
-    Fwd::Buffer(f0) => (f0),
-    Fwd::Fence(f0) => (f0),
-});
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
 /// non-nil value stored into a per-buffer variable. Only the predicates of
@@ -102,13 +95,13 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // DEFVAR_KBOARD; VM2's single keyboard is the initial terminal's (VM2-WIN5).
     CVariable { name: "window-system", gnu: "dispnew.c:7522", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "initial-window-system", gnu: "dispnew.c:7507", kind: Kind::Lisp(Init::Nil) },
-    // DEFVAR_KBOARD; read_char applies it (lisp/romacs/vm/keyboard.el).
+    // DEFVAR_KBOARD; read_char applies it (lisp/vm/keyboard.el).
     CVariable { name: "keyboard-translate-table", gnu: "keyboard.c:13980", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it as initialization begins; org-persist reads it.
     CVariable { name: "before-init-time", gnu: "emacs.c:3587", kind: Kind::Lisp(Init::Nil) },
     // command-line sets it once initialization is done; package.el reads it.
     CVariable { name: "after-init-time", gnu: "emacs.c:3591", kind: Kind::Lisp(Init::Nil) },
-    // C variables that GNU's preloaded Lisp and the Gnosis/emacs-hermes load
+    // C variables that GNU's preloaded Lisp and the Gnosis load
     // closure reference, with their DEFVAR site and C initial value. Each is
     // listed only when that value equals pinned GNU's batch value, so no
     // initialization done later in C (init_*) is misrepresented.
@@ -264,7 +257,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "load-read-function", gnu: "lread.c:5697", kind: Kind::Lisp(Init::Symbol("read")) },
     CVariable { name: "lread--unescaped-character-literals", gnu: "lread.c:5775", kind: Kind::Lisp(Init::Nil) },
     // thread.c's value in a build without threads: VM2 has no thread
-    // objects and does not provide `threads' (DIVERGENCES.md VM2-THREAD1).
+    // objects and does not provide `threads' (ledger/divergences VM2-THREAD1).
     CVariable { name: "main-thread", gnu: "thread.c:1307", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "make-cursor-line-fully-visible", gnu: "xdisp.c:38931", kind: Kind::Lisp(Init::True) },
     CVariable { name: "make-pointer-invisible", gnu: "frame.c:7496", kind: Kind::Lisp(Init::True) },
@@ -341,6 +334,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "recenter-redisplay", gnu: "window.c:9484", kind: Kind::Lisp(Init::Symbol("tty")) },
     CVariable { name: "record-all-keys", gnu: "keyboard.c:14462", kind: Kind::Bool(false) },
     CVariable { name: "redisplay-adhoc-scroll-in-resize-mini-windows", gnu: "xdisp.c:39491", kind: Kind::Bool(true) },
+    CVariable { name: "region-extract-function", gnu: "casefiddle.c:723", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "report-emacs-bug-address", gnu: "emacs.c:3613", kind: Kind::Lisp(Init::Str("bug-gnu-emacs@gnu.org")) },
     CVariable { name: "resize-mini-frames", gnu: "frame.c:7566", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "resize-mini-windows", gnu: "xdisp.c:39045", kind: Kind::Lisp(Init::Nil) },
@@ -395,7 +389,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "tool-bar-mode", gnu: "frame.c:7545", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-separator-image-expression", gnu: "keyboard.c:14122", kind: Kind::Lisp(Init::Nil) },
     // What the command loop evaluates when a throw returns it to top level
-    // (lisp/romacs/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
+    // (lisp/vm/keyboard.el `romacs--top-level-1'); startup.el sets it.
     CVariable { name: "top-level", gnu: "keyboard.c:13974", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "tool-bar-style", gnu: "xdisp.c:38992", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "toolkit-theme", gnu: "frame.c:7896", kind: Kind::Lisp(Init::Nil) },
@@ -414,8 +408,6 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     CVariable { name: "truncate-partial-width-windows", gnu: "xdisp.c:38768", kind: Kind::Lisp(Init::Fixnum(50)) },
     CVariable { name: "tty-erase-char", gnu: "keyboard.c:13948", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "underline-minimum-offset", gnu: "xdisp.c:39302", kind: Kind::Int(1) },
-    CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
-    CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
     CVariable { name: "unibyte-display-via-language-environment", gnu: "xdisp.c:39025", kind: Kind::Bool(false) },
     CVariable { name: "unicode-category-table", gnu: "character.c:1159", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "unread-post-input-method-events", gnu: "keyboard.c:13786", kind: Kind::Lisp(Init::Nil) },
@@ -429,7 +421,7 @@ pub(crate) static C_SPECIALS: &[CVariable] = &[
     // Run at the end of a collection (`romacs--run-finalizers').
     CVariable { name: "post-gc-hook", gnu: "alloc.c:7499", kind: Kind::Lisp(Init::Nil) },
     // keyboard.c Fsets it, not special (NOT_SPECIAL); read_char's wipe and
-    // the command loop's run it (lisp/romacs/vm/keyboard.el, echo.rs).
+    // the command loop's run it (lisp/vm/keyboard.el, echo.rs).
     CVariable { name: "echo-area-clear-hook", gnu: "keyboard.c:14082", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "visible-bell", gnu: "dispnew.c:7496", kind: Kind::Bool(false) },
     CVariable { name: "visible-cursor", gnu: "term.c:5347", kind: Kind::Bool(true) },
@@ -476,7 +468,8 @@ pub(crate) enum Init {
     Str(&'static str),
     /// make_float (X).
     Float(f64),
-    /// build_string (getenv (NAME) ?: FALLBACK), read at startup.
+    /// build_string (getenv (NAME) ?: FALLBACK), read at startup: in every
+    /// process, so a world holds none (`Vm::reseed_environment_variables`).
     Getenv(&'static str, &'static str),
     SystemName,
     SourceDirectory,
@@ -544,9 +537,11 @@ pub(crate) struct CVariable {
 /// actually reached (ruling R216: no speculative ports).
 pub(crate) static C_VARIABLES: &[CVariable] = &[
     // The collector's pacing reads both (`Vm::collection_due`), scaling the
-    // percentage internally (DIVERGENCES VM2-GC-PACING).
+    // percentage internally. The threshold starts at 128 MiB, not GNU's
+    // 800000: a floor that bounds the garbage between collections whatever
+    // the heap's size (ledger/divergences VM2-GC-PACING).
     CVariable { name: "gc-cons-percentage", gnu: "alloc.c:7448", kind: Kind::Lisp(Init::Float(0.1)) },
-    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(800000) },
+    CVariable { name: "gc-cons-threshold", gnu: "alloc.c:7434", kind: Kind::Int(128 << 20) },
     // benchmark.el's `benchmark-run' reads both around its body.
     CVariable { name: "gc-elapsed", gnu: "alloc.c:7536", kind: Kind::Lisp(Init::GcElapsed) },
     CVariable { name: "gcs-done", gnu: "alloc.c:7539", kind: Kind::Int(0) },
@@ -615,7 +610,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // C maintains them while it runs (load specbinds current-load-list,
     // LOADHIST_ATTACH conses onto it, provide runs after-load-alist); VM2's
     // loader binds it to (FILE) but attaches no definitions and runs no
-    // after-load callbacks (DIVERGENCES.md VM2-LOADHIST1).
+    // after-load callbacks (ledger/divergences VM2-LOADHIST1).
     CVariable { name: "after-load-alist", gnu: "lread.c:5637", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "current-load-list", gnu: "lread.c:5693", kind: Kind::Lisp(Init::Nil) },
     // `load' binds these as a `let' does, so their watchers see GNU's
@@ -635,7 +630,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     // appends `face minibuffer-prompt' from Lisp).
     CVariable { name: "unread-command-events", gnu: "keyboard.c:13776", kind: Kind::Lisp(Init::Nil) },
     CVariable { name: "executing-kbd-macro", gnu: "macros.c:435", kind: Kind::Lisp(Init::Nil) },
-    // The command loop's Lisp half (lisp/romacs/vm/keyboard.el) advances it per
+    // The command loop's Lisp half (lisp/vm/keyboard.el) advances it per
     // event read from the macro (keyboard.c read_char).
     CVariable { name: "executing-kbd-macro-index", gnu: "macros.c:439", kind: Kind::Int(0) },
     // Counted by the same Lisp half; repeat.el compares num-input-keys.
@@ -653,7 +648,10 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "signal-hook-function", gnu: "eval.c:4487", kind: Kind::Lisp(Init::Nil) },
     // Variable harness (R216 task 2): a DEFVAR_INT that subr.el reads.
     CVariable { name: "undo-limit", gnu: "undo.c:437", kind: Kind::Int(160_000) },
-    // Variable harness (R216 task 2) and DIVERGENCES.md VM2-VARALIAS1: the
+    CVariable { name: "undo-outer-limit", gnu: "undo.c:459", kind: Kind::Lisp(Init::Fixnum(24000000)) },
+    CVariable { name: "undo-outer-limit-function", gnu: "undo.c:476", kind: Kind::Lisp(Init::Nil) },
+    CVariable { name: "undo-strong-limit", gnu: "undo.c:447", kind: Kind::Int(240000) },
+    // Variable harness (R216 task 2) and ledger/divergences VM2-VARALIAS1: the
     // per-buffer kind. buffer.c:4898 default 70, predicate Qintegerp.
     CVariable { name: "major-mode", gnu: "buffer.c:5242", kind: Kind::PerBuffer { default: Init::Symbol("fundamental-mode"), predicate: Some(Predicate::Symbolp) } },
     // Automatically local in every buffer, unibyte ones included: url-http
@@ -666,7 +664,7 @@ pub(crate) static C_VARIABLES: &[CVariable] = &[
     CVariable { name: "left-margin", gnu: "buffer.c:5279", kind: Kind::PerBuffer { default: Init::Fixnum(0), predicate: Some(Predicate::Integerp) } },
     // Chain: cus-start.el (preloaded) signals for a missing built-in.
     CVariable { name: "abbrev-mode", gnu: "buffer.c:5265", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
-    // self-insert-command (lisp/romacs/vm/prelude.el) reads both.
+    // self-insert-command (lisp/vm/prelude.el) reads both.
     CVariable { name: "auto-fill-function", gnu: "buffer.c:5433", kind: Kind::PerBuffer { default: Init::Nil, predicate: None } },
     // simple.el's delete-backward-char and self-insert paths read it.
     CVariable { name: "overwrite-mode", gnu: "buffer.c:5492", kind: Kind::PerBuffer { default: Init::Nil, predicate: Some(Predicate::Choice(&["nil", "overwrite-mode-textual", "overwrite-mode-binary"])) } },
@@ -874,6 +872,7 @@ static FONT_WIDTH_TABLE: &[Init] = &[
 pub(crate) const NOT_SPECIAL: &[&str] = &["values", "echo-area-clear-hook"];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Forwarded {
     objects: Vec<Value>,
     fundamental_mode_name: Value,
@@ -891,7 +890,6 @@ pub(crate) struct Forwarded {
     /// Table index behind each Obj / Buffer payload, for lazy initial values.
     object_vars: Vec<usize>,
     buffer_vars: Vec<usize>,
-    by_name: HashMap<&'static str, Fwd>,
     /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
     /// locally, else usize::MAX; and the current buffer's local binding as
     /// last found (`Vm::eval_limit_local'): the buffer's bits, its private
@@ -902,7 +900,6 @@ pub(crate) struct Forwarded {
     /// which moves buffers and reclaims bindings.
     pub(super) local_epoch: u64,
 }
-romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, gc_done, defaults, object_vars, buffer_vars, by_name, eval_limit_symbol, eval_limit_cache, local_epoch });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -921,48 +918,70 @@ impl Default for Forwarded {
             defaults: vec![],
             object_vars: vec![],
             buffer_vars: vec![],
-            by_name: HashMap::default(),
         };
+        // In table order, as `PLACES' numbers each kind's storage.
         for (index, var) in C_VARIABLES.iter().enumerate() {
-            let fwd = match var.kind {
+            match var.kind {
                 Kind::Lisp(_) => {
                     store.objects.push(Value::UNBOUND);
                     store.object_vars.push(index);
-                    Fwd::Obj(store.objects.len() as u16 - 1)
                 }
-                Kind::Bool(b) => {
-                    store.bools.push(b);
-                    Fwd::Bool(store.bools.len() as u16 - 1)
-                }
-                Kind::Int(n) => {
-                    store.ints.push(n);
-                    Fwd::Int(store.ints.len() as u16 - 1)
-                }
+                Kind::Bool(b) => store.bools.push(b),
+                Kind::Int(n) => store.ints.push(n),
                 Kind::PerBuffer { .. } => {
                     store.defaults.push(Value::UNBOUND);
                     store.buffer_vars.push(index);
-                    Fwd::Buffer(store.defaults.len() as u16 - 1)
                 }
-            };
-            store.by_name.insert(var.name, fwd);
+            }
         }
-        let Some(Fwd::Int(i)) = store.lookup("max-lisp-eval-depth") else { unreachable!() };
+        let Some(Fwd::Int(i)) = Forwarded::lookup("max-lisp-eval-depth") else { unreachable!() };
         store.eval_limit_index = i as usize;
-        let (Some(Fwd::Int(threshold)), Some(Fwd::Obj(percentage))) = (store.lookup("gc-cons-threshold"), store.lookup("gc-cons-percentage")) else { unreachable!() };
+        let (Some(Fwd::Int(threshold)), Some(Fwd::Obj(percentage))) = (Forwarded::lookup("gc-cons-threshold"), Forwarded::lookup("gc-cons-percentage")) else { unreachable!() };
         store.gc_cons = (threshold as usize, percentage as usize);
-        let (Some(Fwd::Int(done)), Some(Fwd::Obj(elapsed))) = (store.lookup("gcs-done"), store.lookup("gc-elapsed")) else { unreachable!() };
+        let (Some(Fwd::Int(done)), Some(Fwd::Obj(elapsed))) = (Forwarded::lookup("gcs-done"), Forwarded::lookup("gc-elapsed")) else { unreachable!() };
         store.gc_done = (done as usize, elapsed as usize);
         store
     }
 }
 
+/// Where each forwarded variable's storage is, by name: its kind's
+/// storage, numbered in table order. A function of `C_VARIABLES` alone, so
+/// each process builds it for itself and no world image holds it.
+static PLACES: std::sync::LazyLock<HashMap<&'static str, Fwd>> = std::sync::LazyLock::new(|| {
+    let mut counts = [0u16; 4];
+    let mut next = |kind: usize| {
+        counts[kind] += 1;
+        counts[kind] - 1
+    };
+    C_VARIABLES.iter().map(|var| {
+        let fwd = match var.kind {
+            Kind::Lisp(_) => Fwd::Obj(next(0)),
+            Kind::Bool(_) => Fwd::Bool(next(1)),
+            Kind::Int(_) => Fwd::Int(next(2)),
+            Kind::PerBuffer { .. } => Fwd::Buffer(next(3)),
+        };
+        (var.name, fwd)
+    }).collect()
+});
+
 /// `debug-on-next-call''s index among the boolean variables.
 static NEXT_CALL: std::sync::LazyLock<u16> = std::sync::LazyLock::new(|| {
-    let at = C_VARIABLES.iter().position(|var| var.name == "debug-on-next-call").expect("debug-on-next-call is forwarded");
-    C_VARIABLES[..at].iter().filter(|var| matches!(var.kind, Kind::Bool(_))).count() as u16
+    let Some(Fwd::Bool(at)) = Forwarded::lookup("debug-on-next-call") else { unreachable!("debug-on-next-call is a forwarded boolean") };
+    at
 });
 
 impl Forwarded {
+    /// FWD's value where its storage alone gives it: a Boolean, an
+    /// integer, an object once its initial value is made.
+    #[inline]
+    pub(super) fn stored(&self, fwd: Fwd) -> Option<Value> {
+        match fwd {
+            Fwd::Bool(i) => Some(if self.bools[i as usize] { Value::TRUE } else { Value::NIL }),
+            Fwd::Int(i) => Value::integer(self.ints[i as usize]).ok(),
+            Fwd::Obj(i) => Some(self.objects[i as usize]).filter(|&value| value != Value::UNBOUND),
+            Fwd::Buffer(_) | Fwd::Tracked(_) => None,
+        }
+    }
     #[inline(always)]
     pub(super) fn eval_limit(&self) -> i64 { self.ints[self.eval_limit_index] }
     pub(super) fn debug_on_next_call(&self) -> bool { self.bools[*NEXT_CALL as usize] }
@@ -984,18 +1003,18 @@ impl Forwarded {
     }
     /// Direct C-global integer access, without constructing a Lisp Value.
     pub(super) fn integer(&self, name: &str) -> i64 {
-        let Some(Fwd::Int(i)) = self.lookup(name) else { panic!("not a forwarded integer: {name}") };
+        let Some(Fwd::Int(i)) = Forwarded::lookup(name) else { panic!("not a forwarded integer: {name}") };
         self.ints[i as usize]
     }
     pub(super) fn set_integer(&mut self, name: &str, value: i64) {
-        let Some(Fwd::Int(i)) = self.lookup(name) else { panic!("not a forwarded integer: {name}") };
+        let Some(Fwd::Int(i)) = Forwarded::lookup(name) else { panic!("not a forwarded integer: {name}") };
         self.ints[i as usize] = value;
     }
     pub(crate) fn names() -> impl Iterator<Item = &'static str> {
         C_VARIABLES.iter().map(|v| v.name)
     }
-    pub(crate) fn lookup(&self, name: &str) -> Option<Fwd> {
-        self.by_name.get(name).copied()
+    pub(crate) fn lookup(name: &str) -> Option<Fwd> {
+        PLACES.get(name).copied()
     }
     /// Every collector-visible Value held outside value cells and buffers.
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
@@ -1017,24 +1036,27 @@ impl Forwarded {
 
 /// A buffer's per-buffer variable values (GNU keeps them in `struct buffer`
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
-/// local here": the buffer sees the default.
-#[derive(Clone, Default)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>);
-romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4));
+/// local here": the buffer sees the default. Beside them, the visited
+/// file's modification time, identity and truename bytes, the mark marker,
+/// and the labeled restrictions (`prim/leaf/labeled_restrictions.rs`).
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>);
+impl PerBuffer {
+    /// How many per-buffer variables it has a slot for, each at its
+    /// forwarded place (`Fwd::Buffer`).
+    pub(crate) fn slots(&self) -> usize {
+        self.0.len()
+    }
+}
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum VisitedModtime {
     #[default]
     Unknown,
     Missing,
     Known { seconds: i64, nanos: i64, size: Option<u64> },
 }
-romacs_snapshot::snapshot_enum!(VisitedModtime {
-    VisitedModtime::Unknown => (),
-    VisitedModtime::Missing => (),
-    VisitedModtime::Known { seconds, nanos, size } => (seconds, nanos, size),
-});
 
 pub(crate) fn file_identity(path: impl AsRef<std::path::Path>) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
@@ -1052,6 +1074,9 @@ impl PerBuffer {
         self.3 = None;
     }
     pub(crate) fn set_editor_mark(&mut self, marker: Value) { self.4 = Some(marker); }
+    /// Its labeled restrictions, nil when it has none.
+    pub(crate) fn labeled_restrictions(&self) -> Value { self.5.unwrap_or(Value::NIL) }
+    pub(crate) fn set_labeled_restrictions(&mut self, list: Value) { self.5 = (list != Value::NIL).then_some(list); }
     /// buffer-swap-text: exchange the bindings at SLOTS and the mark
     /// marker with OTHER's, as GNU swaps them with the text.
     pub(crate) fn swap_text_slots(&mut self, other: &mut Self, slots: &[u16]) {
@@ -1087,10 +1112,13 @@ impl PerBuffer {
             *value = None;
         }
     }
-    pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+    /// Every Value it holds, passing over slot SKIP.
+    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
-        for v in self.0.iter_mut().flatten() {
-            visit(v);
+        if let Some(list) = &mut self.5 { visit(list); }
+        let skip = skip.map(usize::from);
+        for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
+            if let Some(v) = v { visit(v); }
         }
     }
 }
@@ -1138,10 +1166,25 @@ impl Vm {
         self.forwarded.ints[done] = 0;
         self.forwarded.objects[elapsed] = Value::UNBOUND;
     }
+    /// GNU `init_editfns`, at each process's start: `system-name` names this
+    /// process's host, read again at its next read. An image keeps the host
+    /// it was built on only as `emacs-build-system`.
+    pub(crate) fn forget_system_name(&mut self) {
+        if let Some(Fwd::Obj(i)) = Forwarded::lookup("system-name") {
+            self.forwarded.objects[i as usize] = Value::UNBOUND;
+        }
+    }
+    /// `source-directory' made again from this process's environment on
+    /// its next read (`host::source_directory`), as a restored VM must.
+    pub(crate) fn forget_source_directory(&mut self) {
+        if let Some(Fwd::Obj(i)) = Forwarded::lookup("source-directory") {
+            self.forwarded.objects[i as usize] = Value::UNBOUND;
+        }
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
-    /// A fenced built-in variable is the forwarding the fence keeps; a
-    /// fenced plain one is `Fwd::Fence`.
+    /// A tracked built-in variable is the forwarding the tracking keeps; a
+    /// tracked plain one is `Fwd::Tracked`.
     /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
     /// the only ones a `Fwd::Buffer' forwards.
     pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
@@ -1150,9 +1193,9 @@ impl Vm {
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => match self.fenced_forwarding(slot) {
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => match self.tracked_forwarding(slot) {
                 Some(kept) => Some(kept),
-                // A fenced buffer-local variable is no built-in.
+                // A tracked buffer-local variable is no built-in.
                 None if matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_))) => None,
                 None => Some(fwd),
             },
@@ -1160,8 +1203,8 @@ impl Vm {
             _ => None,
         }
     }
-    /// [`Vm::forwarding`] as the access paths dispatch on it: every fenced
-    /// variable is `Fwd::Fence`.
+    /// [`Vm::forwarding`] as the access paths dispatch on it: every tracked
+    /// variable is `Fwd::Tracked`.
     pub(super) fn access_forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
@@ -1183,12 +1226,12 @@ impl Vm {
     /// [`Vm::forwarding`] without caching, for `&self` readers.
     pub(super) fn forwarding_ref(&self, slot: usize) -> Option<Fwd> {
         match self.variable_redirects.get(slot).copied().flatten() {
-            Some(VariableRedirect::Forwarded(fwd @ Fwd::Fence(_))) => Some(self.fenced_forwarding(slot).unwrap_or(fwd)),
+            Some(VariableRedirect::Forwarded(fwd @ Fwd::Tracked(_))) => Some(self.tracked_forwarding(slot).unwrap_or(fwd)),
             Some(VariableRedirect::Forwarded(fwd)) => Some(fwd),
             Some(_) => None,
             None => {
                 let name = self.symbol_names.get(slot)?;
-                (self.names.get(name) == Some(&slot)).then(|| self.forwarded.lookup(name)).flatten()
+                (self.names.get(name) == Some(&slot)).then(|| Forwarded::lookup(name)).flatten()
             }
         }
     }
@@ -1242,6 +1285,16 @@ impl Vm {
             self.install_local_table(slot, table, false);
         }
     }
+    /// The C variables GNU sets from the environment at every start
+    /// (`Init::Getenv`: init_callproc's `shell-file-name'), set from this
+    /// process's environment after a restore.
+    pub(crate) fn reseed_environment_variables(&mut self) {
+        for variable in C_SPECIALS {
+            if let Kind::Lisp(init @ Init::Getenv(..)) = variable.kind && let Some(&slot) = self.names.get(variable.name) {
+                self.slots[slot].value = self.materialize(init);
+            }
+        }
+    }
     fn materialize(&mut self, init: Init) -> Value {
         match init {
             Init::Nil => Value::NIL,
@@ -1253,7 +1306,7 @@ impl Vm {
             Init::Float(x) => self.allocate_object(data::Object::Float(x)),
             Init::GcElapsed => self.allocate_object(data::Object::Float(self.gc_stats.elapsed_ns as f64 / 1e9)),
             Init::Getenv(name, fallback) => {
-                let text = crate::host::getenv(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
+                let text = crate::host::per_process_env(name).and_then(|v| v.into_string().ok()).unwrap_or_else(|| fallback.to_owned());
                 self.make_lisp_string(text.as_bytes().to_vec(), !text.is_ascii())
             }
             Init::SystemName => prim::prims::sysname::initial_value(self),
@@ -1357,14 +1410,14 @@ impl Vm {
         self.forwarded.defaults[i as usize] = value;
         value
     }
-    fn per_buffer(&self, buffer: usize) -> Option<&PerBuffer> {
+    pub(crate) fn per_buffer(&self, buffer: usize) -> Option<&PerBuffer> {
         match self.objects.get(buffer)? {
             data::Object::Buffer(b) => Some(&b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&b.per_buffer),
             _ => None,
         }
     }
-    fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
+    pub(crate) fn per_buffer_mut(&mut self, buffer: usize) -> Option<&mut PerBuffer> {
         match self.objects.get_entry_mut(buffer)? {
             data::Object::Buffer(b) => Some(&mut b.per_buffer),
             data::Object::ByteBuffer(b) => Some(&mut b.per_buffer),
@@ -1393,14 +1446,14 @@ impl Vm {
     }
     pub(super) fn reset_forwarded_modes(&mut self, buffer: usize) {
         for name in ["major-mode", "mode-name"] {
-            let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) else { unreachable!() };
+            let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) else { unreachable!() };
             self.per_buffer_mut(buffer).expect("buffer").clear_local(i);
             self.forwarded_buffer_value(buffer, i);
         }
     }
     pub(super) fn reset_forwarded_visit(&mut self, buffer: usize) {
         for name in ["buffer-file-name", "buffer-file-truename", "buffer-read-only", "buffer-file-format"] {
-            let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) else { unreachable!() };
+            let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) else { unreachable!() };
             self.per_buffer_mut(buffer).expect("buffer").clear_local(i);
         }
         let locals = self.per_buffer_mut(buffer).expect("buffer");
@@ -1418,6 +1471,11 @@ impl Vm {
         let buffer = self.per_buffer_owner(buffer, i);
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, value); }
     }
+    /// BUFFER's own undo slot, for a collection, which neither fills a slot
+    /// nor follows an indirect buffer's to its base (`Vm::undo_round`).
+    pub(crate) fn own_undo_list(&self, buffer: usize) -> Value {
+        self.per_buffer(buffer).and_then(|locals| locals.get(self.undo_list_slot)).unwrap_or(Value::NIL)
+    }
     /// The buffer whose slot I buffer BUFFER reads and writes: its own,
     /// but an indirect buffer's undo list is its base's, as GNU's
     /// set_buffer_internal_2 hands the one list between them (Bug#18180).
@@ -1430,9 +1488,9 @@ impl Vm {
             _ => buffer,
         }
     }
-    fn undo_list_index(&mut self) -> u16 {
+    pub(crate) fn undo_list_index(&mut self) -> u16 {
         if self.undo_list_slot == u16::MAX {
-            let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-undo-list") else { unreachable!("declared") };
+            let Some(Fwd::Buffer(i)) = Forwarded::lookup("buffer-undo-list") else { unreachable!("declared") };
             self.undo_list_slot = i;
         }
         self.undo_list_slot
@@ -1446,7 +1504,7 @@ impl Vm {
     /// name handler exists yet when the first buffer is made, so
     /// init_buffer's `/:' quoting never applies.
     pub(crate) fn inherited_directory(&mut self) -> Value {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("default-directory") else { unreachable!("declared") };
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup("default-directory") else { unreachable!("declared") };
         let current = self.slots[self.buffer_slot].value;
         if let Some(buffer) = current.index_if(0).and_then(|n| n.checked_sub(1))
             && self.per_buffer(buffer).is_some()
@@ -1466,7 +1524,7 @@ impl Vm {
     }
     /// bset_directory (BUFFER, DIRECTORY).
     pub(crate) fn set_directory_of(&mut self, buffer: usize, directory: Value) {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("default-directory") else { unreachable!("declared") };
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup("default-directory") else { unreachable!("declared") };
         if let Some(locals) = self.per_buffer_mut(buffer) { locals.set(i, directory); }
     }
     pub(super) fn per_buffer_local_p(&self, buffer: usize, i: u16) -> bool {
@@ -1480,7 +1538,7 @@ impl Vm {
     /// Each visit's `buffer-file-name' as host bytes (ENCODE_FILE), its
     /// identity and its saved truename.
     pub(crate) fn file_visits(&self) -> Vec<(Value, Vec<u8>, Option<(u64, u64)>, Option<Vec<u8>>)> {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return Vec::new() };
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup("buffer-file-name") else { return Vec::new() };
         // In the buffer list's order, as get-file-buffer walks Vbuffer_alist.
         let mut buffers = self.buffer_order_snapshot();
         let current = self.slots[self.buffer_slot].value;
@@ -1496,7 +1554,7 @@ impl Vm {
     /// The saved truename of BUFFER's visit, when BUFFER visits a file:
     /// one buffer's record, without walking the others (lock-buffer).
     pub(crate) fn visit_truename(&self, buffer: Value) -> Option<Vec<u8>> {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return None };
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup("buffer-file-name") else { return None };
         let locals = self.per_buffer(buffer.index(0).ok()?.checked_sub(1)?)?;
         self.file_name_bytes(locals.get(i)?)?;
         locals.3.clone()
@@ -1508,7 +1566,7 @@ impl Vm {
     /// one truename can the answer differ from GNU's first in list order.
     pub(crate) fn visit_with_truename(&self, truename: &std::path::Path) -> Option<Value> {
         use std::os::unix::ffi::OsStrExt;
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup("buffer-file-name") else { return None };
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup("buffer-file-name") else { return None };
         let visits = |buffer: &Value| {
             let Some(locals) = buffer.index(0).ok().and_then(|n| n.checked_sub(1)).and_then(|n| self.per_buffer(n)) else { return false };
             locals.3.as_deref().is_some_and(|saved| std::path::Path::new(std::ffi::OsStr::from_bytes(saved)) == truename)
@@ -1524,7 +1582,7 @@ impl Vm {
     /// `let` bindings and the predicate, as C does when it sets a BVAR
     /// directly (fileio.c:5157 `bset_filename`).
     pub(crate) fn bset_current(&mut self, name: &str, value: Value) -> std::result::Result<(), Fault> {
-        let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) else {
+        let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) else {
             return Err(Fault::Error(format!("{name} is not a VM2 per-buffer variable")));
         };
         let buffer = self.current_buffer_object()?;
@@ -1551,7 +1609,7 @@ impl Vm {
                 let buffer = self.buffer_index()?;
                 self.forwarded_buffer_value(buffer, i)
             }
-            Fwd::Fence(slot) => return self.fenced(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
+            Fwd::Tracked(slot) => return self.tracked(slot as usize, Access::Read, |vm| vm.variable_value(slot as usize)),
         })
     }
     /// GNU `default_value`, SYMBOL_FORWARDED arm: a per-buffer variable's
@@ -1559,7 +1617,7 @@ impl Vm {
     pub(super) fn forwarded_default(&mut self, fwd: Fwd) -> Result<Value> {
         match fwd {
             Fwd::Buffer(i) => Ok(self.per_buffer_default(i)),
-            Fwd::Fence(slot) => self.fenced(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
+            Fwd::Tracked(slot) => self.tracked(slot as usize, Access::Read, |vm| vm.default_value(slot as usize)),
             _ => self.forwarded_value(fwd),
         }
     }
@@ -1604,7 +1662,7 @@ impl Vm {
                     self.per_buffer_mut(buffer).expect("live buffer").set(i, value);
                 }
             }
-            Fwd::Fence(_) => unreachable!("set_forwarded acts through the fence"),
+            Fwd::Tracked(_) => unreachable!("set_forwarded acts through the tracking"),
         }
         Ok(())
     }
@@ -1622,8 +1680,8 @@ impl Vm {
     }
     /// GNU `set_internal`, SYMBOL_FORWARDED arm (data.c:1791-1818).
     pub(super) fn set_forwarded(&mut self, slot: usize, fwd: Fwd, value: Value, flag: SetFlag) -> std::result::Result<(), Fault> {
-        if let Fwd::Fence(cell) = fwd {
-            return self.fenced(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
+        if let Fwd::Tracked(cell) = fwd {
+            return self.tracked(cell as usize, Access::Write, |vm| vm.assign_variable(slot, value)).map_err(Fault::Error);
         }
         if value == Value::UNBOUND {
             return Err(Fault::Error(format!("{UNBINDABLE}{}", self.symbol_names[slot])));
@@ -1653,7 +1711,7 @@ impl Vm {
                 self.forwarded.defaults[i as usize] = value;
                 Ok(())
             }
-            Fwd::Fence(cell) => self.fenced(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
+            Fwd::Tracked(cell) => self.tracked(cell as usize, Access::Write, |vm| vm.set_default_value(slot, value)),
             _ => self.set_forwarded(slot, fwd, value, flag),
         }
     }
@@ -1710,7 +1768,7 @@ impl Vm {
             local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         }
         match fwd {
-            Fwd::Fence(_) => unreachable!("unbind_one restores a fenced binding through the fence"),
+            Fwd::Tracked(_) => unreachable!("unbind_one restores a tracked binding through the tracking"),
             Fwd::Obj(i) => self.forwarded.objects[i as usize] = old,
             Fwd::Bool(i) => {
                 self.forwarded.bools[i as usize] = old != Value::NIL;
@@ -1761,7 +1819,7 @@ impl Vm {
                 }
                 Ok(())
             }
-            Fwd::Fence(_) => self.fenced(slot, Access::Write, |vm| vm.make_local_variable(slot)),
+            Fwd::Tracked(_) => self.tracked(slot, Access::Write, |vm| vm.make_local_variable(slot)),
         }
     }
     /// The condition GNU signals for a forwarded store fault rendered by
@@ -1838,7 +1896,7 @@ impl Vm {
     /// GNU `bset_<field> (b, VALUE)` for buffer INDEX: its own slot of the
     /// per-buffer variable NAME, or its Lisp local of NAME when it has one.
     pub(crate) fn set_per_buffer_of(&mut self, index: usize, name: &str, value: Value) {
-        if let Some(Fwd::Buffer(i)) = self.forwarded.lookup(name) {
+        if let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) {
             if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
         } else if let Some(&slot) = self.names.get(name) {
             let (table, buffer) = (self.slots[slot].local, Value::reference(index + 1, 0));

@@ -29,7 +29,7 @@ pub(super) fn resolve(cx: &mut Leaf<'_>, mut face: Value, signal_cycle: bool) ->
 
 /// Whether the display realizes faces from FRAME's: every frame but a child
 /// frame, which the display draws with its root frame's faces
-/// (DIVERGENCES.md VM2-CHILD-FRAME).
+/// (ledger/divergences VM2-CHILD-FRAME).
 pub(super) fn displayed_faces(cx: &mut Leaf<'_>, frame: Value) -> std::result::Result<bool, Fault> {
     Ok(!cx.windows().is_child_frame(frame)?)
 }
@@ -70,6 +70,14 @@ fn reset(cx: &mut Leaf<'_>, vector: Value) -> Out {
         cx.vector_set(vector, Value::integer(index as i64).unwrap(), unspecified)?;
     }
     Ok(vector)
+}
+
+/// `facep` (faces.el): whether FACE names a face, as `internal-lisp-face-p`
+/// with no frame answers.
+pub(super) fn facep(cx: &mut Leaf<'_>, face: Value) -> std::result::Result<bool, Fault> {
+    let face = resolve(cx, face, true)?;
+    let frame = cx.face_frame(Value::NIL, false)?;
+    Ok(lookup(cx, face, frame)? != Value::NIL)
 }
 
 defsubr! { name = "internal-lisp-face-p", gnu = "xfaces.c:3120", effect = Reads,
@@ -214,7 +222,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
     // The font the face draws CHARACTER, else ASCII, with on the display.
     // The initial terminal realizes none, but under a graphic display
     // record (a headless GUI) its one font, "tty", is every face's
-    // (DIVERGENCES.md VM2-WIN5).
+    // (ledger/divergences VM2-WIN5).
     if cx.font_host().is_none() {
         return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
     }
@@ -410,7 +418,7 @@ pub(super) fn shows_changes(cx: &mut Leaf<'_>, face: Value, frame: Value) -> std
 
 /// Realising a face runs no Lisp, so a function `:height' is noted here as
 /// its value over the default face's height on FRAME when it is set
-/// (DIVERGENCES.md VM2-FACEFN1).
+/// (ledger/divergences VM2-FACEFN1).
 pub(super) fn note_height(cx: &mut Leaf<'_>, face: Value, value: Value, frame: Value) -> std::result::Result<(), Fault> {
     let name = cx.symbol_name(face)?;
     let keys = cx.face_keys();
@@ -822,7 +830,7 @@ fn frame_face_hash_table(cx; optional frame: Value) {
 defsubr! { name = "romacs--frame-shares-faces-p", gnu = "romacs:faces", effect = Reads,
 fn romacs_frame_shares_faces_p(cx; optional frame: Value) {
     // FRAME shows another frame's faces: a child frame nothing set a face
-    // on alone (DIVERGENCES.md VM2-CHILD-FRAME). `face-spec-recalc' has
+    // on alone (ledger/divergences VM2-CHILD-FRAME). `face-spec-recalc' has
     // nothing to recompute there.
     let frame = cx.face_frame(frame, true)?;
     Ok(if cx.frame_shares_faces(frame)? { Value::TRUE } else { Value::NIL })

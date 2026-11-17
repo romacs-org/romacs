@@ -33,6 +33,7 @@ use romacs_display_protocol::{
     PresentationFramePoint, PresentationId, PresentedHit, PresentedHitError, PresentedHitQuery,
     RetainedImageSet, SurfaceState,
 };
+use romacs_display_protocol::ContentTransitionHint;
 use romacs_renderer_wgpu::WgpuGlyphAtlas;
 
 
@@ -268,6 +269,8 @@ pub(crate) struct GuiFrameRenderState {
     /// The Emacs frame_id that owns this window (used for routing).
     pub emacs_frame_id: u64,
     pub(super) trace_last_drawn: Option<romacs_display_protocol::PresentationId>,
+    /// The newest presentation reported drawn (`Fact::PresentationRendered`).
+    pub(super) reported_presentation: u64,
     /// Chromeless glyph composition and rendering state.
     pub compositor: FrameCompositor,
     /// The one resolved relationship between the live root surface and the
@@ -481,6 +484,7 @@ impl GuiFrameRenderState {
         Self {
             emacs_frame_id,
             trace_last_drawn: None,
+            reported_presentation: 0,
             compositor: FrameCompositor::new(glyph_atlas),
             present_state: GuiFramePresentState::Suspended,
             chrome: ChromeState::default(),
@@ -623,7 +627,6 @@ impl GuiFrameRenderState {
         if child_changed {
             self.compositor.current_scene_generation =
                 crate::render_thread::frame_state::next_scene_generation();
-            self.compositor.current_row_damage = None;
         }
         if changed || child_changed {
             self.compositor.dirty = true;
@@ -635,7 +638,7 @@ impl GuiFrameRenderState {
     // retained frame through narrower accessors.
     #[allow(dead_code)]
     pub(super) fn current_frame_clone(&self) -> Option<FrameGlyphBuffer> {
-        self.compositor.current_frame.clone()
+        self.compositor.current_frame.as_deref().cloned()
     }
 
     /// Whether the retained frame carries a theme-transition effect hint —
@@ -717,7 +720,7 @@ impl GuiFrameRenderState {
     /// fetched from two different frames.
     pub(super) fn frame_for_target(&self, target_frame_id: u64) -> Option<&FrameGlyphBuffer> {
         if target_frame_id == self.emacs_frame_id {
-            self.compositor.current_frame.as_ref()
+            self.compositor.current_frame.as_deref()
         } else {
             self.compositor
                 .child_frames
@@ -840,11 +843,6 @@ impl GuiFrameRenderState {
                 requested: presentation,
             });
         }
-        if target_frame_id == self.emacs_frame_id
-            && let Some(hit) = self.compositor.input_scroll.hit(point)
-        {
-            return hit;
-        }
         frame
             .resolve_presented_hit(PresentedHitQuery::new(point))
             .map(|hit| hit.and_then(|hit| hit.semantic()))
@@ -890,7 +888,7 @@ impl GuiFrameRenderState {
         let frame_and_offset = if key.frame_id() == 0 || key.frame_id() == self.emacs_frame_id {
             self.compositor
                 .current_frame
-                .as_ref()
+                .as_deref()
                 .map(|frame| (frame, 0.0, 0.0))
         } else {
             self.compositor
@@ -921,25 +919,6 @@ impl GuiFrameRenderState {
         Some(PendingPointerDamage::new(key, rect))
     }
 
-    fn invalidate_pointer_damage_rows(&mut self, damage: PendingPointerDamage) {
-        let key = damage.key();
-        if key.frame_id() != 0 && key.frame_id() != self.emacs_frame_id {
-            return;
-        }
-        let (Some(frame), Some(row_damage)) = (
-            self.compositor.current_frame.as_ref(),
-            self.compositor.current_row_damage.as_mut(),
-        ) else {
-            return;
-        };
-        if frame.presentation_id != key.presentation() {
-            return;
-        }
-        if let Some(appearance) = frame.presented_pointer().appearance(key.appearance()) {
-            row_damage.invalidate_pointer_rows(appearance.damage_rows());
-        }
-    }
-
     /// Records pointer repaint needs after a child-frame edit changed what the
     /// pointer overlaps. Paired with `active_pointer_damage`.
     pub(in crate::render_thread) fn record_pointer_paint_transition(
@@ -947,12 +926,6 @@ impl GuiFrameRenderState {
         before: Option<PendingPointerDamage>,
     ) {
         let after = self.active_pointer_damage();
-        if let Some(damage) = before {
-            self.invalidate_pointer_damage_rows(damage);
-        }
-        if let Some(damage) = after {
-            self.invalidate_pointer_damage_rows(damage);
-        }
 
         if self.pending_pointer_damage.iter().all(Option::is_none) {
             self.pending_pointer_damage[0] = before.or(after);
@@ -1063,24 +1036,6 @@ impl GuiFrameRenderState {
         &self,
         frame: &FrameGlyphBuffer,
     ) -> Option<romacs_display_protocol::PointerAppearanceSelection> {
-        // The projected frame owns a newly resolved pointer map. Appearance
-        // IDs from the authoritative frame cannot address it; resolve hover
-        // against the exact temporary paint geometry instead.
-        if self.compositor.input_scroll.active() {
-            if !self.pointer_inside || self.presented_press.is_some() {
-                return None;
-            }
-            let (x, y) = self.root_frame_point_from_surface(self.mouse_pos.0, self.mouse_pos.1)?;
-            let point = self.inverse_map(frame, x, y)?;
-            let appearance = frame
-                .resolve_presented_hit(PresentedHitQuery::new(point))
-                .ok()??
-                .appearance()?;
-            return Some(romacs_display_protocol::PointerAppearanceSelection::new(
-                appearance,
-                romacs_display_protocol::PointerAppearancePhase::Hover,
-            ));
-        }
         self.pointer_appearance.selection_for(frame)
     }
 
@@ -1233,7 +1188,6 @@ impl GuiFrameRenderState {
     pub(super) fn set_current_frame(
         &mut self,
         frame: Option<romacs_display_protocol::frame_glyphs::FrameGlyphBuffer>,
-        row_damage: Option<romacs_renderer_wgpu::FrameRowDamage>,
         scroll_anchors: super::frame_compositor::ScrollAnchorsByWindow,
         reflow_imprints: super::frame_compositor::ReflowImprintsByWindow,
     ) -> Option<ActivePresentationTransition> {
@@ -1255,13 +1209,6 @@ impl GuiFrameRenderState {
             installed_at,
         )
         .apply(self);
-        if let Some(window) = self.compositor.input_scroll.reconcile(frame.as_ref()) {
-            // Projected motion has already been drawn; do not animate it twice.
-            self.compositor
-                .pending
-                .scrolls
-                .retain(|scroll| scroll.window != window);
-        }
         // Staged, not installed: these describe the incoming presentation, and
         // they become the baseline only if a frame is actually drawn from it.
         self.compositor.incoming_reflow_imprints = reflow_imprints;
@@ -1292,7 +1239,7 @@ impl GuiFrameRenderState {
                 &detail,
             );
         }
-        self.compositor.current_frame = frame;
+        self.compositor.current_frame = frame.map(Arc::new);
         #[cfg(feature = "video")]
         self.refresh_visible_videos();
         self.refresh_present_mapping();
@@ -1304,7 +1251,6 @@ impl GuiFrameRenderState {
             false
         };
         self.compositor.current_scene_generation = super::frame_state::next_scene_generation();
-        self.compositor.current_row_damage = row_damage;
         if appearance_changed {
             self.record_pointer_paint_transition(before);
             self.compositor.dirty = true;
@@ -1320,19 +1266,27 @@ impl GuiFrameRenderState {
     pub(super) fn take_current_frame_for_render(
         &mut self,
         _acquired: &super::render_pass::surface::SurfaceAcquired,
-    ) -> Option<FrameGlyphBuffer> {
+    ) -> Option<(Arc<FrameGlyphBuffer>, Vec<ContentTransitionHint>)> {
         let current_frame = self.compositor.current_frame.as_mut()?;
-        let mut frame = Self::take_frame_for_render(current_frame);
-        self.compositor.input_scroll.paint(&mut frame);
-        self.compositor.text_animations.paint(&mut frame);
-        Some(frame)
+        let (mut frame, hints) = Self::take_frame_for_render(current_frame);
+        if self.compositor.text_animations.is_running() {
+            self.compositor.text_animations.paint(Arc::make_mut(&mut frame));
+        }
+        Some((frame, hints))
     }
 
-    pub(super) fn take_frame_for_render(current_frame: &mut FrameGlyphBuffer) -> FrameGlyphBuffer {
-        let transition_hints = current_frame.take_transition_hints();
-        let mut frame = current_frame.clone();
-        frame.transition_hints = transition_hints;
-        frame
+    /// The frame CURRENT_FRAME holds to draw, shared, and the one-shot
+    /// transition hints it carried, drained: a draw that does not change
+    /// the frame copies nothing.
+    pub(super) fn take_frame_for_render(
+        current_frame: &mut Arc<FrameGlyphBuffer>,
+    ) -> (Arc<FrameGlyphBuffer>, Vec<ContentTransitionHint>) {
+        let hints = if current_frame.transition_hints.is_empty() {
+            Vec::new()
+        } else {
+            Arc::make_mut(current_frame).take_transition_hints()
+        };
+        (Arc::clone(current_frame), hints)
     }
 }
 
@@ -1827,7 +1781,10 @@ pub(crate) struct GuiFrameWindowManager {
     pub pending_creates: Vec<PendingWindow>,
     /// Pending window destruction requests
     pub pending_destroys: Vec<u64>,
-    ready_replies: HashMap<u64, crossbeam_channel::Sender<Result<(), String>>>,
+    /// The request awaiting each frame's readiness, by frame.
+    ready_replies: HashMap<u64, u64>,
+    /// Readiness answers to send, by request (`take_answers`).
+    answers: Vec<(u64, Result<(), String>)>,
     /// Native chrome defaults applied to future secondary frame windows.
     pub(super) chrome_defaults: WindowChrome,
     /// Whether future secondary frame windows should start with FPS enabled.
@@ -1853,6 +1810,7 @@ impl GuiFrameWindowManager {
             pending_creates: Vec::new(),
             pending_destroys: Vec::new(),
             ready_replies: HashMap::new(),
+            answers: Vec::new(),
             chrome_defaults: WindowChrome::default(),
             fps_enabled: false,
         }
@@ -1994,30 +1952,30 @@ impl GuiFrameWindowManager {
         self.pending_destroys.contains(&emacs_frame_id)
     }
 
-    pub(crate) fn await_ready(
-        &mut self,
-        frame: u64,
-        reply: crossbeam_channel::Sender<Result<(), String>>,
-    ) {
+    /// Answer REQUEST once FRAME's window is active, or why it is not.
+    pub(crate) fn await_ready(&mut self, frame: u64, request: u64) {
         if self
             .get(frame)
             .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }))
         {
-            if reply.send(Ok(())).is_err() {
-                self.request_destroy(frame);
-            }
+            self.answers.push((request, Ok(())));
         } else if self.get(frame).is_some()
             || self
                 .pending_creates
                 .iter()
                 .any(|request| request.emacs_frame_id == frame)
         {
-            self.ready_replies.insert(frame, reply);
+            if let Some(superseded) = self.ready_replies.insert(frame, request) {
+                self.answers.push((superseded, Err(format!("Native window for frame {frame}: a later request superseded this one"))));
+            }
         } else {
-            let _ = reply.send(Err(format!(
-                "Native window for frame {frame} was not realized"
-            )));
+            self.answers.push((request, Err(format!("Native window for frame {frame} was not realized"))));
         }
+    }
+
+    /// The readiness answers decided since the last call.
+    pub(crate) fn take_answers(&mut self) -> Vec<(u64, Result<(), String>)> {
+        std::mem::take(&mut self.answers)
     }
 
     /// Process pending window creations. Must be called from the event loop
@@ -2055,7 +2013,7 @@ impl GuiFrameWindowManager {
             );
             let attrs = crate::window_identity::apply_platform_window_identity(attrs, event_loop);
 
-            match comms.create_window(event_loop, attrs, req.emacs_frame_id) {
+            match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
                     window_icon.apply(window.as_ref());
@@ -2220,8 +2178,8 @@ impl GuiFrameWindowManager {
     }
 
     pub(super) fn reject_ready(&mut self, frame: u64, error: &str) {
-        if let Some(reply) = self.ready_replies.remove(&frame) {
-            let _ = reply.try_send(Err(error.to_owned()));
+        if let Some(request) = self.ready_replies.remove(&frame) {
+            self.answers.push((request, Err(error.to_owned())));
         }
     }
 
@@ -2258,7 +2216,7 @@ impl GuiFrameWindowManager {
     }
 
     fn settle_ready_replies(&mut self) {
-        for (frame, reply) in std::mem::take(&mut self.ready_replies) {
+        for (frame, request) in std::mem::take(&mut self.ready_replies) {
             let ready = self
                 .get(frame)
                 .is_some_and(|window| matches!(window.lifecycle, FrameLifecycle::Active { .. }));
@@ -2269,9 +2227,7 @@ impl GuiFrameWindowManager {
                     "Native window/surface creation failed for frame {frame}"
                 ))
             };
-            if reply.send(result).is_err() && ready {
-                self.request_destroy(frame);
-            }
+            self.answers.push((request, result));
         }
     }
 
@@ -2296,7 +2252,9 @@ impl GuiFrameWindowManager {
     pub(crate) fn destroy_all(&mut self) {
         self.pending_creates.clear();
         self.pending_destroys.clear();
-        self.ready_replies.clear();
+        for (_, request) in std::mem::take(&mut self.ready_replies) {
+            self.answers.push((request, Err("Native windows destroyed".to_owned())));
+        }
         self.winit_to_emacs.clear();
         self.primary_winit_id = None;
         self.primary_emacs_frame_id = None;
@@ -2554,8 +2512,8 @@ impl GuiFrameWindowManager {
     }
 
     /// Drop every GPU-resident object owned by per-window render state after
-    /// the wgpu device was lost. CPU state — `current_frame`, row damage,
-    /// child frames, overlays, cursors, floating-WebView rects — is kept: the
+    /// the wgpu device was lost. CPU state — `current_frame`, child frames,
+    /// overlays, cursors, floating-WebView rects — is kept: the
     /// next redraw re-renders the same scene on the rebuilt device.
     pub(super) fn clear_gpu_resident_state(&mut self) {
         self.for_each_top_level_window_mut(|window_state| {
@@ -2563,11 +2521,11 @@ impl GuiFrameWindowManager {
             // Glyph atlas textures (recreated against the new device by
             // populate_glyph_atlas / recreate_secondary_native_surfaces).
             render.compositor.glyph_atlas = None;
+            // The rebuilt atlas reports the presentation drawn again.
+            render.reported_presentation = 0;
             // Retained cursorless scene: texture + view + bind group.
             render.compositor.retained_static = None;
-            render.compositor.retained_scroll = None;
-            render.compositor.retained_root = None;
-            render.compositor.last_root_key = None;
+            render.compositor.root_picture = None;
             // Composition ring plus every running transition's leased
             // source picture.
             clear_frame_transition_textures(&mut render.compositor.transitions);

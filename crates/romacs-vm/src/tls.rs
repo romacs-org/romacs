@@ -10,7 +10,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::io::{self, Read, Write};
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::sync::{Arc, Mutex};
 
 /// GNUTLS_STAGE_*: how far `gnutls-boot' got (gnutls.h's gnutls_initstage_t).
@@ -115,6 +115,7 @@ struct Peer {
 /// One process's TLS session over its channel's descriptors.
 pub(crate) struct Session {
     conn: rustls::ClientConnection,
+    // CELL(Plain)
     peer: Arc<Mutex<Peer>>,
     pub stage: u8,
     /// p->gnutls_p: records go through the session. A blocking client's
@@ -217,7 +218,7 @@ impl Session {
     }
 
     /// Records waiting to go out, written as far as FD takes them now.
-    pub(crate) fn flush(&mut self, fd: RawFd) -> io::Result<()> {
+    pub(crate) fn flush(&mut self, fd: BorrowedFd<'_>) -> io::Result<()> {
         while self.conn.wants_write() {
             match self.conn.write_tls(&mut Fd(fd)) {
                 Ok(0) => break,
@@ -230,7 +231,7 @@ impl Session {
     }
 
     /// One non-blocking round of gnutls_handshake: Ok(true) once done.
-    pub(crate) fn handshake_step(&mut self, fd: RawFd) -> Result<bool, i32> {
+    pub(crate) fn handshake_step(&mut self, fd: BorrowedFd<'_>) -> Result<bool, i32> {
         self.flush(fd).map_err(|_| code::PUSH_ERROR)?;
         if self.conn.is_handshaking() && self.conn.wants_read() {
             match self.conn.read_tls(&mut Fd(fd)) {
@@ -255,7 +256,7 @@ impl Session {
     /// gnutls_try_handshake for a blocking client: rounds until done,
     /// waiting on FD between them; an interrupt (C-g) ends it with
     /// GNUTLS_E_INTERRUPTED for the engine's safepoint to signal.
-    pub(crate) fn handshake(&mut self, fd: RawFd) -> Result<(), i32> {
+    pub(crate) fn handshake(&mut self, fd: BorrowedFd<'_>) -> Result<(), i32> {
         loop {
             if self.handshake_step(fd)? {
                 return Ok(());
@@ -264,7 +265,7 @@ impl Session {
                 return Err(code::INTERRUPTED);
             }
             let events = libc::POLLIN | if self.conn.wants_write() { libc::POLLOUT } else { 0 };
-            crate::subprocess::poll(&[(fd, events)], Some(std::time::Duration::from_millis(100))).map_err(|_| code::PULL_ERROR)?;
+            crate::subprocess::poll(&[(fd.as_raw_fd(), events)], Some(std::time::Duration::from_millis(100))).map_err(|_| code::PULL_ERROR)?;
         }
     }
 
@@ -280,7 +281,7 @@ impl Session {
 
     /// emacs_gnutls_read: plaintext into BUF; Ok(0) at the peer's close
     /// (orderly or not), EAGAIN when no record is complete.
-    pub(crate) fn read(&mut self, fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn read(&mut self, fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
         let again = || io::Error::from_raw_os_error(libc::EAGAIN);
         if self.stage != stage::READY {
             return Err(again());
@@ -315,7 +316,7 @@ impl Session {
     /// them now: how many bytes the session took. It holds at most its
     /// buffer limit of records FD has not taken; the caller keeps the rest
     /// of BYTES until FD is writable again.
-    pub(crate) fn write(&mut self, fd: RawFd, bytes: &[u8]) -> io::Result<usize> {
+    pub(crate) fn write(&mut self, fd: BorrowedFd<'_>, bytes: &[u8]) -> io::Result<usize> {
         if self.stage != stage::READY {
             return Err(io::Error::from_raw_os_error(libc::EAGAIN));
         }
@@ -332,7 +333,7 @@ impl Session {
     }
 
     /// gnutls_bye: the close_notify alert.
-    pub(crate) fn bye(&mut self, fd: RawFd) -> io::Result<()> {
+    pub(crate) fn bye(&mut self, fd: BorrowedFd<'_>) -> io::Result<()> {
         self.conn.send_close_notify();
         self.flush(fd)
     }
@@ -402,6 +403,7 @@ fn status_bits(error: &webpki::Error) -> u32 {
 struct Verifier {
     roots: Arc<rustls::RootCertStore>,
     provider: Arc<rustls::crypto::CryptoProvider>,
+    // CELL(Plain)
     peer: Arc<Mutex<Peer>>,
 }
 
@@ -442,13 +444,13 @@ impl ServerCertVerifier for Verifier {
 }
 
 /// A descriptor as rustls's transport.
-struct Fd(RawFd);
-impl Read for Fd {
+struct Fd<'a>(BorrowedFd<'a>);
+impl Read for Fd<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         crate::subprocess::read(self.0, buf)
     }
 }
-impl Write for Fd {
+impl Write for Fd<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         crate::subprocess::write(self.0, buf)
     }

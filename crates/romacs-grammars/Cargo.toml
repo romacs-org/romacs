@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 # Each grammar is the commit its GNU ts mode names in
-# `treesit-language-source-alist' (lisp/gnu/), as a crates.io release whose
+# `treesit-language-source-alist' (lisp/), as a crates.io release whose
 # sources are that commit's, or the commit itself. etc/tree-sitter/README.md
 # records each one's provenance and licence.
 [dependencies]
@@ -20,7 +20,6 @@ tree-sitter-html = "=0.23.2"
 tree-sitter-javascript = "=0.23.1"
 tree-sitter-jsdoc = "=0.23.2"
 tree-sitter-json = "=0.24.8"
-tree-sitter-md = { git = "https://github.com/tree-sitter-grammars/tree-sitter-markdown", rev = "413285231ce8fa8b11e7074bbe265b48aa7277f9", default-features = false }
 tree-sitter-python = "=0.23.6"
 tree-sitter-rust = "=0.24.0"
 tree-sitter-toml-ng = "=0.7.0"

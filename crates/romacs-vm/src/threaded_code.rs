@@ -279,7 +279,7 @@ mod tests {
         let closure = vm.slots[vm.names["st-cut"]].function;
         let id = vm.closures[usize::try_from(closure.payload()).unwrap()].function;
         vm.materialize_image_function(id).unwrap();
-        assert!(matches!(std::sync::Arc::make_mut(&mut vm.functions[id]).code.pop(), Some(Op::Return(_))));
+        assert!(matches!(std::sync::Arc::make_mut(vm.functions.change(id)).code.pop(), Some(Op::Return(_))));
         let error = vm.eval_source_raw("(st-cut '(1))").unwrap_err();
         assert!(error.contains("ran past the end of lowered code"), "{error}");
     }

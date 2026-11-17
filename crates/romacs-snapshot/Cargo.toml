@@ -9,6 +9,7 @@ description = "What a Romacs world image may hold: the SnapshotSafe contract"
 workspace = true
 
 [dependencies]
+romacs-snapshot-derive = { path = "../romacs-snapshot-derive" }
 serde_json = "1"
 num-bigint = "0.4"
 rustc-hash = "2"

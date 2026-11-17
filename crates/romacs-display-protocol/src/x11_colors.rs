@@ -13,8 +13,8 @@
 //! private CSS-flavored palette. The two disagreed exactly where the databases
 //! differ, so `gray14` and `light blue` rendered black (unknown to the CSS
 //! table) and `green`/`maroon` took their CSS values instead of X11's
-//! (issue #545). `docs/design/display-crate-layout.md` gives the rule: a value
-//! two crates can disagree about belongs here, next to `xterm_palette`.
+//! (issue #545). So a value two crates can disagree about belongs here, next
+//! to `xterm_palette`.
 //!
 //! Scope: the whole of GNU's `parse_color_spec` -- the `#`-hex forms and the
 //! `rgb:R/G/B` / `rgbi:R/G/B` forms -- plus the name database. The evaluator

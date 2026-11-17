@@ -101,23 +101,9 @@ fn idle_literals_and_entry_cache_copies_survive_compaction() {
 }
 #[test]
 fn read_only_graph_is_shared_while_worker_heaps_collect() {
-    use std::{fs::OpenOptions, io::Write};
-    let path = std::env::temp_dir().join(format!("vm2-image-{}", std::process::id()));
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
     // Record 0 -> record 1 -> nil; not a permanent leaf.
     let words: [u64; 4] = [(7 << 3) | 1, (1 << 63) | (1 << 3) | 3, (42 << 3) | 1, 0];
-    for w in words {
-        file.write_all(&w.to_le_bytes()).unwrap();
-    }
-    file.flush().unwrap();
-    let image = unsafe { ImageRegion::map(&file) }.unwrap();
-    std::fs::remove_file(path).unwrap();
-    drop(file);
+    let image = ImageRegion::from_bytes(words.into_iter().flat_map(u64::to_le_bytes).collect()).unwrap();
     assert!(image.reference(2).is_err());
     let threads: Vec<_> = (0..2).map(|_| {
         let image = image.clone();

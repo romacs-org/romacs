@@ -26,7 +26,7 @@ use std::time::Duration;
 /// The evaluator's half of the host's `C-g': whether it is busy and how
 /// many presses it has not taken, in one word, and when its busy span
 /// began.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 pub struct QuitSignal {
     word: AtomicU32,
     /// When the evaluator last became busy, in nanoseconds of [`clock`]:
@@ -36,7 +36,6 @@ pub struct QuitSignal {
     /// (`Vm::share_quit_signal`) before it runs a command.
     since: AtomicU64,
 }
-romacs_snapshot::snapshot_struct!(QuitSignal { word, since });
 
 /// How long a quittable wait blocks between looks at the press count.
 const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);
@@ -296,7 +295,7 @@ impl Vm {
     /// already arrived, as a press the host counted or as `quit-flag', so
     /// the read returns the quit character at once (GNU's
     /// quit_throw_to_read_char). `quit-flag' is cleared: the reader acts on
-    /// the key as read_char's caller does on its quit (lisp/romacs/vm/keyboard.el).
+    /// the key as read_char's caller does on its quit (lisp/vm/keyboard.el).
     /// When `quit-flag' is `throw-on-input''s tag the read returns nothing
     /// and leaves it for the next safepoint, which throws.
     pub(crate) fn take_read_quit(&mut self) -> ReadQuit {
@@ -331,6 +330,30 @@ impl Vm {
     pub fn leave_busy(&mut self) {
         for _ in 0..self.quit.set_busy(false) {
             self.handle_interrupt();
+        }
+    }
+
+    /// Evaluate SOURCE as Lisp a host runs while it waits for a key (GNU's
+    /// `read_char` wait: timers, process output, the idle auto-save). A quit
+    /// from C-g that ends it, pending as it began or raised inside it, is the
+    /// read's quit character (keyboard.c `quit_throw_to_read_char`): it stays
+    /// in `quit-flag` for the next read (`take_quit_key`), and the value is
+    /// None.
+    ///
+    /// # Errors
+    ///
+    /// Any other error SOURCE's evaluation ends with.
+    pub fn eval_as_wait(&mut self, source: &str) -> crate::Result<Option<crate::Local<'_>>> {
+        let (result, quit) = self.quit_watched(|vm| vm.eval_source_raw(source));
+        match result {
+            Ok(value) => Ok(Some(crate::Local::new(self, value))),
+            Err(_) if quit => {
+                // The quit ends here: nothing further unwinds from it.
+                self.quit_unwinding = false;
+                self.set_quit_variable("quit-flag", Value::TRUE);
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -400,7 +423,8 @@ impl Vm {
     }
 
     pub(crate) fn host_input_pending(&mut self) -> bool {
-        self.host_input.as_mut().is_some_and(|host| host.input_pending())
+        // A key a `switch-frame' went before is input not yet read.
+        self.deferred_event.is_some() || self.host_input.as_mut().is_some_and(|host| host.input_pending())
     }
 }
 

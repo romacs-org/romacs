@@ -119,6 +119,24 @@ pub trait HostInput {
     fn pointer(&mut self) -> Option<(i32, i32)> {
         None
     }
+
+    /// Whether the host shows top-level frames beyond the first, each in
+    /// a window of its own that it shows, hides and iconifies as the frame
+    /// is: what lets `make-frame' make one, and a top-level frame hide. A
+    /// host without, every batch run's, keeps one frame, always visible.
+    fn top_level_frames(&mut self) -> bool { false }
+    /// The id of the top-level frame whose window the event `next_event'
+    /// last returned came from (keyboard.c's event `frame_or_window'),
+    /// None for one from no frame, or a host without frames.
+    fn event_frame(&mut self) -> Option<u64> { None }
+    /// Ask the host to give the window of the top-level frame whose id is
+    /// FRAME the input focus (`x-focus-frame'); the compositor may refuse.
+    fn focus_frame(&mut self, _frame: u64) {}
+    /// What the host's display saw of native key repeat since the last
+    /// take (`romacs--take-key-repeats`), None with no display.
+    fn take_key_repeats(&mut self) -> Option<romacs_display_protocol::key_repeat_log::KeyRepeatCounts> {
+        None
+    }
 }
 
 /// What `romacs--native-window' asks of the host.
@@ -146,7 +164,7 @@ impl Vm {
 
     /// redisplay_internal's run_window_change_functions, which every
     /// redisplay's frame snapshot runs first (display.rs): the command
-    /// loop's Lisp half (lisp/romacs/vm/window-change.el) once it is installed.
+    /// loop's Lisp half (lisp/vm/window-change.el) once it is installed.
     /// Lisp runs only when the windows differ from what the last run saw,
     /// so a redisplay that changed no window enters no Lisp.
     pub(crate) fn run_window_change_functions(&mut self) -> Result<()> {
@@ -205,11 +223,14 @@ impl Vm {
         }
         Ok(work)
     }
-    /// Every leaf window of every frame, the mini-windows too: what any
-    /// redisplay may show.
+    /// Every leaf window of every frame shown, the mini-windows too: what
+    /// any redisplay may show. A hidden frame (a child frame kept for a
+    /// layer, a toast or a chip between uses) is not redisplayed, as GNU
+    /// redisplays only visible frames, so its windows run no
+    /// `pre-redisplay-functions`.
     pub(crate) fn displayed_windows(&self) -> Vec<Value> {
         let mut out = vec![];
-        for frame in self.frames() {
+        for frame in self.frames().into_iter().filter(|&frame| self.frame_shown(frame)) {
             let Ok(f) = self.frame(frame) else { continue };
             let mut pending = vec![f.root, f.minibuffer];
             while let Some(window) = pending.pop() {
@@ -254,8 +275,11 @@ impl Vm {
     }
 
     /// A redisplay took TOOK: the first after `romacs--redisplay-since-mark's
-    /// mark is what the command that marked it cost the display.
+    /// mark is what the command that marked it cost the display. Ends the
+    /// cycle `redisplay_begin' began (`romacs--display-stats').
     pub fn redisplay_done(&mut self, took: std::time::Duration) {
+        let conses = self.allocation.consed.conses;
+        self.display_state.stats.end(conses);
         if self.redisplay_since_mark == Some(None) {
             self.redisplay_since_mark = Some(Some(u64::try_from(took.as_micros()).unwrap_or(u64::MAX)));
         }
@@ -290,7 +314,8 @@ impl Vm {
 pub(crate) struct HostWait {
     host: Box<dyn HostInput>,
     deadline: Option<std::time::Instant>,
-    event: Option<HostEvent>,
+    /// The event, and the id of the top-level frame it came from.
+    event: Option<(HostEvent, Option<u64>)>,
 }
 
 /// The waiting host (`HostWait`).
@@ -299,7 +324,7 @@ fn host(vm: &mut Vm) -> &mut dyn HostInput {
 }
 
 /// What a host wait's deadline depends on besides the clock, as
-/// `romacs--wait-state` (`lisp/romacs/vm/keyboard.el`) prints it: empty before the
+/// `romacs--wait-state` (`lisp/vm/keyboard.el`) prints it: empty before the
 /// Lisp half is installed.
 const WAIT_STATE: &str = "(lambda () (and (fboundp 'romacs--wait-state) (romacs--wait-state)))";
 /// The echo area brought up to date (`romacs--echo-sync`): whether it changed.
@@ -308,7 +333,7 @@ const ECHO_SYNC: &str = "(lambda () (and (fboundp 'romacs--echo-sync) (romacs--e
 /// `romacs--read-host-event` &optional SECONDS NODISPLAY, lent from its
 /// engine as `load` is (`Nested::Loader`): redisplay unless NODISPLAY or
 /// input is pending, then wait for one event, or nil once SECONDS pass; its
-/// value goes to OUT. Lisp runs timers between reads (`lisp/romacs/vm/keyboard.el`).
+/// value goes to OUT. Lisp runs timers between reads (`lisp/vm/keyboard.el`).
 /// Orchestration: the Lisp the wait runs (the wait-state probe, echo-sync,
 /// image errors' log lines, redisplay, a resize) is requests, the rest leaves.
 pub(crate) fn wait_for_event<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, args: &RootFrame, out: Out<'_>) -> Result<()> {
@@ -398,8 +423,8 @@ fn wait<'b>(m: &mut Mx<'_, 'b, Vm>, mut gc: Gc<'_, 'b>, display: bool) -> Result
         // enters it at once, not at the read's next key.
         m.leaf((), |vm, ()| if vm.take_debug_event() { vm.poll_quit() } else { Ok(()) })?;
         let (resize, done) = m.leaf((), next_event)?;
-        if let Some(size) = resize {
-            threaded::resize(m, gc.by_ref(), size)?;
+        if let Some((frame, width, height)) = resize {
+            threaded::resize(m, gc.by_ref(), (frame, width, height))?;
             redraw = true;
         }
         if done {
@@ -449,7 +474,7 @@ fn paint(vm: &mut Vm, started: std::time::Instant, frame: Result<romacs_layout_i
 /// is this read's key, not a quit (quit.rs), while the Lisp around the wait
 /// (the redisplay's) stays quittable, as GNU's is. A resize to apply, and
 /// whether the wait is over, its event in `HostWait::event`.
-fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
+fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(Option<u64>, u32, u32)>, bool)> {
     let deadline = vm.host_wait.as_ref().expect("a host wait in progress").deadline;
     let timeout = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
     let fds = vm.process_wait_fds();
@@ -458,27 +483,47 @@ fn next_event(vm: &mut Vm, (): ()) -> Result<(Option<(u32, u32)>, bool)> {
     for _ in 0..vm.quit.set_busy(false) {
         vm.handle_interrupt();
     }
-    let event = match vm.read_quit_event() {
-        Some(event) => Ok(event),
-        None => host(vm).next_event(timeout),
+    // A key a `switch-frame' event went before is read next.
+    let (event, frame) = match (vm.read_quit_event(), vm.deferred_event.take()) {
+        (Some(event), deferred) => { vm.deferred_event = deferred; (Ok(event), None) }
+        (None, Some((event, frame))) => (Ok(event), frame),
+        (None, None) => { let event = host(vm).next_event(timeout); (event, host(vm).event_frame()) }
     };
     vm.quit.set_busy(busy);
     Ok(match event? {
-        HostEvent::Resize { width, height } => (Some((width, height)), false),
+        HostEvent::Resize { width, height } => (Some((frame, width, height)), false),
         // A completed background command ends the wait as a timeout does:
         // Lisp may run its callback between commands
-        // (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
+        // (lisp/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Background if vm.background_processes_ready() => (None, ended(vm, HostEvent::Timeout)),
         HostEvent::Background => (None, false),
-        // Lisp reads it (lisp/romacs/vm/keyboard.el `romacs--read-host-char').
+        // Lisp reads it (lisp/vm/keyboard.el `romacs--read-host-char').
         HostEvent::Process => (None, ended(vm, HostEvent::Timeout)),
-        event => (None, ended(vm, event)),
+        event => (None, ended_from(vm, event, frame)),
     })
+}
+
+/// The top-level frame whose id is FRAME, when its window closed while
+/// another visible top-level frame without a `delete-before' parameter
+/// remains: when frame.el's `handle-delete-frame' deletes it rather than
+/// ending the session, which closing the last window does as before.
+fn closed_among_others(vm: &mut Vm, frame: Option<u64>) -> Result<Option<Value>> {
+    let Some(closing) = frame.and_then(|id| vm.frame_of_id(id).ok()) else { return Ok(None) };
+    let delete_before = vm.intern("delete-before");
+    let others = vm.top_frames().into_iter().any(|f| f != closing && vm.frame(f).is_ok_and(|x| {
+        x.visible && !x.parameters.iter().any(|&(k, v)| k == delete_before && v != Value::NIL)
+    }));
+    Ok(others.then_some(closing))
 }
 
 /// EVENT ends the wait.
 fn ended(vm: &mut Vm, event: HostEvent) -> bool {
-    vm.host_wait.as_mut().expect("a host wait in progress").event = Some(event);
+    ended_from(vm, event, None)
+}
+
+/// EVENT, from the top-level frame whose id is FRAME, ends the wait.
+fn ended_from(vm: &mut Vm, event: HostEvent, frame: Option<u64>) -> bool {
+    vm.host_wait.as_mut().expect("a host wait in progress").event = Some((event, frame));
     true
 }
 
@@ -488,7 +533,16 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
     let HostWait { host, event, .. } = vm.host_wait.take().expect("a host wait in progress");
     vm.host_input = Some(host);
     waited?;
-    let event = event.expect("a wait ends with its event");
+    let (event, frame) = event.expect("a wait ends with its event");
+    // kbd_buffer_get_event: a key from a frame neither the last event's
+    // nor selected is read after the `switch-frame' event it brings.
+    if let (HostEvent::Key(_), Some(id)) = (&event, frame)
+        && let Some(switch) = vm.note_event_frame(id)
+    {
+        vm.deferred_event = Some((event, frame));
+        vm.set_rooted(out.0, out.1, switch);
+        return Ok(());
+    }
     // kbd_buffer_store_event: input inside `while-no-input' sets
     // `quit-flag' to `throw-on-input', for the next safepoint to throw.
     if let HostEvent::Key(_) = event {
@@ -498,15 +552,25 @@ fn finish(vm: &mut Vm, (waited, out): (Result<()>, Out<'_>)) -> Result<()> {
         HostEvent::Key(CommandEvent::Character(c)) => Value::integer(c)?,
         HostEvent::Key(CommandEvent::Named(name)) => vm.intern(&name),
         HostEvent::Timeout => Value::NIL,
-        // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME).
+        // make_lispy_focus_in / make_lispy_focus_out: (focus-in FRAME),
+        // the frame whose window it is, else the selected one.
         HostEvent::Focus(focused) => {
             let kind = vm.intern(if focused { "focus-in" } else { "focus-out" });
-            let frame = vm.frame_value_peek();
+            let frame = frame.and_then(|id| vm.frame_of_id(id).ok()).unwrap_or_else(|| vm.frame_value_peek());
             vm.list_value(&[kind, frame])
         }
         // A native model's event: the special event `(romacs-model ID TYPE PLIST)`.
         HostEvent::Model { id, event } => vm.model_event_value(id, &event),
         HostEvent::Resize { .. } | HostEvent::Background | HostEvent::Process => unreachable!("background events are consumed by the wait"),
+        // A window of one of several visible top-level frames closed:
+        // GNU's `(delete-frame (FRAME))' special event, which
+        // `handle-delete-frame' answers by deleting it.
+        HostEvent::Closed if closed_among_others(vm, frame)?.is_some() => {
+            let closing = closed_among_others(vm, frame)?.expect("checked");
+            let head = vm.intern("delete-frame");
+            let inner = vm.list_value(&[closing]);
+            vm.list_value(&[head, inner])
+        }
         HostEvent::Closed => {
             // Its data tells it from a C-g's (`romacs--host-event').
             let (quit, closed) = (vm.intern("quit"), vm.intern("frame-closed"));
@@ -561,6 +625,22 @@ mod tests {
         assert_eq!((words[0], words[1], words[3]), ("nil", "nil", "nil"), "{got}");
         let first: u64 = words[2].parse().expect(&got);
         assert!((5_000..40_000).contains(&first), "{got}");
+    }
+
+    /// A read that waits for input redisplays inside the bracket
+    /// `romacs--display-stats` counts: a cycle a read, each visiting the
+    /// frame's windows.
+    #[test]
+    fn a_reads_redisplay_is_a_counted_cycle() {
+        let mut vm = Vm::new();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        vm.set_host_input(Some(Box::new(SlowPaint(vec![120, 121], vec![0, 0]))));
+        let got = vm
+            .eval_source("(progn (romacs--read-host-event) (romacs--read-host-event)
+                                 (let ((stats (romacs--display-stats)))
+                                   (list (cdr (assq 'cycles stats)) (> (cdr (assq 'windows-visited stats)) 1))))")
+            .unwrap();
+        assert_eq!(got.display().unwrap(), "(2 t)");
     }
 
     /// A collection in a prompt's redisplay runs with the host taken for the
@@ -637,7 +717,8 @@ mod tests {
         let mut vm = waiting(vec![HostEvent::Resize { width: 1000, height: 700 }, HostEvent::Key(CommandEvent::Character(120))]);
         vm.set_gc_stress(0);
         assert_eq!(shown(&mut vm, "(romacs--read-host-event)"), "120");
-        assert_eq!((vm.window_state.width, vm.window_state.height), (1000, 700));
+        let native = vm.top_geometry(vm.selected_top_frame()).unwrap();
+        assert_eq!((native.width, native.height), (1000, 700));
     }
 
     /// A closed frame ends the wait with `quit`, its data telling it from a

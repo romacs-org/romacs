@@ -224,11 +224,10 @@ impl RenderApp {
         {
             self.frame_windows.mark_top_level_dirty();
         }
-        if let romacs_display_protocol::ImageStateEvent::Evicted(image) = event {
-            self.comms.lost_images.lock().unwrap_or_else(|e| e.into_inner()).evicted.push(image.get());
+        match event {
+            crate::thread_comm::ImageStateEvent::Evicted(image) => self.comms.tell(crate::thread_comm::Fact::ImageEvicted(image.get())),
+            event => self.comms.send_input(crate::thread_comm::InputEvent::ImageStateChanged { event }),
         }
-        self.comms
-            .send_input(crate::thread_comm::InputEvent::ImageStateChanged { event });
     }
 
     /// Publish the complete set of image identities which can still be drawn.

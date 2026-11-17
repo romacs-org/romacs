@@ -102,6 +102,30 @@ impl Backing {
     }
 }
 
+/// The VM's frozen regions by id. Id 0 is the VM's own heap and never a
+/// region, so a VM starts with that slot alone, and holds that at rest:
+/// what a restored VM remakes (`romacs_snapshot::Schema::renew`).
+pub(crate) struct Regions(Vec<Option<Box<Region>>>);
+
+impl Default for Regions {
+    fn default() -> Self {
+        Self(vec![None])
+    }
+}
+
+impl std::ops::Deref for Regions {
+    type Target = Vec<Option<Box<Region>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Regions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// A region attached to this VM: decoded once, never written again.
 pub(crate) struct Region {
     pub(crate) conses: Vec<(Value, Value)>,
@@ -280,7 +304,11 @@ impl<'a> Walk<'a> {
                     match object {
                         Object::String(s) | Object::RawString(s) => {
                             for (i, (_, values)) in s.properties.runs(coordinates::ByteOffset(0)..coordinates::ByteOffset(s.bytes().len())).into_iter().enumerate() {
-                                for (_, v) in values { pending.push((v, Some(node), Label::Property(i))); }
+                                for (key, v) in values {
+                                    // Keys are frozen by name, which only an interned symbol's gives back.
+                                    if self.vm.property_key_name(key).is_none() { return Err(self.refusal(node)); }
+                                    pending.push((v, Some(node), Label::Property(i)));
+                                }
                             }
                         }
                         Object::Vector(items) | Object::Record(items) => {
@@ -379,7 +407,7 @@ impl<'a> Walk<'a> {
                     w.u64(range.end.0 as u64);
                     w.u32(values.len() as u32);
                     for (key, value) in values {
-                        w.bytes(key.as_bytes());
+                        w.bytes(self.vm.property_key_name(key).expect("the walk refused other keys").as_bytes());
                         w.u64(self.edge(value).word());
                     }
                 }
@@ -789,7 +817,7 @@ impl Vm {
                         let mut string = data::LispString::from_bytes(bytes.clone(), *multibyte);
                         for (from, to, values) in runs {
                             for (key, edge) in values {
-                                string.properties.put(coordinates::ByteOffset(*from)..coordinates::ByteOffset(*to), key, value(*edge));
+                                string.properties.put(coordinates::ByteOffset(*from)..coordinates::ByteOffset(*to), self.intern_property_key(key), value(*edge));
                             }
                         }
                         if string.is_utf8() { Object::String(Box::new(string)) } else { Object::RawString(Box::new(string)) }

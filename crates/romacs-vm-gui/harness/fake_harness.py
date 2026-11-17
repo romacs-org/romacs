@@ -8,6 +8,8 @@ its tools as a real harness does, and answers control requests.  Its
 
   say TEXT           stream TEXT as the reply, word by word
   slow N             stream N numbered lines, 0.1 s apart (a long turn)
+  wait FILE          a turn held until FILE exists (60 s at most), then
+                     `released': the test ends it when it has looked
   call TOOL JSON     call Romacs tool TOOL with JSON arguments ("instance":"?"
                      is filled from romacs_identity); on `outcome unknown' ask
                      romacs_call_outcome and repeat the call only when it says
@@ -39,7 +41,7 @@ from romacs_mcp_client import RomacsMcp
 OUT = threading.Lock()
 LOG = os.environ.get('FAKE_HARNESS_LOG')
 # The variables whose inheritance the environment tests watch.
-WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_')
+WATCHED = ('ROMACS_', 'CLAUDE', 'CODEX_', 'T3CODE_', 'AGENT_TEST_')
 
 
 # What `initialize' answers, in claude 2.1.316's shape.
@@ -168,6 +170,14 @@ class Harness:
                 self.stream(f'line {n + 1}')
                 time.sleep(.1)
             return self.result('slow done')
+        if verb == 'wait':
+            self.stream('held')
+            deadline = time.monotonic() + 60
+            while not os.path.exists(rest) and time.monotonic() < deadline:
+                if self.interrupted.is_set():
+                    return self.interrupt_done()
+                time.sleep(.05)
+            return self.result('released')
         if verb == 'call':
             name, _, raw = rest.partition(' ')
             reply = self.call(name, json.loads(raw or '{}'))
@@ -267,7 +277,7 @@ class Harness:
 
     def main(self):
         threading.Thread(target=self.read_stdin, daemon=True).start()
-        log(started=self.session, argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
+        log(started=self.session, pid=os.getpid(), argv=sys.argv[1:], config_dir=os.environ.get('CLAUDE_CONFIG_DIR'),
             cwd=os.getcwd(), env={k: v for k, v in os.environ.items() if k.startswith(WATCHED)})
         while True:
             text = self.inbox.get()

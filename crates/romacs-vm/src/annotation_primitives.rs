@@ -12,81 +12,14 @@ use crate::{
 };
 /// What a walk of the runs that decide a property found.
 enum RunWalk<T> {
-    /// The object's properties are not kept by key, or the property names
-    /// no interned symbol: read by position.
+    /// The object's properties are not kept by key, or the property is no
+    /// symbol: read by position.
     ByPosition,
     /// What the walk's function answered, or None when no run made it
     /// answer.
     Walked(Option<T>),
 }
 impl Vm {
-    pub(crate) fn keymap_at_point(&mut self, property: Value) -> Result<Value> {
-        let index = self.buffer_index()?;
-        let buffer = self.slots[self.buffer_slot].value;
-        // Point's neighbouring properties, whether one run spans point, the
-        // local map and the overlays at point. A unibyte buffer has no
-        // overlays (VM2-MD2).
-        let around = |properties: &crate::properties::Properties, at: ByteOffset, len: usize| {
-            let raw = |at| properties.properties_at(at).into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
-            (if at.0 > 0 { raw(ByteOffset(at.0 - 1)) } else { vec![] },
-             if at.0 < len { raw(at) } else { vec![] },
-             at.0 > 0 && at.0 < len && properties.same_run_state(ByteOffset(at.0 - 1), at))
-        };
-        let (at, (left, right, same), local, overlays) = match &self.objects[index] {
-            Object::Buffer(text) => {
-                let at = text.point;
-                (at.0, around(&text.properties, at, text.len_bytes()), text.local_keymap,
-                 text.intervals.query_with_end(at.0 as u32, at.0 as u32, true,
-                     at.0 == text.len_bytes(), &text.anchors).0)
-            }
-            Object::ByteBuffer(b) => {
-                let properties = crate::properties::Properties::from_map(&b.properties);
-                let overlays = match b.shown() {
-                    Some(text) => {
-                        let at = text.byte_of_char(CharOffset(b.point.0))?.0;
-                        text.intervals.query_with_end(at as u32, at as u32, true, at == text.len_bytes(), &text.anchors).0
-                    }
-                    None => vec![],
-                };
-                (b.point.0, around(&properties, b.point, b.bytes.len()), b.local_keymap, overlays)
-            }
-            _ => unreachable!(),
-        };
-        let mut value = self.ordered_overlay_property(overlays, property)?;
-        if value == Value::NIL {
-            value = self.annotation_resolve(&right, property)?;
-        }
-        if value == Value::NIL {
-            value = self.insertion_overlay_property(buffer, at, property)?;
-        }
-        if value == Value::NIL {
-            let inherited = self.annotation_inherited(left, right, same)?;
-            value = self.annotation_resolve(&inherited, property)?;
-        }
-        Ok(self.resolve_keymap(value).unwrap_or_else(|| {
-            if self.names.get("local-map").is_some_and(|&slot| property == Value::reference(slot + 1, 7)) { local } else { Value::NIL }
-        }))
-    }
-
-    fn insertion_overlay_property(&self, buffer: Value, at: usize, property: Value) -> Result<Value> {
-        let Some(text) = self.overlay_store(buffer) else { return Ok(Value::NIL); };
-        let at = if matches!(self.object(buffer)?, Object::ByteBuffer(_)) { text.byte_of_char(CharOffset(at))?.0 } else { at };
-        let mut candidates = text.intervals.query_with_end(at.saturating_sub(1) as u32,
-            (at + 1).min(text.len_bytes()) as u32, false, true, &text.anchors).0;
-        candidates.retain(|&overlay| {
-            let object = self.overlay(overlay).unwrap();
-            let (start, end) = self.overlay_range(overlay).unwrap().unwrap();
-            start as usize <= at && at <= end as usize
-                && !(start as usize == at && object.front == Bias::Right)
-                && !(end as usize == at && object.rear != Bias::Right)
-        });
-        self.ordered_overlay_property(candidates, property)
-    }
-
-    fn ordered_overlay_property(&self, overlays: Vec<Value>, property: Value) -> Result<Value> {
-        Ok(self.ordered_overlay_hit(overlays, property)?.0)
-    }
-
     /// The highest-priority overlay among OVERLAYS with a non-nil PROPERTY:
     /// (VALUE, OVERLAY), or (nil, nil) when none has it.
     fn ordered_overlay_hit(&self, overlays: Vec<Value>, property: Value) -> Result<(Value, Value)> {
@@ -276,6 +209,7 @@ impl Vm {
             let Object::Overlay(o) = self.object_mut(v)? else { unreachable!() };
             o.start = Some(a);
             o.end = Some(b);
+            self.overlay_changed(v)?;
         }
         Ok(())
     }
@@ -356,6 +290,18 @@ impl Vm {
             None => Ok(Value::NIL),
         }
     }
+    /// buffer.c `Foverlays_in` asks its overlay tree with BEG and END as
+    /// given, so positions outside BUFFER find what the walk from BEG finds:
+    /// nothing from past Z or up to before BEG, everything to Z from past Z,
+    /// and from before BEG what BEG finds but an empty overlay there when END
+    /// is at it. The positions to ask within the buffer, or None for nothing.
+    fn overlays_in_bounds(&self, buffer: Value, beg: Value, end: Value) -> Result<Option<(Value, Value)>> {
+        let (s, e) = (self.scalar_position(beg)?, self.scalar_position(end)?);
+        let z = i64::try_from(self.annotated(buffer)?.len_chars()).map_err(|_| "buffer too large")? + 1;
+        if s > e || (s >= 1 && e <= z) { return Ok(Some((beg, end))); }
+        if s > z || e < 1 || (e == 1 && z > 1) { return Ok(None); }
+        Ok(Some((Value::integer(s.max(1))?, Value::integer(e.min(z))?)))
+    }
     pub(super) fn scalar_position(&self, v: Value) -> Result<i64> {
         if let Ok(n) = v.as_integer() {
             return Ok(n);
@@ -426,20 +372,22 @@ impl Vm {
         if anchor.is_some() { self.note_referrer(buffer, v.index(0)? - 1); }
         Ok(v)
     }
-    /// Whether overlay primitive P with ARGS changes what a window may show,
-    /// as GNU's modify_overlay calls tell redisplay (buffer.c): a new
-    /// overlay has no properties yet, deleting a detached one changes
-    /// nothing, and `overlay-put' changes something only with a value not
-    /// `eq' to the one there. Moving or removing overlays always counts.
-    fn changes_overlays(&self, p: Primitive, args: &[Value]) -> bool {
-        use Primitive::*;
-        match (p, args) {
-            (MakeOverlay, _) => false,
-            (DeleteOverlay, [overlay, ..]) => !matches!(self.overlay_range(*overlay), Ok(None)),
-            (OverlayPut, [overlay, prop, value, ..]) => self.overlay_get(*overlay, *prop).map_or(true, |old| old != *value),
-            (MoveOverlay | RemoveOverlays | DeleteOverlay | OverlayPut, _) => true,
-            _ => false,
-        }
+    /// OVERLAY changed what the windows on its buffer may show (GNU's
+    /// `modify_overlay`, buffer.c): that buffer's overlay revision takes a
+    /// value no buffer's has had. An overlay in no buffer shows nothing.
+    /// One with no property counts as GNU's does not: it still ranks the
+    /// others where it overlaps them, and the ranking is not transitive
+    /// (`overlay_order::compare_overlays`), so making, moving or deleting
+    /// it can change which face shows.
+    pub(crate) fn overlay_changed(&mut self, overlay: Value) -> Result<()> {
+        let o = self.overlay(overlay)?;
+        if o.buffer == Value::NIL { return Ok(()); }
+        let buffer = o.buffer;
+        self.display_state.overlays += 1;
+        let revision = self.display_state.overlays;
+        // A buffer with no store yet (unibyte, never shown) shows nothing.
+        if let Ok(store) = self.overlay_store_mut(buffer) { store.overlay_revision = revision; }
+        Ok(())
     }
     pub(crate) fn overlay_range(&self, v: Value) -> Result<Option<(u32, u32)>> {
         let o = self.overlay(v)?;
@@ -453,6 +401,7 @@ impl Vm {
         )))
     }
     pub(crate) fn delete_overlay_object(&mut self, v: Value) -> Result<()> {
+        self.overlay_changed(v)?;
         let source = self.overlay(v)?;
         let o = Overlay {
             buffer: source.buffer,
@@ -516,7 +465,8 @@ impl Vm {
                 .any(|&(k, v)| k == Value::reference(slot + 1, 7) && v != Value::NIL)
         });
         // itree_node_set_region reinserts a node whose start moves.
-        let reinserted = o.buffer != buffer || self.overlay_range(v)?.is_none_or(|(old, _)| old != start);
+        let old = if o.buffer == buffer { self.overlay_range(v)? } else { None };
+        let reinserted = old.is_none_or(|(old, _)| old != start);
         if o.buffer == buffer {
             let target = self.overlay_store_mut(buffer)?;
             target.intervals.remove(o.start.unwrap(), &target.anchors);
@@ -549,6 +499,9 @@ impl Vm {
             self.note_referrer(buffer, v.index(0)? - 1);
         }
         if reinserted { self.note_overlay_insertion(buffer, v)?; }
+        // A move to the buffer and the range it has shows nothing new: its
+        // order among the others stays too.
+        if old != Some((start, end)) { self.overlay_changed(v)?; }
         if evaporates {
             self.evaporate_overlay(v)?;
         }
@@ -671,42 +624,11 @@ impl Vm {
             Some(Object::Window(w)) => (w.buffer, Some(object)),
             _ => (object, None),
         };
-        let at = if self.overlay_store(object).is_some() {
+        if self.overlay_store(object).is_some() {
             let byte = self.overlay_position(object, position, false)?;
-            let buffer = self.annotated(object)?;
-            let found = buffer
-                .intervals
-                .query_with_end(
-                    byte,
-                    byte,
-                    true,
-                    byte == buffer.anchors.extent(),
-                    &buffer.anchors,
-                )
-                .0;
-            let at = buffer.char_of_byte(ByteOffset(byte as usize))?.0 + 1;
-            let found = match window {
-                // window.h overlay_matches_window: a `window' that is not a
-                // window object restricts nothing.
-                Some(window) => {
-                    let key = self.intern("window");
-                    let mut kept = vec![];
-                    for o in found {
-                        let w = self.overlay_get(o, key)?;
-                        if w == window || !matches!(self.object_if(w), Some(Object::Window(_))) { kept.push(o); }
-                    }
-                    kept
-                }
-                None => found,
-            };
-            let hit = self.ordered_overlay_hit(found, property)?;
-            if hit.0 != Value::NIL {
-                return Ok(hit);
-            }
-            at
-        } else {
-            usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?
-        };
+            return self.char_property_at_byte(object, byte as usize, property, window);
+        }
+        let at = usize::try_from(position.as_integer()?).map_err(|_| "index out of range")?;
         let raw = self.annotation_raw(object, at)?;
         Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
     }
@@ -715,34 +637,101 @@ impl Vm {
     /// either kind or a string: args-out-of-range outside its text.
     pub(crate) fn text_property_at(&self, object: Value, position: i64, property: Value) -> std::result::Result<Value, crate::prim::Fault> {
         use crate::prim::Fault;
-        let raw = match usize::try_from(position).ok().map(|at| self.annotation_raw(object, at)) {
-            Some(Ok(raw)) => raw,
+        let place = match usize::try_from(position).ok().map(|at| self.annotation_place(object, at)) {
+            Some(Ok(place)) => place,
             Some(Err(e)) if e != "index out of range" => return Err(Fault::Error(e)),
             _ => {
                 let at = Value::integer(position).map_err(Fault::Error)?;
                 return Err(Fault::Range(at, at));
             }
         };
-        self.annotation_resolve(&raw, property).map_err(Fault::Error)
+        self.annotation_resolve(&place, property).map_err(Fault::Error)
     }
 
-    /// get_char_property_and_overlay (textprop.c) with a window as OBJECT,
-    /// as the display iterator asks: PROPERTY of the character at BYTE of
-    /// BUFFER from the highest overlay that applies to WINDOW (an overlay
-    /// whose `window' property is another window does not), else from the
-    /// text, together with that overlay or nil.
-    pub(crate) fn window_char_property(&self, buffer: Value, byte: usize, property: Value, window: Value) -> Result<(Value, Value)> {
-        let text = self.annotated(buffer)?;
-        let at = byte as u32;
-        let mut found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
-        let mut having = vec![];
-        for overlay in found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)) {
-            let value = self.overlay_property(overlay, property)?;
-            if value != Value::NIL { having.push((self.overlay_sort_item(overlay)?, value)); }
+    /// textprop.c get_char_property_and_overlay at BYTE of BUFFER's overlay
+    /// store, as the display iterator and the field checks ask: PROPERTY
+    /// of the character there from the highest overlay that applies to
+    /// WINDOW (any overlay when None; one whose `window` property is
+    /// another window does not), read as `overlay-get` reads it, else from
+    /// the text, together with that overlay or nil. A multibyte buffer is
+    /// read at BYTE, with no position converted.
+    pub(crate) fn char_property_at_byte(&self, buffer: Value, byte: usize, property: Value, window: Option<Value>) -> Result<(Value, Value)> {
+        let object = self.object(buffer)?;
+        let text = match object {
+            Object::Buffer(b) => b,
+            Object::ByteBuffer(b) => b.shown().ok_or("unibyte buffer not mirrored")?,
+            _ => return Err("buffer required".into()),
+        };
+        let at = u32::try_from(byte).map_err(|_| "buffer too large")?;
+        let found = text.intervals.query_with_end(at, at, true, at == text.anchors.extent(), &text.anchors).0;
+        let found = match window {
+            Some(window) => found.into_iter().filter(|&overlay| self.overlay_applies_to(overlay, window)).collect(),
+            None => found,
+        };
+        let hit = self.ordered_overlay_hit(found, property)?;
+        if hit.0 != Value::NIL { return Ok(hit); }
+        let place = match object {
+            Object::Buffer(b) => Self::annotation_place_at_byte(b, ByteOffset(byte))?,
+            // A unibyte buffer keeps its properties by its own positions,
+            // not its mirror's bytes.
+            _ => self.annotation_place(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?,
+        };
+        Ok((self.annotation_resolve(&place, property)?, Value::NIL))
+    }
+    /// Whether PROPERTY reads nil at every byte in BYTES of BUFFER, a
+    /// multibyte buffer, as known without reading any one: no overlay
+    /// there has it, no text there has a key that decides it (its own,
+    /// `category`, its aliases), and it has no default. False where that
+    /// is not known, or where reading the variables would signal (a reader
+    /// then signals as it would have).
+    pub(crate) fn char_property_absent(&self, buffer: Value, property: Value, bytes: std::ops::Range<usize>) -> bool {
+        let Ok(Object::Buffer(b)) = self.object(buffer) else { return false };
+        let (Ok(start), Ok(end)) = (u32::try_from(bytes.start), u32::try_from(bytes.end)) else { return false };
+        if !b.intervals.is_empty() {
+            let (found, _) = b.intervals.query_with_end(start, end, false, true, &b.anchors);
+            if !found.into_iter().all(|overlay| self.overlay_get(overlay, property).is_ok_and(|v| v == Value::NIL)) {
+                return false;
+            }
         }
-        if let Some((item, value)) = crate::overlay_order::highest_overlay(having, |h| h.0) { return Ok((value, item.overlay)); }
-        let raw = self.annotation_raw(buffer, text.char_of_byte(ByteOffset(byte))?.0 + 1)?;
-        Ok((self.annotation_resolve(&raw, property)?, Value::NIL))
+        let (aliases, defaults) = self.textget_variables();
+        if defaults != Value::NIL && !matches!(self.annotation_plist(defaults, property), Ok(None | Some(Value::NIL))) {
+            return false;
+        }
+        let range = ByteOffset(bytes.start)..ByteOffset(bytes.end);
+        let unset = |key: crate::properties::Key| b.properties.first_unlike(range.clone(), key, None).is_none();
+        if aliases == Value::NIL {
+            return crate::properties::Key::of(property).is_none_or(unset) && unset(crate::properties::Key::CATEGORY);
+        }
+        self.deciding_keys(property).is_ok_and(|keys| keys.into_iter().all(unset))
+    }
+    /// The text properties whose runs decide PROPERTY's char-property
+    /// value: its own, `category`, and its `char-property-alias-alist`
+    /// aliases. A PROPERTY that is no symbol has no runs of its own.
+    pub(crate) fn deciding_keys(&self, property: Value) -> Result<Vec<crate::properties::Key>> {
+        let mut keys: Vec<_> = crate::properties::Key::of(property).into_iter().collect();
+        for key in std::iter::once(crate::properties::Key::CATEGORY).chain(self.annotation_alias_keys(property)?) {
+            if !keys.contains(&key) { keys.push(key); }
+        }
+        Ok(keys)
+    }
+    /// The first position after POS, at most END, of BUFFER where a text
+    /// property named in KEYS or an overlay may change: where a char
+    /// property KEYS decide may change, so a walk by it pays for those runs,
+    /// not every property's. A unibyte buffer's properties are not kept by
+    /// key: there, where any may.
+    pub(crate) fn next_keys_change(&self, buffer: Value, (pos, end): (i64, i64), keys: &[crate::properties::Key]) -> Result<i64> {
+        let text = self.shown_text(buffer)?;
+        let offset = |n: i64| usize::try_from(n - 1).map(CharOffset).map_err(|_| "position out of range".to_owned());
+        let (at, limit) = (text.byte_of_char(offset(pos)?)?, text.byte_of_char(offset(end)?)?);
+        let next = match self.object_if(buffer) {
+            Some(Object::Buffer(b)) => keys.iter()
+                .fold(limit, |next, key| next.min(b.properties.next_single_change(at, *key, next)))
+                .min(self.next_overlay_change_byte(buffer, at)?),
+            _ => self.next_property_boundary(buffer, at, limit)?,
+        };
+        let next = text.char_of_byte(next.min(limit))?.0;
+        let next = i64::try_from(next).map_err(|_| "position out of range".to_owned())? + 1;
+        Ok(next.max(pos + 1).min(end))
     }
     /// The display ignores an overlay whose `window' property names
     /// another window (xdisp.c load_overlay_strings).
@@ -778,7 +767,7 @@ impl Vm {
             _ => object,
         };
         // Fget_text_property: (args-out-of-range AT AT) outside the text.
-        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(String, Value)>, Fault> {
+        let raw_at = |vm: &mut Self, at: i64| -> std::result::Result<Vec<(crate::properties::Key, Value)>, Fault> {
             match usize::try_from(at).ok().map(|at| vm.annotation_raw(object, at)) {
                 Some(Ok(raw)) => Ok(raw),
                 Some(Err(e)) if e != "index out of range" => Err(Fault::Error(e)),
@@ -794,10 +783,13 @@ impl Vm {
             let raw = raw_at(vm, at)?;
             vm.annotation_resolve(&raw, key).map_err(Fault::Error)
         };
+        // A unibyte buffer's overlays and its narrowing are its mirror's.
+        if matches!(self.object_if(object), Some(Object::ByteBuffer(_))) {
+            self.mirror_shown(object).map_err(Fault::Error)?;
+        }
         if self.overlay_store(object).is_none() {
             return text_property(self, pos, property);
         }
-        self.mirror_shown(object).map_err(Fault::Error)?;
         let b = self.annotated(object).map_err(Fault::Error)?;
         let begv = b.char_of_byte(b.accessible().start).map_err(Fault::Error)?.0 as i64 + 1;
         let max = b.len_chars() as i64 + 1;
@@ -875,9 +867,6 @@ impl Vm {
         }
         if (p as usize) < MakeMarker as usize {
             return self.text_annotation_primitive(p, start, n);
-        }
-        if self.changes_overlays(p, &self.stack[start..start + n]) {
-            self.display_state.overlays += 1;
         }
         let mut fixed = [Value::NIL; 5];
         let variable = if p == InsertBeforeMarkers && n > 5 {
@@ -1051,7 +1040,12 @@ impl Vm {
             }
             OverlayGet => self.overlay_get(x, args[1]),
             OverlayPut => {
-                self.overlay(x)?;
+                // Foverlay_put: nothing a window shows changes while the
+                // value is `eq' both to the overlay's own, which display
+                // reads for some properties, and to the one the overlay
+                // gave, through its category when it had none of its own.
+                let own = self.overlay(x)?.properties.iter().find(|(k, _)| *k == args[1]).map_or(Value::NIL, |&(_, v)| v);
+                let changed = own != args[2] || self.overlay_get(x, args[1]).map_or(true, |old| old != args[2]);
                 let Object::Overlay(o) = self.object_mut(x)? else {
                     unreachable!()
                 };
@@ -1060,6 +1054,7 @@ impl Vm {
                 } else {
                     o.properties.push((args[1], args[2]));
                 }
+                if changed { self.overlay_changed(x)?; }
                 let buffer = self.overlay(x)?.buffer;
                 let slot = args[1].index(7).ok().and_then(|i| i.checked_sub(1));
                 if slot.is_some_and(|i| self.names.get("evaporate") == Some(&i))
@@ -1091,6 +1086,10 @@ impl Vm {
                             self.overlay_position(buffer, args[1], false)?
                         },
                     )
+                } else if p == OverlaysIn {
+                    let Some((beg, end)) = self.overlays_in_bounds(buffer, x, args[1])? else { return Ok(Value::NIL) };
+                    let (a, b) = (self.overlay_position(buffer, beg, false)?, self.overlay_position(buffer, end, false)?);
+                    (a.min(b), a.max(b))
                 } else {
                     let a = match self.overlay_position(buffer, x, false) {
                         // Any position may be asked; none outside the
@@ -1098,12 +1097,7 @@ impl Vm {
                         Err(e) if p == OverlaysAt && e == "index out of range" => return Ok(Value::NIL),
                         a => a?,
                     };
-                    let b = if p == OverlaysIn {
-                        self.overlay_position(buffer, args[1], false)?
-                    } else {
-                        a
-                    };
-                    (a.min(b), a.max(b))
+                    (a, a)
                 };
                 let (a, b) = (a.min(b), a.max(b));
                 let target = self.annotated(buffer)?;
@@ -1350,11 +1344,11 @@ impl Vm {
             Some(Object::Buffer(b)) => &b.properties,
             _ => return Ok(RunWalk::ByPosition),
         };
-        let Ok(name) = self.annotation_key_name(prop) else { return Ok(RunWalk::ByPosition) };
+        let Some(name) = crate::properties::Key::of(prop) else { return Ok(RunWalk::ByPosition) };
         // PROP's aliases decide only where PROP itself is unset: they are
         // looked up at the first such run, and the walk goes on from that
         // run with their boundaries too.
-        let mut keys = vec![name, "category"];
+        let mut keys = vec![name, crate::properties::Key::CATEGORY];
         let mut looked_up = false;
         let mut from = bytes.start;
         // Where none of the keys is set, the defaults alone answer.
@@ -1363,7 +1357,7 @@ impl Vm {
             for (run, values) in properties.key_runs(from..bytes.end, keys.iter().copied()) {
                 if !looked_up && !values.iter().any(|(key, _)| *key == name) {
                     looked_up = true;
-                    let Ok(aliases) = self.annotation_alias_names(prop) else { return Ok(RunWalk::ByPosition) };
+                    let Ok(aliases) = self.annotation_alias_keys(prop) else { return Ok(RunWalk::ByPosition) };
                     if !aliases.is_empty() {
                         keys.extend(aliases);
                         from = run.start;
@@ -1456,6 +1450,16 @@ impl Vm {
             return integer(limit.max(begv));
         }
         let initial = self.char_property_accessible(position - i64::from(position >= 0), property)?;
+        if let Some(Object::Buffer(_)) = self.object_if(object) {
+            if let Some(at) = self.previous_value_change(object, property, initial, (position, limit.max(begv))).map_err(Fault::Error)? {
+                return integer(at);
+            }
+            // As the walk below: BEGV is its last step.
+            if begv > limit && self.char_property_accessible(begv - 1, property)? != initial {
+                return integer(begv);
+            }
+            return integer(limit);
+        }
         // Fprevious_char_property_change's steps: each is the nearest
         // overlay endpoint or text-property boundary before the last, never
         // below BEGV, so BEGV ends the walk.
@@ -1469,69 +1473,85 @@ impl Vm {
         integer(limit)
     }
 
+    /// Fprevious_single_char_property_change's walk in OBJECT, a multibyte
+    /// buffer and the current one: from POSITION back to FLOOR, the nearest
+    /// position whose character before reads PROPERTY other than INITIAL,
+    /// if any is above FLOOR. It steps from one boundary to the nearest
+    /// before it, as GNU's does, over the runs of the keys that decide
+    /// PROPERTY and the overlays' ends, which hold every place its value
+    /// can change: a walk costs the boundaries it passes, not the buffer's.
+    fn previous_value_change(&self, object: Value, property: Value, initial: Value, (position, floor): (i64, i64)) -> Result<Option<i64>> {
+        let Object::Buffer(b) = self.object(object)? else { return Err("multibyte buffer required".into()) };
+        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize));
+        let (floor, mut at) = (byte(floor)?, byte(position)?.min(b.accessible().end));
+        // A malformed alias list leaves every key deciding.
+        let keys = self.deciding_keys(property).ok();
+        loop {
+            let text = match &keys {
+                Some(keys) => keys.iter().fold(floor, |p, key| p.max(b.properties.previous_single_change(at, *key, p))),
+                None => b.properties.previous_change(at, floor),
+            };
+            let overlay = ByteOffset(b.intervals.previous(at.0 as u32, floor.0 as u32, &b.anchors) as usize);
+            let previous = text.max(overlay);
+            if previous <= floor {
+                return Ok(None);
+            }
+            if self.char_property_at_byte(object, b.body().char_start_before(previous.0), property, None)?.0 != initial {
+                return Ok(Some(b.char_of_byte(previous)?.0 as i64 + 1));
+            }
+            at = previous;
+        }
+    }
+
     /// Fget_char_property in the current buffer: POSITION's PROPERTY from
     /// overlays and text properties, args-out-of-range outside BEGV..ZV.
     pub(crate) fn char_property_accessible(&mut self, position: i64, property: Value) -> crate::prim::Out {
         use crate::prim::Fault;
         let object = self.slots[self.buffer_slot].value;
-        let (begv, zv) = match self.object(object).map_err(Fault::Error)? {
+        let at = Value::integer(position).map_err(Fault::Error)?;
+        match self.object(object).map_err(Fault::Error)? {
+            // Bounded in bytes, so neither edge of the restriction is converted.
             Object::Buffer(b) => {
                 let r = b.accessible();
-                (b.char_of_byte(r.start).map_err(Fault::Error)?.0 as i64 + 1, b.char_of_byte(r.end).map_err(Fault::Error)?.0 as i64 + 1)
+                let byte = usize::try_from(position - 1).ok().and_then(|c| b.byte_of_char(CharOffset(c)).ok());
+                let byte = byte.filter(|byte| r.start <= *byte && *byte <= r.end).ok_or(Fault::Range1(at))?;
+                return self.char_property_at_byte(object, byte.0, property, None).map(|hit| hit.0).map_err(Fault::Error);
             }
-            Object::ByteBuffer(b) => (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1),
+            Object::ByteBuffer(b) => {
+                let (begv, zv) = (b.restriction.start.0 as i64 + 1, b.restriction.end.0 as i64 + 1);
+                if position < begv || position > zv {
+                    return Err(Fault::Range1(at));
+                }
+            }
             _ => return Err(Fault::Error("buffer required".into())),
-        };
-        let at = Value::integer(position).map_err(Fault::Error)?;
-        if position < begv || position > zv {
-            return Err(Fault::Range1(at));
         }
         self.get_char_property_values(at, property, object).map_err(Fault::Error)
     }
 
-    /// The positions above LOW and below POSITION in a text buffer where a
-    /// text property run or an overlay starts or ends, nearest first.
+    /// The positions above LOW and below POSITION in a unibyte buffer where
+    /// a text property run or an overlay starts or ends, nearest first.
     fn char_property_boundaries_before(&self, object: Value, position: i64, low: i64) -> std::result::Result<Vec<i64>, crate::prim::Fault> {
         use crate::prim::Fault;
-        if let Some(Object::ByteBuffer(b)) = self.object_if(object) {
-            let (low, mut at, mut positions) = (ByteOffset((low - 1).max(0) as usize), ByteOffset((position - 1).max(0) as usize), vec![]);
-            while at > low {
-                at = b.previous_property_change(at, low);
-                if at > low { positions.push(at.0 as i64 + 1); }
-            }
-            if let Some(text) = b.shown() {
-                let byte = |n: i64| text.byte_of_char(CharOffset((n - 1).clamp(0, b.bytes.len() as i64) as usize)).map(|at| at.0 as u32).map_err(Fault::Error);
-                let (from, to) = (byte(low.0 as i64 + 1)?, byte(position)?);
-                let mut ends = Vec::new();
-                text.intervals.visit(from, to, false, &text.anchors, |_, start, end| {
-                    ends.extend([start, end].into_iter().filter(|&e| e > from && e < to));
-                });
-                for end in ends {
-                    positions.push(text.char_of_byte(ByteOffset(end as usize)).map_err(Fault::Error)?.0 as i64 + 1);
-                }
-                positions.sort_unstable_by(|a, b| b.cmp(a));
-                positions.dedup();
-            }
-            return Ok(positions);
+        let Some(Object::ByteBuffer(b)) = self.object_if(object) else { return Err(Fault::Error("unibyte buffer required".into())) };
+        let (low, mut at, mut positions) = (ByteOffset((low - 1).max(0) as usize), ByteOffset((position - 1).max(0) as usize), vec![]);
+        while at > low {
+            at = b.previous_property_change(at, low);
+            if at > low { positions.push(at.0 as i64 + 1); }
         }
-        let b = self.annotated(object).map_err(Fault::Error)?;
-        let range = b.accessible();
-        let byte = |n: i64| b.byte_of_char(CharOffset((n.clamp(1, b.len_chars() as i64 + 1) - 1) as usize)).map_err(Fault::Error);
-        let (from, to) = (byte(low)?, byte(position)?.min(range.end));
-        let mut bytes = Vec::new();
-        let mut at = from;
-        while at < to {
-            at = b.properties.next_change(at, to);
-            if at < to { bytes.push(at.0 as u32); }
+        if let Some(text) = b.shown() {
+            let byte = |n: i64| text.byte_of_char(CharOffset((n - 1).clamp(0, b.bytes.len() as i64) as usize)).map(|at| at.0 as u32).map_err(Fault::Error);
+            let (from, to) = (byte(low.0 as i64 + 1)?, byte(position)?);
+            let mut ends = Vec::new();
+            text.intervals.visit(from, to, false, &text.anchors, |_, start, end| {
+                ends.extend([start, end].into_iter().filter(|&e| e > from && e < to));
+            });
+            for end in ends {
+                positions.push(text.char_of_byte(ByteOffset(end as usize)).map_err(Fault::Error)?.0 as i64 + 1);
+            }
+            positions.sort_unstable_by(|a, b| b.cmp(a));
+            positions.dedup();
         }
-        b.intervals.visit(from.0 as u32, to.0 as u32, false, &b.anchors, |_, start, end| {
-            bytes.extend([start, end].into_iter().filter(|&e| e > from.0 as u32 && e < to.0 as u32));
-        });
-        bytes.sort_unstable_by(|a, b| b.cmp(a));
-        bytes.dedup();
-        bytes.into_iter()
-            .map(|at| b.char_of_byte(ByteOffset(at as usize)).map(|c| c.0 as i64 + 1).map_err(Fault::Error))
-            .collect()
+        Ok(positions)
     }
 
     fn property_single_change(

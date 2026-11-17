@@ -51,6 +51,21 @@ fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
     crate::host::inspect_listen(&directory, store.as_deref()).map_err(|error| Fault::Error(format!("inspect listener: {error}")))?;
     Ok(Value::NIL)
 }}
+// The main VM's stalls over a second since the last call, for the usage
+// log: (DROPPED LINE...), each LINE a stall's JSON record, oldest first;
+// with ENDING (the session ends) the stall still going too, last
+// (romacs-vm-gui watchdog.rs).
+defsubr! { name = "romacs--take-stalls", gnu = "romacs:inspect", effect = Global,
+fn romacs_take_stalls(cx; optional ending: Value) {
+    let (lines, dropped) = crate::host::take_stalls(ending != Value::NIL);
+    let mut list = Value::NIL;
+    for line in lines.iter().rev() {
+        let text = cx.string(line);
+        list = cx.cons(text, list);
+    }
+    let dropped = Value::integer(i64::try_from(dropped).unwrap_or(i64::MAX)).unwrap_or(Value::NIL);
+    Ok(cx.cons(dropped, list))
+}}
 defsubr! { name = "romacs--inspect-stop", gnu = "romacs:inspect", effect = Global,
 fn romacs_inspect_stop(_cx) {
     crate::host::inspect_stop();
@@ -61,12 +76,12 @@ fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) -> Step 
     cx.backtrace_debug(level, flag, base).map(Step::Done)
 }}
 // Every frame with its locals in one walk, for `backtrace-get-frames`
-// (lisp/romacs/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
+// (lisp/emacs-lisp/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
 defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
 fn backtrace_frames_and_locals(cx; optional base: Value) -> Step {
     cx.backtrace_frames_and_locals(base).map(Step::Done)
 }}
-// The two halves of `backtrace-eval' (lisp/romacs/vm/prelude.el): GNU's
+// The two halves of `backtrace-eval' (lisp/vm/prelude.el): GNU's
 // specpdl_unrewind to a frame's entry, and back.
 defsubr! { name = "romacs--backtrace-unrewind", gnu = "eval.c:4236", effect = Global,
 fn backtrace_unrewind(cx, nframes: Value; optional base: Value) {

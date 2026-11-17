@@ -3,7 +3,7 @@
 //! This records edits and explicit clean/dirty transitions only. Undo history
 //! and undo-based restoration of a saved state are not available here.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Modification {
     pub modiff: u64,
     pub chars_modiff: u64,
@@ -12,8 +12,10 @@ pub(crate) struct Modification {
     /// GNU `auto_save_failure_time': when an auto-save last took over a
     /// minute (seconds since the epoch), else 0.
     pub auto_save_failure: i64,
+    /// GNU `BUF_COMPACT`: MODIFF when a collection last truncated the undo
+    /// list (`Vm::undo_round`).
+    pub compact: u64,
 }
-romacs_snapshot::snapshot_struct!(Modification { modiff, chars_modiff, save_modiff, autosave_modiff, auto_save_failure });
 
 impl Default for Modification {
     fn default() -> Self {
@@ -23,6 +25,7 @@ impl Default for Modification {
             save_modiff: 1,
             autosave_modiff: 0,
             auto_save_failure: 0,
+            compact: 1,
         }
     }
 }

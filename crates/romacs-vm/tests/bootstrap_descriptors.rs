@@ -99,8 +99,8 @@ fn byte_run_loads_with_existing_t3_prelude() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/emacs-lisp/byte-run.el")).unwrap();
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn eval_and_compile_runs_source_body_once() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
+    vm.load_file(&root.join("lisp/emacs-lisp/byte-run.el")).unwrap();
     let value = vm.eval_source("(defvar bootstrap-count 0) (eval-and-compile (setq bootstrap-count (1+ bootstrap-count))) bootstrap-count").unwrap();
     assert_eq!(value.display().unwrap(), "1");
 }
@@ -126,7 +126,7 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
+    vm.load_file(&root.join("lisp/emacs-lisp/byte-run.el")).unwrap();
     vm.eval_source("(defvar bootstrap-timing 0)").unwrap();
     let id = vm.compile_source("(eval-and-compile (setq bootstrap-timing (1+ bootstrap-timing)))").unwrap();
     let before = vm.eval_source("bootstrap-timing").unwrap();
@@ -150,11 +150,11 @@ fn eval_and_compile_evaluates_its_body_at_expansion_as_gnu_does() {
 // SUCCEEDS, assert GNU's answers above instead; never relax the pin.
 fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let source = std::fs::read_to_string(root.join("lisp/gnu/subr.el")).unwrap();
+    let source = std::fs::read_to_string(root.join("lisp/subr.el")).unwrap();
     let definition = source.split("(defun buffer-local-restore-state").nth(1).unwrap()
         .split("(defmacro push").next().unwrap();
     assert!(definition.contains("(pcase-dolist (`(,variable ,local ,value) states)"),
-        "lisp/gnu/subr.el is GNU's again; this pins GNU's definition: {definition}");
+        "lisp/subr.el is GNU's again; this pins GNU's definition: {definition}");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
     // `.map(|_| ())` ends the result's borrow of `vm` (master's heap boundary:
@@ -166,7 +166,7 @@ fn restore_state_needs_pcase_dolist_which_vm2_cannot_reach_yet() {
         (buffer-local-restore-state '((restore-a t . tail) atom (restore-b t 9 extra)))
         (list restore-a restore-b restore-kills)").map(|v| v.display().unwrap()));
     // The body is compiled: its arguments run before the unbound head is read
-    // (DIVERGENCES VM2-BCALL1), so the backquote argument fails first.
+    // (ledger/divergences VM2-BCALL1), so the backquote argument fails first.
     assert_eq!(called, Err("(invalid-function (` ((, variable) (, local) (, value))))".to_owned()),
         "frontier moved: if this is GNU's (nil 9 (nil)), turn the ratchet into the GNU assertion");
 }
@@ -236,12 +236,12 @@ fn subr_cold_frontier_is_pinned() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    vm.set_load_path(&[root.join("lisp/gnu"), root.join("lisp/gnu/emacs-lisp")]).unwrap();
-    vm.load_file(&root.join("lisp/gnu/emacs-lisp/byte-run.el")).unwrap();
+    vm.set_load_path(&[root.join("lisp"), root.join("lisp/emacs-lisp")]).unwrap();
+    vm.load_file(&root.join("lisp/emacs-lisp/byte-run.el")).unwrap();
     // The returned `Local` borrows `vm`; drop it before `load_report`.
-    let outcome = vm.load_file(&root.join("lisp/gnu/subr.el")).map(drop);
+    let outcome = vm.load_file(&root.join("lisp/subr.el")).map(drop);
     let report = vm.load_report();
-    let subr = root.join("lisp/gnu/subr.el").canonicalize().unwrap();
+    let subr = root.join("lisp/subr.el").canonicalize().unwrap();
     let subr = subr.to_string_lossy();
 
     // Count first, so that a frontier move in EITHER direction (including subr.el
@@ -258,7 +258,7 @@ fn subr_cold_frontier_is_pinned() {
     assert!(outcome.is_ok(), "{failure}");
     assert_eq!(report["completed_forms"], 578, "{failure}");
     assert_eq!(vm.eval_source("(fboundp 'add-hook)").unwrap().display().unwrap(), "t", "SUBR_ADD_HOOK_MISSING");
-    for (relative, expected) in [("lisp/gnu/emacs-lisp/macroexp.el", 50), ("lisp/gnu/emacs-lisp/pcase.el", 53), ("lisp/gnu/files.el", 49)] {
+    for (relative, expected) in [("lisp/emacs-lisp/macroexp.el", 50), ("lisp/emacs-lisp/pcase.el", 53), ("lisp/files.el", 49)] {
         let path = root.join(relative);
         let result = vm.load_file(&path).map(drop);
         let canonical = path.canonicalize().unwrap().to_string_lossy().into_owned();
@@ -266,11 +266,12 @@ fn subr_cold_frontier_is_pinned() {
         let completed = report["steps"].as_array().unwrap().iter().filter(|s| s["file"] == canonical && s["status"] == "ok").count();
         eprintln!("BOOTSTRAP_CHAIN {relative}: completed={completed}; result={result:?}");
         assert_eq!(completed, expected, "BOOTSTRAP_CHAIN_MOVED {relative}: {result:?}");
-        if relative == "lisp/gnu/files.el" {
+        if relative == "lisp/files.el" {
             let error = result.unwrap_err();
             // The expander's compiled body reads the unbound `bound-and-true-p'
-            // after its argument, the void variable (DIVERGENCES VM2-BCALL1).
-            assert!(error.contains("line 494 form 50:") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
+            // after its argument, the void variable (ledger/divergences VM2-BCALL1).
+            assert!(error.contains(" form 50: ") && error.ends_with("(void-variable emacs-lisp-docstring-fill-column)"), "FILES_MACRO_FRONTIER_MOVED {error}");
+            assert!(report["steps"].as_array().unwrap().iter().any(|s| s["file"] == canonical && s["status"] == "error" && s["source"].as_str().unwrap().starts_with("(define-minor-mode auto-save-visited-mode")), "FILES_MACRO_FRONTIER_MOVED {error}");
             // Native defgroup is a compiler form, not a callable function cell.
             assert_eq!(vm.eval_source("(fboundp 'defgroup)").unwrap().display().unwrap(), "nil", "FILES_DEFGROUP_ATTRIBUTION_CHANGED");
         } else { assert!(result.is_ok(), "{result:?}"); }

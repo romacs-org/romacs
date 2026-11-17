@@ -84,8 +84,7 @@ impl Vm {
         let Ok(hash) = crate::host::read_to_string(store.join(format!("source-{k}"))) else {
             return Ok(None);
         };
-        // SAFETY: immutable-inode image store; same deployment contract as --image.
-        let Ok(image) = (unsafe { ImageRegion::open(store, &hash) }) else {
+        let Ok(image) = ImageRegion::open(store, &hash) else {
             return Ok(None);
         };
         let Ok(v) = image.string_reference_raw(0) else {
@@ -171,7 +170,7 @@ impl Vm {
         #[cfg(test)]
         request_code::artifact_fault(request_code::ArtifactFault::Remapped);
         for (id, function) in ids.into_iter().zip(a.functions) {
-            self.functions[id] = Arc::new(function);
+            self.functions.set(id, Arc::new(function));
         }
         // The stored functions use the reserved slots: they own them now.
         self.claim_caches(&cache_ids);

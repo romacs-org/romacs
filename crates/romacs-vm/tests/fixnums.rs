@@ -204,7 +204,7 @@ fn widened_code_image_roundtrip() {
         .publish_code_image(&store, entry.unwrap(), [109; 32])
         .unwrap();
     // The private content-addressed store is never overwritten.
-    let image = unsafe { romacs_vm::ImageRegion::open(&store, &key) }.unwrap();
+    let image = romacs_vm::ImageRegion::open(&store, &key).unwrap();
     let (mut restored, entry) = Vm::from_code_image(image, [109; 32]).unwrap();
     restored.collect_garbage();
     let result = restored.execute(entry).and_then(|v| v.display());

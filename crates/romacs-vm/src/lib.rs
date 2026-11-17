@@ -18,10 +18,12 @@ mod char_table;
 mod graphics;
 mod width_rule;
 mod map_keymap;
+mod where_is;
 #[cfg(test)]
 mod map_keymap_tests;
 mod charset;
 mod obarray;
+mod command_set;
 mod command;
 mod interpreted_closure;
 mod oclosure;
@@ -77,6 +79,14 @@ pub(crate) struct NameState(foldhash::fast::SeedableRandomState);
 // SAFETY: its own seed is a number, and its shared seed the one `default`
 // leaked to the heap, never foldhash's global one in a writable static.
 unsafe impl romacs_snapshot::SnapshotSafe for NameState {}
+impl romacs_snapshot::Schema for NameState {
+    const LEAF: bool = true;
+    fn walk(&self, _: &mut romacs_snapshot::Walk<'_>) {}
+    fn any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn settle(&mut self, _: &mut romacs_snapshot::Settle) {}
+}
 
 impl Default for NameState {
     fn default() -> Self {
@@ -98,9 +108,11 @@ use std::sync::Arc;
 mod code_image;
 mod sqlite;
 mod treesit;
+pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;
+mod pass;
 mod posix_tz;
 mod tzfile;
 mod undo;
@@ -110,6 +122,9 @@ use romacs_brand as brand;
 mod gc;
 mod registers;
 mod gc_check;
+mod functions;
+mod epoch;
+mod slots;
 mod gc_mark;
 mod table;
 mod handle;
@@ -117,11 +132,13 @@ pub use handle::{Arg, Fixed, Local, Rooted};
 mod image;
 mod frozen;
 mod isolate;
+mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
 pub mod anchors;
+mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
@@ -137,6 +154,7 @@ mod lstring;
 mod let_forms;
 mod symkey;
 mod display;
+mod display_stats;
 mod fringe;
 mod tab_bar;
 mod overlay_order;
@@ -154,6 +172,7 @@ mod threaded;
 
 mod expand;
 mod save_excursion;
+mod closure_key;
 mod numbers;
 mod metadata;
 mod variable_definitions;
@@ -177,6 +196,7 @@ mod protocol;
 mod reader;
 mod regexp;
 mod syntax_index;
+mod markdown;
 mod syntax_scan;
 mod syntax_summary;
 mod surface;
@@ -193,15 +213,14 @@ fn take_deferred_escape_form(id: i64) -> Form {
 
 pub type Result<T> = std::result::Result<T, String>;
 /// Opaque compiler identity. Source APIs cannot construct one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub struct GeneratedName(u64);
-romacs_snapshot::snapshot_tuple!(GeneratedName(f0));
 impl std::fmt::Display for GeneratedName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub enum Form {
     Int(i64),
     Float(f64),
@@ -225,18 +244,6 @@ pub enum Form {
 }
 // SAFETY: a form's objects are rooted handles (`FormObject`), never raw Values.
 unsafe impl crate::brand::Plain for Form {}
-romacs_snapshot::snapshot_enum!(Form {
-    Form::Int(f0) => (f0),
-    Form::Float(f0) => (f0),
-    Form::Sym(f0) => (f0),
-    Form::Generated(f0) => (f0),
-    Form::List(f0) => (f0),
-    Form::String(f0) => (f0),
-    Form::Bytes(f0) => (f0),
-    Form::Vector(f0) => (f0),
-    Form::Dotted(f0, f1) => (f0, f1),
-    Form::Object(f0) => (f0),
-});
 impl Form {
     pub fn from_json(v: serde_json::Value) -> Result<Self> {
         match v {
@@ -298,7 +305,7 @@ impl Form {
 }
 
 /// Two-bit fixnums and three-bit reference tags; private indices move at collection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Value(u64);
 /// A Value no collection frees or moves: nil, t, unbound, a fixnum, a
 /// primitive, or a symbol that is not an obarray's (`reclaim_obarray_symbols`
@@ -321,7 +328,6 @@ impl Imm {
         self.0
     }
 }
-romacs_snapshot::snapshot_tuple!(Value(f0));
 impl Value {
     pub const NIL: Self = Self(0);
     pub const TRUE: Self = Self(2);
@@ -362,7 +368,7 @@ impl Value {
         self.integer_value()
             .ok_or_else(|| "integer required".into())
     }
-    fn reference(index: usize, tag: u64) -> Self {
+    const fn reference(index: usize, tag: u64) -> Self {
         if tag == 5 {
             Self((((index as u64) + 1) << 3) | 2)
         } else {
@@ -504,7 +510,6 @@ enum Primitive {
     Puthash,
     Remhash,
     Clrhash,
-    Maphash,
     HashTableCount,
     HashTableP,
     HashTableTest,
@@ -580,7 +585,6 @@ enum Primitive {
     DefineKey,
     MakeSparseKeymap,
     Keymapp,
-    KeyBinding,
     LookupKey,
     GlobalSetKey,
     CurrentGlobalMap,
@@ -765,7 +769,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("puthash", Primitive::Puthash),
     ("remhash", Primitive::Remhash),
     ("clrhash", Primitive::Clrhash),
-    ("maphash", Primitive::Maphash),
     ("hash-table-count", Primitive::HashTableCount),
     ("hash-table-p", Primitive::HashTableP),
     ("hash-table-test", Primitive::HashTableTest),
@@ -845,7 +848,6 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
     ("define-key", Primitive::DefineKey),
     ("make-sparse-keymap", Primitive::MakeSparseKeymap),
     ("keymapp", Primitive::Keymapp),
-    ("key-binding", Primitive::KeyBinding),
     // `lookup-key' is a T2 subr (prims/keymap.rs) so menu filters can run.
     ("#:vm2-lookup-key", Primitive::LookupKey),
     ("global-set-key", Primitive::GlobalSetKey),
@@ -892,7 +894,7 @@ const PRIMITIVES: &[(&str, Primitive)] = &[
 #[cfg(test)]
 mod rest_tests;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, romacs_snapshot::Snapshot)]
 enum Op {
     Const(usize, Value),
     Move(usize, usize),
@@ -935,37 +937,6 @@ enum Op {
     LeaveProtect(usize),
     ResumeExit,
 }
-romacs_snapshot::snapshot_enum!(Op {
-    Op::Const(f0, f1) => (f0, f1),
-    Op::Move(f0, f1) => (f0, f1),
-    Op::Cell(f0) => (f0),
-    Op::ReadCell(f0, f1) => (f0, f1),
-    Op::WriteCell(f0, f1) => (f0, f1),
-    Op::Global(f0, f1) => (f0, f1),
-    Op::SetGlobal(f0, f1) => (f0, f1),
-    Op::Bind(f0, f1) => (f0, f1),
-    Op::Unbind(f0) => (f0),
-    Op::BindLate(f0, f1) => (f0, f1),
-    Op::UnbindLate(f0) => (f0),
-    Op::ReadLate(f0, f1, f2) => (f0, f1, f2),
-    Op::WriteLate(f0, f1, f2) => (f0, f1, f2),
-    Op::LateForwarded(f0, f1) => (f0, f1),
-    Op::Jump(f0) => (f0),
-    Op::Unless(f0, f1) => (f0, f1),
-    Op::Closure(f0, f1, f2) => (f0, f1, f2),
-    Op::Define(f0, f1) => (f0, f1),
-    Op::DefineMacro(f0, f1) => (f0, f1),
-    Op::Call(f0, f1, f2, f3) => (f0, f1, f2, f3),
-    Op::Direct(f0, f1, f2, f3, f4) => (f0, f1, f2, f3, f4),
-    Op::Sealed(f0, f1, f2, f3) => (f0, f1, f2, f3),
-    Op::Return(f0) => (f0),
-    Op::Catch(f0, f1, f2) => (f0, f1, f2),
-    Op::Condition(f0, f1, f2) => (f0, f1, f2),
-    Op::PopHandlers(f0) => (f0),
-    Op::Protect(f0, f1, f2) => (f0, f1, f2),
-    Op::LeaveProtect(f0) => (f0),
-    Op::ResumeExit => (),
-});
 impl Op {
     // Register operands only: slots, function ids, branch targets, and arities
     // are different coordinate spaces. Argument windows stay contiguous because
@@ -1043,7 +1014,7 @@ impl Op {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 struct Function {
     // Compiler-only derived metadata for newly compiled closure trees. Imported
     // executable bodies are never children of a new lexical closure site.
@@ -1075,13 +1046,17 @@ struct Function {
     /// images and source-cache entries holding a generated symbol do not
     /// record it.
     params: Option<Vec<Form>>,
+    /// Its structural key (`closure_key`): closures of two lambdas with the
+    /// same key and `equal` captures are `equal`, as GNU's are. None where
+    /// the source has no canonical spelling; such closures compare by
+    /// identity.
+    key: Option<u128>,
 }
-romacs_snapshot::snapshot_struct!(Function { capture_mutations, mapped_code, code, regs, captures, arity, required, rest, sites, lazy, dynamic, pending, params });
 /// A function body a compiled load left in its artifact's bytes
 /// (`Vm::decode_pending`), with what the body names: a collection keeps
 /// its VALUES (moving them with the heap) and CHILDREN alive, and its
 /// inline CACHES claimed, as it would through decoded code.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 struct PendingBody {
     bytes: Arc<Vec<u8>>,
     body: std::ops::Range<usize>,
@@ -1091,7 +1066,6 @@ struct PendingBody {
     /// The artifact's names, as slots.
     names: Arc<Vec<usize>>,
 }
-romacs_snapshot::snapshot_struct!(PendingBody { bytes, body, values, children, caches, names });
 /// The unexpanded body of a function defined in GNU's non-eager load regime
 /// (src/lread.c:2183: `internal-macroexpand-for-load' not yet fbound).
 ///
@@ -1101,7 +1075,7 @@ romacs_snapshot::snapshot_struct!(PendingBody { bytes, body, values, children, c
 /// Everything else is compiler-owned Rust data and needs no tracing. The
 /// captured lexical environment is NOT here: it is the closure's ordinary
 /// capture vector, one register per visible lexical binding in `names` order.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 struct LazyBody {
     body: Value,
     args: Vec<Form>,
@@ -1126,7 +1100,6 @@ struct LazyBody {
     /// Made while interpreting a source file (`Vm::interpreting_source`).
     interpreting: bool,
 }
-romacs_snapshot::snapshot_struct!(LazyBody { body, args, names, cells, lates, shadows, local_specials, pending_specials, dynamic_scope, deferred, evaluated, file_level, interpreting });
 #[derive(Clone, Copy)]
 struct Binding {
     reg: usize,
@@ -1139,15 +1112,11 @@ struct Binding {
     /// binding is dynamic, GNU's lexical lookups still find that one.
     shadow: Option<GeneratedName>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 enum Name {
     Source(String),
     Generated(GeneratedName),
 }
-romacs_snapshot::snapshot_enum!(Name {
-    Name::Source(f0) => (f0),
-    Name::Generated(f0) => (f0),
-});
 impl Name {
     fn source(&self) -> Option<&str> {
         match self {
@@ -1217,12 +1186,12 @@ fn lambda_arity(args: &[Form]) -> Result<(usize, usize, bool)> {
     }
     Ok((positional - usize::from(rest), required, rest))
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 struct Cache {
     version: u64,
     target: Value,
 }
-romacs_snapshot::snapshot_struct!(Cache { version, target });
+#[derive(romacs_snapshot::Snapshot)]
 struct Slot {
     value: Value,
     function: Value,
@@ -1241,7 +1210,6 @@ struct Slot {
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
 }
-romacs_snapshot::snapshot_struct!(Slot { value, function, version, plist, local, explicit_local, declared_special });
 impl Slot {
     const fn new() -> Self {
         Self {
@@ -1255,7 +1223,7 @@ impl Slot {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 enum VariableRedirect {
     Plain,
     /// GNU `SYMBOL_LOCALIZED`: the slot's own `local` table holds per-buffer
@@ -1270,20 +1238,13 @@ enum VariableRedirect {
     /// in runtime storage (`forwarded.rs`), never in the symbol's value cell.
     Forwarded(forwarded::Fwd),
 }
-romacs_snapshot::snapshot_enum!(VariableRedirect {
-    VariableRedirect::Plain => (),
-    VariableRedirect::Localized => (),
-    VariableRedirect::LocalizedForwarded(f0) => (f0),
-    VariableRedirect::Alias(f0) => (f0),
-    VariableRedirect::Forwarded(f0) => (f0),
-});
+#[derive(romacs_snapshot::Snapshot)]
 struct Closure {
     function: usize,
     captures: Vec<Value>,
     metadata: Vec<Value>,
     document: Value,
 }
-romacs_snapshot::snapshot_struct!(Closure { function, captures, metadata, document });
 
 /// Source interning is compiler-owned; cold faults intern diagnostics. Hot calls use slots and guards.
 #[cfg(test)]
@@ -1291,41 +1252,38 @@ romacs_snapshot::snapshot_struct!(Closure { function, captures, metadata, docume
 mod window_tests;
 
 /// A symbol's declaration as the compiler sees it (`Vm::special_kind`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub(crate) enum SpecialKind {
     Lexical = 0,
     FileLocal = 1,
     Global = 2,
 }
-romacs_snapshot::snapshot_enum!(SpecialKind {
-    SpecialKind::Lexical => (),
-    SpecialKind::FileLocal => (),
-    SpecialKind::Global => (),
-});
 /// One recent_keys entry: an input character or event symbol, or the
 /// command it ran, which `recent-keys' shows as (nil . COMMAND).
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) enum RecentKey { Char(i64), Event(String), Command(String) }
-romacs_snapshot::snapshot_enum!(RecentKey {
-    RecentKey::Char(f0) => (f0),
-    RecentKey::Event(f0) => (f0),
-    RecentKey::Command(f0) => (f0),
-});
 /// lossage_limit's default.
 pub(crate) const RECENT_KEYS: usize = 300;
 
 /// timefns.c's local time zone after set-time-zone-rule: the process's
 /// TZ (the start), the system wall clock (nil or `wall'), GNU's utc_tz
 /// (t or 0), or a rule string.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) enum LocalZone { Process, Wall, Utc, Rule(String) }
-romacs_snapshot::snapshot_enum!(LocalZone {
-    LocalZone::Process => (),
-    LocalZone::Wall => (),
-    LocalZone::Utc => (),
-    LocalZone::Rule(f0) => (f0),
-});
 
+// What a world image may hold of a VM (`world::safe`): every field, each
+// SnapshotSafe or, at rest, checked by `world_quiescent`: the hosts, the
+// children and jobs, the mapped code image, the tracking, the lowered code
+// (function pointers), the suspended engines (pointers into it), the
+// compiled patterns (their SIMD searchers hold function pointers) and the
+// idle clock reading (process-relative). The restoring process remakes the
+// at-rest fields (`Schema::renew`).
+//
+// The image's root (`#[snapshot(root)]`), not itself SnapshotSafe: a VM
+// enters an image only as the primary, which `world::image::capture`
+// validates, never inside a carry, where nothing would.
+#[derive(romacs_snapshot::Snapshot)]
+#[snapshot(root)]
 pub struct Vm {
     charsets: charset::Registry,
     standard_case_tables: [Value; 4],
@@ -1346,6 +1304,7 @@ pub struct Vm {
     /// A Lisp-called motion runs, whose polls may quit (`Vm::native_poll`).
     /// Off in redisplay, which never unwinds half done.
     motion_quit: bool,
+    // CELL(Plain)
     #[cfg(test)]
     variable_read_probes: std::cell::Cell<usize>,
     #[cfg(test)]
@@ -1356,22 +1315,44 @@ pub struct Vm {
     disable_inline: bool,
     #[cfg(test)]
     speculative_misses: usize,
+    /// Times `buffer_index` resolved the current buffer afresh.
+    #[cfg(test)]
+    buffer_resolutions: usize,
     regexp: regexp::MatchState,
+    #[snapshot(at_rest)]
     regexp_cache: regexp::PatternCache,
+    /// The char tables read as flat rows (`char_table::flat`).
+    #[snapshot(at_rest)]
+    flat_tables: char_table::FlatTables,
+    /// The call caches filled since the last collection, up to
+    /// `gc::CACHES_FILLED` (`Vm::empty_dead_caches`): only these may name
+    /// what a minor frees.
+    #[snapshot(at_rest)]
+    caches_filled: Vec<u32>,
+    /// The objects whose storage records its own writes (`gc::shares_storage`),
+    /// as the last minor found them all, or None where no minor since a full,
+    /// a promotion or a restore knows them: the minor that needs them then
+    /// asks every object its kind (`Vm::minor`).
+    #[snapshot(at_rest)]
+    shared_holders: Option<Vec<u32>>,
     /// Romacs's own mode-line segment values (`romacs-mode-line-*`) as
     /// the expander's forms, by variable slot, while the value is the same
     /// object: dropped when that value dies, rewritten when it moves.
+    #[snapshot(at_rest)]
     mode_line_forms: std::collections::HashMap<usize, (Value, Form)>,
     /// GNU's image caches (graphics.rs): facts of the images frames have
     /// loaded, their pixels the display host's.
+    #[snapshot(at_rest)]
     images: graphics::ImageCache,
     /// The closures `(lambda ...)' lists called as functions compiled to,
     /// by the list object (`Vm::lambda_list_closure`): an ephemeron, each
     /// entry traced while its list lives and moved with it (`Vm::weak_round`).
+    #[snapshot(at_rest)]
     lambda_lists: std::collections::HashMap<u64, source_cache::LambdaList>,
     /// The status bar's last fitted line (a `display::mode_line::Band'),
     /// kept for a click to read (`Vm::status_bar_target'); its object
     /// constants are traced handles.
+    #[snapshot(at_rest)]
     status_bar_line: Option<Box<dyn std::any::Any>>,
     execution_fatal: bool,
     loader: loader::Loader,
@@ -1390,30 +1371,43 @@ pub struct Vm {
     /// The instruction and registers of the leaf a site is running with no
     /// activation, as addresses; (0, 0) otherwise. Lisp that leaf reaches
     /// records the activation first (`Vm::record_site_leaf`).
+    #[snapshot(at_rest)]
     site_leaf: (usize, usize),
     signal_handlers: Vec<threaded::SignalHandler>,
     backtrace: backtrace::Backtrace,
     /// profiler.c's CPU and memory profilers (`profiler.rs`).
+    #[snapshot(at_rest)]
     profiler: profiler::Profiler,
     propagated_escape_hooked: bool,
     propagated_eval_depth: Option<usize>,
     /// Set immediately before executing an `eval` form; consumed by the engine.
     propagate_next: bool,
     /// The embedder's keyboard while one is attached (host_input.rs).
+    #[snapshot(at_rest)]
     host_input: Option<Box<dyn host_input::HostInput>>,
     /// A host wait in progress, its host moved out of `host_input`.
+    #[snapshot(at_rest)]
     host_wait: Option<host_input::HostWait>,
+    /// A host event a `switch-frame' event went before, and the id of the
+    /// top-level frame it came from: the next read's (host_input.rs).
+    #[snapshot(at_rest)]
+    deferred_event: Option<(host_input::HostEvent, Option<u64>)>,
     /// The embedder's layout while one is attached (layout_host.rs).
+    #[snapshot(at_rest)]
     layout_host: Option<Box<dyn layout_host::LayoutHost>>,
     /// The embedder's window system while one is attached (display_host.rs).
+    #[snapshot(at_rest)]
     display: Option<display_host::Display>,
     /// The visual configuration Lisp asked for (`romacs--effect-set'),
     /// which the open display shows.
+    #[snapshot(at_rest)]
     visual: Box<romacs_display_protocol::VisualConfig>,
     /// The embedder's end of the session while one is attached (session_host.rs).
+    #[snapshot(at_rest)]
     session_host: Option<session_host::SessionHost>,
     /// keyboard.c timer_idleness_start_time: when the command loop began
     /// waiting idle for a key, while it does.
+    #[snapshot(at_rest)]
     idle_since: Option<std::time::Instant>,
     /// `romacs--redisplay-since-mark': None unmarked; marked, the first
     /// redisplay's microseconds after the mark, None until it runs.
@@ -1443,8 +1437,10 @@ pub struct Vm {
     /// Counts keymap stores and parent changes, GNU's two flushes of the
     /// reverse-map cache `where-is-internal' keeps (keymap.c where_is_cache).
     keymap_generation: u64,
+    #[snapshot(at_rest)]
     process_jobs: process_jobs::Jobs,
     /// GNU process.c chan_process and friends: subprocess descriptors.
+    #[snapshot(at_rest)]
     subprocesses: subprocess::Table,
     environment_snapshot: Option<Vec<Vec<u8>>>,
     /// SYMBOL_TRAPPED_WRITE base slots: variables with watchers (watchers.rs).
@@ -1453,7 +1449,8 @@ pub struct Vm {
     /// (`Vm::notify_watchers_at`), or as a panic is caught (`Vm::catching`).
     retrap: Vec<usize>,
     /// etc/DOC as last read, keyed by path and modification time (prims/doc.rs).
-    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<Vec<u8>>)>,
+    doc_file: Option<(std::path::PathBuf, std::time::SystemTime, std::sync::Arc<prim::prims::doc::DocFile>)>,
+    #[snapshot(at_rest)]
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
     pending_specials: NameSet<String>,
@@ -1510,6 +1507,10 @@ pub struct Vm {
     loader_order_request: bool,
     /// Consumed by the next `function` call: keep every capture register.
     keep_captures: bool,
+    /// Consumed by the next lambda compiled: the closure slots `closure`
+    /// takes out of its body (an interactive spec and its modes), which its
+    /// structural key covers as GNU's `equal` compares them (`closure_key`).
+    closure_key_extra: Vec<Form>,
     /// Eager `lambda' bodies being compiled around the current form.
     lambda_depth: usize,
     /// The windows the last window change functions run saw
@@ -1517,18 +1518,33 @@ pub struct Vm {
     window_change_seen: Vec<u64>,
     expanded_macros: Vec<(usize, u64)>,
     expanded_symbols: NameSet<String>,
+    #[snapshot(at_rest)]
     image: Option<std::sync::Arc<ImageRegion>>,
     /// Frozen regions by id (`frozen.rs`); index 0 is the image above.
-    regions: Vec<Option<Box<frozen::Region>>>,
+    #[snapshot(at_rest)]
+    regions: frozen::Regions,
+    #[snapshot(at_rest)]
     region_free: Vec<usize>,
     /// Three quarters of the region ids are live: collect at the next entry.
+    #[snapshot(at_rest)]
     region_collect: bool,
     /// Worker isolates and, in a worker, the parent peer (`isolate.rs`).
+    #[snapshot(at_rest)]
     isolates: isolate::Isolates,
+    /// This session's keeper, once attached (`keeper.rs`).
+    #[snapshot(at_rest)]
+    keeper: Option<keeper::Link>,
     /// GNU inotify.c inotifyfd: the file notification instance, made by
     /// the first watch and closed with the last (`prim/leaf/inotify.rs`).
+    #[snapshot(at_rest)]
     inotify: Option<std::os::fd::OwnedFd>,
     buffer_slot: usize,
+    /// The current buffer as `buffer_index` last resolved it: the slot's
+    /// value then, a live buffer, and its object index. Kept by value, not
+    /// by writer: `let` and its unwinding write the slot like any special
+    /// variable, and a different value simply resolves again. Killing a
+    /// buffer and a collection (which may move buffers) drop it.
+    resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
@@ -1537,6 +1553,9 @@ pub struct Vm {
     /// Storage of GNU's built-in (C) variables; collector roots (`gc.rs`).
     forwarded: forwarded::Forwarded,
     fixnum_slots: [usize; 2],
+    /// `char-property-alias-alist' and `default-text-properties', which
+    /// textget reads for every property a character does not have.
+    textget_slots: [usize; 2],
     local_binding_slots: HashSet<usize>,
     free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
@@ -1551,6 +1570,10 @@ pub struct Vm {
     /// collection, which GNU charges to `consing_until_gc' with the objects
     /// themselves (alloc.c make_uninit_multibyte_string, allocate_vectorlike).
     gc_payload_bytes: usize,
+    /// `gc_payload_bytes` as the last collection left it: what the minors
+    /// since the last full promoted (`Vm::minor`).
+    #[snapshot(at_rest)]
+    payload_settled: usize,
     /// Vector and record slots the last collection kept, which it traced:
     /// with `gc_retained', the live heap the proportional rule paces by, so
     /// a big kept vector spaces out the collections that trace it.
@@ -1593,11 +1616,16 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
+    /// The names `permanent_symbol_names` took since the last collection,
+    /// the only ones a minor can find young.
+    #[snapshot(at_rest)]
+    permanent_names_added: Vec<Value>,
+    // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
     generated_symbols: HashMap<GeneratedName, usize>,
     generated_slots: HashMap<usize, GeneratedName>,
-    slots: Vec<Slot>,
+    slots: slots::Slots,
     specials: NameSet<String>,
     /// Bumped whenever a symbol stops being special or an uninterned one's
     /// declaration changes: with the size of `specials', which an insertion
@@ -1606,13 +1634,15 @@ pub struct Vm {
     /// Per slot, `slot_is_special''s last answer and the key it held under
     /// (`Vm::special_key'), for the late bindings' check at each `let'.
     special_cache: Vec<u64>,
-    functions: Vec<Arc<Function>>,
+    functions: functions::Functions,
     request_code: request_code::RequestCode,
+    #[snapshot(at_rest)]
     execution: threaded::Program,
     /// Programs of finished nested engine runs (registers all NIL again,
     /// lowered code kept), reused by the next nested run
     /// (`threaded::Vm::end_nested_execution`). Code invalidation and the
     /// collector reach them as they reach `execution`.
+    #[snapshot(at_rest)]
     spare_programs: Vec<threaded::Program>,
     /// By argument count, the permanent function through which native code
     /// calls Lisp (`threaded::Vm::reader_call`), compiled at first use.
@@ -1622,11 +1652,9 @@ pub struct Vm {
     cell_pairs: HashMap<usize, Value>,
     /// fns.c `random's generator, seeded from entropy as at GNU startup.
     random: random::Random,
-    /// A world build's P fence (`world`); None outside build mode.
-    fence: Option<Box<world::Fence>>,
-    /// The re-seed definitions waiting for their variable's first access
-    /// (`world::pending`), by slot.
-    pending: std::collections::BTreeMap<usize, world::pending::Pending>,
+    /// A world build's P tracking (`world`); None outside build mode.
+    #[snapshot(at_rest)]
+    tracking: Option<Box<world::Tracking>>,
     /// glibc's localtime_offset: the last mktime result's difference from
     /// its local time, where the next encode-time starts its search.
     mktime_offset: i64,
@@ -1644,8 +1672,9 @@ pub struct Vm {
     /// The objects that name a buffer: each buffer's markers and overlays
     /// (GNU's BUF_MARKERS and overlay trees) and the windows, so a buffer's
     /// or a window are found without walking the heap. None until
-    /// `referrers` lists them again after a collection moved objects; it
-    /// may name dead ones.
+    /// `referrers` first lists them; a collection keeps it, without what
+    /// died and with what moved where it went (`Referrers::forget`,
+    /// `Referrers::forward`). A chain may name a member that left it.
     referrers: Option<buffer::Referrers>,
     /// The slots of the variables each buffer, by its index in `objects`,
     /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
@@ -1657,6 +1686,8 @@ pub struct Vm {
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
     completion_walks: u64,
+    /// The symbols M-x lists (`command_set.rs`).
+    command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
     /// The register files, the running engine's current (`registers.rs`).
@@ -1670,6 +1701,9 @@ pub struct Vm {
     doomed_finalizers: std::collections::VecDeque<Value>,
     /// A collection ended since `post-gc-hook' last ran or was found nil (`Vm::post_gc_hook_due').
     post_gc_due: bool,
+    /// A collection found a list for `undo-outer-limit-function`, and the
+    /// aftermath has not looked (`Vm::take_undo_offer`).
+    undo_offers_due: bool,
     /// Escapes being unwound, in any engine: routing takes it, the driver gives
     /// it back. While nonzero no aftermath starts (`Vm::aftermath_held`).
     unwinding: usize,
@@ -1679,6 +1713,7 @@ pub struct Vm {
     aftermath_runs: usize,
     /// Suspended engines' own state, owned here until they resume: traced and
     /// forwarded in place, and dropped with the engine by a caught panic.
+    #[snapshot(at_rest)]
     suspended: Vec<threaded::Suspended>,
     /// Menu-item `:filter' results for the keymap walk in progress, as
     /// (menu item, result); set and cleared around one walk, which never
@@ -1691,185 +1726,6 @@ pub struct Vm {
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
 }
-// What a world image may hold of a VM (`world::safe`): every field, each
-// SnapshotSafe or, at rest, checked by `world_quiescent`: the hosts, the
-// children and jobs, the mapped code image, the fence, the lowered code
-// (function pointers), the suspended engines (pointers into it), the
-// compiled patterns (their SIMD searchers hold function pointers) and the
-// idle clock reading (process-relative).
-//
-// Its fields are listed, not the VM itself made SnapshotSafe: a VM enters
-// an image only as the primary, which `world::image::capture` validates,
-// never inside a carry, where nothing would.
-romacs_snapshot::snapshot_fields!(Vm {
-    charsets,
-    standard_case_tables,
-    command_point,
-    change_prepared,
-    change_slots,
-    case_symbols_slot,
-    print_number_index,
-    undo_list_slot,
-    display_state,
-    window_state,
-    world_version,
-    motion_quit,
-    #[cfg(test)] variable_read_probes,
-    #[cfg(test)] speculative_hits,
-    #[cfg(test)] inline_hits,
-    #[cfg(test)] disable_inline,
-    #[cfg(test)] speculative_misses,
-    regexp,
-    execution_fatal,
-    loader,
-    source_cache,
-    macros,
-    expanding,
-    compile_depth,
-    eval_depth,
-    dynamic_scope,
-    propagated_escape,
-    signal_handlers,
-    backtrace,
-    propagated_escape_hooked,
-    propagated_eval_depth,
-    propagate_next,
-    keymap_generation,
-    environment_snapshot,
-    trapped,
-    retrap,
-    doc_file,
-    terminal_bindings,
-    pending_specials,
-    file_specials,
-    seed_file_specials,
-    file_level_request,
-    lazy_regime,
-    interpreting_source,
-    defer_expansion_errors,
-    evaluating,
-    quit_unwinding,
-    thrown_no_catch,
-    strict_root,
-    reached_head,
-    reached_generated,
-    loader_order_request,
-    keep_captures,
-    lambda_depth,
-    window_change_seen,
-    expanded_macros,
-    expanded_symbols,
-    buffer_slot,
-    multibyte_slot,
-    truncate_lines_slot,
-    defun_start_epoch,
-    variable_redirects,
-    forwarded,
-    fixnum_slots,
-    local_binding_slots,
-    free_local_binding_slots,
-    gc_stats,
-    gc_times,
-    gc_census,
-    collection_log,
-    gc_retained,
-    gc_payload_bytes,
-    gc_retained_slots,
-    gc_code,
-    gc_holds,
-    running_engines,
-    rooted_write,
-    deferred_writes,
-    gc_stress,
-    allocation,
-    gc_floor,
-    job_budget,
-    gc_retained_payload,
-    names,
-    initial_obarray,
-    symbol_names,
-    obarray_symbol_names,
-    permanent_symbol_names,
-    native_case_roots,
-    obarray_free_slots,
-    generated_symbols,
-    generated_slots,
-    slots,
-    specials,
-    special_changes,
-    special_cache,
-    functions,
-    request_code,
-    closures,
-    cells,
-    cell_pairs,
-    random,
-    mktime_offset,
-    tz_rule_dstoff,
-    local_zone,
-    recent_keys,
-    lossage_limit,
-    conses,
-    objects,
-    referrers,
-    local_owners,
-    completion_walks,
-    completion_case_memo,
-    caches,
-    stack,
-    external_roots,
-    finalizers,
-    doomed_finalizers,
-    post_gc_due,
-    unwinding,
-    aftermath_runs,
-    keymap_filters,
-    keymap_pending_filter,
-    dynamic,
-    conditions,
-    rooted,
-    reader_trampolines,
-    quit,
-    force_quit_count,
-    deferred_escapes,
-    redisplay_since_mark,
-    treesit_plain,
-    treesit_deferred,
-    treesit_parse_owed,
-    quit_slots,
-    face_keys,
-    debug_event_slots,
-} at_rest {
-    site_leaf,
-    regexp_cache,
-    mode_line_forms,
-    images,
-    lambda_lists,
-    status_bar_line,
-    suspended,
-    host_input,
-    host_wait,
-    layout_host,
-    display,
-    visual,
-    session_host,
-    terminal_host,
-    subprocesses,
-    process_jobs,
-    image,
-    regions,
-    region_free,
-    region_collect,
-    isolates,
-    inotify,
-    fence,
-    pending,
-    execution,
-    spare_programs,
-    idle_since,
-    profiler,
-});
-
 impl Default for Vm {
     fn default() -> Self {
         Self::new()
@@ -1918,8 +1774,15 @@ impl Vm {
             disable_inline: false,
             #[cfg(test)]
             speculative_misses: 0,
+            #[cfg(test)]
+            buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            flat_tables: char_table::FlatTables::default(),
+            shared_holders: None,
+            caches_filled: Vec::new(),
+            permanent_names_added: Vec::new(),
+            payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
             lambda_lists: Default::default(),
@@ -1941,6 +1804,7 @@ impl Vm {
             propagated_eval_depth: None,
             host_input: None,
             host_wait: None,
+            deferred_event: None,
             layout_host: None,
             display: None,
             visual: Box::default(),
@@ -1981,23 +1845,27 @@ impl Vm {
             reached_generated: None,
             loader_order_request: false,
             keep_captures: false,
+            closure_key_extra: Vec::new(),
             lambda_depth: 0,
             window_change_seen: Vec::new(),
             expanded_macros: vec![],
             expanded_symbols: NameSet::default(),
             image: None,
-            regions: vec![None],
+            regions: frozen::Regions::default(),
             region_free: Vec::new(),
             region_collect: false,
             isolates: isolate::Isolates::default(),
+            keeper: None,
             inotify: None,
             buffer_slot: 0,
+            resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
+            textget_slots: [usize::MAX; 2],
             local_binding_slots: HashSet::default(),
             free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
@@ -2026,11 +1894,11 @@ impl Vm {
             obarray_free_slots: Vec::new(),
             generated_symbols: HashMap::default(),
             generated_slots: HashMap::default(),
-            slots: vec![],
+            slots: slots::Slots::default(),
             specials: NameSet::default(),
             special_changes: 0,
             special_cache: Vec::new(),
-            functions: vec![],
+            functions: functions::Functions::default(),
             request_code: request_code::RequestCode::default(),
             execution: threaded::Program::default(),
             spare_programs: Vec::new(),
@@ -2039,8 +1907,7 @@ impl Vm {
             cells: Default::default(),
             cell_pairs: HashMap::default(),
             random: random::Random::from_entropy(),
-            fence: None,
-            pending: std::collections::BTreeMap::new(),
+            tracking: None,
             mktime_offset: 0,
             tz_rule_dstoff: 0,
             local_zone: LocalZone::Process,
@@ -2051,6 +1918,7 @@ impl Vm {
             referrers: None,
             local_owners: None,
             completion_walks: 0,
+            command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
             stack: registers::Registers::new(),
@@ -2058,6 +1926,7 @@ impl Vm {
             finalizers: vec![],
             doomed_finalizers: Default::default(),
             post_gc_due: false,
+            undo_offers_due: false,
             unwinding: 0,
             aftermath_runs: 0,
             suspended: vec![],
@@ -2067,6 +1936,11 @@ impl Vm {
             conditions: conditions::Registry::default(),
             rooted: handle::RootSet::default(),
         };
+        // The built-in property keys are the first symbols, each at its
+        // place among them: Rust names them as constants.
+        for (index, name) in properties::Key::BUILTIN.iter().enumerate() {
+            assert_eq!(vm.slot(name), index, "the built-in property key `{name}' is not symbol {index}");
+        }
         for index in 0..PRIMITIVES.len() {
             let d = prim::descriptor(index).unwrap();
             let i = vm.slot(d.name());
@@ -2110,12 +1984,13 @@ impl Vm {
         vm.declare_special_raw("internal--text-quoting-flag", Value::TRUE);
         vm.declare_special_raw("default-text-properties", Value::NIL);
         vm.declare_special_raw("char-property-alias-alist", Value::NIL);
+        vm.textget_slots = [vm.slot("char-property-alias-alist"), vm.slot("default-text-properties")];
         vm.specials.insert("text-property-default-nonsticky".into());
         vm.specials.insert("yank-excluded-properties".into());
         vm.specials.insert("yank-handled-properties".into());
         vm.declare_special_raw("font-lock-defaults", Value::NIL);
         // keyboard.c:13843: the command that entered the innermost
-        // minibuffer, which read_minibuf binds (lisp/romacs/vm/minibuf.el).
+        // minibuffer, which read_minibuf binds (lisp/vm/minibuf.el).
         vm.declare_special_raw("current-minibuffer-command", Value::NIL);
         for name in [
             "kill-ring",
@@ -2135,7 +2010,7 @@ impl Vm {
             "last-command-event",
             "command-history",
             // keyboard.c this_command_keys, this_single_command_key_start
-            // and raw_keybuf (prims/keyboard.rs, lisp/romacs/vm/keyboard.el).
+            // and raw_keybuf (prims/keyboard.rs, lisp/vm/keyboard.el).
             "romacs--command-keys",
             "romacs--single-command-key-start",
             "romacs--raw-command-keys",
@@ -2203,8 +2078,8 @@ impl Vm {
     /// Slot stamps retain precise source-macro dependencies; the world epoch
     /// guards speculative dispatch, including intervening writes to other slots.
     fn define_function(&mut self, slot: usize, value: Value, is_macro: bool) -> Result<()> {
-        if self.fence.is_some() {
-            self.fence_function(slot);
+        if self.tracking.is_some() {
+            self.tracked_function(slot);
         }
         let world = self
             .world_version
@@ -2223,12 +2098,17 @@ impl Vm {
             self.macros.remove(&slot);
         }
         self.world_version = world;
+        self.command_set.changed(slot);
         Ok(())
     }
     /// Record whether `names' maps SLOT's name to SLOT.
     fn set_initial_obarray(&mut self, slot: usize, interned: bool) {
         if self.initial_obarray.len() <= slot { self.initial_obarray.resize(slot + 1, false); }
         self.initial_obarray[slot] = interned;
+        // A void symbol's interning changes no command.
+        if self.slots.get(slot).is_some_and(|s| !matches!(s.function, Value::NIL | Value::UNBOUND)) {
+            self.command_set.changed(slot);
+        }
     }
     /// Whether SLOT's symbol is interned in the initial obarray.
     fn in_initial_obarray(&self, slot: usize) -> bool {
@@ -2342,6 +2222,7 @@ impl Vm {
         local_specials: &NameSet<String>,
     ) -> Result<(usize, Vec<Name>)> {
         let keep_captures = std::mem::take(&mut self.keep_captures);
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let mut b = Builder {
             code: vec![],
             next: 0,
@@ -2513,6 +2394,7 @@ impl Vm {
             pending: None,
             dynamic: (visible == 0).then_some(self.dynamic_scope),
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: local_specials }, args, body, &key_extra),
         });
         Ok((id, names))
     }
@@ -2571,6 +2453,7 @@ impl Vm {
     /// until expansion. Each capture is reported as mutated, so no binding
     /// it can see is ever unboxed out from under the later compilation.
     fn lazy_lambda(&mut self, b: &mut Builder, args: &[Form], body: &[Form], deferred: bool) -> Result<usize> {
+        let key_extra = std::mem::take(&mut self.closure_key_extra);
         let (arity, required, rest) = lambda_arity(args)?;
         let mut names: Vec<Name> = b.env.keys().cloned().collect();
         names.sort();
@@ -2607,6 +2490,7 @@ impl Vm {
             lazy: Some(Arc::new(lazy)),
             pending: None,
             params: Some(args.to_vec()),
+            key: closure_key::of_forms(self, &closure_key::Context { dynamic: self.dynamic_scope, names: &names, specials: &b.local_specials }, args, body, &key_extra),
         });
         let regs = names.iter().map(|n| b.env[n].reg).collect();
         let site = b.sites.len();
@@ -2673,7 +2557,9 @@ impl Vm {
         }
         let mut function = self.take_compiled_function(compiled);
         function.capture_mutations = vec![true; names.len()];
-        self.functions[id] = Arc::new(function);
+        // The closure stays the one its key named before its first call.
+        function.key = self.functions[id].key;
+        self.functions.set(id, Arc::new(function));
         Ok(())
     }
     fn expr(&mut self, b: &mut Builder, f: &Form) -> Result<usize> {
@@ -3754,11 +3640,11 @@ impl Vm {
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
-        // A `let' moves a fenced value back unread; a watcher would see it.
-        if let Some(forwarded::Fwd::Fence(cell)) = self.native_forwarding(slot) {
-            self.fence_unbound(cell as usize);
-            self.fence_watched(cell as usize);
-            return self.unfenced(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+        // A `let' moves a tracked value back unread; a watcher would see it.
+        if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
+            self.tracked_unbound(cell as usize);
+            self.tracked_watched(cell as usize);
+            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
         }
         self.restore_binding(slot, base, value, owner, let_default)
     }

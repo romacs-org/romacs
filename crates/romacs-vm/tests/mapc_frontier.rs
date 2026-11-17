@@ -11,11 +11,11 @@ fn mapc_bootstrap_frontiers() {
     for target in ["cl-lib.el", "ert.el"] {
         let mut vm = Vm::new();
         vm.install_lisp_prelude().unwrap();
-        vm.set_load_path(&[root.join("lisp/gnu"), source_only.path().to_owned()]).unwrap();
+        vm.set_load_path(&[root.join("lisp"), source_only.path().to_owned()]).unwrap();
         for file in ["emacs-lisp/debug-early.el", "emacs-lisp/byte-run.el", "emacs-lisp/backquote.el", "subr.el", "keymap.el", "emacs-lisp/pcase.el", "emacs-lisp/gv.el"] {
-            vm.load_file(&root.join("lisp/gnu").join(file)).unwrap();
+            vm.load_file(&root.join("lisp").join(file)).unwrap();
         }
-        let result = vm.load_file(&root.join("lisp/gnu/emacs-lisp").join(target)).map(|_| ());
+        let result = vm.load_file(&root.join("lisp/emacs-lisp").join(target)).map(|_| ());
         eprintln!("{target}: {result:?}");
         let report = vm.load_report();
         let steps = report["steps"].as_array().unwrap();
@@ -27,11 +27,12 @@ fn mapc_bootstrap_frontiers() {
         assert!(result.is_err(), "remeasure if the target completes");
         let failure = own.iter().find(|s| s["status"] != "ok").unwrap();
         assert_eq!(failure["ordinal"], if target == "cl-lib.el" { 92 } else { 1 });
-        assert_eq!(failure["line"], if target == "cl-lib.el" { 553 } else { 57 });
+        let head = if target == "cl-lib.el" { "(unless (load \"cl-loaddefs\"" } else { "(require 'cl-lib)" };
+        assert!(failure["source"].as_str().unwrap().starts_with(head), "failing form of {target}: {failure}");
         assert!(failure["error"].as_str().unwrap().contains("(void-function define-inline)"));
         let cause = steps.iter().find(|s| s["status"] != "ok" && s["file"].as_str().unwrap().ends_with("/cl-macs.el")).unwrap();
         assert_eq!(cause["ordinal"], 159);
-        assert_eq!(cause["line"], 3579);
+        assert!(cause["source"].as_str().unwrap().starts_with("(define-inline cl-typep "), "failing form of cl-macs.el: {cause}");
         assert_eq!(cause["error"], "(void-function define-inline)");
     }
 }

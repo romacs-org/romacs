@@ -296,9 +296,11 @@ fn build_face_conflict_details(
 impl RenderApp {
     pub(super) fn prepare_frame_state_for_render(&mut self) {
         self.render_dirty_models();
-        self.prepare_page_scenes();
-        self.process_shader_surfaces();
-        self.render_page_scenes();
+        romacs_display_protocol::meter::spent(super::frame_cost::SCENES, || {
+            self.prepare_page_scenes();
+            self.process_shader_surfaces();
+            self.render_page_scenes();
+        });
         self.synchronize_image_residency();
         self.process_pending_images();
         self.refresh_faces_from_frames();
@@ -335,6 +337,8 @@ impl RenderApp {
     /// Feeding it the frame sample would make it read zero every time.
     pub(super) fn begin_fps_cpu_span(fps: &mut FpsCounter) {
         if fps.enabled {
+            // CLOCK: starts a stopwatch over CPU render work; a constant
+            // frame sample would make it read zero.
             fps.cpu_span_start = std::time::Instant::now();
         }
     }

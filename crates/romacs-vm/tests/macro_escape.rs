@@ -5,8 +5,7 @@
 //! (macroexp.el `internal-macroexpand-for-load'), so an error there is
 //! "Eager macro-expansion failure" and a quit passes as it is. Romacs
 //! expands `eval''s macro calls as it compiles and defers only an
-//! expansion that fails to its reach (DIVERGENCES.md VM2-EVAL-EXPAND1).
-use std::path::Path;
+//! expansion that fails to its reach (ledger/divergences VM2-EVAL-EXPAND1).
 #[path = "support/gnu_ert_vm.rs"]
 mod gnu_ert_vm;
 
@@ -75,8 +74,7 @@ fn escape(form: &str) -> String {
 
 #[test]
 fn macro_expansion_escapes_reach_gnus_handlers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     vm.eval_source(MACROS).unwrap();
     let scratch = std::env::temp_dir().join(format!("macro-escape-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
@@ -120,8 +118,7 @@ fn macro_expansion_escapes_reach_gnus_handlers() {
 /// where pinned GNU gives (handled (body cleanup (caught (error "uw")))).
 #[test]
 fn a_failing_expansion_runs_again_at_its_reach() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     vm.eval_source(MACROS).unwrap();
     let form = "(progn (setq rt-log nil) (eval '(list (condition-case e (progn (push 'body rt-log) (rt-u)) (error (push (list 'caught e) rt-log) 'handled)) (reverse rt-log)) t))";
     let printed = vm.eval_source(&format!("(prin1-to-string {form})")).unwrap().display().unwrap();
@@ -135,8 +132,7 @@ fn a_failing_expansion_runs_again_at_its_reach() {
 /// call), so a call costs what a loaded function's does.
 #[test]
 fn an_eval_defined_function_expands_each_call_site_once() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = gnu_ert_vm::bootstrapped_with(&root, "lisp/romacs/romacs-loadup-bootstrap.el");
+    let mut vm = gnu_ert_vm::bootstrapped();
     let source = "(progn (defvar rt-count 0)
       (defmacro rt-counted (x) (setq rt-count (1+ rt-count)) `(+ ,x 1))
       (eval '(defun rt-h (x) (when x (rt-counted x))) t)

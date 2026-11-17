@@ -6,29 +6,9 @@
 //! modifiers' (`event-modifiers', C-h f), `accessible-keymaps' and
 //! `keymap--get-keyelt' (C-h m, where-is), `print-unreadable-function'
 //! (`readablep', C-h v) and `buffer-size' of a given buffer (help-fns).
-use romacs_vm::Vm;
-use std::path::Path;
-
-fn romacs() -> Vm {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = Vm::new();
-    vm.eval_source("(setq noninteractive t)").unwrap();
-    vm.set_frame_geometry(80, 25, 1, 1).unwrap();
-    let lisp = root.join("lisp/gnu");
-    let mut names: Vec<String> = std::fs::read_dir(&lisp).unwrap()
-        .filter_map(|entry| entry.ok().filter(|e| e.path().is_dir()).and_then(|e| e.file_name().into_string().ok()))
-        .filter(|name| !["term", "RCS", "CVS", "Old"].contains(&name.as_str()) && !name.starts_with('='))
-        .collect();
-    names.sort();
-    let mut paths = vec![lisp.clone()];
-    paths.extend(names.iter().rev().filter(|n| *n != "obsolete").map(|n| lisp.join(n)));
-    if names.iter().any(|n| n == "obsolete") { paths.push(lisp.join("obsolete")); }
-    paths.push(root.join("lisp/romacs"));
-    vm.set_load_path(&paths).unwrap();
-    vm.install_lisp_prelude().unwrap();
-    vm.load_file(&root.join("lisp/romacs/romacs-loadup-bootstrap.el")).unwrap();
-    vm
-}
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+use gnu_lisp::gnu_lisp;
 
 /// Each EXPRESSION's printed value (or signal) in pinned GNU and in a
 /// Romacs on the loadup bootstrap, after SETUP in both; the mismatches.
@@ -39,7 +19,7 @@ fn mismatches(setup: &str, expressions: &[&str]) -> Vec<String> {
 /// As [`mismatches`], GNU's answers read with each (EXPRESSION, GNU TEXT,
 /// ROMACS FORM) of BUILT_INS: in that expression's answer, GNU's TEXT naming
 /// where C defines a built-in stands for what Romacs's FORM evaluates to,
-/// its Rust file (DIVERGENCES.md VM2-HELP-SOURCE).
+/// its Rust file (ledger/divergences VM2-HELP-SOURCE).
 fn mismatches_where(setup: &str, expressions: &[&str], built_ins: &[(&str, &str, &str)]) -> Vec<String> {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let probe = |expression: &str| format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");
@@ -54,7 +34,7 @@ fn mismatches_where(setup: &str, expressions: &[&str], built_ins: &[(&str, &str,
         .unwrap();
     assert!(output.status.success(), "GNU: {}", String::from_utf8_lossy(&output.stderr));
     let expected: Vec<String> = String::from_utf8(output.stdout).unwrap().split('\0').map(str::to_owned).collect();
-    let mut vm = romacs();
+    let mut vm = gnu_lisp(&[]);
     vm.eval_source(&format!("(progn {setup} nil)")).unwrap();
     let mut failures = Vec::new();
     for (expression, mut expected) in expressions.iter().zip(expected) {
@@ -280,7 +260,7 @@ fn file_name_completion_reaches_system_users_and_loads_no_handler() {
     ]);
 }
 
-/// eshell's esh-util loads ange-ftp in VM2 (DIVERGENCES.md VM2-EWCLOAD1);
+/// eshell's esh-util loads ange-ftp in VM2 (ledger/divergences VM2-EWCLOAD1);
 /// a local file still visits as GNU's does.
 #[test]
 fn a_file_visits_after_eshell_loads() {
@@ -337,8 +317,8 @@ fn gnu_c_commands_have_gnu_interactive_forms() {
     assert!(output.status.success(), "GNU: {}", String::from_utf8_lossy(&output.stderr));
     let names: Vec<String> = String::from_utf8(output.stdout).unwrap().lines().map(str::to_owned).collect();
     assert!(names.len() > 90, "GNU lists its C commands");
-    let mut vm = romacs();
-    // `signal-process' is Lisp in lisp/romacs/vm/subprocess.el, without GNU's spec yet.
+    let mut vm = gnu_lisp(&[]);
+    // `signal-process' is Lisp in lisp/vm/subprocess.el, without GNU's spec yet.
     let defined: Vec<String> = names.into_iter().filter(|name| name != "signal-process" && vm
         .eval_source(&format!("(fboundp '{name})")).and_then(|v| v.display()).as_deref() == Ok("t")).collect();
     let forms: Vec<String> = defined.iter().map(|name| format!("(interactive-form '{name})")).collect();

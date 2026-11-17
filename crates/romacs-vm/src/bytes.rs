@@ -2,13 +2,14 @@
 use crate::{Result, Value, anchors::AnchorTree, coordinates::ByteOffset};
 use std::{collections::BTreeMap, ops::Range};
 /// Non-Lisp buffer identity and modification state; contains no moving Values.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub(crate) struct BufferState {
     pub(crate) name: Option<String>,
     pub(crate) live: bool,
     pub(crate) inhibit_buffer_hooks: bool,
     /// Shared with the buffer's indirect buffers, as GNU's MODIFF and
     /// SAVE_MODIFF are in their shared text.
+    // CELL(Plain)
     pub(crate) modification: crate::indirect::Shared<crate::modification::Modification>,
     /// syntax.c's find_start_* cache, tagged with `Vm::defun_start_epoch`
     /// when this buffer wrote it: GNU keeps one cache for the last buffer.
@@ -16,7 +17,6 @@ pub(crate) struct BufferState {
     /// The terminal session this buffer shows, where it shows one.
     pub(crate) terminal: Option<u64>,
 }
-romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start, terminal });
 impl Default for BufferState {
     fn default() -> Self {
         Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
@@ -43,7 +43,7 @@ impl std::ops::Deref for BufferState {
 impl std::ops::DerefMut for BufferState {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut *self.modification }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct ByteBuffer {
     pub(crate) state: BufferState,
     pub bytes: Vec<u8>,
@@ -58,7 +58,7 @@ pub(crate) struct ByteBuffer {
     /// The markers in this buffer, at byte offsets, which here are its
     /// characters (insdel.c adjust_markers_for_*); as a text buffer's.
     pub anchors: AnchorTree,
-    pub properties: BTreeMap<ByteOffset, BTreeMap<String, Value>>,
+    pub properties: ByteProperties,
     /// GNU keeps a buffer's interval tree once it had a property.
     pub had_intervals: bool,
     /// GNU's per-buffer variable slots (`struct buffer`, forwarded.rs).
@@ -70,13 +70,12 @@ pub(crate) struct ByteBuffer {
     /// What a window shows of these bytes (`shown'), once one has.
     pub(crate) mirror: Option<Box<Mirror>>,
 }
-romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held } at_rest { mirror });
 
 /// The text of a unibyte buffer as display reads it: each byte one
 /// character, so its positions are the buffer's, a byte above 127 the
 /// raw-byte character GNU shows as an escape. Every edit of the bytes edits
 /// it, and it holds the buffer's overlays.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct Mirror {
     text: crate::annotations::AnnotatedBuffer,
 }
@@ -97,7 +96,7 @@ impl Mirror {
     }
 }
 /// A unibyte buffer's or insertion's text properties, by byte.
-pub(crate) type ByteProperties = BTreeMap<ByteOffset, BTreeMap<String, Value>>;
+pub(crate) type ByteProperties = BTreeMap<ByteOffset, crate::properties::Values>;
 
 impl ByteBuffer {
     /// Bring the mirror to the bytes, narrowing and point now.
@@ -174,7 +173,7 @@ impl ByteBuffer {
     /// unibyte string holding R's text properties when it has any.
     pub(crate) fn text_object(&self, r: Range<ByteOffset>) -> crate::data::Object {
         let bytes = self.bytes[r.start.0..r.end.0].to_vec();
-        let properties: BTreeMap<ByteOffset, BTreeMap<String, Value>> = self.properties.range(r.clone())
+        let properties: ByteProperties = self.properties.range(r.clone())
             .filter(|(_, values)| !values.is_empty())
             .map(|(&at, values)| (ByteOffset(at.0 - r.start.0), values.clone())).collect();
         if properties.is_empty() { return crate::data::unibyte_object(bytes); }
@@ -265,18 +264,24 @@ impl ByteBuffer {
         let at = self.point;
         self.replace_with_bias(at..at, inserted, true)
     }
-    pub fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+    pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
+        self.visit_values_but(reading, None, visit);
+    }
+    /// A live buffer's undo list is weak (`Vm::undo_round`).
+    pub(crate) fn owns_undo_list(&self) -> bool {
+        self.state.live
+    }
+    /// `visit_values`, passing over per-buffer slot SKIP.
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         visit(&mut self.local_keymap);
-        self.per_buffer.visit_values(visit);
-        if let Some(held) = &mut self.held { held.visit_values(visit); }
-        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(visit); }
+        self.per_buffer.visit_values_but(skip, visit);
+        if let Some(held) = &mut self.held { held.visit_values(reading, visit); }
+        if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(reading, visit); }
         for props in self.properties.values_mut() {
-            for v in props.values_mut() {
-                visit(v);
-            }
+            props.visit_values(visit);
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
@@ -289,10 +294,8 @@ impl ByteBuffer {
             .values()
             .map(|p| {
                 size_of::<ByteOffset>()
-                    + size_of::<BTreeMap<String, Value>>()
-                    + p.keys()
-                        .map(|k| size_of::<String>() + size_of::<Value>() + k.capacity())
-                        .sum::<usize>()
+                    + size_of::<crate::properties::Values>()
+                    + p.len() * (size_of::<crate::properties::Key>() + size_of::<Value>())
             })
             .sum::<usize>()
     }

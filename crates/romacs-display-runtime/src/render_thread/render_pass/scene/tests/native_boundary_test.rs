@@ -45,7 +45,6 @@ fn obsolete_native_owner_retires_before_required_child_under_same_pressure() {
     root.background_alpha = 1.0;
     render.set_current_frame(
         Some(root.clone()),
-        None,
         Default::default(),
         Default::default(),
     );
@@ -202,7 +201,6 @@ fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls
         let surface = mapping(&new_frame, W, H).surface();
         render.set_current_frame(
             Some(new_frame.clone()),
-            None,
             Default::default(),
             Default::default(),
         );
@@ -242,7 +240,7 @@ fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls
             });
         // This pending hint is the real path that begins a transition AFTER native
         // preflight. Admission must neither drain it nor ignore its future pixels.
-        render.compositor.current_frame = Some(new_frame.clone());
+        render.compositor.current_frame = Some(std::sync::Arc::new(new_frame.clone()));
         let native = prepare_frame_targets(&mut renderer, &mut render, surface, &full_plan())
             .unwrap()
             .native;
@@ -269,12 +267,12 @@ fn dispatched_scale_zoom_strips_use_final_native_conversion_with_opaque_controls
             &mut renderer,
             &mut render.compositor.transitions,
             &Default::default(),
-            &mut new_frame,
+            &new_frame.take_transition_hints(),
             Default::default(),
             &mut render.compositor.dirty,
         );
         assert!(render.compositor.transitions.has_active());
-        render.compositor.current_frame = Some(new_frame.clone());
+        render.compositor.current_frame = Some(std::sync::Arc::new(new_frame.clone()));
         let retained = prepare_frame_targets(&mut renderer, &mut render, surface, &full_plan())
             .unwrap()
             .native;

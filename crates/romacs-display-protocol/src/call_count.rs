@@ -1,6 +1,7 @@
 //! Calls counted by name on the thread that makes them: what the evaluator
 //! asks of its hosts (romacs-vm `host_calls`) and of the paint sender
-//! (romacs-display-runtime), in the one place both can reach.
+//! (romacs-display-runtime), and what a frame costs the render thread
+//! (romacs-renderer-wgpu `cost`), in the one place all can reach.
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -10,7 +11,19 @@ thread_local! {
 
 /// Count one call of NAME on this thread.
 pub fn count(name: &'static str) {
-    COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += 1);
+    add(name, 1);
+}
+
+/// Count N more of NAME on this thread: work counted in its own unit (rows,
+/// bytes, instructions) where a call is too coarse.
+pub fn add(name: &'static str, n: u64) {
+    if n > 0 { COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += n); }
+}
+
+/// This thread's calls of NAME so far.
+#[must_use]
+pub fn of(name: &str) -> u64 {
+    COUNTS.with(|counts| counts.borrow().get(name).copied().unwrap_or(0))
 }
 
 /// This thread's counts so far, by name.
@@ -28,5 +41,13 @@ mod tests {
         super::count("call-count-test");
         std::thread::spawn(|| super::count("call-count-test")).join().unwrap();
         assert_eq!(super::counts().into_iter().find(|row| row.0 == "call-count-test"), Some(("call-count-test", 1)));
+        assert_eq!((super::of("call-count-test"), super::of("call-count-never")), (1, 0));
+    }
+
+    #[test]
+    fn work_adds_in_its_own_unit() {
+        super::add("call-count-add-test", 40);
+        super::add("call-count-add-test", 2);
+        assert_eq!(super::of("call-count-add-test"), 42);
     }
 }

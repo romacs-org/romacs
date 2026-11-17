@@ -8,8 +8,14 @@ repository.workspace = true
 description = "The production allocator for Romacs: jemalloc"
 
 [dependencies]
+libc.workspace = true
+rustix.workspace = true
 tikv-jemallocator = { version = "0.7", default-features = false }
 tikv-jemalloc-sys = { version = "0.7", default-features = false, features = ["stats"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+libc.workspace = true
+rustix = { workspace = true, features = ["process"] }

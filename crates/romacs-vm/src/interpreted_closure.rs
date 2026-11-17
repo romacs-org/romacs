@@ -28,7 +28,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("romacs-document-image-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let key = vm.publish_code_image(&path, entry, [93; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [93; 32]).unwrap();
         loaded.collect(&mut []);
         assert_eq!(loaded.execute_raw(entry).unwrap().as_integer().unwrap(), 7);
@@ -109,7 +109,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("closure-image-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let key = source.publish_code_image(&path, entry, [37; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [37; 32]).unwrap();
         loaded.collect(&mut []);
         assert_eq!(loaded.execute_raw(entry).unwrap().as_integer().unwrap(), 9);
@@ -390,6 +390,7 @@ impl Vm {
                     );
                     values.insert(name, Value::reference(cell, 5));
                 }
+                let key_args = args.clone();
                 let (function, names) = if self.lazy_regime || self.source_load_active() {
                 let (arity, required, rest) = lambda_arity(&args)?;
                 let mut names: Vec<_> = outer.keys().cloned().collect();
@@ -421,6 +422,7 @@ impl Vm {
                     rest,
                     sites: vec![],
                     params: Some(lazy.args.clone()),
+                    key: None,
                     lazy: Some(Arc::new(lazy)),
                     pending: None,
                     dynamic: names.is_empty().then_some(a[2] == Value::NIL),
@@ -436,6 +438,12 @@ impl Vm {
                     self.keep_captures = saved_captures;
                     result?
                 };
+                // fns.c internal_equal compares the closure's interactive
+                // spec too, a slot of its own here: the key takes it beside
+                // the body, whichever way it compiled (`equal' compares the
+                // docstring, its other slot, apart).
+                let key = crate::closure_key::of_lazy(self, &crate::closure_key::Context { dynamic: a[2] == Value::NIL, names: &names, specials: &specials }, &key_args, a[1], a[4]);
+                Arc::make_mut(self.functions.change(function)).key = key;
                 let captures = names.iter().map(|name| values[name]).collect();
                 let mut metadata = vec![a[0], a[1], a[2]];
                 if a[3] != Value::NIL || a[4] != Value::NIL {

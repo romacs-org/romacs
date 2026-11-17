@@ -3,7 +3,7 @@
 use super::*;
 
 /// A walk stopped at a menu filter it has no result for yet.
-pub(crate) const KEYMAP_FILTER_PENDING: &str = "keymap menu filter must be evaluated (VM2 key-binding and define-key do not)";
+pub(crate) const KEYMAP_FILTER_PENDING: &str = "keymap menu filter must be evaluated (VM2 define-key does not)";
 use data::Object;
 
 struct KeyEvent { value: Value, input_index: usize }
@@ -67,10 +67,10 @@ impl Vm {
         let global = self.slots[self.names["global-map"]].value;
         self.declare_special_raw("#:vm2-global-keymap", global);
         self.declare_special_raw("meta-prefix-char", Value::integer(27).unwrap());
-        // keyboard.c keys_of_keyboard: the file notification and focus
-        // events' special bindings.
+        // keyboard.c keys_of_keyboard: the file notification, focus and
+        // frame deletion events' special bindings.
         let special = self.slots[self.names["special-event-map"]].value;
-        for (event, command) in [("file-notify", "file-notify-handle-event"), ("focus-in", "handle-focus-in"), ("focus-out", "handle-focus-out")] {
+        for (event, command) in [("file-notify", "file-notify-handle-event"), ("focus-in", "handle-focus-in"), ("focus-out", "handle-focus-out"), ("delete-frame", "handle-delete-frame")] {
             let (event, command) = (self.intern(event), self.intern(command));
             self.keymap_store(special, event, command, false).unwrap();
         }
@@ -155,7 +155,7 @@ impl Vm {
     /// keymap.c get_keymap without AUTOLOAD, for `keymapp': a symbol whose
     /// function is a keymap's autoload, `(autoload FILE DOC INTERACTIVE
     /// keymap)', is a keymap before its file loads.
-    fn autoloaded_keymap(&self, object: Value) -> bool {
+    pub(crate) fn autoloaded_keymap(&self, object: Value) -> bool {
         let (Some(&autoload), Some(&keymap)) = (self.names.get("autoload"), self.names.get("keymap")) else { return false };
         if object == Value::NIL || object.index_if(7).is_none() { return false; }
         let mut value = object;
@@ -219,24 +219,27 @@ impl Vm {
         let (_, mut tail) = self.cons_pair(map)?;
         let mut fallback = None;
         let mut found = None;
+        let mut prefixes: Vec<Value> = Vec::new();
         let limit = self.list_limit();
         for _ in 0..=limit {
-            if tail == Value::NIL { return found.or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
+            if tail == Value::NIL { return self.keymap_prefixes(found, &prefixes).or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
             if tail.tag() != 3 {
                 let parent = self.resolve_keymap_as(tail, keymap).ok_or("keymap parent required")?;
                 tail = parent;
             }
             let (entry, next) = self.cons_pair(tail)?;
             let binding = if entry == keymap {
-                if !inherit || found == Some(Value::NIL) { return found.or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
+                if !inherit || found == Some(Value::NIL) { return self.keymap_prefixes(found, &prefixes).or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
                 if let Some(child) = found {
                     let parent = self.keymap_entry_at(tail, event, true, defaults, depth + 1)?;
                     if let Some(parent) = parent.and_then(|v| self.resolve_keymap_as(v, keymap)) {
-                        let child_cell = self.keymap_cons(child, parent);
+                        // The prefixes found, then the parent's as their tail.
+                        let prefixes = if prefixes.is_empty() { vec![child] } else { prefixes };
+                        let composed = prefixes.iter().rev().fold(parent, |tail, &prefix| self.keymap_cons(prefix, tail));
                         let head = self.keymap_symbol("keymap");
-                        return Ok(Some(self.keymap_cons(head, child_cell)));
+                        return Ok(Some(self.keymap_cons(head, composed)));
                     }
-                    return Ok(found);
+                    return Ok(self.keymap_prefixes(found, &prefixes));
                 }
                 None
             } else if let Some(submap) = self.resolve_keymap_as(entry, keymap) {
@@ -261,18 +264,27 @@ impl Vm {
             if let Some(value) = binding {
                 let value = self.keymap_definition(if value == Value::TRUE { Value::NIL } else { value })?;
                 if self.resolve_keymap_as(value, keymap).is_some() {
-                    if let Some(child) = found.filter(|&v| v != Value::NIL) {
-                        let head = self.keymap_symbol("keymap");
-                        found = Some(self.list_value(&[head, child, value]));
-                    } else { found = Some(value); }
+                    // FOUND is the first prefix binding; the walk's answer
+                    // is all of them (`keymap_prefixes').
+                    if prefixes.is_empty() { found = Some(value); }
+                    prefixes.push(value);
                 } else {
                     if found.is_none() || found == Some(Value::NIL) { found = Some(value); }
-                    if value != Value::NIL { return Ok(found); }
+                    if value != Value::NIL { return Ok(self.keymap_prefixes(found, &prefixes)); }
                 }
             }
             tail = next;
         }
         Err("circular keymap".into())
+    }
+    /// GNU's `access_keymap_1`: several prefix bindings of one event compose as
+    /// one flat (keymap PREFIX...), in the order found; made once, when
+    /// the walk ends.  FOUND otherwise.
+    fn keymap_prefixes(&mut self, found: Option<Value>, prefixes: &[Value]) -> Option<Value> {
+        if prefixes.len() < 2 { return found; }
+        let head = self.keymap_symbol("keymap");
+        let composed: Vec<Value> = std::iter::once(head).chain(prefixes.iter().copied()).collect();
+        Some(self.list_value(&composed))
     }
     pub(super) fn keymap_store(&mut self, map: Value, event: Value, value: Value, remove: bool) -> Result<()> {
         self.note_keymap_change();
@@ -407,28 +419,60 @@ impl Vm {
             }
         }
         name.push_str(base);
-        self.keymap_symbol(&name)
+        self.intern(&name)
+    }
+    /// keyboard.c parse_modifiers: SYMBOL's (BASE MASK) on its
+    /// `event-symbol-element-mask' and (BASE MODIFIERS...) on its
+    /// `event-symbol-elements', made once; `event-basic-type' and
+    /// `event-modifiers' read them. GNU caches them on every key lookup or
+    /// definition of the symbol (keymap.c reorder_modifiers) and every read.
+    pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> Result<()> {
+        let (mask_key, elements_key) = (self.keymap_symbol("event-symbol-element-mask"), self.keymap_symbol("event-symbol-elements"));
+        let plist = self.symbol_plist(symbol)?;
+        if self.plist_lookup(plist, mask_key).tag() == 3 { return Ok(()); }
+        let name = self.key_event_name(symbol).ok_or("symbol event required")?.to_owned();
+        let (modifiers, start) = parse_event_modifiers(name.as_bytes());
+        let base = self.intern(&name[start..]);
+        let mask = self.list_value(&[base, Value::integer(modifiers).expect("modifier bits are a fixnum")]);
+        self.put_symbol_property(symbol, mask_key, mask)?;
+        // lispy_modifier_list: consed from the lowest bit, so highest first.
+        let mut elements = Value::NIL;
+        for (bit, modifier) in MODIFIER_NAMES {
+            if modifiers & 1 << bit != 0 {
+                let modifier = self.keymap_symbol(modifier);
+                elements = self.alloc_cons(modifier, elements);
+            }
+        }
+        let elements = self.alloc_cons(base, elements);
+        self.put_symbol_property(symbol, elements_key, elements)?;
+        Ok(())
     }
     fn canonical_key_event_symbol(&mut self, event: Value) -> Result<Value> {
         // GNU keymap.c:338,762 reorder both stored and looked-up symbols.
         // Only abbreviated keyboard modifiers (not `control-`, etc.) are
         // prefixes; solitary list modifiers accept both spellings.
+        self.cache_event_symbol_elements(event)?;
         let name = self.key_event_name(event).ok_or("symbol event required")?.to_owned();
         let (modifiers, base) = parse_event_modifiers(name.as_bytes());
         if base == 0 { return Ok(event); }
         Ok(self.modified_key_event_symbol(&name[base..], modifiers))
     }
-    fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
+    pub(crate) fn key_event_from_list(&mut self, event: Value) -> Result<Value> {
         // GNU keyboard.c:7832-7888: collect modifier bits before converting
         // the base, so (shift control a) and (control shift a) agree.
+        // A symbol naming a modifier is one unless it is last; any other
+        // element is the base, and a second one is refused. nil is a base
+        // like any symbol, so (nil a) is a and nil itself is nil.
         let parts = self.list_values(event)?;
-        let Some((&last, modifiers)) = parts.split_last() else { return Err("Invalid base event".into()); };
-        let mut mask = 0;
-        for &modifier in modifiers {
-            mask |= self.key_event_name(modifier).and_then(Self::key_event_modifier)
-                .ok_or("Two bases given in one event")?;
+        let (mut mask, mut base) = (0, Value::NIL);
+        for (i, &item) in parts.iter().enumerate() {
+            let modifier = if i + 1 < parts.len() { self.key_event_name(item).and_then(Self::key_event_modifier) } else { None };
+            match modifier {
+                Some(bit) => mask |= bit,
+                None if base != Value::NIL => return Err("Two bases given in one event".into()),
+                None => base = item,
+            }
         }
-        let mut base = last;
         if let Some(name) = self.key_event_name(base) {
             if name.chars().count() == 1 {
                 // event-convert-list uses SREF, the first byte, even for a
@@ -616,7 +660,7 @@ impl Vm {
     pub(super) fn keymap_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         self.ensure_keymaps();
-        let valid = match p { MakeSparseKeymap => n <= 1, Keymapp | UseLocalMap | Kbd => n == 1, DefineKey => (3..=4).contains(&n), LookupKey => (2..=3).contains(&n), KeyBinding => (1..=4).contains(&n), GlobalSetKey => n == 2, CurrentGlobalMap => n == 0, _ => false };
+        let valid = match p { MakeSparseKeymap => n <= 1, Keymapp | UseLocalMap | Kbd => n == 1, DefineKey => (3..=4).contains(&n), LookupKey => (2..=3).contains(&n), GlobalSetKey => n == 2, CurrentGlobalMap => n == 0, _ => false };
         if !valid { return Err("wrong primitive arity".into()); }
         let args = self.stack[start..start + n].to_vec();
         match p {
@@ -639,25 +683,14 @@ impl Vm {
                 *self.local_keymap(index) = args[0];
                 Ok(Value::NIL)
             }
-            KeyBinding => {
-                // VM2 key-binding never remaps, which is NO-REMAP t's lookup.
-                if n > 3 && args[3] != Value::NIL { return Err("key-binding POSITION not supported".into()); }
-                let events = self.key_events(args[0])?;
-                let index = self.buffer_index()?;
-                let local = *self.local_keymap(index);
-                let defaults = n > 1 && args[1] != Value::NIL;
-                if local != Value::NIL {
-                    let binding = self.lookup_keymap_key(local, &events, defaults)?;
-                    if binding != Value::NIL && binding.integer_value().is_none() { return Ok(binding); }
-                }
-                let global = self.slots[self.names["#:vm2-global-keymap"]].value;
-                let binding = self.lookup_keymap_key(global, &events, defaults)?;
-                Ok(if binding.integer_value().is_some() { Value::NIL } else { binding })
-            }
             _ => unreachable!(),
         }
     }
 }
+
+/// keyboard.c modifier_names: the symbol for each modifier bit.
+pub(crate) const MODIFIER_NAMES: [(u32, &str); 12] = [(0, "up"), (1, "down"), (2, "drag"), (3, "click"), (4, "double"), (5, "triple"),
+    (22, "alt"), (23, "super"), (24, "hyper"), (25, "shift"), (26, "control"), (27, "meta")];
 
 /// keyboard.c parse_modifiers_uncached: the modifier bits NAME's prefixes
 /// spell (each an abbreviation followed by `-'), with `click' for a bare

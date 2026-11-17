@@ -1,0 +1,308 @@
+# Third-party packages measured against pinned GNU (tools/package-parity).
+#
+# Each package installs with package-vc from a local mirror of `url` at `rev`,
+# after the packages it names in `deps`, into one package directory per editor.
+# `lisp_dir` and `main_file` are package-vc's spec keys.  `tests` lists the
+# package's own ERT files (globs relative to its checkout), `load` the
+# checkout directories its tests add to load-path, and `exclude` globs that
+# match support files rather than suites; `setup` names checkout files (test
+# helpers) loaded before each test file.  `journey` names a script under journeys/.  `pin` moves
+# every `rev` to its upstream default branch.
+#
+# `ignored_files` is package-vc's :ignored-files.  The pinned package-vc takes
+# the union of every file's Package-Requires, so a sibling file that requires
+# the package itself makes activation recurse without end, in GNU and Romacs
+# alike; each such file is ignored here.
+
+[package.compat]
+url = "https://github.com/emacs-compat/compat"
+rev = "90880f81419577e1d3f68424d2a3adf31e6d663e"
+tests = ["compat-tests.el"]
+
+[package.cond-let]
+url = "https://github.com/tarsius/cond-let"
+rev = "b992b54d3958c1f76abb05ecd6f60c645aefd647"
+
+[package.llama]
+url = "https://github.com/tarsius/llama"
+rev = "6850d0c91b629da14fdff2300c222289d1a0029a"
+tests = ["llama-tests.el"]
+
+[package.dash]
+url = "https://github.com/magnars/dash.el"
+# package-vc would take dash-functional.el's requirements, which name dash.
+main_file = "dash.el"
+ignored_files = ["dash-functional.el"]
+rev = "d746dd9edcb67a108818beb0cdc78dc1cb466832"
+tests = ["dev/examples.el"]
+
+[package.s]
+url = "https://github.com/magnars/s.el"
+rev = "d7c04b84d03481a1ed62ee13dbe595224ccbe57c"
+tests = ["dev/examples.el"]
+load = ["dev"]
+setup = ["dev/examples-to-tests.el"]
+
+[package.ert-async]
+url = "https://github.com/rejeep/ert-async.el"
+rev = "948cf2faa10e085bda3739034ca5ea1912893433"
+
+[package.shut-up]
+url = "https://github.com/cask/shut-up"
+rev = "2f015df0b678c4eac90a561c65d8f31f6d7b73d1"
+
+[package.undercover]
+url = "https://github.com/undercover-el/undercover.el"
+rev = "e7e280b3de48eec9db0e6044c15499a6ecb6268d"
+deps = ["dash", "shut-up"]
+
+[package.f]
+url = "https://github.com/rejeep/f.el"
+rev = "931b6d0667fe03e7bf1c6c282d6d8d7006143c52"
+deps = ["dash", "s", "ert-async", "undercover"]
+tests = ["test/f-*-test.el"]
+load = ["test"]
+setup = ["test/f-init.el", "test/test-helper.el"]
+
+[package.transient]
+url = "https://github.com/magit/transient"
+rev = "93423bb0c97aea87d49c50676ee63d1e5817c787"
+lisp_dir = "lisp"
+deps = ["compat", "cond-let"]
+tests = ["test/*.el"]
+
+[package.with-editor]
+url = "https://github.com/magit/with-editor"
+rev = "254c54189e26ed9223a55cba8bbd08b51c4b83c0"
+lisp_dir = "lisp"
+deps = ["compat"]
+
+[package.magit-section]
+url = "https://github.com/magit/magit"
+rev = "4402e972bb2b6df2dad25118d8a638fa5a9b3e5b"
+ignored_files = ["magit.el"]
+lisp_dir = "lisp"
+main_file = "magit-section.el"
+deps = ["compat", "cond-let", "llama"]
+
+[package.magit]
+url = "https://github.com/magit/magit"
+rev = "4402e972bb2b6df2dad25118d8a638fa5a9b3e5b"
+lisp_dir = "lisp"
+deps = ["compat", "cond-let", "llama", "magit-section", "transient", "with-editor"]
+tests = ["test/magit-tests.el"]
+journey = "magit.el"
+
+[package.vertico]
+url = "https://github.com/minad/vertico"
+rev = "c60d80215d19b4b36c0ba49599b6815ed35f2ac1"
+deps = ["compat"]
+journey = "vertico.el"
+
+[package.orderless]
+url = "https://github.com/oantolin/orderless"
+rev = "e271a8ec938929b726331236cf56d1c44571122e"
+journey = "orderless.el"
+
+[package.marginalia]
+url = "https://github.com/minad/marginalia"
+rev = "381af583d2530796b9955ff2fe0cba3ad3119943"
+deps = ["compat"]
+journey = "marginalia.el"
+
+[package.consult]
+url = "https://github.com/minad/consult"
+rev = "a64569f377b8bc0f62e1d2ae0f3ee48ba4a7cc1c"
+deps = ["compat"]
+journey = "consult.el"
+
+[package.corfu]
+url = "https://github.com/minad/corfu"
+rev = "15fed49c97bf6b2436641714ae15bbd2f3e37b77"
+deps = ["compat"]
+
+[package.cape]
+url = "https://github.com/minad/cape"
+rev = "50bc6187daf9af9df1a802fcbbd91fe4b952fc69"
+deps = ["compat"]
+
+[package.embark]
+url = "https://github.com/oantolin/embark"
+rev = "87e53827cf6659dcc4ac4e54be9af34aeca44f6e"
+ignored_files = ["avy-embark-collect.el", "embark-consult.el"]
+main_file = "embark.el"
+deps = ["compat"]
+journey = "embark.el"
+
+[package.elisp-refs]
+url = "https://github.com/Wilfred/elisp-refs"
+rev = "541a064c3ce27867872cf708354a65d83baf2a6d"
+deps = ["dash", "s"]
+tests = ["test/elisp-refs-unit-test.el"]
+load = ["test"]
+
+[package.helpful]
+url = "https://github.com/Wilfred/helpful"
+rev = "03756fa6ad4dcca5e0920622b1ee3f70abfc4e39"
+deps = ["dash", "s", "f", "elisp-refs"]
+tests = ["test/helpful-unit-test.el"]
+journey = "helpful.el"
+
+[package.emacsql]
+url = "https://github.com/magit/emacsql"
+rev = "7a4c607912c8fdd1fca4def4915d68f43b12d4da"
+tests = ["tests/*-tests.el"]
+load = ["tests"]
+
+[package.org-roam]
+url = "https://github.com/org-roam/org-roam"
+rev = "903bd4ec56d29247990d005ed9052c201e18b812"
+deps = ["dash", "emacsql", "magit-section"]
+
+[package.projectile]
+url = "https://github.com/bbatsov/projectile"
+rev = "4d2be8680fe445c4ca88177f0ed838051cadfe58"
+journey = "projectile.el"
+
+[package.flycheck]
+url = "https://github.com/flycheck/flycheck"
+rev = "246857406d3f1b95fe96b8822928599b0295acca"
+
+[package.ht]
+url = "https://github.com/Wilfred/ht.el"
+rev = "1c49aad1c820c86f7ee35bf9fff8429502f60fef"
+deps = ["dash"]
+tests = ["test/ht-test.el"]
+
+[package.spinner]
+url = "https://github.com/Malabarba/spinner.el"
+rev = "d4647ae87fb0cd24bc9081a3d287c860ff061c21"
+
+[package.lv]
+url = "https://github.com/abo-abo/hydra"
+rev = "59a2a45a35027948476d1d7751b0f0215b1e61aa"
+ignored_files = ["hydra.el"]
+main_file = "lv.el"
+
+[package.markdown-mode]
+url = "https://github.com/jrblevin/markdown-mode"
+rev = "e2e2bc753b4330f85b6ea7e62cd0552e8ea47b76"
+tests = ["tests/markdown-test.el"]
+load = ["tests"]
+
+[package.lsp-mode]
+url = "https://github.com/emacs-lsp/lsp-mode"
+rev = "a8b0978967f1a0f96d8916282bd2351e3045cac0"
+main_file = "lsp-mode.el"
+deps = ["dash", "f", "ht", "spinner", "markdown-mode", "lv"]
+
+[package.dired-hacks-utils]
+url = "https://github.com/Fuco1/dired-hacks"
+rev = "de9336f4b47ef901799fe95315fa080fa6d77b48"
+ignored_files = ["dired-avfs.el", "dired-collapse.el", "dired-filter.el", "dired-list.el", "dired-narrow.el", "dired-open.el", "dired-rainbow.el", "dired-ranger.el", "dired-subtree.el", "dired-tagsistant.el"]
+main_file = "dired-hacks-utils.el"
+deps = ["dash", "s", "f"]
+
+[package.dired-subtree]
+url = "https://github.com/Fuco1/dired-hacks"
+rev = "de9336f4b47ef901799fe95315fa080fa6d77b48"
+main_file = "dired-subtree.el"
+deps = ["dash", "dired-hacks-utils"]
+journey = "dired-subtree.el"
+
+[package.multiple-cursors]
+url = "https://github.com/magnars/multiple-cursors.el"
+rev = "6086e34e86cc9c305c693f440e648588335669c9"
+journey = "multiple-cursors.el"
+
+[package.yasnippet]
+url = "https://github.com/joaotavora/yasnippet"
+rev = "c1e6ff23e9af16b856c88dfaab9d3ad7b746ad37"
+tests = ["yasnippet-tests.el"]
+
+[package.goto-chg]
+url = "https://github.com/emacs-evil/goto-chg"
+rev = "72f556524b88e9d30dc7fc5b0dc32078c166fda7"
+
+[package.evil]
+url = "https://github.com/emacs-evil/evil"
+rev = "6a3e1ddd04ac504a016590940d0af2a3361b9efd"
+ignored_files = ["evil-test-helpers.el"]
+deps = ["goto-chg"]
+tests = ["evil-tests.el"]
+journey = "evil.el"
+
+[package.avy]
+url = "https://github.com/abo-abo/avy"
+rev = "933d1f36cca0f71e4acb5fac707e9ae26c536264"
+tests = ["avy-test.el"]
+
+[package.ace-window]
+url = "https://github.com/abo-abo/ace-window"
+rev = "77115afc1b0b9f633084cf7479c767988106c196"
+deps = ["avy"]
+
+[package.rainbow-delimiters]
+url = "https://github.com/Fanael/rainbow-delimiters"
+rev = "f40ece58df8b2f0fb6c8576b527755a552a5e763"
+tests = ["rainbow-delimiters-test.el"]
+
+[package.expand-region]
+url = "https://github.com/magnars/expand-region.el"
+rev = "351279272330cae6cecea941b0033a8dd8bcc4e8"
+journey = "expand-region.el"
+
+[package.nerd-icons]
+url = "https://github.com/rainstormstudio/nerd-icons.el"
+rev = "87ae84981ddeb4446586ba65cb30cec6e6ccfdb0"
+
+[package.shrink-path]
+url = "https://gitlab.com/bennya/shrink-path.el"
+rev = "c14882c8599aec79a6e8ef2d06454254bb3e1e41"
+deps = ["dash", "s", "f"]
+
+[package.doom-modeline]
+url = "https://github.com/seagle0128/doom-modeline"
+rev = "0ba6add16eb3c810e348b2c2187bf721a2fd7291"
+deps = ["compat", "nerd-icons", "shrink-path"]
+tests = ["test/*-test.el"]
+
+[package.posframe]
+url = "https://github.com/tumashu/posframe"
+rev = "1a6a25c58559ef43821a071c43b23de5cbc3cc3a"
+
+[package.company]
+url = "https://github.com/company-mode/company-mode"
+rev = "22cb3ff7b14821d98a5be6b324357a21bc46fef3"
+deps = ["posframe"]
+tests = ["test/*-tests.el"]
+exclude = ["test/all.el"]
+load = ["test"]
+
+[package.ivy]
+url = "https://github.com/abo-abo/swiper"
+rev = "7b267e29cd47b2036eafbc212683a721bd2b7dd0"
+ignored_files = ["counsel.el", "ivy-avy.el", "ivy-hydra.el", "swiper.el"]
+main_file = "ivy.el"
+tests = ["ivy-test.el"]
+
+[package.wgrep]
+url = "https://github.com/mhayashi1120/Emacs-wgrep"
+rev = "49f09ab9b706d2312cab1199e1eeb1bcd3f27f6f"
+ignored_files = ["wgrep-ack.el", "wgrep-ag.el", "wgrep-deadgrep.el", "wgrep-helm.el", "wgrep-pt.el"]
+main_file = "wgrep.el"
+tests = ["wgrep-test.el"]
+
+[package.diff-hl]
+url = "https://github.com/dgutov/diff-hl"
+rev = "8dfb5c27ea43b8c7ac1c008bb97090ad4f059285"
+tests = ["test/diff-hl-test.el"]
+load = ["test"]
+
+[package.smartparens]
+url = "https://github.com/Fuco1/smartparens"
+rev = "82d2cf084a19b0c2c3812e0550721f8a61996056"
+deps = ["dash"]
+tests = ["test/smartparens-*-test.el"]
+load = ["test"]
+setup = ["test/test-helper.el"]

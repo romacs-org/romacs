@@ -8,8 +8,8 @@ case inserts text into a buffer shown in the frame's one window, lets the
 engine redisplay, and asks the same `window-text-pixel-size',
 `buffer-text-pixel-size', `string-pixel-width', `pos-visible-in-window-p',
 `posn-at-point' and `vertical-motion' forms of both.  The cases are the
-shapes emacs-hermes's chat and the sessions browser measure (VM2-WTPS1):
-its composer rule (a `(space :width 2)' stretch, faced text, an
+shapes an agent chat and a sessions browser measure (VM2-WTPS1):
+a composer rule (a `(space :width 2)' stretch, faced text, an
 `:align-to right' fill) measured in a work buffer against a chat window,
 the full-width `(space :width text)' separator, `:align-to' columns,
 invisible detail text, overlay strings, an isearch match's overlay face,
@@ -35,14 +35,12 @@ FACES = '''
 (defface wtps-big '((t :height 1.5)) "A taller face.")
 '''
 
-# The text hermes-chat--status-rule-decorate builds around the rule's
-# status, and the fill hermes-chat--status-rule-line appends.
+# A chat rule's status text, and the fill after it.
 RULE = ('(concat (propertize " " (quote display) (quote (space :width 2)) (quote face) (quote wtps-separator)) " "'
         ' (propertize "● Running" (quote face) (quote warning)) " " (propertize "0:03" (quote face) (quote shadow))'
         ' (propertize " · " (quote face) (quote shadow)) (propertize "3 queued" (quote face) (quote font-lock-type-face)) " ")')
 FILL = '(propertize " " (quote display) (quote (space :align-to right)) (quote face) (quote wtps-separator))'
-# hermes-chat--footer-measure: the string in a work buffer, measured as
-# the chat WINDOW shows it.
+# A string measured in a work buffer as the chat WINDOW shows it.
 MEASURE = ('(with-current-buffer (get-buffer-create " *wtps-measure*") (erase-buffer) (insert {})'
            ' (car (buffer-text-pixel-size nil (selected-window) t)))').format
 
