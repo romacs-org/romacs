@@ -24,5 +24,8 @@ executable.
 - A Lisp half is one `(progn ...)`: its primitive reads the file's first form
   only, so a second top-level form never runs. The preludes are evaluated
   whole.
-- No `load-history` entry names these files: their definitions stand in for
-  GNU's C.
+- No `load-history` entry names the preludes or the halves: their
+  definitions stand in for GNU's C.
+- A prelude that signals fails `install_lisp_prelude` with its file named,
+  and a half that signals fails its primitive at each call: an edit here can
+  break every VM made over the tree.

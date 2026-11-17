@@ -75,3 +75,22 @@ fn a_vm_without_a_tree_is_told_why() {
         .output().unwrap();
     assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 }
+
+/// A prelude that signals fails the install with an error naming its file.
+#[test]
+fn a_prelude_that_signals_names_its_file() {
+    if std::env::var_os("ROMACS_VM_LISP_TREE_CHILD").is_some() {
+        let mut vm = Vm::new();
+        let error = vm.install_lisp_prelude().map(|_| ()).unwrap_err();
+        assert!(error.contains("lisp/vm/prelude.el: ") && error.contains("broken on purpose"), "{error}");
+        return;
+    }
+    let prelude = std::fs::read_to_string(checkout_vm_lisp().join("prelude.el")).unwrap() + "\n(error \"broken on purpose\")\n";
+    let root = tree("broken", &[("vm/prelude.el", prelude)]);
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &own_test::name(module_path!(), "a_prelude_that_signals_names_its_file"), "--nocapture"])
+        .env("ROMACS_VM_LISP_TREE_CHILD", "1").env("ROMACS_RUNTIME_ROOT", &root)
+        .output().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+}

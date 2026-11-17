@@ -2569,14 +2569,15 @@ impl Vm {
     /// state is registers, and the Lisp of the process, inotify, isolate and
     /// window-change primitives. Its definitions stand in for GNU's C, so no
     /// `load-history` entry names them. A world build records what it read;
-    /// a process with no runtime tree gets the reason as an error, and none
-    /// runs a copy compiled into the executable.
+    /// a file that signals, or a process with no runtime tree, gets an error
+    /// naming the file or the reason, and none runs a copy compiled into the
+    /// executable.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
         let mut value = Value::NIL;
         for path in prims::PRELUDES {
             let file = crate::host::runtime_lisp(path)?;
             let source = crate::host::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-            value = self.eval_source_raw(&source)?;
+            value = self.eval_source_raw(&source).map_err(|e| format!("{}: {e}", file.display()))?;
         }
         Ok(value)
     }
