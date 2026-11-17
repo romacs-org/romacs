@@ -720,6 +720,10 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 /// as an init's error is shown. The form calls only what is defined, since
 /// the Lisp that failed may be what would show it, and a way of showing
 /// one that signals keeps none of the others from being shown.
+///
+/// # Errors
+///
+/// The VM's error when it cannot evaluate the report itself.
 pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
     vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
        (let ((errors (reverse {LISP_ERRORS})))
