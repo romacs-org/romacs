@@ -313,17 +313,19 @@ and a move before the launch is not counted."
            (setf (romacs-agent-state session) state)
            (funcall fire)
            (should (eq (romacs-agent-state session) state)))
-         ;; A run began and never came up (its startup unanswered): stopped,
-         ;; and failed, saying so.
+         ;; A run began and never came up (its startup unanswered): failed,
+         ;; saying so, its supervisor left running (no stop, no other host):
+         ;; stopped, the queue would resume it at once.
          (setf (romacs-agent-state session) 'ended)
          (romacs-agent-resume session)
          (funcall placed)
          (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session))))
          (setf (romacs-agent-state session) 'starting)
-         (let ((stopped 0))
-           (cl-letf (((symbol-function 'romacs-agent-stop) (lambda (&rest _) (cl-incf stopped))))
+         (let ((touched 0))
+           (cl-letf (((symbol-function 'romacs-agent-stop) (lambda (&rest _) (cl-incf touched)))
+                     ((symbol-function 'romacs-agent--no-supervisor) (lambda (&rest _) (cl-incf touched))))
              (funcall fire))
-           (should (= stopped 1)))
+           (should (= touched 0)))
          (should (eq (romacs-agent-state session) 'unstarted))
          (should (string-match-p "did not come up" (romacs-agent-reply session)))
          ;; Its records still moving: no deadline runs until its launch.

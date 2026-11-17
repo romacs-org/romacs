@@ -3335,8 +3335,9 @@ attached, or to start once its session is moved."
 failed, saying so: a launch never leaves a session starting for ever,
 whether no run of its harness began (no `run' record from its
 supervisor) or one began and never came up (its startup unanswered),
-which is stopped.  Counted from the launch itself: the wait for a worker
-VM moving its records to SQLite first ends by itself, moved or not."
+which is left to come up later or be stopped by hand.  Counted from the
+launch itself: the wait for a worker VM moving its records to SQLite
+first ends by itself, moved or not."
   :type 'number :group 'romacs-agent)
 
 (defvar romacs-agent--attempts (make-hash-table :test #'eq :weakness 'key)
@@ -3376,27 +3377,29 @@ its deadline now waits for the run to come up."
   "The deadline of SESSION's launch attempt TOKEN.  Still `starting', or
 `detached' with no run begun (its new supervisor never attached: a
 session with records of an earlier run is taken for detached), it ends
-failed; a run that began and never came up is stopped first."
+failed.  A run that began and never came up is said failed and left
+running: stopped here, its queue would resume it at once, and it may yet
+come up."
   (when (romacs-agent--attempt-current-p session token)
     (let ((ran (nth 2 (gethash session romacs-agent--attempts))))
       (romacs-agent--attempt-over session)
       (when (or (eq (romacs-agent-state session) 'starting)
                 (and (eq (romacs-agent-state session) 'detached) (not ran)))
         (remhash (romacs-agent-id session) romacs-agent--resuming)
-        (when ran (romacs-agent-stop session))
         (romacs-agent--unstarted
-         session (format (if ran "its harness began but did not come up within %s s of its launch: stopped"
+         session (format (if ran "its harness began but did not come up within %s s of its launch: stop it to try again"
                            "no run of its harness began within %s s of its launch")
-                         romacs-agent-start-deadline))))))
+                         romacs-agent-start-deadline)
+         ran)))))
 
-(defun romacs-agent--unstarted (session why)
+(defun romacs-agent--unstarted (session why &optional running)
   "End SESSION unstarted and failed, WHY its reason: shown in its view,
 logged (`romacs-agent-issues-record', the usage log), its held notes
-sent through another host."
+sent through another host, unless its supervisor is RUNNING."
   (romacs-agent--raise session (list :type 'unstarted :seq (1+ (romacs-agent-seq session)) :text why))
   (when (fboundp 'romacs-usage-log-note)
     (romacs-usage-log-note "agent-unstarted" :session (romacs-agent-id session) :reason why))
-  (romacs-agent--no-supervisor session))
+  (unless running (romacs-agent--no-supervisor session)))
 
 (defun romacs-agent--launch-when-placed (session launch)
   "Call LAUNCH, which launches SESSION, once its records' place is known
