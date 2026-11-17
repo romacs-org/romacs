@@ -1,4 +1,4 @@
-//! The tree-sitter grammars Romacs ships (DIVERGENCES VM2-TREESIT-BUNDLED).
+//! The tree-sitter grammars Romacs ships (ledger/divergences VM2-TREESIT-BUNDLED).
 //! Each is the commit its GNU ts mode pins in `treesit-language-source-alist',
 //! linked into the executable; `romacs-vm-gui' registers [`BUNDLED`] with the
 //! VM's grammar loader, which finds them after the user's grammar directories

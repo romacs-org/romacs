@@ -3,7 +3,7 @@
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 
 ;; `backquote-process' is native and the compiler takes its answer without
-;; calling the macro (DIVERGENCES.md VM2-BACKQUOTE).  GNU's backquote.el,
+;; calling the macro (ledger/divergences VM2-BACKQUOTE).  GNU's backquote.el,
 ;; its functions under other names, is the reference here.
 
 (defun backquote-test--read-all (file)

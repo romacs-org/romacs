@@ -6,10 +6,9 @@
 //! src/xterm.c:9329), and `etc/rgb.txt` itself through `x-load-color-file`
 //! (src/xfaces.c:7251) on NS, W32 and Android. The evaluator's face and
 //! `color-values` paths and the image decoders that resolve names (XPM `c` keys)
-//! therefore have to answer from ONE table -- two copies in two crates is
-//! exactly the disagreement `docs/design/display-crate-layout.md` sends to
-//! `romacs-display-protocol`, and it is what made XPM render `gray14` black
-//! (issue #545).
+//! therefore have to answer from ONE table -- two copies in two crates can
+//! disagree, which is why such a value lives in `romacs-display-protocol`,
+//! and it is what made XPM render `gray14` black (issue #545).
 //!
 //! Reading the file at compile time (rather than at startup) keeps the table
 //! that ships identical to the `etc/rgb.txt` GNU ships, with no runtime I/O and

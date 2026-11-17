@@ -4,7 +4,7 @@ pub mod cluster;
 pub mod fontset;
 pub use fontset::{Alternative, Alternatives, FontDef, Fontset, FontsetMode, FontsetState, FontsetTarget, OpenedDefFont, OtfSpec};
 
-/// GNU font-sort attributes. Height scoring remains deferred (DIVERGENCES.md).
+/// GNU font-sort attributes. Height scoring remains deferred (ledger/divergences).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum FontSelectionAttribute { Width, Height, Weight, Slant }
 pub(crate) const DEFAULT_FONT_SELECTION_ORDER: [FontSelectionAttribute; 4] = [

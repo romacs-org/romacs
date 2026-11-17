@@ -2714,9 +2714,8 @@ fn translate_key_suppresses_modifiers() {
 /// Every other `NamedKey` winit's xkb keymap can produce: the media, launch,
 /// browser, mail, power, IME, 3270 and ISO group families.  The values come
 /// from inverting that keymap, so each is the keysym an X11 or Wayland backend
-/// hands GNU, and the trailing comment is the symbol the key becomes (see
-/// `keyboard/keysym.rs`, docs/design/input-keysyms.md).  With these, nothing
-/// winit can name reaches the "no keysym mapping yet" log.
+/// hands GNU, and the trailing comment is the symbol the key becomes.  With
+/// these, nothing winit can name reaches the "no keysym mapping yet" log.
 #[test]
 fn translate_key_names_the_media_launch_and_ime_families() {
     for (key, expected) in [

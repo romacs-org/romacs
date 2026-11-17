@@ -1,7 +1,7 @@
 # Bundled tree-sitter grammars
 
 The grammars Romacs links into its executable (`crates/romacs-grammars`,
-DIVERGENCES.md VM2-TREESIT-BUNDLED). Each one is the commit its GNU ts mode
+ledger/divergences VM2-TREESIT-BUNDLED). Each one is the commit its GNU ts mode
 pins in `treesit-language-source-alist`, so a ts mode parses with the
 grammar it was written against. A grammar the user installs in
 `treesit-extra-load-path` or `user-emacs-directory`'s `tree-sitter/`

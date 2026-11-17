@@ -1,5 +1,5 @@
 //! Three-argument `+', `-', `*', `min' and `max' compile as byte-opt.el
-//! rewrites them, `(OP (OP x y) z)' (DIVERGENCES.md VM2-SEALED1): the inner
+//! rewrites them, `(OP (OP x y) z)' (ledger/divergences VM2-SEALED1): the inner
 //! operation runs before the third argument is evaluated, so a marker it
 //! reads and the first signal are byte-compiled GNU's.
 use romacs_vm::Vm;

@@ -1,7 +1,7 @@
 ;;; romacs-raw-bytes-tests.el --- Raw bytes in multibyte buffers -*- lexical-binding: t; -*-
 
 ;; GNU's eight-bit characters (#x3FFF80..#x3FFFFF) in multibyte buffers
-;; (DIVERGENCES.md VM2-RAWTEXT1, VM2-BUFNAME-RAW1, VM2-STR2).  Every
+;; (ledger/divergences VM2-RAWTEXT1, VM2-BUFNAME-RAW1, VM2-STR2).  Every
 ;; expected value below is pinned GNU Emacs 32.0.50's answer to the same
 ;; form (2026-10-30); the file passes under GNU itself:
 ;;   emacs -Q --batch -l romacs-raw-bytes-tests.el -f ert-run-tests-batch-and-exit

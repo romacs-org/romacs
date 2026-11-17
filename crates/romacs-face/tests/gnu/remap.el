@@ -42,7 +42,7 @@
      ((s86-p ((t :foreground "p"))))
      ((s86-p (:filtered (:window s86-param t) (:foreground "filtered")) s86-p))
      s86-p)
-    ;; Deliberate divergences, recorded in GNU-DIVERGENCES.md:
+    ;; Deliberate divergences, recorded in ledger/divergences:
     (anonymous-attribute-before-inherit
      ((s86-blue ((t :foreground "blue"))))
      nil

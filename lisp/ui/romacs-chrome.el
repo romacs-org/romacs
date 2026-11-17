@@ -26,7 +26,7 @@
 ;;
 ;; `romacs-classic-chrome' sets every pane value to 0: GNU's look, with
 ;; the geometry of a GNU frame without dividers or border, and the bar.
-;; DIVERGENCES.md VM2-PANE-CHROME and VM2-STATUS-BAR.
+;; ledger/divergences VM2-PANE-CHROME and VM2-STATUS-BAR.
 
 ;;; Code:
 

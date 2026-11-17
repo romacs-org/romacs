@@ -435,7 +435,7 @@ impl Vm {
             self.set_marker_object(point, pos, buffer)?;
             // GNU restores `b->last_window_start` here; VM2 keeps no
             // per-buffer last window start, so it starts at 1. See
-            // DIVERGENCES.md VM2-WB1.
+            // ledger/divergences VM2-WB1.
             self.set_marker_object(st, Value::integer(1)?, buffer)?;
             self.set_window_old_point(v, pos, buffer)?;
             let w = self.window_mut(v)?;
@@ -1873,7 +1873,7 @@ impl<'a> Windows<'a> {
     }
     /// window.c:5003. VM2 derives a window's total size from its pixel size
     /// (`window-total-height`), so there is no separate total to install:
-    /// this validates FRAME and returns t (DIVERGENCES.md VM2-WIN1).
+    /// this validates FRAME and returns t (ledger/divergences VM2-WIN1).
     pub(crate) fn window_resize_apply_total(&mut self, frame: Value) -> Out {
         self.live_frame(frame)?;
         Ok(Value::TRUE)
@@ -1949,7 +1949,7 @@ impl<'a> Windows<'a> {
     /// parameter is not `none`, with that parameter or `mode-line-format`
     /// non-nil, taller than one canonical line. `mode-line-format` is the
     /// window's buffer's, as display.rs paints it. VM2 draws a mode line one
-    /// canonical line tall (DIVERGENCES.md VM2-WIN3).
+    /// canonical line tall (ledger/divergences VM2-WIN3).
     pub(crate) fn window_mode_line_height(&mut self, window: Value) -> Out {
         let w = self.live(window)?;
         let wants = self.vm.window_wants_mode_line(w).map_err(internal)?;
@@ -2198,7 +2198,7 @@ impl<'a> Windows<'a> {
         Ok(if self.vm.set_window_fringes(w, [left, right], outside != Value::NIL, Some(persistent != Value::NIL)).map_err(internal)? { Value::TRUE } else { Value::NIL })
     }
     /// frame.c:4358/4376: VM2 reports backend LINE_HEIGHT / COLUMN_WIDTH,
-    /// even though frame-live-p returns t (DIVERGENCES.md VM2-WIN5).
+    /// even though frame-live-p returns t (ledger/divergences VM2-WIN5).
     pub(crate) fn frame_char_size(&mut self, frame: Value, horizontal: bool) -> Out {
         self.any_frame(frame)?;
         let unit = if horizontal { self.vm.window_state.column } else { self.vm.window_state.line };
@@ -2283,7 +2283,7 @@ impl<'a> Windows<'a> {
     }
     /// frame.c:4381 Fframe_native_width and :4401 Fframe_native_height:
     /// the frame's size in the pixels its windows are measured in, as the
-    /// host or the batch runner set it (DIVERGENCES.md VM2-WIN5).
+    /// host or the batch runner set it (ledger/divergences VM2-WIN5).
     pub(crate) fn frame_native_size(&mut self, frame: Value, horizontal: bool) -> Out {
         self.any_frame(frame)?;
         let frame = if frame == Value::NIL { self.frame() } else { frame };
@@ -2730,7 +2730,7 @@ impl<'a> Windows<'a> {
         let window = self.live(window)?;
         let bands = ["tab-line", "header-line", "mode-line"].map(|name| self.vm.intern(name));
         if line != Value::NIL && line.integer_value().is_none() && !bands.contains(&line) { return Err(Fault::Wrong("fixnump", line)); }
-        // VM2 draws no tab line (DIVERGENCES.md VM2-WIN3).
+        // VM2 draws no tab line (ledger/divergences VM2-WIN3).
         if line == bands[0] { return Ok(Value::NIL); }
         self.vm.window_line_height(line, window).map_err(Fault::Error)
     }
@@ -2996,7 +2996,7 @@ impl<'a> Windows<'a> {
         // WINDOW takes ROOT's place and geometry; everything else in ROOT's
         // subtree is deleted. An internal WINDOW's children are resized
         // proportionally (GNU asks `window--resize-root-window`; VM2 uses its
-        // frame-resize plan, DIVERGENCES.md VM2-WIN2).
+        // frame-resize plan, ledger/divergences VM2-WIN2).
         let (x, y, width, height) = {
             let r = self.get(root)?;
             (r.x, r.y, r.width, r.height)
@@ -3022,7 +3022,7 @@ impl<'a> Windows<'a> {
             .plan_window_geometry(w, x, y, width, height, (0, 0), line, column, &mut geometry)
             .map_err(internal)?;
         // Live-window start is intentionally unchanged: GNU's vmotion-based
-        // scroll preservation is deferred (DIVERGENCES.md VM2-WIN4).
+        // scroll preservation is deferred (ledger/divergences VM2-WIN4).
         for (v, x, y, wd, ht) in geometry {
             let window = self.get_mut(v)?;
             window.x = x;

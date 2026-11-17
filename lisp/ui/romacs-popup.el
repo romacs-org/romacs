@@ -18,7 +18,7 @@
 ;; deactivating a map is its caller's.  A menu whose buffer has keys of
 ;; its own takes them while it shows (`romacs-popup-take-keys').  The Lisp APIs
 ;; packages call stay GNU's; only where and how a menu shows is Romacs's
-;; (DIVERGENCES.md VM2-MENU-LAYERS).  `romacs-popup-key-grid' lays out
+;; (ledger/divergences VM2-MENU-LAYERS).  `romacs-popup-key-grid' lays out
 ;; groups of keys for a panel.
 
 ;;; Code:
@@ -949,6 +949,9 @@ a fringe-less window keeps for its continuation glyph."
 (defvar romacs-popup--keys-exit nil "What ends its transient map.")
 (defvar romacs-popup--keys-then nil "What to call once the key's command returns.")
 
+(defvar romacs-popup--taking nil
+  "Non-nil while the menu taking keys runs a key's command.")
+
 (defvar romacs-popup-key-hook nil
   "Run in a menu's buffer, its window selected, after each key it takes:
 a buffer-local value follows point (a highlighted row).")
@@ -1017,8 +1020,10 @@ minibuffer is the minibuffer's."
 (defun romacs-popup-then (function)
   "Hide the menu taking keys once this key's command returns, then call
 FUNCTION in the window and buffer the user was in: what opens something
-for the user (a buffer, a prompt of its own) runs there, not in the menu."
-  (setq romacs-popup--keys-then function))
+for the user (a buffer, a prompt of its own) runs there, not in the menu.
+A command not run by the menu (its buffer shown in a window of its own)
+calls FUNCTION now."
+  (if romacs-popup--taking (setq romacs-popup--keys-then function) (funcall function)))
 
 (defun romacs-popup-menu-key ()
   "Run the key just typed in the menu taking keys, or hide the menu and run
@@ -1037,7 +1042,7 @@ the key as if it had never shown."
                (setq unread-command-events (append (listify-key-sequence keys) unread-command-events)))
       (setq romacs-popup--keys-then nil)
       ;; The map is the menu's only: not in a minibuffer its command reads.
-      (let ((overriding-terminal-local-map nil))
+      (let ((overriding-terminal-local-map nil) (romacs-popup--taking t))
         (with-selected-window window
           (setq this-command command)
           (call-interactively command)

@@ -13,7 +13,7 @@
 ;; lines through `vertical-motion', which follows the host's layout once a
 ;; host lays the frame out.  On a window-system frame GNU takes their
 ;; pixel-based twins, which agree where a window's rows share the frame's
-;; line height (DIVERGENCES.md VM2-SCROLL1).
+;; line height (ledger/divergences VM2-SCROLL1).
 
 ;;; Code:
 

@@ -52,6 +52,11 @@ class Refusals(unittest.TestCase):
         self.assertIsNone(d.refusal(PAINTS, {'readings': readings(STEP, STEP)}, 2))
         self.assertIsNone(d.refusal(IDLE, {'readings': readings(QUIET, QUIET)}, 2))
 
+    def test_a_step_that_waited_is_refused(self):
+        waited = {'readings': readings(STEP, STEP), 'waited': "a step's change or timer redisplayed: it waited"}
+        self.assertIn('a step waited', d.refusal(PAINTS, waited, 2))
+        self.assertIsNone(d.refusal(PAINTS, {'readings': readings(STEP, STEP), 'waited': None}, 2))
+
     def test_missing_steps_and_counters_are_refused(self):
         self.assertIn('2 readings for 2 steps', d.refusal(PAINTS, {'readings': readings(STEP)}, 2))
         blind = readings(STEP)
