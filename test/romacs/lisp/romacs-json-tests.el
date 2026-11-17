@@ -311,8 +311,8 @@ provides, whatever the file is called."
       (delete-directory directory t))))
 
 (ert-deftest romacs-json-read-follows-json-without-romacs-on-the-load-path ()
-  "json.el loaded under a `load-path' that holds GNU's Lisp alone, as an
-init layer's build may have it, still gets Romacs's `json-read': the
+  "json.el loaded under a `load-path' that holds GNU's Lisp alone still
+gets Romacs's `json-read': the
 following file is loaded from its own directory, and the load does not
 signal for want of it."
   (let* ((json (locate-file-internal "json.el" load-path))

@@ -293,7 +293,7 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
 
 (defun romacs-agent-renew--unfinished (session)
   "Finish SESSION's renewal if one is journaled that no run followed."
-  (when (and (romacs-agent-renewing session) (eq (romacs-agent-get (romacs-agent-id session)) session))
+  (when (and (romacs-agent-renewing session) (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (condition-case err (romacs-agent-renew--finish session (romacs-agent-harness-session session))
       (error (romacs-agent--raise session (list :type 'error :text (format "Renewal not finished: %s"
                                                                            (error-message-string err))))))))

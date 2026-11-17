@@ -5,6 +5,7 @@
 (require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
+(require 'romacs-test-notes)
 
 ;; Loading romacs-agent installs romacs-agent-tools: the endpoint's
 ;; registrations are left as they were.

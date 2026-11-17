@@ -523,6 +523,40 @@ fn reparsing_predicates_signal_as_treesit_c() {
     assert_eq!(value.as_deref(), Ok("((treesit-query-error treesit-test-reparse) (treesit-buffer_changed treesit-test-reparse))"));
 }
 
+/// A window waiting for its buffer's first parse takes stopgap faces:
+/// strings and comments as the syntax table finds them (a doc comment as
+/// the mode's comment rule matches it), and the keyword tokens of the
+/// mode's enabled font-lock rules, matched by case as whole tokens;
+/// nothing structural, no rule of a feature that is off, and no
+/// `syntax-propertize`, which may ask for the tree.
+#[test]
+fn a_window_waiting_for_its_first_parse_takes_lexical_faces() {
+    let mut vm = gnu_lisp(&[]);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let source = format!("(progn {SYSTEM_SETUP} (load \"romacs-treesit\") \
+        (with-temp-buffer \
+          (set-window-buffer nil (current-buffer)) \
+          (let ((table (make-syntax-table))) \
+            (modify-syntax-entry ?/ \". 124b\" table) (modify-syntax-entry ?* \". 23\" table) \
+            (modify-syntax-entry ?\\n \"> b\" table) (set-syntax-table table)) \
+          (setq-local treesit-font-lock-settings \
+            (treesit-font-lock-rules \
+              :language 'c :feature 'comment \
+              '(((comment) @font-lock-doc-face (:match \"\\\\`/\\\\*\\\\*\" @font-lock-doc-face)) (comment) @font-lock-comment-face) \
+              :language 'c :feature 'keyword '([\"return\" \"if\"] @font-lock-keyword-face) \
+              :language 'c :feature 'operator '([\"+\"] @font-lock-operator-face) \
+              :language 'c :feature 'delimiter '([\";\"] @font-lock-delimiter-face))) \
+          (setf (nth 1 (nth 3 treesit-font-lock-settings)) nil) \
+          (setq-local syntax-propertize-function (lambda (&rest _) (error \"stopgap propertized\"))) \
+          (setq-local parse-sexp-lookup-properties t) (setq syntax-propertize--done 1) \
+          (insert \"/** doc */ /* plain */ int f (int a) {{ if (a) return a + 1; Return xif; \\\"if x\\\"; }}\") \
+          (romacs-treesit--stopgap (selected-window) (point-min) (point-max)) \
+          (mapcar (lambda (word) (goto-char (point-min)) (let ((case-fold-search nil)) (search-forward word)) (get-text-property (1- (match-end 0)) 'face)) \
+                  '(\"doc\" \"plain\" \"int\" \"if\" \"return\" \"+\" \";\" \"Return\" \"xif\" \"if x\"))))");
+    let value = vm.eval_source(&source).and_then(romacs_vm::Local::display);
+    assert_eq!(value.as_deref(), Ok("(font-lock-doc-face font-lock-comment-face nil font-lock-keyword-face font-lock-keyword-face font-lock-operator-face nil nil nil font-lock-string-face)"));
+}
+
 /// `romacs--treesit-subtree-exceeds' tells what `treesit-subtree-stat'
 /// does against a depth and a width, for a wide tree, a deep one and a
 /// small one, on each side of their numbers.

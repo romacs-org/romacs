@@ -120,6 +120,16 @@ fn window_end_and_recentring_over_a_hidden_tail_as_pinned_gnu() {
     replay(include_str!("hidden_tail.el"), include_str!("hidden_tail.gnu"), 500);
 }
 
+/// `recenter_pixels.el`: `recenter` in a window redisplay has not laid out
+/// in the current faces (a new window, a face changed since its paint)
+/// chooses GNU's start over mixed row heights, line numbers, hidden and
+/// replaced text, scroll margins, narrowing, partial rows and a window
+/// shorter than the rows it would keep below point, and the paint keeps it.
+#[test]
+fn recentring_a_window_not_painted_as_pinned_gnu() {
+    replay(include_str!("recenter_pixels.el"), include_str!("recenter_pixels.gnu"), 40);
+}
+
 /// A collection moves every object but changes no answer: what a window
 /// recorded about its display must survive one.
 #[test]

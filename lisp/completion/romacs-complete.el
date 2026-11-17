@@ -959,7 +959,13 @@ Exit with current input if prefix ARG is given."
     buffer))
 
 (defun romacs-complete--frame ()
-  "The child frame that hosts the minibuffer window, made once."
+  "The child frame that hosts the minibuffer window over the selected
+frame's top-level frame, made there once.  One made over another
+top-level frame goes, giving that frame its minibuffer window back."
+  (when (and (frame-live-p romacs-complete--layer)
+             (not (eq (romacs-layer--root-of romacs-complete--layer) (romacs-layer--root-frame))))
+    (delete-frame romacs-complete--layer)
+    (setq romacs-complete--layer nil))
   (unless (frame-live-p romacs-complete--layer)
     (let* ((root (romacs-layer--root-frame))
            (after-make-frame-functions nil)

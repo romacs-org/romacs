@@ -94,7 +94,6 @@ rule	romacs-unidata.el	lisp/international/
 rule	romacs-usage-log.el	lisp/session/
 rule	romacs-video.el	lisp/graphics/
 rule	romacs-workspace-completion.el	lisp/completion/
-rule	romacs-world-layer.el	lisp/session/
 rule	warm-restart.el	lisp/session/
 rule	markdown-mode.el	lisp/textmodes/
 rule	markdown-ts-mode.el	lisp/textmodes/

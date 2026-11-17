@@ -371,12 +371,12 @@ transaction: never two of one, nor a form without its row."
           (pcase-dolist (`(,row . ,form) entries)
             (when form (romacs-agent-turns--drawn (nth 0 row) (list (nth 1 row))))))
       (error (ignore-errors (sqlite-execute db "rollback"))
-             (message "romacs-agent-turns: %s" (error-message-string err))))))
+             (signal (car err) (cdr err))))))
 
 (defun romacs-agent-turns-drawn-keep (id first-seq form)
   "Keep FORM as session ID's turn from FIRST-SEQ drawn (`romacs-agent-drawn-put'):
 the writer's, for a turn the editor just drew."
-  (when-let* ((db (romacs-agent-turns--db)))
+  (let ((db (or (romacs-agent-turns--db) (error "No agents store to keep a drawn turn in"))))
     (romacs-agent-drawn-put db id first-seq form)
     t))
 
@@ -446,7 +446,7 @@ are filled and drawn soon, by the fill's batch process."
   "A live turn's end: SESSION's rows are caught up a moment later, by a
 batch process (`romacs-agent-turns-fill-soon'), not here."
   (when (and (eq (plist-get event :type) 'done) (romacs-agent-dir session)
-             (eq (romacs-agent-get (romacs-agent-id session)) session))
+             (eq (romacs-agent-loaded (romacs-agent-id session)) session))
     (unless romacs-agent-turns--due
       (run-with-timer 2 nil (lambda () (let ((ids romacs-agent-turns--due))
                                          (setq romacs-agent-turns--due nil)
@@ -522,7 +522,7 @@ forms a transaction.  The number drawn."
                     (romacs-agent-turns--drawn id (mapcar #'car forms))
                     (cl-incf drawn (length forms)))
                 (error (ignore-errors (sqlite-execute db "rollback"))
-                       (message "romacs-agent-turns: %s" (error-message-string err)))))))))
+                       (signal (car err) (cdr err)))))))))
     drawn))
 
 (defun romacs-agent-turns-fill-batch ()
@@ -541,7 +541,7 @@ It moves no session's records to SQLite: the editor alone does."
       (when (file-exists-p (expand-file-name "manifest.json" dir))
         (cl-letf (((symbol-function 'romacs-agent--attach) #'ignore))
           (romacs-agent--load dir))
-        (when-let* ((session (romacs-agent-get (file-name-nondirectory dir))))
+        (when-let* ((session (romacs-agent-loaded (file-name-nondirectory dir))))
           ;; Whether records came since its rows is the records' to say: a
           ;; session loaded beside its running supervisor has an older seq.
           (setq written (+ written (condition-case err (romacs-agent-turns-fill session)
@@ -694,9 +694,9 @@ record further back than `romacs-agent-turns--lookup-bytes' gives nil."
 ;; with no turn (first seq 0).  One copy a session, moved as it is written.
 
 (defun romacs-agent-turns-fold-put (id text)
-  "Keep TEXT as the session ID's folded state, its only copy; non-nil when
-kept."
-  (when-let* ((db (romacs-agent-turns--db)))
+  "Keep TEXT as the session ID's folded state, its only copy; t once kept.
+A failure signals, rolled back: the writer sees it."
+  (let ((db (or (romacs-agent-turns--db) (error "No agents store to keep %s's state in" id))))
     (condition-case err
         (progn
           (sqlite-execute db "begin immediate")
@@ -708,8 +708,7 @@ kept."
           (sqlite-execute db "commit")
           t)
       (error (ignore-errors (sqlite-execute db "rollback"))
-             (message "romacs-agent-turns: %s" (error-message-string err))
-             nil))))
+             (signal (car err) (cdr err))))))
 
 (defun romacs-agent-turns-fold (id)
   "The session ID's folded state as kept, or nil."

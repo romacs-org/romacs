@@ -783,6 +783,12 @@ mod leaf {
         pub fn clear_string(&mut self, value: Value) -> std::result::Result<Value, Fault> {
             if Vm::image_value(value) { return Err(self.read_only(value)); }
             let bytes=self.string_view(value)?.bytes.len();
+            // The old text is wiped where it lies, not only replaced.
+            match self.object_mut(value)? {
+                data::Object::String(string) | data::Object::RawString(string) => string.wipe(),
+                data::Object::Bytes(old) => zeroize::Zeroize::zeroize(old),
+                _ => {}
+            }
             *self.object_mut(value)? = data::Object::Bytes(vec![0;bytes]);
             Ok(Value::NIL)
         }
@@ -2051,9 +2057,9 @@ pub(crate) fn window_text_shows_glyphs(vm: &mut Vm, window: Value, from: usize, 
     Leaf::new(vm).window_text_shows_glyphs(window, from, to)
 }
 
-/// The line numbers WINDOW shows from its start (Leaf::window_line_numbers).
-pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value) -> std::result::Result<Option<LineLabels>, Fault> {
-    Leaf::new(vm).window_line_numbers(window)
+/// The line numbers WINDOW shows from position FIRST (`Leaf::window_line_numbers`).
+pub(crate) fn window_line_numbers(vm: &mut Vm, window: Value, first: i64) -> std::result::Result<Option<LineLabels>, Fault> {
+    Leaf::new(vm).window_line_numbers(window, first)
 }
 
 /// cmds.c beginning-of-line and end-of-line's target: the line boundary

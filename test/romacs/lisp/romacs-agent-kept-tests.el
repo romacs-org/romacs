@@ -555,7 +555,8 @@ contents, so two equal states print the same."
 
 (ert-deftest romacs-agent-kept-a-session-asked-for-mid-restore-loads-at-once ()
   ;; While sessions load a turn at a time, one attached early may ask for
-  ;; another not reached yet (its child): it is loaded then and there.
+  ;; another not reached yet (its child): it is loaded then and there, as
+  ;; any session asked for by its id is.
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (clrhash romacs-agent--sessions)
@@ -563,8 +564,10 @@ contents, so two equal states print the same."
       (should (romacs-agent-get romacs-agent-kept-tests--id))
       (should-not (romacs-agent-get "../escape")))
     (clrhash romacs-agent--sessions)
+    ;; No restore running: asked for, it is loaded all the same.
     (let ((romacs-agent--restore-pending nil))
-      (should-not (romacs-agent-get romacs-agent-kept-tests--id)))))
+      (should-not (romacs-agent-loaded romacs-agent-kept-tests--id))
+      (should (romacs-agent-get romacs-agent-kept-tests--id)))))
 
 ;; Worker VMs as these tests see them: a job is held until `--work' runs
 ;; it in a VM of its own (a private session table), then its callback.

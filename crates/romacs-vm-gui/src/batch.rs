@@ -251,7 +251,7 @@ pub fn compile_lisp_tree(jobs: usize) -> Result<(), String> {
 }
 
 /// The installation's directory `EXECUTABLE.SUFFIX` beside this executable.
-fn beside_executable(suffix: &str) -> Option<PathBuf> {
+pub(crate) fn beside_executable(suffix: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     Some(exe.with_file_name(format!("{}.{suffix}", exe.file_name()?.to_string_lossy())))
 }
@@ -322,7 +322,7 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
 fn installed_world(dir: &Path) -> Option<Box<Vm>> {
     let store = beside_executable("worlds").filter(|store| store.is_dir() && !romacs_vm::world::store::disabled())?;
     match World::restore_read_only::<()>(&store, recipe(dir)) {
-        Ok((vm, ())) => {
+        Ok((_, vm, ())) => {
             diagnose(&serde_json::json!({"mode": "restored", "store": store, "installed": true, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             Some(vm)
         }

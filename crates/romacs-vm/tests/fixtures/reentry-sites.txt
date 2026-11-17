@@ -23,6 +23,7 @@ compiled_lisp/mod.rs compile_walk compile_unit 1 clean  # each emission is a Rus
 compiled_lisp/mod.rs compile_walk eval_source_raw 4 clean  # each call's value is used before the next call; :eof is in the initial obarray, whose symbols are never reclaimed
 compiled_lisp/unit.rs function force_lazy 1 held  # an open compiler builder holds collection
 display.rs fontify_range call_prepared_source_raw 1 clean  # the arguments are fixnums; the window and buffer are #: slots, read back by redisplay_window_fontify
+display.rs treesit_stopgap call_prepared_source_raw 1 clean  # the arguments are fixnums and the window, which slots[root] holds and nothing reads back after the call
 display_host/models.rs run_model_event call_prepared_source_raw 1 clean  # the event list is only the call's argument; its value is discarded, and nothing heap from before it is used after
 eval_buffer.rs eval_buffer_primitive write_from_native 2 held  # the bootstrap's emacs-lisp-mode and menu-bar-mode, as set writes: queued for the legacy call's engine, which always runs here, so the watchers run at the drain; with no engine, at once with collection held (rooted_write unset)
 eval_form.rs eval_primitive compile_request 1 held  # an open compiler builder holds collection
@@ -175,8 +176,5 @@ watchers.rs safe_call reader_call 1 held  # called from leaves, whose engine is 
 watchers.rs write_from_native perform_write 1 held  # at once: nothing hears it, or no engine will complete it and its watchers hold collection (rooted_write unset)
 window.rs frame_window_snapshots resize_root_window 1 clean  # its size is plain; the root window is read again from the frame after it
 window.rs resize_root_along call_prepared_source_raw 1 clean  # its arguments are rooted by the call; the root window is read again from the host frame after it
-world/layer.rs cancel_entry_timers eval_source_raw 2 clean  # no Values before either call: the timers it keeps and those restore makes again are Lisp variables', and its value is a fixnum, read at once
-world/layer.rs world_layer_load eval_source_raw 6 boundary  # a layer build's top-level requests (secret-reader advice on, session variables, each entry, a collection when an entry leaves a resource, advice off, startup rerun): the builder holds Rust strings, symbol slots and digests only; across an entry or the collection the `features' head sits in a RootFrame and is read back; each result is dropped or only matched
-world/pending.rs force_pending safe_call 1 held  # gc_holds is raised across the call; INDEX is a fixnum and nothing heap is used after it
 world/store.rs publish_world collect_compacting 1 collector  # a build's end: no engine runs, and the VM is all the image holds
 prim/leaf/face.rs call_propagating call_lisp_at_write 1 held  # a leaf: its engine is not suspended; its callers hold only symbols, frames and lface vectors the leaf's held collection keeps in place

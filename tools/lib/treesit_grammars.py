@@ -32,8 +32,6 @@ CRATE = Path('crates/romacs-grammars')
 NOTICES = Path('etc/tree-sitter')
 # The grammar directory inside its crate, where it is not `src'.
 SOURCE_DIRS = {
-    'markdown': 'tree-sitter-markdown/src',
-    'markdown-inline': 'tree-sitter-markdown-inline/src',
     'tsx': 'tsx/src',
     'typescript': 'typescript/src',
 }

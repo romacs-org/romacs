@@ -159,6 +159,58 @@ fn carry(spans: &mut Vec<Span>, runs: &[Run], piece: Range<usize>, at: usize) {
     }
 }
 
+/// SOURCE, a pipe table, with its columns aligned: each cell padded to its
+/// column's widest as COLUMNS counts characters, on the side its delimiter
+/// row's colons say, and the delimiter row as wide. None when SOURCE holds
+/// no table. The source's other lines (around the table) are left out.
+pub(crate) fn align(source: &str, columns: &dyn Fn(char) -> usize) -> Option<String> {
+    let rows = rows(source);
+    let aligns = alignments(source)?;
+    let count = rows.iter().map(Vec::len).max()?.max(aligns.len());
+    let width = |s: &str| s.chars().map(columns).sum::<usize>();
+    let widths: Vec<usize> = (0..count)
+        .map(|i| rows.iter().filter_map(|r| r.get(i)).map(|c| width(&c.text)).max().unwrap_or(0).max(3))
+        .collect();
+    let mut out = String::new();
+    let line = |cells: Vec<String>| format!("| {} |\n", cells.join(" | "));
+    for (r, row) in rows.iter().enumerate() {
+        let cells = (0..count)
+            .map(|i| {
+                let text = row.get(i).map_or("", |c| c.text.as_str());
+                let pad = widths[i].saturating_sub(width(text));
+                match aligns.get(i).copied().unwrap_or(pulldown_cmark::Alignment::None) {
+                    pulldown_cmark::Alignment::Right => format!("{}{text}", " ".repeat(pad)),
+                    pulldown_cmark::Alignment::Center => format!("{}{text}{}", " ".repeat(pad / 2), " ".repeat(pad - pad / 2)),
+                    _ => format!("{text}{}", " ".repeat(pad)),
+                }
+            })
+            .collect();
+        out.push_str(&line(cells));
+        if r == 0 {
+            let rule = widths
+                .iter()
+                .enumerate()
+                .map(|(i, &w)| match aligns.get(i).copied().unwrap_or(pulldown_cmark::Alignment::None) {
+                    pulldown_cmark::Alignment::Left => format!(":{}", "-".repeat(w - 1)),
+                    pulldown_cmark::Alignment::Right => format!("{}:", "-".repeat(w - 1)),
+                    pulldown_cmark::Alignment::Center => format!(":{}:", "-".repeat(w - 2)),
+                    pulldown_cmark::Alignment::None => "-".repeat(w),
+                })
+                .collect();
+            out.push_str(&line(rule));
+        }
+    }
+    Some(out)
+}
+
+/// The column alignments of SOURCE's first table.
+fn alignments(source: &str) -> Option<Vec<pulldown_cmark::Alignment>> {
+    Parser::new_ext(source, super::spans::options()).find_map(|event| match event {
+        Event::Start(Tag::Table(aligns)) => Some(aligns),
+        _ => None,
+    })
+}
+
 /// SOURCE's table rows, header first: each cell's text and inline runs.
 fn rows(source: &str) -> Vec<Vec<Cell>> {
     let all = runs(&spans(source).spans);

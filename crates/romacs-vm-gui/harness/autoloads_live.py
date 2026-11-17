@@ -150,9 +150,10 @@ def main():
         fio.shot(output / 'started.png', env, report)
         report['captures'].append({'name': 'started', 'rows': rows()})
         # The launch font: no override, so the frame's own default.
-        font = re.findall(r'^romacs: font family=(.*) pixels=(\d+)$', log_path.read_text(errors='replace'), re.M)
+        # A size in points is a fractional number of pixels (14 points: 18.67).
+        font = re.findall(r'^romacs: font family=(.*) pixels=([\d.]+)$', log_path.read_text(errors='replace'), re.M)
         report['checks'].append({'default_font': font})
-        if not font or int(font[-1][1]) < 10:
+        if not font or float(font[-1][1]) < 10:
             raise AssertionError(f'default face font {font}: not a readable size')
         run('romacs-live-elisp-state', 'sample.el', '(defun sample-greet')
         fio.wait(elisp.exists, args.timeout, 'Lisp buffer state', process)

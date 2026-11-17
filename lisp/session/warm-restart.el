@@ -67,6 +67,11 @@ Handlers that would attach live resources then add a function to
 (defvar warm-restart-activate-functions nil
   "Functions called with no arguments once a restored session's buffers exist.")
 
+(defvar warm-restart-before-handover-functions nil
+  "Functions called with no arguments as a restart begins, before its
+image is written and its successor started: what must be on disk for the
+successor (a queue of writes) is put there, however long it takes.")
+
 (defvar warm-restart-blocker-functions nil
   "Abnormal hook naming why the current buffer cannot be handed over now.
 Each function runs in a buffer and returns nil or a string.  May be set
@@ -429,11 +434,18 @@ is not portable."
              collect (list :selected (eq frame (selected-frame))
                            :state (warm-restart--strip (window-state-get (frame-root-window frame) t))))))
 
+(defun warm-restart--secret-p (value)
+  "Whether VALUE is a string holding a secret, which no image holds: text
+with the `romacs-secret' property anywhere, as the password manager
+marks its secrets."
+  (and (stringp value) (text-property-not-all 0 (length value) 'romacs-secret nil value) t))
+
 (defun warm-restart--register (value)
   "Register VALUE as data: a position becomes (file-query FILE POS) in a
 file's buffer or (warm-restart-position ID POS) in another carried one.
-nil when it cannot be carried."
-  (cond ((markerp value)
+nil when it cannot be carried, or is a secret."
+  (cond ((warm-restart--secret-p value) nil)
+        ((markerp value)
          (let ((buffer (marker-buffer value)))
            (cond ((null buffer) nil)
                  ((buffer-file-name buffer) (list 'file-query (buffer-file-name buffer) (marker-position value)))
@@ -458,12 +470,14 @@ names of those that are not."
           warm-restart-history-variables))
 
 (defun warm-restart--globals ()
-  "The session-wide part of an image, and what of it is lost."
+  "The session-wide part of an image, and what of it is lost.
+The kill ring's secrets (`warm-restart--secret-p') are left out."
   (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell)))) register-alist))
         (histories (warm-restart--variables (warm-restart--history-variables)))
-        (globals (warm-restart--variables warm-restart-globals)))
-    (list :kill-ring (mapcar #'substring-no-properties kill-ring)
-          :yank-index (- (length kill-ring) (length kill-ring-yank-pointer))
+        (globals (warm-restart--variables warm-restart-globals))
+        (kills (seq-remove #'warm-restart--secret-p kill-ring)))
+    (list :kill-ring (mapcar #'substring-no-properties kills)
+          :yank-index (- (length kills) (length (seq-remove #'warm-restart--secret-p kill-ring-yank-pointer)))
           :registers (cl-remove-if-not #'cdr registers)
           :histories (car histories) :globals (car globals)
           :lost (append (cl-loop for (char . value) in registers unless value
@@ -1588,6 +1602,25 @@ output to LOG: the successor of a session that is no server."
                  "exec \"$@\" >>\"$0\" 2>&1 </dev/null")
          log (number-to-string (emacs-pid)) (append command (list "--restore" image))))
 
+(defun warm-restart--confirm (plan force asked)
+  "Refuse PLAN while a buffer of it is blocked; unless FORCE, ask whether
+the processes that would end and ask on exit, those not in ASKED, may end.
+Return ASKED with the processes asked about, ASKED itself when none was:
+processes, not names, as a name freed meanwhile may be taken again."
+  (when-let* ((blocked (warm-restart--entries plan 'blocked)))
+    (user-error "Cannot restart now: %s"
+                (mapconcat (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason))) blocked "; ")))
+  (let ((asking (and (not force)
+                     (cl-loop for process in (process-list)
+                              when (and (process-live-p process) (process-query-on-exit-flag process)
+                                        (not (memq process asked)))
+                              collect process))))
+    (when (and asking
+               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? "
+                                         (mapconcat #'process-name asking ", ")))))
+      (user-error "Restart cancelled"))
+    (append asking asked)))
+
 ;;;###autoload
 (defun romacs-restart (&optional force)
   "Restart into a new process, carrying this session.
@@ -1598,16 +1631,17 @@ network connections are not carried yet: when one would ask before
 `kill-emacs', so does this, unless FORCE.  See `romacs-restart-command'
 for running a newer build."
   (interactive)
-  (let* ((plan (warm-restart-plan))
-         (asking (cl-remove-if-not (lambda (p) (plist-get p :query)) (plist-get plan :processes))))
-    (when (warm-restart--entries plan 'blocked)
-      (user-error "Cannot restart now: %s"
-                  (mapconcat (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
-                             (warm-restart--entries plan 'blocked) "; ")))
-    (when (and asking (not force)
-               (not (yes-or-no-p (format "Not carried, they end: %s.  Restart anyway? "
-                                         (mapconcat (lambda (p) (plist-get p :process)) asking ", ")))))
-      (user-error "Restart cancelled"))
+  (let ((asked (warm-restart--confirm (warm-restart-plan) force nil)) plan)
+    ;; What the successor reads is on disk before it starts, and before
+    ;; its supervisor's deadline runs.
+    (run-hooks 'warm-restart-before-handover-functions)
+    ;; Timers and process output run while those hooks wait, and while a
+    ;; question waits for its answer: the plan is made again until one
+    ;; needs no question, so what they made is carried, refused or asked
+    ;; about.
+    (while (let ((before asked))
+             (setq plan (warm-restart-plan) asked (warm-restart--confirm plan force asked))
+             (not (eq asked before))))
     (let ((image (warm-restart-write plan))
           (server (bound-and-true-p romacs-server-name)))
       ;; Before anything closes the endpoint: whoever starts this server
@@ -1690,6 +1724,20 @@ whose worlds it then boots from."
            (list (cons target (warm-restart--launch-flags (cdr (warm-restart--argv))))))
           (t (user-error "No build at %s" target)))))
 
+(defvar warm-restart-obstacle-functions nil
+  "Functions, each saying what keeps a requested restart from starting now:
+a list of reasons (strings), or nil when it has none.  A request waits
+while any names one, as it waits for an idle session, never blocking the
+editor: work a restart must not cut short (records still being written)
+is done in the background meanwhile.")
+
+(defun warm-restart--hook-obstacles ()
+  "The reasons `warm-restart-obstacle-functions' give, in their order."
+  (let ((reasons nil))
+    (run-hook-wrapped 'warm-restart-obstacle-functions
+                      (lambda (function) (setq reasons (append reasons (funcall function))) nil))
+    reasons))
+
 (defun warm-restart--obstacles (request)
   "Why REQUEST cannot restart now, as strings; nil when it can."
   (let ((ready (plist-get request :ready)))
@@ -1698,7 +1746,8 @@ whose worlds it then boots from."
           ((and ready (funcall ready)))
           ((and (fboundp 'romacs-mcp-in-flight-p) (romacs-mcp-in-flight-p)) (list "a Romacs tool call is in flight"))
           (t (let ((plan (warm-restart-plan)))
-               (append (mapcar (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
+               (append (warm-restart--hook-obstacles)
+                       (mapcar (lambda (e) (format "%s (%s)" (plist-get e :name) (plist-get e :reason)))
                                (warm-restart--entries plan 'blocked))
                        (unless (plist-get request :force)
                          (mapcar (lambda (p) (format "process %s would end" (plist-get p :process)))

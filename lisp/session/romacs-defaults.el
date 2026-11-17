@@ -10,9 +10,9 @@
 ;; blink, buffers that follow their files, relative line numbers in
 ;; programming buffers, tree-sitter modes for the languages whose
 ;; grammars Romacs ships, backups and auto-saves kept out of the
-;; directories being edited, and VC logs of the whole history, which
-;; C-g stops while they arrive.  `romacs-defaults-settings' lists
-;; them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
+;; directories being edited, VC logs of the whole history, which
+;; C-g stops while they arrive, and secrets from the password store.
+;; `romacs-defaults-settings' lists them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
 ;;
 ;; One switch, `romacs-defaults-mode', turns them all on or off.  An
 ;; interactive --loadup session turns it on before the user's init
@@ -36,6 +36,15 @@
 
 ;;; Code:
 
+;; The options those libraries compute from the per-user directory
+;; (`romacs-defaults--session-options') are bound before the libraries
+;; load, so their `defcustom' computes nothing: the world ends before the
+;; startup steps that name the per-user directory, and each session gives
+;; them their standard value (`romacs-defaults-start').
+(defvar savehist-file nil)
+(defvar save-place-file nil)
+(defvar recentf-save-file nil)
+
 (require 'elec-pair)
 (require 'savehist)
 (require 'saveplace)
@@ -54,6 +63,12 @@
 (defvar vc-log-show-limit 500)
 (put 'vc-log-show-limit 'standard-value '(500))
 (put 'vc-log-show-limit 'custom-type 'natnum)
+;; auth-source.el stays out of the world too (it loads eieio); its option is
+;; declared likewise.  The password store's backend parser is
+;; auth-source-pass's, which loads with it.
+(defvar auth-sources '("~/.authinfo" "~/.authinfo.gpg" "~/.netrc"))
+(put 'auth-sources 'standard-value '('("~/.authinfo" "~/.authinfo.gpg" "~/.netrc")))
+(with-eval-after-load 'auth-source (require 'auth-source-pass))
 (require 'romacs-omarchy)
 
 (defconst romacs-defaults--session-options '(savehist-file save-place-file recentf-save-file)
@@ -104,8 +119,8 @@
     (read-extended-command-predicate #'command-completion-default-include-p)
     ;; Tree-sitter modes in place of the regex modes, for the languages
     ;; whose grammars Romacs ships (`romacs-treesit-bundled-grammars'):
-    ;; GNU's :set remaps each mode to its ts mode.  markdown-ts-mode is
-    ;; left out until its cost per key is measured within budget.
+    ;; GNU's :set remaps each mode to its ts mode.  Markdown is
+    ;; `romacs-markdown-mode''s, not a ts mode's.
     (treesit-enabled-modes
      '(bash-ts-mode c-ts-mode c++-ts-mode c-or-c++-ts-mode css-ts-mode go-ts-mode
        js-ts-mode json-ts-mode mhtml-ts-mode python-ts-mode rust-ts-mode
@@ -115,7 +130,10 @@
     ;; `use-package' forms in a Lisp buffer's imenu, under "Packages".
     (use-package-enable-imenu-support t)
     ;; Logs show the whole history: it streams in behind the first screen.
-    (vc-log-show-limit 0))
+    (vc-log-show-limit 0)
+    ;; Secrets come from the password store first (romacs-pass.el), so the
+    ;; packages that ask auth-source need no configuration (VM-PASS1).
+    (auth-sources '(password-store "~/.authinfo" "~/.authinfo.gpg" "~/.netrc")))
   "Romacs's defaults, each (OPTION FORM [idle]): FORM is OPTION's standard value.
 They are set in this order while `romacs-defaults-mode' is on.  An `idle'
 setting, a mode the first frame does not need, is set at the session's

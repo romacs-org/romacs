@@ -59,15 +59,25 @@ class Refusals(unittest.TestCase):
         self.assertIn('no instruction counter', d.refusal(PAINTS, {'readings': blind}, 1))
 
     def test_a_step_without_a_redisplay_is_refused(self):
-        self.assertIn('steps [1] did not run one redisplay', d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
+        self.assertIn('steps [1] did not run as many redisplays as the others',
+                      d.refusal(IDLE, {'readings': readings(QUIET, (300, 0, 0, 0, 0, 0, 0, 0, 0))}, 2))
 
     def test_a_step_of_two_redisplays_is_odd(self):
         twice = (600, 0, 2, 200, 0, 0, 4, 0, 0)
         self.assertEqual(d.odd_steps(IDLE, d.steps(readings(QUIET, twice, QUIET))), [1])
 
+    def test_steps_that_each_run_two_redisplays_keep_their_rule(self):
+        # Each step's own and the one after a timer it set off (jit-lock's).
+        twice = (1500, 0, 2, 900, 9, 2, 2, 5, 1)
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, twice, twice))), [])
+        self.assertEqual(d.odd_steps(PAINTS, d.steps(readings(twice, STEP, twice))), [1])
+        self.assertEqual(d.figures(d.steps(readings(twice, twice)))['cycles'], 2)
+
     def test_a_scenario_paints_every_step_or_none(self):
-        self.assertIn('steps [1] did not run one redisplay that submitted a frame', d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
-        self.assertIn('steps [1] did not run one redisplay that submitted no frame', d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
+        self.assertIn('steps [1] did not run as many redisplays as the others, with a frame submitted',
+                      d.refusal(PAINTS, {'readings': readings(STEP, QUIET)}, 2))
+        self.assertIn('steps [1] did not run as many redisplays as the others, with no frame submitted',
+                      d.refusal(IDLE, {'readings': readings(QUIET, STEP)}, 2))
 
     def test_a_tenth_of_the_steps_may_be_odd(self):
         disturbed = {'readings': readings(*[QUIET] * 9, STEP)}
@@ -90,7 +100,8 @@ class Bars(unittest.TestCase):
         self.assertEqual(d.overall([row]), 'PASS')
 
     def test_counts_are_held_as_measured_and_instructions_and_conses_with_a_margin(self):
-        self.assertEqual((self.bars['windows_rebuilt'], self.bars['band_expansions'], self.bars['frames_submitted']), (1, 2, 1))
+        self.assertEqual((self.bars['cycles'], self.bars['windows_rebuilt'], self.bars['band_expansions'], self.bars['frames_submitted']),
+                         (1, 1, 2, 1))
         self.assertEqual((self.bars['display_conses'], d.ceiling('display_conses', 7439), d.ceiling('layouts', 2)), (8, 8190, 2))
         self.assertEqual((self.bars['display_instructions'], self.bars['display_instructions_p90']), (550, 550))
         self.assertEqual((d.ceiling('step_instructions', 5_234_567), d.ceiling('step_instructions', 0)), (5_760_000, 0))

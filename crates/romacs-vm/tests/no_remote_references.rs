@@ -79,7 +79,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("site_leaf", Free),
     ("signal_handlers", Root), ("backtrace", Root), ("profiler", Root),
     ("propagated_escape_hooked", Free), ("propagated_eval_depth", Free), ("propagate_next", Free),
-    ("host_input", Free), ("host_wait", Free), ("layout_host", Free), ("display", Free), ("visual", Free), ("session_host", Free), ("idle_since", Free),
+    ("host_input", Free), ("host_wait", Free), ("deferred_event", Free), ("layout_host", Free), ("display", Free), ("visual", Free), ("session_host", Free), ("idle_since", Free),
     ("redisplay_since_mark", Free), ("treesit_plain", Free), ("treesit_deferred", Free), ("treesit_parse_owed", Free),
     ("quit", Free), ("force_quit_count", Free), ("deferred_escapes", Free), ("quit_slots", Free),
     // Interned symbols, which no collection frees, and indices.
@@ -131,7 +131,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("closures", Barrier), ("cells", Barrier), ("conses", Barrier), ("objects", Barrier),
     // A paired cell's trace pushes the pair's Value, and its writes will shade.
     ("cell_pairs", Owed),
-    ("random", Free), ("tracking", Free), ("pending", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
+    ("random", Free), ("tracking", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
     ("referrers", Cache), ("local_owners", Cache),
     ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),

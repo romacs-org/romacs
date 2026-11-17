@@ -7,7 +7,6 @@ license and attribution files remain with them.
 | Dependency | Used for | Replacement plan |
 | --- | --- | --- |
 | fsm | Jabber's state-machine support | Small, explicit state transitions in Romacs-owned code. |
-| markdown-mode | Markdown editing and rendering helpers | Romacs-owned editing commands, using a Rust parser where useful. |
 
 Replace one dependency at a time. Keep its callers working, test connection and
 cleanup behavior where applicable, and remove the bundled package only when the

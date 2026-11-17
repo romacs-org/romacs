@@ -133,6 +133,7 @@ impl Vm {
         self.gc_stress.rearm();
         self.reset_collection_counters();
         self.forget_system_name();
+        self.forget_source_directory();
     }
 }
 

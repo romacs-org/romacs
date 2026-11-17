@@ -116,7 +116,7 @@ root; nil when it is no git project or git fails.  Only a `start' or
 (defun romacs-agent-diff--live-p (session)
   "Whether SESSION's events now happen now: the registered session, its
 journal's replay over."
-  (and (eq (romacs-agent-get (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
+  (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) (romacs-agent-caught-up session)))
 
 (defvar romacs-agent-diff--turns (make-hash-table :test #'equal)
   "A session's id to the request id of its last message read back: the

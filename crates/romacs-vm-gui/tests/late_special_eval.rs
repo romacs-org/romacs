@@ -100,9 +100,11 @@ fn late_specials_in_loaded_files_bind_as_gnu() {
     assert_eq!(run(&gnu, &compiled, false), compiled_answer, "GNU loading .elc");
     assert_eq!(run_probe(&gnu, &compiled, false, &explicit(&compiled)), "(2 2)", "GNU loading the .el beside its .elc");
     let romacs = env!("CARGO_BIN_EXE_romacs-vm-gui");
-    // Source GNU would interpret: without a store, and with one but no `.elc'.
+    // Source GNU would interpret: without a store Romacs reads it as GNU
+    // does; with one it compiles the library into the store, as package.el
+    // compiles a package it installs, and runs it compiled.
     assert_eq!(run(romacs, &source, false), interpreted, "Romacs loading source");
-    assert_eq!(run(romacs, &source, true), interpreted, "Romacs loading source beside a store");
+    assert_eq!(run(romacs, &source, true), compiled_answer, "Romacs compiling a load-path library through a store");
     // A sibling `.elc': GNU would load compiled code.  Without a store
     // Romacs reads the source as GNU's compiled load would have it; with
     // one, the store's compile process makes the artifact, then a load runs it.

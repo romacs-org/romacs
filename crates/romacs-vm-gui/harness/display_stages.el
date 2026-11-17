@@ -7,11 +7,14 @@
 ;; in a fresh session, after scaling/probes.el (its helpers).  A scenario
 ;; is a buffer shown one way and a step that changes it; each step runs
 ;; from a timer, then the host redisplays, and the next step starts once
-;; `romacs--redisplay-since-mark' saw that redisplay.  At the start of
-;; each step, and after the last one's redisplay, the session keeps the
-;; evaluator's `romacs-instructions', `romacs--display-stats' and
-;; `gcs-done': the differences are what a step cost in all, what its
-;; redisplay cost alone, and whether a collection fell in it.  Every
+;; the step has settled (`display-stages--settled-p'): its redisplay ran,
+;; no timer is ripe, and a redisplay ran after any timer that ran since.
+;; So the redisplays a step sets off, such as jit-lock's
+;; `jit-lock-force-redisplay', count in it however fast the host is.  At
+;; the start of each step, and once the last one settled, the session
+;; keeps the evaluator's `romacs-instructions', `romacs--display-stats'
+;; and `gcs-done': the differences are what a step cost in all, what its
+;; redisplays cost alone, and whether a collection fell in it.  Every
 ;; reading is taken before anything is serialized.
 ;;
 ;; A scenario is (display-stages-scenario NAME [:paints t] :setup FORM
@@ -240,6 +243,15 @@ line's end; return it."
   :body (display-stages--delta it i))
 
 ;; A folded Org buffer is opened: its first paint fontifies what it shows.
+;; The chunk jit-lock fontifies after each folded body reaches back into
+;; it, so a second redisplay follows (`jit-lock-force-redisplay', as in
+;; GNU): two a step.  Its bar holds five layouts, two in the second and
+;; three in the first (TODO(#265): one): the window's rows for point's
+;; visibility before jit-lock fontifies them (A), point's line for hscroll
+;; (B), and the rows again for the range shown once jit-lock has changed
+;; their properties (C).  Before romacs#221 A and C were glyph walks: 694 M
+;; display instructions with 1 layout and 4 walks, against 499 M with 3
+;; layouts and 1 walk after.
 (display-stages-scenario fontify-open-org-folded :paints t
   :setup (display-stages--counting-fontified)
   :body (switch-to-buffer (display-stages--org (format "stages-%d.org" i) 15)))
@@ -251,6 +263,8 @@ line's end; return it."
   :body (insert "a"))
 ;; A folded heading's parts are shown, from the last heading up, so that
 ;; the window keeps its start and the step is the unfold, not a scroll.
+;; As in opening one, jit-lock's chunks reach back into the folds: a second
+;; redisplay follows each step's own.
 (display-stages-scenario fontify-unfold-org :paints t
   :setup (prog1 (display-stages--show (display-stages--org "stages.org" 30))
            (display-stages--counting-fontified))
@@ -270,6 +284,44 @@ line's end; return it."
     (scaling--print (list :name (symbol-name (car scenario))
                           :paints (if (plist-get (cdr scenario) :paints) t :json-false)))))
 
+;; A step settles by the order of events, not by a wait.  A poll that
+;; finds it unsettled is owed a redisplay already: the step's own, one
+;; after a timer that ran, or one after a ripe timer, which runs in the
+;; poll's own pass (`romacs--timer-check' runs every ripe one).  So the
+;; redisplay after the poll is that one, and polls add none.  The poll and
+;; the advice on `timer-event-handler' cost a step 15 to 20 k instructions
+;; (plain-idle's 616 k became 629 to 637 k): plain-idle's and chat-idle's
+;; step bars rose by as much, their margins kept.
+
+(defvar display-stages--poll nil
+  "The step loop's own timer function, which sets off no redisplay of a step's.")
+
+(defvar display-stages--owed nil
+  "Redisplay cycles run when the last timer other than the step loop's ran,
+until a cycle after it has run: then nil.")
+
+(defun display-stages--cycles ()
+  "Redisplay cycles run so far."
+  (alist-get 'cycles (romacs--display-stats)))
+
+(defun display-stages--note-timer (timer)
+  "Before TIMER runs, note that a redisplay is owed after it, unless it is
+the step loop's own."
+  (unless (eq (timer--function timer) display-stages--poll)
+    (setq display-stages--owed (display-stages--cycles))))
+
+(defun display-stages--settled-p ()
+  "Whether the step marked last has settled: its redisplay ran, no timer is
+ripe, idle timers included, and a redisplay ran after the last timer
+other than the loop's own."
+  (and (romacs--redisplay-since-mark)
+       ;; No timer ripe, ordinary or (while idle) idle, as the host's
+       ;; own pass chooses them (`romacs--timer-next').
+       (not (eql (romacs--timer-delay) 0))
+       (or (null display-stages--owed)
+           (and (> (display-stages--cycles) display-stages--owed)
+                (progn (setq display-stages--owed nil) t)))))
+
 (defun display-stages--reading ()
   "The evaluator's instructions and collections so far, and redisplay's counts."
   `((step-instructions . ,(romacs-instructions)) (collections . ,gcs-done) ,@(romacs--display-stats)
@@ -278,8 +330,8 @@ line's end; return it."
 (defun display-stages-start (name out steps)
   "Run scenario NAME for STEPS steps in this session, then exit.
 Once the session is idle, set the scenario up; then run its steps from a
-chain of timers, each after the host's redisplay of the step before.  Take
-a reading at the start of each step and after the last one's redisplay;
+chain of timers, each once the step before settled.  Take a reading at
+the start of each step and once the last one settled;
 only then stop the profile `scaling--perf' controls, mark the end on
 stderr, and write the readings to OUT as JSON."
   (let* ((plist (or (alist-get name display-stages-scenarios) (error "No scenario %s" name)))
@@ -296,7 +348,9 @@ stderr, and write the readings to OUT as JSON."
         (lambda ()
           (let ((step nil) (laid-out nil) (i 0))
             (setq laid-out (lambda ()
-                             (if (romacs--redisplay-since-mark) (funcall step) (run-with-timer gap nil laid-out))))
+                             (if (display-stages--settled-p) (funcall step) (run-with-timer gap nil laid-out)))
+                  display-stages--poll laid-out)
+            (advice-add 'timer-event-handler :before #'display-stages--note-timer)
             (setq step (lambda ()
                          (push (display-stages--reading) readings)
                          (if (< i steps)

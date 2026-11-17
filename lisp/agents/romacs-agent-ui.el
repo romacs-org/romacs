@@ -109,6 +109,9 @@ fork), said by no one: the quietest row.")
   "The other session on a message's card: its sender, or the one it goes to.")
 (defface romacs-agent-message-bar '((t :inherit font-lock-function-name-face))
   "The bar before each line of a message between sessions.")
+(defface romacs-agent-ui-sent '((t :inherit shadow :slant italic))
+  "A message this chat sent another thread: set apart from words for the
+user.")
 (defface romacs-agent-link '((t :inherit link))
   "Face of a link to a delegated task's thread.")
 (defface romacs-agent-unread '((t :weight bold))
@@ -421,7 +424,7 @@ it, `romacs-agent-rows-texts'), else what its renderer draws
 session is known and still goes on.  A turn ended is not the task done:
 work it left running, such as a command in the background, keeps it
 waiting on its workers."
-  (let ((key (and-let* ((session (romacs-agent-get id))) (romacs-agent-ui--state-key session))))
+  (let ((key (and-let* ((session (romacs-agent-loaded id))) (romacs-agent-ui--state-key session))))
     (if (memq key romacs-agent-ui--live-keys) key (romacs-agent-ui--status-key word))))
 
 (defun romacs-agent-ui--chip (id word)
@@ -794,7 +797,9 @@ link."
                       :failed failed :bytes (or (plist-get event :output-bytes) (string-bytes output)))))
           (forward-line 1))
         (unless (string-empty-p (string-trim body))
-          (let ((text (propertize (concat (string-trim-right body) "\n") 'romacs-agent-output id
+          ;; One shown, a message sent, ends with a blank line: what comes
+          ;; after it is not its own.
+          (let ((text (propertize (concat (string-trim-right body) (if shown "\n\n" "\n")) 'romacs-agent-output id
                                   'invisible (if shown nil '(romacs-agent-output)))))
             (unless shown (add-face-text-property 0 (length text) 'romacs-agent-dim t text))
             (romacs-agent-ui--insert-at
@@ -1095,7 +1100,7 @@ the sender's thread and the reply hint where it can be answered, then
 its text."
   (let* ((from (plist-get message :from))
          (sender (plist-get from :session))
-         (known (and sender (romacs-agent-get sender)))
+         (known (and sender (romacs-agent-loaded sender)))
          (name (romacs-agent-ui--sender-name from))
          (answerable (or sender (plist-get from :address)))
          (id (plist-get message :id)))
@@ -1110,7 +1115,7 @@ its text."
 (defun romacs-agent-ui--sender-name (from)
   "The sender FROM names, a message's: its session's title now when it is
 known, else the name it sent."
-  (or (and-let* ((sender (plist-get from :session)) (known (romacs-agent-get sender))) (romacs-agent-title known))
+  (or (and-let* ((sender (plist-get from :session)) (known (romacs-agent-loaded sender))) (romacs-agent-title known))
       (plist-get from :name) "another session"))
 
 (defun romacs-agent-ui--message-wake (message)
@@ -1546,7 +1551,7 @@ and the parent of one whose state that changed, in the next batch."
   (dolist (session sessions)
     (romacs-agent-ui--summarize-children session)
     (when-let* (((romacs-agent-ui--announce session))
-                (parent (romacs-agent-get (plist-get (romacs-agent-options session) :parent))))
+                (parent (romacs-agent-loaded (plist-get (romacs-agent-options session) :parent))))
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--header-refresh session)
     (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
@@ -1677,7 +1682,7 @@ decided once per event."
       ((or 'done 'exit) (romacs-agent-ui--end-subagents session nil (eq type 'exit) (plist-get event :time))))
     (when moved
       (when-let* ((parent (plist-get (romacs-agent-options session) :parent))
-                  (known (romacs-agent-get parent)))
+                  (known (romacs-agent-loaded parent)))
         (romacs-agent-ui--children-changed known)))
     moved))
 
@@ -2411,7 +2416,7 @@ composer as it is."
     (recenter -1)
     (romacs-agent-mark-seen session)
     ;; Its parent's failed count may have just lost it, and the status bar its news.
-    (when-let* ((parent (romacs-agent-get (plist-get (romacs-agent-options session) :parent))))
+    (when-let* ((parent (romacs-agent-loaded (plist-get (romacs-agent-options session) :parent))))
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--batch)
     (when (memq (romacs-agent-state session) '(starting running waiting-approval)) (romacs-agent-ui--tick-start))
@@ -2617,7 +2622,10 @@ kept turn holds no output."
   "Keep SESSION's turn that just ended in the current chat as it is drawn
 here, from its prompt (`romacs-agent-first-seq') to the transcript's end,
 beside its turn row: a chat opened later inserts it."
-  (when-let* ((found (save-excursion (goto-char romacs-agent-ui--end)
+  (when-let* (;; A session's own, not a transcript's view (`romacs-agent-history-open'),
+              ;; which keeps no turns.
+              ((eq (romacs-agent-loaded (romacs-agent-id session)) session))
+              (found (save-excursion (goto-char romacs-agent-ui--end)
                                      (text-property-search-backward 'romacs-agent-first-seq nil (lambda (_ v) v)))))
     (condition-case err
         (romacs-agent-write 'romacs-agent-turns-drawn-keep

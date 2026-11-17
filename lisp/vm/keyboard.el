@@ -344,8 +344,10 @@ all a collection there reclaims."
         (if (> left 0) left t)))))
 
 (defun romacs--unread-p ()
-  "Whether read_char has a requeued event: in any of its unread queues."
-  (or unread-post-input-method-events unread-command-events unread-input-method-events))
+  "Whether read_char has a requeued event: in any of its unread queues, or
+a `switch-frame' a focus change queued (`unread_switch_frame')."
+  (or unread-post-input-method-events unread-command-events unread-input-method-events
+      (romacs--unread-switch-frame-p)))
 
 (defun romacs--unwrap-menu-event (c)
   "read_char's undoing of read_char_x_menu_prompt: (EVENT) is EVENT."
@@ -453,6 +455,9 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
       (when (and (stringp executing-kbd-macro) (/= 0 (logand c #x80)) (<= c #xff))
         (setq c (logior #x8000000 (logand c #x7f))))
       (setq executing-kbd-macro-index (1+ executing-kbd-macro-index)))
+     ;; read_char's `unread_switch_frame': a focus change's or a key
+     ;; sequence's delayed `switch-frame', read and recorded as input.
+     ((setq c (romacs--take-unread-switch-frame)))
      ((romacs--host-input-p)
       ;; read_char's auto-saves, for a command's keys: after
       ;; `auto-save-interval' events, and while idle.
@@ -538,7 +543,7 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
   (when inhibit-interaction (signal 'inhibited-interaction nil))
   ;; message_with_string's echo, which is not logged (keyboard.c:10776).
   (when prompt (let ((message-log-max nil)) (message "%s" prompt)))
-  (let ((seconds (and (numberp seconds) seconds)) val)
+  (let ((seconds (and (numberp seconds) seconds)) val (delayed nil))
     (while (progn
              ;; PREV-EVENT t keeps the input method out unless INPUT-METHOD.
              (setq val (romacs--read-char seconds (not input-method)))
@@ -546,7 +551,12 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
              ;; or cleared it under `inhibit-quit' and is read as a key;
              ;; maybe_quit acts on it before the event is returned.
              (and romacs--keyboard-quit (not inhibit-quit) (signal 'quit nil))
-             (and ascii-required (not (and seconds (null val)))
+             (or
+              ;; NO-SWITCH-FRAME, as ASCII-REQUIRED is for `read-char':
+              ;; a `switch-frame' is put off until the event is read.
+              (and ascii-required (eq (car-safe val) 'switch-frame)
+                   (setq delayed val))
+              (and ascii-required (not (and seconds (null val)))
                   (progn
                     ;; A function key with an ASCII equivalent is that
                     ;; character, with the symbol's modifiers.
@@ -559,7 +569,8 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
                          (if error-nonascii
                              (progn (setq unread-command-events (list val))
                                     (error "Non-character input-event"))
-                           t))))))
+                           t)))))))
+    (when delayed (romacs--set-unread-switch-frame delayed))
     val))
 
 ;;;; read_key_sequence
@@ -705,7 +716,7 @@ of `help-event-list'."
 ends, normally or not: a choice made at its start is undone here, so a
 read nested in another's restores the outer one's.")
 
-(defun romacs--read-key-sequence (dont-downcase-last &optional command)
+(defun romacs--read-key-sequence (dont-downcase-last &optional command can-return-switch-frame)
   "keyboard.c read_key_sequence: read a complete key sequence.
 Return its events as a vector, or nil at the end of an executing
 keyboard macro. Set `romacs--key-sequence-command' to its binding in the
@@ -720,8 +731,11 @@ unbound upper-case or shifted key is looked up without its shift, and
 An unbound help key after a prefix ends the sequence with
 `prefix-help-command' (keyboard.c's fallback), unless COMMAND, the
 command loop's own read, offers it to `romacs--prefix-help-functions'
-and one takes it."
-  (let ((started nil) (checkpoint nil) (clean nil) (help-command nil))
+and one takes it.
+A `switch-frame' event read after the first event of the sequence, or as
+its first without CAN-RETURN-SWITCH-FRAME, is kept for the read after
+the sequence (keyboard.c `delayed_switch_frame')."
+  (let ((started nil) (checkpoint nil) (clean nil) (help-command nil) (delayed nil))
    (unwind-protect
   (let* ((keys-start (length romacs--command-keys))
          (indec (romacs--keyremap (and (boundp 'input-decode-map) input-decode-map)))
@@ -775,17 +789,21 @@ and one takes it."
                                clean (not (or unread-command-events executing-kbd-macro
                                               (and (boundp 'inhibit--record-char) inhibit--record-char)))))
                        (setq key (romacs--read-char nil last-nonmenu-event t)
-                             quit-flag nil
-                             raw (vconcat raw (list key))
-                             keys (vconcat keys (list key)))
-                       (when romacs--key-read-functions
-                         (run-hook-with-args 'romacs--key-read-functions key))
-                       ;; Once per sequence, after its first event is read
-                       ;; and before it is looked up; replays of the
-                       ;; sequence do not run it again.
-                       (unless started
-                         (setq started t)
-                         (run-hooks 'romacs--sequence-start-functions))))
+                             quit-flag nil)
+                       (if (and (memq (car-safe key) '(switch-frame select-window))
+                                (or (> n 0) (not can-return-switch-frame)))
+                           ;; delayed_switch_frame: read on, the event kept.
+                           (setq delayed key again t)
+                         (setq raw (vconcat raw (list key))
+                               keys (vconcat keys (list key)))
+                         (when romacs--key-read-functions
+                           (run-hook-with-args 'romacs--key-read-functions key))
+                         ;; Once per sequence, after its first event is read
+                         ;; and before it is looked up; replays of the
+                         ;; sequence do not run it again.
+                         (unless started
+                           (setq started t)
+                           (run-hooks 'romacs--sequence-start-functions)))))
               ;; A click in a mode line, header line or margin is looked
               ;; up after its area, a fake prefix key.
               (when (and (eq state 'read) (consp key) (consp (cdr key))
@@ -859,6 +877,8 @@ and one takes it."
         (romacs--add-command-key (aref keys n))
         (setq n (1+ n)))
       (setq keys (romacs--subvector keys 0 n)))
+    ;; read_key_sequence's end: the delayed `switch-frame' is read next.
+    (romacs--set-unread-switch-frame delayed)
     (setq romacs--raw-command-keys raw
           romacs--key-sequence-command (and keys (if help-command (car help-command) binding))
           romacs--key-sequence-remapped
@@ -869,7 +889,7 @@ and one takes it."
      (when started (run-hooks 'romacs--sequence-end-functions)))))
 
 ;; keyboard.c read_key_sequence_vs; Fread_key_sequence's string form is Rust.
-(defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last cmd-loop)
+(defun romacs--read-key-sequence-vs (prompt continue-echo dont-downcase-last cmd-loop &optional can-return-switch-frame)
   (and prompt (not (stringp prompt))
        (signal 'wrong-type-argument (list 'stringp prompt)))
   ;; read_key_sequence (keyboard.c:10993): an interactive read installs
@@ -880,7 +900,7 @@ and one takes it."
     (setq romacs--command-keys [] romacs--single-command-key-start 0))
   (let ((input-method-exit-on-first-char (not cmd-loop))
         (input-method-use-echo-area (not cmd-loop)))
-    (or (romacs--read-key-sequence dont-downcase-last) [])))
+    (or (romacs--read-key-sequence dont-downcase-last nil can-return-switch-frame) [])))
 
 ;;;; command_loop_1
 
@@ -919,7 +939,8 @@ idle timers and redisplay see `this-command' nil."
 run its command between `pre-command-hook' and `post-command-hook'.
 Return the keys read, nil at the end of an executing keyboard macro."
   (romacs--command-loop-top)
-  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil t)))
+  ;; command_loop_1 reads a key sequence that may be a `switch-frame'.
+  (let ((keys (let ((romacs--reading-command-keys t)) (romacs--read-key-sequence nil t t)))
         cmd previous-buffer previous-tick)
     (set-buffer (window-buffer (selected-window)))
     (setq num-input-keys (1+ num-input-keys))

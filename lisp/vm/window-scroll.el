@@ -156,9 +156,11 @@ screen-fulls when WHOLE, keeping point in view."
     nil))
 
 (defun romacs--recenter (arg redisplay)
-  "window.c Frecenter on a terminal frame: put point's screen line ARG
-lines from the top (from the bottom when negative, in the middle when
-nil or a list) of the selected window, clear of `scroll-margin'."
+  "window.c Frecenter: put point's screen line ARG lines from the top
+(from the bottom when negative, in the middle when nil or a list) of the
+selected window, clear of `scroll-margin'.  Its display branches take the
+rows a host lays out (`romacs--recenter-start': a start, t to keep the
+start, nil with no host), else the terminal branch counts lines."
   (let ((window (selected-window)) center iarg)
     (unless (eq (window-buffer window) (current-buffer))
       (error "%s" (format-message "`recenter'ing a window that does not display current-buffer")))
@@ -171,17 +173,19 @@ nil or a list) of the selected window, clear of `scroll-margin'."
           (t (setq iarg (prefix-numeric-value arg))))
     (let* ((margin (romacs--window-scroll-margin window))
            (ht (romacs--window-internal-height window))
-           (line (cond (center (/ ht 2)) ((< iarg 0) (+ iarg ht)) (t iarg)))
-           (line (max margin (min line (- ht margin 1))))
-           ;; GNU's pixel branches, where a host lays the window out.
-           (start (or (and (or center (< iarg 0))
-                           (romacs--recenter-start (and (not center) iarg) margin ht))
-                      ;; Short of lines, the iterator ends at BEGV, shown or not.
-                      (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point))))))
-      ;; optional_new_start: redisplay keeps it while point shows.
-      (set-window-start window start t)
-      ;; Zero in lines or pixels alike; VM2 keeps it in pixels.
-      (set-window-vscroll window 0 t)))
+           ;; GNU's display branches, over the rows a host lays out: t
+           ;; keeps the start (nothing fits below point), nil means no host.
+           (start (romacs--recenter-start (and (not center) iarg) margin ht)))
+      (unless (eq start t)
+        (unless start
+          ;; The terminal branch: short of lines, the iterator ends at BEGV.
+          (let* ((line (cond (center (/ ht 2)) ((< iarg 0) (+ iarg ht)) (t iarg)))
+                 (line (max margin (min line (- ht margin 1)))))
+            (setq start (save-excursion (if (< (- (vertical-motion (- line) window)) line) (point-min) (point))))))
+        ;; optional_new_start: redisplay keeps it while point shows.
+        (set-window-start window start t)
+        ;; Zero in lines or pixels alike; VM2 keeps it in pixels.
+        (set-window-vscroll window 0 t))))
   nil)
 
 (defun romacs--displayed-window-lines (window)

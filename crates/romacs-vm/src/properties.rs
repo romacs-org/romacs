@@ -1230,6 +1230,10 @@ impl Properties {
     pub fn previous_change(&self, at: ByteOffset, limit: ByteOffset) -> ByteOffset {
         self.trees().fold(limit, |previous, root| previous.max(root.change_before(at, previous)))
     }
+    /// [`Self::previous_change`] of `key` alone.
+    pub fn previous_single_change(&self, at: ByteOffset, key: Key, limit: ByteOffset) -> ByteOffset {
+        self.tree(key).map_or(limit, |root| root.change_before(at, limit))
+    }
     /// [`Self::next_change`] of `key` alone.
     pub fn next_single_change(&self, at: ByteOffset, key: Key, limit: ByteOffset) -> ByteOffset {
         self.tree(key).map_or(limit, |root| root.change_after(at, limit))

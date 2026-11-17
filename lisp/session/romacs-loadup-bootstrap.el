@@ -132,6 +132,9 @@ and the reader use by default.")
 (romacs-follow-gnu-file 'json "romacs-json")
 ;; treesit.el's font-lock loop, run natively (LISP-TREESIT-FONTIFY).
 (romacs-follow-gnu-file 'treesit "romacs-treesit-font-lock")
+;; auth-source-pass reads the password store through the password manager
+;; (VM-PASS1).
+(romacs-follow-gnu-file 'auth-source-pass "romacs-auth-source-pass")
 (load "simple.el" nil t t)
 ;; The region is drawn natively (`snapshot_region'): no overlay for it.
 (setq redisplay-highlight-region-function #'romacs--native-region)
@@ -191,6 +194,8 @@ and load nothing when none is."
 (load "romacs-keymap.el" nil t t)
 ;; GNU describes keymaps, char-tables and syntax in C; Romacs in Lisp.
 (load "romacs-help.el" nil t t)
+;; GNU's eval.c `funcall-with-delayed-message', over a timer.
+(load "romacs-eval.el" nil t t)
 (load "font-core.el" nil t t)
 (load "emacs-lisp/syntax.el" nil t t)
 ;; The syntax summaries' switches (DIVERGENCES.md VM2-SYNTAX-SUMMARIES).
@@ -499,19 +504,15 @@ GUI once the user's init has loaded (`romacs-gui-loadup-after-init')."
 Each entry is (FEATURE FILE FORM REASON): FILE's FORM, which
 `romacs-world-restart' evaluates again when FEATURE is loaded.")
 
-(require 'romacs-world-layer)
-
 (defun romacs-world-restart ()
   "Make a VM restored from a world what a fresh process makes at this point.
 Take the session's last per-process startup steps again
 \(`romacs-startup-function'), then evaluate each `romacs--world-reseed'
-form whose feature is loaded, then the init layer's libraries' re-seed
-definitions (`romacs--world-reseed-all')."
+form whose feature is loaded."
   (funcall romacs-startup-function)
   (dolist (entry romacs--world-reseed)
     (when (featurep (car entry))
-      (eval (nth 2 entry) t)))
-  (romacs--world-reseed-all))
+      (eval (nth 2 entry) t))))
 
 ;; The stock look is a theme: `default' (etc/themes/default-theme.el),
 ;; enabled once Custom and the faces are loaded, so every world built from
