@@ -40,7 +40,7 @@ labwc with the same font, and evaluates the same forms in both.
               posn-at-point, and image-size (the frame's default face).
 
 Fixtures are in harness/fixtures/images.  `canvas' is GNU's Android-only
-type (DIVERGENCES VM2-IMAGE-CANVAS), so the forms leave it out.  COMPARISON POLICY: every form's
+type (ledger/divergences VM2-IMAGE-CANVAS), so the forms leave it out.  COMPARISON POLICY: every form's
 value exactly, an error as (ERROR . DATA), and the *Messages* lines gained.
 
 usage: images_live.py --romacs BIN [--gnu EMACS] --output DIR [--workflow NAME]...

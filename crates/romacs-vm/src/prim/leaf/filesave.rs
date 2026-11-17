@@ -15,7 +15,7 @@ impl Leaf<'_> {
     }
     /// umask: replace the process's file mode creation mask.
     pub fn filesave_set_umask(&self, mask: u32) {
-        unsafe { libc::umask(mask as libc::mode_t) };
+        crate::host::set_umask(mask);
     }
     pub fn filesave_rename(&self, from: &std::path::Path, to: &std::path::Path, replace: bool) -> std::io::Result<()> {
         if replace { return crate::host::rename(from, to) }

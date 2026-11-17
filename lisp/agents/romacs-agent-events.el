@@ -272,7 +272,11 @@ editor the import is the writer's (`romacs-agent-events--import-queued'):
 then `queued', and what waits for it (`romacs-agent-events-then') runs
 once it is done."
   (when (and romacs-agent-events-store (romacs-agent-dir session) (not (romacs-agent-events-p session))
-             (romacs-agent-events--db)
+             ;; From the editor the writer makes the store as it imports:
+             ;; a session started before the store is made goes to it too
+             ;; (its supervisor makes its records' tables), not to a journal
+             ;; no store-drawn chat shows while it runs.
+             (or (romacs-agent-writer-queued-p) (romacs-agent-events--db))
              (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
              ;; A worker writing it meanwhile: it stays in its journal, and
              ;; the editor finds that journal grown when it would flip it.
@@ -290,13 +294,27 @@ once it is done."
   "Ask the writer to import SESSION; `queued'.  One with no records is
 known imported at once, and only marked so (`romacs-agent-events--mark'):
 nothing of it is read meanwhile, and the mark clears nothing a host
-writes.  Its journal goes to the backup directory here, once imported,
-so no reader here finds it gone before it reads SQLite."
+writes.  While the store cannot be read here yet (the writer has still
+to make it, early in a fresh start) it is `queued' until marked, the
+store then made: nothing reads its records here before it can.  Its
+journal goes to the backup directory here, once imported, so no reader
+here finds it gone before it reads SQLite."
   (let ((id (romacs-agent-id session)) (dir (romacs-agent-dir session)))
-    (if (not (file-exists-p (expand-file-name "journal.jsonl" dir)))
-        (progn (puthash id t romacs-agent-events--imported)
-               (romacs-agent-write 'romacs-agent-events--mark (list id))
-               t)
+    (cond
+     ((and (not (file-exists-p (expand-file-name "journal.jsonl" dir))) (romacs-agent-events--db))
+      (puthash id t romacs-agent-events--imported)
+      (romacs-agent-write 'romacs-agent-events--mark (list id))
+      t)
+     ((not (file-exists-p (expand-file-name "journal.jsonl" dir)))
+      (unless (gethash id romacs-agent-events--importing)
+        (puthash id t romacs-agent-events--importing)
+        (romacs-agent-write 'romacs-agent-events--mark (list id)
+                            (lambda (answer)
+                              (remhash id romacs-agent-events--importing)
+                              (when (eq (car-safe answer) 'ok) (puthash id t romacs-agent-events--imported))
+                              (romacs-agent-events--waited id))))
+      'queued)
+     (t
       (unless (gethash id romacs-agent-events--importing)
         (puthash id t romacs-agent-events--importing)
         (romacs-agent-write
@@ -307,7 +325,7 @@ so no reader here finds it gone before it reads SQLite."
              (puthash id t romacs-agent-events--imported)
              (with-demoted-errors "romacs-agent-events: backing up: %S" (romacs-agent-events--back-up session)))
            (romacs-agent-events--waited id))))
-      'queued)))
+      'queued))))
 
 (defun romacs-agent-events--mark (id)
   "The writer's: mark the session ID, which has no journal, imported: its
@@ -626,10 +644,6 @@ own writes up as they do."
   "At most how many sessions, and how many bytes of journals, a migration
 job moves; a journal past the bytes goes alone.")
 
-(defconst romacs-agent-events--worker-busy 60000
-  "The milliseconds a worker's writes wait for the database's lock: a
-worker waits for the editor, never the editor for long on a worker.")
-
 (defun romacs-agent-events-migrate-soon ()
   "Move every session still in a journal to SQLite, in worker VMs, once the
 editor is idle: with the store on, in an editor whose worker VMs run."
@@ -725,13 +739,13 @@ loop: a worker's start is the editor's time."
 (defun romacs-agent-events--migrate-job (dirs)
   "In a worker VM: move the sessions recorded in DIRS to SQLite, compact
 them and fill their turn rows.  The ids moved."
-  (when-let* ((db (romacs-agent-events--db)))
-    (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-events--worker-busy))
-    ;; It writes records; it never makes them a session's own.  The turn
-    ;; rows it writes are drawn here, off the editor.
-    (let ((romacs-agent-events-store nil)
-          (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
-      (delq nil (mapcar #'romacs-agent-events--migrate-one dirs)))))
+  (let ((romacs-agent-store-patience romacs-agent-store-patient))
+    (when (romacs-agent-events--db)
+      ;; It writes records; it never makes them a session's own.  The
+      ;; turn rows it writes are drawn here, off the editor.
+      (let ((romacs-agent-events-store nil)
+            (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
+        (delq nil (mapcar #'romacs-agent-events--migrate-one dirs))))))
 
 (defun romacs-agent-events--migrate-one (dir)
   "Move the session recorded in DIR to SQLite; its id, or nil when it is

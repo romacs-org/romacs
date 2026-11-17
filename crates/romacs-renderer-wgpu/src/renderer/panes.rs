@@ -1,4 +1,4 @@
-//! The root frame's panes (DIVERGENCES.md VM2-PANE-CHROME), drawn over its
+//! The root frame's panes (ledger/divergences VM2-PANE-CHROME), drawn over its
 //! glyphs: each pane but the selected one dimmed toward the frame
 //! background, its corners rounded into that background, and an edge one
 //! device pixel wide round it.

@@ -9,7 +9,7 @@
 //! file name handlers as GNU does; `write-region' refuses the annotation
 //! functions.
 //!
-//! Supported subset (DIVERGENCES.md VM2-FILEIO1 lists the rest):
+//! Supported subset (ledger/divergences VM2-FILEIO1 lists the rest):
 //!
 //! * Decoding: GNU's decision and coding.c's detection in its priority
 //!   order, through the native string decoder. Detection refuses where it

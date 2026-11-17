@@ -19,7 +19,7 @@ fn mismatches(setup: &str, expressions: &[&str]) -> Vec<String> {
 /// As [`mismatches`], GNU's answers read with each (EXPRESSION, GNU TEXT,
 /// ROMACS FORM) of BUILT_INS: in that expression's answer, GNU's TEXT naming
 /// where C defines a built-in stands for what Romacs's FORM evaluates to,
-/// its Rust file (DIVERGENCES.md VM2-HELP-SOURCE).
+/// its Rust file (ledger/divergences VM2-HELP-SOURCE).
 fn mismatches_where(setup: &str, expressions: &[&str], built_ins: &[(&str, &str, &str)]) -> Vec<String> {
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let probe = |expression: &str| format!("(prin1-to-string (condition-case e {expression} (error (list 'signal e))))");
@@ -260,7 +260,7 @@ fn file_name_completion_reaches_system_users_and_loads_no_handler() {
     ]);
 }
 
-/// eshell's esh-util loads ange-ftp in VM2 (DIVERGENCES.md VM2-EWCLOAD1);
+/// eshell's esh-util loads ange-ftp in VM2 (ledger/divergences VM2-EWCLOAD1);
 /// a local file still visits as GNU's does.
 #[test]
 fn a_file_visits_after_eshell_loads() {

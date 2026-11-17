@@ -51,7 +51,7 @@ fn make_vector_matches_gnu_values() {
 /// alloc.c:3536 `make_vector` -> `allocate_vectorlike` -> `memory_full`,
 /// which signals `memory-signal-data`. VM2 has no such variable and signals
 /// alloc.c:7508's initializer text; GNU's startup.el:1738 rewrites it to the
-/// user's key binding (DIVERGENCES VM2-FR5-2).
+/// user's key binding (ledger/divergences VM2-FR5-2).
 #[test]
 fn make_vector_impossible_length_signals_memory_full_text() {
     check(&[(
@@ -210,7 +210,7 @@ fn propertize_keys_that_are_no_symbols_are_refused() {
     ]);
 }
 
-/// Every primh pin in the five corpora names a `/DIVERGENCES.md` row, with
+/// Every primh pin in the five corpora names a `ledger/divergences` row, with
 /// the same id and class, and nothing else is in the ledger.
 /// The divergence ledger, one file per divergence, read as one text.
 fn divergences() -> String {

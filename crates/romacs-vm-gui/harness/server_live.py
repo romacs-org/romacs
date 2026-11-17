@@ -774,7 +774,7 @@ DND_PROBE = '''(let ((f (car (filtered-frame-list #'display-graphic-p))))
 def daemon(args, base):
     """GNU's daemon and Romacs's server, asked the same before and after a
     client's frame; `ding' rings in both states.  The frame counts are
-    recorded, not compared: Romacs's frames are its own (DIVERGENCES.md)."""
+    recorded, not compared: Romacs's frames are its own (ledger/divergences)."""
     s = Server(args, base, 'dm')
     try:
         ask = lambda form: s.emacsclient('-e', form).stdout.strip()

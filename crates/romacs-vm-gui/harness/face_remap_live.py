@@ -38,7 +38,7 @@ PROBE = ('(progn (redisplay t) (list '
 
 # Under a `:filtered' remapping GNU's posn-at-point sizes a remapped glyph
 # without the window's filter (10x25 where it paints 19x48); Romacs answers
-# the painted size (DIVERGENCES.md VM2-FACE-REMAP).  The filtered workflow
+# the painted size (ledger/divergences VM2-FACE-REMAP).  The filtered workflow
 # compares the keyword's position, not its size.
 PROBE_FILTERED = PROBE.replace('(list (posn-x-y p) (posn-object-width-height p)))) (save-excursion (goto-char (point-min)) (search-forward "em ")',
                                '(posn-x-y p))) (save-excursion (goto-char (point-min)) (search-forward "em ")')

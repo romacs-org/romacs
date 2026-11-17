@@ -1,5 +1,5 @@
 {
- "comment": "Accepted differences of the bulk `core` corpus. Each pin names its verdict class and the /DIVERGENCES.md row that records GNU's behaviour beside ours. tests/bulk_core.rs fails on a pin that stops differing, changes class, names an unknown case or names a missing ledger row. Pins are human judgements: never regenerate them blindly after a re-record.",
+ "comment": "Accepted differences of the bulk `core` corpus. Each pin names its verdict class and the ledger/divergences row that records GNU's behaviour beside ours. tests/bulk_core.rs fails on a pin that stops differing, changes class, names an unknown case or names a missing ledger row. Pins are human judgements: never regenerate them blindly after a re-record.",
  "pins": {
   "append/1041": {
    "class": "VALUE",

@@ -5,7 +5,7 @@
 ;;; Commentary:
 ;; A layer is a child frame (GNU's `parent-frame') showing one buffer over
 ;; the root frame.  Showing, moving or hiding it changes no window of the
-;; frame below and no terminal's size (DIVERGENCES.md VM2-CHILD-FRAME).
+;; frame below and no terminal's size (ledger/divergences VM2-CHILD-FRAME).
 ;; Where a layer goes is policy, here: a full-width strip directly above
 ;; the minibuffer line (or the frame's bottom while the minibuffer is in
 ;; its own layer) by default, a centred box, or below point.  A
@@ -298,7 +298,7 @@ columns and lines."
 ;; window's text (or the frame's, `romacs-layer-toast-position'), which
 ;; covers no status bar and no minibuffer.  The echo area's semantics are
 ;; GNU's (`message', `current-message', *Messages*); only where a message
-;; shows is ours (DIVERGENCES.md VM2-ECHO-LAYER).
+;; shows is ours (ledger/divergences VM2-ECHO-LAYER).
 
 (defcustom romacs-layer-toast-timeout 2.5
   "Seconds a message toast shows before it fades, unless the next command
@@ -693,7 +693,7 @@ the echo area's next message or clearing.")
     (setq romacs-layer--command-error nil)))
 
 ;; The minibuffer and the echo area wrap at words too: minibuffers as each
-;; is entered, the echo area at its first message (DIVERGENCES.md
+;; is entered, the echo area at its first message (ledger/divergences
 ;; VM2-WRAP-WORDS).
 
 (defun romacs-layer--wrap-echo-area (&optional _text)

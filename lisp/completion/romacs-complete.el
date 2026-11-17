@@ -40,7 +40,7 @@
 ;; stays GNU's buffer and window, with its contents, prompt, point, hooks,
 ;; history and recursion; only where it is drawn changes.  Messages show
 ;; as toasts in the frame's top-right corner and stay in *Messages*
-;; (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER, VM2-ECHO-LAYER).
+;; (ledger/divergences VM2-MINI-COMPLETION-LAYER, VM2-ECHO-LAYER).
 ;;
 ;; Candidates come from `completion-all-completions' over the table and
 ;; predicate the reader was given, with `completion-styles' (orderless

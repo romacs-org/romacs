@@ -3919,6 +3919,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "crossbeam-deque",
+ "errno",
  "flate2",
  "foldhash",
  "fsrs",
@@ -3929,6 +3930,7 @@ dependencies = [
  "libsqlite3-sys",
  "md-5",
  "memchr",
+ "memmap2",
  "num-bigint",
  "num-integer",
  "pulldown-cmark",
