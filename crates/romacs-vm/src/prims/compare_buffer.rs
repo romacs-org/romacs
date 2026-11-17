@@ -1,6 +1,9 @@
 //! GNU editfns.c compare-buffer-substrings.
 use super::*;
 
+/// Characters compared between two polls.
+const CHUNK: usize = 1 << 14;
+
 defsubr! { name = "compare-buffer-substrings", gnu = "editfns.c:1752", effect = Reads,
 fn compare_buffer_substrings(cx, buffer1: Value, start1: Value, end1: Value, buffer2: Value, start2: Value, end2: Value) {
     let fold = cx.intern("case-fold-search");
@@ -12,7 +15,6 @@ fn compare_buffer_substrings(cx, buffer1: Value, start1: Value, end1: Value, buf
     let mut canon = None;
     // A read: it stops anywhere, polled a chunk at a time; equal chunks are
     // compared whole.
-    const CHUNK: usize = 1 << 14;
     let common = first.len().min(second.len());
     for start in (0..common).step_by(CHUNK) {
         if start != 0 { cx.quittable(Leaf::native_poll)?; }

@@ -190,3 +190,15 @@ fn call_process_s_wait_quits_and_interrupts_the_child() {
     assert!(outcome.is_ok(), "the wait ended with the child");
     assert!(signal.due(), "inhibit-quit holds the press");
 }
+
+/// The native sort, in runs merged a level at a time, orders as the sort
+/// through a Lisp predicate does, ties kept in order: over several merge
+/// levels and many equal keys.
+#[test]
+fn a_native_sort_in_runs_is_stable_and_ordered() {
+    let (mut vm, _) = busy_vm();
+    let form = "(let (l) (dotimes (i 100000) (push (cons (% (* i 7919) 97) i) l)) \
+                  (equal (sort (copy-sequence l) :key #'car) \
+                         (sort (copy-sequence l) :key #'car :lessp (lambda (a b) (< a b)))))";
+    assert_eq!(vm.eval_source(form).unwrap().display().unwrap(), "t");
+}

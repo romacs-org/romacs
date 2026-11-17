@@ -97,21 +97,39 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
-/// A stable sort of ORDER by COMPARE that polls between its runs: runs of
-/// [`SORT_RUN`] sorted alone, then merged pairwise a level at a time, each
-/// merge a sort of two sorted runs, which std's stable sort merges in one
-/// pass. Every step is bounded by a run or a merge, never the whole input.
-fn sort_polled<T>(cx: &mut Leaf<'_>, order: &mut [T],
-                  mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
-    let mut width = SORT_RUN;
-    for run in order.chunks_mut(width) {
+/// A stable sort of ORDER by COMPARE that polls as it goes: runs of
+/// [`SORT_RUN`] sorted alone, then merged pairwise a level at a time, a poll
+/// every run's worth of merged elements. Nothing outside ORDER is written.
+fn sort_polled<T: Copy>(cx: &mut Leaf<'_>, order: &mut [T],
+                        mut compare: impl FnMut(&mut Leaf<'_>, &T, &T) -> std::cmp::Ordering) -> std::result::Result<(), Fault> {
+    use std::cmp::Ordering::{Greater, Less};
+    for run in order.chunks_mut(SORT_RUN) {
         run.sort_by(|a, b| compare(cx, a, b));
         cx.native_poll()?;
     }
+    let mut merged = Vec::with_capacity(order.len().min(2 * SORT_RUN));
+    let mut width = SORT_RUN;
     while width < order.len() {
-        for pair in order.chunks_mut(2 * width).filter(|pair| pair.len() > width) {
-            pair.sort_by(|a, b| compare(cx, a, b));
-            cx.native_poll()?;
+        for start in (0..order.len()).step_by(2 * width) {
+            let (mid, end) = ((start + width).min(order.len()), (start + 2 * width).min(order.len()));
+            // A pair already in order needs no merge.
+            if mid == end || compare(cx, &order[mid - 1], &order[mid]) != Greater { continue; }
+            merged.clear();
+            let (mut left, mut right) = (start, mid);
+            while left < mid && right < end {
+                // Stable: the right element goes first only when strictly less.
+                if compare(cx, &order[right], &order[left]) == Less {
+                    merged.push(order[right]);
+                    right += 1;
+                } else {
+                    merged.push(order[left]);
+                    left += 1;
+                }
+                if merged.len().is_multiple_of(SORT_RUN) { cx.native_poll()?; }
+            }
+            merged.extend_from_slice(&order[left..mid]);
+            merged.extend_from_slice(&order[right..end]);
+            order[start..end].copy_from_slice(&merged);
         }
         width *= 2;
     }
