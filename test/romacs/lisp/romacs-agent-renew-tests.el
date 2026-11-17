@@ -541,6 +541,61 @@ and the worker's answer is what the editor's own read gave."
         (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
       (should (eq (car outcome) :done)))))
 
+(defun romacs-agent-renew-tests--turns (from n)
+  "Records of N turns numbered from FROM, without seqs: a prompt, a tool's
+call and result, an answer and its result each."
+  (cl-loop for k from from below (+ from n)
+           append (list (romacs-agent-renew-tests--prompt (* 10 k) (format "question %d" k))
+                        (romacs-mcp--object "out" (romacs-mcp--object
+                                                   "type" "assistant" "parent_tool_use_id" :null "uuid" (format "t%d" k)
+                                                   "message" (romacs-mcp--object "id" (format "t%d" k) "content"
+                                                                                 (vector (romacs-mcp--object "type" "tool_use" "id" (format "u%d" k) "name" "Bash"
+                                                                                                             "input" (romacs-mcp--object "command" (format "grep %d" k)))))))
+                        (romacs-mcp--object "out" (romacs-mcp--object
+                                                   "type" "user" "parent_tool_use_id" :null
+                                                   "message" (romacs-mcp--object "content" (vector (romacs-mcp--object "type" "tool_result" "tool_use_id" (format "u%d" k) "content" "found")))))
+                        (romacs-mcp--object "out" (romacs-mcp--object
+                                                   "type" "assistant" "parent_tool_use_id" :null "uuid" (format "m%d" k)
+                                                   "message" (romacs-mcp--object "id" (format "m%d" k) "content"
+                                                                                 (vector (romacs-mcp--object "type" "text" "text" (format "answer %d" k))))))
+                        (romacs-agent-renew-tests--reply (format "r%d" k) (format "answer %d" k)))))
+
+(ert-deftest romacs-agent-renew-thread-from-turns-rows ()
+  "romacs#270: a renewal's thread comes from its turns' rows since its last
+renewal, and its records only after the newest row: what it gives is what
+replaying all its records gave."
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (romacs-agent-renew-tests--with 'claude
+    (let ((romacs-agent-turns--made nil))
+      (apply #'romacs-agent-renew-tests--journal session
+             (append (romacs-agent-renew-tests--turns 1 4)
+                     (list (romacs-mcp--object "note" (romacs-mcp--object "type" "renew" "brief" "the earlier brief")))
+                     (romacs-agent-renew-tests--turns 5 6)))
+      ;; Its rows written for all but its last turn, a row's fill behind it.
+      (let ((all (romacs-agent-turns-fill session)))
+        (should (> all 0))
+        (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq = (select max(first_seq) from turns where session = ?)"
+                        (list (romacs-agent-id session) (romacs-agent-id session))))
+      (let* ((end (romacs-agent--journal-end session)) (last (romacs-agent-seq session))
+             (events (romacs-agent-events session))
+             (whole (list (romacs-agent-renew--compaction events) (romacs-agent-renew--items session events)))
+             (replayed 0))
+        (cl-letf* ((record (symbol-function 'romacs-agent--record))
+                   ((symbol-function 'romacs-agent--record) (lambda (&rest args) (cl-incf replayed) (apply record args))))
+          (should (equal (romacs-agent-renew--thread (romacs-agent-dir session) end last) whole)))
+        ;; Its last turn's records alone replayed, not the rest.
+        (should (< 0 replayed 10))
+        ;; Over the brief's budget: its first turn since the renewal, a gap,
+        ;; and its latest turns.
+        (let* ((romacs-agent-handoff-budget 40)
+               (items (cadr (romacs-agent-renew--thread (romacs-agent-dir session) end last))))
+          (should (equal (plist-get (car items) :text) "the earlier brief"))
+          (should (equal (plist-get (cadr items) :text) "question 5"))
+          (should (cl-find 'note items :key (lambda (item) (plist-get item :role))))
+          (should (equal (plist-get (car (last items)) :text) "answer 10"))
+          (should-not (cl-find "question 6" items :key (lambda (item) (plist-get item :text)) :test #'equal)))))))
+
 (ert-deftest romacs-agent-renew-a-failed-finish-may-be-tried-again ()
   (romacs-agent-renew-tests--with 'codex
     (romacs-agent--record session (romacs-mcp--object "seq" 50 "t" 50.0 "note"
