@@ -1903,8 +1903,10 @@ impl Vm {
     pub(crate) fn set_per_buffer_of(&mut self, index: usize, name: &str, value: Value) {
         if let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) {
             if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
-        } else if let Some(&slot) = self.names.get(name) {
-            self.store_local(index, slot, crate::variable_runtime::LocalStore::Set(value));
+        } else if let Some(&slot) = self.names.get(name)
+            && let Some(at) = self.local_at(index, slot)
+        {
+            self.store_local(index, slot, at, crate::variable_runtime::LocalStore::Set(value));
         }
     }
     /// data.c check_fwd_predicate's FWDPRED_Qfraction: VALUE is a number

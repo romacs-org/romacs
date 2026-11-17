@@ -54,7 +54,9 @@ impl Leaf<'_> {
             if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.index(0).unwrap() - 1, i); }
         } else {
             let index = buffer.index(0).map_err(Fault::Error)? - 1;
-            self.vm.store_local(index, slot, crate::variable_runtime::LocalStore::Kill);
+            if let Some(at) = self.vm.local_at(index, slot) {
+                self.vm.store_local(index, slot, at, crate::variable_runtime::LocalStore::Kill);
+            }
         }
         Ok(())
     }

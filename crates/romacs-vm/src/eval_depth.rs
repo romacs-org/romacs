@@ -44,25 +44,25 @@ impl Vm {
     /// The current buffer's object index and its local value of
     /// `max-lisp-eval-depth', if it has one: GNU swaps that binding into the
     /// C variable at set-buffer, so evaluation reads it.
-    fn eval_limit_local(&self) -> Option<(usize, Value)> {
+    fn eval_limit_local(&self) -> Option<crate::variable_runtime::LocalEntry> {
         let symbol = self.forwarded.eval_limit_symbol;
         if symbol == usize::MAX {
             return None;
         }
-        let index = self.slots[self.buffer_slot].value.index_if(0)?.checked_sub(1)?;
-        Some((index, self.per_buffer(index)?.locals().get(Value::reference(symbol + 1, 7))?))
+        let buffer = self.slots[self.buffer_slot].value.index_if(0)?.checked_sub(1)?;
+        Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, symbol)?.ok()? })
     }
     /// `max-lisp-eval-depth' as evaluation reads it: the current buffer's
     /// binding (its local one, else the C storage).
     pub(super) fn eval_limit(&mut self) -> i64 {
         match self.eval_limit_local() {
-            Some((_, local)) => local.integer_value().unwrap_or(0),
+            Some(local) => self.local_value(local).integer_value().unwrap_or(0),
             None => self.forwarded.eval_limit(),
         }
     }
     fn set_eval_limit(&mut self, limit: i64) {
         match self.eval_limit_local() {
-            Some((index, _)) => self.store_local(index, self.forwarded.eval_limit_symbol, crate::variable_runtime::LocalStore::Set(Value::integer(limit).expect("eval depth limit is a fixnum"))),
+            Some(local) => self.store_local(local.buffer, self.forwarded.eval_limit_symbol, Ok(local.at), crate::variable_runtime::LocalStore::Set(Value::integer(limit).expect("eval depth limit is a fixnum"))),
             None => self.forwarded.set_integer(MAX_DEPTH, limit),
         }
     }

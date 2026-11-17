@@ -106,6 +106,30 @@ mod reclamation_tests {
         std::fs::remove_dir_all(store).unwrap();
     }
 
+    /// `localized` answers from the slot's own redirect, and asks the
+    /// tracking only of a tracked variable: for every other kind of
+    /// redirect it answers as the redirect the tracking keeps.
+    #[test]
+    fn localized_agrees_with_the_kept_redirect_for_every_kind() {
+        let mut vm = Vm::new();
+        vm.eval_source_raw("(defvar lk-plain 1) (defvar lk-auto 2) (make-variable-buffer-local 'lk-auto)
+          (defvar lk-explicit 3) (make-local-variable 'lk-explicit) (defvaralias 'lk-alias 'lk-plain)
+          (make-local-variable 'undo-limit)").unwrap();
+        let mut seen = Vec::new();
+        for name in ["lk-plain", "lk-auto", "lk-explicit", "lk-alias", "undo-limit", "inhibit-modification-hooks", "undo-strong-limit", "print-length", "fill-column", "never-a-variable"] {
+            let slot = vm.slot(name);
+            let fast = vm.localized(slot);
+            let redirect = vm.variable_redirects[slot];
+            let kept = matches!(vm.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)));
+            assert_eq!(fast, kept, "{name}: {redirect:?}");
+            seen.push(std::mem::discriminant(&redirect.expect("resolved")));
+        }
+        for kind in [VariableRedirect::Plain, VariableRedirect::Localized, VariableRedirect::Alias(0),
+                     VariableRedirect::LocalizedForwarded(forwarded::Fwd::Int(0)), VariableRedirect::Forwarded(forwarded::Fwd::Int(0))] {
+            assert!(seen.contains(&std::mem::discriminant(&kind)), "no case of {kind:?}");
+        }
+    }
+
     #[test]
     fn a_killed_buffers_locals_go_with_it() {
         let mut vm = Vm::new();
@@ -141,8 +165,16 @@ pub(crate) fn variable_reads() -> usize {
 pub(crate) enum Binding {
     /// The default: the symbol's value cell or a built-in's native storage.
     Default,
-    /// The local in the buffer at this object index.
-    Local(usize),
+    /// The current buffer's local.
+    Local(LocalEntry),
+}
+
+/// A buffer's local of a variable: the buffer's object index, and where the
+/// entry is in its store, good until the store next changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LocalEntry {
+    pub(crate) buffer: usize,
+    pub(crate) at: usize,
 }
 
 /// A change to one buffer's local of a variable (`Vm::store_local`).
@@ -299,17 +331,30 @@ impl Vm {
     }
     /// Whether the variable at SLOT (the end of its alias chain) may have
     /// buffer-local values: GNU's SYMBOL_LOCALIZED, as a tracking keeps it.
+    #[inline]
     pub(super) fn localized(&mut self, slot: usize) -> bool {
-        if self.variable_redirects.get(slot).copied().flatten().is_none() {
-            // Code images rebuild slots without interning; uninterned slots
-            // are never forwarded. Resolve the redirect once.
-            let name = self.symbol_names[slot].clone();
-            if self.names.get(&name) != Some(&slot) {
-                return self.slots[slot].localness != Localness::Never;
+        match self.variable_redirects.get(slot).copied().flatten() {
+            Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)) => true,
+            // Only a tracked variable's redirect is not its own: the
+            // tracking keeps that.
+            Some(VariableRedirect::Forwarded(forwarded::Fwd::Tracked(_))) => {
+                matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)))
             }
-            self.initialize_variable_redirect(&name, slot);
+            Some(_) => false,
+            None => self.localized_first(slot),
         }
-        matches!(self.kept_redirect(slot), Some(VariableRedirect::Localized | VariableRedirect::LocalizedForwarded(_)))
+    }
+    /// `localized` of a slot whose redirect is not resolved yet.
+    #[cold]
+    fn localized_first(&mut self, slot: usize) -> bool {
+        // Code images rebuild slots without interning; uninterned slots are
+        // never forwarded. Resolve the redirect once.
+        let name = self.symbol_names[slot].clone();
+        if self.names.get(&name) != Some(&slot) {
+            return self.slots[slot].localness != Localness::Never;
+        }
+        self.initialize_variable_redirect(&name, slot);
+        self.localized(slot)
     }
     /// Where the variable at SLOT has its value in the current buffer: the
     /// buffer's local, else the default. With CREATE, for a set: an
@@ -326,43 +371,50 @@ impl Vm {
             self.declare_local(slot, Localness::Automatic);
         }
         if !self.localized(slot) { return Ok(Binding::Default); }
-        let index = self.buffer_index()?;
-        let symbol = Value::reference(slot + 1, 7);
-        if self.per_buffer(index).is_some_and(|b| b.locals().contains(symbol)) { return Ok(Binding::Local(index)); }
+        let buffer = self.buffer_index()?;
+        let Some(found) = self.local_at(buffer, slot) else { return Ok(Binding::Default) };
+        let at = match found {
+            Ok(at) => return Ok(Binding::Local(LocalEntry { buffer, at })),
+            Err(at) => at,
+        };
         if !create || self.slots[slot].localness == Localness::Explicit { return Ok(Binding::Default); }
         // Assignment within a default binding belongs to that binding in
         // its originating buffer, not to a newly created local entry.
-        let buffer = self.slots[self.buffer_slot].value;
+        let current = self.slots[self.buffer_slot].value;
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
         let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, kind)| {
-            *kind == Let::Default && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
+            *kind == Let::Default && *bound == slot && (*owner == current || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == current)))
         });
         if shadowed { return Ok(Binding::Default); }
         let value = if let Some(fwd) = self.localized_forwarded(slot) { self.forwarded_value(fwd)? } else { self.slots[slot].value };
-        self.store_local(index, slot, LocalStore::Make(value));
-        Ok(Binding::Local(index))
+        self.store_local(buffer, slot, Err(at), LocalStore::Make(value));
+        Ok(Binding::Local(LocalEntry { buffer, at }))
     }
-    /// The local value of the variable at SLOT in the buffer at object
-    /// INDEX, which has one; UNBOUND when void.
-    pub(super) fn local_value(&self, index: usize, slot: usize) -> Value {
-        self.per_buffer(index).and_then(|b| b.locals().get(Value::reference(slot + 1, 7))).unwrap_or(Value::UNBOUND)
+    /// Where the variable at SLOT's local is, Ok, or would go, Err, in the
+    /// store of the buffer at object INDEX; None when INDEX is no buffer.
+    pub(super) fn local_at(&self, index: usize, slot: usize) -> Option<std::result::Result<usize, usize>> {
+        Some(self.per_buffer(index)?.locals().find(Value::reference(slot + 1, 7)))
+    }
+    /// A buffer's local value, UNBOUND when void.
+    #[inline]
+    pub(super) fn local_value(&self, local: LocalEntry) -> Value {
+        self.per_buffer(local.buffer).map_or(Value::UNBOUND, |b| b.locals().value_at(local.at))
     }
     /// The one way a buffer's Lisp locals change, but for a kill's
     /// wholesale clear (`PerBuffer::retain_locals`) and an indirect clone's
     /// copy (`Vm::clone_indirect_state`): STORE to the local of the
-    /// variable at SLOT in the buffer at object INDEX. A store that would
-    /// change nothing writes nothing.
-    pub(crate) fn store_local(&mut self, index: usize, slot: usize, store: LocalStore) {
-        let symbol = Value::reference(slot + 1, 7);
-        let Some(has) = self.per_buffer(index).map(|b| b.locals().contains(symbol)) else { return };
-        if has == matches!(store, LocalStore::Make(_)) {
-            return;
-        }
-        let locals = self.per_buffer_mut(index).expect("a buffer").locals_mut();
-        match store {
-            LocalStore::Make(value) => { locals.insert(symbol, value); }
-            LocalStore::Set(value) => *locals.get_mut(symbol).expect("its local") = value,
-            LocalStore::Kill => { locals.remove(symbol); }
+    /// variable at SLOT in the buffer at object INDEX, whose entry `local_at`
+    /// found AT, with nothing changed in that store since. A store that would
+    /// change nothing (a Make where there is a local, a Set or Kill where
+    /// there is none) writes nothing.
+    pub(crate) fn store_local(&mut self, index: usize, slot: usize, at: std::result::Result<usize, usize>, store: LocalStore) {
+        let Some(per_buffer) = self.per_buffer_mut(index).filter(|_| at.is_ok() != matches!(store, LocalStore::Make(_))) else { return };
+        let locals = per_buffer.locals_mut();
+        match (store, at) {
+            (LocalStore::Make(value), Err(at)) => locals.insert_at(at, Value::reference(slot + 1, 7), value),
+            (LocalStore::Set(value), Ok(at)) => locals.set_at(at, value),
+            (LocalStore::Kill, Ok(at)) => locals.remove_at(at),
+            _ => unreachable!("filtered above"),
         }
     }
     /// SLOT's value in BUFFER, as `buffer-local-value' reads it: its
@@ -400,8 +452,8 @@ impl Vm {
         VARIABLE_READS.with(|reads| reads.set(reads.get() + 1));
         let base = self.indirect_variable(slot);
         let binding = self.binding(base, false)?;
-        if let Binding::Local(index) = binding {
-            return Ok(self.local_value(index, base));
+        if let Binding::Local(local) = binding {
+            return Ok(self.local_value(local));
         }
         match self.native_forwarding(base) {
             Some(fwd) => self.forwarded_value(fwd),
@@ -489,15 +541,15 @@ impl Vm {
             if value == Value::UNBOUND {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
             }
-            let Binding::Local(index) = self.binding(base, true)? else {
+            let Binding::Local(local) = self.binding(base, true)? else {
                 return self.set_forwarded(base, fwd, value, forwarded::SetFlag::Set).map_err(forwarded::fault_text);
             };
             let value = Self::localized_value(fwd, value).map_err(forwarded::fault_text)?;
-            self.store_local(index, base, LocalStore::Set(value));
+            self.store_local(local.buffer, base, Ok(local.at), LocalStore::Set(value));
             return Ok(());
         }
         match self.binding(base, true)? {
-            Binding::Local(index) => self.store_local(index, base, LocalStore::Set(value)),
+            Binding::Local(local) => self.store_local(local.buffer, base, Ok(local.at), LocalStore::Set(value)),
             Binding::Default => self.slots[base].value = value,
         }
         Ok(())
@@ -564,7 +616,7 @@ impl Vm {
         let forwarded = self.native_forwarding(base).filter(|_| local == Binding::Default);
         let binding = match (forwarded, local) {
             (Some(fwd), _) => self.forwarded_binding(base, fwd).map_err(forwarded::fault_text)?,
-            (None, Binding::Local(index)) => (base, self.local_value(index, base), self.slots[self.buffer_slot].value, Let::Local),
+            (None, Binding::Local(at)) => (base, self.local_value(at), self.slots[self.buffer_slot].value, Let::Local),
             (None, Binding::Default) => {
                 let kind = if self.localized(base) { Let::Default } else { Let::Plain };
                 (base, self.slots[base].value, self.slots[self.buffer_slot].value, kind)
@@ -597,7 +649,7 @@ impl Vm {
             None => value,
         };
         match local {
-            Binding::Local(index) => self.store_local(index, base, LocalStore::Set(value)),
+            Binding::Local(local) => self.store_local(local.buffer, base, Ok(local.at), LocalStore::Set(value)),
             Binding::Default => self.slots[base].value = value,
         }
         Ok(())
@@ -612,7 +664,9 @@ impl Vm {
             self.declare_local(slot, Localness::Explicit);
         }
         let index = self.buffer_index()?;
-        self.store_local(index, slot, LocalStore::Make(value));
+        if let Some(at) = self.local_at(index, slot) {
+            self.store_local(index, slot, at, LocalStore::Make(value));
+        }
         Ok(())
     }
     /// `special-variable-p' of SLOT's symbol: declared special now.

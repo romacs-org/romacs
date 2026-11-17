@@ -366,8 +366,8 @@ impl Vm {
             return Ok(self.dynamic[next].1);
         }
         if self.backtrace_lisp_local(at) {
-            let index = self.owner_local(slot, owner).ok_or("missing local binding")?;
-            return Ok(self.local_value(index, slot));
+            let local = self.owner_local(slot, owner).ok_or("missing local binding")?;
+            return Ok(self.local_value(local));
         }
         self.tracked_binding(slot, at, owner);
         self.untracked(slot, |vm| vm.backtrace_live_value(slot, owner, kind == Let::Default))
@@ -564,7 +564,7 @@ impl Vm {
             return Ok(());
         }
         let current = match self.owner_local(slot, owner).filter(|_| lisp_local) {
-            Some(index) => self.local_value(index, slot),
+            Some(local) => self.local_value(local),
             None => self.backtrace_live_value(slot, owner, default)?,
         };
         let frame = self.root_frame(&[current]);

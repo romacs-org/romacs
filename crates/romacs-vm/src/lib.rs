@@ -3681,7 +3681,7 @@ impl Vm {
                 _ => value,
             };
             match target {
-                Some(index) => self.store_local(index, base, crate::variable_runtime::LocalStore::Set(value)),
+                Some(local) => self.store_local(local.buffer, base, Ok(local.at), crate::variable_runtime::LocalStore::Set(value)),
                 None => self.slots[base].value = value,
             }
             return Ok(());
@@ -3702,14 +3702,14 @@ impl Vm {
         }
         Ok(())
     }
-    /// OWNER's object index, if OWNER is live and still has a local of the
-    /// variable at BASE.
-    fn owner_local(&self, base: usize, owner: Value) -> Option<usize> {
+    /// OWNER's local of the variable at BASE, if OWNER is live and still has
+    /// one.
+    fn owner_local(&self, base: usize, owner: Value) -> Option<crate::variable_runtime::LocalEntry> {
         if !self.live_buffer_value(owner) {
             return None;
         }
-        let index = owner.index_if(0)? - 1;
-        self.per_buffer(index)?.locals().contains(Value::reference(base + 1, 7)).then_some(index)
+        let buffer = owner.index_if(0)? - 1;
+        Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, base)?.ok()? })
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
