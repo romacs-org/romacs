@@ -168,6 +168,27 @@ class RepinTest(unittest.TestCase):
         self.assertEqual(observed["pdmp"].name, "emacs-aa.pdmp")
         self.assertEqual(observed["fingerprint"], "0c" * 32)
 
+    def test_an_installed_layout_is_found_through_a_symlinked_directory(self):
+        prefix = self.root / "prefix"
+        emacs = fake_gnu(prefix / "bin", "33.1", "s", b"\x0e")
+        (prefix / "bin/emacs.pdmp").unlink()
+        write_dump(self.root / "elsewhere/x86/emacs-ff.pdmp", b"\x0f")
+        (prefix / "libexec/emacs").mkdir(parents=True)
+        (prefix / "libexec/emacs/33.1").symlink_to(self.root / "elsewhere")
+        self.assertEqual(gnu_oracle.observe(emacs)["fingerprint"], "0f" * 32)
+
+    def test_a_size_spelt_differently_is_not_a_change(self):
+        emacs = fake_gnu(self.root / "gnu", "32.0.50", "s", b"\x10")
+        argv = ("--emacs", str(emacs), "--mirror-commit", "f" * 40, "--build-time", "stamp")
+        self.repin(*argv, "--reason", "first")
+        observed = gnu_oracle.observe(emacs)
+        text = self.reference.read_text().replace(
+            f'executable_size = "{observed["executable_size"]}"', f'executable_size = "+{observed["executable_size"]}"'
+        ).replace(f'pdmp_size = "{observed["pdmp_size"]}"', f'pdmp_size = "00{observed["pdmp_size"]}"')
+        self.reference.write_text(text)
+        self.assertIn("nothing to re-baseline", self.repin(*argv, "--reason", "same build"))
+        self.assertEqual(self.reference.read_text(), text)
+
     def test_a_file_that_is_not_a_dump_is_named_as_such(self):
         emacs = fake_gnu(self.root / "gnu", "32.0.50", "s", b"\x0d")
         (self.root / "gnu/emacs.pdmp").write_bytes(b"NOTADUMP" * 8)
@@ -198,12 +219,15 @@ class ParseReferenceTest(unittest.TestCase):
                 ("an upper-case digest", base.replace("d" * 64, "D" * 64)),
                 ("a truncated digest", base.replace("d" * 64, "d" * 63)),
                 ("a truncated fingerprint", base.replace("b" * 64, "b" * 63)),
-                ("a non-integer size", base.replace('pdmp_size = "2"', 'pdmp_size = "-2"')),
+                ("a negative size", base.replace('pdmp_size = "2"', 'pdmp_size = "-2"')),
+                ("a size past u64", base.replace('pdmp_size = "2"', f'pdmp_size = "{1 << 64}"')),
                 ("an unrecognised schema", base.replace('schema = "1"', 'schema = "2"')),
                 ("a missing key", 'schema = "1"\n')]:
             with self.subTest(what), self.assertRaises(ValueError):
                 gnu_oracle.parse_reference(text)
         gnu_oracle.parse_reference(f"# a comment\n\n{base}\n   \n# trailing note\n")
+        self.assertEqual(gnu_oracle.parse_reference(base.replace('pdmp_size = "2"', 'pdmp_size = "+002"'))
+                         ["pdmp_size"], "2", "a size is read as a u64 and kept in one spelling")
 
 
 if __name__ == "__main__":

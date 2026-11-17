@@ -179,8 +179,11 @@ def parse_reference(text):
         if not re.fullmatch(f"[0-9a-f]{{{digits}}}", fields[key]):
             raise ValueError(f"key {key!r} must be {digits} lowercase hex digits, got {fields[key]!r}")
     for key in ("executable_size", "pdmp_size"):
-        if not re.fullmatch(r"[0-9]+", fields[key]):
+        # A u64, read as Rust's parser reads one ("+12" and "012" are 12) and
+        # kept in its one spelling, so a reformatted size is not a change.
+        if not re.fullmatch(r"\+?[0-9]+", fields[key]) or int(fields[key]) >= 1 << 64:
             raise ValueError(f"key {key!r} is not a non-negative integer: {fields[key]!r}")
+        fields[key] = str(int(fields[key]))
     return fields
 
 
@@ -202,12 +205,25 @@ def dump_for(executable):
     if beside.is_file():
         return beside
     prefix = executable.parent.parent
-    found = sorted((path for root in ("libexec/emacs", "lib/emacs")
-                    for path in (prefix / root).rglob("*.pdmp")
-                    if path.is_file() and (path.name in ("emacs.pdmp", "Emacs.pdmp")
-                                           or path.name.startswith("emacs-"))),
-                   key=lambda path: os.fsencode(path))
+    found = sorted((path for root in ("libexec/emacs", "lib/emacs") for path in installed_dumps(prefix / root)),
+                   key=os.fsencode)
     return found[0] if found else beside
+
+
+def installed_dumps(directory):
+    """The dump names GNU installs under DIRECTORY, through symlinked directories too."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return []
+    found = []
+    for path in entries:
+        if path.is_dir():
+            found += installed_dumps(path)
+        elif path.name in ("emacs.pdmp", "Emacs.pdmp") or (
+                path.name.startswith("emacs-") and path.name.endswith(".pdmp")):
+            found.append(path)
+    return found
 
 
 def file_sha256(path):
