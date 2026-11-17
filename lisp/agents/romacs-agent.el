@@ -586,12 +586,18 @@ characters they encode, to put in a buffer, a string or more JSON."
   (decode-coding-string (json-serialize object :false-object :false :null-object :null) 'utf-8))
 
 (defun romacs-agent--write-json (file object)
-  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user."
-  (let ((temporary (concat file ".tmp")) (coding-system-for-write 'utf-8-unix))
-    (with-temp-file temporary
-      (insert (romacs-agent--json object)))
-    (set-file-modes temporary #o600)
-    (rename-file temporary file t)))
+  "Write OBJECT as JSON to FILE in UTF-8, atomically, readable only by the user.
+Through a temporary file of this write's own, beside FILE: two processes
+writing FILE at once (a session's harness answering in each) never take
+each other's."
+  (let ((temporary (make-temp-file (concat file ".") nil ".tmp")) (coding-system-for-write 'utf-8-unix))
+    (condition-case err
+        (progn
+          (with-temp-file temporary
+            (insert (romacs-agent--json object)))
+          (set-file-modes temporary #o600)
+          (rename-file temporary file t))
+      (error (ignore-errors (delete-file temporary)) (signal (car err) (cdr err))))))
 
 (defun romacs-agent--keep-json (file object)
   "Write OBJECT as JSON to FILE as `romacs-agent--write-json' does, unless
@@ -1080,18 +1086,20 @@ that file's time.  Nil when it is not found."
             (gethash "models" kept))))
 
 (defun romacs-agent--keep-models (session rows)
-  "Keep ROWS, what SESSION's harness reports, for its instance."
-  (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
-         (file (romacs-agent--models-file (plist-get instance :name))))
-    (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
-      (make-directory (file-name-directory file) t)
-      (romacs-agent--write-json
-       file (romacs-mcp--object
-             "stamp" stamp
-             "models" (vconcat (mapcar (lambda (row)
-                                         (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
-                                                             "efforts" (vconcat (plist-get (cdr row) :efforts))))
-                                       rows)))))))
+  "Keep ROWS, what SESSION's harness reports, for its instance.  A cache:
+one not written is reported, never in the way of the answer it came in."
+  (with-demoted-errors "romacs-agent: keeping models: %S"
+    (let* ((instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
+           (file (romacs-agent--models-file (plist-get instance :name))))
+      (when-let* ((rows) (stamp (romacs-agent--models-stamp instance)))
+        (make-directory (file-name-directory file) t)
+        (romacs-agent--write-json
+         file (romacs-mcp--object
+               "stamp" stamp
+               "models" (vconcat (mapcar (lambda (row)
+                                           (romacs-mcp--object "id" (car row) "label" (plist-get (cdr row) :label)
+                                                               "efforts" (vconcat (plist-get (cdr row) :efforts))))
+                                         rows))))))))
 
 (defun romacs-agent--refresh-models (session)
   "Ask SESSION's harness for its models, when its driver can and its
