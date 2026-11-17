@@ -724,13 +724,21 @@ pub fn noted_lisp_errors(vm: &mut Vm) -> Result<Vec<serde_json::Value>, String> 
 }
 
 /// A noted error of Romacs's Lisp as JSON: its file and line where the
-/// loader's message names them (`FILE: line N form M: ...`), and the
+/// loader's message names them (`FILE: line N form M: ...`, at the first
+/// such whole delimiter, which a file's name may hold part of), and the
 /// message.
 #[must_use]
 pub fn lisp_error_fields(error: &str) -> serde_json::Value {
-    let place = error.find(": line ").and_then(|at| {
-        let digits: String = error[at + ": line ".len()..].chars().take_while(char::is_ascii_digit).collect();
-        Some((&error[..at], digits.parse::<u64>().ok()?))
+    let number = |text: &str| -> Option<(u64, usize)> {
+        let digits = text.chars().take_while(char::is_ascii_digit).count();
+        Some((text[..digits].parse().ok()?, digits))
+    };
+    let place = error.match_indices(": line ").find_map(|(at, delimiter)| {
+        let rest = &error[at + delimiter.len()..];
+        let (line, digits) = number(rest)?;
+        let form = rest[digits..].strip_prefix(" form ")?;
+        let (_, digits) = number(form)?;
+        form[digits..].starts_with(": ").then_some((&error[..at], line))
     });
     match place {
         Some((file, line)) => serde_json::json!({"file": file, "line": line, "error": error}),
@@ -2361,6 +2369,8 @@ mod tests {
                    serde_json::json!({"file": "/t/lisp/ui/x.el", "line": 12, "error": "/t/lisp/ui/x.el: line 12 form 3: (error \"boom\")"}));
         assert_eq!(lisp_error_fields("file missing: /t/lisp/x.el: No such file or directory"),
                    serde_json::json!({"error": "file missing: /t/lisp/x.el: No such file or directory"}));
+        let named = "/tmp/build: line 7/tree/x.el: line 12 form 3: (error \"boom\")";
+        assert_eq!(lisp_error_fields(named), serde_json::json!({"file": "/tmp/build: line 7/tree/x.el", "line": 12, "error": named}));
     }
 
     /// Files of Romacs's Lisp that signal end no launch: the launch goes on
