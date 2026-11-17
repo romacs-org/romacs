@@ -6,7 +6,7 @@ use crate::data::Object;
 #[path = "obarray_tests.rs"]
 mod tests;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Entry {
     bytes: Vec<u8>,
     chars: usize,
@@ -14,15 +14,13 @@ pub(super) struct Entry {
     next: Option<u64>,
     present: bool,
 }
-romacs_snapshot::snapshot_struct!(Entry { bytes, chars, symbol, next, present });
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Obarray {
     pub(super) initial: bool,
     buckets: Vec<Option<u64>>,
     entries: HashMap<u64, Entry>,
     count: usize,
 }
-romacs_snapshot::snapshot_struct!(Obarray { initial, buckets, entries, count });
 impl Obarray {
     pub(super) fn new(bits: u32, initial: bool) -> Self {
         Self { initial, buckets: vec![None; 1usize << bits], entries: HashMap::default(), count: 0 }

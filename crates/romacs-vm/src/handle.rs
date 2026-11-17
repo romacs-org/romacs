@@ -184,9 +184,8 @@ impl<'r> From<&'r Rooted> for Arg<'r> {
 
 /// Payload of the hidden `Form::Object` variant: a heap object carried by a
 /// macro expansion inside the crate. Not constructible or readable outside.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct FormObject(pub(crate) Arc<Rooted>);
-romacs_snapshot::snapshot_tuple!(FormObject(f0));
 
 impl FormObject {
     pub(crate) fn new(vm: &Vm, value: Value) -> Self {
@@ -316,12 +315,12 @@ static NEXT_VM: AtomicU64 = AtomicU64::new(1);
 
 /// The VM side of `Rooted`: weak references to every live handle's slot.
 /// Only `collect` reads it; a dropped handle's weak entry is pruned there.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct RootSet {
     id: u64,
     // CELL(Rooted): Root registrations, kept as Value bits.
     slots: RefCell<Vec<Weak<AtomicU64>>>,
 }
-romacs_snapshot::snapshot_struct!(RootSet { id, slots });
 
 impl RootSet {
     /// No embedder handle is live.
@@ -342,11 +341,11 @@ impl Default for RootSet {
 /// A value kept alive and current across collections. It holds no borrow, so
 /// it can be stored anywhere; reading it requires the `Vm` it belongs to,
 /// which yields an ordinary `Local`. Dropping it releases the root.
+#[derive(romacs_snapshot::Snapshot)]
 pub struct Rooted {
     slot: Arc<AtomicU64>,
     vm: u64,
 }
-romacs_snapshot::snapshot_struct!(Rooted { slot, vm });
 
 impl Rooted {
     pub fn get<'vm>(&self, vm: &'vm Vm) -> Result<Local<'vm>> {

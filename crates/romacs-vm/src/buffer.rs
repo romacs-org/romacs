@@ -436,7 +436,7 @@ pub(crate) fn widened_properties(from: &properties::Properties, octets: &[u8], b
 }
 
 /// The objects that name a buffer, by index in `objects` (`Vm::referrers`).
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Referrers {
     /// Every window.
     pub(crate) windows: Vec<usize>,
@@ -444,16 +444,14 @@ pub(crate) struct Referrers {
     /// BUF_MARKERS and overlay tree.
     chains: HashMap<usize, Chain>,
 }
-romacs_snapshot::snapshot_struct!(Referrers { windows, chains });
 /// One buffer's markers and overlays. A member may since have moved to
 /// another buffer or died, or be listed again after it came back.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Chain {
     members: Vec<usize>,
     /// The length when members that left were last dropped.
     pruned: usize,
 }
-romacs_snapshot::snapshot_struct!(Chain { members, pruned });
 impl Referrers {
     /// Note OBJECT, at index I, if it names a buffer.
     pub(crate) fn list(&mut self, i: usize, object: &Object) {

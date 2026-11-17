@@ -1,5 +1,5 @@
 //! `Schema` for the standard library's and other crates' data types the
-//! listings hold: what each owns and contains, for a walk. Byte counts are
+//! derived types hold: what each owns and contains, for a walk. Byte counts are
 //! exact for sequences, text and boxes; for hash tables, B-trees, ropes,
 //! bignums and shared pointers they are estimates from their lengths and
 //! capacities, without node overhead or padding.

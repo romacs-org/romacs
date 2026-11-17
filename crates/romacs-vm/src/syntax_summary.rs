@@ -39,7 +39,7 @@ const COMSTR: i64 = -105;
 /// The scanner's control state between two characters: everything that
 /// decides how it reads what follows (`ParseState`'s control fields and
 /// the continuation's `in_symbol`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub(crate) struct Key {
     instring: i32,
     /// -1 outside a nestable comment, else its nesting.
@@ -49,7 +49,6 @@ pub(crate) struct Key {
     prev_syntax: i32,
     in_symbol: bool,
 }
-romacs_snapshot::snapshot_struct!(Key { instring, incomment, comstyle, quoted, prev_syntax, in_symbol });
 impl Key {
     pub(crate) fn of(state: &ParseState) -> Self {
         Self {
@@ -65,7 +64,7 @@ impl Key {
 
 /// A level value a summary keeps: a position in the span (from its start),
 /// or one of the entry state's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum Ref {
     Unset,
     At(u32),
@@ -75,17 +74,9 @@ pub(crate) enum Ref {
     TopPrev,
     ComStart,
 }
-romacs_snapshot::snapshot_enum!(Ref {
-    Ref::Unset => (),
-    Ref::At(at) => (at),
-    Ref::Open(j) => (j),
-    Ref::TopLast => (),
-    Ref::TopPrev => (),
-    Ref::ComStart => (),
-});
 
 /// What a span does to a parse state entered in some key.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Summary {
     exit: Key,
     /// Entry levels gone at its end.
@@ -105,17 +96,15 @@ pub(crate) struct Summary {
     /// every count it `fits`.
     levels: Option<u32>,
 }
-romacs_snapshot::snapshot_struct!(Summary { exit, pops, rise, fall, peak, opened, top, comstr, levels });
 
 /// A span's summary, or `Deep` where it has none: a general one whose span
 /// closes more levels than its scan was given or reaches GNU's level cap,
 /// and any whose span ends in a state no key resumes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum Span {
     Exact(Summary),
     Deep,
 }
-romacs_snapshot::snapshot_enum!(Span { Span::Exact(summary) => (summary), Span::Deep => () });
 
 /// The span START..END (END a character position) entered in KEY: exact
 /// for a state with LEVELS levels open, or general with no count.

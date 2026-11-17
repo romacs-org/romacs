@@ -52,7 +52,7 @@ const WRITTEN_LIMIT: usize = 64 << 10;
 /// collected since the last one, so it never drops what is recorded. The
 /// collector, which knows the epoch its VM's last collection ended at,
 /// reads what was recorded since and drops what was recorded before.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct BodyProperties {
     store: Properties,
     /// The Values stored that can name a heap entry, oldest first.
@@ -65,7 +65,6 @@ pub(crate) struct BodyProperties {
     /// was made, its properties replaced whole, or its record given up.
     all_at: u64,
 }
-romacs_snapshot::snapshot_struct!(BodyProperties { store, written, epochs, starts, all_at });
 
 impl std::ops::Deref for BodyProperties {
     type Target = Properties;

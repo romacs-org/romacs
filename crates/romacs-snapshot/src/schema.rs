@@ -1,5 +1,6 @@
-//! What an image holds, kind by kind (`Schema`): the walk the listing
-//! macros derive from the listing that makes a type `SnapshotSafe`.
+//! What an image holds, kind by kind (`Schema`): the walk
+//! `#[derive(Snapshot)]` makes from the definition that makes a type
+//! `SnapshotSafe`.
 //!
 //! One walk from an image's root meets every value the image holds through
 //! a listed field, an element or a pointee. For each type it meets it
@@ -24,8 +25,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::{Any, TypeId, type_name};
 use std::collections::BTreeMap;
 
-/// A type whose values a walk visits field by field. The listing macros
-/// implement it; the standard library's and other crates' data types are
+/// A type whose values a walk visits field by field. `#[derive(Snapshot)]`
+/// implements it; the standard library's and other crates' data types are
 /// implemented in `impls`.
 pub trait Schema: 'static {
     /// Values with nothing to visit and no allocation: numbers and flags. A
@@ -42,7 +43,7 @@ pub trait Schema: 'static {
     fn settle(&mut self, s: &mut Settle);
     /// Remake each at-rest field as this process makes it (`Default`): an
     /// image holds them at rest, and whatever they hold, an empty table's
-    /// static for one, is the builder's. Only a listing names at-rest fields.
+    /// static for one, is the builder's. Only a `#[snapshot(root)]` has them.
     fn renew(&mut self) {}
 }
 
@@ -225,7 +226,7 @@ impl<'o> Walk<'o> {
     }
 
     /// Meet the field NAME of the value the walk is in, which must be
-    /// SnapshotSafe: the listing macros' check of every listed field.
+    /// SnapshotSafe: the derive's check of every field it walks.
     pub fn field<F: crate::SnapshotSafe + Schema>(&mut self, name: &'static str, value: &F) {
         if let Some((kind, at, variant, true)) = self.layout("") {
             let offset = (std::ptr::from_ref(value).cast::<u8>() as usize).wrapping_sub(at);

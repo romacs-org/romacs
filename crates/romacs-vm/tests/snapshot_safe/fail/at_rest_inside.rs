@@ -1,6 +1,9 @@
 // A SnapshotSafe value may lie anywhere in an image, where no restore
-// remakes an at-rest field: only an image's root (`snapshot_fields!`) has them.
-use romacs_vm::world::safe::snapshot_struct;
-pub struct Cache { table: std::collections::HashMap<u32, u32>, scratch: Vec<u8> }
-snapshot_struct!(Cache { table } at_rest { scratch });
+// remakes an at-rest field: only an image's root (`#[snapshot(root)]`) has them.
+#[derive(romacs_snapshot::Snapshot)]
+pub struct Cache {
+    table: std::collections::HashMap<u32, u32>,
+    #[snapshot(at_rest)]
+    scratch: Vec<u8>,
+}
 fn main() {}

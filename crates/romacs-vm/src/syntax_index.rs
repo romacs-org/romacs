@@ -45,17 +45,16 @@ type Slot = (Key, Option<u32>);
 /// any write to any table, its parents' included, renews it),
 /// `comment-end-can-be-escaped', and whether `syntax-table' properties are
 /// honoured.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Context {
     pub table: u64,
     pub writes: u64,
     pub escaped_ends: bool,
     pub properties: bool,
 }
-romacs_snapshot::snapshot_struct!(Context { table, writes, escaped_ends, properties });
 
 /// A leaf (no children) or an inner node of the tree.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 struct Node {
     chars: usize,
     spans: Vec<(Slot, Span)>,
@@ -68,7 +67,6 @@ struct Node {
     unsafe_end: bool,
     children: Vec<Node>,
 }
-romacs_snapshot::snapshot_struct!(Node { chars, spans, unchecked, unsafe_end, children });
 
 impl Node {
     fn leaf(chars: usize) -> Self {
@@ -97,7 +95,7 @@ impl Node {
 }
 
 /// Counts of what the index did, for `romacs-syntax-summaries-stats'.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Stats {
     /// Parses served, and parses the plain scanner took, by reason.
     pub served: u64,
@@ -112,7 +110,6 @@ pub(crate) struct Stats {
     /// Takes of the property change log that found it a hull.
     pub log_overflows: u64,
 }
-romacs_snapshot::snapshot_struct!(Stats { served, declined, leaf_scans, plain_leaves, composed, switches, log_overflows });
 
 /// Why a parse took the plain scanner.
 #[derive(Clone, Copy, Debug)]
@@ -164,6 +161,7 @@ fn offset(at: i64) -> usize {
 
 /// A text's summaries: a B-tree over its leaves, absent until a parse
 /// needs it.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct SyntaxIndex {
     /// Characters in a leaf it cuts.
     leaf: usize,
@@ -171,7 +169,6 @@ pub(crate) struct SyntaxIndex {
     context: Option<Context>,
     pub(crate) stats: Stats,
 }
-romacs_snapshot::snapshot_struct!(SyntaxIndex { leaf, root, context, stats });
 impl Default for SyntaxIndex {
     fn default() -> Self {
         Self { leaf: LEAF, root: None, context: None, stats: Stats::default() }

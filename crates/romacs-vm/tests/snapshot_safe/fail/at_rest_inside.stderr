@@ -1,11 +1,5 @@
-error: no rules expected `at_rest`
- --> tests/snapshot_safe/fail/at_rest_inside.rs:5:34
+error: only a `#[snapshot(root)]` has at-rest fields: no restore remakes one anywhere else
+ --> tests/snapshot_safe/fail/at_rest_inside.rs:7:5
   |
-5 | snapshot_struct!(Cache { table } at_rest { scratch });
-  |                                  ^^^^^^^ no rules expected this token in macro call
-  |
-note: while trying to match `}`
- --> $WORKSPACE/crates/romacs-snapshot/src/lib.rs
-  |
-  |     ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? }) => {
-  |                                                           ^
+7 |     scratch: Vec<u8>,
+  |     ^^^^^^^
