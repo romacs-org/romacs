@@ -18,7 +18,7 @@
 ;; Events come from `unread-command-events', then the executing keyboard
 ;; macro, then the host keyboard (host_input.rs) when one is attached.
 ;; Without one, a read that would wait signals end of file; see
-;; DIVERGENCES.md VM2-KBD1 for this and the other limits of this port.
+;; ledger/divergences VM2-KBD1 for this and the other limits of this port.
 ;; This whole file is compiled as one form before its defvars run, so its
 ;; own variables are only ever set, never let-bound.
 
@@ -31,7 +31,7 @@
 (defvar romacs--key-sequence-command nil "keyboard.c read_key_sequence_cmd.")
 (defvar romacs--key-sequence-remapped nil "keyboard.c read_key_sequence_remapped.")
 
-;; BOOTSTRAP STAND-INS (DIVERGENCES.md VM2-KBD1). The command loop calls
+;; BOOTSTRAP STAND-INS (ledger/divergences VM2-KBD1). The command loop calls
 ;; `command-execute' (simple.el) and `undefined' (subr.el), which a bare VM
 ;; has not loaded. These minimal copies are installed only where nothing is
 ;; defined; loading GNU's files replaces them.

@@ -27,7 +27,7 @@ fn replay_all_fourteen_acceptance_answers_and_additional_gnu_probes() {
             } else {
                 assert_eq!(
                     result.unwrap().display().unwrap(),
-                    // GNU-DIVERGENCES.md D001: deliberate scalar replacement;
+                    // ledger/divergences D001: deliberate scalar replacement;
                     // retain the frozen GNU answer and compare exactly.
                     if row["source"]
                         == "(condition-case e (let ((s (copy-sequence \"αβγ\"))) (aset s 1 955) (aref s 1)) (error 18))"

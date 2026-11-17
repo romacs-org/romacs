@@ -12,7 +12,7 @@
 ;; populating one, whose registers are not yet written at the collection: they
 ;; lie below the top and can still hold what the populating callee left, so
 ;; only per-register liveness (stack maps) frees those, and they are expected
-;; to fail until it lands (DIVERGENCES VM2-GC-FINALIZER).  Whether they fail
+;; to fail until it lands (ledger/divergences VM2-GC-FINALIZER).  Whether they fail
 ;; depends on frame layout: the wide frame's unwritten registers must lie where
 ;; the populating callee's were, so a change to register allocation can turn
 ;; them into unexpected passes with no change to the collector.

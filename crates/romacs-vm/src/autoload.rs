@@ -16,7 +16,7 @@
 //! way out, and a nested load that succeeded is not undone by its caller's
 //! failure (the inner level reset its queue to `t` before returning).
 //!
-//! VM2 has no `function-history` (DIVERGENCES.md VM2-AUTOLOAD1), so a symbol's
+//! VM2 has no `function-history` (ledger/divergences VM2-AUTOLOAD1), so a symbol's
 //! record is `(SYMBOL . OLD-DEFINITION)` captured at the `defalias`, where GNU
 //! re-reads the previous definition from that symbol property when it undoes.
 //!

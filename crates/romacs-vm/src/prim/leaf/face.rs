@@ -302,7 +302,7 @@ impl Leaf<'_> {
 
     /// The frame whose faces FRAME shows: FRAME, unless it is a child
     /// frame that never had faces of its own, which shows its parent's
-    /// (DIVERGENCES.md VM2-CHILD-FRAME).
+    /// (ledger/divergences VM2-CHILD-FRAME).
     pub(crate) fn face_owner(&mut self, mut frame: Value) -> super::super::Out {
         loop {
             if self.face_table(frame, false)? != Value::NIL { return Ok(frame); }

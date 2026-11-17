@@ -449,7 +449,7 @@ class Ledger(unittest.TestCase):
                       self.refused(VALID_ROW.replace('src/editfns.c:3611-3653', 'etc/NEWS:1-2')))
 
     def test_an_unknown_divergence_is_refused(self):
-        self.assertIn('not an entry in DIVERGENCES.md', self.refused(VALID_ROW.replace('"VM2-FMT1"', '"D999"')))
+        self.assertIn('not an entry in ledger/divergences', self.refused(VALID_ROW.replace('"VM2-FMT1"', '"D999"')))
 
     def test_a_missing_justification_is_refused(self):
         text = '\n'.join(l for l in VALID_ROW.splitlines() if not l.startswith('why'))

@@ -12,7 +12,7 @@
 //! As in `eval_sub', a non-symbol atom, a quoted datum and an alist-bound
 //! symbol evaluate to the identical object without compiling anything.
 //!
-//! Recorded limits (DIVERGENCES.md VM2-EVAL2): other forms are converted to
+//! Recorded limits (ledger/divergences VM2-EVAL2): other forms are converted to
 //! compiler source. Objects with no source spelling (closures, buffers, ...)
 //! are carried as themselves (`Form::Object`), so they evaluate and stay
 //! `eq'; list, string and vector structure is copied, so nested quoted

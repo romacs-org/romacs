@@ -317,7 +317,7 @@ impl Leaf<'_> {
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let replacement = match &self.vm.objects[index] {
             data::Object::Buffer(t) if !multibyte => {
-                // DIVERGENCES.md VM2-INDIRECT1.
+                // ledger/divergences VM2-INDIRECT1.
                 if t.base != Value::NIL || !t.indirect.is_empty() {
                     return Err(fileio_refusal("insert-file-contents unibyte toggle of a buffer sharing its text"));
                 }

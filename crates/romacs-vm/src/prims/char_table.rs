@@ -53,7 +53,7 @@ fn char_table_range(cx, table: Value, range: Value) {
 
 
 // Only GNU's two built-in tests run natively; any other TEST would need a
-// Lisp call per comparison (DIVERGENCES.md VM2-CHARTAB-OPTIMIZE1).
+// Lisp call per comparison (ledger/divergences VM2-CHARTAB-OPTIMIZE1).
 defsubr! { name = "optimize-char-table", gnu = "chartab.c:676", effect = MutatesArgs,
 fn optimize_char_table(cx, table: Value; optional test: Value) {
     if cx.kind(table) != crate::prim::leaf::Kind::CharTable { return Err(Fault::Wrong("char-table-p", table)); }

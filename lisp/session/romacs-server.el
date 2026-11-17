@@ -6,7 +6,7 @@
 ;;; Commentary:
 ;; A server session (`romacs --server NAME' starts one) outlives its
 ;; window: it listens before any window shows, a client asks for one, and
-;; closing it keeps the session (DIVERGENCES.md SERVER2).  Two ways in:
+;; closing it keeps the session (ledger/divergences SERVER2).  Two ways in:
 ;;
 ;; - The native endpoint (romacs-mcp.el) on
 ;;   $XDG_RUNTIME_DIR/romacs/NAME/server.sock, with the client methods
@@ -296,7 +296,7 @@ client's end does not delete it."
 (defun romacs-server--filter (orig proc string)
   "Around `server-process-filter': emacsclient's -c asks for a window,
 which server.el grants only where `x-create-frame' exists.  Romacs's frame
-surface has another name (DIVERGENCES.md VM2-WIN-SUBSTRATE), so the name is
+surface has another name (ledger/divergences VM2-WIN-SUBSTRATE), so the name is
 bound while a request is read, and the window frame is the server's."
   (if (fboundp 'x-create-frame)
       (funcall orig proc string)

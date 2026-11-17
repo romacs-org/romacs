@@ -47,7 +47,7 @@ reported as the `faces' category.  Normalised: each engine's private root
 and package directory become <root> and <lisp>; clock times (HH:MM:SS)
 become <clock>.  Ignored: window-end, pixel geometry, body heights and
 windows' mode lines: Romacs's status bar is the mode line and its windows
-have no mode-line row (DIVERGENCES.md VM2-STATUS-BAR), so heights differ
+have no mode-line row (ledger/divergences VM2-STATUS-BAR), so heights differ
 by those rows and its windows show none.  A compare's
 `ignore' names path prefixes the agent judged nondeterministic (a model's
 reply), recorded with the call.  romacs-error: Romacs signalled where GNU

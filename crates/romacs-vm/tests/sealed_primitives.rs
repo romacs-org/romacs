@@ -1,4 +1,4 @@
-//! GNU's byte-op primitives are sealed (DIVERGENCES.md VM2-SEALED1): a call
+//! GNU's byte-op primitives are sealed (ledger/divergences VM2-SEALED1): a call
 //! of `car' is `Bcar', which never reads the function cell, so advice on
 //! `car' is seen only by cell readers (`funcall' of a variable, `mapcar').
 //! Pinned GNU 32.0.50, byte-compiled, answers the same case the same way.

@@ -1,4 +1,4 @@
-//! The host layout hook (DIVERGENCES.md VM2-WTPS1). Within a measuring
+//! The host layout hook (ledger/divergences VM2-WTPS1). Within a measuring
 //! primitive, the VM hands the host one window's display input, owned
 //! text and faces, and the host answers with the geometry its own layout
 //! gives that input, presenting nothing. No Lisp runs in the host.

@@ -784,7 +784,7 @@ impl Vm {
     }
     /// `get` of a property from the symbol's own plist (GNU `Fget`,
     /// fns.c:2653; `overriding-plist-environment` is not consulted, see
-    /// DIVERGENCES.md VM2-PLIST1).
+    /// ledger/divergences VM2-PLIST1).
     pub(super) fn symbol_property(&self, symbol: Value, key: Value) -> Result<Value> {
         Ok(self.plist_lookup(self.symbol_plist(symbol)?, key))
     }

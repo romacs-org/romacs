@@ -2,7 +2,7 @@
 //! `window-header-line-height', `window-body-height' and
 //! `window-text-pixel-size' MODE-LINES, against pinned GNU as relations to
 //! the frame's line, since VM2's batch frame keeps its pixel backend
-//! geometry (DIVERGENCES.md VM2-WIN5). romacs-vm-gui's measure.rs tests the
+//! geometry (ledger/divergences VM2-WIN5). romacs-vm-gui's measure.rs tests the
 //! painted header line.
 use romacs_vm::Vm;
 

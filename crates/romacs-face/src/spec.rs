@@ -169,7 +169,7 @@ impl FaceDef {
                 }
                 // A font object cannot be expressed without a font backend;
                 // GNU also ignores :font on a non-window frame. Out of scope
-                // for this crate; see GNU-DIVERGENCES.md.
+                // for this crate; see ledger/divergences.
                 ":font" => {}
                 k => {
                     let Some(a) = Attribute::from_keyword(k) else {

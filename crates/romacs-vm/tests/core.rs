@@ -34,7 +34,7 @@ fn primitive_cache_invalidates_too() {
 #[test]
 fn byte_op_calls_are_sealed_to_the_primitive() {
     // GNU compiles (+ 9 4) to Bplus and never reads the cell; so does Romacs
-    // (DIVERGENCES.md VM2-SEALED1). funcall still reads the cell.
+    // (ledger/divergences VM2-SEALED1). funcall still reads the cell.
     let mut vm = Vm::new();
     let call = compile(&mut vm, json!(["+", 9, 4]));
     assert_eq!(vm.execute(call).unwrap().as_integer().unwrap(), 13);

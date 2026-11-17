@@ -78,7 +78,7 @@ lisp/international/uni-special-uppercase.el
 lisp/international/uni-titlecase.el
 lisp/international/uni-uppercase.el
 
-# unidata-romacs: The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in lisp/international/romacs-unidata.el by tools/lib/romacs_unidata.py (DIVERGENCES.md VM2-UNIDATA1). (from admin/unidata/Makefile.in, admin/unidata/unidata-gen.el, admin/unidata/UnicodeData.txt, admin/unidata/BidiMirroring.txt, admin/unidata/BidiBrackets.txt, admin/unidata/SpecialCasing.txt, admin/unidata/Scripts.txt, admin/unidata/ScriptExtensions.txt, admin/unidata/PropertyValueAliases.txt, admin/unidata/confusables.txt, admin/unidata/IdnaMappingTable.txt)
+# unidata-romacs: The pinned GNU build's unidata output, with each byte-code literal replaced by the name of the same function in lisp/international/romacs-unidata.el by tools/lib/romacs_unidata.py (ledger/divergences VM2-UNIDATA1). (from admin/unidata/Makefile.in, admin/unidata/unidata-gen.el, admin/unidata/UnicodeData.txt, admin/unidata/BidiMirroring.txt, admin/unidata/BidiBrackets.txt, admin/unidata/SpecialCasing.txt, admin/unidata/Scripts.txt, admin/unidata/ScriptExtensions.txt, admin/unidata/PropertyValueAliases.txt, admin/unidata/confusables.txt, admin/unidata/IdnaMappingTable.txt)
 lisp/international/uni-bidi.el
 lisp/international/uni-brackets.el
 lisp/international/uni-category.el
