@@ -125,6 +125,7 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod gc_image;
 mod functions;
 mod epoch;
 mod slots;
@@ -1561,6 +1562,8 @@ pub struct Vm {
     gc_times: gc::GcTimes,
     /// What the last mark counted (`garbage-collect's statistics).
     gc_census: gc::Census,
+    /// The restored world image, as `make_image_permanent` found it.
+    world_image: gc_image::WorldImage,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1866,6 +1869,7 @@ impl Vm {
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
             gc_census: Default::default(),
+            world_image: gc_image::WorldImage::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
@@ -2027,7 +2031,7 @@ impl Vm {
         vm.declare_special_raw("completion-regexp-list", Value::NIL);
         vm.declare_special_raw("case-symbols-as-words", Value::NIL);
         vm.case_symbols_slot = vm.slot("case-symbols-as-words");
-        // The automatic local table is initialized lazily by variable_binding_slot.
+        // Declared automatically local at its first lookup (`Vm::binding`).
         vm.declare_special_raw("inhibit-changing-match-data", Value::NIL);
         vm.declare_special_raw("#:vm2-match-buffer", Value::NIL);
         vm.declare_special_raw("#:vm2-standard-syntax", Value::NIL);

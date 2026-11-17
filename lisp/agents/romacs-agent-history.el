@@ -429,9 +429,19 @@ transaction.  How many rows it holds."
         (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
       (length items))))
 
+(defvar romacs-agent-store-patience)
+(defvar romacs-agent-store-patient)
+
 (defun romacs-agent-history-index-batch ()
-  "`romacs-agent-history-index' in a batch process, its count printed."
-  (princ (format "romacs-agent-history: %d transcripts\n" (romacs-agent-history-index))))
+  "`romacs-agent-history-index' in a batch process, its count printed.
+Off the editor, it waits long for the store's lock, and is done again
+until the lock lets it: a listing left unwritten lists nothing."
+  (require 'romacs-agent-store)
+  (let ((romacs-agent-store-patience romacs-agent-store-patient) (count nil))
+    (while (not count)
+      (condition-case nil (setq count (or (romacs-agent-history-index) 0))
+        (sqlite-locked-error nil)))
+    (princ (format "romacs-agent-history: %d transcripts\n" count))))
 
 (defvar romacs-agent-history--indexing nil "The batch process scanning the transcripts, while it runs.")
 
@@ -527,7 +537,10 @@ started after this call, up to WAIT seconds (t: 30)."
           (dotimes (_ (if earlier 2 1))
             (romacs-agent-history-index-soon)
             (while (and (romacs-agent-history-indexing-p) (< (float-time) end))
-              (accept-process-output romacs-agent-history--indexing 0.05)))))
+              (accept-process-output romacs-agent-history--indexing 0.05)))
+          ;; Ended, its sentinel may not have run yet: what it wrote is read
+          ;; here, not left to it.
+          (romacs-agent-history--from-rows)))
     (setq romacs-agent-history--listing (romacs-agent-history--scan))))
 
 (defun romacs-agent-history-find (harness config-dir id)

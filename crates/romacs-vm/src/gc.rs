@@ -154,6 +154,8 @@ pub(crate) struct GcTimes {
     pub(crate) marked: [usize; 4],
     /// Entries the collection found in each table.
     pub(crate) entries: [usize; 4],
+    /// Image entries a full read as roots, per table (`Vm::image_roots`).
+    pub(crate) remembered: [usize; 4],
 }
 
 /// What a completed mark holds, for the rest of the collection.
@@ -303,6 +305,7 @@ impl Census {
         self.buffers += other.buffers;
     }
 }
+
 
 /// What `memory-use-counts' reports, in its units; symbols are counted from
 /// the symbol table, and VM2 has no intervals
@@ -1393,20 +1396,13 @@ impl Vm {
         // Compaction: every live entry moves down, every reference is
         // rewritten, and no entry is left free. Past here a panic leaves the
         // references half rewritten, which nothing can undo.
-        // Stress fillers go only where live objects would move past them.
-        let forwarded = |marks: &mut dyn Iterator<Item = bool>, pads: usize| {
-            let (mut map, mut next, mut any) = (Vec::new(), pads, false);
-            for live in marks {
-                any |= live;
-                map.push(if live { next += 1; next - 1 } else { usize::MAX });
-            }
-            (map, if any { pads } else { 0 })
-        };
+        // Stress fillers go only where live objects would move past them,
+        // and the image's entries never move (`Table::compaction_map`).
         let tables = [
-            forwarded(&mut self.conses.marks(), pads),
-            forwarded(&mut self.closures.marks(), pads),
-            forwarded(&mut self.cells.marks(), pads),
-            forwarded(&mut self.objects.marks(), pads),
+            self.conses.compaction_map(pads),
+            self.closures.compaction_map(pads),
+            self.cells.compaction_map(pads),
+            self.objects.compaction_map(pads),
         ];
         let fill: Vec<usize> = tables.iter().map(|table| table.1).collect();
         let maps: Vec<Vec<usize>> = tables.into_iter().map(|table| table.0).collect();
@@ -1426,16 +1422,16 @@ impl Vm {
             assert_ne!(i, usize::MAX, "rewriting an unmarked root");
             *v = Value::reference(i + offset, tag);
         };
-        self.conses.collector_compact(|p| {
+        self.conses.collector_compact(&maps[0], |p| {
             rewrite(&mut p.0);
             rewrite(&mut p.1);
-        });
-        self.closures.collector_compact(|c| {
+        }, || (Value::NIL, Value::NIL));
+        self.closures.collector_compact(&maps[1], |c| {
             for v in c.captures.iter_mut().chain(c.metadata.iter_mut()) {
                 rewrite(v);
             }
             rewrite(&mut c.document);
-        });
+        }, || Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: Value::NIL });
         self.cell_pairs = std::mem::take(&mut self.cell_pairs).into_iter().filter_map(|(i, mut pair)| {
             if !self.cells.marked(i) { return None; }
             let mut cell = Value::reference(i, 5);
@@ -1443,7 +1439,7 @@ impl Vm {
             rewrite(&mut pair);
             Some((cell.payload() as usize, pair))
         }).collect();
-        self.cells.collector_compact(|v| rewrite(v));
+        self.cells.collector_compact(&maps[2], |v| rewrite(v), || Value::NIL);
         // The traced register slots (`register_roots`); above the tops is NIL.
         let tops = self.register_tops();
         let registers = self.suspended_stacks.iter_mut().chain(std::iter::once(&mut self.stack)).zip(tops);
@@ -1512,7 +1508,7 @@ impl Vm {
             });
         }
         let whole = properties::Reading { since: self.allocation.since, whole: true };
-        self.objects.collector_compact(|object| {
+        self.objects.collector_compact(&maps[3], |object| {
                 match object {
                     data::Object::Vector(values) | data::Object::Record(values) => {
                         for v in values {
@@ -1545,7 +1541,7 @@ impl Vm {
                     | data::Object::Bytes(..)
                     | data::Object::SyntaxTable(_) => {}
                 }
-        });
+        }, || data::Object::Free);
         for f in self.functions.collector_iter_mut() {
             // Function Arcs are private to this VM; no executable shares IR.
             let f = Arc::get_mut(f).expect("source IR must be exclusively owned at a wait point");
@@ -1585,7 +1581,11 @@ impl Vm {
     fn settle_cell_pairs(&mut self) {
         let pairs: Vec<(usize, Value)> = self.cell_pairs.iter().filter(|&(&i, _)| self.cells.marked(i))
             .map(|(&i, &pair)| (i, self.cons_pair(pair).expect("live lexical pair").1)).collect();
-        for (i, value) in pairs { self.cells.collector_entries_mut()[i] = value; }
+        for (i, value) in pairs {
+            self.cells.collector_entries_mut()[i] = value;
+            // An edge into the image no store recorded.
+            self.cells.remember(i);
+        }
     }
     /// The finalizers a mark DOOMED leave the live list for the doomed one.
     fn doom(&mut self, doomed: &[Value]) {
@@ -1933,6 +1933,9 @@ impl Vm {
                 for &(key, value) in &entry.properties { pending.extend([key, value]); }
             }
         }
+        // A minor's old include the image; any other mark reads of the image
+        // only what may name what is not of it, and counts the rest.
+        let image = (minor_changed.is_none()).then(|| self.image_roots(&mut pending, &mut code_pending, &mut code_marks));
         lap.lap(&mut self.gc_times, Phase::Roots);
         let untraced_lists = self.lambda_lists.keys().copied().collect();
         let reading = properties::Reading { since: self.allocation.since, whole: true };
@@ -1994,7 +1997,12 @@ impl Vm {
         self.lambda_lists = lists;
         let finished = finished.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         if !finished { return None; }
-        let census = marking.census(&own);
+        let mut census = marking.census(&own);
+        // What it did not read of the image, the permanent objects, it counts
+        // as they are: as the restore found them.
+        if image == Some(true) {
+            census.add(&self.world_image.census);
+        }
         let code_marks = code_marks.into_iter().map(|mark| mark.into_inner()).collect();
         let payload = marking.marked_payload(&own);
         Some(Marked { marking, own, doomed, code_marks, census, payload, state })
@@ -2131,7 +2139,9 @@ impl Vm {
         let object = handed.object();
         if shares_storage(object) { state.shared_seen.push(i as u32); }
         let native_nodes = &mut state.native_nodes;
-        let nodes_since = if state.reading.whole { 0 } else { state.reading.since };
+        // A minor reads the nodes written since the last collection; any
+        // other mark, of the image's holders, those written since the restore.
+        let nodes_since = || if !state.reading.whole { state.reading.since } else if self.world_image.holds(i) { self.world_image.since } else { 0 };
         match object {
             data::Object::Window(w) => w.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Obarray(t) => {
@@ -2143,9 +2153,9 @@ impl Vm {
             data::Object::WindowConfiguration(c) => c.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Treesit(t) => t.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Process(p) => p.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
-            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, nodes_since, &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::CharTable(t) => t.collector_visit_values(native_nodes, nodes_since(), &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::SubCharTable(node) => char_table::collector_visit_node(node, native_nodes, nodes_since(), &mut |v| if keep(v) { pending.push(*v) }),
+            data::Object::MapKeymapCursor(c) => c.collector_visit_values(native_nodes, nodes_since(), &mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Buffer(t) => {
                 let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
@@ -2167,7 +2177,9 @@ impl Vm {
         }
     }
     /// The last completed collection: ((PHASE . SECONDS)...), then
-    /// (marked CONSES CLOSURES CELLS OBJECTS) and (entries ...) likewise.
+    /// (marked CONSES CLOSURES CELLS OBJECTS) and (entries ...) likewise; then
+    /// (image ...), the restored image's entries, and (remembered ...), those
+    /// of them the last full read.
     pub(crate) fn gc_phases(&mut self) -> Value {
         let times = self.gc_times;
         let counts = |vm: &mut Vm, name: &str, row: [usize; 4]| {
@@ -2180,7 +2192,11 @@ impl Vm {
         };
         let entries = counts(self, "entries", times.entries);
         let marked = counts(self, "marked", times.marked);
-        let mut result = self.keymap_cons(entries, Value::NIL);
+        let image = counts(self, "image", self.world_image.entries);
+        let remembered = counts(self, "remembered", times.remembered);
+        let mut result = self.keymap_cons(remembered, Value::NIL);
+        result = self.keymap_cons(image, result);
+        result = self.keymap_cons(entries, result);
         result = self.keymap_cons(marked, result);
         for (name, ns) in PHASES.iter().zip(times.ns).rev() {
             let symbol = self.intern(name);

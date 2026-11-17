@@ -163,6 +163,19 @@ impl<'a> Seen<'a> {
     }
 }
 
+/// What OBJECT adds to a mark's census, as the mark counts it.
+pub(super) fn census_of(object: &data::Object) -> crate::gc::Census {
+    let mut census = crate::gc::Census::default();
+    match Seen::of(object) {
+        Seen::Values(values, spare) => (census.vectors, census.vector_slots, census.vector_free) = (1, values.len(), spare),
+        Seen::Text { bytes, .. } => (census.strings, census.string_bytes) = (1, bytes),
+        Seen::Float => census.floats = 1,
+        Seen::Buffer => census.buffers = 1,
+        Seen::Free | Seen::Memory(_) | Seen::Inert | Seen::Finalizer(_) | Seen::Other => {}
+    }
+    census
+}
+
 /// A Value a worker claimed and handed over, on the thread it was handed to.
 /// `Marking::round` alone makes one, for the hand-over it just took.
 pub(super) struct Handed<'m> {

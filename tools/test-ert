@@ -7,8 +7,16 @@ tests.  With neither --module nor --file, every bundled package with suites
 runs.  A suite is a file under test/packages (the bundled packages') or
 test/romacs/lisp (Romacs's own Lisp's) that defines a test; the rest are
 support files its suites require.  The run first prepares one batch world in a
-store of its own, which every file then restores rather than booting GNU's Lisp
-from source; a host that builds none runs each file from source.
+store, which every file then restores rather than booting GNU's Lisp from
+source; a host that builds none runs each file from source.
+
+The store persists across runs: ROMACS_TEST_STORE, else
+$XDG_CACHE_HOME/romacs/test-ert.  With --compiled (or ROMACS_TEST_COMPILED=1)
+each file loads its libraries compiled, through the compiled-Lisp store beside
+the world store, as a session does; an artifact is keyed by what it is computed
+from (the build's inputs and the Lisp, relative to the tree), so every run and
+every build of the same sources reuses what an earlier one compiled.  Without
+it files load source: a fresh store compiles inside the suites' own time.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -96,13 +104,14 @@ def driver(path, selector):
             f"(setq ert-scoreboard-selector '{selector})\n(kill-emacs (progn {reporter}))\n")
 
 
-def host_environment(home, binary, store):
+def host_environment(home, binary, store, compiled=False):
     """A file's private HOME, with worlds off unless the run has a world STORE: a
-    throwaway HOME would only start a world builder of its own."""
+    throwaway HOME would only start a world builder of its own.  COMPILED loads
+    libraries compiled, through the store's compiled-Lisp store."""
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     runtime = binary.parent / 'lisp'
     env.setdefault('ROMACS_LISP_DIR', str(runtime if runtime.is_dir() else ROOT / 'lisp'))
-    env.update(HOME=str(home), TMPDIR=str(home), ROMACS_COMPILED_LISP='off')
+    env.update(HOME=str(home), TMPDIR=str(home), ROMACS_COMPILED_LISP='on' if compiled and store else 'off')
     if store is None:
         env['ROMACS_WORLD'] = 'off'
     else:
@@ -118,14 +127,15 @@ def host_command(binary, store):
     return [str(binary), *(['--world-store', str(store)] if store else []), '-Q', '--batch']
 
 
-def prepared_store(binary, directory, timeout):
-    """The run's batch world store in DIRECTORY, its world built once
-    (`--world-build --batch`) for every file to restore, or None and why: a host
-    that cannot build one runs each file booting from source, as before.  A world
-    is the runtime at the chain's end, the same in every process; each file still
-    takes its startup steps and runs its tests in its own process and HOME."""
-    store, home = directory / 'store', directory / 'home'
-    store.mkdir()
+def prepared_store(binary, persistent, directory, timeout):
+    """The batch world store in PERSISTENT, its world built for this host once
+    (`--world-build --batch`, a no-op when an earlier run built it) for every file
+    to restore, or None and why: a host that cannot build one runs each file
+    booting from source, as before.  A world is the runtime at the chain's end, the
+    same in every process; each file still takes its startup steps and runs its
+    tests in its own process and HOME.  DIRECTORY holds this run's own files."""
+    store, home = persistent / 'worlds', directory / 'home'
+    store.mkdir(parents=True, exist_ok=True)
     home.mkdir()
     env = host_environment(home, binary, store)
     status = run_host([str(binary), '--world-store', str(store), '--world-build', '--batch'],
@@ -186,12 +196,12 @@ def verdict(output, status):
                 failed=counts['failed'], skipped=counts['skipped'])
 
 
-def run_suite(path, selector, binary, timeout, load_paths, store):
+def run_suite(path, selector, binary, timeout, load_paths, store, compiled=False):
     with tempfile.TemporaryDirectory(prefix='romacs-ert-') as temp:
         home = Path(temp)
         script = home / 'driver.el'
         script.write_text(driver(path, selector))
-        env = host_environment(home, binary, store)
+        env = host_environment(home, binary, store, compiled)
         command = host_command(binary, store)
         for directory in load_paths + [path.parent]:
             command += ['-L', str(directory)]
@@ -243,6 +253,11 @@ def main():
                         help='Seconds for each test file')
     parser.add_argument('--jobs', type=int, default=int(os.environ.get('JOBS') or min(8, os.cpu_count() or 1)))
     parser.add_argument('--logs', type=Path, help='Keep each file\'s output in this directory')
+    parser.add_argument('--store', type=Path, default=os.environ.get('ROMACS_TEST_STORE') or
+                        Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'romacs/test-ert',
+                        help='The persistent world and compiled-Lisp store (ROMACS_TEST_STORE)')
+    parser.add_argument('--compiled', action='store_true', default=os.environ.get('ROMACS_TEST_COMPILED') == '1',
+                        help='Load libraries compiled, through the store (ROMACS_TEST_COMPILED=1)')
     args = parser.parse_args()
     bases = directories(ROOT)
     if args.list:
@@ -270,11 +285,12 @@ def main():
     load_paths = directories(ROOT)
     with tempfile.TemporaryDirectory(prefix='romacs-ert-world-') as world:
         before = time.monotonic()
-        store, why = prepared_store(binary, Path(world), args.timeout)
+        store, why = prepared_store(binary, Path(args.store).expanduser(), Path(world), args.timeout)
         print(f'ERT batch world: prepared in {time.monotonic() - before:.2f}s' if store else
               f'ERT batch world: none ({why}); each file boots from source', flush=True)
         with ThreadPoolExecutor(args.jobs) as pool:
-            futures = [pool.submit(run_suite, p, args.selector, binary, args.timeout, load_paths, store) for p in files]
+            futures = [pool.submit(run_suite, p, args.selector, binary, args.timeout, load_paths, store,
+                                   args.compiled) for p in files]
             results = []
             for future in futures:
                 results.append(future.result())

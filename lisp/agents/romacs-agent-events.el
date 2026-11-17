@@ -848,6 +848,14 @@ first: functions called once a worker has moved it, or its move failed.")
 from one when a view of it holds places in that journal: the session
 goes on in its journal rather than move under that view.")
 
+(defvar romacs-agent-events--until-store nil
+  "What waits for the store to be read here, each (SESSION . THEN), in the
+order given (`romacs-agent-events-then').")
+
+(defvar romacs-agent-events--store-answered nil
+  "Non-nil while what waited for the store goes on: the writer has
+answered, so none waits for it again.")
+
 (defun romacs-agent-events-then (session then)
   "Call THEN once SESSION's records are in SQLite.  At once when they are,
 or are made so here (`romacs-agent-events-own'), or cannot be: the store
@@ -855,9 +863,18 @@ off, a supervisor running for it, an import here failing, or a view
 holding places in its journal (`romacs-agent-events-held-functions').
 A journal too long to move here, or one a worker moves now, waits for
 that worker VM, ahead of every other session, and THEN is called once it
-is moved or its move failed.  Several are called in the order given."
+is moved or its move failed; early in a fresh start it first waits for
+the writer to make the store it moves to.  Several are called in the
+order given."
   (let ((id (romacs-agent-id session)) (own (romacs-agent-events-own session)))
-    (if (and (not (gethash id romacs-agent-events--waiting))
+    (cond
+     ;; The store not readable here yet, early in a fresh start: a worker
+     ;; moves it once the writer has made the store, so it waits for that
+     ;; (`romacs-agent-events--store-readable'), not taken for unmovable.
+     ((and (not (eq own 'queued)) (not romacs-agent-events--store-answered)
+           (romacs-agent-events--store-pending-p session))
+      (setq romacs-agent-events--until-store (append romacs-agent-events--until-store (list (cons session then)))))
+     ((and (not (gethash id romacs-agent-events--waiting))
              (not (eq own 'queued))
              (not (and (romacs-agent-events--movable-p session)
                        (not (romacs-agent-events-p session))
@@ -865,7 +882,8 @@ is moved or its move failed.  Several are called in the order given."
                            (> (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)
                               (or romacs-agent-fold-bytes most-positive-fixnum)))
                        (not (run-hook-with-args-until-success 'romacs-agent-events-held-functions session)))))
-        (funcall then)
+      (funcall then))
+     (t
       (puthash id (append (gethash id romacs-agent-events--waiting) (list then)) romacs-agent-events--waiting)
       (let ((dir (romacs-agent-dir session)))
         ;; A job moving it already: it is flipped as that job ends; the
@@ -874,7 +892,33 @@ is moved or its move failed.  Several are called in the order given."
         (unless (or (gethash id romacs-agent-events--migrating) (gethash id romacs-agent-events--importing)
                     (romacs-agent-events-p session))
           (setq romacs-agent-events--migrate-queue (cons dir (delete dir romacs-agent-events--migrate-queue)))))
-      (romacs-agent-events--migrate-next))))
+      (romacs-agent-events--migrate-next)))))
+
+(defun romacs-agent-events--store-pending-p (session)
+  "Whether SESSION's records could be moved by a worker but for the store,
+which cannot be read here yet and the writer is asked to make: the store
+on, the writer the editor's, a worker VM here, no supervisor writing its
+journal, and not imported."
+  (and romacs-agent-events-store (romacs-agent-writer-queued-p) (romacs-agent-dir session)
+       (fboundp 'isolate-spawn) (isolate-main-p)
+       (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
+       (not (romacs-agent-events-p session))
+       (not (romacs-agent-events--db))
+       ;; The writer asked to make it (by that look): its answer lets the
+       ;; wait go.  One not readable for another reason is not waited for.
+       romacs-agent-store--making))
+
+(defun romacs-agent-events--store-readable ()
+  "The writer answered the asking to make the store: what waited for it
+goes on, in order, as it would have (`romacs-agent-events-then'); once
+only, so a store still unreadable lets it go as unmovable."
+  (let ((waiting romacs-agent-events--until-store) (romacs-agent-events--store-answered t))
+    (setq romacs-agent-events--until-store nil)
+    (pcase-dolist (`(,session . ,then) waiting)
+      (with-demoted-errors "romacs-agent-events: after the store was made: %S"
+        (romacs-agent-events-then session then)))))
+
+(add-hook 'romacs-agent-store-readable-hook #'romacs-agent-events--store-readable)
 
 (defun romacs-agent-events--movable-p (session)
   "Whether a worker VM can move SESSION to SQLite: the store on, worker VMs
@@ -884,8 +928,10 @@ here, and no supervisor writing its journal."
        (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))))
 
 (defun romacs-agent-events-waiting-p (id)
-  "Whether something waits for the session ID names to move to SQLite."
-  (and (gethash id romacs-agent-events--waiting) t))
+  "Whether something waits for the session ID names to move to SQLite,
+or for the store it moves to (`romacs-agent-events--until-store')."
+  (or (and (gethash id romacs-agent-events--waiting) t)
+      (and (cl-find id romacs-agent-events--until-store :key (lambda (entry) (romacs-agent-id (car entry))) :test #'equal) t)))
 
 (defun romacs-agent-events--waited (id)
   "Call what waits for the session ID names to move, moved or not, in the
