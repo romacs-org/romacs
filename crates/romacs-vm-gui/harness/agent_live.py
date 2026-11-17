@@ -211,7 +211,17 @@ class Agents(Server):
         return f'(romacs-agent-get {lisp_text(sid)})'
 
     def send(self, sid, text):
+        self.sent = len(self.logged())
         self.eval(f'(romacs-agent-send {self.s(sid)} {lisp_text(text)})')
+
+    def called(self, tool, seconds=30):
+        """The fake harness's last call of TOOL since the last send, once it
+        is logged: a session may read idle before its call is (the message
+        not taken yet), so idle alone never says the call was made."""
+        mark = getattr(self, 'sent', 0)
+        return until(lambda: next((e for e in reversed(self.logged()[mark:])
+                                   if e.get('tool') == tool and 'repeated' not in e), None),
+                     seconds, f'{tool} called')
 
     def state(self, sid):
         return self.eval(f'(romacs-agent-state {self.s(sid)})')
@@ -479,7 +489,7 @@ def budget(args, base):
         a.idle(sid)
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(while t)", "budgetMs": 1000}')
         a.idle(sid, 20)
-        spent = next(e for e in reversed(a.logged()) if e.get('tool') == 'romacs_eval')
+        spent = a.called('romacs_eval')
         log = (a.home / '.local/state/romacs/agents' / sid / 'calls.jsonl').read_text().splitlines()
         records = [json.loads(line) for line in log]
         server_ms = max((r.get('ms', 0) for r in records if r.get('tool') == 'romacs_eval'), default=None)
@@ -657,21 +667,31 @@ def deadline(args, base):
         a.eval('(setq romacs-agent-reply-timeout 2)')
         sid = a.start('say ready')
         a.idle(sid)
+        # A turn is over once its end is recorded: idle right after a send
+        # may be the turn before's, the message not taken yet.
+        done = lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})')
+
+        def answered(before, what):
+            until(lambda: done() != before, 40, f'{what} answered')
+            a.idle(sid, 40)
+
         ran = a.root / 'ran.txt'
+        before = done()
         a.send(sid, 'call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(progn (append-to-file "ran\\n" nil {lisp(ran)}) (sleep-for 5) 1)') + ', "budgetMs": 0}')
-        a.idle(sid, 40)
+        answered(before, 'the running call')
         running = next(e for e in reversed(a.logged()) if e.get('tool') == 'romacs_eval')
         asked = next((e['outcome'] for e in reversed(a.logged()) if 'outcome_of' in e), '')
         queued = a.root / 'queued.txt'
         # The harness calls a second after it is asked, while the editor is
         # busy with a client's 6 s evaluation: the call waits in the queue.
+        before = done()
         a.send(sid, 'later 1 call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(append-to-file "q\\n" nil {lisp(queued)})') + '}')
         busy = subprocess.Popen([a.args.romacs, '--server', a.name, '-e', '(progn (sleep-for 6) t)'], env=a.env,
                                 cwd=a.work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         busy.wait(30)
-        a.idle(sid, 40)
+        answered(before, 'the queued call')
         withdrawn = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'withdrawn' in e.get('text', '')]
         result = {'running_text': running['text'][:120], 'running_seconds': round(running['seconds'], 2),
                   'outcome': asked[:120], 'ran_once': ran.read_text().count('ran') == 1,
@@ -908,7 +928,7 @@ def tools(args, base):
             a.send(sid, f'call {tool} ' + json.dumps(arguments))
             a.idle(sid, 60)
             if tool == 'romacs_delegate_task':
-                task_id = json.loads(a.tool_results()[-1][1])['taskId']
+                task_id = json.loads(a.called(tool)['text'])['taskId']
         results = a.tool_results()[-len(steps):]
         checked = {tool: (name == tool and bool(error) == (tool in REFUSED_IN_TOUR) and check(text))
                    for (tool, _, check), (name, text, error) in zip(steps, results)}
@@ -1008,7 +1028,7 @@ def delegate(args, base):
         def delegate_call(arguments):
             a.send(parent, 'call romacs_delegate_task ' + json.dumps(arguments))
             a.idle(parent, 60)
-            return json.loads(a.tool_results()[-1][1])
+            return json.loads(a.called('romacs_delegate_task')['text'])
 
         waited = delegate_call({'task': 'say reviewed', 'mode': 'wait', 'role': 'review', 'clientRequestId': 'w1',
                                 'target': {'provider': 'codex', 'model': 'm-test', 'options': {'reasoningEffort': 'low'}}})
@@ -1027,7 +1047,7 @@ def delegate(args, base):
         slow_pid = next(e['pid'] for e in a.codex_runs() if e['prompt'] == 'slow 30')
         a.send(parent, 'call romacs_task_cancel ' + json.dumps({'taskId': cancelled['taskId']}))
         a.idle(parent)
-        cancel = json.loads(a.tool_results()[-1][1])
+        cancel = json.loads(a.called('romacs_task_cancel')['text'])
         until(lambda: not Path(f'/proc/{slow_pid}').exists(), 15, 'cancelled child ended')
         # An interrupt ends the turn: it failed, the session is idle, and the
         # next message continues its thread.
@@ -1600,13 +1620,13 @@ def unicode(args, base):
         # A tool's input and output.
         a.send(sid, 'call romacs_eval ' + json.dumps({'instance': '?', 'code': f'(concat "{UNICODE}")'}))
         a.idle(sid)
-        evaluated = a.tool_results()[-1]
+        evaluated = a.called('romacs_eval')
         # A raw byte in a buffer a tool reads.
         a.eval('(with-current-buffer (get-buffer-create "raw") (erase-buffer) '
                f'(insert "a" (unibyte-string 255) "b {UNICODE}") t)')
         a.send(sid, 'call romacs_buffer_read ' + json.dumps({'instance': '?', 'name': 'raw', 'start': 1, 'maxChars': 100}))
         a.idle(sid)
-        read = a.tool_results()[-1]
+        read = a.called('romacs_buffer_read')
         chat_after = a.chat(sid)
         # A session in a non-ASCII directory, the editor's locale Latin-1:
         # the harness starts there all the same.
@@ -1647,8 +1667,8 @@ def unicode(args, base):
         result['ok'] = (f'> say {UNICODE}' in chat and UNICODE in chat.split(f'> say {UNICODE}', 1)[1]
                         and sent_text == f'say {UNICODE}' and results and results[0] == UNICODE
                         and UNICODE in title and UNICODE in buffer_name
-                        and UNICODE in evaluated[1] and not evaluated[2]
-                        and json.loads(read[1])['text'] == 'a\ufffdb ' + UNICODE and not read[2]
+                        and UNICODE in evaluated['text'] and not evaluated['error']
+                        and json.loads(read['text'])['text'] == 'a\ufffdb ' + UNICODE and not read['error']
                         and started_in == str(odd)
                         and UNICODE in chat_after.split('romacs_eval', 1)[1]
                         and UNICODE in codex_reply and UNICODE in title_again
@@ -1697,7 +1717,7 @@ def environment(args, base):
         a.send(sid, 'call romacs_eval ' + json.dumps(
             {'instance': '?', 'code': '(shell-command-to-string "env | grep -E \'^(ROMACS_|CLAUDE|CODEX_|T3CODE_|AGENT_TEST_)\' | sort")'}))
         a.idle(sid)
-        from_eval = a.tool_results()[-1][1]
+        from_eval = a.called('romacs_eval')['text']
         # The unit unsets them even from the user manager's environment.
         unit = a.eval(f'(romacs-agent-unit {a.s(sid)})').strip('"')
         unset = subprocess.run(['systemctl', '--user', 'show', '-p', 'UnsetEnvironment', unit],
@@ -1869,7 +1889,7 @@ def instances(args, base):
         a.idle(sid)
         a.send(sid, 'call romacs_orchestrator_capabilities ' + json.dumps({'instance': '?'}))
         a.idle(sid)
-        capabilities = json.loads(a.tool_results()[-1][1])
+        capabilities = json.loads(a.called('romacs_orchestrator_capabilities')['text'])
         providers = {p['providerInstanceId']: p for p in capabilities.get('providers', [])}
         # A T3 id starts its instance.
         aliased = a.eval('(romacs-agent-provider (romacs-agent-start default-directory "say hi" nil "claudeAgent_claude2"))').strip('"')
@@ -2929,7 +2949,7 @@ def chat_view(args, base):
         a.send(sid, 'call romacs_delegate_task ' + json.dumps(
             {'task': 'say child', 'title': 'a child', 'target': {'provider': 'codex'}, 'clientRequestId': 'view'}))
         a.idle(sid, 60)
-        child = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')['taskId']
+        child = json.loads(a.called('romacs_delegate_task')['text'])['taskId']
         until(lambda: a.state(child) == 'idle', 20, 'child done')
         a.idle(sid, 30)
         a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) (split-window-right) '
@@ -2974,7 +2994,7 @@ def children(args, base):
             a.send(parent, 'call romacs_delegate_task ' + json.dumps(
                 {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
             a.idle(parent, 60)
-            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
+            record = json.loads(a.called('romacs_delegate_task')['text'])
             return record['taskId']
 
         running = delegate('slow 300', 'long build', 'codex')
