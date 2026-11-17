@@ -1208,6 +1208,8 @@ wakes no one besides."
              ((and prompted (not (romacs-agent--per-turn-p child)) (not (romacs-agent-input-seq child))
                    (eq (romacs-agent-state child) 'ended)
                    (not (process-live-p (romacs-agent-connection child))))
+              ;; The caller has the failure: its end wakes no one besides.
+              (romacs-agent-tools--answer child (romacs-agent-done-seq child))
               (user-error "Task %s (%s) ended before it had its brief: %s" (romacs-agent-id child)
                           (romacs-agent-title child) (or (romacs-agent-reply child) "its harness exited")))
              ((and (or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
