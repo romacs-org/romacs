@@ -281,6 +281,7 @@ pub fn narrowing<T: RestrictedCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
 /// coordinate assertion ("char-to-byte at 3").
 pub struct Stale<T> {
     inner: T,
+    // CELL(Plain): the cached byte of char 3; no Lisp value.
     anchor: std::cell::Cell<Option<usize>>,
 }
 

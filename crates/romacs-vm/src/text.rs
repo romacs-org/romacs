@@ -1493,7 +1493,7 @@ impl TextBody {
 }
 
 #[cfg(test)]
-#[path = "text_contract.rs"]
+#[path = "text_contract_tests.rs"]
 mod contract;
 
 #[cfg(test)]
