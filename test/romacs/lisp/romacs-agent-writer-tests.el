@@ -428,6 +428,22 @@ connection of its own, as the writer's process has."
       (should-not (gethash "h" romacs-agent--launched))
       (should (= hosts 2)))))
 
+(ert-deftest romacs-agent-writer-held-notes-stay-when-their-connection-is-gone ()
+  ;; A connection closed as its acknowledgement is read (its attachment
+  ;; stolen, its host ended): sending the held notes through it signals
+  ;; nothing, in the filter this runs from, and the notes stay held.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--launched (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "g"))
+         (process (make-process :name "gone" :command '("true") :connection-type 'pipe :noquery t)))
+    (unwind-protect
+        (progn
+          (while (process-live-p process) (accept-process-output process 0.05))
+          (puthash "g" (list (romacs-mcp--object "type" "plan")) romacs-agent--held-notes)
+          (romacs-agent--send-held session process)
+          (should (= (length (gethash "g" romacs-agent--held-notes)) 1)))
+      (delete-process process))))
+
 (ert-deftest romacs-agent-writer-the-last-resort-sends-nothing ()
   ;; While the editor makes the writes itself, what their answers queue is
   ;; made by the next round here, never sent to a writer too.

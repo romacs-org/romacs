@@ -3259,10 +3259,17 @@ socket."
 as it acknowledges this server's attachment: kept until each comes back
 \(`romacs-agent--held-echoed'), so one a refused or stolen attachment
 never wrote goes again with the next.  The replay before the
-acknowledgement has let go of the ones written already."
+acknowledgement has let go of the ones written already.  A PROCESS
+gone meanwhile (its attachment stolen, its host ended) takes none: they
+stay held for the next host, and nothing is signalled in the filter
+this runs from, whose records after the acknowledgement would be lost."
   (remhash (romacs-agent-id session) romacs-agent--launched)
-  (dolist (note (gethash (romacs-agent-id session) romacs-agent--held-notes))
-    (process-send-string process (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))))
+  (let ((lines (mapcar (lambda (note) (concat (json-serialize (romacs-mcp--object "note" note)) "\n"))
+                       (gethash (romacs-agent-id session) romacs-agent--held-notes))))
+    (condition-case nil
+        (dolist (line lines) (process-send-string process line))
+      ;; Its pipe closed as it was written to.
+      (error nil))))
 
 (defun romacs-agent-held-notes-count ()
   "How many notes wait for a supervisor that is not attached here."
