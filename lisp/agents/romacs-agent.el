@@ -3384,23 +3384,24 @@ sent through another host."
 (defun romacs-agent--launch-when-placed (session launch)
   "Call LAUNCH, which launches SESSION, once its records' place is known
 \(`romacs-agent-events-then'), as one launch attempt with a deadline
-\(`romacs-agent-start-deadline').  An error or a quit in it ends SESSION
-unstarted and failed, saying why, while it is `starting', as a supervisor
-that never came up does: no attach is left to, and what waits for its
-start would wait for ever.  Called at once, the error then reaches the
-caller too."
+\(`romacs-agent-start-deadline', `romacs-agent--attempted')."
   (let ((now t) (token (romacs-agent--attempt session)))
-    (romacs-agent-events-then
-     session
-     (lambda ()
-       (when (romacs-agent--attempt-current-p session token)
-         (condition-case err (funcall launch)
-           ((error quit)
-            (when (eq (romacs-agent-state session) 'starting)
-              (romacs-agent--unstarted session (format "its supervisor could not start: %s"
-                                                       (error-message-string err))))
-            (when now (signal (car err) (cdr err))))))))
+    (romacs-agent-events-then session (lambda () (romacs-agent--attempted session token now launch)))
     (setq now nil)))
+
+(defun romacs-agent--attempted (session token now launch)
+  "Call LAUNCH, SESSION's launch attempt TOKEN, unless the attempt is over
+\(its deadline passed, another began).  An error or a quit in it ends
+SESSION unstarted and failed, saying why, while it is `starting', as a
+supervisor that never came up does: no attach is left to, and what waits
+for its start would wait for ever.  NOW, called from where the attempt
+began: the error then reaches that caller too."
+  (when (romacs-agent--attempt-current-p session token)
+    (condition-case err (funcall launch)
+      ((error quit)
+       (when (eq (romacs-agent-state session) 'starting)
+         (romacs-agent--unstarted session (format "its supervisor could not start: %s" (error-message-string err))))
+       (when now (signal (car err) (cdr err)))))))
 
 (defun romacs-agent--stop-then (session then)
   "Stop SESSION's harness, then call THEN: once its unit is gone, as the
@@ -4064,6 +4065,15 @@ forked, or one a message was sent to."
 it has seen (`romacs-agent--journal-after'): further, it reads on from
 where its last run began.")
 
+(defun romacs-agent--read-on-from-seen (session)
+  "What SESSION's last supervisor journaled is read on, as it attaches,
+from the last record it has seen, not from where that run began: a long
+run is not read again.  Its records' place now, moved or not."
+  (when-let* ((from (and (> (romacs-agent-seq session) 0)
+                         (romacs-agent--journal-after session (romacs-agent-seq session) romacs-agent--resume-reach)))
+              ((integerp from)))
+    (setf (romacs-agent-journal-start session) from)))
+
 (defun romacs-agent-resume (session)
   "Run SESSION's harness again on its conversation, after it ended, in the
 configuration directory its instance had when it started: the harness
@@ -4087,12 +4097,6 @@ keeps the conversation there."
   (romacs-agent--changed session)
   ;; A turn the harness's end cut short goes on (Claude Code's own switch).
   (let ((environment (append (romacs-agent--harness-get session :resume-environment) process-environment)))
-    ;; What its last supervisor journaled is read on from the last record
-    ;; seen, not from where that run began: a long run is not read again.
-    (when-let* ((from (and (> (romacs-agent-seq session) 0)
-                           (romacs-agent--journal-after session (romacs-agent-seq session) romacs-agent--resume-reach)))
-                ((integerp from)))
-      (setf (romacs-agent-journal-start session) from))
     ;; Moved to SQLite first, in a worker when it is long; a launch that
     ;; fails, is quit or never runs ends it failed (`romacs-agent--launch-when-placed').
     (puthash (romacs-agent-id session) t romacs-agent--resuming)
@@ -4100,6 +4104,7 @@ keeps the conversation there."
      session
      (lambda ()
        (remhash (romacs-agent-id session) romacs-agent--resuming)
+       (romacs-agent--read-on-from-seen session)
        (let ((process-environment environment))
          ;; A conversation that never began (its first run never started) is
          ;; begun, under its own id: there is none to resume.
