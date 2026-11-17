@@ -84,8 +84,7 @@ impl Vm {
         let Ok(hash) = crate::host::read_to_string(store.join(format!("source-{k}"))) else {
             return Ok(None);
         };
-        // SAFETY: immutable-inode image store; same deployment contract as --image.
-        let Ok(image) = (unsafe { ImageRegion::open(store, &hash) }) else {
+        let Ok(image) = ImageRegion::open(store, &hash) else {
             return Ok(None);
         };
         let Ok(v) = image.string_reference_raw(0) else {

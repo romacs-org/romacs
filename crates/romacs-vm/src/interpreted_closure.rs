@@ -28,7 +28,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("romacs-document-image-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let key = vm.publish_code_image(&path, entry, [93; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [93; 32]).unwrap();
         loaded.collect(&mut []);
         assert_eq!(loaded.execute_raw(entry).unwrap().as_integer().unwrap(), 7);
@@ -109,7 +109,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("closure-image-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let key = source.publish_code_image(&path, entry, [37; 32]).unwrap();
-        let image = unsafe { ImageRegion::open(&path, &key) }.unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
         let (mut loaded, entry) = Vm::from_code_image(image, [37; 32]).unwrap();
         loaded.collect(&mut []);
         assert_eq!(loaded.execute_raw(entry).unwrap().as_integer().unwrap(), 9);
