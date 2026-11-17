@@ -3638,11 +3638,16 @@ Interactively, open the chat without sending an initial prompt."
                  (romacs-agent--changed session)
                  (romacs-agent--manifest session nil)
                  (when prompt (romacs-agent-send session prompt)))
-        (romacs-agent--launch session (romacs-agent--argv session nil))
-        (romacs-agent--attach session romacs-agent--launch-tries)
-        (romacs-agent--when-attached session (lambda ()
-                                               (romacs-agent--refresh-models session)
-                                               (when prompt (romacs-agent-send session prompt))))))
+        ;; Launched once its records' place is known: early in a fresh
+        ;; start, once the writer has made the store it goes to.
+        (romacs-agent-events-then
+         session
+         (lambda ()
+           (romacs-agent--launch session (romacs-agent--argv session nil))
+           (romacs-agent--attach session romacs-agent--launch-tries)
+           (romacs-agent--when-attached session (lambda ()
+                                                  (romacs-agent--refresh-models session)
+                                                  (when prompt (romacs-agent-send session prompt))))))))
     (when (called-interactively-p 'any) (romacs-agent-show session))
     session))
 
@@ -3712,10 +3717,13 @@ Romacs is resuming THREAD.  Once started, the supervisor owns it."
               (if (romacs-agent--per-turn-p session)
                   (romacs-agent--manifest session nil)
                 (let ((argv (romacs-agent--argv session t)))
-                  ;; Its supervisor's from here.
+                  ;; Its supervisor's from here, launched once its records'
+                  ;; place is known (`romacs-agent-events-then').
                   (setq dir nil)
-                  (romacs-agent--launch session argv)
-                  (romacs-agent--attach session romacs-agent--launch-tries)))
+                  (romacs-agent-events-then
+                   session (lambda ()
+                             (romacs-agent--launch session argv)
+                             (romacs-agent--attach session romacs-agent--launch-tries)))))
               (setq dir nil)
               (when (romacs-agent--per-turn-p session)
                 (setf (romacs-agent-state session) 'idle)

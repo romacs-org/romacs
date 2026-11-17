@@ -178,3 +178,29 @@ whatever TMPDIR is); `delivered' collects wakes."
             (should (equal (seq-take (romacs-agent--relay-args session) 5)
                            '("--socket" "/route" "--reconnect" "--session" "r")))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-launch-a-start-waits-for-its-records-place ()
+  ;; A session whose records' place is not known yet (early in a fresh
+  ;; start, the writer still to make the store) launches once it is, never
+  ;; before: a supervisor launched before writes a journal the editor no
+  ;; longer reads once the session is marked imported.
+  (let* ((root (make-temp-file "romacs-start-" t))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent--children (make-hash-table :test #'equal))
+         (romacs-agent-events--waiting (make-hash-table :test #'equal))
+         (romacs-agent-providers (list (cons "claude" root)))
+         (launched nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore)
+                  ((symbol-function 'romacs-agent--state-root) (lambda () root))
+                  ((symbol-function 'romacs-agent-events-own) (lambda (_) 'queued))
+                  ((symbol-function 'romacs-agent-events--migrate-next) #'ignore)
+                  ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness")))
+                  ((symbol-function 'romacs-agent--launch) (lambda (session &rest _) (push (romacs-agent-id session) launched)))
+                  ((symbol-function 'romacs-agent--attach) #'ignore)
+                  ((symbol-function 'romacs-agent--when-attached) #'ignore))
+          (let ((session (romacs-agent-start root nil nil "claude")))
+            (should-not launched)
+            (romacs-agent-events--waited (romacs-agent-id session))
+            (should (equal launched (list (romacs-agent-id session))))))
+      (delete-directory root t))))

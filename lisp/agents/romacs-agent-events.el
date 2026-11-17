@@ -294,13 +294,27 @@ once it is done."
   "Ask the writer to import SESSION; `queued'.  One with no records is
 known imported at once, and only marked so (`romacs-agent-events--mark'):
 nothing of it is read meanwhile, and the mark clears nothing a host
-writes.  Its journal goes to the backup directory here, once imported,
-so no reader here finds it gone before it reads SQLite."
+writes.  While the store cannot be read here yet (the writer has still
+to make it, early in a fresh start) it is `queued' until marked, the
+store then made: nothing reads its records here before it can.  Its
+journal goes to the backup directory here, once imported, so no reader
+here finds it gone before it reads SQLite."
   (let ((id (romacs-agent-id session)) (dir (romacs-agent-dir session)))
-    (if (not (file-exists-p (expand-file-name "journal.jsonl" dir)))
-        (progn (puthash id t romacs-agent-events--imported)
-               (romacs-agent-write 'romacs-agent-events--mark (list id))
-               t)
+    (cond
+     ((and (not (file-exists-p (expand-file-name "journal.jsonl" dir))) (romacs-agent-events--db))
+      (puthash id t romacs-agent-events--imported)
+      (romacs-agent-write 'romacs-agent-events--mark (list id))
+      t)
+     ((not (file-exists-p (expand-file-name "journal.jsonl" dir)))
+      (unless (gethash id romacs-agent-events--importing)
+        (puthash id t romacs-agent-events--importing)
+        (romacs-agent-write 'romacs-agent-events--mark (list id)
+                            (lambda (answer)
+                              (remhash id romacs-agent-events--importing)
+                              (when (eq (car-safe answer) 'ok) (puthash id t romacs-agent-events--imported))
+                              (romacs-agent-events--waited id))))
+      'queued)
+     (t
       (unless (gethash id romacs-agent-events--importing)
         (puthash id t romacs-agent-events--importing)
         (romacs-agent-write
@@ -311,7 +325,7 @@ so no reader here finds it gone before it reads SQLite."
              (puthash id t romacs-agent-events--imported)
              (with-demoted-errors "romacs-agent-events: backing up: %S" (romacs-agent-events--back-up session)))
            (romacs-agent-events--waited id))))
-      'queued)))
+      'queued))))
 
 (defun romacs-agent-events--mark (id)
   "The writer's: mark the session ID, which has no journal, imported: its

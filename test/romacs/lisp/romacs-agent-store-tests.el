@@ -559,3 +559,17 @@ writes: the sessions table made again in its form, the rest left.")
     (should (equal (romacs-agent-store-folded) '("/p/one")))))
 
 ;;; romacs-agent-store-tests.el ends here
+
+(ert-deftest romacs-agent-store-a-session-asking-of-a-restart-is-loaded ()
+  ;; A listed session that asked to be told of a restart is loaded as a
+  ;; restore runs, so it is told: left a row, it would never be.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-tools)
+  (romacs-agent-store-tests--with
+    (let ((asked "aaaaaaaa-0000-4000-8000-000000000001") (quiet "aaaaaaaa-0000-4000-8000-000000000002"))
+      (record asked "asked")
+      (record quiet "quiet")
+      (write-region "" nil (expand-file-name (concat asked "/restart-wake") root) nil 'silent)
+      (romacs-agent-store-fill)
+      (should-not (romacs-agent--unloaded-p (expand-file-name asked root)))
+      (should (romacs-agent--unloaded-p (expand-file-name quiet root))))))
