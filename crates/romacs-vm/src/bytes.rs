@@ -286,7 +286,7 @@ impl ByteBuffer {
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.state.storage_bytes(capacity) + self.anchors.storage_bytes(capacity) + (if capacity {
+        self.state.storage_bytes(capacity) + self.anchors.storage_bytes(capacity) + self.per_buffer.locals_storage_bytes(capacity) + (if capacity {
             self.bytes.capacity()
         } else {
             self.bytes.len()

@@ -1425,6 +1425,7 @@ impl AnnotatedBuffer {
         };
         shared
             + self.text.state.storage_bytes(capacity)
+            + self.per_buffer.locals_storage_bytes(capacity)
             + self.indirect.capacity() * size_of::<Value>()
             + self.intervals.storage_bytes(capacity)
             + (if capacity {

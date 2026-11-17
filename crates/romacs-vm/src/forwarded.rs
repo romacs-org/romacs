@@ -1066,6 +1066,8 @@ impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
     /// Its Lisp locals.
     pub(crate) fn locals(&self) -> &LocalVars { &self.6 }
+    /// The bytes its Lisp locals take (`LocalVars::storage_bytes`).
+    pub(crate) fn locals_storage_bytes(&self, capacity: bool) -> usize { self.6.storage_bytes(capacity) }
     /// Its Lisp locals to change: only `Vm::store_local` does.
     pub(super) fn locals_mut(&mut self) -> &mut LocalVars { &mut self.6 }
     /// Forget the visited file's identity and modification time, as a

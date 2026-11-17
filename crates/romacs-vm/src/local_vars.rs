@@ -75,6 +75,10 @@ impl LocalVars {
     pub(crate) fn version(&self) -> u32 {
         self.version
     }
+    /// The bytes its entries take, with CAPACITY those allocated.
+    pub(crate) fn storage_bytes(&self, capacity: bool) -> usize {
+        (if capacity { self.entries.capacity() } else { self.entries.len() }) * size_of::<(Value, Value)>()
+    }
     /// Each (symbol, value), in slot order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (Value, Value)> + '_ {
         self.entries.iter().copied()

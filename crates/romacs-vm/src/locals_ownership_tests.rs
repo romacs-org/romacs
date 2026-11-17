@@ -146,3 +146,25 @@ fn a_minor_reads_only_the_locals_stored_into_since() {
     let moved = vm.eval_source_raw("(list (buffer-local-value 'mn-l1 (nth 1 mn-bufs)) (buffer-local-value 'mn-l2 (nth 3 mn-bufs)))").unwrap();
     assert_eq!(vm.display(moved).unwrap(), "((swapped) (converted))");
 }
+
+/// A buffer's storage, as the heap statistics count it, includes its store
+/// of locals, in both representations.
+#[test]
+fn a_buffers_storage_counts_its_locals() {
+    let mut vm = Vm::new();
+    let storage = |vm: &Vm, index: usize| match &vm.objects[index] {
+        data::Object::Buffer(b) => b.storage_bytes(false),
+        data::Object::ByteBuffer(b) => b.storage_bytes(false),
+        _ => unreachable!("a buffer"),
+    };
+    vm.eval_source_raw("(setq sb (get-buffer-create \"sb\"))").unwrap();
+    let named = vm.slot("sb");
+    let index = vm.slots[named].value.index(0).unwrap() - 1;
+    let before = storage(&vm, index);
+    vm.eval_source_raw("(save-current-buffer (set-buffer sb) (let ((i 0)) (while (< i 100) (set (make-local-variable (intern (format \"sb-l%d\" i))) i) (setq i (1+ i)))))").unwrap();
+    let entry = size_of::<(Value, Value)>();
+    assert_eq!(storage(&vm, index) - before, 100 * entry, "multibyte");
+    vm.eval_source_raw("(save-current-buffer (set-buffer sb) (set-buffer-multibyte nil))").unwrap();
+    let index = vm.slots[named].value.index(0).unwrap() - 1;
+    assert!(storage(&vm, index) >= 100 * entry, "unibyte");
+}
