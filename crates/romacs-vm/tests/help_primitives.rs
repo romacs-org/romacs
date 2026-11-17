@@ -7,7 +7,7 @@
 //! ranges split by shadowing, `current-minor-mode-maps' and
 //! `describe-buffer-bindings' under a prefix and with an overriding map.
 //! A character above #x10FFFF, which a Romacs buffer cannot hold, is
-//! U+FFFD in GNU's text too (DIVERGENCES.md VM2-HELP-EXTENDED).
+//! U+FFFD in GNU's text too (ledger/divergences VM2-HELP-EXTENDED).
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;
 use gnu_lisp::gnu_lisp;

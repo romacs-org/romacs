@@ -6,7 +6,7 @@
 //! icomplete shows the candidates in the mini-window as an overlay string,
 //! the mini-window grows to hold them and shrinks back when the minibuffer
 //! exits; GNU's `find-file-noselect' visits. The GUI delivers Return as C-j
-//! (DIVERGENCES VM2-HOSTIN1).
+//! (ledger/divergences VM2-HOSTIN1).
 use romacs_vm_gui::{command, fonts, presentation, startup};
 use romacs_vm::{CommandEvent, HostEvent, HostFrame, HostInput, Vm};
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
@@ -192,7 +192,7 @@ fn gnu_completion_reads_commands_files_and_buffers_through_icomplete() {
 }
 
 /// On a window system the defaults show the minibuffer in romacs-complete's
-/// layer (DIVERGENCES VM2-COMPLETE-DEFAULT), and Return takes the
+/// layer (ledger/divergences VM2-COMPLETE-DEFAULT), and Return takes the
 /// candidate of the input typed, even when typing outran the candidate
 /// updates after its first key: Return, `romacs-complete-directory-enter',
 /// once exited with a candidate computed for that first key.

@@ -15,7 +15,7 @@ GNU evaluates every row twice in one process (byte-compiled, then
 interpreted; gnu_driver.el), so each argument expression also resets the
 buffer it acts in.  Paths are absolute and fixed, never relative and never
 under HOME: GNU's HOME is private per recording and its `default-directory'
-is the recorder's, neither of which a replay shares (DIVERGENCES.md
+is the recorder's, neither of which a replay shares (ledger/divergences
 VM2-PATH2).
 
 GNU's -Q image also runs Lisp the C calls (`format-decode',

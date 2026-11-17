@@ -3,7 +3,7 @@
 //! frame. A top-level frame is one the display shows in a window of its
 //! own and owns its native geometry (`TopGeometry'); a child frame
 //! (`parent-frame') is painted over its parent and never resizes its
-//! windows (DIVERGENCES.md VM2-CHILD-FRAME).
+//! windows (ledger/divergences VM2-CHILD-FRAME).
 use crate::{data::Object, *};
 pub(super) const SELECTED_FRAME: &str = "#:vm2-frame";
 /// keyboard.c internal_last_event_frame.

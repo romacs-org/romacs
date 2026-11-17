@@ -35,7 +35,7 @@ fn replay_gnu_32_known_answers_and_dump_every_form() {
 /// GNU's `lexical-binding' is a special, automatically buffer-local
 /// variable (lread.c DEFVAR_LISP + Fmake_variable_buffer_local), so `let',
 /// `setq' and a parameter bind it; VM2 reads t, being always lexical
-/// (DIVERGENCES.md VM2-LEXBIND1).
+/// (ledger/divergences VM2-LEXBIND1).
 #[test]
 fn lexical_binding_is_a_special_variable_as_in_gnu() {
     let mut vm = Vm::new();

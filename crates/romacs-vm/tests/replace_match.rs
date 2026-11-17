@@ -222,7 +222,7 @@ fn matches_gnu(cases: &str) {
 /// casing) replaces it as one character for several: its text properties
 /// cover them all and markers after it follow the text. GNU's
 /// replace_range_2 leaves markers at their character positions and gives
-/// the extra characters the properties around them (DIVERGENCES.md
+/// the extra characters the properties around them (ledger/divergences
 /// VM2-CASE3).
 #[test]
 fn region_case_expansion_keeps_properties_and_follows_markers() {

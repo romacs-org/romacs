@@ -1101,7 +1101,7 @@ pub enum ContentTransitionHint {
     },
 }
 
-/// A root-frame window drawn as a pane (DIVERGENCES.md VM2-PANE-CHROME),
+/// A root-frame window drawn as a pane (ledger/divergences VM2-PANE-CHROME),
 /// over its glyphs: BOUNDS its box in logical pixels, its corners rounded
 /// to RADIUS into the frame background, an EDGE one device pixel wide
 /// round it, and its paint blended DIM of the way toward the frame

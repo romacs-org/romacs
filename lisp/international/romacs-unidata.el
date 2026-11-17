@@ -10,7 +10,7 @@
 ;; Adapted from GNU admin/unidata/unidata-gen.el at the pin.  GNU's
 ;; generated uni-*.el tables carry these functions as byte code in their
 ;; extra slots.  Romacs runs Lisp from source, so its copies of those tables
-;; name the functions below instead (DIVERGENCES.md VM2-UNIDATA1).  Each
+;; name the functions below instead (ledger/divergences VM2-UNIDATA1).  Each
 ;; body is unidata-gen.el's function of the same suffix; the defsubst
 ;; `unidata-decode-word' is the plain function `romacs-unidata--decode-word'.
 

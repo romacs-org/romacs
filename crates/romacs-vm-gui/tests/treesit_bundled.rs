@@ -1,4 +1,4 @@
-//! The grammars the executable ships (crates/romacs-grammars, DIVERGENCES
+//! The grammars the executable ships (crates/romacs-grammars, ledger/divergences
 //! VM2-TREESIT-BUNDLED): each is the commit its GNU ts mode pins in
 //! `treesit-language-source-alist', and the loader finds it after the
 //! user's grammar directories and before the system's, never for a

@@ -14,7 +14,7 @@
 
 (fset 'romacs-gui--window-child (symbol-function 'window-child))
 ;; The default face's font: Iosevka at 14 points, which Romacs ships and
-;; registers for itself (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED), so
+;; registers for itself (assets/fonts, ledger/divergences VM2-FONT-BUNDLED), so
 ;; every way of starting a session gets it without a launcher saying so;
 ;; its colours, and every other face's, are the stock theme's
 ;; (etc/themes/default-theme.el, lisp/ui/romacs-theme.el).

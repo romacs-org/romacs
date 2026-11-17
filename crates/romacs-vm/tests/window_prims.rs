@@ -166,7 +166,7 @@ fn vm2_win4_expanding_a_scrolled_lower_window_keeps_its_start() {
         (let ((old (window-start wp-b))) \
           (delete-other-windows-internal wp-b) \
           (list old (window-start wp-b) (eq (frame-root-window) wp-b))))");
-    assert_eq!(show(&mut vm, &src), "(201 201 t)", "VM2-WIN4: no vmotion scroll preservation; update DIVERGENCES.md when fixed");
+    assert_eq!(show(&mut vm, &src), "(201 201 t)", "VM2-WIN4: no vmotion scroll preservation; update ledger/divergences when fixed");
 }
 
 /// VM2-WIN5 characterizes the hybrid device model, not GNU's terminal
@@ -179,7 +179,7 @@ fn vm2_win5_frame_type_and_character_metrics_are_a_documented_hybrid() {
         (= (* (frame-char-height) (window-total-height (minibuffer-window))) \
            (window-pixel-height (minibuffer-window))) \
         (= (* (frame-char-width) (window-total-width)) (window-pixel-width)))";
-    assert_eq!(show(&mut vm, src), "(t 20 10 t t)", "VM2-WIN5: default hybrid model; update DIVERGENCES.md when fixed");
+    assert_eq!(show(&mut vm, src), "(t 20 10 t t)", "VM2-WIN5: default hybrid model; update ledger/divergences when fixed");
     vm.set_frame_geometry(800, 600, 24, 8).unwrap();
     assert_eq!(show(&mut vm, src), "(t 24 8 t t)", "VM2-WIN5: character metrics must follow backend geometry");
 }

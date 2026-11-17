@@ -15,7 +15,7 @@
 //! The Lisp half is installed on first use with keyboard.c's (prims/keyboard.rs
 //! `install'), by one `Step::Call' of `eval': a bare `Vm::new()' stays bare.
 //!
-//! Supported subset (DIVERGENCES.md VM2-MINIBUF1 lists what is not):
+//! Supported subset (ledger/divergences VM2-MINIBUF1 lists what is not):
 //! PROMPT, INITIAL-CONTENTS (string or (STRING . POSITION)), KEYMAP, READ,
 //! HIST (variable set to nil when unbound; history recorded only through
 //! GNU's own `add-to-history' when that is fbound), DEFAULT-VALUE (string,

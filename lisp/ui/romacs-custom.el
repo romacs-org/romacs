@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 ;; GNU's `enable-theme' and `disable-theme' with their loops over a theme's
-;; face settings in Rust (DIVERGENCES.md VM2-FACE-ENGINE).  A run of face
+;; face settings in Rust (ledger/divergences VM2-FACE-ENGINE).  A run of face
 ;; settings is one primitive call that stops at the next setting of any
 ;; other kind, so faces and variables still interleave in the order of
 ;; `theme-settings', and what variables, hooks and the `user' theme do is

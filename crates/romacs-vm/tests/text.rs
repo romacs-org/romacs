@@ -3,7 +3,7 @@ use romacs_vm::{Form, Vm};
 #[test]
 fn scalar_mutation_d001_and_byte_strings_remain_strict() {
     let mut vm = Vm::new();
-    // GNU-DIVERGENCES.md D001: widths may change in scalar strings.
+    // ledger/divergences D001: widths may change in scalar strings.
     for (code, expected) in [(946, "aβc"), (955, "aλc"), (97, "aac"), (128512, "a😀c")] {
         let v = vm
             .eval_source(&format!(
