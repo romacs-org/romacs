@@ -726,7 +726,7 @@ impl Vm {
             DefvarBoundp => {
                 // HOST(dynamic:saved): saved-binding accessor: defvar's boundp; variable_primitive
                 // checks a tracked variable first (F2)
-                let shadowed_unbound = self.dynamic.iter().find(|(s,_,_,_)| *s==slot).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
+                let shadowed_unbound = self.dynamic.iter().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).is_some_and(|(_,v,_,_)| *v == Value::UNBOUND);
                 Ok(truth(self.slots[slot].value != Value::UNBOUND && !shadowed_unbound))
             }
             // GNU Fdefvar without a value at a loading file's own level: the
@@ -752,7 +752,7 @@ impl Vm {
                 let shadow = if self.slots[slot].value == Value::UNBOUND { None } else {
                     // HOST(dynamic:saved): saved-binding accessor: defvar's set-default;
                     // variable_primitive checks a tracked variable first (F2)
-                    self.dynamic.iter_mut().find(|(s,_,_,_)| *s==slot).filter(|(_,v,_,_)| *v == Value::UNBOUND)
+                    self.dynamic.iter_mut().find(|(s,_,_,kind)| *s==slot && *kind != Let::Local).filter(|(_,v,_,_)| *v == Value::UNBOUND)
                 };
                 if let Some((_,old,_,_)) = shadow { *old = value; }
                 else {
