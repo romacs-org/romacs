@@ -664,8 +664,9 @@ impl World {
     }
 
     /// The world restored, when it is usable now, without building: for a
-    /// worker isolate, which runs its spawner's exact world or nothing
-    /// (lisp/vm/isolate.el `isolate-world-unavailable').
+    /// worker isolate, which runs its spawner's exact world or nothing; a
+    /// spawner with no world starts its workers from source instead
+    /// (lisp/vm/isolate.el `romacs--isolate-boot-arguments').
     pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
         if !arena::active() {
             return Err(json!("no arena"));
