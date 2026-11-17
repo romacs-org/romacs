@@ -3009,7 +3009,8 @@ def children(args, base):
         # The harness's own subagent: counted while it runs; its row goes to its card.
         a.send(parent, 'agent 6 read the code')
         until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
-        until(lambda: 'threads live' in header(), 15, 'subagent counted')
+        # The harness's own subagent counts apart from the delegated threads.
+        until(lambda: '1 working' in header(), 15, 'subagent counted')
         result['header_subagent'] = header()
         open_menu()
         time.sleep(.3)
