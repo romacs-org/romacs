@@ -409,23 +409,30 @@ And a parent that loaded before the thread was read is stale again."
       (should-not (file-exists-p (jabber-db--intent-file))))))
 
 (ert-deftest jabber-test-mam-sync-worker-defers-to-fresh-intent ()
-  "The worker waits while a fresh mark exists, at most its patience; a stale one not."
+  "The worker waits while a fresh mark exists, at most its patience; a stale one not.
+A mark's age runs from its file's time, not from the call, so the wait is
+judged by the mark: fresh when the worker asks, stale when it goes on.  Where
+no wait is due, the patience is long enough that a wait could not pass for
+a slow host."
   (jabber-test-mam-sync--with-db
     (let ((db jabber-db--connection)
-          (jabber-db-intent-patience 0.3)
           (file (jabber-db--intent-file)))
       (write-region "" nil file nil 'silent)
-      (let ((start (float-time)))
+      (let ((jabber-db-intent-patience 1.0))
+        (should (jabber-db--intent-fresh-p file))
         (jabber-db--defer-to-session #'ignore db "BEGIN IMMEDIATE")
-        (should (>= (- (float-time) start) 0.25)))
-      ;; Statements inside the worker's own transaction never wait.
-      (let ((start (float-time)) (jabber-db--in-transaction db))
-        (jabber-db--defer-to-session #'ignore db "INSERT INTO x VALUES (1)")
-        (should (< (- (float-time) start) 0.05)))
-      (set-file-times file (time-subtract nil 10))
-      (let ((start (float-time)))
-        (jabber-db--defer-to-session #'ignore db "BEGIN IMMEDIATE")
-        (should (< (- (float-time) start) 0.05)))
+        (should-not (jabber-db--intent-fresh-p file)))
+      (let ((jabber-db-intent-patience 5))
+        (write-region "" nil file nil 'silent)
+        ;; Statements inside the worker's own transaction never wait.
+        (let ((start (float-time)) (jabber-db--in-transaction db))
+          (should (jabber-db--intent-fresh-p file))
+          (jabber-db--defer-to-session #'ignore db "INSERT INTO x VALUES (1)")
+          (should (< (- (float-time) start) 2.5)))
+        (set-file-times file (time-subtract nil 10))
+        (let ((start (float-time)))
+          (jabber-db--defer-to-session #'ignore db "BEGIN IMMEDIATE")
+          (should (< (- (float-time) start) 2.5))))
       (delete-file file))))
 
 (ert-deftest jabber-test-mam-sync-live-write-waits-a-bounded-time ()
