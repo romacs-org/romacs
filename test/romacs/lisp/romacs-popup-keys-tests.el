@@ -101,7 +101,9 @@ taking keys, and `home', the window the user was in."
             (should (eq where home))
             (should (eq (window-buffer home) other))
             (should (equal hidden (list menu)))
-            (should-not romacs-popup--keys-buffer))
+            (should-not romacs-popup--keys-buffer)
+            ;; Its map is gone, not back once the command's bindings end.
+            (should-not (memq romacs-popup--keys-map (cdr overriding-terminal-local-map))))
         (kill-buffer other)))))
 
 (ert-deftest romacs-popup-keys-quit-window-hides ()

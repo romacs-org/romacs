@@ -1024,20 +1024,21 @@ the key as if it had never shown."
   "Hide the menu taking keys, ending its transient map."
   (when romacs-popup--keys-exit (funcall romacs-popup--keys-exit)))
 
-(defun romacs-popup--outside (user menu)
+(defun romacs-popup--outside (user menu leave)
   "A `display-buffer' action for the commands of MENU, the window of the
 menu taking keys: a buffer of its own stays, any other goes to USER, the
-window the user was in, the menu hidden."
+window the user was in, and LEAVE is called: the menu is to hide."
   (lambda (buffer alist)
     (unless (eq buffer (window-buffer menu))
-      (romacs-popup--keys-done)
+      (funcall leave)
       (window--display-buffer buffer user 'reuse alist))))
 
 (defun romacs-popup--menu-key (keys)
   "Run KEYS in the menu taking keys, or hide it and run them as typed anew."
   (let* ((window (romacs-popup--keys-window))
          (command (and window (romacs-popup--menu-command
-                               keys (with-current-buffer (window-buffer window) (current-local-map))))))
+                               keys (with-current-buffer (window-buffer window) (current-local-map)))))
+         (leave nil))
     (cond ((not command)
            (romacs-popup--keys-done)
            (setq unread-command-events (append (listify-key-sequence keys) unread-command-events)))
@@ -1045,13 +1046,17 @@ window the user was in, the menu hidden."
           (t
            ;; The map is the menu's only: not in a minibuffer its command reads.
            (let ((overriding-terminal-local-map nil)
-                 (display-buffer-overriding-action (list (romacs-popup--outside (selected-window) window))))
+                 (display-buffer-overriding-action
+                  (list (romacs-popup--outside (selected-window) window (lambda () (setq leave t))))))
              (with-selected-window window
                (setq this-command command)
                (call-interactively command)
                ;; Its buffer's own hook, as after a command in its window.
                (when (and (eq (window-buffer) (current-buffer)) (local-variable-p 'post-command-hook))
-                 (dolist (hook (remq t post-command-hook)) (funcall hook)))))))))
+                 (dolist (hook (remq t post-command-hook)) (funcall hook)))))
+           ;; Its map ends once the binding above is undone, or it would
+           ;; come back with it.
+           (when leave (romacs-popup--keys-done))))))
 
 ;;;###autoload
 (defun romacs-popup-display-buffer (buffer alist)

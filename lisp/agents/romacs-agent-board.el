@@ -453,11 +453,17 @@ on stays under point, else its line."
             (t (forward-line (max 1 (1- line)))
                (unless (romacs-agent-board--row) (romacs-agent-board-next 1)))))))
 
+(defun romacs-agent-board--windows (buffer)
+  "The windows showing BUFFER on a visible frame: a hidden layer's kept
+frame shows nothing."
+  (seq-filter (lambda (window) (frame-visible-p (window-frame window)))
+              (get-buffer-window-list buffer nil t)))
+
 (defun romacs-agent-board--columns (buffer)
   "The columns BUFFER's board has: its narrowest window's, else the
 selected frame's.  Emoji draw a little wider than the two columns they
 count: slack, so a row's last column is not cut."
-  (- (let ((windows (get-buffer-window-list buffer nil t)))
+  (- (let ((windows (romacs-agent-board--windows buffer)))
        (if windows (apply #'min (mapcar #'window-body-width windows)) (frame-width)))
      3))
 
@@ -465,7 +471,7 @@ count: slack, so a row's last column is not cut."
   "Draw BUFFER's board COLUMNS wide, by default as wide as its windows:
 each window showing it keeps the row at its point and at its start."
   (with-current-buffer buffer
-    (let* ((windows (get-buffer-window-list buffer nil t))
+    (let* ((windows (romacs-agent-board--windows buffer))
            (spots (mapcar (lambda (window)
                             (list window (romacs-agent-board--spot (window-point window))
                                   (romacs-agent-board--spot (window-start window))))
@@ -513,8 +519,7 @@ the same width, while the board shows one; else stop."
 (defun romacs-agent-board--shown ()
   "The board's buffer, while it shows."
   (when-let* ((buffer (get-buffer romacs-agent-board--name))
-              (window (get-buffer-window buffer t))
-              ((frame-visible-p (window-frame window))))
+              ((romacs-agent-board--windows buffer)))
     buffer))
 
 (defun romacs-agent-board--refresh ()
@@ -532,14 +537,15 @@ the same width, while the board shows one; else stop."
   "Draw the board, from one of its commands."
   (romacs-agent-board--render (current-buffer)))
 
-(defun romacs-agent-board--shown-in (_window)
-  "Draw the board anew as a window shows it: it was not followed hidden."
-  (romacs-agent-board--redraw))
+(defun romacs-agent-board--shown-in (window)
+  "Draw the board anew as WINDOW shows it: it was not followed hidden."
+  (romacs-agent-board--render (window-buffer window)))
 
 (defun romacs-agent-board--resized (window)
   "Draw the board again when WINDOW, showing it, changed its width."
-  (unless (eql (romacs-agent-board--columns (window-buffer window)) romacs-agent-board--width)
-    (romacs-agent-board--redraw)))
+  (let ((buffer (window-buffer window)))
+    (unless (eql (romacs-agent-board--columns buffer) (buffer-local-value 'romacs-agent-board--width buffer))
+      (romacs-agent-board--render buffer))))
 
 ;;; Commands
 
