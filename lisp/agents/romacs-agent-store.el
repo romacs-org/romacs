@@ -134,9 +134,16 @@ read here goes on.")
   "Functions that make the tables of the store's other modules, called by
 the writer once it has opened it (`romacs-agent-store--made').")
 
+(defun romacs-agent-store--writer-open ()
+  "In a writer: the store opened, its directory made first.  The writer
+makes the store, in a home where no agent has run yet as well: nothing
+else may have made the state directory."
+  (make-directory (file-name-directory (romacs-agent-store--file)) t)
+  (romacs-agent-store--open))
+
 (defun romacs-agent-store--made ()
   "In a writer: the store opened, every module's tables made."
-  (when (romacs-agent-store--open) (run-hooks 'romacs-agent-store-made-functions) t))
+  (when (romacs-agent-store--writer-open) (run-hooks 'romacs-agent-store-made-functions) t))
 
 (defun romacs-agent-store--writer-start ()
   "The writer's start: the store opened, its tables made, its waits long,
@@ -144,7 +151,7 @@ its commits not synced one by one (`synchronous=NORMAL', as a supervisor's
 are): what a crash may lose of them is the writer's queue's window."
   ;; Its connection waits long; the editor, which runs this when it ends
   ;; with no writer (`romacs-agent-writer--here'), keeps its own short.
-  (when-let* ((db (let ((romacs-agent-store-patience romacs-agent-store-patient)) (romacs-agent-store--open))))
+  (when-let* ((db (let ((romacs-agent-store-patience romacs-agent-store-patient)) (romacs-agent-store--writer-open))))
     (sqlite-pragma db "synchronous = NORMAL")
     (romacs-agent-store--made)))
 
