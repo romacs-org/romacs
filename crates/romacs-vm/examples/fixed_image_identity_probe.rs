@@ -13,8 +13,8 @@ fn main() {
     let s = b.string("beta");
     b.cons(s, Fixed::NIL);
     let kb = b.publish(&store, [2; 32]).unwrap();
-    let ra = unsafe { ImageRegion::open(&store, &ka) }.unwrap();
-    let rb = unsafe { ImageRegion::open(&store, &kb) }.unwrap();
+    let ra = ImageRegion::open(&store, &ka).unwrap();
+    let rb = ImageRegion::open(&store, &kb).unwrap();
     let a0 = ra.reference(0).unwrap();
     let a1 = ra.reference(1).unwrap();
 

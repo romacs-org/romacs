@@ -25,9 +25,8 @@ fn main_result() -> Result<(), String> {
         for (i, b) in config.iter_mut().enumerate() {
             *b = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
         }
-        // SAFETY: same immutable-inode store contract as --image. No source fallback.
-        let image =
-            unsafe { romacs_vm::ImageRegion::open(std::path::Path::new(&args[1]), &args[2]) }?;
+        // No source fallback.
+        let image = romacs_vm::ImageRegion::open(std::path::Path::new(&args[1]), &args[2])?;
         let (mut vm, entry) = Vm::from_code_image(image.clone(), config)?;
         let before = image.verified_pages();
         let result = vm.execute(entry)?;
@@ -44,10 +43,7 @@ fn main_result() -> Result<(), String> {
             return Err("--image STORE HASH ROOT_INDEX requires three arguments".into());
         }
         let root: usize = args[3].parse().map_err(|_| "invalid image root index")?;
-        // SAFETY: the content store is an immutable-inode deployment contract.
-        // Producer never overwrites a published inode. External writers are forbidden.
-        let image =
-            unsafe { romacs_vm::ImageRegion::open(std::path::Path::new(&args[1]), &args[2]) }?;
+        let image = romacs_vm::ImageRegion::open(std::path::Path::new(&args[1]), &args[2])?;
         let world = image.reference(root)?;
         let bytes = image.mapped_bytes();
         vm.attach_image(image)?;

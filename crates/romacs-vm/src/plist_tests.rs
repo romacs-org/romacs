@@ -151,7 +151,7 @@ fn code_images_publish_each_symbol_objects_plist() {
     );
     let entry = source.compile(&Form::Int(0)).unwrap();
     let key = source.publish_code_image(&store, entry, [0; 32]).unwrap();
-    let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+    let image = ImageRegion::open(&store, &key).unwrap();
     let (mut vm, _) = Vm::from_code_image(image, [0; 32]).unwrap();
     assert_eq!(show(&mut vm, "(symbol-plist 'plist-img)"), "(a (1 \"one\") b 2)", "interned plist survives the image");
     assert_eq!(show(&mut vm, "(list (get plist-img-u 'a) (eq plist-img-u 'plist-img))"), "(uninterned nil)", "uninterned plist survives the image");
@@ -162,7 +162,7 @@ fn code_images_publish_each_symbol_objects_plist() {
     assert_eq!(show(&mut vm, "(symbol-plist 'plist-img)"), "(a (1 \"one\") b 3 c 4)", "the private copy is traced");
     // A fresh world from the same image whose FIRST mutation is an append:
     // the mapped last cell cannot take a new tail, so it is copied too.
-    let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+    let image = ImageRegion::open(&store, &key).unwrap();
     let (mut appended, _) = Vm::from_code_image(image, [0; 32]).unwrap();
     assert_eq!(show(&mut appended, "(progn (put 'plist-img 'z 9) (symbol-plist 'plist-img))"), "(a (1 \"one\") b 2 z 9)");
     appended.collect(&mut []);

@@ -773,7 +773,7 @@ mod tests {
         std::fs::create_dir_all(&store).unwrap();
         let config = [17; 32];
         let key = vm.publish_code_image(&store, entry, config).unwrap();
-        let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+        let image = ImageRegion::open(&store, &key).unwrap();
         let (mut restored, entry) = Vm::from_code_image(image, config).unwrap();
         let value = restored.execute_raw(entry).unwrap();
         assert_ne!(value, Value::NIL);
