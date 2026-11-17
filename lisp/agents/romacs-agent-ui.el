@@ -612,7 +612,7 @@ only once that source is in SQLite."
   (when (plist-get ref :row)
     (let ((own (romacs-agent-turns-item (plist-get ref :session) (plist-get ref :id)))
           (source (and (plist-get ref :from)
-                       (or (romacs-agent-get (plist-get ref :from)) (romacs-agent-store-row-session (plist-get ref :from))))))
+                       (or (romacs-agent-loaded (plist-get ref :from)) (romacs-agent-store-row-session (plist-get ref :from))))))
       (if (or (plist-get own :output) (not source) (not (romacs-agent-events-p source))) own
         (or (romacs-agent-turns-item source (plist-get ref :id)) own)))))
 
@@ -2440,7 +2440,7 @@ alone (`romacs-agent-store-row-session', a restored chat), load it, and
 attach it when its supervisor listens (`romacs-agent-load-session')."
   (when-let* ((session romacs-agent-ui--session)
               (id (romacs-agent-id session))
-              ((not (eq (romacs-agent-get id) session)))
+              ((not (eq (romacs-agent-loaded id) session)))
               ((or (and (symbolp this-command) (string-prefix-p "romacs-agent-chat-" (symbol-name this-command)))
                    (and (markerp romacs-agent-ui--end) (>= (point) romacs-agent-ui--end))))
               (live (romacs-agent-load-session id)))
@@ -2457,7 +2457,7 @@ window shows it, from its session's row alone
 was open, loading no session; one is loaded when its chat is used
 \(`romacs-agent-ui--ensure-live')."
   (let ((id (plist-get misc :session)))
-    (when-let* ((session (or (romacs-agent-get id) (romacs-agent-store-row-session id) (romacs-agent-load-session id)))
+    (when-let* ((session (or (romacs-agent-loaded id) (romacs-agent-store-row-session id) (romacs-agent-load-session id)))
                 (buffer (let ((live (romacs-agent-buffer session)))
                           (if (buffer-live-p live) live (romacs-agent-ui--make-chat session)))))
       (with-current-buffer buffer

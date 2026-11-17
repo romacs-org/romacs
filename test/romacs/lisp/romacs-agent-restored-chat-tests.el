@@ -69,7 +69,7 @@
                             nil nil (list :session romacs-agent-restored-chat-tests--id :draft "half a question")))
                    ;; Its row alone, no session loaded.
                    (session (buffer-local-value 'romacs-agent-ui--session buffer)))
-              (should-not (romacs-agent-get romacs-agent-restored-chat-tests--id))
+              (should-not (romacs-agent-loaded romacs-agent-restored-chat-tests--id))
               ;; Restored: its draft, no journal read for its transcript.
               (should (= replays 0))
               (should (equal (with-current-buffer buffer (romacs-agent-ui--composer-text)) "half a question"))
