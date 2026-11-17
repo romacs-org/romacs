@@ -2,7 +2,7 @@
 use crate::{Result, Value, anchors::AnchorTree, coordinates::ByteOffset};
 use std::{collections::BTreeMap, ops::Range};
 /// Non-Lisp buffer identity and modification state; contains no moving Values.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub(crate) struct BufferState {
     pub(crate) name: Option<String>,
     pub(crate) live: bool,
@@ -17,7 +17,6 @@ pub(crate) struct BufferState {
     /// The terminal session this buffer shows, where it shows one.
     pub(crate) terminal: Option<u64>,
 }
-romacs_snapshot::snapshot_struct!(BufferState { name, live, inhibit_buffer_hooks, modification, defun_start, terminal });
 impl Default for BufferState {
     fn default() -> Self {
         Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
@@ -44,7 +43,7 @@ impl std::ops::Deref for BufferState {
 impl std::ops::DerefMut for BufferState {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut *self.modification }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct ByteBuffer {
     pub(crate) state: BufferState,
     pub bytes: Vec<u8>,
@@ -71,17 +70,15 @@ pub(crate) struct ByteBuffer {
     /// What a window shows of these bytes (`shown'), once one has.
     pub(crate) mirror: Option<Box<Mirror>>,
 }
-romacs_snapshot::snapshot_struct!(ByteBuffer { state, bytes, syntax_table, category_table, case_tables, local_keymap, point, restriction, anchors, properties, had_intervals, per_buffer, held, mirror });
 
 /// The text of a unibyte buffer as display reads it: each byte one
 /// character, so its positions are the buffer's, a byte above 127 the
 /// raw-byte character GNU shows as an escape. Every edit of the bytes edits
 /// it, and it holds the buffer's overlays.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct Mirror {
     text: crate::annotations::AnnotatedBuffer,
 }
-romacs_snapshot::snapshot_struct!(Mirror { text });
 impl Mirror {
     /// The byte range of the mirror's text that R, of the buffer's bytes, is.
     fn range(&self, r: &Range<ByteOffset>) -> Result<Range<ByteOffset>> {

@@ -11,12 +11,12 @@ const RAND_BITS: u32 = 31;
 const FIXNUM_BITS: u32 = 62;
 const INTMASK: u64 = (1 << FIXNUM_BITS) - 1;
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Random {
     state: [i32; DEGREE],
     front: usize,
     rear: usize,
 }
-romacs_snapshot::snapshot_struct!(Random { state, front, rear });
 
 impl Random {
     /// srandom (SEED).

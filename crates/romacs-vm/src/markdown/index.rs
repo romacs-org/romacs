@@ -9,7 +9,7 @@ use std::ops::Range;
 /// The text of a range of characters.
 pub(crate) type Read<'a> = dyn FnMut(Range<usize>) -> String + 'a;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Index {
     /// The top-level blocks' line starts, ascending; right outside `dirty`.
     starts: Vec<usize>,
@@ -24,7 +24,6 @@ pub(crate) struct Index {
     len: usize,
     built: bool,
 }
-romacs_snapshot::snapshot_struct!(Index { starts, dirty, defs, labels, len, built });
 
 impl Index {
     /// START..END of the document was replaced by INSERTED characters.

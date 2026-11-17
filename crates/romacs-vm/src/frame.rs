@@ -17,7 +17,7 @@ pub(crate) const DEFAULT_FRINGE: u32 = 8;
 const FRAME_LIST: &str = "#:vm2-frame-list";
 /// A top-level frame's native geometry, as its window and its last
 /// layout left it. Unused on a child frame, whose size is its own.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 pub(super) struct TopGeometry {
     pub width: u32,
     pub height: u32,
@@ -34,13 +34,12 @@ pub(super) struct TopGeometry {
     pub status_height: u32,
     pub status_reserved: u32,
 }
-romacs_snapshot::snapshot_struct!(TopGeometry { width, height, mini_lines, mini_reserved, text_area, status_height, status_reserved });
 impl Default for TopGeometry {
     fn default() -> Self {
         Self { width: 640, height: 480, mini_lines: 1, mini_reserved: 0, text_area: [640, 480], status_height: 0, status_reserved: 0 }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Frame {
     pub root: Value,
     pub selected: Value,
@@ -99,7 +98,6 @@ pub(super) struct Frame {
     /// A top-level frame's native geometry.
     pub native: TopGeometry,
 }
-romacs_snapshot::snapshot_struct!(Frame { root, selected, minibuffer, terminal, parameters, live, id, parent, left, top, width, height, border, visible, z, focus, alpha_background, hosts_minibuffer, fringes, tab_bar_lines, dividers, status_bar_lines, status_bar_top, native, iconified });
 
 impl Frame {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
@@ -121,7 +119,7 @@ pub(crate) struct ChildGeometry {
     pub height: u32,
     pub border: u32,
 }
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) struct Terminal {
     pub frame: Value,
     pub live: bool,
@@ -132,7 +130,6 @@ pub(super) struct Terminal {
     /// The parameter alist (terminal.c `param_alist').
     pub params: Value,
 }
-romacs_snapshot::snapshot_struct!(Terminal { frame, live, terminal_coding, keyboard_coding, params });
 impl Terminal {
     pub fn visit_values(&mut self, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.frame); f(&mut self.terminal_coding); f(&mut self.keyboard_coding); f(&mut self.params);

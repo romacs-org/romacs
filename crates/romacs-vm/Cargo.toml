@@ -89,6 +89,8 @@ romacs-coordinate-contract = { path = "../romacs-coordinate-contract" }
 romacs-layout = { path = "../romacs-layout" }
 # Compile-fail proofs that the heap boundary is a type property (tests/compile_boundaries.rs).
 trybuild = "1.0"
+# The derive the compile-fail proofs of the snapshot contract use, which names this crate.
+romacs-snapshot = { path = "../romacs-snapshot" }
 # Test sources made when the tests build: the `all` target's module list
 # (tests/all/main.rs) and the primh and varh replay harnesses.
 romacs-vm-test-build = { path = "../romacs-vm-test-build" }

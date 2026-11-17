@@ -6,9 +6,8 @@
 use super::Key;
 use crate::Value;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Values(Vec<(Key, Value)>);
-romacs_snapshot::snapshot_tuple!(Values(f0));
 
 impl Values {
     pub(crate) fn get(&self, key: Key) -> Option<&Value> {

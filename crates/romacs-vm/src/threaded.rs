@@ -957,18 +957,13 @@ struct Frame {
     mark: usize,
 }
 const NO_MARK: usize = usize::MAX;
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) enum Escape {
     Normal(Value),
     Throw(Value, Value),
     Signal(Value, Value),
     Error { condition: Value, object: Value, conditions: Value, target: Option<usize> },
 }
-romacs_snapshot::snapshot_enum!(Escape {
-    Escape::Normal(f0) => (f0),
-    Escape::Throw(f0, f1) => (f0, f1),
-    Escape::Signal(f0, f1) => (f0, f1),
-    Escape::Error { condition, object, conditions, target } => (condition, object, conditions, target),
-});
 impl Escape {
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         match self {

@@ -14,14 +14,13 @@ use crate::Slot;
 /// Slots to a card.
 const CARD: usize = 64;
 
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Slots {
     list: Vec<Slot>,
     /// One byte for each `CARD` slots: nonzero when one of them may have
     /// been written since the last collection.
     cards: Vec<u8>,
 }
-romacs_snapshot::snapshot_struct!(Slots { list, cards });
 
 impl std::ops::Deref for Slots {
     type Target = [Slot];

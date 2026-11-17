@@ -1,11 +1,8 @@
 error[E0277]: the trait bound `&Atomic<usize>: SnapshotSafe` is not satisfied
- --> tests/snapshot_safe/fail/writable_static.rs:6:1
+ --> tests/snapshot_safe/fail/writable_static.rs:4:10
   |
-6 | snapshot_struct!(Counter { count });
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  | |
-  | the trait `SnapshotSafe` is not implemented for `&Atomic<usize>`
-  | required by a bound introduced by this call
+4 | #[derive(romacs_snapshot::Snapshot)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `SnapshotSafe` is not implemented for `&Atomic<usize>`
   |
 help: the trait `SnapshotSafe` is implemented for `Atomic<usize>`
  --> $WORKSPACE/crates/romacs-snapshot/src/lib.rs
@@ -24,16 +21,13 @@ note: required by a bound in `Walk::<'o>::field`
   |
   |     pub fn field<F: crate::SnapshotSafe + Schema>(&mut self, name: &'static str, value: &F) {
   |                     ^^^^^^^^^^^^^^^^^^^ required by this bound in `Walk::<'o>::field`
-  = note: this error originates in the macro `$crate::snapshot_fields` which comes from the expansion of the macro `plain` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `romacs_snapshot::Snapshot` which comes from the expansion of the macro `plain` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `&Atomic<usize>: Schema` is not satisfied
- --> tests/snapshot_safe/fail/writable_static.rs:6:1
+ --> tests/snapshot_safe/fail/writable_static.rs:4:10
   |
-6 | snapshot_struct!(Counter { count });
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  | |
-  | the trait `Schema` is not implemented for `&Atomic<usize>`
-  | required by a bound introduced by this call
+4 | #[derive(romacs_snapshot::Snapshot)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Schema` is not implemented for `&Atomic<usize>`
   |
 help: the trait `Schema` is implemented for `Atomic<usize>`
  --> $WORKSPACE/crates/romacs-snapshot/src/schema/impls.rs
@@ -52,16 +46,13 @@ note: required by a bound in `Walk::<'o>::field`
   |
   |     pub fn field<F: crate::SnapshotSafe + Schema>(&mut self, name: &'static str, value: &F) {
   |                                           ^^^^^^ required by this bound in `Walk::<'o>::field`
-  = note: this error originates in the macro `$crate::snapshot_fields` which comes from the expansion of the macro `leaves` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `romacs_snapshot::Snapshot` which comes from the expansion of the macro `leaves` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `&'static Atomic<usize>: Schema` is not satisfied
- --> tests/snapshot_safe/fail/writable_static.rs:6:1
+ --> tests/snapshot_safe/fail/writable_static.rs:4:10
   |
-6 | snapshot_struct!(Counter { count });
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  | |
-  | the trait `Schema` is not implemented for `&'static Atomic<usize>`
-  | required by a bound introduced by this call
+4 | #[derive(romacs_snapshot::Snapshot)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Schema` is not implemented for `&'static Atomic<usize>`
   |
 help: the trait `Schema` is implemented for `Atomic<usize>`
  --> $WORKSPACE/crates/romacs-snapshot/src/schema/impls.rs
@@ -75,4 +66,4 @@ help: the trait `Schema` is implemented for `Atomic<usize>`
   | |         std::sync::atomic::AtomicU64, std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicI64,
   | |         rustc_hash::FxBuildHasher, foldhash::fast::FixedState);
   | |______________________________________________________________- in this macro invocation
-  = note: this error originates in the macro `$crate::snapshot_fields` which comes from the expansion of the macro `leaves` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the derive macro `romacs_snapshot::Snapshot` which comes from the expansion of the macro `leaves` (in Nightly builds, run with -Z macro-backtrace for more info)
