@@ -241,6 +241,16 @@ itself again."
           (should-not buffer-read-only)
           (should-not (buffer-modified-p))
           (should (eq (key-binding (kbd "C-g")) #'keyboard-quit)))
+        ;; Asked again, unmodified, it waits once more: holding none of the
+        ;; old text, in its undo list either, and with no change to keep.
+        (romacs-pass-edit "email/work")
+        (with-current-buffer buffer
+          (should romacs-pass--decrypting)
+          (should (equal (buffer-string) ""))
+          (should-not buffer-undo-list)
+          (should-not (buffer-modified-p))
+          (should-not (romacs-pass--restart-blocker)))
+        (romacs-pass-tests--wait (lambda () (not (buffer-local-value 'romacs-pass--decrypting buffer))))
         (kill-buffer buffer)))))
 
 (ert-deftest romacs-pass-edit-cancel-stops-gpg-quietly ()

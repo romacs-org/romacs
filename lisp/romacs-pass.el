@@ -529,21 +529,26 @@ shown as it is."
   (format "*pass: %s*" entry))
 
 (defun romacs-pass--edit-buffer (entry)
-  "An empty buffer editing ENTRY."
+  "An empty buffer editing ENTRY, unmodified, with no undo history."
   (let ((buffer (get-buffer-create (romacs-pass--edit-name entry))))
     (with-current-buffer buffer
       (romacs-pass-edit-mode)
-      (let ((inhibit-read-only t)) (erase-buffer))
+      (romacs-pass--edit-replace "")
       (setq romacs-pass--edited entry))
     buffer))
+
+(defun romacs-pass--edit-replace (text)
+  "Make the buffer's text a copy of TEXT, unmodified, with no undo history:
+what it held is not kept in the undo list, where it would outlive it."
+  (let ((inhibit-read-only t) (buffer-undo-list t)) (erase-buffer) (insert text))
+  (setq buffer-undo-list nil)
+  (set-buffer-modified-p nil))
 
 (defun romacs-pass--edit-fill (buffer text)
   "Put a copy of TEXT in BUFFER, editing its entry from the start; BUFFER.
 Which window shows it is left as it is."
   (with-current-buffer buffer
-    (let ((inhibit-read-only t)) (erase-buffer) (insert text))
-    (setq buffer-undo-list nil)
-    (set-buffer-modified-p nil)
+    (romacs-pass--edit-replace text)
     (goto-char (point-min)))
   buffer)
 
