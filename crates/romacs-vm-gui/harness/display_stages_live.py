@@ -16,8 +16,11 @@ anything, so a step's figures are differences of two readings:
   step_instructions     what Romacs ran for the step: its change, the
                         timers it set off and its redisplays, each once,
                         not the loop's own polls nor the host's wait for a
-                        frame to render (`display-stages--work'); a step
-                        that waits inside its change makes no measurement
+                        frame to render (`display-stages--work'), nor the
+                        host's passes for process output and the echo
+                        area's sync, which no scenario sets work for; a
+                        step that waits inside its change makes no
+                        measurement
   cycles                redisplays the step ran: its own, and any after a
                         timer it set off (jit-lock's `jit-lock-force-redisplay')
   display_instructions  the part inside redisplays (the frame frozen and

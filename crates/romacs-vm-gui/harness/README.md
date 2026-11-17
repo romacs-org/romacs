@@ -575,8 +575,10 @@ and as medians, the redisplays run, the instructions and conses spent
 inside them beside what Romacs ran for the whole step (its change, the
 timers it set off and its redisplays, each counted once; not the loop's
 own polls nor the host's wait for a frame to render, which grow with the
-machine's load; collections fall where allocating makes them due, as
-the host's idle collection is off), the windows rebuilt, the
+machine's load, nor the host's own passes for process output and the
+echo area's sync after a message, which no scenario sets work for;
+collections fall where allocating makes them due, as the host's idle
+collection is off), the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
 submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step
