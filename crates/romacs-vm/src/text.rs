@@ -39,7 +39,7 @@ pub(crate) fn char_conversions() -> usize {
     CHAR_CONVERSIONS.with(std::cell::Cell::get)
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 struct ChunkCursor {
     text: String,
     byte: usize,
@@ -48,7 +48,6 @@ struct ChunkCursor {
     middle_byte: usize,
     middle_char: usize,
 }
-romacs_snapshot::snapshot_struct!(ChunkCursor { text, byte, scalar, chars, middle_byte, middle_char });
 impl ChunkCursor {
     fn fill(&mut self, text: &str, byte: usize, scalar: usize) {
         self.text.clear();
@@ -78,7 +77,7 @@ impl ChunkCursor {
 /// The text of a buffer and its indirect buffers (GNU's `struct
 /// buffer_text`): the characters, their properties and the caches that
 /// read them. Each buffer's view of it is a [`Text`].
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub struct TextBody {
     rope: ropey_stable::Rope,
     bytes_len: usize,
@@ -127,7 +126,6 @@ pub struct TextBody {
     // CELL(Plain)
     pub(crate) markdown: std::cell::RefCell<crate::markdown::Index>,
 }
-romacs_snapshot::snapshot_struct!(TextBody { rope, bytes_len, chars_len, tail, tail_chars, flat, flat_moved, raw, flat_internal, search, is_ascii, coordinate, chunk, cold_chunks, cold_order, #[cfg(test)] scanned_bytes, properties, #[cfg(test)] coordinate_steps, #[cfg(test)] property_edit_visits, treesit, syntax, markdown });
 // GNU's eight-bit characters (#x3FFF80..#x3FFFFF, the raw bytes 0x80..0xFF)
 // cannot be UTF-8, which the rope requires. Raw byte B is stored as the
 // placeholder character U+00B, whose UTF-8 is GNU's internal form of the
@@ -429,7 +427,7 @@ pub(crate) fn octets_as_multibyte(octets: &[u8]) -> (Vec<u8>, Vec<usize>) {
 
 /// One buffer's view of its text: the shared [`TextBody`], and this
 /// buffer's own point, narrowing, syntax and category tables and identity.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub struct Text {
     // CELL(Held): Text shared by indirect buffers, its properties among it: `TextBody`'s own write
     // methods.
@@ -444,7 +442,6 @@ pub struct Text {
     /// set (treesit.c).
     pub(crate) ts_linecols: [crate::treesit::Linecol; 3],
 }
-romacs_snapshot::snapshot_struct!(Text { body, restriction, state, point, syntax_table, category_table, ts_linecols });
 impl std::ops::Deref for Text {
     type Target = TextBody;
     #[inline]

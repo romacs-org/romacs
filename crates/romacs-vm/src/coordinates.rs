@@ -1,8 +1,7 @@
 //! Coordinate spaces never convert implicitly. Lisp presents scalar positions;
 //! text storage and edits use absolute UTF-8 byte offsets.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub struct ByteOffset(pub usize);
-romacs_snapshot::snapshot_tuple!(ByteOffset(f0));
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CharOffset(pub usize);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]

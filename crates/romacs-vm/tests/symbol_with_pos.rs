@@ -43,7 +43,7 @@ fn no_positioned_symbol_producer_is_available() {
 fn assert_heap_kind_inventory(source: &str) {
     let object = source.split("pub(super) enum Object {").nth(1).unwrap().split("\n}").next().unwrap();
     let variants: Vec<_> = object.lines().map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with("#["))
         .map(|line| line.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap())
         .collect();
     // Native subtable slots, traversal cursors, process slots, a

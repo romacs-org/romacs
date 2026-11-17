@@ -527,16 +527,13 @@ pub(crate) fn uniprop_block(codes: &[u32]) -> Result<Vec<Value>> {
 pub(super) type CharTableNodeHandle = Arc<Mutex<CharTableNode>>;
 
 // CELL(Held)
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(super) enum CharTableSlot {
     Value(Value),
     Node(CharTableNodeHandle),
 }
-romacs_snapshot::snapshot_enum!(CharTableSlot {
-    CharTableSlot::Value(f0) => (f0),
-    CharTableSlot::Node(f0) => (f0),
-});
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct CharTableNode {
     depth: usize,
     min_char: usize,
@@ -552,7 +549,6 @@ pub(super) struct CharTableNode {
     /// it was not written. Like the stamp, it has no default.
     leaf: bool,
 }
-romacs_snapshot::snapshot_struct!(CharTableNode { depth, min_char, slots, stamp, leaf });
 
 impl CharTableNode {
     pub(super) const WIDTHS: [usize; 4] = [65536, 4096, 128, 1];
@@ -968,6 +964,7 @@ impl CharTableView {
     }
 }
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct CharTable {
     purpose: Value,
     // CELL(Held)
@@ -982,7 +979,6 @@ pub(super) struct CharTable {
     /// what derived data keys on, since an address may be reused or moved.
     serial: u64,
 }
-romacs_snapshot::snapshot_struct!(CharTable { purpose, root, ascii, default, parent, extras, edits, serial });
 
 impl CharTable {
     /// Whether no character has a value, as a new table's: read without

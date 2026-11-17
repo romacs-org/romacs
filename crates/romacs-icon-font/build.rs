@@ -45,9 +45,12 @@ const BASELINE: f64 = 800.0;
 const FULL_SIZE: &[&str] = &["romacs"];
 
 fn main() {
-    let icons = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons");
+    // Relative to the package, the directory Cargo runs this script in: a
+    // path baked in by `env!` would be the checkout that compiled the script,
+    // which a target directory shared between checkouts runs for the others.
+    let icons = Path::new("../../assets/icons");
     println!("cargo::rerun-if-changed={}", icons.display());
-    let font = build(&icons).unwrap_or_else(|e| panic!("RomacsIcons.ttf: {e}"));
+    let font = build(icons).unwrap_or_else(|e| panic!("RomacsIcons.ttf: {e}"));
     let out = Path::new(&std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("RomacsIcons.ttf");
     std::fs::write(&out, font).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
 }

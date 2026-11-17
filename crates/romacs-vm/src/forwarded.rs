@@ -41,7 +41,7 @@ use crate::world::Access;
 /// GNU `Lisp_Fwd` kinds (lisp.h). The payload indexes the matching vector
 /// of [`Forwarded`]. `Lisp_Fwd_Kboard_Obj` is not modelled (no variable the
 /// chain or census reaches needs it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum Fwd {
     Obj(u16),
     Bool(u16),
@@ -53,13 +53,6 @@ pub(crate) enum Fwd {
     /// sees it; the kind queries see the redirect it keeps.
     Tracked(u32),
 }
-romacs_snapshot::snapshot_enum!(Fwd {
-    Fwd::Obj(f0) => (f0),
-    Fwd::Bool(f0) => (f0),
-    Fwd::Int(f0) => (f0),
-    Fwd::Buffer(f0) => (f0),
-    Fwd::Tracked(f0) => (f0),
-});
 
 /// GNU `enum Lisp_Fwd_Predicate`, checked by `store_symval_forwarding` for a
 /// non-nil value stored into a per-buffer variable. Only the predicates of
@@ -879,6 +872,7 @@ static FONT_WIDTH_TABLE: &[Init] = &[
 pub(crate) const NOT_SPECIAL: &[&str] = &["values", "echo-area-clear-hook"];
 
 /// The runtime storage GNU keeps in C globals and `buffer_defaults`.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Forwarded {
     objects: Vec<Value>,
     fundamental_mode_name: Value,
@@ -906,7 +900,6 @@ pub(crate) struct Forwarded {
     /// which moves buffers and reclaims bindings.
     pub(super) local_epoch: u64,
 }
-romacs_snapshot::snapshot_struct!(Forwarded { objects, fundamental_mode_name, unbound_symbol, bools, ints, eval_limit_index, gc_cons, gc_done, defaults, object_vars, buffer_vars, eval_limit_symbol, eval_limit_cache, local_epoch });
 
 impl Default for Forwarded {
     fn default() -> Self {
@@ -1046,9 +1039,8 @@ impl Forwarded {
 /// local here": the buffer sees the default. Beside them, the visited
 /// file's modification time, identity and truename bytes, the mark marker,
 /// and the labeled restrictions (`prim/leaf/labeled_restrictions.rs`).
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>);
-romacs_snapshot::snapshot_tuple!(PerBuffer(f0, f1, f2, f3, f4, f5));
 impl PerBuffer {
     /// How many per-buffer variables it has a slot for, each at its
     /// forwarded place (`Fwd::Buffer`).
@@ -1058,18 +1050,13 @@ impl PerBuffer {
 }
 
 /// Native scalar state, not Lisp Values: safe through moving collection.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) enum VisitedModtime {
     #[default]
     Unknown,
     Missing,
     Known { seconds: i64, nanos: i64, size: Option<u64> },
 }
-romacs_snapshot::snapshot_enum!(VisitedModtime {
-    VisitedModtime::Unknown => (),
-    VisitedModtime::Missing => (),
-    VisitedModtime::Known { seconds, nanos, size } => (seconds, nanos, size),
-});
 
 pub(crate) fn file_identity(path: impl AsRef<std::path::Path>) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;

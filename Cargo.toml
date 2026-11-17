@@ -5,6 +5,7 @@ members = [
     "crates/romacs-keeper",
     "crates/romacs-coordinate-contract",
     "crates/romacs-snapshot",
+    "crates/romacs-snapshot-derive",
     "crates/romacs-vm",
     "crates/romacs-vm-test-build",
     "crates/romacs-icon-font",

@@ -17,8 +17,8 @@ use std::path::Path;
 mod list;
 
 fn main() {
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../romacs-vm/tests");
-    list::write(&tests, &["modules.rs", "gnu_modules.rs"],
+    let tests = Path::new("../romacs-vm/tests");
+    list::write(tests, &["modules.rs", "gnu_modules.rs"],
                 |source| if boots_gnu_lisp(source) { "gnu_modules.rs" } else { "modules.rs" });
 }
 
