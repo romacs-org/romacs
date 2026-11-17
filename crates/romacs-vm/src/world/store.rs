@@ -280,7 +280,7 @@ fn private_store(store: &Path) -> std::io::Result<()> {
     // closes: processes that start at once on a new store all find it
     // empty, and one must make and write the marker before any other reads
     // it, or the others' exclusive creation of it fails (EEXIST).
-    rustix::fs::flock(&dir, rustix::fs::FlockOperation::LockExclusive)?;
+    host::lock(&dir, host::Lock::Exclusive)?;
     // Read through the directory opened again under the lock: btrfs lists
     // to a directory's reader only the entries it had when the reader
     // opened it, so a marker made since would not be seen through DIR.
@@ -579,7 +579,7 @@ impl World {
         let (image, manifest) = usable;
         // Mapped and marked in use under the store's lock: `prune` then
         // finds this world held, or does not find it at all.
-        let _store = self.store_lock(libc::LOCK_SH);
+        let _store = self.store_lock(host::Lock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
                 Some((vm, carry)) => {
@@ -671,7 +671,7 @@ impl World {
             return Err(json!("no arena"));
         }
         let (image, _manifest) = self.usable()?;
-        let _store = self.store_lock(libc::LOCK_SH);
+        let _store = self.store_lock(host::Lock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
                 Some((vm, carry)) => {
@@ -772,11 +772,10 @@ impl World {
 
     /// The world's lock, if no builder holds it.
     fn try_lock(&self) -> std::io::Result<Option<std::fs::File>> {
-        use std::os::fd::AsRawFd;
-        let _store = self.store_lock(libc::LOCK_SH)?;
+        let _store = self.store_lock(host::Lock::Shared)?;
         let file = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
         pause_for_test();
-        Ok((unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(file))
+        Ok(host::lock(&file, host::Lock::TryExclusive)?.then_some(file))
     }
 
     /// The store-wide lock, `STORE/store.lock`, taken as KIND and held
@@ -785,8 +784,8 @@ impl World {
     /// world's own lock or use file, or maps an image; `prune` and `reset`
     /// hold it exclusive while they unlink: no process is then between
     /// opening such a file and locking it.
-    fn store_lock(&self, kind: i32) -> std::io::Result<std::fs::File> {
-        lock_store(&self.store, kind)
+    fn store_lock(&self, how: host::Lock) -> std::io::Result<std::fs::File> {
+        lock_store(&self.store, how)
     }
 
     /// Wait up to TIMEOUT for the builder holding the lock to end: whether
@@ -852,11 +851,10 @@ impl World {
     /// Hold `KEY.use` shared for this process's life, stamped with the time:
     /// the world is in use, and was just now (`prune`).
     fn mark_use(&self) {
-        use std::os::fd::AsRawFd;
-        let Ok(_store) = self.store_lock(libc::LOCK_SH) else { return };
+        let Ok(_store) = self.store_lock(host::Lock::Shared) else { return };
         if let Ok(file) = host::open_store_file(self.file(".use"), host::StoreOpen::Write { create: true, truncate: false }) {
             let _ = file.set_modified(host::clock());
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } == 0 {
+            if host::lock(&file, host::Lock::TryShared).unwrap_or(false) {
                 std::mem::forget(file);
             }
         }
@@ -882,26 +880,30 @@ impl World {
     pub fn begin_build(&self) -> std::io::Result<()> {
         // The launcher's lock, handed on; taking it again on the same open
         // file only confirms it.
-        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::fd::FromRawFd;
         let handed = host::getenv(LOCK_ENV).and_then(|fd| fd.to_str()?.parse::<i32>().ok());
         host::unset_env(LOCK_ENV);
         // Without one, the world's lock is opened and locked under the
         // store's, held until the flock is: `prune` cannot unlink it between.
         let mut store = None;
         let lock = match handed {
+            // UNSAFE(a descriptor inherited by number has no safe owner: from_raw_fd is unsafe)
+            // SAFETY: the launcher handed this process the world's lock at FD,
+            // named in LOCK_ENV, which is read once and removed above, so no
+            // other owner in this process holds it.
             Some(fd) => unsafe { std::fs::File::from_raw_fd(fd) },
             None => {
-                store = Some(self.store_lock(libc::LOCK_SH)?);
+                store = Some(self.store_lock(host::Lock::Shared)?);
                 let lock = host::open_store_file(self.file(".lock"), host::StoreOpen::Write { create: true, truncate: false })?;
                 pause_for_test();
                 lock
             }
         };
-        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        if !host::lock(&lock, host::Lock::TryExclusive)? {
             return Err(std::io::Error::other("another builder holds the lock"));
         }
         drop(store);
-        unsafe { libc::fcntl(lock.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
+        host::close_on_exec(&lock)?;
         std::mem::forget(lock);
         self.remove_abandoned()?;
         let seed = self.key[..4].try_into().expect("4 bytes");
@@ -1116,7 +1118,7 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
         return Ok(0);
     }
     checked_store(store, home)?;
-    let _store = lock_store(store, libc::LOCK_EX)?;
+    let _store = lock_store(store, host::Lock::Exclusive)?;
     let mut removed = 0;
     for entry in host::read_dir(store)? {
         let name = entry?.file_name();
@@ -1127,7 +1129,7 @@ fn reset_in(store: &Path, everything: bool, home: Option<&Path>) -> std::io::Res
             .is_some_and(|m| m["uncaptured"].as_array().is_some_and(|r| !r.is_empty()));
         // A world's lock or use file goes only when no process holds it.
         let held = |suffix: &str| ["lock", "use"].contains(&suffix) && host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
-            .is_ok_and(|file| { use std::os::fd::AsRawFd; (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0 });
+            .is_ok_and(|file| !host::lock(&file, host::Lock::TryExclusive).unwrap_or(false));
         match world_file(name) {
             Some((_, suffix)) if regular(&path) && !held(suffix) && (everything || suffix == "failed" || (suffix == "json" && uncaptured())) => {
                 host::remove_file(&path)?;
@@ -1200,12 +1202,11 @@ impl World {
     }
 
     fn prune_in(&self, home: Option<&Path>, own_family: bool, most: usize) -> std::io::Result<Vec<String>> {
-        use std::os::fd::AsRawFd;
         use std::os::unix::fs::MetadataExt;
         checked_store(&self.store, home)?;
         // No process is between opening a world's lock or use file and
         // locking it while this is held: each lock below is as it is.
-        let _store = self.store_lock(libc::LOCK_EX)?;
+        let _store = self.store_lock(host::Lock::Exclusive)?;
         let mut files: std::collections::BTreeMap<String, Vec<(String, std::fs::Metadata)>> = Default::default();
         for entry in host::read_dir(&self.store)? {
             let entry = entry?;
@@ -1218,7 +1219,7 @@ impl World {
         }
         let held = |path: PathBuf| -> bool {
             host::open_store_file(&path, host::StoreOpen::Write { create: false, truncate: false })
-                .is_ok_and(|file| (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }) != 0)
+                .is_ok_and(|file| !host::lock(&file, host::Lock::TryExclusive).unwrap_or(false))
         };
         let worlds: Vec<Stored> = files.iter().map(|(key, files)| Stored {
             key: key.clone(),
@@ -1237,7 +1238,7 @@ impl World {
             let locks: Vec<std::fs::File> = ["lock", "use"].iter()
                 .filter_map(|s| host::open_store_file(self.store.join(format!("{key}.{s}")), host::StoreOpen::Write { create: false, truncate: false }).ok())
                 .collect();
-            if locks.iter().any(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0) {
+            if locks.iter().any(|f| !host::lock(f, host::Lock::TryExclusive).unwrap_or(false)) {
                 continue;
             }
             for (name, _) in &files[&key] {
@@ -1340,11 +1341,10 @@ fn family<'a>(recipe: impl Iterator<Item = &'a str>) -> String {
 }
 
 /// STORE's store-wide lock (`World::store_lock`), taken as KIND.
-fn lock_store(store: &Path, kind: i32) -> std::io::Result<std::fs::File> {
-    use std::os::fd::AsRawFd;
+fn lock_store(store: &Path, how: host::Lock) -> std::io::Result<std::fs::File> {
     let file = host::open_store_file(store.join(STORE_LOCK), host::StoreOpen::Write { create: true, truncate: false })?;
-    if unsafe { libc::flock(file.as_raw_fd(), kind) } != 0 {
-        return Err(std::io::Error::last_os_error());
+    if !host::lock(&file, how)? {
+        return Err(std::io::ErrorKind::WouldBlock.into());
     }
     Ok(file)
 }
@@ -1671,8 +1671,8 @@ mod tests {
     }
 
     fn fifo(path: &Path) {
-        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "{}", path.display());
+        use rustix::fs::{FileType, Mode, CWD};
+        rustix::fs::mknodat(CWD, path, FileType::Fifo, Mode::from_raw_mode(0o600), 0).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     }
 
     /// Run F on a thread of its own: its result, unless it blocks.
@@ -1727,7 +1727,7 @@ mod tests {
         std::fs::remove_file(dir.join(STORE_LOCK)).unwrap();
         fifo(&dir.join(STORE_LOCK));
         let store = dir.clone();
-        assert!(bounded("the store lock", move || lock_store(&store, libc::LOCK_SH)).is_err());
+        assert!(bounded("the store lock", move || lock_store(&store, host::Lock::Shared)).is_err());
         let _ = std::fs::remove_dir_all(marked);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1842,7 +1842,6 @@ mod tests {
 
     #[test]
     fn pruning_deletes_an_old_worlds_files_and_spares_one_in_use() {
-        use std::os::fd::AsRawFd;
         let dir = marked_store("prune");
         std::fs::create_dir_all(dir.join("ids")).unwrap();
         let current = World { store: dir.clone(), key: [0xaa; 32], recipe: vec![] };
@@ -1860,7 +1859,7 @@ mod tests {
         std::fs::File::options().write(true).open(&stale_id).unwrap().set_modified(week_ago).unwrap();
         // A restored process maps HELD: it holds its use lock shared.
         let in_use = std::fs::File::open(dir.join(format!("{held}.use"))).unwrap();
-        assert_eq!(unsafe { libc::flock(in_use.as_raw_fd(), libc::LOCK_SH) }, 0);
+        assert!(host::lock(&in_use, host::Lock::Shared).unwrap());
         assert_eq!(current.prune().unwrap(), [old.clone()]);
         let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         assert!(!names.iter().any(|n| n.starts_with(&old)), "{names:?}");

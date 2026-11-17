@@ -21,7 +21,7 @@ use std::ffi::{CStr, OsStr, OsString};
 use std::fs::{File, FileType, Metadata};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::fd::{AsFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -2081,6 +2081,44 @@ pub enum StoreOpen {
     Append,
 }
 
+/// How a lock is taken on a file or directory: flock(2). A `Try` lock does
+/// not wait for a holder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lock {
+    Shared,
+    Exclusive,
+    TryShared,
+    TryExclusive,
+}
+
+/// Take HOW on FD, held until its open file closes: false when a `Try`
+/// lock is held elsewhere.
+///
+/// # Errors
+/// What flock(2) reports, but a `Try` lock's `EWOULDBLOCK`.
+pub fn lock(fd: impl std::os::fd::AsFd, how: Lock) -> io::Result<bool> {
+    use rustix::fs::FlockOperation as Op;
+    let operation = match how {
+        Lock::Shared => Op::LockShared,
+        Lock::Exclusive => Op::LockExclusive,
+        Lock::TryShared => Op::NonBlockingLockShared,
+        Lock::TryExclusive => Op::NonBlockingLockExclusive,
+    };
+    match rustix::fs::flock(fd, operation) {
+        Ok(()) => Ok(true),
+        Err(rustix::io::Errno::WOULDBLOCK) if matches!(how, Lock::TryShared | Lock::TryExclusive) => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Mark FD close-on-exec, so no child inherits it.
+///
+/// # Errors
+/// What fcntl(2) reports.
+pub fn close_on_exec(fd: impl std::os::fd::AsFd) -> io::Result<()> {
+    rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC).map_err(io::Error::from)
+}
+
 /// A world store's file at PATH, opened as HOW: never through a symlink,
 /// never blocking on what is no file (a FIFO opens at once, and is then
 /// refused), and only when it is a regular file; truncated only then. The
@@ -2972,11 +3010,39 @@ fn connect_in_progress(family: rustix::net::AddressFamily, address: &impl rustix
     }
 }
 
+/// The C library's text for the error ERRNO (`emacs_strerror`).
+#[must_use]
+pub fn error_text(errno: i32) -> String {
+    sys::error_text(errno)
+}
+
+/// The C library's text for the signal SIGNAL, None if it has none.
+#[must_use]
+pub fn signal_text(signal: i32) -> Option<String> {
+    sys::signal_text(signal)
+}
+
+/// umask(2): replace the process's file mode creation mask with MASK.
+pub fn set_umask(mask: u32) {
+    rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask));
+}
+
+/// close(2) of FILE, with its error, which dropping it discards.
+///
+/// # Errors
+/// What close(2) reports.
+pub fn close_file(file: File) -> io::Result<()> {
+    sys::close_owned(file.into())
+}
+
 /// accept4 on the listening socket LISTENER: the connection, close-on-exec,
-/// and the peer's raw address with its length.
-pub fn accept(listener: RawFd) -> io::Result<(OwnedFd, libc::sockaddr_storage, libc::socklen_t)> {
-    effect(|| format!("accept on {listener}"))?;
-    sys::accept(listener)
+/// and the peer's address, if the kernel names one.
+///
+/// # Errors
+/// A refused effect, or what accept4(2) reports.
+pub fn accept(listener: std::os::fd::BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<rustix::net::SocketAddrAny>)> {
+    effect(|| format!("accept on {}", std::os::fd::AsRawFd::as_raw_fd(&listener)))?;
+    Ok(rustix::net::acceptfrom_with(listener, rustix::net::SocketFlags::CLOEXEC)?)
 }
 
 /// connect_network_socket's nonblocking connect: a close-on-exec stream

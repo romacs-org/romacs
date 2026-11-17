@@ -233,7 +233,7 @@ fn use_log_appends_and_yields_to_maintenance() {
     });
     let log = store::generation(&store).join("use.log");
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1600);
-    let maintenance = store::lock(&store, libc::LOCK_EX).unwrap();
+    let maintenance = store::lock(&store, crate::host::Lock::Exclusive).unwrap();
     store::note_use(&store, &path, Path::new("/f1.el"));
     drop(maintenance);
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1600);

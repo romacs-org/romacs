@@ -1,7 +1,7 @@
 //! The C library calls host.rs makes that no crate of the workspace covers
-//! safely: rustix has no user database, posix_spawn, getaddrinfo, signal
-//! handler, fork or sysconf, and its kill and pidfd_send_signal take only
-//! named signals and no flags. Each is a small safe function around one
+//! safely: rustix has no user database, `posix_spawn`, getaddrinfo, signal
+//! handler, fork, sysconf, or the C library's error and signal texts, and its
+//! kill and `pidfd_send_signal` take only named signals and no flags. Each is a small safe function around one
 //! unsafe call, so this file is the whole of the host boundary's unsafe
 //! code. host.rs records, refuses and replays; these only call.
 use std::ffi::{CStr, CString};
@@ -414,21 +414,30 @@ pub(super) fn lookup_addresses(name: &CStr, family: i32, numeric: bool) -> Resul
     }
 }
 
-/// accept4 on the listening socket LISTENER: the connection, close-on-exec,
-/// and the peer's raw address with its length.
-pub(super) fn accept(listener: RawFd) -> io::Result<(OwnedFd, libc::sockaddr_storage, libc::socklen_t)> {
-    let mut storage = std::mem::MaybeUninit::<libc::sockaddr_storage>::zeroed();
-    let mut len = size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-    // SAFETY: an all-zero sockaddr_storage is valid; accept4 writes at most
-    // LEN bytes of it and LEN back; a non-negative result is a new
-    // descriptor this process owns.
-    unsafe {
-        let fd = libc::accept4(listener, storage.as_mut_ptr().cast(), &mut len, libc::SOCK_CLOEXEC);
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok((OwnedFd::from_raw_fd(fd), storage.assume_init(), len))
+/// strerror's text for ERRNO (`emacs_strerror`): glibc's English table.
+pub(super) fn error_text(errno: i32) -> String {
+    // UNSAFE(no crate gives the C library's error text: strerror is a C call)
+    // SAFETY: strerror accepts any number and returns a NUL-terminated
+    // string, never null on glibc, valid until the next call on this
+    // thread; it is copied before that.
+    let text = unsafe { libc::strerror(errno) };
+    if text.is_null() {
+        return format!("Unknown error {errno}");
     }
+    // UNSAFE(the C library's text is a C string: from_ptr is unsafe)
+    // SAFETY: as above: non-null, NUL-terminated, copied at once.
+    unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned()
+}
+
+/// strsignal's text for SIGNAL: glibc's English table, None if it has none.
+pub(super) fn signal_text(signal: i32) -> Option<String> {
+    // UNSAFE(no crate gives the C library's signal text: strsignal is a C call)
+    // SAFETY: strsignal accepts any number.
+    let text = unsafe { libc::strsignal(signal) };
+    // UNSAFE(the C library's text is a C string: from_ptr is unsafe)
+    // SAFETY: strsignal's text is NUL-terminated and valid until the next
+    // call on this thread; it is copied before that.
+    (!text.is_null()).then(|| unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
