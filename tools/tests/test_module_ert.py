@@ -1,5 +1,6 @@
 """Exercise the module ERT command with real GNU ERT and negative hosts."""
 import hashlib
+import json
 import os
 import runpy
 from pathlib import Path
@@ -153,6 +154,39 @@ class ModuleERT(unittest.TestCase):
         self.assertIn('gnosis-test-demo.el', names)
         self.assertFalse(names & {'gnosis-test-db.el', 'gnosis-test-helpers.el',
                                   'gnosis-test-schema-v8.el'})
+
+    def recording_host(self, builds):
+        """A host that records each run's arguments and ROMACS_WORLD, and on
+        `--world-build` makes a world in its store when BUILDS."""
+        fake, record = self.home / 'recording-host', self.home / 'runs'
+        fake.write_text(f'''#!{sys.executable}
+import json, os, pathlib, sys
+with open({str(record)!r}, 'a') as runs:
+    runs.write(json.dumps([sys.argv[1:], os.environ.get('ROMACS_WORLD')]) + '\\n')
+if {builds!r} and '--world-build' in sys.argv:
+    (pathlib.Path(sys.argv[sys.argv.index('--world-store') + 1]) / 'w.rwi').write_text('')
+''')
+        fake.chmod(0o700)
+        return fake, record
+
+    def test_files_restore_the_world_the_run_prepares(self):
+        fake, record = self.recording_host(builds=True)
+        result = self.invoke(binary=fake)
+        self.assertIn('ERT batch world: prepared', result.stdout)
+        (prepare, world), (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        store = prepare[prepare.index('--world-store') + 1]
+        self.assertEqual(prepare[-2:], ['--world-build', '--batch'])
+        self.assertEqual(run[:4], ['--world-store', store, '-Q', '--batch'])
+        self.assertEqual((world, run_world), (None, None))
+        self.assertFalse(Path(store).exists(), 'the run removes its store')
+
+    def test_files_boot_from_source_when_no_world_is_built(self):
+        fake, record = self.recording_host(builds=False)
+        result = self.invoke(binary=fake)
+        self.assertIn('ERT batch world: none', result.stdout)
+        _, (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        self.assertEqual(run[:2], ['-Q', '--batch'])
+        self.assertEqual(run_world, 'off')
 
     def test_timeout_kills_the_process_group(self):
         fake = self.home / 'hanging-host'
