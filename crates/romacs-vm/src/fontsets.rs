@@ -9,6 +9,7 @@ use std::sync::Arc;
 /// `fontset-default''s full name.
 pub(crate) const DEFAULT_NAME: &str = "-*-*-*-*-*-*-*-*-*-*-*-*-fontset-default";
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Registry {
     sets: Vec<Arc<Fontset>>,
     /// Lower-case full names and aliases, for literal lookups.
@@ -32,7 +33,6 @@ pub(crate) struct Registry {
     staged: Option<(Vec<Arc<Fontset>>, HashMap<String, usize>)>,
     published: Arc<FontsetState>,
 }
-romacs_snapshot::snapshot_struct!(Registry { sets, names, frame, revision, charset_tick, charset_rank, preferred, symbols, scripts, script_edits, staged, published });
 
 impl Default for Registry {
     fn default() -> Self {

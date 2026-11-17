@@ -4,7 +4,7 @@
 //! the same objects, reviving windows deleted since, as GNU does.
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct SavedWindow {
     window: Value,
     /// The leaf's buffer; nil for an internal window.
@@ -41,11 +41,10 @@ pub(crate) struct SavedWindow {
     /// makes persistent, VALUE nil where the window had none.
     parameters: Vec<(Value, Value)>,
 }
-romacs_snapshot::snapshot_struct!(SavedWindow { window, buffer, start, point, parent, children, horizontal, x, y, width, height, normal_lines, normal_cols, left_margin, right_margin, fringes, fringes_outside_margins, fringes_persistent, vscroll_px, hscroll, min_hscroll, suspend_auto_hscroll, old_point, combination_limit, dedicated, parameters });
 
 /// GNU `struct save_window_data`: one frame's windows, and the frame
 /// selected when they were saved.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct WindowConfiguration {
     frame: Value,
     selected_frame: Value,
@@ -55,7 +54,6 @@ pub(crate) struct WindowConfiguration {
     /// The root's subtree in preorder, then the minibuffer window.
     windows: Vec<SavedWindow>,
 }
-romacs_snapshot::snapshot_struct!(WindowConfiguration { frame, selected_frame, current_window, current_buffer, root, windows });
 
 /// What Fset_window_configuration restores after its record_buffer: the
 /// buffer recorded, the frame to select again, and the buffer current at

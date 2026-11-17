@@ -1,10 +1,9 @@
 //! Packed, pointer-free storage; unused high bits are always zero.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct BoolVector {
     pub(crate) len: usize,
     pub(crate) bytes: Vec<u8>,
 }
-romacs_snapshot::snapshot_struct!(BoolVector { len, bytes });
 impl BoolVector {
     pub(crate) fn new(len: usize, init: bool) -> Result<Self, String> {
         let mut bytes = Vec::new();

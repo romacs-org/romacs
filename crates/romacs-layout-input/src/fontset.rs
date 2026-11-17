@@ -12,18 +12,17 @@ use std::sync::{Arc, Mutex};
 
 /// An `:otf` property: (SCRIPT LANGSYS GSUB GPOS), each feature list holding
 /// tags a font must have and, after a nil, tags it must lack.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct OtfSpec {
     pub script: String,
     pub langsys: Option<String>,
     pub gsub: Vec<(String, bool)>,
     pub gpos: Vec<(String, bool)>,
 }
-romacs_snapshot::snapshot_struct!(OtfSpec { script, langsys, gsub, gpos });
 
 /// GNU's font-def: a font-spec reduced to what selection and the readers
 /// use, with the charset `font-encoding-alist' gives it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct FontDef {
     pub family: Option<String>,
     pub foundry: Option<String>,
@@ -44,7 +43,6 @@ pub struct FontDef {
     /// FONT_DEF_ENCODING, its charset's id.
     pub encoding: u32,
 }
-romacs_snapshot::snapshot_struct!(FontDef { family, foundry, registry, name, weight, width, slant, pixel_size, lang, script_chars, otf, encoding });
 
 impl FontDef {
     /// A def naming only FAMILY.
@@ -56,11 +54,11 @@ impl FontDef {
 /// One alternative: a font, or nil, which ends the search (fontset.c:635).
 pub type Alternative = Option<Arc<FontDef>>;
 
+#[derive(romacs_snapshot::Snapshot)]
 struct Cell {
     entry: Alternative,
     next: Link,
 }
-romacs_snapshot::snapshot_struct!(Cell { entry, next });
 type Link = Option<Arc<Cell>>;
 
 /// Frees a long chain without recursing down it.
@@ -78,12 +76,11 @@ impl Drop for Cell {
 
 /// An ordered list of alternatives: `front' in order, then `back' reversed.
 /// Prepending and appending are O(1) and share all that came before.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub struct Alternatives {
     front: Link,
     back: Link,
 }
-romacs_snapshot::snapshot_struct!(Alternatives { front, back });
 
 impl std::fmt::Debug for Alternatives {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -165,15 +162,11 @@ const FANOUT: usize = 64;
 /// The characters the root slot covers: 2^24, past MAX_CHAR.
 const ROOT_SPAN: u32 = 1 << 24;
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 enum Slot {
     Uniform(Option<Alternatives>),
     Node(Arc<[Slot; FANOUT]>),
 }
-romacs_snapshot::snapshot_enum!(Slot {
-    Slot::Uniform(f0) => (f0),
-    Slot::Node(f0) => (f0),
-});
 
 impl Default for Slot {
     fn default() -> Self { Slot::Uniform(None) }
@@ -265,7 +258,7 @@ impl Slot {
 }
 
 /// A base fontset.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub struct Fontset {
     /// Its full name, and FONTSET_ASCII, the ASCII font's name.
     pub name: String,
@@ -273,7 +266,6 @@ pub struct Fontset {
     rules: Slot,
     fallback: Option<Alternatives>,
 }
-romacs_snapshot::snapshot_struct!(Fontset { name, ascii, rules, fallback });
 
 impl Fontset {
     pub fn new(name: impl Into<String>) -> Self {
@@ -331,14 +323,13 @@ impl Fontset {
 }
 
 /// The font a def was realized to: what `fontset-info' names.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct OpenedDefFont {
     pub family: String,
     pub file: String,
     pub selector: u32,
     pub pixel_size: u32,
 }
-romacs_snapshot::snapshot_struct!(OpenedDefFont { family, file, selector, pixel_size });
 
 /// A def's identity in [`FontsetState::note_opened`]'s record.
 pub fn def_key(def: &Arc<FontDef>) -> usize {
@@ -349,7 +340,7 @@ pub fn def_key(def: &Arc<FontDef>) -> usize {
 /// fontsets a face searches, and the charset order groups sort by. Publishing
 /// it clones Arcs only; `revision' names it, so an equal revision is an
 /// equal state.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub struct FontsetState {
     pub default: Arc<Fontset>,
     pub frame: Arc<Fontset>,
@@ -365,7 +356,6 @@ pub struct FontsetState {
     opened: Arc<Mutex<HashMap<usize, Vec<OpenedDefFont>>>>,
     pub revision: u64,
 }
-romacs_snapshot::snapshot_struct!(FontsetState { default, frame, charset_order, preferred_charsets, default_font_symbols, opened, revision });
 
 impl std::fmt::Debug for FontsetState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

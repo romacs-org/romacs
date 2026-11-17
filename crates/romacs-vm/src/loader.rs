@@ -5,6 +5,7 @@ use crate::brand::{Gc, Mx};
 use crate::gc::RootFrame;
 use std::path::{Path, PathBuf};
 /// What a source load sets for its file, as it was: `Vm::enter_source_regime`.
+#[derive(romacs_snapshot::Snapshot)]
 struct SourceRegime {
     lazy: bool,
     defer: bool,
@@ -12,8 +13,7 @@ struct SourceRegime {
     expanded_macros: Vec<(usize, u64)>,
     expanded_symbols: NameSet<String>,
 }
-romacs_snapshot::snapshot_struct!(SourceRegime { lazy, defer, interpreting, expanded_macros, expanded_symbols });
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Loader {
     pub(super) propagate: usize,
     active: Vec<PathBuf>,
@@ -32,7 +32,6 @@ pub(super) struct Loader {
     /// The outer file's `(defvar X)`s, saved by each load in progress.
     file_specials: Vec<NameSet<String>>,
 }
-romacs_snapshot::snapshot_struct!(Loader { propagate, active, files, steps, completed_files, completed_forms, compiled, in_artifact, regimes, file_specials });
 impl Loader {
     /// How many source loads are in progress.
     pub(super) fn active_depth(&self) -> usize {
@@ -65,7 +64,7 @@ impl Loader {
 /// file (`Vm::load_step_file`), the form's place and what became of it.
 /// A form that signalled keeps its error and its text; a completed one
 /// keeps neither, so a session's record stays small.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, romacs_snapshot::Snapshot)]
 pub struct Step {
     file: usize,
     /// 1-based, in its file.
@@ -78,15 +77,13 @@ pub struct Step {
     pub error: Option<String>,
     pub source: Option<String>,
 }
-romacs_snapshot::snapshot_struct!(Step { file, ordinal, byte, line, status, error, source });
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub enum StepStatus {
     /// Read and entered, not yet finished.
     Entered,
     Ok,
     Error,
 }
-romacs_snapshot::snapshot_enum!(StepStatus { StepStatus::Entered => (), StepStatus::Ok => (), StepStatus::Error => () });
 impl StepStatus {
     fn name(self) -> &'static str {
         match self { StepStatus::Entered => "entered", StepStatus::Ok => "ok", StepStatus::Error => "error" }

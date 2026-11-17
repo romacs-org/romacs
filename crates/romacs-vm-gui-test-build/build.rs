@@ -13,6 +13,6 @@ use std::path::Path;
 mod list;
 
 fn main() {
-    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../romacs-vm-gui/tests");
-    list::write(&tests, &["modules.rs"], |_| "modules.rs");
+    let tests = Path::new("../romacs-vm-gui/tests");
+    list::write(tests, &["modules.rs"], |_| "modules.rs");
 }

@@ -8,7 +8,7 @@
 use std::ops::Range;
 
 /// The text, in GNU's internal form, with a gap at `gap`.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct GapText {
     /// The text before the gap, the gap, then the text after it.
     buf: Vec<u8>,
@@ -19,14 +19,12 @@ pub(crate) struct GapText {
     /// keeping the view up to date costs more than building it again.
     moved: usize,
 }
-romacs_snapshot::snapshot_struct!(GapText { buf, gap, gap_len, moved });
 
 /// A body's search view, while it pays: absent until a search after an
 /// edit, dropped when keeping it costs more than a rebuild. A copy of the
 /// body starts without one, as a cache does.
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(crate) struct SearchView(pub(crate) Option<GapText>);
-romacs_snapshot::snapshot_tuple!(SearchView(view));
 impl Clone for SearchView {
     fn clone(&self) -> Self {
         SearchView(None)

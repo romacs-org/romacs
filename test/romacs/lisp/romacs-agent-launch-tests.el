@@ -157,3 +157,24 @@ whatever TMPDIR is); `delivered' collects wakes."
 
 (provide 'romacs-agent-launch-tests)
 ;;; romacs-agent-launch-tests.el ends here
+
+(defvar romacs-server-name)
+
+(ert-deftest romacs-agent-launch-a-relay-knows-where-a-restart-says-it-is-under-way ()
+  ;; A named server's sessions' relays get its restart's pending record,
+  ;; so a call made during a restart waits for the successor; an unnamed
+  ;; one's get none, and a call waits a short while alone.
+  (require 'warm-restart)
+  (let* ((root (make-temp-file "romacs-relay-" t))
+         (warm-restart-directory root)
+         (session (romacs-agent--make :id "r" :harness 'claude :dir root)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--route) (lambda (_) "/route")))
+          (let ((romacs-server-name "main"))
+            (should (equal (member "--restart-pending" (romacs-agent--relay-args session))
+                           (list "--restart-pending" (warm-restart-pending-file "main")))))
+          (let ((romacs-server-name nil))
+            (should-not (member "--restart-pending" (romacs-agent--relay-args session)))
+            (should (equal (seq-take (romacs-agent--relay-args session) 5)
+                           '("--socket" "/route" "--reconnect" "--session" "r")))))
+      (delete-directory root t))))

@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// it lost promotes everything instead.
 const CHANGED_LIMIT: usize = 64 << 10;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Functions {
     list: Vec<Arc<Function>>,
     /// The ids installed, replaced or changed in place since the last
@@ -24,7 +24,6 @@ pub(crate) struct Functions {
     /// collection.
     lost: bool,
 }
-romacs_snapshot::snapshot_struct!(Functions { list, changed, lost });
 
 impl std::ops::Deref for Functions {
     type Target = [Arc<Function>];
