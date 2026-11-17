@@ -53,15 +53,20 @@ struct Place {
     store: Form,
     value: Form,
 }
-fn place(f: &Form, fresh: &mut Fresh) -> Result<Place> {
+/// F as a place of the bootstrap's own: a variable, or a `car', `cdr',
+/// `aref' or `gethash' form. None for any other place, which is GNU's gv's
+/// through subr.el's macro: the form is left unexpanded, so before subr.el
+/// it compiles as a call and fails only if it is reached, as any form of a
+/// macro not yet defined does, rather than failing the load around it.
+fn place(f: &Form, fresh: &mut Fresh) -> Result<Option<Place>> {
     let value = fresh.symbol();
     if matches!(f, Form::Sym(_) | Form::Generated(_)) {
-        return Ok(Place {
+        return Ok(Some(Place {
             bindings: vec![],
             read: f.clone(),
             store: call("setq", vec![f.clone(), value.clone()]),
             value,
-        });
+        }));
     }
     let a = f.list()?;
     let head = a.first().ok_or("empty place")?.sym()?;
@@ -74,7 +79,7 @@ fn place(f: &Form, fresh: &mut Fresh) -> Result<Place> {
             bindings.push(l(vec![temp.clone(), arg.clone()]));
             temps.push(temp);
         }
-        return Ok(Place {
+        return Ok(Some(Place {
             bindings,
             read: call(head, temps.clone()),
             store: call(
@@ -82,13 +87,13 @@ fn place(f: &Form, fresh: &mut Fresh) -> Result<Place> {
                 vec![temps[0].clone(), value.clone(), temps[1].clone()],
             ),
             value,
-        });
+        }));
     }
     let setter = match (head, a.len()) {
         ("car", 2) => "setcar",
         ("cdr", 2) => "setcdr",
         ("aref", 3) => "aset",
-        _ => return Err("unsupported generalized place".into()),
+        _ => return Ok(None),
     };
     let mut bindings = vec![];
     let mut temps = vec![];
@@ -99,12 +104,12 @@ fn place(f: &Form, fresh: &mut Fresh) -> Result<Place> {
     }
     let read = call(head, temps.clone());
     temps.push(value.clone());
-    Ok(Place {
+    Ok(Some(Place {
         bindings,
         read,
         store: call(setter, temps),
         value,
-    })
+    }))
 }
 fn store(p: Place, value: Form) -> Form {
     let mut bindings = p.bindings;
@@ -623,7 +628,7 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             }
             if !matches!(args[1], Form::Sym(_) | Form::Generated(_)) {
                 let value = fresh.symbol();
-                let p = place(&args[1], &mut fresh)?;
+                let Some(p) = place(&args[1], &mut fresh)? else { return Ok(None) };
                 let update = call("cons", vec![value.clone(), p.read.clone()]);
                 return Ok(Some(binding(value, args[0].clone(), store(p, update))));
             }
@@ -641,7 +646,7 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             }
             if !matches!(args[0], Form::Sym(_) | Form::Generated(_)) {
                 let saved = fresh.symbol();
-                let p = place(&args[0], &mut fresh)?;
+                let Some(p) = place(&args[0], &mut fresh)? else { return Ok(None) };
                 let mut bindings = p.bindings;
                 bindings.push(l(vec![saved.clone(), p.read]));
                 bindings.push(l(vec![p.value, call("cdr", vec![saved.clone()])]));
@@ -667,7 +672,7 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             }
             let mut forms = vec![];
             for pair in args.chunks_exact(2) {
-                let p = place(&pair[0], &mut fresh)?;
+                let Some(p) = place(&pair[0], &mut fresh)? else { return Ok(None) };
                 forms.push(store(p, pair[1].clone()));
             }
             progn(&forms)
@@ -676,7 +681,7 @@ pub(crate) fn expand(f: &Form) -> Result<Option<Form>> {
             if !(1..=2).contains(&args.len()) {
                 return Err(format!("bad {head} arguments"));
             }
-            let p = place(&args[0], &mut fresh)?;
+            let Some(p) = place(&args[0], &mut fresh)? else { return Ok(None) };
             let delta = args.get(1).cloned().unwrap_or(Form::Int(1));
             let value = call(
                 if head == "cl-incf" { "+" } else { "-" },
@@ -711,6 +716,18 @@ mod tests {
         let mut vm = crate::Vm::new();
         let value = vm.eval_source("(declare-function romacs-command-epoch \"prims/completion.rs\" ())").unwrap();
         assert_eq!(value.display().unwrap(), "nil");
+    }
+
+    /// Before subr.el, a place of GNU's gv fails the form that reaches it,
+    /// not the definition around it: a bare VM defines the function, and
+    /// only calling it signals. Its own places still expand.
+    #[test]
+    fn a_bare_vm_leaves_a_gv_place_to_the_form_that_reaches_it() {
+        let mut vm = crate::Vm::new();
+        vm.eval_source("(defun romacs-test-push-place (x) (push 1 (alist-get 'a x)))").unwrap();
+        assert!(vm.eval_source("(romacs-test-push-place nil)").is_err());
+        let value = vm.eval_source("(let ((x (list 1 2))) (push 0 (cdr x)) (setf (car x) 9) x)").unwrap();
+        assert_eq!(value.display().unwrap(), "(9 0 2)");
     }
 
     /// Before backquote.el, `backquote-list*' is not there to call.
