@@ -1,4 +1,4 @@
-//! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S]`:
+//! `romacs-mcp --socket PATH --reconnect --session ID [--reply-timeout S] [--restart-pending FILE]`:
 //! the relay an agent session's harness runs as its Romacs MCP server
 //! (lisp/agents/romacs-agent.el). Unlike the plain relay it reads the lines it
 //! copies, so the harness's MCP session outlives the Romacs server it
@@ -11,9 +11,14 @@
 //!   is answered `outcome unknown' (it may have run: the harness asks
 //!   `romacs_call_outcome'); a call made while no server listens, or queued
 //!   to one that went away before taking it, is held and sent once a server
-//!   does listen (a restart's successor, a resumed session's route), and
-//!   answered `not executed' (safe to repeat) only if none has by the reply
-//!   timeout, the bound every harness already gives a Romacs tool call;
+//!   does listen, and answered `not executed' (safe to repeat) if none has
+//!   within `HOLD` (a harness started a moment ahead of its server, a
+//!   resumed session's route relinked), or, while a restart of the server
+//!   is under way (FILE, its pending record, exists), within the reply
+//!   timeout: a restart however slow, never an hour's wait for a server
+//!   that crashed or never started;
+//! - held calls go in the order they came; one the harness cancels before a
+//!   server takes it is dropped, never sent and never answered;
 //! - a call unanswered past the reply timeout (the editor busy) is
 //!   withdrawn with `romacs/cancel': answered `not executed' when the
 //!   server says it was still queued, else `outcome unknown'; a reply that
@@ -50,6 +55,8 @@ pub struct Config {
     pub socket: PathBuf,
     pub session: String,
     pub reply_timeout: Duration,
+    /// The record a restart of the server keeps while it is under way.
+    pub restart_pending: Option<PathBuf>,
 }
 
 /// How long a withdrawal waits for the server's answer.
@@ -58,6 +65,9 @@ const CANCEL_GRACE: Duration = Duration::from_secs(10);
 /// A call sent upstream and not answered.
 /// Lines waiting for the server; past it a call is refused.
 const QUEUE: usize = 64;
+/// How long a call is held for a server to listen, no restart under way:
+/// a harness started ahead of its server, a route relinked on a resume.
+const HOLD: Duration = Duration::from_secs(30);
 /// How long `initialize' and `tools/list' wait for the server.
 const DISCOVERY: Duration = Duration::from_secs(2);
 /// The tool the relay answers itself.
@@ -136,6 +146,10 @@ struct State {
     probes: u64,
     /// Connections in a row the server ended within `REFUSED_WITHIN`.
     refusals: u32,
+    /// When a restart of the server was last seen under way: a held call's
+    /// `HOLD` runs from then, as the successor claims the restart's record
+    /// before its server listens.
+    restart_seen: Option<Instant>,
 }
 
 /// How long to wait before the next connection attempt, after FAILURES
@@ -295,6 +309,15 @@ impl Relay {
             return;
         }
         let mut state = self.lock();
+        // The harness cancels a call no server has taken (held, or queued and
+        // not written): it is never sent, and, cancelled, never answered.
+        if method == "notifications/cancelled" {
+            let target = message.as_ref().and_then(|m| m.pointer("/params/requestId")).map(key);
+            if let Some(target) = target.filter(|k| state.inflight.get(k).is_some_and(|call| !call.written)) {
+                state.inflight.remove(&target);
+                return;
+            }
+        }
         if method == "initialize" { state.initialize = message.clone(); }
         if method == "notifications/initialized" { state.initialized = Some(line.to_owned()); }
         if method == "tools/list" { state.list_params = message.as_ref().and_then(|m| m.get("params")).cloned(); }
@@ -404,8 +427,15 @@ impl Relay {
         // A full queue refused the last probe: try again while it matters.
         Self::probe(&mut state);
         Self::send_held(&mut state);
+        let restarting = self.config.restart_pending.as_ref().is_some_and(|file| file.exists());
+        if restarting { state.restart_seen = Some(now); }
+        let restart_seen = state.restart_seen;
         let late: Vec<String> = state.inflight.iter()
-            .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && now.duration_since(call.sent) >= self.config.reply_timeout)
+            .filter(|(_, call)| !call.discovery() && call.cancel.is_none() && {
+                let held_since = restart_seen.map_or(call.sent, |seen| seen.max(call.sent));
+                now.duration_since(call.sent) >= self.config.reply_timeout
+                    || (!call.queued && !restarting && now.duration_since(held_since) >= HOLD)
+            })
             .map(|(k, _)| k.clone()).collect();
         for call_key in late {
             // Still queued, or held: never sent, the writer finds it gone.
@@ -451,7 +481,9 @@ impl Relay {
             }
             state.cancels.clear();
             state.probe = None;
-            let left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
+            let mut left: Vec<Call> = state.inflight.drain().map(|(_, call)| call).collect();
+            // In the order they came, as their new tokens keep it.
+            left.sort_by_key(|call| call.token);
             for mut call in left {
                 listed |= call.method == "tools/list";
                 if call.discovery() {

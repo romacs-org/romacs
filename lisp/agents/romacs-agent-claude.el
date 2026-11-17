@@ -93,9 +93,7 @@ RESUME is non-nil."
       "mcpServers" (romacs-mcp--object
                     "romacs" (romacs-mcp--object
                               "command" (romacs-agent--program "romacs-mcp")
-                              "args" (vector "--socket" (romacs-agent--route session) "--reconnect"
-                                             "--session" (romacs-agent-id session)
-                                             "--reply-timeout" (number-to-string romacs-agent-reply-timeout))
+                              "args" (vconcat (romacs-agent--relay-args session))
                               ;; Claude Code's own limit on a call, in ms: past
                               ;; the relay's, so the relay's answer is the one.
                               "timeout" (* 1000 (+ (truncate romacs-agent-reply-timeout) 15))))))
