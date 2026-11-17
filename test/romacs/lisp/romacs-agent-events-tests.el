@@ -649,8 +649,9 @@ turns, and its journal's file; a state root of its own."
   ;; Every module whose tables the writer makes, as in the editor.
   (require 'romacs-agent-turns)
   (require 'romacs-agent-history)
-  (dolist (made '(t nil))
+  (dolist (made '(t nil unasked))
     (let* ((root (make-temp-file "romacs-long-" t))
+           (romacs-agent-store--making nil)
            (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
            (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-events-store t)
            (romacs-agent-events--imported (make-hash-table :test #'equal))
@@ -663,22 +664,30 @@ turns, and its journal's file; a state root of its own."
                                         :host-socket (expand-file-name "none.sock" root))))
       (unwind-protect
           (cl-letf (((symbol-function 'romacs-agent-write) #'ignore)
+                    ;; Unreadable with no asking to make it (an open that
+                    ;; failed otherwise): nothing would let it go.
+                    ((symbol-function 'romacs-agent-store--make-soon)
+                     (if (eq made 'unasked) #'ignore (symbol-function 'romacs-agent-store--make-soon)))
                     ((symbol-function 'isolate-main-p) (lambda () t))
                     ((symbol-function 'romacs-agent-events--migrate-next) #'ignore))
             (make-directory (romacs-agent-dir session) t)
             (with-temp-file (expand-file-name "journal.jsonl" (romacs-agent-dir session))
               (insert "{\"seq\":1,\"t\":1.0,\"in\":{\"prompt\":\"a long journal\"}}\n"))
             (romacs-agent-events-then session (lambda () (setq ran t)))
-            (should-not ran)
-            (should (romacs-agent-events-waiting-p "long"))
+            (when (eq made 'unasked)
+              (should ran)
+              (should-not (romacs-agent-events-waiting-p "long")))
+            (unless (eq made 'unasked)
+              (should-not ran)
+              (should (romacs-agent-events-waiting-p "long")))
             ;; The writer made the store, as it does, or not.
-            (when made
+            (when (eq made t)
               (let ((romacs-agent-writer-queued nil))
                 (romacs-agent-store--made)
                 (romacs-agent-events--db))
               (setq romacs-agent-store--db nil))
             (run-hooks 'romacs-agent-store-readable-hook)
-            (if (not made)
+            (if (not (eq made t))
                 (should ran)
               ;; A worker's now: queued for it, THEN once it is moved.
               (should-not ran)

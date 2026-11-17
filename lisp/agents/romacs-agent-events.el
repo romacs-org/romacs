@@ -900,13 +900,17 @@ order given."
 
 (defun romacs-agent-events--store-pending-p (session)
   "Whether SESSION's records could be moved by a worker but for the store,
-which cannot be read here yet: the store on, the writer the editor's, a
-worker VM here, no supervisor writing its journal, and not imported."
+which cannot be read here yet and the writer is asked to make: the store
+on, the writer the editor's, a worker VM here, no supervisor writing its
+journal, and not imported."
   (and romacs-agent-events-store (romacs-agent-writer-queued-p) (romacs-agent-dir session)
        (fboundp 'isolate-spawn) (isolate-main-p)
        (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
        (not (romacs-agent-events-p session))
-       (not (romacs-agent-events--db))))
+       (not (romacs-agent-events--db))
+       ;; The writer asked to make it (by that look): its answer lets the
+       ;; wait go.  One not readable for another reason is not waited for.
+       romacs-agent-store--making))
 
 (defun romacs-agent-events--store-readable ()
   "The writer answered the asking to make the store: what waited for it
