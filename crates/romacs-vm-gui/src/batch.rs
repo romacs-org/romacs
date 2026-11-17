@@ -171,13 +171,15 @@ pub fn configure_worker_compiled_lisp(store: PathBuf) {
 fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
-    // The installation's tree by its true name: artifacts and the compile
-    // identity name its files relative to it (`compiled_lisp::Config::root`).
-    // A Lisp tree named by ROMACS_LISP_DIR may lie outside any runtime tree:
-    // then every file is named by its path, and no tree is looked for.
-    let root = std::env::var_os("ROMACS_LISP_DIR").is_none()
-        .then(|| romacs_vm::host::canonicalize(&romacs_vm::host::runtime_root()).ok())
-        .flatten();
+    // The tree the Lisp lies in, by its true name (DIR is canonical): the
+    // directory holding it as `lisp/` beside `etc/`, as every runtime tree
+    // does, however it was named (ROMACS_LISP_DIR, as tools/test-ert names
+    // it, or the executable's place). Artifacts and the compile identity name
+    // its files relative to it (`compiled_lisp::Config::root`). A Lisp tree
+    // with no such tree around it: every file by its path.
+    let root = dir.parent()
+        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
+        .map(Path::to_path_buf);
     let mut runtime = vec![dir.clone()];
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
