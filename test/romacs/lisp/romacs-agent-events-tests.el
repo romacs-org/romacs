@@ -696,3 +696,32 @@ turns, and its journal's file; a state root of its own."
               (should ran)))
         (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
         (delete-directory root t)))))
+
+(ert-deftest romacs-agent-events-a-socket-left-behind-supervises-nothing ()
+  ;; A supervisor writes a session's records while its host lives; a socket
+  ;; a host left behind (its unit stopped, a crash) is none, so the session
+  ;; is moved; with no host.json (an earlier build's host) the socket says so.
+  (let* ((root (make-temp-file "romacs-stale-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+         (id "aaaaaaaa-0000-4000-8000-00000000050c")
+         (dir (expand-file-name id (romacs-agent--state-root)))
+         (socket (expand-file-name "host.sock" root))
+         (host (start-process "romacs-test-host" nil "bash" "-c" "exec -a romacs-agent-host sleep 30")))
+    (unwind-protect
+        (cl-flet ((host-pid (pid) (romacs-agent--write-json (expand-file-name "host.json" dir)
+                                                            (romacs-mcp--object "pid" pid))))
+          (make-directory dir t)
+          (write-region "" nil socket nil 'silent)
+          (should-not (romacs-agent-events--supervised-p id (expand-file-name "none.sock" root)))
+          ;; No host.json: the socket alone.
+          (should (romacs-agent-events--supervised-p id socket))
+          ;; Its host gone: a process no more, or another program's.
+          (host-pid 999999999)
+          (should-not (romacs-agent-events--supervised-p id socket))
+          (host-pid (emacs-pid))
+          (should-not (romacs-agent-events--supervised-p id socket))
+          ;; Its host there.
+          (host-pid (process-id host))
+          (should (romacs-agent-events--supervised-p id socket)))
+      (delete-process host)
+      (delete-directory root t))))

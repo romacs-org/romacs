@@ -59,6 +59,21 @@
 (defvar romacs-agent-events--imported (make-hash-table :test #'equal)
   "Each session id known imported, by this process: once it is, it stays.")
 
+(defun romacs-agent-events--supervised-p (id &optional socket)
+  "Whether a supervisor writes the records of the session ID: its socket
+\(SOCKET, else ID's) there, and the host its host.json names alive, a
+romacs-agent-host.  A socket a host left behind (its unit stopped, a
+crash) is none, so a stopped session's journal moves; with no host.json
+\(an earlier build's host) the socket alone says so."
+  (let ((socket (or socket (romacs-agent--host-socket id))))
+    (and socket (file-exists-p socket)
+         (let* ((host (romacs-agent--read-json
+                       (expand-file-name "host.json" (expand-file-name id (romacs-agent--state-root)))))
+                (pid (and (hash-table-p host) (gethash "pid" host))))
+           (or (not (integerp pid))
+               (let ((args (cdr (assq 'args (process-attributes pid)))))
+                 (and (stringp args) (string-search "romacs-agent-host" args) t)))))))
+
 (defun romacs-agent-events-p (session)
   "Whether SESSION's records are read from SQLite: it has been imported."
   (let ((id (romacs-agent-id session)))
@@ -277,7 +292,7 @@ once it is done."
              ;; (its supervisor makes its records' tables), not to a journal
              ;; no store-drawn chat shows while it runs.
              (or (romacs-agent-writer-queued-p) (romacs-agent-events--db))
-             (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
+             (not (romacs-agent-events--supervised-p (romacs-agent-id session) (romacs-agent-host-socket session)))
              ;; A worker writing it meanwhile: it stays in its journal, and
              ;; the editor finds that journal grown when it would flip it.
              (not (gethash (romacs-agent-id session) romacs-agent-events--migrating))
@@ -444,7 +459,7 @@ its own; else the records written, and their `staged' row, are removed."
     (condition-case err
         (progn
           (setq ok (and (eql (or (file-attribute-size (file-attributes journal)) 0) size)
-                        (not (file-exists-p (romacs-agent--host-socket id)))
+                        (not (romacs-agent-events--supervised-p id))
                         (not (sqlite-select db "select 1 from imported where session = ?" (list id)))
                         (eql (caar (sqlite-select db "select count(*) from events where session = ?" (list id))) count)))
           (if ok (sqlite-execute db "insert into imported values (?, ?)" (list id (float-time)))
@@ -563,7 +578,7 @@ records removed."
                      ;; Checked holding the write lock: a supervisor started
                      ;; after it writes nothing until this commits, and what
                      ;; this removes is from before it.
-                     (when (file-exists-p (romacs-agent--host-socket id))
+                     (when (romacs-agent-events--supervised-p id)
                        (error "Its supervisor runs"))
                      (setq removed (+ removed (sqlite-execute db (car (last statements))
                                                               (list id end low (+ low romacs-agent-events--compact-window)))))
@@ -577,7 +592,7 @@ records removed."
 compacted and no supervisor running: none is writing to them."
   (when-let* ((db (romacs-agent-events--db)))
     (romacs-agent-events--compact-schema db)
-    (cl-remove-if (lambda (id) (file-exists-p (romacs-agent--host-socket id)))
+    (cl-remove-if #'romacs-agent-events--supervised-p
                   (mapcar #'car (sqlite-select
                                  db (concat "select imported.session from imported"
                                             " left join compacted on compacted.session = imported.session"
@@ -665,7 +680,7 @@ supervisor."
          (and (not (gethash id imported)) (not (gethash id romacs-agent--sessions))
               (not (gethash id romacs-agent-events--migrating))
               (file-exists-p (expand-file-name "journal.jsonl" dir))
-              (not (file-exists-p (romacs-agent--host-socket id))))))
+              (not (romacs-agent-events--supervised-p id)))))
      (and (file-directory-p (romacs-agent--state-root))
           (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))))
 
@@ -676,7 +691,7 @@ no reader has them.  A loaded one's goes at a later start."
   (dolist (id ids)
     (let ((dir (expand-file-name id (romacs-agent--state-root))))
       (when (and (not (gethash id romacs-agent--sessions))
-                 (not (file-exists-p (romacs-agent--host-socket id)))
+                 (not (romacs-agent-events--supervised-p id))
                  (file-exists-p (expand-file-name "journal.jsonl" dir)))
         (with-demoted-errors "romacs-agent-events: backing up: %S"
           (romacs-agent-events--back-up (romacs-agent--make :id id :dir dir)))))))
@@ -755,7 +770,7 @@ left (its supervisor runs, it failed)."
     (condition-case err
         (when-let* ((manifest (romacs-agent--read-json (expand-file-name "manifest.json" dir)))
                     (session (romacs-agent--of-manifest dir manifest))
-                    ((not (file-exists-p (romacs-agent--host-socket (romacs-agent-id session))))))
+                    ((not (romacs-agent-events--supervised-p (romacs-agent-id session)))))
           (puthash (romacs-agent-id session) session romacs-agent--sessions)
           ;; Its records written, not its own: the editor makes them so.
           (pcase-let* ((id (romacs-agent-id session))
@@ -901,7 +916,7 @@ on, the writer the editor's, a worker VM here, no supervisor writing its
 journal, and not imported."
   (and romacs-agent-events-store (romacs-agent-writer-queued-p) (romacs-agent-dir session)
        (fboundp 'isolate-spawn) (isolate-main-p)
-       (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))
+       (not (romacs-agent-events--supervised-p (romacs-agent-id session) (romacs-agent-host-socket session)))
        (not (romacs-agent-events-p session))
        (not (romacs-agent-events--db))
        ;; The writer asked to make it (by that look): its answer lets the
@@ -925,7 +940,7 @@ only, so a store still unreadable lets it go as unmovable."
 here, and no supervisor writing its journal."
   (and romacs-agent-events-store (romacs-agent-dir session) (fboundp 'isolate-spawn) (isolate-main-p)
        (romacs-agent-events--db)
-       (not (let ((socket (romacs-agent-host-socket session))) (and socket (file-exists-p socket))))))
+       (not (romacs-agent-events--supervised-p (romacs-agent-id session) (romacs-agent-host-socket session)))))
 
 (defun romacs-agent-events-waiting-p (id)
   "Whether something waits for the session ID names to move to SQLite,
