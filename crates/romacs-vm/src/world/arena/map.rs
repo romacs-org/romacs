@@ -43,7 +43,7 @@ pub(super) fn reserve_window() {
     let mut bits = 0u64;
     let mut at = BUILD.0;
     while at < WINDOW.1 {
-        match map(&place(at, CHUNK), at, CHUNK, Of::Nothing) {
+        match map(&place(at, CHUNK), at, CHUNK, &Of::Nothing) {
             Ok(mapping) => {
                 mapping.keep();
                 bits |= 1 << ((at - WINDOW.0) / CHUNK);
@@ -132,6 +132,7 @@ pub(super) struct Mapping {
 
 impl Mapping {
     /// Keep it mapped for the process's life.
+    #[expect(clippy::unused_self, reason = "keeping consumes the mapping, so it cannot be undone after")]
     pub(super) fn keep(self) {}
 
     /// Ask the kernel to read it ahead.
@@ -148,7 +149,7 @@ impl Mapping {
 }
 
 /// Map LEN bytes of OF at AT, within PLACE's span, as PLACE says.
-pub(super) fn map(place: &Place, at: usize, len: usize, of: Of<'_>) -> Result<Mapping, Refused> {
+pub(super) fn map(place: &Place, at: usize, len: usize, of: &Of<'_>) -> Result<Mapping, Refused> {
     let (low, span) = place.span;
     if at < low || len > span || at - low > span - len {
         std::process::abort();
@@ -164,7 +165,7 @@ pub(super) fn map(place: &Place, at: usize, len: usize, of: Of<'_>) -> Result<Ma
         match of {
             Of::Nothing => rustix::mm::mmap_anonymous(at as *mut _, len, ProtFlags::empty(), MapFlags::PRIVATE | MapFlags::NORESERVE | fixed),
             Of::Memory => rustix::mm::mmap_anonymous(at as *mut _, len, rw, MapFlags::PRIVATE | MapFlags::NORESERVE | fixed),
-            Of::File { fd, shared } => {
+            &Of::File { fd, shared } => {
                 let sharing = if shared { MapFlags::SHARED | MapFlags::NORESERVE } else { MapFlags::PRIVATE };
                 rustix::mm::mmap(at as *mut _, len, rw, sharing | fixed, fd, 0)
             }

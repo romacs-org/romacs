@@ -157,7 +157,7 @@ impl Library {
         const DT_TEXTREL: i64 = 22;
         const DT_FLAGS: i64 = 30;
         const DF_TEXTREL: u64 = 0x4;
-        let word = |bytes: &[u8]| <[u8; 8]>::try_from(bytes).map(u64::from_ne_bytes).unwrap_or(0);
+        let word = |bytes: &[u8]| <[u8; 8]>::try_from(bytes).map_or(0, u64::from_ne_bytes);
         self.headers.iter().filter(|h| h.p_type == libc::PT_DYNAMIC).any(|h| {
             self.bytes(h.p_vaddr, h.p_memsz).chunks_exact(16)
                 .map(|entry| (word(&entry[..8]).cast_signed(), word(&entry[8..])))
