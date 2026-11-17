@@ -144,7 +144,7 @@ fn code_images_publish_pending_bodies_decoded() {
     assert!(source.functions[id].pending.is_some(), "the defined function was never called");
     let image_entry = source.compile(&Form::Int(0)).unwrap();
     let key = source.publish_code_image(&store, image_entry, [0; 32]).unwrap();
-    let image = unsafe { crate::ImageRegion::open(&store, &key) }.unwrap();
+    let image = crate::ImageRegion::open(&store, &key).unwrap();
     let (mut vm, _) = Vm::from_code_image(image, [0; 32]).unwrap();
     assert_eq!(vm.eval_source("(t-pending-img 7)").unwrap().display().unwrap(), "(7 \"x\" sym)");
     std::fs::remove_dir_all(store).unwrap();

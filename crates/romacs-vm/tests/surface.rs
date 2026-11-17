@@ -95,8 +95,7 @@ fn replay(primitive: &str) {
             assert_eq!(actual, Ok(expected.clone()), "heap: {source}");
         }
         if let Ok(key) = key {
-            // SAFETY: the content-addressed store is private and never overwritten.
-            let image = unsafe { ImageRegion::open(&store, &key) }.unwrap();
+            let image = ImageRegion::open(&store, &key).unwrap();
             let (mut mapped, entry) = Vm::from_code_image(image, [0; 32]).unwrap();
             mapped.set_collection_floor(1);
             mapped.collect_garbage();

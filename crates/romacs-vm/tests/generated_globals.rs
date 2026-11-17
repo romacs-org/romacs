@@ -44,7 +44,7 @@ fn escaped_generated_variable_can_be_set_without_interning_its_spelling() {
     let store = std::env::temp_dir().join(format!("s40-generated-{}", std::process::id()));
     std::fs::create_dir(&store).unwrap();
     let key = vm.publish_code_image(&store, entry, [40; 32]).unwrap();
-    let image = unsafe { romacs_vm::ImageRegion::open(&store, &key) }.unwrap();
+    let image = romacs_vm::ImageRegion::open(&store, &key).unwrap();
     let (mut restored, entry) = Vm::from_code_image(image, [40; 32]).unwrap();
     assert_eq!(restored.execute(entry).unwrap().as_integer().unwrap(), 3);
     assert_eq!(
