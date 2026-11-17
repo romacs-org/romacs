@@ -2890,6 +2890,11 @@ def board_keys(args, base):
         # The newest thread gone after the board was drawn: its records too
         # (a session still recorded is listed from its row and loaded when asked).
         # Removed from outside the editor, whose own connection only reads.
+        # The board is not told until RET: a redraw (a batch of session
+        # events, the store's rows, a transcript scan ending) would drop
+        # its row before the key reaches it.
+        hooks = "'(romacs-agent-ui-changed-hook romacs-agent-store-filled-hook romacs-agent-history-indexed-hook)"
+        a.eval(f'(progn (dolist (hook {hooks}) (remove-hook hook (function romacs-agent-board--refresh))) t)')
         a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
                '(remhash id romacs-agent--sessions) t)')
         store = a.home / '.local/state/romacs/agents/sessions.sqlite'
@@ -2899,6 +2904,7 @@ def board_keys(args, base):
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
+        a.eval(f'(progn (dolist (hook {hooks}) (add-hook hook (function romacs-agent-board--refresh))) t)')
         ret_on('^work  ')
         steps['after_gone'] = settled(showing, sids[0])
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}
