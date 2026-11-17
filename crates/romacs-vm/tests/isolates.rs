@@ -172,8 +172,10 @@ fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     // spawn) or its death arrives at the await; either way the death is
     // reported once and the worker forgotten.
     assert_eq!(eval(&mut vm, "(let ((isolate-worker-program \"/bin/true\") (events nil)) (push (lambda (_iso event _data) (push event events)) isolate-error-functions) (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5) (isolate-error (car e))) (progn (romacs--isolate-pump 0.5) events) (isolate-list)))"), "(isolate-died (isolate-died) nil)");
-    assert_eq!(eval(&mut vm, "(let ((isolate-boot 'world) (isolate-world nil)) (condition-case e (isolate-spawn '+ 1 2) (isolate-world-unavailable 'unavailable)))"), "unavailable");
-    assert_eq!(eval(&mut vm, "(let ((isolate-boot 'source)) (condition-case e (isolate-spawn '+ 1 2) (isolate-world-unavailable 'unavailable)))"), "unavailable");
+    // A worker always starts: with no world to adopt it boots from source,
+    // never refused while its callers wait.
+    assert_eq!(eval(&mut vm, "(let ((isolate-boot 'world) (isolate-world nil)) (romacs--isolate-boot-arguments))"), "(\"--source\")");
+    assert_eq!(eval(&mut vm, "(let ((isolate-boot 'source)) (romacs--isolate-boot-arguments))"), "(\"--source\")");
     // A worker killed from outside resolves its futures as died.
     let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (while t)))) (iso (isolate-future-isolate f))) (romacs--isolate-wait 0.2) (romacs--isolate-signal (romacs--isolate-id iso) 9) (list (condition-case e (isolate-await f 5) (isolate-died 'died)) (isolate-list)))");
     assert_eq!(out, "(died nil)");
