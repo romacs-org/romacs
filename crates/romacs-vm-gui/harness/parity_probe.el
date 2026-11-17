@@ -216,7 +216,7 @@ that are bound, else every bound non-custom variable named with
       (list :buffer (buffer-name buffer)
             :start start :point (window-point window) :end (window-end window)
             ;; Widths only: Romacs's windows have no mode-line row (its status
-            ;; bar is the mode line, DIVERGENCES.md VM2-STATUS-BAR), so their
+            ;; bar is the mode line, ledger/divergences VM2-STATUS-BAR), so their
             ;; heights and tops differ from GNU's by those rows.
             :body (list (window-body-width window))
             ;; Pixel edges, geometry by the harness's policy.  Not

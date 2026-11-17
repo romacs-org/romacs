@@ -113,7 +113,7 @@ def gnu_settings():
 
 # GNU's completion as it loads lisp/completion/romacs-completion-defaults.el, for
 # Romacs in a comparison: Romacs's window-system display is its own layer
-# (romacs-complete-mode, DIVERGENCES.md VM2-MINI-COMPLETION-LAYER), which
+# (romacs-complete-mode, ledger/divergences VM2-MINI-COMPLETION-LAYER), which
 # takes the root window's last line, and its styles begin with fzf
 # (VM2-FZF-DEFAULT), which fido then completes with instead of flex; GNU
 # gets `fido-vertical-mode' and the same styles without fzf, and no

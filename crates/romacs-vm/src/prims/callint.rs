@@ -113,7 +113,7 @@ pub(super) fn prefix_numeric(cx: &mut Leaf<'_>, raw: Value) -> Value {
 
 // GNU's body is `Ffuncall' inside a specpdl frame; `called-interactively-p'
 // (subr.el) finds the frame by walking the backtrace. VM2 has no backtrace
-// frames, so the mark itself is not observable (DIVERGENCES VM2-CALLINT1).
+// frames, so the mark itself is not observable (ledger/divergences VM2-CALLINT1).
 defsubr! { name = "funcall-interactively", gnu = "callint.c:239", effect = Global,
 fn funcall_interactively(cx, function: Value; rest args) -> Step {
     Ok(Step::Call { f: function, args: args.to_vec(), then: done, saved: vec![] })

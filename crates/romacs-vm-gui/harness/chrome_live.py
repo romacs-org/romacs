@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pane chrome in a live session (DIVERGENCES.md VM2-PANE-CHROME): the
+"""Pane chrome in a live session (ledger/divergences VM2-PANE-CHROME): the
 root frame's windows drawn as panes, one, two and three of them.
 
 One private headless labwc and one `romacs-vm-gui --loadup'.  The
@@ -19,7 +19,7 @@ a screenshot (grim) is probed:
 
   line     a pixel in the middle of the status bar, below its top, is the
            `mode-line-active' background and its left edge the accent
-           (modern only; DIVERGENCES.md VM2-STATUS-BAR);
+           (modern only; ledger/divergences VM2-STATUS-BAR);
   bands    no window has a mode-line band: the bar is the mode line;
 
 and the run checks that `romacs-chrome-state' reports gap 6, radius 6,

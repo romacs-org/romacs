@@ -7,7 +7,7 @@ use crate::anchors::Bias;
 use crate::annotations::Marker;
 use crate::prim::Out;
 use crate::subprocess::{self as sp, Channel, Process, Slot};
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 
 type Result<T> = std::result::Result<T, Fault>;
 
@@ -381,7 +381,7 @@ impl Leaf<'_> {
             if !p.alive || p.pid <= 0 {
                 continue;
             }
-            let Some(status) = sp::wait_status(p.pid as i32, libc::WUNTRACED | libc::WCONTINUED) else { continue };
+            let Some(status) = sp::wait_status(p.pid as i32, rustix::process::WaitOptions::UNTRACED | rustix::process::WaitOptions::CONTINUED) else { continue };
             self.process_tick(proc);
             let p = self.process_mut(proc);
             p.raw_status = Some(status);
@@ -530,7 +530,7 @@ impl Leaf<'_> {
     /// address is connecting.
     fn process_connect_poll(&mut self, proc: Value) -> Option<Value> {
         let channel = self.channel_mut(proc)?;
-        let fd = channel.infd.as_ref()?.as_raw_fd();
+        let fd = channel.infd.as_ref()?.as_fd();
         let mut errno = sp::socket_error(fd);
         while errno != 0 && let Some(next) = channel.connecting.as_mut().filter(|rest| !rest.is_empty()).map(|rest| rest.remove(0)) {
             match crate::host::connect_nonblocking(next).and_then(|fd| Ok((sp::dup(&fd)?, fd))) {
@@ -543,7 +543,7 @@ impl Leaf<'_> {
             }
         }
         channel.connecting = None;
-        let fd = channel.infd.as_ref()?.as_raw_fd();
+        let fd = channel.infd.as_ref()?.as_fd();
         let address = |local| (errno == 0).then(|| sp::socket_address(fd, local).ok().flatten()).flatten();
         let (remote, local) = (address(false), address(true));
         let remote = remote.map_or(Value::NIL, |a| self.address_lisp(&a));
@@ -569,7 +569,7 @@ impl Leaf<'_> {
     pub(crate) fn process_read(&mut self, proc: Value) -> Out {
         let readmax = self.process(proc)?.readmax;
         let Some(channel) = self.channel_mut(proc) else { return Ok(self.cons(fixnum(-1), fixnum(libc::EBADF.into()))) };
-        let Some(fd) = channel.infd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(self.cons(fixnum(-1), fixnum(libc::EBADF.into()))) };
+        let Some(fd) = channel.infd.as_ref().map(|f| f.as_fd()) else { return Ok(self.cons(fixnum(-1), fixnum(libc::EBADF.into()))) };
         let mut buf = vec![0; readmax];
         let read = match channel.tls.as_deref_mut().filter(|s| s.active) {
             Some(session) => session.read(fd, &mut buf),
@@ -737,7 +737,7 @@ impl Leaf<'_> {
     }
     fn process_flush(&mut self, proc: Value) -> Result<()> {
         let Some(channel) = self.channel_mut(proc) else { return Ok(()) };
-        let Some(fd) = channel.outfd.as_ref().map(|f| f.as_raw_fd()) else { return Ok(()) };
+        let Some(fd) = channel.outfd.as_ref().map(|f| f.as_fd()) else { return Ok(()) };
         if let Some(session) = channel.tls.as_deref_mut().filter(|s| s.active) {
             // emacs_gnutls_write: the session takes the bytes into records
             // and holds what the socket does not take yet; before READY it
@@ -773,7 +773,7 @@ impl Leaf<'_> {
     /// Fprocess_send_eof's channel work, after the status check.
     pub(crate) fn process_send_eof(&mut self, proc: Value) -> Result<()> {
         if self.process(proc)?.pty_in {
-            let eof = self.channel(proc).and_then(|c| c.outfd.as_ref()).map_or(4, |fd| sp::tty_eof_char(fd.as_raw_fd()));
+            let eof = self.channel(proc).and_then(|c| c.outfd.as_ref()).map_or(4, |fd| sp::tty_eof_char(fd.as_fd()));
             self.process_send(proc, Some(vec![eof]))?;
             return Ok(());
         }
@@ -784,7 +784,7 @@ impl Leaf<'_> {
             if let Some(fd) = &channel.outfd
                 && network
             {
-                unsafe { libc::shutdown(fd.as_raw_fd(), libc::SHUT_WR) };
+                let _ = rustix::net::shutdown(fd, rustix::net::Shutdown::Write);
             }
             channel.pending.clear();
             channel.outfd = Some(OwnedFd::from(null));
@@ -834,47 +834,46 @@ impl Leaf<'_> {
         }
         let (pty_in, pty_out) = if pty.is_some() { (pty_in, pty_out) } else { (false, false) };
         let mut channel = Channel::default();
-        let (forkin, forkout);
-        let mut child_ends: Vec<OwnedFd> = Vec::new();
-        if let (true, Some((master, tty, _))) = (pty_in, &pty) {
-            forkin = tty.as_raw_fd();
+        // The child's standard input and output, closed here once it has
+        // them: a pipe's other end, or a duplicate of the pty's tty.
+        let child_in = if let (true, Some((master, tty, _))) = (pty_in, &pty) {
             channel.outfd = Some(sp::dup(master).map_err(|e| self.file_errno("Creating pipe", &e))?);
+            sp::dup(tty).map_err(|e| self.file_errno("Creating pipe", &e))?
         } else {
             let (read, write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
-            forkin = read.as_raw_fd();
-            child_ends.push(read);
             channel.outfd = Some(write);
-        }
-        if let (true, Some((master, tty, _))) = (pty_out, &pty) {
-            forkout = tty.as_raw_fd();
+            read
+        };
+        let child_out = if let (true, Some((master, tty, _))) = (pty_out, &pty) {
             channel.infd = Some(sp::dup(master).map_err(|e| self.file_errno("Creating pipe", &e))?);
+            sp::dup(tty).map_err(|e| self.file_errno("Creating pipe", &e))?
         } else {
             let (read, write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
-            forkout = write.as_raw_fd();
-            child_ends.push(write);
             channel.infd = Some(read);
-        }
-        let mut forkerr = forkout;
-        if stderrproc != Value::NIL {
-            if let Some(c) = self.channel_mut(stderrproc) {
+            write
+        };
+        // STDERRPROC's pipe takes the child's standard error, else its output.
+        let child_err = if stderrproc == Value::NIL { None } else {
+            self.channel_mut(stderrproc).and_then(|c| {
                 c.outfd = None;
                 c.child_stdin = None;
-                if let Some(fd) = &c.child_stdout {
-                    forkerr = fd.as_raw_fd();
-                }
-            }
-        }
+                c.child_stdout.as_ref().map(sp::dup)
+            }).transpose().map_err(|e| self.file_errno("Creating pipe", &e))?
+        };
         for fd in [&channel.infd, &channel.outfd].into_iter().flatten() {
-            sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Creating pipe", &e))?;
+            sp::set_nonblocking(fd.as_fd()).map_err(|e| self.file_errno("Creating pipe", &e))?;
         }
         if pty_out && let Some((_, tty, _)) = &pty {
-            sp::child_setup_tty(tty.as_raw_fd());
+            sp::child_setup_tty(tty.as_fd());
         }
         let run = self.sym("run");
         self.process_mut(proc).set(Slot::Status, run);
-        let spawn = sp::Spawn { argv, env, dir, stdin: forkin, stdout: forkout, stderr: forkerr, controlling_tty: pty_in };
+        let spawn = sp::Spawn {
+            argv, env, dir, stdin: child_in.as_fd(), stdout: child_out.as_fd(),
+            stderr: child_err.as_ref().map_or(child_out.as_fd(), |f| f.as_fd()), controlling_tty: pty_in,
+        };
         let pid = sp::spawn(&spawn).map_err(|e| self.file_errno("Doing vfork", &e))?;
-        drop(child_ends);
+        drop((child_in, child_out, child_err));
         channel.pidfd = crate::host::pidfd_open(pid);
         channel.pid = pid;
         let filter = self.process(proc)?.get(Slot::Filter);
@@ -900,7 +899,7 @@ impl Leaf<'_> {
         let (pty_in, pty_out) = { let p = self.process(proc)?; (p.pty_in, p.pty_out) };
         if (pty_in || pty_out) && let Ok((master, name)) = crate::host::allocate_pty() {
             let tty = crate::host::open_tty(&name).map_err(|e| self.file_errno("Opening pty", &e))?;
-            sp::set_nonblocking(master.as_raw_fd()).map_err(|e| self.file_errno("Opening pty", &e))?;
+            sp::set_nonblocking(master.as_fd()).map_err(|e| self.file_errno("Opening pty", &e))?;
             let mut channel = Channel::default();
             channel.outfd = Some(sp::dup(&master).map_err(|e| self.file_errno("Opening pty", &e))?);
             channel.infd = Some(master);
@@ -923,7 +922,7 @@ impl Leaf<'_> {
         let (stdin_read, outfd) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
         let (infd, stdout_write) = crate::host::pipe().map_err(|e| self.file_errno("Creating pipe", &e))?;
         for fd in [&infd, &outfd] {
-            sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Creating pipe", &e))?;
+            sp::set_nonblocking(fd.as_fd()).map_err(|e| self.file_errno("Creating pipe", &e))?;
         }
         let channel = Channel { infd: Some(infd), outfd: Some(outfd), child_stdin: Some(stdin_read), child_stdout: Some(stdout_write), ..Channel::default() };
         self.attach_channel(proc, channel);
@@ -948,21 +947,23 @@ impl Leaf<'_> {
         let current_group = if pty_in { current_group } else { Value::NIL };
         let mut gid = pid;
         if current_group != Value::NIL {
-            let fd = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd());
-            if let Some(fd) = fd {
-                let mut t: libc::termios = unsafe { std::mem::zeroed() };
-                unsafe { libc::tcgetattr(fd, &mut t) };
+            let terminal = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|fd| {
+                let modes = sp::terminal_modes(fd.as_fd());
+                let code = |index| modes.as_ref().map_or(0, |t| t.special_codes[index]);
                 let ch = match signo {
-                    libc::SIGINT => Some(t.c_cc[libc::VINTR]),
-                    libc::SIGQUIT => Some(t.c_cc[libc::VQUIT]),
-                    libc::SIGTSTP => Some(t.c_cc[libc::VSUSP]),
+                    libc::SIGINT => Some(code(rustix::termios::SpecialCodeIndex::VINTR)),
+                    libc::SIGQUIT => Some(code(rustix::termios::SpecialCodeIndex::VQUIT)),
+                    libc::SIGTSTP => Some(code(rustix::termios::SpecialCodeIndex::VSUSP)),
                     _ => None,
                 };
+                (ch, sp::tty_pgrp(fd.as_fd()))
+            });
+            if let Some((ch, group)) = terminal {
                 if let Some(ch) = ch.filter(|&c| c != 0xff && c != 0) {
                     self.process_send(proc, Some(vec![ch]))?;
                     return Ok(Value::NIL);
                 }
-                gid = sp::tty_pgrp(fd).unwrap_or(pid);
+                gid = group.unwrap_or(pid);
             }
             if current_group == self.intern("lambda") && gid == pid {
                 return Ok(Value::NIL);
@@ -986,7 +987,7 @@ impl Leaf<'_> {
     pub(crate) fn process_running_child(&mut self, proc: Value) -> Out {
         self.signal_target(proc)?;
         let pid = self.process(proc)?.pid as i32;
-        let gid = self.channel(proc).and_then(|c| c.infd.as_ref()).and_then(|fd| sp::tty_pgrp(fd.as_raw_fd())).unwrap_or(-1);
+        let gid = self.channel(proc).and_then(|c| c.infd.as_ref()).and_then(|fd| sp::tty_pgrp(fd.as_fd())).unwrap_or(-1);
         Ok(if gid == pid { Value::NIL } else if gid != -1 { fixnum(gid.into()) } else { Value::TRUE })
     }
     /// delete-process's kill of a real process: record_kill_process, then
@@ -1019,9 +1020,9 @@ impl Leaf<'_> {
         if self.process_type_is(proc, "network") {
             return Ok(Value::NIL);
         }
-        let Some(fd) = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd()) else { return Ok(Value::NIL) };
-        let size = libc::winsize { ws_row: height, ws_col: width, ws_xpixel: 0, ws_ypixel: 0 };
-        Ok(if unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) } < 0 { Value::NIL } else { Value::TRUE })
+        let size = rustix::termios::Winsize { ws_row: height, ws_col: width, ws_xpixel: 0, ws_ypixel: 0 };
+        let set = self.channel(proc).and_then(|c| c.infd.as_ref()).map(|fd| rustix::termios::tcsetwinsize(fd, size));
+        Ok(if set.is_some_and(|set| set.is_ok()) { Value::TRUE } else { Value::NIL })
     }
 
     /// The network half of make-network-process for a stream socket:
@@ -1044,8 +1045,8 @@ impl Leaf<'_> {
             }
             Made::Failed(fault) => return Err(fault),
         };
-        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
-        let local = sp::socket_address(fd.as_raw_fd(), true).ok().flatten();
+        sp::set_nonblocking(fd.as_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let local = sp::socket_address(fd.as_fd(), true).ok().flatten();
         let mut channel = Channel::default();
         channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
         channel.infd = Some(fd);
@@ -1142,8 +1143,8 @@ impl Leaf<'_> {
     /// HOST and SERVICE the peer's (t and nil for a local socket) and
     /// SUFFIX what the server's name gains for the connection's.
     pub(crate) fn process_accept(&mut self, server: Value) -> Out {
-        let Some(fd) = self.channel(server).and_then(|c| c.infd.as_ref()).map(|f| f.as_raw_fd()) else { return Ok(Value::NIL) };
-        let (fd, remote) = match sp::accept(fd) {
+        let Some(accepted) = self.channel(server).and_then(|c| c.infd.as_ref()).map(|f| sp::accept(f.as_fd())) else { return Ok(Value::NIL) };
+        let (fd, remote) = match accepted {
             Ok(accepted) => accepted,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(Value::NIL),
             Err(error) => {
@@ -1151,8 +1152,8 @@ impl Leaf<'_> {
                 return Ok(self.cons(error_symbol, fixnum(error.raw_os_error().unwrap_or(0).into())));
             }
         };
-        sp::set_nonblocking(fd.as_raw_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
-        let local = sp::socket_address(fd.as_raw_fd(), true).ok().flatten();
+        sp::set_nonblocking(fd.as_fd()).map_err(|e| self.file_errno("Setting socket", &e))?;
+        let local = sp::socket_address(fd.as_fd(), true).ok().flatten();
         let mut channel = Channel::default();
         channel.outfd = Some(sp::dup(&fd).map_err(|e| self.file_errno("Setting socket", &e))?);
         channel.infd = Some(fd);
@@ -1224,8 +1225,8 @@ impl Leaf<'_> {
             ref spec => open_out(self, spec, "Cannot redirect stderr")?,
         };
         let spawn = sp::Spawn {
-            argv, env, dir, stdin: input.as_raw_fd(), stdout: out_fd.as_raw_fd(),
-            stderr: err_fd.as_ref().map_or(out_fd.as_raw_fd(), |f| f.as_raw_fd()), controlling_tty: false,
+            argv, env, dir, stdin: input.as_fd(), stdout: out_fd.as_fd(),
+            stderr: err_fd.as_ref().map_or(out_fd.as_fd(), |f| f.as_fd()), controlling_tty: false,
         };
         let pid = sp::spawn(&spawn).map_err(|e| self.file_errno("Doing vfork", &e))?;
         drop((input, out_fd, err_fd));
@@ -1237,7 +1238,7 @@ impl Leaf<'_> {
         if let Some(read) = reader {
             let mut buf = vec![0; 64 * 1024];
             loop {
-                match sp::read(read.as_raw_fd(), &mut buf) {
+                match sp::read(read.as_fd(), &mut buf) {
                     Ok(0) => break,
                     Ok(n) => bytes.extend_from_slice(&buf[..n]),
                     Err(_) => break,
@@ -1322,9 +1323,5 @@ fn incomplete_utf8_tail(bytes: &[u8]) -> usize {
 
 /// emacs_strerror.
 pub(crate) fn strerror(errno: i32) -> String {
-    let text = unsafe { libc::strerror(errno) };
-    if text.is_null() {
-        return format!("Unknown error {errno}");
-    }
-    unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned()
+    crate::host::error_text(errno)
 }

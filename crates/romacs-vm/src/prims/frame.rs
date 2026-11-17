@@ -440,7 +440,7 @@ fn apply_child_parameters(cx: &mut Leaf<'_>, frame: Value, pairs: &[(Value, Valu
 }
 
 // What pgtkfns.c x-create-frame does: with a `parent-frame' Romacs's
-// display makes a child frame, painted over its parent (DIVERGENCES.md
+// display makes a child frame, painted over its parent (ledger/divergences
 // VM2-CHILD-FRAME); without one a top-level frame, in a window of its own
 // where the host shows more than one (VM2-WIN-SUBSTRATE).
 // Not named `x-create-frame': loadup.el and cus-start.el read that name
@@ -531,7 +531,7 @@ fn create_top_frame(cx: &mut Leaf<'_>, pairs: &[(Value, Value)], stored: Vec<(Va
 }
 
 // The frame reserves no line for a minibuffer window a child frame hosts
-// (DIVERGENCES.md VM2-MINI-COMPLETION-LAYER); romacs-complete.el places it.
+// (ledger/divergences VM2-MINI-COMPLETION-LAYER); romacs-complete.el places it.
 defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Global,
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)

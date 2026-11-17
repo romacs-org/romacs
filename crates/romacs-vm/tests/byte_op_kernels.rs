@@ -33,7 +33,7 @@ fn romacs() -> String {
     }).unwrap().join().unwrap()
 }
 
-/// Cases that differ on purpose, each recorded in DIVERGENCES.md. A case
+/// Cases that differ on purpose, each recorded in ledger/divergences. A case
 /// that comes to agree must leave this list.
 const KNOWN: &[&str] = &[
     "aset string-wide:",     // VM2-ASET-STRING1
@@ -46,7 +46,7 @@ fn byte_op_kernels_match_compiled_gnu() {
     let known = |line: &str| KNOWN.iter().any(|k| line.starts_with(k));
     for k in KNOWN {
         let same = expected.lines().zip(actual.lines()).any(|(e, a)| e.starts_with(k) && e == a);
-        assert!(!same, "{k} now agrees: take it out of KNOWN and DIVERGENCES.md");
+        assert!(!same, "{k} now agrees: take it out of KNOWN and ledger/divergences");
     }
     let wrong: Vec<String> = expected.lines().zip(actual.lines())
         .filter(|(e, a)| e != a && !known(e))

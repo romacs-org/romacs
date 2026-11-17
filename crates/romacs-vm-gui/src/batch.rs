@@ -398,7 +398,7 @@ fn builder_args(world: &World) -> Vec<std::ffi::OsString> {
 }
 
 /// The batch chain from source: a VM on GNU batch's initial terminal
-/// frame, 80 columns by 25 lines of 1x1 characters (DIVERGENCES.md
+/// frame, 80 columns by 25 lines of 1x1 characters (ledger/divergences
 /// VM2-WIN5), through the GNU-loadup chain over DIR and its startup
 /// steps. What a session without a world boots, and what a batch world
 /// holds up to the dump point.

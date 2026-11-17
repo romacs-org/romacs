@@ -83,7 +83,7 @@ impl Attribute {
 /// A face height: absolute decipoints, or a scale of whatever it merges onto.
 ///
 /// GNU also accepts a function of the underlying height. A function is code,
-/// not data, so it cannot live in an immutable face; see GNU-DIVERGENCES.md.
+/// not data, so it cannot live in an immutable face; see ledger/divergences.
 #[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Height {
     Absolute(i64),

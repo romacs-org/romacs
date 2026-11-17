@@ -29,7 +29,7 @@ struct Tally {
     realized: usize,
     realized_from_frame: usize,
     realized_from_specs: usize,
-    /// GNU-DIVERGENCES.md "reset is resolved": GNU's Lisp `face-attribute`
+    /// ledger/divergences "reset is resolved": GNU's Lisp `face-attribute`
     /// returns the symbol `reset`, while its own C merge (and redisplay)
     /// substitutes the default face's value. romacs returns the latter.
     reset_resolved: usize,
