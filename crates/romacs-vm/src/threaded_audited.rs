@@ -62,7 +62,7 @@ impl<K> Clone for Pc<'_, K> {
 }
 impl<K> Copy for Pc<'_, K> {}
 
-/// A handler whose three byte operands are registers of its frame.
+/// A handler whose two byte operands are registers of its frame.
 pub(super) enum Bytes {}
 /// A handler whose two wide operands are registers of its frame.
 pub(super) enum Wides {}
@@ -183,10 +183,6 @@ impl Pc<'_, Bytes> {
     #[inline]
     pub(super) fn b(self) -> usize {
         self.inst().b8 as usize
-    }
-    #[inline]
-    pub(super) fn d(self) -> usize {
-        self.inst().d8 as usize
     }
 }
 

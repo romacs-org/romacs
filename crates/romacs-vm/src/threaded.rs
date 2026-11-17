@@ -2077,8 +2077,8 @@ fn lower(vm: &Vm, op: Op) -> Inst {
             i.b = b;
             i.c = code::narrow(c);
         }
-        // Their targets are `Inst::branch`, their handlers validation's.
-        Op::Jump(_) => {}
+        // A branch's target is `Inst::branch`, its handler validation's; a
+        // jump has no operand to lower.
         Op::Unless(a, _) => i.a = a,
         Op::Return(a) => {
             i.handler = ret;
