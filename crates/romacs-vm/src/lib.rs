@@ -1216,6 +1216,18 @@ enum VariableRedirect {
     /// in runtime storage (`forwarded.rs`), never in the symbol's value cell.
     Forwarded(forwarded::Fwd),
 }
+/// What a `let` of a variable bound, GNU's SPECPDL_LET kinds (eval.c
+/// `specbind`): its one value, the default of a variable that has no
+/// local in the buffer where the `let` ran, or that buffer's local.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
+pub(crate) enum Let {
+    /// SPECPDL_LET: a variable with no per-buffer values.
+    Plain,
+    /// SPECPDL_LET_DEFAULT: the default of a localized variable.
+    Default,
+    /// SPECPDL_LET_LOCAL: the owner buffer's local.
+    Local,
+}
 #[derive(romacs_snapshot::Snapshot)]
 struct Closure {
     function: usize,
@@ -1704,7 +1716,9 @@ pub struct Vm {
     keymap_filters: Vec<(Value, Value)>,
     /// The first filter that walk needed: (menu item, filter, definition).
     keymap_pending_filter: Option<(Value, Value, Value)>,
-    dynamic: Vec<(usize, Value, Value, bool)>,
+    /// The `let` bindings in effect: (variable, saved value, buffer current
+    /// when bound, kind).
+    dynamic: Vec<(usize, Value, Value, Let)>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
@@ -3621,7 +3635,7 @@ impl Vm {
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
         // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
-        let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
+        let (slot, value, owner, kind) = self.dynamic.pop().expect("compiler balances bindings");
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
@@ -3629,13 +3643,13 @@ impl Vm {
         if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
             self.tracked_unbound(cell as usize);
             self.tracked_watched(cell as usize);
-            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, kind));
         }
-        self.restore_binding(slot, base, value, owner, let_default)
+        self.restore_binding(slot, base, value, owner, kind)
     }
     /// `unbind_one`'s restore of the popped binding of SLOT (BASE its
     /// variable, when the backtrace names one) to VALUE.
-    fn restore_binding(&mut self, slot: usize, base: Option<usize>, value: Value, owner: Value, let_default: bool) -> Result<()> {
+    fn restore_binding(&mut self, slot: usize, base: Option<usize>, value: Value, owner: Value, kind: Let) -> Result<()> {
         // A local let restores the owner's current local binding, if it
         // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
         // may have been killed and made again inside the let.
@@ -3674,7 +3688,7 @@ impl Vm {
             return Ok(());
         }
         if let Some(fwd) = self.native_forwarding(slot) {
-            return self.unbind_forwarded(slot, fwd, value, owner, let_default);
+            return self.unbind_forwarded(slot, fwd, value, owner, kind);
         }
         let mut value = value;
         if let Some(base) = base && self.variable_trapped(base) {

@@ -183,11 +183,8 @@ impl Vm {
     /// variables use private slots, while forwarded buffer locals need the
     /// explicit LET_DEFAULT flag. Saved values are already traced by `dynamic`.
     pub(super) fn default_toplevel_binding(&mut self, slot: usize) -> Option<usize> {
-        let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        self.dynamic.iter().position(|(bound, _, _, let_default)| {
-            *bound == slot && (!buffer_forwarded || *let_default)
-        })
+        self.dynamic.iter().position(|&(bound, _, _, kind)| bound == slot && kind != Let::Local)
     }
 
     /// GNU eval.c:766: the oldest SPECPDL_LET_LOCAL of exactly this symbol
@@ -197,11 +194,10 @@ impl Vm {
     /// LET_DEFAULT flag.
     pub(super) fn local_toplevel_binding(&mut self, slot: usize, buffer: Value) -> Option<usize> {
         let symbol = Value::reference(slot + 1, 7);
-        let buffer_forwarded = matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_)));
         self.backtrace.bindings.iter().filter(|(_, bound)| *bound == symbol).map(|(at, _)| *at).find(|&at| {
             // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-            let (bound, _, owner, let_default) = self.dynamic[at];
-            owner == buffer && if buffer_forwarded { bound == slot && !let_default } else { bound != slot }
+            let (_, _, owner, kind) = self.dynamic[at];
+            owner == buffer && kind == Let::Local
         })
     }
 
@@ -330,8 +326,8 @@ impl Vm {
         // Assignment within a default binding belongs to that binding in
         // its originating buffer, not to a newly created local entry.
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, localized)| {
-            *localized && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
+        let shadowed = self.dynamic.iter().rev().any(|(bound, _, owner, kind)| {
+            *kind == Let::Default && *bound == slot && (*owner == buffer || (*owner == Value::NIL && self.names.get("#:vm2-buffer:*scratch*").is_some_and(|i| self.slots[*i].value == buffer)))
         });
         if !create || explicit || shadowed { return Ok(slot); }
         let local = self.allocate_local_binding_slot();
@@ -530,7 +526,10 @@ impl Vm {
         let forwarded = self.native_forwarding(base).filter(|_| local == base);
         let binding = match forwarded {
             Some(fwd) => self.forwarded_binding(base, fwd).map_err(forwarded::fault_text)?,
-            None => (local, self.slots[local].value, self.slots[self.buffer_slot].value, self.local_table(base)?.is_some()),
+            None => {
+                let kind = if local != base { Let::Local } else if self.local_table(base)?.is_some() { Let::Default } else { Let::Plain };
+                (local, self.slots[local].value, self.slots[self.buffer_slot].value, kind)
+            }
         };
         if base != self.buffer_slot {
             self.backtrace.bind(self.dynamic.len(), Value::reference(base + 1, 7));
@@ -542,7 +541,7 @@ impl Vm {
         if self.variable_trapped(base) {
             // The value is rooted across its watchers and read back.
             let frame = self.root_frame(&[value]);
-            let notified = if matches!(forwarded, Some(forwarded::Fwd::Buffer(_))) && binding.3 {
+            let notified = if matches!(forwarded, Some(forwarded::Fwd::Buffer(_))) && binding.3 == Let::Default {
                 self.notify_watchers_at(base, value, "set", Some(Value::NIL))
             } else {
                 self.notify_watchers(base, value, "let")

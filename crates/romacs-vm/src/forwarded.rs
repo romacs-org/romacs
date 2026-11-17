@@ -1678,7 +1678,7 @@ impl Vm {
     /// while BUFFER was current is in effect.
     fn let_shadows_buffer_binding(&self, slot: usize, buffer: Value) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        self.dynamic.iter().any(|&(bound, _, owner, let_default)| bound == slot && let_default && owner == buffer)
+        self.dynamic.iter().any(|&(bound, _, owner, kind)| bound == slot && kind == Let::Default && owner == buffer)
     }
     /// GNU `set_internal` (data.c:1806): setting per-buffer variable I with
     /// no local value in BUFFER, within a `let' of its default made there,
@@ -1727,7 +1727,7 @@ impl Vm {
     /// binding it records, (SLOT OLD OWNER LET-DEFAULT). A per-buffer
     /// variable with no local value here, or a localized Boolean, binds its
     /// default (SPECPDL_LET_DEFAULT).
-    pub(super) fn forwarded_binding(&mut self, slot: usize, fwd: Fwd) -> std::result::Result<(usize, Value, Value, bool), Fault> {
+    pub(super) fn forwarded_binding(&mut self, slot: usize, fwd: Fwd) -> std::result::Result<(usize, Value, Value, Let), Fault> {
         let old = self.forwarded_value(fwd).map_err(Fault::Error)?;
         let owner = self.slots[self.buffer_slot].value;
         // Only a per-buffer variable needs the current buffer; binding any
@@ -1739,13 +1739,14 @@ impl Vm {
             }
             _ => false,
         };
-        Ok((slot, old, owner, let_default))
+        let kind = if let_default { Let::Default } else if matches!(fwd, Fwd::Buffer(_)) { Let::Local } else { Let::Plain };
+        Ok((slot, old, owner, kind))
     }
     /// GNU `do_specbind`'s store for a forwarded SLOT, once its binding is
     /// recorded: a failed store leaves that binding to restore OLD.
-    pub(super) fn store_forwarded_binding(&mut self, slot: usize, fwd: Fwd, value: Value, let_default: bool) -> std::result::Result<(), Fault> {
+    pub(super) fn store_forwarded_binding(&mut self, slot: usize, fwd: Fwd, value: Value, kind: Let) -> std::result::Result<(), Fault> {
         let value = match self.localized_forwarded(slot) { Some(localized) => Self::localized_value(localized, value)?, None => value };
-        if let_default {
+        if kind == Let::Default {
             self.set_forwarded_default(slot, fwd, value, SetFlag::Bind)
         } else {
             self.set_forwarded(slot, fwd, value, SetFlag::Bind)
@@ -1759,7 +1760,8 @@ impl Vm {
     /// OWNER still has its local value. A watcher's signal leaves the value
     /// unrestored, as does a saved integer that set-default-toplevel-value
     /// replaced with a non-integer, which signals once the watchers ran.
-    pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, let_default: bool) -> Result<()> {
+    pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, kind: Let) -> Result<()> {
+        let let_default = kind == Let::Default;
         let mut local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         if let Fwd::Buffer(i) = fwd && !let_default && !local.is_some_and(|buffer| self.per_buffer_local_p(buffer, i)) {
             return Ok(());

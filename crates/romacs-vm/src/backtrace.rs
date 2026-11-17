@@ -316,7 +316,8 @@ impl Vm {
     }
     fn backtrace_binding_live(&mut self, at: usize, symbol: Value) -> Result<bool> {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, owner, default) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.dynamic[at];
+        let default = kind == Let::Default;
         if let Some((base, owner)) = self.backtrace_boolean_local(at) {
             return Ok(self.live_buffer_value(owner) && self.declaration_hash_get(self.slots[base].local, owner)?.is_some());
         }
@@ -342,7 +343,8 @@ impl Vm {
     /// the default and whose local it is.
     fn backtrace_shadow_key(&self, at: usize) -> (usize, bool, u64) {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let (slot, _, owner, default) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.dynamic[at];
+        let default = kind == Let::Default;
         let fwd = self.localized_forwarded(slot).or_else(|| self.forwarding_ref(slot));
         match fwd {
             Some(forwarded::Fwd::Buffer(_)) => (slot, default, if default { Value::NIL.0 } else { owner.0 }),
@@ -379,7 +381,8 @@ impl Vm {
     fn backtrace_binding_value(&mut self, at: usize, successor: Option<usize>) -> Result<Value> {
         // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
         // let's own, never the root's
-        let (slot, _, owner, default) = self.dynamic[at];
+        let (slot, _, owner, kind) = self.dynamic[at];
+        let default = kind == Let::Default;
         if let Some((base, owner)) = self.backtrace_boolean_local(at) {
             // HOST(dynamic:saved): reads a later binding's saved value, the value of binding AT: a
             // let's own, never the root's
@@ -570,7 +573,8 @@ impl Vm {
     fn backtrace_swap_binding(&mut self, at: usize) -> Result<()> {
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
         // (eval.c specpdl_unrewind); not done while a world is built, so no tracking sees it
-        let (slot, saved, owner, default) = self.dynamic[at];
+        let (slot, saved, owner, kind) = self.dynamic[at];
+        let default = kind == Let::Default;
         let symbol = self.backtrace.binding_symbol(at);
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
         let present = match base {
@@ -593,7 +597,7 @@ impl Vm {
             _ => self.backtrace_live_value(slot, owner, default)?,
         };
         let frame = self.root_frame(&[current]);
-        let restored = self.restore_binding(slot, base, saved, owner, default);
+        let restored = self.restore_binding(slot, base, saved, owner, kind);
         let [current] = self.release_frame(frame);
         restored?;
         // HOST(dynamic:saved): backtrace-eval's unrewind swaps the saved value with the current one
@@ -610,7 +614,7 @@ impl Vm {
         let slot = nothing.index_if(7).expect("inert binding symbol") - 1;
         // HOST(dynamic:saved): backtrace-eval's unrewind makes a binding whose buffer lost its
         // local inert (eval.c SPECPDL_NOP); not done while a world is built, so no tracking sees it
-        self.dynamic[at] = (slot, Value::NIL, Value::NIL, false);
+        self.dynamic[at] = (slot, Value::NIL, Value::NIL, Let::Plain);
         if let Ok(i) = self.backtrace.bindings.binary_search_by_key(&at, |(depth, _)| *depth) {
             self.backtrace.bindings[i].1 = nothing;
         }
