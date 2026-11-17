@@ -663,7 +663,9 @@ fn line_fields(text: &str) -> Option<(i64, Option<f64>, Option<String>)> {
         || !rest[kind.len()..].starts_with("\":") {
         return None;
     }
-    let tail = &text[text.len().saturating_sub(80)..];
+    // From a character's start: a byte 80 from the end may be inside one.
+    let start = (text.len().saturating_sub(80)..text.len()).find(|&i| text.is_char_boundary(i))?;
+    let tail = &text[start..];
     let at = tail.rfind(",\"seq\":")?;
     let fields = tail[at + 7..].strip_suffix('}')?;
     let (seq, time) = fields.split_once(",\"t\":")?;
@@ -803,6 +805,15 @@ mod tests {
     fn a_line_of_megabytes_is_read_from_its_ends() {
         let line = format!("{{\"out\":{{\"text\":\"{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(4_000_000));
         assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))));
+    }
+
+    #[test]
+    fn a_character_across_the_tails_start_is_read_past() {
+        // Each offset of a three-byte character around 80 bytes from the end.
+        for pad in 0..4 {
+            let line = format!("{{\"out\":{{\"text\":\"{}€{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(40), "b".repeat(56 + pad));
+            assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))), "{line}");
+        }
     }
 
     #[test]
