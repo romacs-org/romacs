@@ -768,7 +768,7 @@ pub fn adopt(file: &std::fs::File) -> Restore {
     if IMAGE_ARENA.get().is_some() {
         return refuse(2, 0, false);
     }
-    let outcome = map_image_fd(file.as_fd());
+    let Some(outcome) = map_image_fd(file.as_fd()) else { return refuse(2, 0, false) };
     RESTORE.store(outcome as u8, Ordering::Release);
     outcome
 }
@@ -792,15 +792,17 @@ pub fn map_failure() -> Option<(&'static str, i32, bool)> {
 }
 
 
-fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
+/// FD's image mapped where it was made, as `adopt` says; None when another
+/// thread adopted one first, whose outcome stays said.
+fn map_image_fd(fd: BorrowedFd<'_>) -> Option<Restore> {
     let mut bytes = [0u8; size_of::<Header>()];
     let read = rustix::io::pread(fd, &mut bytes, 0);
     // HOST(rustix::file): the world allocator checks an image is whole before it adopts it; the
     // launcher checked that image
     let stat = rustix::fs::fstat(fd);
-    let (Ok(read), Ok(stat)) = (read, stat) else { return Restore::Unreadable };
+    let (Ok(read), Ok(stat)) = (read, stat) else { return Some(Restore::Unreadable) };
     if read != bytes.len() {
-        return Restore::Unreadable;
+        return Some(Restore::Unreadable);
     }
     let image: Header = bytemuck::pod_read_unaligned(&bytes);
     let (base, len) = (image.base, image.image.len);
@@ -808,12 +810,19 @@ fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     if image.magic != MAGIC || len == 0 || len % PAGE != 0 || stat.st_size as usize != len
         || base % ALIGN != 0 || base < WINDOW.0 || base.saturating_add(len) > WINDOW.1 || !(base..=base + len).contains(&image.top)
     {
-        return Restore::Format;
+        return Some(Restore::Format);
     }
     let reserve = match reserve() {
         Some(reserve) if len < reserve && base + reserve <= WINDOW.1 => reserve,
-        _ => return refuse(3, 0, false),
+        _ => return Some(refuse(3, 0, false)),
     };
+    // From here to publication under the lock: a thread adopting at the
+    // same time finds the image published, never a placement that
+    // replaces it. Nothing below allocates.
+    let mut locked = Locked::take();
+    if IMAGE_ARENA.get().is_some() {
+        return None;
+    }
     // Over the reservation, unless the range reaches this process's first
     // arena (an image made under another address-space limit could): then
     // only where nothing is, which refuses it (`map::place`). What a
@@ -822,19 +831,18 @@ fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     let place = map::place(base, reserve);
     let mapped = match map::map(&place, base, len, &map::Of::File { fd, shared: false }) {
         Ok(mapped) => mapped,
-        Err(refused) => return refuse(4, refused.errno, refused.over_reservation),
+        Err(refused) => return Some(refuse(4, refused.errno, refused.over_reservation)),
     };
     match map::map(&place, base + len, reserve - len, &map::Of::Memory) {
         Ok(rest) => rest.keep(),
         Err(refused) => {
             mapped.undo();
-            return refuse(5, refused.errno, refused.over_reservation);
+            return Some(refuse(5, refused.errno, refused.over_reservation));
         }
     }
     // The kernel reads the file ahead while the process starts.
     mapped.will_need();
     mapped.keep();
-    let mut locked = Locked::take();
     IMAGE_ARENA.publish(base, reserve);
     if let Some(mut heap) = locked.heap(&IMAGE_ARENA) {
         // This process's reservation, not the builder's.
@@ -844,7 +852,7 @@ fn map_image_fd(fd: BorrowedFd<'_>) -> Restore {
     drop(locked);
     GUARD.store(guard_executable(image.image.executable) as u8, Ordering::Release);
     start_heap_file(reserve);
-    Restore::Mapped
+    Some(Restore::Mapped)
 }
 
 /// With `ROMACS_HEAP_FILE=1`, start the file heap, LEN bytes as an arena
