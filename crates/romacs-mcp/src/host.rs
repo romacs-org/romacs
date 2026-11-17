@@ -150,15 +150,33 @@ impl Store {
             }
             Some(database) => {
                 let session = dir.file_name().and_then(|n| n.to_str()).ok_or("--dir names no session")?.to_owned();
-                let db = rusqlite::Connection::open(database).map_err(|e| format!("{}: {e}", database.display()))?;
-                db.busy_timeout(std::time::Duration::from_millis(200)).map_err(|e| e.to_string())?;
-                db.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
-                db.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
-                // As lisp/agents/romacs-agent-events.el makes them.
-                db.execute_batch(EVENTS_SCHEMA).map_err(|e| e.to_string())?;
-                Ok(Store::Sqlite { db, session })
+                // Its lock held by another (the writer making the store, a
+                // migration's transaction) is waited out, as a record's
+                // write is: a host that gave up here would leave its
+                // session unrun.
+                loop {
+                    match Self::open_sqlite(database) {
+                        Ok(db) => return Ok(Store::Sqlite { db, session }),
+                        Err(rusqlite::Error::SqliteFailure(error, _))
+                            if matches!(error.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) =>
+                        {
+                            std::thread::sleep(STORE_RETRY)
+                        }
+                        Err(error) => return Err(format!("{}: {error}", database.display())),
+                    }
+                }
             }
         }
+    }
+
+    fn open_sqlite(database: &Path) -> rusqlite::Result<rusqlite::Connection> {
+        let db = rusqlite::Connection::open(database)?;
+        db.busy_timeout(std::time::Duration::from_millis(200))?;
+        db.pragma_update(None, "journal_mode", "WAL")?;
+        db.pragma_update(None, "synchronous", "NORMAL")?;
+        // As lisp/agents/romacs-agent-events.el makes them.
+        db.execute_batch(EVENTS_SCHEMA)?;
+        Ok(db)
     }
 
     /// Keep record TEXT, its seq SEQ; on disk before this returns when SYNC.
@@ -806,6 +824,32 @@ mod tests {
             .prepare("select kind from events order by seq").unwrap()
             .query_map([], |row| row.get(0)).unwrap().map_while(Result::ok).collect();
         assert_eq!(kinds, ["out", "out"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_store_another_holds_is_opened_once_it_is_let_go() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-held-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000003");
+        std::fs::create_dir_all(&session).unwrap();
+        let database = dir.join("sessions.sqlite");
+        // Another connection makes the store and holds its lock past a
+        // connection's wait, as the writer making it does.
+        let (held, holding) = std::sync::mpsc::channel();
+        let holder = { let database = database.clone(); std::thread::spawn(move || {
+            let db = rusqlite::Connection::open(&database).unwrap();
+            db.pragma_update(None, "journal_mode", "WAL").unwrap();
+            db.execute_batch("begin immediate; create table first (x);").unwrap();
+            held.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            db.execute_batch("commit").unwrap();
+        }) };
+        holding.recv().unwrap();
+        let started = std::time::Instant::now();
+        let store = Store::open(&session, Some(&database));
+        assert!(store.is_ok(), "{:?}", store.err());
+        assert!(started.elapsed() >= std::time::Duration::from_millis(400));
+        holder.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

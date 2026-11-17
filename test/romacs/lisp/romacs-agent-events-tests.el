@@ -610,3 +610,33 @@ turns, and its journal's file; a state root of its own."
          (should (equal (caar (sqlite-select (romacs-agent-events--db) "pragma auto_vacuum")) 2))))))
 
 ;;; romacs-agent-events-tests.el ends here
+
+(ert-deftest romacs-agent-events-a-session-started-before-the-store-goes-to-it ()
+  ;; In the editor, the store not made yet (the writer makes it as the
+  ;; editor starts): a new session's records go to it all the same, not to
+  ;; a journal no store-drawn chat shows while it runs.
+  (let* ((root (make-temp-file "romacs-first-" t))
+         (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-events-store t)
+         (romacs-agent-events--imported (make-hash-table :test #'equal))
+         (romacs-agent-writer-queued t) (asked nil) (done nil)
+         (session (romacs-agent--make :id "first" :dir (expand-file-name "first" root))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-write)
+                   (lambda (function args &optional then &rest _) (push (cons function args) asked) (setq done then)))
+                  ((symbol-function 'romacs-agent-store--make-soon) #'ignore))
+          (make-directory (romacs-agent-dir session) t)
+          (should-not (romacs-agent-events--db))
+          ;; Its launch waits for the writer to make the store and mark it:
+          ;; nothing reads its records here before they can be read.
+          (let ((launched nil) (romacs-agent-events--waiting (make-hash-table :test #'equal))
+                (romacs-agent-events--importing (make-hash-table :test #'equal)))
+            (romacs-agent-events-then session (lambda () (setq launched t)))
+            (should-not launched)
+            (should-not (romacs-agent-events-p session))
+            (pcase-let ((`(,function . ,args) (car asked)))
+              (should (equal (cons function args) '(romacs-agent-events--mark "first"))))
+            (funcall done '(ok t))
+            (should launched)
+            (should (romacs-agent-events-p session))))
+      (delete-directory root t))))
