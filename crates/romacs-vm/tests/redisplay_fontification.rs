@@ -145,7 +145,7 @@ fn collections_during_fontification_keep_the_snapshot_intact() {
 
 /// GNU calls a function that leaves `fontified' nil at every iterator stop
 /// (property boundaries, at most 100 characters apart); Romacs once per nil
-/// stretch and full redisplay (DIVERGENCES.md VM2-FONTIFY1). Either way it
+/// stretch and full redisplay (ledger/divergences VM2-FONTIFY1). Either way it
 /// ends. A redisplay of a window nothing changed in walks no text, in
 /// either (VM2-REDISPLAY2); `force-window-update' asks for a full one.
 #[test]

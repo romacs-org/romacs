@@ -18,7 +18,7 @@
 ;; deactivating a map is its caller's.  A menu whose buffer has keys of
 ;; its own takes them while it shows (`romacs-popup-take-keys').  The Lisp APIs
 ;; packages call stay GNU's; only where and how a menu shows is Romacs's
-;; (DIVERGENCES.md VM2-MENU-LAYERS).  `romacs-popup-key-grid' lays out
+;; (ledger/divergences VM2-MENU-LAYERS).  `romacs-popup-key-grid' lays out
 ;; groups of keys for a panel.
 
 ;;; Code:

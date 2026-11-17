@@ -14,7 +14,7 @@
 ;; Where the font is not there (`--batch', a stripped install) or
 ;; `romacs-icons-source' is `text', `romacs-icon' gives the icon's
 ;; Unicode symbol instead, and with `romacs-icons-ascii' its ASCII
-;; character.  DIVERGENCES.md VM2-MODE-LINE.
+;; character.  ledger/divergences VM2-MODE-LINE.
 
 ;;; Code:
 

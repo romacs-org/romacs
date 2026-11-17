@@ -12,7 +12,7 @@
 ;; grammars Romacs ships, backups and auto-saves kept out of the
 ;; directories being edited, VC logs of the whole history, which
 ;; C-g stops while they arrive, and secrets from the password store.
-;; `romacs-defaults-settings' lists them.  DIVERGENCES.md VM2-OOB-DEFAULTS.
+;; `romacs-defaults-settings' lists them.  ledger/divergences VM2-OOB-DEFAULTS.
 ;;
 ;; One switch, `romacs-defaults-mode', turns them all on or off.  An
 ;; interactive --loadup session turns it on before the user's init

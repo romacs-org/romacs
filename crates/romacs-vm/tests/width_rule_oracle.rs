@@ -17,7 +17,7 @@ use gnu_lisp::gnu_lisp;
 /// strings (GNU prints the others as its internal bytes).
 const SETUP: &str = r#"(progn
  ;; No automatic composition: GNU measures a composed cluster as its
- ;; shaping draws it, which the width rule does not (DIVERGENCES.md
+ ;; shaping draws it, which the width rule does not (ledger/divergences
  ;; VM2-STRING-WIDTH-COMPOSITION).
  (setq composition-function-table (make-char-table nil))
  (defun wr-runs (from to width)

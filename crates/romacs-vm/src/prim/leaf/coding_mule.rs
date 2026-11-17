@@ -3,7 +3,7 @@
 //! encode_coding_iso_2022), emacs-mule (decode_coding_emacs_mule,
 //! encode_coding_emacs_mule), and the SJIS and Big5 encoders. Line ends
 //! are converted around them by the owner, as GNU's decode_eol and
-//! consume_chars do. Composition sequences signal (DIVERGENCES.md
+//! consume_chars do. Composition sequences signal (ledger/divergences
 //! VM2-CODING-COMPOSITION).
 use super::*;
 use super::coding::CodingToken;

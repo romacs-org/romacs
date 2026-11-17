@@ -1,7 +1,7 @@
 //! GNU ccl.c's program registry: `register-ccl-program' (ccl.c:2245) with
 //! resolve_symbol_ccl_program (ccl.c:1885). Programs register as GNU
 //! records them; running them (`ccl-execute', `ccl-execute-on-string') is
-//! not implemented (DIVERGENCES.md VM2-CCL1).
+//! not implemented (ledger/divergences VM2-CCL1).
 use super::*;
 use crate::prim::leaf::Kind;
 

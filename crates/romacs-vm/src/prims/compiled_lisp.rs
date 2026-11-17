@@ -1,6 +1,6 @@
 //! Background compiles of compiled Lisp (`crate::compiled_lisp`), the
 //! switch lisp/session/romacs-precompile.el turns. Not in GNU, whose `.elc` files
-//! an installation compiles ahead (DIVERGENCES.md VM2-LOADPRECOMPILE).
+//! an installation compiles ahead (ledger/divergences VM2-LOADPRECOMPILE).
 use super::*;
 
 // (romacs--compiled-lisp-background ON DELAY): with ON, compile in the

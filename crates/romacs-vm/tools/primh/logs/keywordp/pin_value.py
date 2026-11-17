@@ -8,7 +8,7 @@ empty name, so both answer (ok ). Neither row calls keywordp: the printer
 family only prints the catalog value. keywordp of both values agrees with GNU
 (rows keywordp/0026 and /0027, nil). The difference predates this port (the
 23deaa2a binary gives the same two VALUE rows, fresh-red.json).
-DIVERGENCES.md VM2-EMPTYSYM1.
+ledger/divergences VM2-EMPTYSYM1.
 Only the pinned map is edited; no hash or recorded expectation is touched.
 """
 import json, sys

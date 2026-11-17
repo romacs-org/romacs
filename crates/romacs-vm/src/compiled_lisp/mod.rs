@@ -5,7 +5,7 @@
 //! semantics (`Vm::load_artifact`). That is every such load, not only
 //! those GNU would satisfy with compiled code: a user's packages and the
 //! libraries on `load-path` are compiled as package.el compiles a package
-//! it installs (DIVERGENCES VM2-LOADCOMPILED). A `load` that names the
+//! it installs (ledger/divergences VM2-LOADCOMPILED). A `load` that names the
 //! `.el` reads source, as GNU's does.
 //!
 //! A compile process is a batch session over the base world that walks

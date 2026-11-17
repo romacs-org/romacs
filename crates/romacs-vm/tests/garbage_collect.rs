@@ -58,7 +58,7 @@ fn garbage_collect_forwards_live_call_state() {
 }
 
 /// GNU's inhibited `garbage-collect' returns nil (alloc.c:6044). Romacs
-/// inhibits where a native frame holds untraced Values (DIVERGENCES
+/// inhibits where a native frame holds untraced Values (ledger/divergences
 /// VM2-GC-INHIBITED): a watcher a primitive's write runs, and macro
 /// expansion inside an open compiler builder. A pacing floor does not
 /// inhibit an explicit collection.

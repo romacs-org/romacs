@@ -28,7 +28,7 @@
 ;; buffer is snapshotted again once the session idles.  Property values
 ;; that are not plain data (keymaps, functions, nested lists) are not
 ;; sent: such a run stays a hole the session fontifies itself.
-;; DIVERGENCES.md VM2-FONTIFY-ISOLATE.
+;; ledger/divergences VM2-FONTIFY-ISOLATE.
 
 ;;; Code:
 
@@ -81,7 +81,7 @@ fingerprint was last found to match.")
 ;;;; The job, run in the worker
 
 ;; A lambda form, not a symbol: the worker's world does not hold this
-;; module (DIVERGENCES.md VM2-ISOLATE-GLOBALS).
+;; module (ledger/divergences VM2-ISOLATE-GLOBALS).
 
 (defconst romacs-fontify--fingerprint
   '(lambda ()

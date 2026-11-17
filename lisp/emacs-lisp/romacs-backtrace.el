@@ -9,7 +9,7 @@
 ;; the list with `nth', quadratic in the stack's depth; every *Backtrace*
 ;; buffer is built through it.  This one takes every frame with its locals
 ;; from one walk (`backtrace--frames-and-locals'), and keeps GNU's
-;; constructor protocol and eval-buffer positions (DIVERGENCES DBG-GET-FRAMES).
+;; constructor protocol and eval-buffer positions (ledger/divergences DBG-GET-FRAMES).
 
 ;;; Code:
 

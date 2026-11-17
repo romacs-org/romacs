@@ -3,7 +3,7 @@
 //! `treesit-enabled-modes' t and fontified at GNU's default
 //! `treesit-font-lock-level' give the face runs pinned GNU gives with the
 //! same grammars (fixtures/treesit-faces/*.faces), with the grammars this
-//! executable ships (DIVERGENCES.md VM2-TREESIT-BUNDLED).
+//! executable ships (ledger/divergences VM2-TREESIT-BUNDLED).
 //!
 //! The expected runs are pinned GNU's: build the shipped grammars as
 //! libraries with `tools/lib/treesit_grammars.py so --out DIR`, then for each

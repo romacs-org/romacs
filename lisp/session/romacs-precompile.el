@@ -18,7 +18,7 @@
 ;; the session has been idle `romacs-precompile-idle-delay' seconds.  It
 ;; never touches the Lisp heap, and the session does no work for it
 ;; between keys or while idle.  This file is its switch.  Not in GNU
-;; (DIVERGENCES.md VM2-LOADPRECOMPILE).
+;; (ledger/divergences VM2-LOADPRECOMPILE).
 
 ;;; Code:
 

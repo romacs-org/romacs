@@ -297,7 +297,7 @@ CALL_INTERACTIVELY = [
     "(progn (defalias 'use-region-p (lambda () t)) " + ci("a", "\"R\"") + ")",
     # The minibuffer/keyboard-reading codes (a b B c C D f F G k K M n N s S
     # v x X z Z) block on input in a batch GNU, so they cannot be recorded
-    # here; VM2 signals for them (DIVERGENCES VM2-CALLINT1). A `%' in a prompt
+    # here; VM2 signals for them (ledger/divergences VM2-CALLINT1). A `%' in a prompt
     # needs format-message, which VM2 lacks.
     ci("a", "\"pP%s\""),
     # List specs: evaluated, in the closure's lexical environment.

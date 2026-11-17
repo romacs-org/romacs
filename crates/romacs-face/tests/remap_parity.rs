@@ -88,7 +88,7 @@ fn remapping_and_anonymous_faces_match_gnu() {
         let gnu = gnu_specified(&case[4]);
         let ours = ours(case);
         match name {
-            // GNU-DIVERGENCES.md "anonymous plist attributes win over :inherit":
+            // ledger/divergences "anonymous plist attributes win over :inherit":
             // GNU merges :inherit where it appears, so an earlier attribute loses.
             "anonymous-attribute-before-inherit" => {
                 assert_eq!(gnu, vec![(Attribute::Foreground, (*d("\"blue\"")).clone())]);

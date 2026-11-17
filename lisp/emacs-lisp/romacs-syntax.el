@@ -7,7 +7,7 @@
 
 ;; A long `parse-partial-sexp' composes kept summaries of the text instead
 ;; of reading all of it (crates/romacs-vm/src/syntax_index.rs,
-;; DIVERGENCES.md VM2-SYNTAX-SUMMARIES).  `syntax-ppss' is syntax.el's: its
+;; ledger/divergences VM2-SYNTAX-SUMMARIES).  `syntax-ppss' is syntax.el's: its
 ;; long parses from the states it caches are the ones served.
 
 ;;; Code:

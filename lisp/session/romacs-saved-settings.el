@@ -11,7 +11,7 @@
 ;; variable says, and the two commands write the file it answers.
 ;; `romacs-saved-settings-start' loads that file after Romacs's defaults and before
 ;; the init, so a saved value replaces a default and the init has the last
-;; word.  DIVERGENCES.md VM2-CUSTOM-LOAD, VM2-CUSTOM-FILE-GUARD and
+;; word.  ledger/divergences VM2-CUSTOM-LOAD, VM2-CUSTOM-FILE-GUARD and
 ;; VM2-NOVICE-CUSTOM-FILE.
 ;;
 ;; This file only defines.  The loadup chain holds it, so a batch program

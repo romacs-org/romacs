@@ -1,5 +1,5 @@
 //! The tree-sitter grammars this executable ships (crates/romacs-grammars,
-//! DIVERGENCES.md VM2-TREESIT-BUNDLED), registered for every VM it runs.
+//! ledger/divergences VM2-TREESIT-BUNDLED), registered for every VM it runs.
 
 /// Register the bundled grammars with the VM's grammar loader, once per
 /// process, before the first VM loads a language.

@@ -1,4 +1,4 @@
-//! Romacs Icons, the mode line's icon font (DIVERGENCES.md VM2-MODE-LINE),
+//! Romacs Icons, the mode line's icon font (ledger/divergences VM2-MODE-LINE),
 //! as build.rs builds it from assets/icons: one glyph a drawing, each one
 //! text column wide, at the codepoints assets/icons/codepoints.txt gives.
 

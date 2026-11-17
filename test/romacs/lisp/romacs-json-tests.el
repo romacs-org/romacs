@@ -205,7 +205,7 @@ json.el's own."
     (should-not called)))
 
 (ert-deftest romacs-json-read-keeps-its-recorded-differences ()
-  "The differences DIVERGENCES LISP-JSON-READ records, as they are.
+  "The differences ledger/divergences LISP-JSON-READ records, as they are.
 A value the native parser reads leaves the match data as they were,
 where json.el's reader leaves its own; a key interned before the native
 parser refuses the document stays interned, where json.el's reader
