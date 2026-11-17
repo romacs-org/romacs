@@ -185,6 +185,27 @@ impl Slot {
     fn holds(&self, at: usize) -> bool {
         self.get().is_some_and(|(base, reserve)| (base..base + reserve).contains(&at))
     }
+
+    /// The published arena, as a `Published` a lock may view.
+    #[inline]
+    fn published(&self) -> Option<Published> {
+        self.get().map(|(base, reserve)| Published { base, reserve })
+    }
+}
+
+/// An arena a slot published: BASE and RESERVE as `Slot::published`
+/// read them, so a viewer of it (`Locked::heap`) need not read them again.
+#[derive(Clone, Copy)]
+struct Published {
+    base: usize,
+    reserve: usize,
+}
+
+impl Published {
+    #[inline]
+    fn holds(self, at: usize) -> bool {
+        (self.base..self.base + self.reserve).contains(&at)
+    }
 }
 
 /// The process's first arena, once it started.
@@ -193,10 +214,11 @@ static FIRST_ARENA: Slot = Slot::new();
 /// from then on, in place of the first.
 static IMAGE_ARENA: Slot = Slot::new();
 
-/// The arena allocations come from: the image, once one is adopted.
+/// The arena allocations come from, once one is published: the image,
+/// once one is adopted.
 #[inline]
-fn current() -> &'static Slot {
-    if IMAGE_ARENA.get().is_some() { &IMAGE_ARENA } else { &FIRST_ARENA }
+fn current_arena() -> Option<Published> {
+    IMAGE_ARENA.published().or_else(|| FIRST_ARENA.published())
 }
 /// A builder's arena is a shared mapping of this unlinked file, and an
 /// image is copied from the file (`write_image`); unset elsewhere.
@@ -235,19 +257,25 @@ impl Locked {
         Locked(())
     }
 
-    /// The arena SLOT holds, once published: its header and the words of
-    /// its blocks, for as long as this borrow of the lock lasts.
+    /// The arena SLOT holds, once published (`view`).
     #[inline]
     fn heap(&mut self, slot: &Slot) -> Option<Heap<'_>> {
-        let (base, reserve) = slot.get()?;
+        slot.published().map(|arena| self.view(arena))
+    }
+
+    /// ARENA's header and the words of its blocks, for as long as this
+    /// borrow of the lock lasts.
+    #[inline]
+    fn view(&mut self, arena: Published) -> Heap<'_> {
         // UNSAFE(an arena is memory this module maps at an address it chooses; no type owns it)
         // SAFETY: a slot publishes only an arena mapped read-write for
         // RESERVE bytes from BASE, which stays mapped for the process's life,
         // with its header at BASE, initialized when it started or by the
-        // image it maps. The lock, which SELF holds and lends only through
-        // this borrow, makes this the header's one reference.
-        let header = unsafe { &mut *(base as *mut Header) };
-        Some(Heap { header, start: base, span: reserve })
+        // image it maps; `Published` is made only from a slot. The lock,
+        // which SELF holds and lends only through this borrow, makes this
+        // the header's one reference.
+        let header = unsafe { &mut *(arena.base as *mut Header) };
+        Heap { header, start: arena.base, span: arena.reserve }
     }
 }
 
@@ -587,8 +615,8 @@ fn give_small(heap: &mut Heap<'_>, at: usize, class: usize) {
 
 /// The arena AT is in, or None for a block outside the arenas.
 #[inline]
-fn owner(at: *mut u8) -> Option<&'static Slot> {
-    [&IMAGE_ARENA, &FIRST_ARENA].into_iter().find(|slot| slot.holds(at as usize))
+fn owner(at: *mut u8) -> Option<Published> {
+    [&IMAGE_ARENA, &FIRST_ARENA].into_iter().filter_map(Slot::published).find(|arena| arena.holds(at as usize))
 }
 
 fn state() -> u8 {
@@ -952,7 +980,7 @@ fn started() -> bool {
 /// The range the arena's allocations come from: where it starts and how
 /// much address space it holds. None when the heap is the system's.
 pub fn current_range() -> Option<(usize, usize)> {
-    if active() { current().get() } else { None }
+    if active() { current_arena().map(|arena| (arena.base, arena.reserve)) } else { None }
 }
 
 /// Where the arena's bytes are: the span handed out from its start
@@ -1207,7 +1235,8 @@ fn copy_range(from: BorrowedFd<'_>, to: BorrowedFd<'_>, start: u64, end: u64) ->
 #[expect(clippy::inline_always, reason = "MEASURE")]
 fn allocate(layout: Layout) -> (usize, usize) {
     let mut locked = Locked::take();
-    let Some(mut heap) = locked.heap(current()) else { return (0, 0) };
+    let Some(arena) = current_arena() else { return (0, 0) };
+    let mut heap = locked.view(arena);
     let zero = heap.zero;
     let at = match class_of(layout.size(), layout.align()) {
         Some(class) => take_small(&mut heap, class),
@@ -1220,9 +1249,9 @@ fn allocate(layout: Layout) -> (usize, usize) {
 /// Give the block at AT, of LAYOUT, back to ARENA, the arena it lies in.
 #[inline(always)]
 #[expect(clippy::inline_always, reason = "MEASURE")]
-fn free(arena: &Slot, at: usize, layout: Layout) {
+fn free(arena: Published, at: usize, layout: Layout) {
     let mut locked = Locked::take();
-    let Some(mut heap) = locked.heap(arena) else { return };
+    let mut heap = locked.view(arena);
     match class_of(layout.size(), layout.align()) {
         Some(class) => give_small(&mut heap, at, class),
         None => give_pages(&mut heap, at, pages(layout.size())),
@@ -1231,9 +1260,9 @@ fn free(arena: &Slot, at: usize, layout: Layout) {
 
 /// Resize the page run at AT, of OLD pages, in ARENA to NEW pages where it
 /// lies: shrunk in place, or grown at the top. Whether it was.
-fn resize_run(arena: &Slot, at: usize, old: usize, new: usize) -> bool {
+fn resize_run(arena: Published, at: usize, old: usize, new: usize) -> bool {
     let mut locked = Locked::take();
-    let Some(mut heap) = locked.heap(arena) else { return false };
+    let mut heap = locked.view(arena);
     if new <= old {
         if new < old {
             give_pages(&mut heap, at + new * PAGE, old - new);
