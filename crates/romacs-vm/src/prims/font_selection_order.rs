@@ -1,4 +1,4 @@
-//! GNU xfaces.c font-sort state; scoring limitations live in DIVERGENCES.md.
+//! GNU xfaces.c font-sort state; scoring limitations live in ledger/divergences.
 use super::*;
 use romacs_layout_input::FontSelectionAttribute as A;
 

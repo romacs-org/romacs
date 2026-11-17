@@ -38,7 +38,7 @@
 //!    are what GNU's build writes into each `subdirs.el` ([`update_subdirs`],
 //!    a port of `build-aux/update-subdirs`, applied where `lisp/Makefile.in`
 //!    applies it), spliced exactly as `normal-top-level-add-to-load-path`
-//!    (startup.el:472) splices them. DIVERGENCES.md VM2-LP1 says why this is
+//!    (startup.el:472) splices them. ledger/divergences VM2-LP1 says why this is
 //!    Rust rather than GNU's own Lisp.
 //!
 //! Load sites are found in loadup.el's text by [`load_sites`]: an open paren,

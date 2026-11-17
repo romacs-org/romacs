@@ -1,4 +1,4 @@
-//! The VM's window system (romacs_vm::DisplayHost, DIVERGENCES.md
+//! The VM's window system (romacs_vm::DisplayHost, ledger/divergences
 //! VM2-WIN5 and VM2-FONT1): frames on the GUI's display are GNU pgtk's,
 //! and the fonts Lisp lists, opens and asks about are the ones painting
 //! draws with. A character's font is resolved as layout resolves it: the
@@ -7,7 +7,7 @@ use romacs_font::{FontRequest, FontResolver, entity};
 use romacs_vm::{FontEntity, FontQuery, OpenedFont};
 use std::collections::HashMap;
 
-/// The fonts Romacs ships (assets/fonts, DIVERGENCES.md VM2-FONT-BUNDLED),
+/// The fonts Romacs ships (assets/fonts, ledger/divergences VM2-FONT-BUNDLED),
 /// in the runtime tree: an installation's share/romacs, or the checkout
 /// this binary was built from.
 fn bundled_fonts_dir() -> std::path::PathBuf {
@@ -514,7 +514,7 @@ mod tests {
     }
 
     /// A character in the icons' range resolves to Romacs's icon font
-    /// (romacs-icon-font, DIVERGENCES.md VM2-MODE-LINE), for a face of any
+    /// (romacs-icon-font, ledger/divergences VM2-MODE-LINE), for a face of any
     /// family: it is the only font with it.
     #[test]
     fn an_icon_resolves_to_the_icon_font() {

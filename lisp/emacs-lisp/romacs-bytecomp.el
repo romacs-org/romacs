@@ -13,7 +13,7 @@
 ;; dialect GNU would compile it in, so each macro expands once; a body
 ;; that front end refuses gives GNU's diagnostic string, as
 ;; `byte-compile' returns it, and no function.  Any other
-;; argument, and file compilation, stay GNU's.  DIVERGENCES.md
+;; argument, and file compilation, stay GNU's.  ledger/divergences
 ;; VM2-BYTECOMP1.
 ;;
 ;; The advice is added before bytecomp.el loads: nadvice keeps it through

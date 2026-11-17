@@ -30,7 +30,7 @@
 ;; `romacs-mode-line-mode' installs the format only over GNU's default or
 ;; its own last install, and on turning off restores GNU's only over its
 ;; own: a format an init or a package installed is never replaced.
-;; `romacs-classic-chrome' turns it off.  DIVERGENCES.md VM2-MODE-LINE.
+;; `romacs-classic-chrome' turns it off.  ledger/divergences VM2-MODE-LINE.
 ;;
 ;; The idea of segments with a left and a right list, the buffer-name
 ;; styles of `romacs-mode-line-buffer-style' and refreshing segments from

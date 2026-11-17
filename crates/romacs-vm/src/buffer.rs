@@ -386,7 +386,7 @@ mod model_tests {
 /// GNU buffer names are Lisp strings, raw bytes included; the model keys
 /// buffers by a Rust string, so a raw-byte character of byte B stands in a
 /// name as the character U+10FF00+B, which no real name uses
-/// (DIVERGENCES.md VM2-BUFNAME-RAW1). `buffer_name_text` and
+/// (ledger/divergences VM2-BUFNAME-RAW1). `buffer_name_text` and
 /// `buffer_name_value` convert at the Lisp boundary; `buffer_name_shown`
 /// gives the text GNU shows for it (`\NNN`).
 const RAW_NAME_BASE: u32 = 0x10ff00;
@@ -1354,7 +1354,7 @@ impl Vm {
     /// T's unibyte storage: the same bytes, per-buffer variables and
     /// markers.  Its overlays stay with T.
     fn unibyte_storage(t: &crate::annotations::AnnotatedBuffer) -> Result<bytes::ByteBuffer> {
-        // DIVERGENCES.md VM2-INDIRECT1.
+        // ledger/divergences VM2-INDIRECT1.
         if t.base != Value::NIL || !t.indirect.is_empty() {
             return Err("VM2 cannot make a buffer sharing its text unibyte".into());
         }

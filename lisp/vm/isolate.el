@@ -12,9 +12,9 @@
 ;; the spawner's later state, and is seeded once with
 ;; `isolate-inherited-variables'.  Every value that crosses is frozen
 ;; (`freeze'); closures cannot cross, a symbol or a lambda form with
-;; `:bindings' can (DIVERGENCES.md VM2-ISOLATE-CLOSURES).
+;; `:bindings' can (ledger/divergences VM2-ISOLATE-CLOSURES).
 ;;
-;; Not in GNU (DIVERGENCES.md VM2-ISOLATE).  `isolate-await' re-signals a
+;; Not in GNU (ledger/divergences VM2-ISOLATE).  `isolate-await' re-signals a
 ;; worker's error where GNU's `thread-join' would store it in
 ;; `thread-last-error'.
 ;;

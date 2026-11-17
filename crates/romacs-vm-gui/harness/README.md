@@ -572,13 +572,21 @@ fast the host is, not in this step or the next by a race with a poll. The
 session reads `romacs-instructions` and `romacs--display-stats` at each
 step's start, all before it writes anything, so the report has, per step
 and as medians, the redisplays run, the instructions and conses spent
-inside them beside the whole step's instructions, the windows rebuilt, the
+inside them beside what Romacs ran for the whole step (its change, the
+timers it set off and its redisplays, each counted once; not the loop's
+own polls nor the host's wait for a frame to render, which grow with the
+machine's load, nor the host's own passes for process output and the
+echo area's sync after a message, which no scenario sets work for;
+collections fall where allocating makes them due, as the host's idle
+collection is off), the windows rebuilt, the
 bands expanded, the layouts asked of the layout host and the frames
 submitted. `display_stages_bars.json` holds each scenario's figures:
 instructions and conses under a ceiling, the counts exactly, so a step
 that no longer does its change fails too. So does a scenario more than a
 tenth of whose steps run more or fewer redisplays than the others, or
-paint when they change nothing, or do not when they do. Work that removes cost lowers the bars in the same change:
+paint when they change nothing, or do not when they do, and one whose
+step waits inside its change, running a timer or a redisplay there,
+which would count its waiting as its work. Work that removes cost lowers the bars in the same change:
 `--write-bars FILE` writes the ones a run would pass. `--record` adds a
 call graph of each scenario's steps (a frame-pointer build).
 

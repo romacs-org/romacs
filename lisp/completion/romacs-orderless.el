@@ -36,7 +36,7 @@
 ;; are enumerated once per directory while it is unchanged.  This file
 ;; provides `romacs-orderless', not `orderless', so an orderless.el the
 ;; user installs replaces it with its own registration
-;; (DIVERGENCES.md VM2-ORDERLESS).
+;; (ledger/divergences VM2-ORDERLESS).
 
 ;; This package provides an `orderless' completion style that divides
 ;; the pattern into components (space-separated by default), and

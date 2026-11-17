@@ -217,7 +217,28 @@ class Agents(Server):
         return self.eval(f'(romacs-agent-state {self.s(sid)})')
 
     def idle(self, sid, seconds=30):
-        until(lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+        self.until(sid, lambda: self.state(sid) == 'idle', seconds, f'session {sid} idle')
+
+    def until(self, sid, ready, seconds, what):
+        """`until', and on its timeout what SID's session holds: what it
+        waits on is then in the failure, not lost with the run."""
+        try:
+            until(ready, seconds, what)
+        except RuntimeError as error:
+            raise RuntimeError(f'{error}; {self.held(sid)}') from None
+
+    def held(self, sid):
+        """SID's state, queue, selection and driver, as the editor has them."""
+        try:
+            return self.eval(f'(let ((s {self.s(sid)})) (if (not s) "no session" (prin1-to-string (list '
+                             ':state (romacs-agent-state s) :queue (romacs-agent-queue s) '
+                             ':selection (romacs-agent-pending-selection s) :driver (romacs-agent-driver-state s) '
+                             ':dispatch (romacs-agent-dispatch s) :caught-up (romacs-agent-caught-up s) '
+                             ':startup (romacs-agent-startup-pending s) :interrupted (romacs-agent-interrupted s) '
+                             ':input (romacs-agent-input-seq s) :completed (romacs-agent-completed-seq s) '
+                             ':connected (process-live-p (romacs-agent-connection s))))))')[:3000]
+        except Exception as error:  # A dead server says so, not hides the timeout.
+            return f'(state unreadable: {error!r})'
 
     def journal(self, sid):
         """SID's records, as the editor reads them wherever they are kept:
@@ -437,8 +458,10 @@ def outcome(args, base):
         time.sleep(.5)
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
+        # The relay holds a call while no Romacs listens (HOLD, 30 s,
+        # crates/romacs-mcp/src/reconnect.rs), then answers it not executed.
         until(lambda: sum(1 for e in a.logged() if e.get('tool') == 'romacs_eval' and 'not executed' in e.get('text', '')) >= 1,
-              20, 'not executed while down')
+              45, 'not executed while down')
         not_executed = not late.exists()
         a.restart()
         result = {'outcome_after_kill': asked, 'ran_once': ran_once, 'not_executed_had_no_effect': not_executed}
@@ -729,6 +752,18 @@ def probe(args, base):
         a.close()
 
 
+def user_manager_reachable(runtime):
+    """Let `systemd-run --user' reach the user manager from RUNTIME, a
+    private runtime directory a check gives the harness: it looks for the
+    manager's socket there (systemd/private, then bus).  Only those two are
+    linked to the real ones; the rest of RUNTIME stays private."""
+    real = Path(f'/run/user/{os.getuid()}')
+    for name in ('systemd', 'bus'):
+        link = Path(runtime) / name
+        if Path(runtime) != real and (real / name).exists() and not os.path.lexists(link):
+            link.symlink_to(real / name)
+
+
 def unit(args, base):
     bus = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
     if not bus:
@@ -736,6 +771,7 @@ def unit(args, base):
     a = Agents(args, base, f'au{os.getpid()}', {'DBUS_SESSION_BUS_ADDRESS': bus, 'ROMACS_SERVER_SLICE': 'romacs-build.slice'})
     a.env['WAYLAND_DISPLAY'] = str(a.runtime / a.env['WAYLAND_DISPLAY'])
     a.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+    user_manager_reachable(a.env['XDG_RUNTIME_DIR'])
     a.unit = f'romacs-server-{a.name}'
     try:
         a.up()
@@ -1182,6 +1218,7 @@ def restart(args, base, bus=None, race=False):
     if bus:
         a.env['WAYLAND_DISPLAY'] = str(a.runtime / a.env['WAYLAND_DISPLAY'])
         a.env['XDG_RUNTIME_DIR'] = os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        user_manager_reachable(a.env['XDG_RUNTIME_DIR'])
         a.unit = f'romacs-server-{name}'
     a.persist()
     try:
@@ -1940,7 +1977,7 @@ def rpc(args, base):
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
         before = done(sid)
-        until(lambda: done(sid) > before, 30, 'held message answered')
+        a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
         a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
@@ -2712,9 +2749,10 @@ def start_picker(args, base):
     """Starting a session by real keys through the palette: C-u c on the
     home page, the directory of the project at point, a row found by typing
     (its instance's group, the harness's reported model among the catalogue's),
-    the effort, the prompt.  The fake harnesses record what they were given.
-    The first session of an instance asks its models once and keeps only
-    their rows; with one enabled instance no palette is asked."""
+    the effort, then the first message in the chat it opens.  The fake
+    harnesses record what they were given.
+    Each run's initialize answers its models, kept with only their rows;
+    with one enabled instance no palette is asked."""
     a = Agents(args, base, 'pk')
     try:
         a.up()
@@ -2770,10 +2808,21 @@ def start_picker(args, base):
             a.keys(effort)
             time.sleep(.5)
             a.keys('-k', 'Return')
-            asked('Prompt')
-            a.keys(text)
+            composed(text)
             a.keys('-k', 'Return')
             return directory
+
+        def chat_shown():
+            """Whether the selected window shows a chat, its composer the place to type."""
+            return a.eval('(with-current-buffer (window-buffer (selected-window)) '
+                          '(and (bound-and-true-p romacs-agent-ui--session) (not (active-minibuffer-window)) t))') == 't'
+
+        def composed(text):
+            """TEXT typed in the chat a start opened: its first message."""
+            until(chat_shown, 15, 'chat opened')
+            a.keys(text)
+            until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
+                                 + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't', 15, f'{text} typed')
 
         # The palette, as drawn.
         on_project(other)
@@ -2804,18 +2853,19 @@ def start_picker(args, base):
         a.keys('c')
         asked('Project directory')
         a.keys('-k', 'Return')
-        asked('Prompt')
-        result['single'] = prompt()
-        a.keys('-M', 'ctrl', '-k', 'g', '-m', 'ctrl')
+        until(chat_shown, 15, 'chat opened')
+        result['single'] = 'chat'
 
         after = lambda argv, flag: argv[argv.index(flag) + 1] if flag in argv else None
-        result['ok'] = (result['asked'] == 1 and kept_ok
+        # Each run initializes once (its hooks); the models it answers are
+        # kept, the account left out.
+        result['ok'] = (result['asked'] == 2 and kept_ok
                         and Path(result['directory'].rstrip('/')).name == other.name
                         and after(claude_argv, '--model') == 'claude-sonnet-5-5'
                         and after(claude_argv, '--effort') == 'high'
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
-                        and rows[0] == 'Claude · default' and 'Claude · Fake 1' in rows
-                        and 'Codex · GPT-6.1 Sol' in rows and 'Prompt' in result['single'])
+                        and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
+                        and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
         return result
     finally:
         a.close()
@@ -2913,6 +2963,10 @@ def children(args, base):
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
         a.codex_instance()
+        # A child waits for its approval only when the user is asked: every
+        # tool call is allowed by default.  Counts said in words, as read
+        # below (a glyph says them by default).
+        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
         parent = a.start('say ready')
         a.idle(parent)
 
@@ -3091,7 +3145,7 @@ def select(args, base):
             f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         gate.touch()
-        until(lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
+        a.until(one, lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
         written = order(one)
         result['armed'] = {'header': header, 'armed': armed, 'written': written, 'options': options(one),
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
@@ -3134,7 +3188,7 @@ def select(args, base):
             a.send(sid, 'say again')
             settled(sid, 30)
             a.eval('(progn (setenv "FAKE_SELECT" nil) t)')
-            until(lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
+            a.until(sid, lambda: 'again' in (a.results(sid) or [''])[-1], 30, 'answered after restart')
             argv = starts(sid)[-1]
             restarts[how] = {'runs': len(starts(sid)), 'resume': after(argv, '--resume') == sid,
                              'model': after(argv, '--model')}

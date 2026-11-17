@@ -92,7 +92,7 @@ impl Vm {
 
     fn print_render_as(&mut self, value: Value, quoted: bool, overrides: Value, buffer_output: bool, unreadable: Unreadable) -> Result<(String, Unreadable)> {
         // `print-symbols-bare' only changes how a positioned symbol prints,
-        // and Romacs makes none (DIVERGENCES.md VM2-SYMPOS1).
+        // and Romacs makes none (ledger/divergences VM2-SYMPOS1).
         for name in ["float-output-format", "print-integers-as-characters", "print-charset-text-property"] {
             let slot = self.slot(name);
             let v = self.variable_value(slot)?;

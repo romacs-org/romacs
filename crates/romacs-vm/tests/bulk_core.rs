@@ -5,7 +5,7 @@
 //! GNU 32.0.50 through the unchanged primh `gnu_driver.el`); this file and the
 //! spec never state an answer. Each row runs in a FRESH production VM (prelude
 //! installed, collection at every safepoint). A difference is either fixed or
-//! pinned in `bulk/core.ledger.json` to a row of `/DIVERGENCES.md`; a pin that
+//! pinned in `bulk/core.ledger.json` to a row of `ledger/divergences`; a pin that
 //! stops differing, changes class, names an unknown case or names a missing
 //! ledger row fails, exactly as primh's pins do.
 #[path = "support/bulk.rs"]

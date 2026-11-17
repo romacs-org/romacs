@@ -7,7 +7,7 @@
 //! Without a host layout, rows are logical lines of the frame's line
 //! height. Over a host's layout, which continues and truncates lines, rows
 //! are the screen lines painting lays out, painted yet or not, and the
-//! start they choose may begin a continuation line (DIVERGENCES.md
+//! start they choose may begin a continuation line (ledger/divergences
 //! VM2-RD1); the display iterator chooses only for a vertically scrolled
 //! window.
 //!

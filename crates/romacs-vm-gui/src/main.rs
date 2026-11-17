@@ -15,14 +15,13 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
-/// Write VALUE to stderr as one line, in one write. `eprintln!("{}", value)`
-/// hands serde's pieces to unbuffered stderr a syscall apiece: thousands for
-/// a scene dump, which under load held the evaluator for seconds a paint.
+/// Write VALUE to stderr as one line, handed over as one complete buffer
+/// (`stderr::line`).
+/// `eprintln!("{}", value)` hands serde's pieces to unbuffered stderr a
+/// syscall apiece: thousands for a scene dump, which under load held the
+/// evaluator for seconds a paint.
 fn diagnostic_line(value: &serde_json::Value) {
-    use std::io::Write;
-    let mut line = serde_json::to_vec(value).unwrap_or_default();
-    line.push(b'\n');
-    let _ = std::io::stderr().lock().write_all(&line);
+    romacs_vm_gui::stderr::line(&value.to_string());
 }
 
 use romacs_vm_gui::{command, echo, fonts, grammars, loading, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
@@ -697,7 +696,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
     if argv.first().map(String::as_str) == Some("--restart-supervise") { std::process::exit(restart::supervise(&argv)); }
     romacs_vm::host::catch_user_signals().map_err(|e| format!("user signals: {e}"))?;
     grammars::register();
-    // Before any font resolver is built (DIVERGENCES.md VM2-FONT-BUNDLED).
+    // Before any font resolver is built (ledger/divergences VM2-FONT-BUNDLED).
     for problem in fonts::register_bundled_fonts() {
         eprintln!("romacs: {problem}");
     }

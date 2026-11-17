@@ -20,7 +20,7 @@
 (load "emacs-lisp/backquote.el" nil t t)
 ;; Every load expands its templates, so the walk is native, and while
 ;; these two stay as they are here the compiler takes its answer without
-;; calling the macro (DIVERGENCES.md VM2-BACKQUOTE).
+;; calling the macro (ledger/divergences VM2-BACKQUOTE).
 (defalias 'backquote-process (symbol-function 'romacs--backquote-process))
 (put 'backquote 'romacs--standard-macro (cdr (symbol-function 'backquote)))
 ;; subr.el's defvars own these maps in GNU; the native bare-VM skeleton
@@ -49,7 +49,7 @@ and the reader use by default.")
 (load "emacs-lisp/map-ynp.el" nil t t)
 (load "international/mule.el" nil t t)
 ;; mule.el's translation tables, built over Lisp vectors
-;; (DIVERGENCES LISP-TRANSLATION-TABLE).
+;; (ledger/divergences LISP-TRANSLATION-TABLE).
 (romacs-follow-gnu-file 'mule "international/romacs-mule")
 (load "international/mule-conf.el" nil t t)
 ;; loadup.el:143.
@@ -122,13 +122,13 @@ and the reader use by default.")
 ;; cl-print's closure method walks body slots VM2 closures do not expose
 ;; (VM2-CLOSEQ1).
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
-;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+;; One walk for every frame's locals (ledger/divergences DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 ;; SCRAM's key derivation natively (VM2-SCRAM1).
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
 ;; Gnus's shipped data is in `data-directory' (VM2-ETC1).
 (with-eval-after-load 'nnheader (require 'romacs-nnheader))
-;; json.el's reader through the native parser (DIVERGENCES LISP-JSON-READ).
+;; json.el's reader through the native parser (ledger/divergences LISP-JSON-READ).
 (romacs-follow-gnu-file 'json "romacs-json")
 ;; treesit.el's font-lock loop, run natively (LISP-TREESIT-FONTIFY).
 (romacs-follow-gnu-file 'treesit "romacs-treesit-font-lock")
@@ -148,7 +148,7 @@ and the reader use by default.")
 ;; closures keep private (VM2-ERT-BATCH1): whenever cl-print loads (debug.el's
 ;; *Backtrace*, ERT), they print through the owned method instead.
 (with-eval-after-load 'cl-print (require 'romacs-cl-print))
-;; One walk for every frame's locals (DIVERGENCES DBG-GET-FRAMES).
+;; One walk for every frame's locals (ledger/divergences DBG-GET-FRAMES).
 (with-eval-after-load 'backtrace (require 'romacs-backtrace))
 ;; SCRAM's key derivation natively (VM2-SCRAM1).
 (with-eval-after-load 'sasl-scram-rfc (require 'romacs-sasl-scram))
@@ -177,7 +177,7 @@ and load nothing when none is."
 (load "minibuffer.el" nil t t)
 ;; minibuffer.el's candidate sorts, natively: through `sort' with a Lisp
 ;; predicate they cost most of a completion key over thousands of
-;; candidates (DIVERGENCES.md VM2-COMPLETION-SORT).
+;; candidates (ledger/divergences VM2-COMPLETION-SORT).
 (defalias 'minibuffer--sort-by-length-alpha #'romacs--sort-by-length-alpha)
 (defalias 'minibuffer--sort-by-position #'romacs--sort-by-history)
 ;; M-x completes over the command set the runtime keeps, not the obarray
@@ -198,7 +198,7 @@ and load nothing when none is."
 (load "romacs-eval.el" nil t t)
 (load "font-core.el" nil t t)
 (load "emacs-lisp/syntax.el" nil t t)
-;; The syntax summaries' switches (DIVERGENCES.md VM2-SYNTAX-SUMMARIES).
+;; The syntax summaries' switches (ledger/divergences VM2-SYNTAX-SUMMARIES).
 (load "romacs-syntax.el" nil t t)
 ;; Redisplay's switches.
 (load "romacs-display.el" nil t t)

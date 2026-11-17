@@ -560,6 +560,86 @@ writes: the sessions table made again in its form, the rest left.")
 
 ;;; romacs-agent-store-tests.el ends here
 
+(defun romacs-agent-store-tests--hold-lock (file &optional first)
+  "Another Romacs process that holds FILE's write lock for 1.5 s, once it
+has it: in a transaction of its own, after the statement FIRST when given."
+  (let* ((held nil)
+         (holder (make-process
+                  :name "romacs-store-lock" :noquery t :connection-type 'pipe
+                  :filter (lambda (_ text) (when (string-search "held" text) (setq held t)))
+                  :command (list (expand-file-name invocation-name invocation-directory) "--batch" "--eval"
+                                 (format "%S" `(let ((db (sqlite-open ,file)))
+                                                 (sqlite-pragma db "journal_mode = WAL")
+                                                 (sqlite-execute db "begin immediate")
+                                                 ,@(and first `((sqlite-execute db ,first)))
+                                                 (princ "held\n")
+                                                 (sleep-for 1.5)
+                                                 (sqlite-execute db "commit")))))))
+    (with-timeout (30 (delete-process holder) (error "The lock was never taken"))
+      (while (not held) (accept-process-output holder 0.1)))
+    holder))
+
+(ert-deftest romacs-agent-store-fill-waits-out-another-process-s-lock ()
+  ;; Another process holds the store's write lock longer than a connection
+  ;; waits for it (a migration worker's long transaction): the fill tries
+  ;; its chunk again until it is written, never leaving a row out.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (should (= (romacs-agent-store-fill) 0))
+    (record "aaaaaaaa-0000-4000-8000-000000000001" "one")
+    (record "aaaaaaaa-0000-4000-8000-000000000002" "two")
+    (let ((holder (romacs-agent-store-tests--hold-lock (romacs-agent-store--file))))
+      (unwind-protect
+          (progn
+            ;; Past the editor's wait, the lock still held.
+            (should (= (romacs-agent-store-fill) 2))
+            (should-not (romacs-agent-store--missing)))
+        (delete-process holder)))))
+
+(ert-deftest romacs-agent-store-fill-opens-a-store-being-made ()
+  ;; Off the editor, a store whose making is locked by another process
+  ;; past this one's wait is opened once the lock lets it, not taken for
+  ;; no store: a batch fill writes every row all the same.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (record "aaaaaaaa-0000-4000-8000-000000000001" "one")
+    (let ((holder (romacs-agent-store-tests--hold-lock (romacs-agent-store--file) "create table first (x)"))
+          (romacs-agent-store-patient 300))
+      (unwind-protect
+          (let ((romacs-agent-store-patience romacs-agent-store-patient))
+            (should (= (romacs-agent-store-fill) 1)))
+        (delete-process holder)))))
+
+(ert-deftest romacs-agent-store-the-writer-s-start-leaves-the-editor-s-wait ()
+  ;; The editor runs the writer's start when it ends with no writer: its
+  ;; own connections' wait stays short after.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((romacs-agent-store-patience 200))
+      (romacs-agent-store--writer-start)
+      (should (= romacs-agent-store-patience 200))
+      (should (= (caar (sqlite-select (romacs-agent-store--open) "pragma busy_timeout")) romacs-agent-store-patient))
+      ;; The writer itself waits long for every connection of its life: one
+      ;; opened again after a start that failed too.
+      (should (equal (alist-get 'romacs-agent-store-patience (funcall romacs-agent-writer-bindings-function))
+                     romacs-agent-store-patient)))))
+
+(ert-deftest romacs-agent-store-a-reader-waits-for-the-lock ()
+  ;; The editor's read connection waits a moment for the lock: a WAL read
+  ;; is refused while another connection checkpoints or vacuums, and a
+  ;; refused open reads as no store at all.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (romacs-agent-store-fill)
+    ;; Every module's tables, as the writer makes them.
+    (dolist (table '("events" "turns" "turn_drawn" "transcripts"))
+      (sqlite-execute (romacs-agent-store--open) (format "create table if not exists %s (x)" table)))
+    (let ((romacs-agent-store--db nil))
+      (let ((db (romacs-agent-store--open-to-read (romacs-agent-store--file))))
+        (should db)
+        (should (= (caar (sqlite-select db "pragma busy_timeout")) romacs-agent-store-patience))
+        (sqlite-close db)))))
+
 (ert-deftest romacs-agent-store-a-session-asking-of-a-restart-is-loaded ()
   ;; A listed session that asked to be told of a restart is loaded as a
   ;; restore runs, so it is told: left a row, it would never be.
