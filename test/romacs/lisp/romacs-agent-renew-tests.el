@@ -560,6 +560,16 @@ call and result, an answer and its result each."
                                                                                  (vector (romacs-mcp--object "type" "text" "text" (format "answer %d" k))))))
                         (romacs-agent-renew-tests--reply (format "r%d" k) (format "answer %d" k)))))
 
+(ert-deftest romacs-agent-renew-row-inputs-keep-their-messages ()
+  "A row's inputs, its prompt and those written into its turn, keep who
+said them: another session's message is no request of the user's."
+  (let* ((from (romacs-mcp--object "kind" "child" "from" (romacs-mcp--object "name" "lane x") "text" "hi"))
+         (row (list :prompt "go" :messages (vector from) :reply "done"
+                    :items (vector (romacs-mcp--object "kind" "input" "text" "steered" "steer" t "messages" (vector from)))))
+         (items (romacs-agent-handoff-items (romacs-agent-renew--row-events row))))
+    (should (equal (mapcar (lambda (item) (plist-get item :role)) items) '(tool tool assistant)))
+    (should (string-match-p "Message from lane x (child): steered" (plist-get (cadr items) :text)))))
+
 (ert-deftest romacs-agent-renew-thread-from-turns-rows ()
   "romacs#270: a renewal's thread comes from its turns' rows since its last
 renewal, and its records only after the newest row: what it gives is what

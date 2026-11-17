@@ -295,17 +295,22 @@ and, when earlier ones are left out, the first of them and a gap's mark
   (+ (length (or (plist-get row :prompt) "")) (length (or (plist-get row :reply) ""))
      (* 80 (cl-count "tool" (plist-get row :items) :key (lambda (item) (gethash "kind" item)) :test #'equal))))
 
+(defun romacs-agent-renew--input (text messages)
+  "An input event of TEXT, with MESSAGES (a row's: who said what in it, as
+tables) as its event carries them."
+  (let ((messages (mapcar (lambda (message)
+                            (let ((from (gethash "from" message)))
+                              (list :kind (gethash "kind" message)
+                                    :from (list :name (and (hash-table-p from) (gethash "name" from))))))
+                          (append messages nil))))
+    (append (list :type 'input :text text) (and messages (list :messages messages)))))
+
 (defun romacs-agent-renew--row-events (row)
   "ROW, a turn's (`romacs-agent-turns-page'), or `gap', as the events its
 records raised, as far as a brief reads them (`romacs-agent-handoff-items')."
   (if (eq row 'gap) (list (list :type 'gap :text "earlier turns of this conversation left out"))
-    (let ((messages (mapcar (lambda (message)
-                              (let ((from (gethash "from" message)))
-                                (list :kind (gethash "kind" message)
-                                      :from (list :name (and (hash-table-p from) (gethash "name" from))))))
-                            (append (plist-get row :messages) nil)))
-          (events nil))
-      (push (append (list :type 'input :text (plist-get row :prompt)) (and messages (list :messages messages))) events)
+    (let ((events nil))
+      (push (romacs-agent-renew--input (plist-get row :prompt) (plist-get row :messages)) events)
       (seq-doseq (item (plist-get row :items))
         (pcase (gethash "kind" item)
           ("text" (unless (gethash "parent" item)
@@ -314,7 +319,9 @@ records raised, as far as a brief reads them (`romacs-agent-handoff-items')."
           ("tool" (push (list :type 'tool :state 'started :id (gethash "id" item) :name (gethash "name" item)
                               :input (gethash "input" item) :parent (gethash "parent" item))
                         events))
-          ("input" (push (list :type 'input :text (gethash "text" item) :steer (gethash "steer" item)) events))
+          ("input" (push (append (romacs-agent-renew--input (gethash "text" item) (gethash "messages" item))
+                                 (list :steer (gethash "steer" item)))
+                         events))
           ("compacted" (push (list :type 'compacted :text (gethash "text" item)) events))))
       (push (list :type 'done :text (plist-get row :reply)) events)
       (nreverse events))))
