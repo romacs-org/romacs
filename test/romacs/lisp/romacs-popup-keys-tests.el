@@ -93,6 +93,15 @@ taking keys, and `home', the window the user was in."
       (should (equal where (list home nil)))
       (should (equal hidden (list menu))))))
 
+(ert-deftest romacs-popup-keys-then-outside-the-menu-runs-now ()
+  ;; A menu's command run with no menu taking keys (its buffer shown in a
+  ;; window of its own): what it would have run after the menu hid runs
+  ;; now, never left waiting for a menu key that does not come.
+  (let ((ran nil) (romacs-popup--keys-then nil))
+    (romacs-popup-then (lambda () (setq ran t)))
+    (should ran)
+    (should-not romacs-popup--keys-then)))
+
 (ert-deftest romacs-popup-keys-the-hook-follows-each-key ()
   (romacs-popup-keys-tests--with
     (let ((seen nil))
