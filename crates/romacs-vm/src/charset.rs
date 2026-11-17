@@ -94,7 +94,7 @@ pub(super) fn offset_fast_map(min_char: i64, max_char: i64) -> [u8; 190] {
     map
 }
 
-#[derive(Default)]
+#[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Registry {
     pub initialized: bool,
     pub records: Vec<Record>,
@@ -117,9 +117,9 @@ pub(super) struct Registry {
     /// maps themselves load when a decoder first needs them, as in GNU.
     pub unify_ranges: Vec<(i64, i64, usize)>,
 }
-romacs_snapshot::snapshot_struct!(Registry { initialized, records, bindings, ids, iso, mule, ordered, iso_list, mule_list, ordered_tick, non_preferred_head, jis_roman, jis_1978, jis_0208, ksc5601, unify_ranges });
 
 #[allow(dead_code)] // Native definition metadata is retained even before encoders exist.
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct Record {
     pub attrs: [Value; 10],
     pub space: [u32; 8],
@@ -144,16 +144,15 @@ pub(super) struct Record {
     /// (MAP) or unify map (OFFSET) on first use; unify-charset clears it.
     pub tables: Option<std::rc::Rc<Tables>>,
 }
-romacs_snapshot::snapshot_struct!(Record { attrs, space, dimension, min, max, offset, iso_final, iso_revision, mule_id, ascii_compatible, supplementary, invalid, min_char, max_char, fast_map, linear, index_offset, unified, tables });
 
 /// GNU's per-charset mapping tables, holding code indexes, never Lisp values.
+#[derive(romacs_snapshot::Snapshot)]
 pub(crate) struct Tables {
     /// load_charset (charset, 2): character to index, the first entry wins.
     pub encoder: std::collections::BTreeMap<u32, u32>,
     /// load_charset (charset, 1): index to character, the last entry wins.
     pub decoder: std::collections::BTreeMap<u32, u32>,
 }
-romacs_snapshot::snapshot_struct!(Tables { encoder, decoder });
 
 impl Registry {
     pub fn native_record(&self, name: Value) -> Option<&Record> {

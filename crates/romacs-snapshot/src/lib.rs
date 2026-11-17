@@ -11,19 +11,22 @@
 //! what Romacs's own types hold of a static is its name or a copy. The one
 //! such address a plain type may hold, an empty standard hash table's
 //! control bytes, a capture removes (`Settle`), and the root's at-rest
-//! fields the restoring process remakes (`Schema::renew`). An at-rest enum
-//! variant's payload is the exception no walk reaches (`snapshot_enum!`).
+//! fields the restoring process remakes (`Schema::renew`).
 //!
-//! The contract is a trait, implemented for a type only by listing it
-//! field by field (`snapshot_struct!`, `snapshot_tuple!`) or variant by
-//! variant (`snapshot_enum!`): the listing destructures every field, so a
-//! field added and not listed does not compile, and each listed field's
-//! type must be SnapshotSafe itself. A field of the image's root whose type
-//! can hold a resource, but whose value a VM at rest never does, is listed
-//! as at rest (`snapshot_fields!` alone has them): romacs-vm's
+//! The contract is a trait, derived from a type's definition
+//! (`#[derive(Snapshot)]`, romacs-snapshot-derive): the derive meets every
+//! field of every variant, so none is left out, and each one's type must be
+//! SnapshotSafe itself. A field of the image's root whose type can hold a
+//! resource, but whose value a VM at rest never does, is declared at rest
+//! (`#[snapshot(at_rest)]`, a root's alone): romacs-vm's
 //! `Vm::world_quiescent` checks each such field, and the object inventory,
 //! before a capture, and its `world::image::capture` takes only
-//! SnapshotSafe values. Each crate lists its own types, next to them.
+//! SnapshotSafe values. An enum variant declared at rest is the one payload
+//! no walk reaches: the type keeps it inert in an image (romacs-vm's
+//! `Object::foreign_resource`), and should one hold an address of the
+//! executable anyway, following it faults where the restore could reserve
+//! that range (romacs-vm's `world::arena::guard_executable`; a taken range
+//! is left alone). Each crate derives it for its own types.
 //!
 //! No capture-time scan backs this up. The heap holds padding and unused
 //! capacity no value initialized; a B2 image has thousands of words there
@@ -35,117 +38,14 @@
 /// that maps the image (see the module documentation).
 ///
 /// # Safety
-/// Implement it only through `snapshot_struct!`, `snapshot_tuple!` or
-/// `snapshot_enum!`, which check each field, or for a type whose
-/// representation holds no pointer but into the global allocator's heap
-/// or into immutable data, and no resource of the process.
+/// Implement it only through `#[derive(Snapshot)]`, which checks each
+/// field, or for a type whose representation holds no pointer but into the
+/// global allocator's heap and no resource of the process.
 pub unsafe trait SnapshotSafe {}
 
 mod schema;
 pub use schema::{EMPTY_HASH_TABLE, Notes, Schema, Settle, TAKEN, Walk};
-
-/// `snapshot_struct!(Name { field, ... })`: Name is SnapshotSafe, every
-/// field listed and SnapshotSafe (`Walk::field` requires it). The listing
-/// is also Name's `Schema`: its walk and settling meet each field. It has
-/// no at-rest fields: a SnapshotSafe value may lie anywhere in an image,
-/// where no restore remakes them.
-#[macro_export]
-macro_rules! snapshot_struct {
-    ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? }) => {
-        // SAFETY: the walk below names every field and requires each one
-        // SnapshotSafe.
-        unsafe impl $crate::SnapshotSafe for $name {}
-        $crate::snapshot_fields!($name { $($(#[$m])* $field),* });
-    };
-}
-
-/// `snapshot_fields!(Name { field, ... } at_rest { field, ... })`: the
-/// listing of `snapshot_struct!`, checked the same way and walked the same
-/// way, without making Name SnapshotSafe. For a value that enters an image
-/// only through a door that validates it, as a world's primary VM does
-/// through romacs-vm's `world::image::capture`: SnapshotSafe would let one
-/// in unvalidated, inside another value. So it is an image's root, and only
-/// it may have at-rest fields: `world_quiescent` checks them, and the
-/// process that restores the image remakes them (`Schema::renew`), so each
-/// type's `Default` is its state at rest.
-#[macro_export]
-macro_rules! snapshot_fields {
-    ($name:ident { $($(#[$m:meta])* $field:ident),* $(,)? } $(at_rest { $($(#[$rm:meta])* $rest:ident),* $(,)? })?) => {
-        impl $crate::Schema for $name {
-            #[allow(unused_variables, reason = "at-rest fields are named, not walked")]
-            fn walk(&self, w: &mut $crate::Walk<'_>) {
-                let $name { $($(#[$m])* $field,)* $($($(#[$rm])* $rest,)*)? } = self;
-                $($(#[$m])* w.field(stringify!($field), $field);)*
-            }
-            fn any(&self) -> Option<&dyn ::std::any::Any> {
-                Some(self)
-            }
-            fn settle(&mut self, s: &mut $crate::Settle) {
-                // Every field is named by the walk; at-rest ones are not settled.
-                let $name { $($(#[$m])* $field,)* .. } = self;
-                $($(#[$m])* $crate::Schema::settle($field, s);)*
-            }
-            fn renew(&mut self) {
-                $($($(#[$rm])* { self.$rest = ::std::default::Default::default(); })*)?
-            }
-        }
-    };
-}
-
-/// `snapshot_tuple!(Name(a, b))`: a tuple struct, every field listed.
-#[macro_export]
-macro_rules! snapshot_tuple {
-    ($name:ident ( $($field:ident),* $(,)? )) => {
-        // SAFETY: the walk below names every field and requires each one
-        // SnapshotSafe.
-        unsafe impl $crate::SnapshotSafe for $name {}
-        impl $crate::Schema for $name {
-            fn walk(&self, w: &mut $crate::Walk<'_>) {
-                let $name($($field),*) = self;
-                $(w.field(stringify!($field), $field);)*
-            }
-            fn any(&self) -> Option<&dyn ::std::any::Any> {
-                Some(self)
-            }
-            fn settle(&mut self, s: &mut $crate::Settle) {
-                let $name($($field),*) = self;
-                $($crate::Schema::settle($field, s);)*
-            }
-        }
-    };
-}
-
-/// `snapshot_enum!(Name { Name::A(x) => (x), Name::B { y, .. } => (y),
-/// Name::C => () })`: every variant matched, the match exhaustive, each
-/// binding SnapshotSafe. Bind nothing of an at-rest variant's payload.
-///
-/// Such a payload is the one place of an image no walk reaches: it is
-/// neither checked `SnapshotSafe` nor walked, settled or renewed, and the
-/// macro cannot tell a payload left unbound from a variant without one.
-/// Each such variant names what keeps it inert in an image (romacs-vm's
-/// `Object::foreign_resource` and `world_quiescent`); should one hold an
-/// address of the executable anyway, the restore's guard makes following
-/// it fault (romacs-vm's `world::arena::guard_executable`).
-#[macro_export]
-macro_rules! snapshot_enum {
-    ($name:ty { $($pat:pat => ($($bind:ident),*)),* $(,)? }) => {
-        // SAFETY: the walk below matches every variant, exhaustively, and
-        // requires each binding SnapshotSafe.
-        unsafe impl $crate::SnapshotSafe for $name {}
-        #[allow(unused_variables, reason = "an at-rest variant's payload is bound, not walked or settled")]
-        impl $crate::Schema for $name {
-            fn walk(&self, w: &mut $crate::Walk<'_>) {
-                match self { $($pat => { w.variant(stringify!($pat)); $(w.field(stringify!($bind), $bind);)* })* }
-            }
-            fn any(&self) -> Option<&dyn ::std::any::Any> {
-                Some(self)
-            }
-            fn settle(&mut self, s: &mut $crate::Settle) {
-                match self { $($pat => { $($crate::Schema::settle($bind, s);)* })* }
-            }
-        }
-    };
-}
+pub use romacs_snapshot_derive::Snapshot;
 
 // The standard library's data types: their representations hold no
 // pointer but into the global allocator's heap, which is the arena.

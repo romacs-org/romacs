@@ -12,7 +12,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 /// Discriminant values match the GNU numbering (0–15) so the enum can be
 /// cast to `u8` and used directly in bytecode (e.g. the regex engine's
 /// `SyntaxSpec` / `NotSyntaxSpec` opcodes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, romacs_snapshot::Snapshot)]
 #[repr(u8)]
 pub enum SyntaxClass {
     /// ' ' — Whitespace (Swhitespace = 0)
@@ -48,24 +48,6 @@ pub enum SyntaxClass {
     /// '|' — Generic string fence (Sstring_fence = 15)
     StringFence = 15,
 }
-romacs_snapshot::snapshot_enum!(SyntaxClass {
-    SyntaxClass::Whitespace => (),
-    SyntaxClass::Punctuation => (),
-    SyntaxClass::Word => (),
-    SyntaxClass::Symbol => (),
-    SyntaxClass::Open => (),
-    SyntaxClass::Close => (),
-    SyntaxClass::Quote => (),
-    SyntaxClass::StringDelim => (),
-    SyntaxClass::Math => (),
-    SyntaxClass::Escape => (),
-    SyntaxClass::CharQuote => (),
-    SyntaxClass::Comment => (),
-    SyntaxClass::EndComment => (),
-    SyntaxClass::InheritStd => (),
-    SyntaxClass::CommentFence => (),
-    SyntaxClass::StringFence => (),
-});
 
 pub const SYNTAX_CLASS_COUNT: usize = 16;
 const SYNTAX_CLASS_DESIGNATORS: [char; SYNTAX_CLASS_COUNT] = [

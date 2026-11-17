@@ -5,24 +5,19 @@
 //! All positions are zero-based, bounded by the explicit extent (at most u32::MAX).
 
 /// Insertion at an anchor stays before it only for Right bias.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, romacs_snapshot::Snapshot)]
 pub enum Bias {
     Left,
     Right,
 }
-romacs_snapshot::snapshot_enum!(Bias {
-    Bias::Left => (),
-    Bias::Right => (),
-});
 /// Stable identity; stale handles cannot alias a reused slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, romacs_snapshot::Snapshot)]
 pub struct Anchor {
     slot: u32,
     generation: u32,
 }
-romacs_snapshot::snapshot_struct!(Anchor { slot, generation });
 const NIL: u32 = u32::MAX;
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, romacs_snapshot::Snapshot)]
 struct Node {
     l: u32,
     r: u32,
@@ -31,8 +26,7 @@ struct Node {
     lazy: u32, // pending wrapping add for descendants (not self)
     flags: u32,
 }
-romacs_snapshot::snapshot_struct!(Node { l, r, p, pos, lazy, flags });
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub struct AnchorTree {
     n: Vec<Node>,
     root: u32,
@@ -44,7 +38,6 @@ pub struct AnchorTree {
     births: Vec<u64>,
     born: u64,
 }
-romacs_snapshot::snapshot_struct!(AnchorTree { n, root, free, len, extent, births, born });
 #[inline]
 fn prio(i: u32) -> u32 {
     let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85eb_ca6b;

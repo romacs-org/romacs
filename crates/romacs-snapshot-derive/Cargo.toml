@@ -1,0 +1,17 @@
+[package]
+name = "romacs-snapshot-derive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "`#[derive(Snapshot)]`: a type's place in a world image, from its definition"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = "2"

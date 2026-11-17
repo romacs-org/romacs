@@ -26,7 +26,7 @@ use std::time::Duration;
 /// The evaluator's half of the host's `C-g': whether it is busy and how
 /// many presses it has not taken, in one word, and when its busy span
 /// began.
-#[derive(Debug)]
+#[derive(Debug, romacs_snapshot::Snapshot)]
 pub struct QuitSignal {
     word: AtomicU32,
     /// When the evaluator last became busy, in nanoseconds of [`clock`]:
@@ -36,7 +36,6 @@ pub struct QuitSignal {
     /// (`Vm::share_quit_signal`) before it runs a command.
     since: AtomicU64,
 }
-romacs_snapshot::snapshot_struct!(QuitSignal { word, since });
 
 /// How long a quittable wait blocks between looks at the press count.
 const QUIT_SLICE: std::time::Duration = std::time::Duration::from_millis(40);

@@ -84,15 +84,11 @@ impl Attribute {
 ///
 /// GNU also accepts a function of the underlying height. A function is code,
 /// not data, so it cannot live in an immutable face; see GNU-DIVERGENCES.md.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Height {
     Absolute(i64),
     Relative(f64),
 }
-romacs_snapshot::snapshot_enum!(Height {
-    Height::Absolute(f0) => (f0),
-    Height::Relative(f0) => (f0),
-});
 
 impl Height {
     /// GNU `merge_face_heights` (xfaces.c): absolute wins; a scale applied to
@@ -111,7 +107,7 @@ impl Height {
 
 /// A specified attribute value. Which variants an attribute admits is
 /// enforced by [`validate`]; the record never holds an unvalidated value.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub enum Value {
     /// A family, foundry or colour name.
     Str(Arc<str>),
@@ -125,14 +121,6 @@ pub enum Value {
     /// A structured underline or box plist, or a stipple bitmap spec.
     Structured(BoundedDatum),
 }
-romacs_snapshot::snapshot_enum!(Value {
-    Value::Str(f0) => (f0),
-    Value::Symbol(f0) => (f0),
-    Value::Height(f0) => (f0),
-    Value::Bool(f0) => (f0),
-    Value::Int(f0) => (f0),
-    Value::Structured(f0) => (f0),
-});
 
 impl Value {
     pub fn to_datum(&self) -> Datum {
@@ -158,7 +146,7 @@ impl Value {
 }
 
 /// One attribute slot of a face record.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, romacs_snapshot::Snapshot)]
 pub enum Slot {
     #[default]
     Unspecified,
@@ -166,11 +154,6 @@ pub enum Slot {
     Reset,
     Set(Value),
 }
-romacs_snapshot::snapshot_enum!(Slot {
-    Slot::Unspecified => (),
-    Slot::Reset => (),
-    Slot::Set(f0) => (f0),
-});
 
 impl Slot {
     fn is_relative(&self) -> bool {
@@ -203,11 +186,10 @@ impl Slot {
 
 /// An immutable attribute record. Built only through [`AttrsBuilder`] or by
 /// merging, so every slot holds a validated value.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, romacs_snapshot::Snapshot)]
 pub struct Attrs {
     slots: [Slot; ATTRIBUTE_COUNT],
 }
-romacs_snapshot::snapshot_struct!(Attrs { slots });
 
 impl Attrs {
     pub fn get(&self, attr: Attribute) -> &Slot {

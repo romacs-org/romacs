@@ -1,5 +1,6 @@
 """Real OS pipes/sockets; fixture peer is transport-only, not MCP proof.
 Run: python3 transport.py /absolute/path/to/romacs-mcp
+(cargo test -p romacs-mcp runs it, against that build, from transport.rs.)
 """
 import json
 import os
@@ -433,6 +434,171 @@ class Transport(unittest.TestCase):
         back, _ = self.listener.accept()
         self.sockets.append(back)
         self.assertIn(b"romacs/hello", back.recv(1 << 16))
+
+    def serve_call(self, peer, wanted, answer):
+        """Read PEER until the call WANTED (its JSON id text) comes, then answer it."""
+        peer.settimeout(5)
+        received = b""
+        def came():
+            return any(json.loads(line).get("id") == json.loads(wanted)
+                       for line in received.split(b"\n") if line.strip())
+        while not came():
+            data = peer.recv(1 << 16)
+            if not data:
+                self.fail(f"the call {wanted} never came")
+            received += data
+        peer.sendall((json.dumps({"jsonrpc": "2.0", "id": json.loads(wanted), "result": answer}) + "\n").encode())
+        return received
+
+    def test_reconnect_holds_a_call_until_a_session_listens(self):
+        # romacs#264: a tool call made before any server listens (a harness
+        # started, or a restart, ahead of its Romacs) waits for one, and
+        # gets its real answer, not "not executed".
+        later = str(self.root / "later")
+        child = subprocess.Popen([str(BINARY), "--socket", later, "--reconnect", "--session", "s", "--reply-timeout", "30"],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.children.append(child)
+        self.say(child, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "v"}})
+        self.hear(child, 1)
+        self.say(child, {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "romacs_identity"}})
+        time.sleep(2.5)
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(later)
+        server.listen(4)
+        server.settimeout(5)
+        self.sockets.append(server)
+        peer, _ = server.accept()
+        self.sockets.append(peer)
+        received = self.serve_call(peer, "7", {"content": [{"type": "text", "text": "here"}], "isError": False})
+        self.assertIn(b"romacs/hello", received)
+        reply = self.hear(child, 7)
+        self.assertEqual(reply["result"]["content"][0]["text"], "here")
+
+    def test_reconnect_holds_a_call_across_a_restart(self):
+        # The Romacs a relay reached goes away (a restart): a call made before
+        # its successor listens is held, and answered by the successor.
+        child, peer = self.relay()
+        # Gone first: no connection can be made to it meanwhile.
+        self.listener.close()
+        os.unlink(self.path)
+        peer.close()
+        time.sleep(.3)
+        self.say(child, {"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "romacs_identity"}})
+        # Long enough for the relay to know the connection is gone (it may
+        # take a second or two): the call is held, not refused.
+        time.sleep(3)
+        successor = socket.socket(socket.AF_UNIX)
+        successor.bind(self.path)
+        successor.listen(4)
+        successor.settimeout(10)
+        self.listener = successor
+        back, _ = successor.accept()
+        self.sockets.append(back)
+        self.serve_call(back, "8", {"content": [{"type": "text", "text": "restarted"}], "isError": False})
+        self.assertEqual(self.hear(child, 8, 10)["result"]["content"][0]["text"], "restarted")
+
+    def test_reconnect_a_held_call_is_not_executed_past_the_reply_timeout(self):
+        # With no server at all, the call is answered "not executed" once the
+        # reply timeout passes: safe to repeat.
+        child = subprocess.Popen([str(BINARY), "--socket", str(self.root / "never"), "--reconnect", "--session", "s",
+                                  "--reply-timeout", "1"],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.children.append(child)
+        self.say(child, {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "romacs_identity"}})
+        reply = self.hear(child, 9, 5)
+        self.assertIn("not executed", reply["result"]["content"][0]["text"])
+
+    def held(self, socket_path, reply_timeout, *extra):
+        child = subprocess.Popen([str(BINARY), "--socket", socket_path, "--reconnect", "--session", "s",
+                                  "--reply-timeout", reply_timeout, *extra],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.children.append(child)
+        return child
+
+    def test_reconnect_with_no_restart_a_held_call_waits_its_hold_alone(self):
+        # No server and no restart under way (a Romacs that crashed or never
+        # started): "not executed" after the hold, not after the reply timeout.
+        child = self.held(str(self.root / "never"), "3600", "--restart-pending", str(self.root / "pending"))
+        start = time.monotonic()
+        self.say(child, {"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "romacs_identity"}})
+        reply = self.hear(child, 10, 45)
+        self.assertIn("not executed", reply["result"]["content"][0]["text"])
+        self.assertLess(time.monotonic() - start, 40)
+
+    def test_reconnect_a_restart_under_way_holds_a_call_past_its_hold(self):
+        # A restart's pending record: the call waits for the successor
+        # however long the restart takes, then gets its answer.
+        pending = self.root / "pending"
+        pending.write_text("image")
+        later = str(self.root / "successor")
+        child = self.held(later, "3600", "--restart-pending", str(pending))
+        self.say(child, {"jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": {"name": "romacs_identity"}})
+        ready, _, _ = select.select([child.stdout], [], [], 34)
+        self.assertFalse(ready, "a call answered while a restart was under way")
+        # The successor claims the record a moment before it listens.
+        pending.unlink()
+        time.sleep(2)
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(later)
+        server.listen(4)
+        server.settimeout(10)
+        self.sockets.append(server)
+        peer, _ = server.accept()
+        self.sockets.append(peer)
+        self.serve_call(peer, "11", {"content": [{"type": "text", "text": "restored"}], "isError": False})
+        self.assertEqual(self.hear(child, 11, 10)["result"]["content"][0]["text"], "restored")
+
+    def calls_received(self, peer, wanted, seconds=10):
+        """The tool calls' ids PEER receives, in order, until WANTED of them came."""
+        peer.settimeout(seconds)
+        received, ids = b"", []
+        while len(ids) < wanted:
+            data = peer.recv(1 << 20)
+            if not data:
+                break
+            received += data
+            lines = received.split(b"\n")
+            received = lines.pop()
+            ids += [m["id"] for m in map(json.loads, filter(None, lines)) if m.get("method") == "tools/call"]
+        return ids
+
+    def test_reconnect_held_calls_keep_their_order_across_a_lost_connection(self):
+        # A server that takes the first call and stops reading, then goes:
+        # the calls queued behind it reach its successor in the order made.
+        child, peer = self.relay()
+        big = "x" * (1 << 21)
+        self.say(child, {"jsonrpc": "2.0", "id": 20, "method": "tools/call", "params": {"name": "t", "arguments": {"code": big}}})
+        for n in range(21, 26):
+            self.say(child, {"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": "t"}})
+        time.sleep(.5)
+        self.listener.close()
+        os.unlink(self.path)
+        peer.close()
+        self.assertIn("outcome unknown", self.hear(child, 20, 10)["result"]["content"][0]["text"])
+        successor = socket.socket(socket.AF_UNIX)
+        successor.bind(self.path)
+        successor.listen(4)
+        successor.settimeout(10)
+        self.listener = successor
+        back, _ = successor.accept()
+        self.sockets.append(back)
+        self.assertEqual(self.calls_received(back, 5), [21, 22, 23, 24, 25])
+
+    def test_reconnect_a_held_call_cancelled_is_never_sent(self):
+        later = str(self.root / "later")
+        child = self.held(later, "30")
+        self.say(child, {"jsonrpc": "2.0", "id": 30, "method": "tools/call", "params": {"name": "t"}})
+        self.say(child, {"jsonrpc": "2.0", "id": 31, "method": "tools/call", "params": {"name": "t"}})
+        self.say(child, {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 30}})
+        time.sleep(.5)
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(later)
+        server.listen(4)
+        server.settimeout(10)
+        self.sockets.append(server)
+        peer, _ = server.accept()
+        self.sockets.append(peer)
+        self.assertEqual(self.calls_received(peer, 1), [31])
 
     def test_reconnect_a_session_lost_during_discovery_settles_it(self):
         child, peer = self.relay()

@@ -22,6 +22,7 @@ use romacs_layout_input::{BandStretches, Face, FaceHandle, FaceRun, StatusBarSna
 /// shown, realised from the lface vectors the first time something asks
 /// (`Vm::named'). A handle means one face for the table's life, and a face
 /// change drops the table: the work follows what shows, not what exists.
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct FaceTable {
     // CELL(Plain)
     faces: std::cell::RefCell<Vec<Face>>,
@@ -67,7 +68,6 @@ impl FaceTable {
         FaceHandle(faces.len() as u32 - 1)
     }
 }
-romacs_snapshot::snapshot_struct!(FaceTable { faces, index, over, merged, view, id, floor });
 
 /// More faces than a screen shows in a long while: a table past this is
 /// dropped, so one that outlives many distinct merged faces stays small.
@@ -75,12 +75,11 @@ const FACE_TABLE_LIMIT: usize = 4096;
 
 /// A window's faces: its table's, with the window's own `default' where a
 /// terminal gives it one.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 pub(crate) struct WindowFaces {
     table: std::rc::Rc<FaceTable>,
     default: Face,
 }
-romacs_snapshot::snapshot_struct!(WindowFaces { table, default });
 impl WindowFaces {
     fn new(table: std::rc::Rc<FaceTable>) -> WindowFaces {
         let default = table.face(FaceHandle(0));
@@ -104,13 +103,12 @@ impl WindowFaces {
 /// What laying a window out from its start established, in its buffer's
 /// bytes: where its last displayed row ends, where its fully visible rows
 /// end (MAX: through the end of its text) and its text area's height.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) struct Laid {
     pub end: usize,
     pub visible_end: usize,
     pub body_height: f32,
 }
-romacs_snapshot::snapshot_struct!(Laid { end, visible_end, body_height });
 
 /// A window's text as a snapshot publishes it (`Vm::window_text`): byte
 /// offsets are into TEXT, which starts at buffer byte BASE.
@@ -223,6 +221,7 @@ impl ShownText {
     }
 }
 
+#[derive(romacs_snapshot::Snapshot)]
 pub(super) struct DisplayState {
     /// What lies beneath the default face: its attributes are all absolute.
     base: Base,
@@ -304,14 +303,12 @@ pub(super) struct DisplayState {
     /// (`Vm::check_reuse`), a bit each.
     check_told: std::collections::BTreeMap<u64, u16>,
 }
-romacs_snapshot::snapshot_struct!(DisplayState { base, face_heights, face_table, remapped, terminal_tables, table_ids, font_selection_order, font_alternatives, fontsets, previous, shown, laid, hooked, overlays, segments, bases, face_revision, bar_fit, bar_line, bar_cache, mode_line_epoch, version, hosted, width, height, building_band, diagnostics, mode_line_evals, refusals, stats, check_told });
 
 /// A refusal of the hosted measurement a displayed window answered by
 /// approximation instead: its CLASS (the refusal's message), the major
 /// MODE of the buffer asked about, and how many times.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct LayoutRefusal { pub class: String, pub mode: String, pub n: u64 }
-romacs_snapshot::snapshot_struct!(LayoutRefusal { class, mode, n });
 impl DisplayState {
     /// A face changed: what faces realize may differ.
     pub(super) fn faces_changed(&mut self) {
@@ -464,7 +461,7 @@ enum Plain {
 /// text, faces and start (GNU redisplay's test that a window needs no
 /// redrawing). A moving collection renames every Value in it, so a
 /// collection counts as a change.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, romacs_snapshot::Snapshot)]
 struct ShownKey {
     collections: u64,
     overlays: u64,
@@ -519,9 +516,8 @@ impl ShownKey {
     }
 }
 
-romacs_snapshot::snapshot_struct!(ShownKey { collections, overlays, hosted, buffer, shows, selected_id, selected, modiff, accessible, start, mark, terminal, geometry, min_hscroll, suspended, chrome, root, metrics, faces, table, variables, header });
 
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 struct Shown {
     key: ShownKey,
     point: i64,
@@ -536,7 +532,6 @@ struct Shown {
     /// it since the last paint (`record_end_laid'), else KEY's.
     ended: Option<ShownKey>,
 }
-romacs_snapshot::snapshot_struct!(Shown { key, point, mini, len, at_zv, table, ended });
 
 /// The bands redisplay built for a window, before their faces.
 #[derive(Default)]

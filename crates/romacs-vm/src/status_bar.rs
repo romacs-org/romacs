@@ -9,21 +9,19 @@ use crate::{data::Object, *};
 use romacs_layout_input::{BandMarks, Face, FaceHandle, FaceRun, Pill, Segment, StatusBarSnapshot, TextSlice};
 
 /// What the bar's expansion depends on (`Vm::bar_key').
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct BarKey {
     epoch: u64, collections: u64, faces: (u64, u64), columns: usize, focused: bool,
     minibuffer: (u64, u64, u64),
     line: LineKey,
 }
-romacs_snapshot::snapshot_struct!(BarKey { epoch, collections, faces, columns, focused, minibuffer, line });
 
 /// What the owner's line depends on (`Vm::line_key').
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct LineKey {
     id: u64, buffer: u64, name: Option<String>, format: u64, modiff: u64, modified: bool,
     point: i64, start: i64, size: (u32, u32), accessible: (usize, usize),
 }
-romacs_snapshot::snapshot_struct!(LineKey { id, buffer, name, format, modiff, modified, point, start, size, accessible });
 
 /// The corner radius of a segment's pill, in pixels.
 const PILL_RADIUS: u32 = 6;

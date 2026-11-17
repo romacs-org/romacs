@@ -8,9 +8,8 @@ const LEAF: usize = 32;
 
 /// A property's key: its symbol, compared by identity as GNU's `EQ`
 /// compares plist keys, so an uninterned symbol is its own key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 pub(crate) struct Key(Value);
-romacs_snapshot::snapshot_tuple!(Key(f0));
 impl Ord for Key {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.0.cmp(&other.0.0)
@@ -98,13 +97,12 @@ fn newest_first(mut pairs: Vec<(u32, Key, Value)>) -> Vec<(Key, Value)> {
     pairs.into_iter().map(|(_, k, v)| (k, v)).collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 struct Run {
     len: u32,
     stamp: u32,
     value: Value,
 }
-romacs_snapshot::snapshot_struct!(Run { len, stamp, value });
 impl Run {
     fn same(self, other: Self) -> bool {
         self.stamp == other.stamp && self.value == other.value
@@ -134,7 +132,7 @@ impl Run {
 /// A leaf's runs, length and present length, and whether every run reads
 /// the same (`uniform`, presence and value alike, stamps aside): a search
 /// for the next change passes over a uniform subtree whole.
-#[derive(Clone)]
+#[derive(Clone, romacs_snapshot::Snapshot)]
 enum Tree {
     Leaf(Vec<Run>, usize, usize, bool),
     Branch {
@@ -146,10 +144,6 @@ enum Tree {
         uniform: bool,
     },
 }
-romacs_snapshot::snapshot_enum!(Tree {
-    Tree::Leaf(f0, f1, f2, f3) => (f0, f1, f2, f3),
-    Tree::Branch { left, right, len, present, height, uniform } => (left, right, len, present, height, uniform),
-});
 impl Tree {
     fn leaf(runs: Vec<Run>) -> Self {
         let len = runs.iter().map(|r| r.len as usize).sum();
@@ -963,7 +957,7 @@ pub(crate) fn visit_keys<V>(map: &mut BTreeMap<Key, V>, visit: &mut impl FnMut(&
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Properties {
     /// Each key's runs.  A key no text has has no layer.
     layers: BTreeMap<Key, Box<Tree>>,
@@ -974,20 +968,18 @@ pub(crate) struct Properties {
     /// pays one word.
     syntax_changes: Option<Box<SyntaxChanges>>,
 }
-romacs_snapshot::snapshot_struct!(Properties { layers, stamp, syntax_changes });
 
 /// Byte ranges where the `syntax-table' property changed, as the text's
 /// bytes lie until its next edit: apart while they are few, then as their
 /// hull (lowest start to highest end), one range that each later change
 /// widens. A count never makes it `all', which is every property replaced.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct SyntaxChanges {
     pub ranges: Vec<Range<usize>>,
     pub all: bool,
     /// Whether the ranges are one hull.
     pub hull: bool,
 }
-romacs_snapshot::snapshot_struct!(SyntaxChanges { ranges, all, hull });
 impl SyntaxChanges {
     /// The ranges kept apart.
     const KEPT: usize = 64;

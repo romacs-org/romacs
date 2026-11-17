@@ -1,5 +1,4 @@
 // A function pointer is an address in the builder's code.
-use romacs_vm::world::safe::snapshot_struct;
+#[derive(romacs_snapshot::Snapshot)]
 pub struct Hook { run: fn() }
-snapshot_struct!(Hook { run });
 fn main() {}
