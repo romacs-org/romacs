@@ -15,7 +15,8 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
-/// Write VALUE to stderr as one line, in one write (`stderr::line`).
+/// Write VALUE to stderr as one line, handed over as one complete buffer
+/// (`stderr::line`).
 /// `eprintln!("{}", value)` hands serde's pieces to unbuffered stderr a
 /// syscall apiece: thousands for a scene dump, which under load held the
 /// evaluator for seconds a paint.
