@@ -9,6 +9,17 @@
 //! variable's value is (`Places`) holds while it stands.
 use crate::Value;
 
+#[cfg(test)]
+thread_local! {
+    /// The entries this thread's collections have visited (`visit_values`).
+    static VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// The entries this thread's collections have visited.
+#[cfg(test)]
+pub(crate) fn visited() -> usize {
+    VISITED.with(std::cell::Cell::get)
+}
+
 #[derive(Clone, Debug, Default, romacs_snapshot::Snapshot)]
 pub(crate) struct LocalVars {
     entries: Vec<(Value, Value)>,
@@ -68,6 +79,8 @@ impl LocalVars {
     /// Both halves of every entry: the symbol keeps an obarray's symbol
     /// alive while a buffer has a local of it, the value is the buffer's.
     pub(crate) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
+        #[cfg(test)]
+        VISITED.with(|visited| visited.set(visited.get() + self.entries.len()));
         for (symbol, value) in &mut self.entries {
             visit(symbol);
             visit(value);

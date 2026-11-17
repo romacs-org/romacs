@@ -226,6 +226,11 @@ struct MarkState {
     untraced_lists: Vec<u64>,
     /// The objects storing their own writes (`shares_storage`) the mark met.
     shared_seen: Vec<u32>,
+    /// A minor's old holders of shared storage nothing stored into since the
+    /// last collection, in index order: read again for their text, while
+    /// their buffer's locals, whose every store marks the buffer, name
+    /// nothing young.
+    clean_holders: Vec<u32>,
     /// Weak tables looked through, one per table per round (`MarkedSet`).
     #[cfg(test)]
     weak_visits: usize,
@@ -1311,7 +1316,7 @@ impl Vm {
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
         lap.lap(&mut self.gc_times, Phase::Setup);
         let n = gc_mark::threads(self.gc_stress.threads);
-        let Some(mut marked) = self.mark_heap(roots, &in_obarray, MarkFor::Collection { until_key }, n, &mut lap) else { return false };
+        let Some(mut marked) = self.mark_heap(roots, &in_obarray, MarkFor::Collection { until_key }, Vec::new(), n, &mut lap) else { return false };
         // From here the collection changes the heap: the last point a key
         // press ends it.
         if until_key && self.host_key_pending() { return false; }
@@ -1324,7 +1329,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, own, doomed, code_marks, census, payload: _, state } = marked;
-        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, clean_holders: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         lap.lap(&mut self.gc_times, Phase::Mark);
@@ -1773,7 +1778,8 @@ impl Vm {
         let holders = self.shared_holders.take().unwrap_or_else(|| self.objects.iter().enumerate()
             .filter(|&(_, object)| shares_storage(object)).map(|(i, _)| i as u32).collect());
         let mut objects = self.objects.read_again();
-        objects.extend(self.objects.read_again_at(&holders, &shared));
+        let clean = self.objects.read_again_at(&holders, &shared);
+        objects.extend(clean.iter().copied());
         // Old, and marked as the young are: what they hold is no growth.
         let old_payload: usize = objects.iter().map(|&i| data::payload_bytes(&self.objects[i])).sum();
         again.extend(objects.into_iter().map(|i| Value::reference(i + 1, 0)));
@@ -1799,7 +1805,7 @@ impl Vm {
         // Setup is the old marked and what is read again gathered; Roots and
         // Mark as a full's; Weak, all that is dropped; then the sweep.
         lap.lap(&mut self.gc_times, Phase::Setup);
-        let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, 1, &mut lap) else { unreachable!("no key ends a minor") };
+        let Some(marked) = self.mark_heap(&again, &none, MarkFor::Minor, clean.into_iter().map(|i| i as u32).collect(), 1, &mut lap) else { unreachable!("no key ends a minor") };
         lap.lap(&mut self.gc_times, Phase::Mark);
         if self.gc_stress.verify {
             self.check_minor(roots);
@@ -1884,7 +1890,7 @@ impl Vm {
     /// returned.
     pub(crate) fn mark_only(&mut self, roots: &[Value], keep_weak: bool) -> MarkedSet {
         let in_obarray = self.slot_set(self.obarray_symbol_names.keys());
-        let marked = self.mark_heap(roots, &in_obarray, MarkFor::Only { keep_weak }, 1, &mut Lap(None)).expect("no key ends it");
+        let marked = self.mark_heap(roots, &in_obarray, MarkFor::Only { keep_weak }, Vec::new(), 1, &mut Lap(None)).expect("no key ends it");
         let Marked { code_marks, state, .. } = marked;
         MarkedSet { code_marks, obarray_symbols_live: state.obarray_symbols_live, region_marks: state.region_marks,
                     #[cfg(test)] weak_visits: state.weak_visits }
@@ -1892,7 +1898,7 @@ impl Vm {
     /// Mark from ROOTS and everything the VM holds, on N threads, for FOR: what
     /// it reached, or None when a key press ended it, its marks left for the
     /// next mark to clear. Writes nothing but colours and its own state.
-    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], r#for: MarkFor, n: usize, lap: &mut Lap) -> Option<Marked> {
+    fn mark_heap(&mut self, roots: &[Value], in_obarray: &[bool], r#for: MarkFor, clean_holders: Vec<u32>, n: usize, lap: &mut Lap) -> Option<Marked> {
         let until_key = matches!(r#for, MarkFor::Collection { until_key: true });
         let keep_weak = matches!(r#for, MarkFor::Only { keep_weak: true });
         let keep = |v: &Value| traced(*v, in_obarray);
@@ -1931,7 +1937,7 @@ impl Vm {
         let untraced_lists = self.lambda_lists.keys().copied().collect();
         let reading = properties::Reading { since: self.allocation.since, whole: true };
         let undo_strong = keep_weak || matches!(r#for, MarkFor::Minor);
-        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, reading, undo_strong, ..MarkState::default() };
+        let mut state = MarkState { region_marks: vec![false; self.regions.len()], untraced_lists, reading, undo_strong, clean_holders, ..MarkState::default() };
         state.region_marks[0] = true;
         if minor_changed.is_some() { self.minor_keeps(&mut state); }
         // GNU dooms finalizers once, after the roots and before the weak
@@ -2072,7 +2078,7 @@ impl Vm {
         let colors = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         self.clear_marks();
         let mut lap = Lap(None);
-        let alone = self.mark_heap(roots, in_obarray, MarkFor::Collection { until_key: false }, 1, &mut lap).expect("no key ends it");
+        let alone = self.mark_heap(roots, in_obarray, MarkFor::Collection { until_key: false }, Vec::new(), 1, &mut lap).expect("no key ends it");
         let again = [self.conses.colors(), self.closures.colors(), self.cells.colors(), self.objects.colors()];
         for (table, (colors, again)) in ["conses", "closures", "cells", "objects"].iter().zip(colors.iter().zip(&again)) {
             if let Some(i) = colors.iter().zip(again).position(|(a, b)| a != b) {
@@ -2143,12 +2149,14 @@ impl Vm {
             data::Object::Buffer(t) => {
                 let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
-                t.visit_values_but(state.reading, weak, &mut |v| if keep(v) { pending.push(*v) });
+                let locals = state.clean_holders.binary_search(&(i as u32)).is_err();
+                t.visit_values_but(state.reading, weak, locals, &mut |v| if keep(v) { pending.push(*v) });
             }
             data::Object::ByteBuffer(t) => {
                 let weak = (!state.undo_strong && t.owns_undo_list()).then_some(self.undo_list_slot);
                 if weak.is_some() { state.undo_owners.push(i); }
-                t.visit_values_but(state.reading, weak, &mut |v| if keep(v) { pending.push(*v) });
+                let locals = state.clean_holders.binary_search(&(i as u32)).is_err();
+                t.visit_values_but(state.reading, weak, locals, &mut |v| if keep(v) { pending.push(*v) });
             }
             data::Object::Marker(m) => m.visit_values(&mut |v| if keep(v) { pending.push(*v) }),
             data::Object::Overlay(o) => o.visit_values(&mut |v| if keep(v) { pending.push(*v) }),

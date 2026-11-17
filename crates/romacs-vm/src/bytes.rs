@@ -265,19 +265,20 @@ impl ByteBuffer {
         self.replace_with_bias(at..at, inserted, true)
     }
     pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
-        self.visit_values_but(reading, None, visit);
+        self.visit_values_but(reading, None, true, visit);
     }
     /// A live buffer's undo list is weak (`Vm::undo_round`).
     pub(crate) fn owns_undo_list(&self) -> bool {
         self.state.live
     }
-    /// `visit_values`, passing over per-buffer slot SKIP.
-    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
+    /// `visit_values`, passing over per-buffer slot SKIP, and over the Lisp
+    /// locals unless LOCALS (`PerBuffer::visit_values_but`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, locals: bool, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         visit(&mut self.local_keymap);
-        self.per_buffer.visit_values_but(skip, visit);
+        self.per_buffer.visit_values_but(skip, locals, visit);
         if let Some(held) = &mut self.held { held.visit_values(reading, visit); }
         if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(reading, visit); }
         for props in self.properties.values_mut() {

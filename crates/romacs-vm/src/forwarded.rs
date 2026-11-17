@@ -1116,11 +1116,13 @@ impl PerBuffer {
             *value = None;
         }
     }
-    /// Every Value it holds, passing over slot SKIP.
-    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
+    /// Every Value it holds, passing over slot SKIP, and over the Lisp
+    /// locals unless LOCALS (a minor's read of a buffer nothing stored into
+    /// since the last collection: each store into them marks the buffer).
+    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, locals: bool, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
         if let Some(list) = &mut self.5 { visit(list); }
-        self.6.visit_values(visit);
+        if locals { self.6.visit_values(visit); }
         let skip = skip.map(usize::from);
         for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
             if let Some(v) = v { visit(v); }
