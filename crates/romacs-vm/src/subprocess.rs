@@ -578,18 +578,29 @@ fn decode_sockaddr(address: rustix::net::SocketAddrAny) -> Option<Address> {
             let v6 = std::net::SocketAddrV6::try_from(address).ok()?;
             Some(Address::V6(v6.ip().segments(), v6.port()))
         }
-        rustix::net::AddressFamily::UNIX => {
-            // A NUL ends a path; a Linux abstract name keeps its leading NUL,
-            // and may hold NULs; an unnamed socket has an empty name.
-            let unix = rustix::net::SocketAddrUnix::try_from(address).ok()?;
-            let name = match (unix.path_bytes(), unix.abstract_name()) {
-                (Some(path), _) => path.split(|&b| b == 0).next().unwrap_or(path).to_vec(),
-                (None, Some(name)) => [&[0], name].concat(),
-                (None, None) => Vec::new(),
-            };
-            Some(Address::Local(name))
-        }
+        rustix::net::AddressFamily::UNIX => Some(Address::Local(local_name(&address))),
         _ => None,
+    }
+}
+
+/// A local socket's name, as the LEN bytes of ADDRESS hold it past the
+/// family: a NUL ends a path; a Linux abstract name keeps its leading NUL
+/// and may hold NULs; an unnamed socket's is empty. Read from the bytes,
+/// not through rustix's `SocketAddrUnix`, which reads an unnamed socket as
+/// an empty abstract name and indexes past `sun_path` for a path that
+/// fills it.
+fn local_name(address: &rustix::net::SocketAddrAny) -> Vec<u8> {
+    let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+    let len = (address.addr_len() as usize).min(size_of::<libc::sockaddr_un>());
+    // UNSAFE(rustix's SocketAddrAny has no safe view of its bytes, and its unix decoding misreads these)
+    // SAFETY: the storage is a sockaddr_storage the kernel filled, with
+    // its first ADDR_LEN bytes initialised; LEN is at most that and at
+    // most a sockaddr_un, which the storage is sized for.
+    let bytes = unsafe { std::slice::from_raw_parts(address.as_ptr().cast::<u8>(), len) };
+    let path = bytes.get(offset..).unwrap_or_default();
+    match path.first() {
+        Some(&b) if b != 0 => path.split(|&b| b == 0).next().unwrap_or(path).to_vec(),
+        _ => path.to_vec(),
     }
 }
 
@@ -660,6 +671,29 @@ pub(crate) fn signal_number(name: &str) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bound path, an abstract name with a NUL in it, and an unnamed
+    /// socket each read back as GNU's process.c names them.
+    #[test]
+    fn local_socket_names_keep_their_shape() {
+        use std::os::unix::net::{SocketAddr, UnixDatagram};
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::fd::AsFd;
+        let dir = std::env::temp_dir().join(format!("romacs-names-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s");
+        let named = UnixDatagram::bind(&path).unwrap();
+        let name = |fd: &UnixDatagram| match socket_address(fd.as_fd(), true).unwrap() {
+            Some(Address::Local(name)) => name,
+            _ => panic!("not a local address"),
+        };
+        assert_eq!(name(&named), path.as_os_str().as_encoded_bytes());
+        let abstract_name = format!("romacs\0names-{}", std::process::id()).into_bytes();
+        let hidden = UnixDatagram::bind_addr(&SocketAddr::from_abstract_name(&abstract_name).unwrap()).unwrap();
+        assert_eq!(name(&hidden), [&[0], &abstract_name[..]].concat());
+        assert_eq!(name(&UnixDatagram::unbound().unwrap()), b"");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// The child's /proc state letter, or None once no such process exists.
     fn state(pid: i32) -> Option<char> {
