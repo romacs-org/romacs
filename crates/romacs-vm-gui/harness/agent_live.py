@@ -657,21 +657,31 @@ def deadline(args, base):
         a.eval('(setq romacs-agent-reply-timeout 2)')
         sid = a.start('say ready')
         a.idle(sid)
+        # A turn is over once its end is recorded: idle right after a send
+        # may be the turn before's, the message not taken yet.
+        done = lambda: a.eval(f'(romacs-agent-done-seq {a.s(sid)})')
+
+        def answered(before, what):
+            until(lambda: done() != before, 40, f'{what} answered')
+            a.idle(sid, 40)
+
         ran = a.root / 'ran.txt'
+        before = done()
         a.send(sid, 'call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(progn (append-to-file "ran\\n" nil {lisp(ran)}) (sleep-for 5) 1)') + ', "budgetMs": 0}')
-        a.idle(sid, 40)
+        answered(before, 'the running call')
         running = next(e for e in reversed(a.logged()) if e.get('tool') == 'romacs_eval')
         asked = next((e['outcome'] for e in reversed(a.logged()) if 'outcome_of' in e), '')
         queued = a.root / 'queued.txt'
         # The harness calls a second after it is asked, while the editor is
         # busy with a client's 6 s evaluation: the call waits in the queue.
+        before = done()
         a.send(sid, 'later 1 call romacs_eval {"instance": "?", "code": '
                     + json.dumps(f'(append-to-file "q\\n" nil {lisp(queued)})') + '}')
         busy = subprocess.Popen([a.args.romacs, '--server', a.name, '-e', '(progn (sleep-for 6) t)'], env=a.env,
                                 cwd=a.work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         busy.wait(30)
-        a.idle(sid, 40)
+        answered(before, 'the queued call')
         withdrawn = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'withdrawn' in e.get('text', '')]
         result = {'running_text': running['text'][:120], 'running_seconds': round(running['seconds'], 2),
                   'outcome': asked[:120], 'ran_once': ran.read_text().count('ran') == 1,
