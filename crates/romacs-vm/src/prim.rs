@@ -2451,14 +2451,14 @@ impl Vm {
             heap = self.stack[start..start + argc].to_vec();
             &heap
         };
-        let step = no_collection(self, |vm| {
+        let step = crate::gap_probe::within(self, || d.name, |vm| no_collection(vm, |vm| {
             let mut cx = Leaf::new(vm);
             match d.body {
                 Body::Leaf(f) => f(&mut cx, args).map(Step::Done),
                 Body::Call(f) => f(&mut cx, args),
                 Body::Reader(_) => unreachable!("a reading primitive is lent from its engine (`read_body`)"),
             }
-        });
+        }));
         step.map_err(|fault| self.step_fault(fault))
     }
     /// The arity error D, the generated primitive TARGET, raises for ARGC
@@ -2507,7 +2507,7 @@ impl Vm {
         result: Value,
         saved: &[Value],
     ) -> std::result::Result<Step, Option<(Value, Value)>> {
-        no_collection(self, |vm| then(&mut Leaf::new(vm), result, saved))
+        crate::gap_probe::within(self, || "(continuation)", |vm| no_collection(vm, |vm| then(&mut Leaf::new(vm), result, saved)))
             .map_err(|fault| self.step_fault(fault))
     }
     fn step_fault(&mut self, fault: Fault) -> Option<(Value, Value)> {

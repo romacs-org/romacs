@@ -29,6 +29,7 @@ mod interpreted_closure;
 mod oclosure;
 mod host_input;
 mod quit;
+mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
 mod bidi;
@@ -1793,7 +1794,7 @@ impl Vm {
             treesit_plain: Vec::new(),
             treesit_deferred: None,
             treesit_parse_owed: false,
-            quit: std::sync::Arc::default(),
+            quit: gap_probe::as_hosted(std::sync::Arc::default()),
             force_quit_count: 0,
             deferred_escapes: 0,
             quit_slots: [0; 3],

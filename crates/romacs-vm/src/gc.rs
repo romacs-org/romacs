@@ -1307,6 +1307,9 @@ impl Vm {
     /// local marks, and an undo list's cut waits for the end of the mark).
     /// Whether it collected.
     pub(super) fn collect_marked(&mut self, roots: &mut [Value], until_key: bool) -> bool {
+        crate::gap_probe::within(self, || "(gc)", |vm| vm.collect_marked_probed(roots, until_key))
+    }
+    fn collect_marked_probed(&mut self, roots: &mut [Value], until_key: bool) -> bool {
         // The one funnel: no collection while a hold is open or an engine runs
         // unsuspended, whatever reached here. Raw code cannot suspend its own
         // engine (only the engine's lends do), so it cannot make this pass.
@@ -1757,6 +1760,9 @@ impl Vm {
     /// promotes everything instead.
     /// Whether it collected.
     pub(crate) fn collect_minor(&mut self, roots: &[Value]) -> bool {
+        crate::gap_probe::within(self, || "(gc minor)", |vm| vm.collect_minor_probed(roots))
+    }
+    fn collect_minor_probed(&mut self, roots: &[Value]) -> bool {
         if !self.may_collect(0) {
             return false;
         }

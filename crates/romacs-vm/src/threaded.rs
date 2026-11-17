@@ -1832,6 +1832,7 @@ fn execute_args_inner(vm: &mut Vm, function: usize, args: &[Value]) -> Result<Va
     }
     // GNU's eval_sub and funcall run maybe_quit before the body: a quit
     // already due ends the entry before its first instruction.
+    crate::gap_probe::safepoint(Some(engine.vm));
     let quit = if crate::host::safepoint_pending() || engine.vm.quit_due() {
         engine.budget = 0;
         interrupt_quit(&mut engine)
@@ -2411,7 +2412,10 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
     // GNU's maybe_quit: a host's C-g (quit.rs), a debug event, or an
     // isolate's interrupt (SIGUSR1, `isolate.rs`) is `quit` at this
     // safepoint unless `inhibit-quit' is bound.
-    let quit = m.leaf((), |e, ()| (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some());
+    let quit = m.leaf((), |e, ()| {
+        crate::gap_probe::safepoint(Some(e.vm));
+        (crate::host::safepoint_pending() || e.vm.quit_poll_due()) && interrupt_quit(e).is_some()
+    });
     if quit { Continue::Stop } else { Continue::At(pc) }
 }
 /// GNU maybe_quit at a safepoint: an isolate's pending interrupt as a
@@ -4481,7 +4485,9 @@ unsafe fn leaf_call(
         }
         let leaf: prim::LeafBody = std::mem::transmute(en.entries.get_unchecked((*pc).site).function);
         en.vm.site_leaf = (pc as usize, r as usize);
+        crate::gap_probe::enter(en.vm, || prim::generated(target).map_or("(site leaf)", |d| d.name));
         let value = en.vm.leaf_value(leaf, r.add(start), argc, &mut en.leaf_fault);
+        crate::gap_probe::exit(en.vm);
         en.vm.site_leaf = (0, 0);
         if value == Value::UNBOUND && en.leaf_fault.is_some() {
             return leaf_failed(e, r, pc, target, start, argc);

@@ -1407,6 +1407,7 @@ thread_local! {
 /// counted for the searching VM, or a debug event.
 fn regexp_quit_probe() -> bool {
     let armed = ARMED.with(std::cell::Cell::get);
+    if !armed.quit.is_null() { crate::gap_probe::safepoint(None); }
     // An inspection leaves the match alone: only a real quit stops it.
     if crate::host::inspect_pending() && let Some((backtrace, symbols)) = armed.frames {
         let generation = crate::host::inspect_generation();

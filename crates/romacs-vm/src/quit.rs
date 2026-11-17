@@ -178,6 +178,7 @@ impl Vm {
     pub(crate) fn native_poll(&mut self) -> std::result::Result<(), crate::prim::Fault> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.motion_quit || !self.native_quit_reached() { return Ok(()); }
+        crate::gap_probe::safepoint(Some(self));
         let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
         if !press && !crate::host::user_signal_waiting(self.debug_event_mask()) { return Ok(()); }
         match self.maybe_quit() {
@@ -229,6 +230,7 @@ impl Vm {
     /// `maybe_quit' for Rust that runs between Lisp evaluations (the
     /// loader between forms): the escape left for the caller to propagate.
     pub(crate) fn poll_quit(&mut self) -> crate::Result<()> {
+        crate::gap_probe::safepoint(Some(self));
         if !self.quit_poll_due() {
             return Ok(());
         }
@@ -406,6 +408,7 @@ impl Vm {
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
+            crate::gap_probe::safepoint(Some(self));
             if self.quit.pressed() || crate::host::user_signal_waiting(debug) {
                 return Ok(vec![0; fds.len()]);
             }
