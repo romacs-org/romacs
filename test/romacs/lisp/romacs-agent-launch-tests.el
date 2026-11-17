@@ -353,9 +353,11 @@ the launched run's own `run' note ends it."
          ;; No launch waits: its last run ended.
          (should (romacs-agent--caught-up-p session))
          ;; A launch waits: that exit was the run before it.
-         (puthash (romacs-agent-id session) t romacs-agent--launched)
+         (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
          (should-not (romacs-agent--caught-up-p session))
-         ;; The launched run came and went before it was attached.
-         (write (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "run"))
-                (romacs-mcp--object "seq" 4 "t" 4.0 "exit" 0))
+         ;; The launched run began, read by one try; it ended before the
+         ;; next one attached.
+         (write (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "run")))
+         (should-not (romacs-agent--caught-up-p session))
+         (write (romacs-mcp--object "seq" 4 "t" 4.0 "exit" 0))
          (should (romacs-agent--caught-up-p session)))))))

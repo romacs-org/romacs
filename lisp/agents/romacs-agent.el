@@ -2512,12 +2512,16 @@ supervisor may be starting again."
 (defun romacs-agent--caught-up-p (session)
   "Replay what SESSION's last supervisor journaled since it started, unseen
 here; non-nil when that ends with the harness's exit.  While a launch of
-SESSION waits for its supervisor, only an exit after a `run' note not
-seen before counts: an earlier run's exit is no end of the one launched.
+SESSION waits for its supervisor, only an exit after a `run' note past
+what it had seen as it launched counts: an earlier run's exit is no end
+of the one launched.
 What the replay folded is kept, so the next start reads on from there."
   (when (romacs-agent-journal-start session)
-    (let ((launching (gethash (romacs-agent-id session) romacs-agent--launched))
-          (seen (romacs-agent-seq session)) (ran nil) (ended nil))
+    (let* ((launching (gethash (romacs-agent-id session) romacs-agent--launched))
+           ;; Its run's records follow the seq seen as it launched, however
+           ;; many tries have read some of them since.
+           (seen (if (integerp launching) launching (romacs-agent-seq session)))
+           (ran nil) (ended nil))
       (romacs-agent--read-journal
        session (lambda (record)
                  (cond ((and launching (romacs-agent--note-p record "run") (> (or (gethash "seq" record) 0) seen))
@@ -3268,7 +3272,8 @@ it go."
 
 (defvar romacs-agent--launched (make-hash-table :test #'equal)
   "The ids of the sessions whose supervisor this server launched and has
-not attached to, or seen fail, yet.")
+not attached to, or seen fail, yet, each to the seq it had seen as it
+launched: the launched run's records come after it.")
 
 (defun romacs-agent--supervisor-may-run-p (session)
   "Whether a supervisor of SESSION may be running, not attached here: one
@@ -3668,7 +3673,7 @@ to it."
         (apply #'call-process "setsid" nil 0 nil "--fork" command))
       (setf (romacs-agent-unit session) nil))
     ;; It numbers its records from now on: notes wait for it to attach.
-    (puthash (romacs-agent-id session) t romacs-agent--launched)
+    (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
     (romacs-agent--manifest session argv)))
 
 (defun romacs-agent--project-default ()
