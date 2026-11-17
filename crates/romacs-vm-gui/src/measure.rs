@@ -599,6 +599,31 @@ mod tests {
         assert!(calls.windows(2).all(|w| w[0] < w[1]), "{calls:?}: each pass walks only text newly in view");
     }
 
+    /// A window fontified ahead of its layout, through where its last
+    /// layout from the same start ended, shows text past that once its
+    /// faces shrink: redisplay walks on from there, not again from the
+    /// start, so a function that never sets `fontified` is called at ever
+    /// later positions.
+    #[test]
+    fn redisplay_walks_on_from_what_it_fontified_ahead() {
+        let mut h = hosted();
+        h.eval(r"(progn (setq truncate-partial-width-windows nil) (erase-buffer)
+          (insert (propertize (make-string 3000 ?x) 'face 'hosted-big))
+          (goto-char 1) (set-window-start nil 1))");
+        h.paint();
+        h.eval(r"(progn (put-text-property 1 (point-max) 'fontified nil)
+          (setq hosted-calls nil)
+          (setq fontification-functions
+                (list (lambda (pos)
+                        (setq hosted-calls (cons pos hosted-calls))
+                        (remove-text-properties pos (min (point-max) (+ pos 1000)) '(face nil))))))");
+        h.paint();
+        let calls = h.eval("(reverse hosted-calls)");
+        let calls: Vec<i64> = calls.trim_matches(['(', ')']).split(' ').map(|n| n.parse().unwrap()).collect();
+        assert!(calls.len() > 1, "{calls:?}: a pass for the text past what was fontified ahead");
+        assert!(calls.windows(2).all(|w| w[0] < w[1]), "{calls:?}: no text is walked twice");
+    }
+
     /// A row a plain newline starts measures alone, whatever the line
     /// before holds: gnosis's review centres each line with an overlay
     /// string, then measures the next line.  The line holding the string

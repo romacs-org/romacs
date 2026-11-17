@@ -2075,6 +2075,13 @@ pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64)
     Leaf::new(vm).hosted_rows_end(window, start, rows)
 }
 
+/// The first position from POS before END where redisplay calls
+/// `fontification-functions` in the current buffer as WINDOW shows it
+/// (`Leaf::fontify_next`).
+pub(crate) fn fontify_next(vm: &mut Vm, window: Value, pos: i64, end: i64) -> std::result::Result<Option<i64>, Fault> {
+    Leaf::new(vm).fontify_next(window, pos, end, false)
+}
+
 /// The effective `text-quoting-style' (Leaf::text_quoting_style).
 pub(crate) fn text_quoting_style(vm: &mut Vm) -> std::result::Result<&'static str, Fault> {
     Leaf::new(vm).text_quoting_style()

@@ -891,6 +891,7 @@ pub struct PointPlace {
     pub truncated_right: bool,
     pub at_eol: bool,
 }
+romacs_snapshot::snapshot_struct!(PointPlace { x, line_x, gutter, truncated_left, truncated_right, at_eol });
 
 /// One screen row: the byte it starts at, its top and its height.
 #[derive(Clone, Copy, Debug, PartialEq)]

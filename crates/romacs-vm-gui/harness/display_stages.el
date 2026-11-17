@@ -243,15 +243,12 @@ line's end; return it."
   :body (display-stages--delta it i))
 
 ;; A folded Org buffer is opened: its first paint fontifies what it shows.
-;; The chunk jit-lock fontifies after each folded body reaches back into
-;; it, so a second redisplay follows (`jit-lock-force-redisplay', as in
-;; GNU): two a step.  Its bar holds five layouts, two in the second and
-;; three in the first (TODO(#265): one): the window's rows for point's
-;; visibility before jit-lock fontifies them (A), point's line for hscroll
-;; (B), and the rows again for the range shown once jit-lock has changed
-;; their properties (C).  Before romacs#221 A and C were glyph walks: 694 M
-;; display instructions with 1 layout and 4 walks, against 499 M with 3
-;; layouts and 1 walk after.
+;; The window has laid none of it out to fontify ahead from, so it lays the
+;; window out for point's visibility, then again once jit-lock has
+;; fontified what that showed.  The chunk jit-lock fontifies after each
+;; folded body reaches back into it, so a second redisplay follows
+;; (`jit-lock-force-redisplay', as in GNU), laying it out once: two
+;; redisplays and three layouts a step.
 (display-stages-scenario fontify-open-org-folded :paints t
   :setup (display-stages--counting-fontified)
   :body (switch-to-buffer (display-stages--org (format "stages-%d.org" i) 15)))
