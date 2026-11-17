@@ -26,9 +26,9 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 582000,
+  "step_instructions": 737000,
   "cycles": 1,
-  "display_instructions": 573000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -36,12 +36,13 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 578000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick": {
-  "step_instructions": 875000,
+  "step_instructions": 1030000,
   "cycles": 1,
-  "display_instructions": 574000,
+  "display_instructions": 727000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -49,7 +50,8 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 574000
+  "display_instructions_p90": 731000,
+  "display_instructions_note": "the chat's session is in the store, as every real one is, so its header says what the session runs on (model, mode, context, the running mark), and a reused window's header band is expanded again every redisplay: about 100 K of each idle redisplay is that header (measured 655-667 K; no header 566 K, a plain string 593 K); the live agents writer worker adds the rest. TODO(#269): expand a band only when what it reads changed"
  },
  "chat-tick-second": {
   "step_instructions": 19100000,
@@ -82,13 +84,16 @@
   "cycles": 1,
   "display_instructions": 24200000,
   "display_conses": 174,
-  "windows_rebuilt": 2,
+  "windows_rebuilt": 3,
   "band_expansions": 2,
-  "layouts": 2,
+  "layouts": 3,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 24300000
+  "display_instructions_p90": 24300000,
+  "windows_rebuilt_ceiling": true,
+  "layouts_ceiling": true,
+  "layouts_note": "a live writer worker (the chat's session in the store) costs a window rebuild and layout after a collection in some runs and not others: measured 2 or 3 of each from run to run, the same on a beta build after one unrelated writer write; both held to a ceiling of 3, not exactly. TODO(#269): back to exactly 2 once a live writer costs nothing idle"
  },
  "cursor-move": {
   "step_instructions": 1860000,

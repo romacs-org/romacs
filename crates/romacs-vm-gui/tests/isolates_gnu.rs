@@ -1,5 +1,6 @@
 //! Isolates on the full GNU Lisp chain: a batch session boots from source
-//! and spawns workers that boot from source too (`:allow-source-boot t`),
+//! and spawns workers that boot from source too, as every worker of a VM
+//! with no world does,
 //! so a worker can run `make-process` and the project commands. Covers
 //! what the bare-worker tests (romacs-vm `tests/isolates.rs`) cannot: child
 //! reporting with pidfds and retirement, the kill reaching a reported
@@ -74,7 +75,7 @@ fn process_exists(pid: i64) -> bool {
 #[test]
 fn a_killed_workers_reported_child_is_reached_and_a_reaped_one_is_retired() {
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (id (romacs--isolate-id iso))
              (child (isolate-await (isolate-spawn '(lambda () (process-id (make-process :name \"sleeper\" :command '(\"sleep\" \"30\") :connection-type 'pipe))) :isolate iso)))
              (reaped (isolate-await (isolate-spawn '(lambda () (let ((p (make-process :name \"quick\" :command '(\"true\") :connection-type 'pipe))) (while (process-live-p p) (accept-process-output p 0.1)) (process-id p))) :isolate iso))))
@@ -105,7 +106,7 @@ fn a_worker_killed_from_outside_has_its_reported_child_reached() {
     // Sol r1 S7: a death the parent did not cause still signals the groups
     // of the children the worker reported.
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (id (romacs--isolate-id iso))
              (child (isolate-await (isolate-spawn '(lambda () (process-id (make-process :name \"sleeper\" :command '(\"sleep\" \"30\") :connection-type 'pipe))) :isolate iso)))
              (events nil))
@@ -146,7 +147,7 @@ fn the_project_commands_give_the_synchronous_results() {
         (prin1 (list 'files (length sync-files) (equal sync-files iso-files)
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
                      'ready (list before preparing ready (romacs-project--warm pr))
-                     'boot (isolate-await (isolate-spawn '(lambda () isolate-boot) :allow-source-boot t))))
+                     'boot (isolate-await (isolate-spawn '(lambda () isolate-boot)))))
         (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/progmodes/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
@@ -289,7 +290,7 @@ fn a_snapshot_carries_the_text_and_its_worker_buffer_refuses_text_edits() {
                                                              (condition-case nil (progn (insert \"x\") 'inserted) (buffer-read-only 'refused))
                                                              (condition-case nil (progn (put-text-property 1 3 'face 'bold) 'put) (buffer-read-only 'refused))
                                                              (let ((inhibit-read-only t)) (put-text-property 1 3 'face 'bold) (get-text-property 1 'face)))))
-                                                  s1 :allow-source-boot t)))
+                                                  s1)))
               (edited (condition-case err
                           (isolate-await (isolate-spawn '(lambda (s) (with-snapshot-buffer s (let ((inhibit-read-only t)) (insert \"y\")) t)) s1))
                         (error (error-message-string err)))))
@@ -351,7 +352,7 @@ fn a_workers_fontification_is_the_sessions() {
                 (puthash token owner romacs-fontify--jobs)
                 ;; Start the walk mid-buffer, as a window showing it there would.
                 (let ((done (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 20000
-                                                          :require (nth 2 spec) :allow-source-boot t))))
+                                                          :require (nth 2 spec)))))
                   (romacs--isolate-pump 0.2)
                   (let ((blocks (romacs-fontify--covering (point-min) (point-max))))
                     (when blocks (romacs-fontify--apply (point-min) (point-max) blocks))
@@ -376,7 +377,7 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     // The GUI's worker waits on its evaluator thread while the main thread
     // joins it; SIGTERM may land on either, so the handler wakes the wait.
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (isolate-kill-timeout 10))
         (isolate-await (isolate-spawn '(lambda () t) :isolate iso))
         (let ((t0 (float-time)))
@@ -408,7 +409,7 @@ fn results_wait_for_a_widened_buffer_and_a_changed_setup_refuses_them() {
           (narrow-to-region 1 100)
           ;; From 9000: the block it began in is delivered twice.
           (let ((done (condition-case err
-                          (progn (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 9000 :allow-source-boot t))
+                          (progn (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 9000))
                                  (romacs--isolate-pump 0.2) 'delivered)
                         (error err))))
             (widen)

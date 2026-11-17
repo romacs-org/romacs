@@ -151,9 +151,11 @@ def refusal(scenario, result, wanted):
 def off(measured, bars):
     """The figures of MEASURED off their bar or without one: (figure,
     value, bar or None).  Instructions and conses are off over their bar,
-    any other count when it differs."""
+    and so is a count whose bars mark it a ceiling (FIGURE_ceiling); any
+    other count when it differs."""
     return [(figure, value, bars.get(figure)) for figure, value in measured.items()
-            if bars.get(figure) is None or value > bars[figure] or (value < bars[figure] and not margined(figure))]
+            if bars.get(figure) is None or value > bars[figure]
+            or (value < bars[figure] and not (margined(figure) or bars.get(f'{figure}_ceiling')))]
 
 
 def verdict(scenario, result, wanted, bars):
@@ -174,6 +176,14 @@ def verdict(scenario, result, wanted, bars):
                            for figure, value, bar in row['off'])
         return {**row, 'status': 'FAIL', 'reason': reason}
     return {**row, 'status': 'PASS'}
+
+
+def rebarred(bars, new):
+    """BARS with each scenario's figures from NEW, its notes and ceilings
+    (FIGURE_note, FIGURE_ceiling) kept: why a bar is what it is outlives a
+    recording."""
+    kept = lambda name: {k: v for k, v in bars.get(name, {}).items() if k.endswith(('_note', '_ceiling'))}
+    return {**bars, **{name: {**figures, **kept(name)} for name, figures in new.items()}}
 
 
 def margined(figure):
@@ -310,7 +320,7 @@ def main():
         report['rows'] = run(binary, home, selected, bars, args)
         report['status'] = overall(report['rows'])
         if args.write_bars:
-            args.write_bars.write_text(json.dumps({**bars, **bars_of(report['rows'])}, indent=1) + '\n')
+            args.write_bars.write_text(json.dumps(rebarred(bars, bars_of(report['rows'])), indent=1) + '\n')
     except (Refused, subprocess.SubprocessError, OSError, ValueError) as error:
         report['error'] = str(error)
     # The worlds are the bulk of HOME, and no part of the report.
