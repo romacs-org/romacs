@@ -106,6 +106,14 @@ class Parsing(unittest.TestCase):
                           '{"scaling":"end"}', '{"diagnostic":"paint-submitted","presentation":4}'])
         self.assertEqual(s.step_paints(text), [1, 0, 1])
 
+    def test_a_mark_another_writer_left_on_its_line_still_counts(self):
+        # A stall report written a piece at a time, its newline after the mark.
+        text = '\n'.join(['{"scaling":"start"}', '{"scaling":"step","i":0}', '{"diagnostic":"paint-submitted","presentation":1}',
+                          'romacs-stall: {"buffer":null,"ms":1362,"samples":[["a"]]}{"scaling":"step","i":1}',
+                          '{"diagnostic":"paint-submitted","presentation":2}', '{"scaling":"end"}'])
+        self.assertEqual(s.step_paints(text), [1, 1])
+        self.assertEqual(list(s.stderr_records('x {"a":1}{"b":{"c":2}} {broken {"d":3}')), [{'a': 1}, {'b': {'c': 2}}, {'d': 3}])
+
     def test_a_slope_probe_is_held_by_its_slope_not_its_exponent(self):
         # 10 M of fixed work and 2 instructions per unit of N a step, 4 steps
         # at N 100 and 400: the exponent says it grows, the slope that it is
