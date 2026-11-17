@@ -15,14 +15,13 @@ static DIAGNOSTICS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// can hold what the user typed). On under ROMACS_DIAGNOSTICS=1, the trace
 /// flags, and the --wayland oracle transport.
 fn diagnostics() -> bool { DIAGNOSTICS.load(std::sync::atomic::Ordering::Relaxed) }
-/// Write VALUE to stderr as one line, in one write. `eprintln!("{}", value)`
-/// hands serde's pieces to unbuffered stderr a syscall apiece: thousands for
-/// a scene dump, which under load held the evaluator for seconds a paint.
+/// Write VALUE to stderr as one line, handed over as one complete buffer
+/// (`stderr::line`).
+/// `eprintln!("{}", value)` hands serde's pieces to unbuffered stderr a
+/// syscall apiece: thousands for a scene dump, which under load held the
+/// evaluator for seconds a paint.
 fn diagnostic_line(value: &serde_json::Value) {
-    use std::io::Write;
-    let mut line = serde_json::to_vec(value).unwrap_or_default();
-    line.push(b'\n');
-    let _ = std::io::stderr().lock().write_all(&line);
+    romacs_vm_gui::stderr::line(&value.to_string());
 }
 
 use romacs_vm_gui::{command, echo, fonts, grammars, loading, loadup, measure, native, presentation, startup, terminal_service, terminal_wait};
