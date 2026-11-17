@@ -695,12 +695,10 @@ impl Vm {
     }
     /// `annotation_variable` of the variable at SLOT.
     fn annotation_slot_value(&self, slot: usize) -> Value {
-        let table = self.slots[slot].local;
-        let local = (table != Value::NIL)
-            .then(|| self.eq_hash_get(table, self.slots[self.buffer_slot].value))
-            .flatten()
-            .and_then(|binding| binding.index(7).ok());
-        let value = self.slots[local.map_or(slot, |index| index - 1)].value;
+        let local = self.slots[self.buffer_slot].value.index_if(0)
+            .and_then(|index| self.per_buffer(index - 1))
+            .and_then(|b| b.locals().get(Value::reference(slot + 1, 7)));
+        let value = local.unwrap_or(self.slots[slot].value);
         if value == Value::UNBOUND { Value::NIL } else { value }
     }
     pub(super) fn annotation_plist(&self, mut plist: Value, key: Value) -> Result<Option<Value>> {
@@ -1390,18 +1388,19 @@ impl AnnotatedBuffer {
     /// Every Value the buffer holds; of its text's properties, what READING
     /// says (`BodyProperties`).
     pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
-        self.visit_values_but(reading, None, f);
+        self.visit_values_but(reading, None, true, f);
     }
     /// A live buffer's undo list is weak, unless it is its base's and so not in
     /// its slot; a dead buffer's is held like the rest of it (`mark_buffer`).
     pub(crate) fn owns_undo_list(&self) -> bool {
         self.state.live && self.base == Value::NIL
     }
-    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`).
-    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, f: &mut impl FnMut(&mut Value)) {
+    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`),
+    /// and over the Lisp locals unless LOCALS (`PerBuffer::visit_values_but`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, locals: bool, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
-        self.per_buffer.visit_values_but(skip, f);
+        self.per_buffer.visit_values_but(skip, locals, f);
         self.text.visit_view_values(f);
         // An indirect buffer holds its base alive; the text they share is
         // the base's to visit, once, as collection rewrites what it visits.
@@ -1426,6 +1425,7 @@ impl AnnotatedBuffer {
         };
         shared
             + self.text.state.storage_bytes(capacity)
+            + self.per_buffer.locals_storage_bytes(capacity)
             + self.indirect.capacity() * size_of::<Value>()
             + self.intervals.storage_bytes(capacity)
             + (if capacity {

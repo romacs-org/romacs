@@ -255,7 +255,7 @@ mod leaf {
         /// `memory-use-counts': (CONSES FLOATS VECTOR-CELLS SYMBOLS STRING-CHARS INTERVALS STRINGS).
         pub(crate) fn consed(&self) -> [u64; 7] {
             let c = &self.vm.allocation.consed;
-            let symbols = (self.vm.slots.len() - self.vm.local_binding_slots.len()) as u64 + c.reused_symbols;
+            let symbols = self.vm.slots.len() as u64 + c.reused_symbols;
             [c.conses, c.floats, c.vector_cells, symbols, c.string_chars, 0, c.strings]
         }
         /// `Vm::collection_share'.
@@ -1239,7 +1239,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.symbol_slot(v)?;
-            Ok(self.vm.local_table(slot).map_err(Fault::Error)?.is_some())
+            Ok(self.vm.localized(slot))
         }
         /// A live dynamic (`let`) binding of V, GNU's `specpdl` scan in
         /// `Fdefvaralias`. Bindings record the variable at the chain's end.
