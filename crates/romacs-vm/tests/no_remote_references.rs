@@ -108,6 +108,9 @@ const FIELDS: &[(&str, Class)] = &[
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
     ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
     ("gc_holds", Free), ("running_engines", Free), ("rooted_write", Free), ("gc_stress", Free), ("allocation", Free),
+    // The restored image's symbols of obarrays of their own, by slot: roots of
+    // every full (a minor reclaims no symbol); the rest of it holds no Value.
+    ("world_image", Root),
     ("names", Free), ("initial_obarray", Free), ("symbol_names", Free),
     // Read for the symbols marked, which own-obarray ones are only if reached.
     ("obarray_symbol_names", Rescanned),
@@ -299,7 +302,7 @@ const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
 type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
-    ["table.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
+    ["table.rs", "table_image_tests.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
 }
 
 /// The collector, and the char table and keymap cursor files that give it
