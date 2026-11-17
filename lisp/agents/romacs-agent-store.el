@@ -135,8 +135,9 @@ the writer once it has opened it (`romacs-agent-store--made').")
   "The writer's start: the store opened, its tables made, its waits long,
 its commits not synced one by one (`synchronous=NORMAL', as a supervisor's
 are): what a crash may lose of them is the writer's queue's window."
-  (setq romacs-agent-store-patience romacs-agent-store-patient)
-  (when-let* ((db (romacs-agent-store--open)))
+  ;; Its connection waits long; the editor, which runs this when it ends
+  ;; with no writer (`romacs-agent-writer--here'), keeps its own short.
+  (when-let* ((db (let ((romacs-agent-store-patience romacs-agent-store-patient)) (romacs-agent-store--open))))
     (sqlite-pragma db "synchronous = NORMAL")
     (romacs-agent-store--made)))
 
@@ -159,6 +160,12 @@ are): what a crash may lose of them is the writer's queue's window."
           (set-file-modes file #o600)
           (setq romacs-agent-store--db (cons (cons file nil) db))
           db)
+      ;; Off the editor a lock is waited out by the caller, never read
+      ;; as no store.
+      (sqlite-locked-error
+       (if (>= romacs-agent-store-patience romacs-agent-store-patient) (signal (car err) (cdr err))
+         (message "romacs-agent-store: %s" (error-message-string err))
+         nil))
       (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
 
 (defvar romacs-agent-store--transcripts nil
@@ -332,13 +339,18 @@ manifest."
 (defun romacs-agent-store-fill ()
   "Write the row of each recorded session that has none, from its records
 (`romacs-agent-store--recorded-row'); return how many were written."
-  (let ((count 0) (db (romacs-agent-store--open))
+  (let ((count 0) (db nil) (missing nil)
         (romacs-agent-store--transcripts (make-hash-table :test #'equal)))
+    ;; Opened and asked what is missing until the lock lets it, as a chunk
+    ;; is written (`romacs-agent-store--fill-chunk').
+    (while (condition-case nil
+               (progn (setq db (romacs-agent-store--open) missing (and db (romacs-agent-store--missing))) nil)
+             (sqlite-locked-error t)))
     ;; Written only where no row is (a loaded session's own, written
     ;; meanwhile, is newer), fifty rows a short transaction that takes the
     ;; write lock as it begins.
     (when db
-      (dolist (dirs (seq-partition (romacs-agent-store--missing) 50))
+      (dolist (dirs (seq-partition missing 50))
         (cl-incf count (romacs-agent-store--fill-chunk db dirs)))
       count)))
 
