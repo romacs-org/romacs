@@ -865,10 +865,9 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
 
 /// GNU's editing functions romacs-editing.el calls, by the GNU file that
 /// defines each.
-const GNU_EDITING: [(&str, &[&str]); 4] = [
+const GNU_EDITING: [(&str, &[&str]); 3] = [
     ("subr.el", &["plusp", "add-to-history", "ignore", "string=", "undefined"]),
     ("files.el", &["files--ensure-directory", "make-directory"]),
-    ("mail/mailheader.el", &["mail-header-extract", "mail-header-format-function"]),
     ("simple.el", &["mark", "set-mark", "push-mark", "pop-mark", "push-mark-command", "pop-to-mark-command",
                     "set-mark-command", "beginning-of-buffer", "kill-new", "current-kill", "backward-word",
                     "kill-word", "backward-kill-word"]),
@@ -879,7 +878,6 @@ fn compiled_gnu_editing(file: &str) -> Option<&'static str> {
     match file {
         "subr.el" => Some(include_str!("../../../lisp/subr.el")),
         "files.el" => Some(include_str!("../../../lisp/files.el")),
-        "mail/mailheader.el" => Some(include_str!("../../../lisp/mail/mailheader.el")),
         "simple.el" => Some(include_str!("../../../lisp/simple.el")),
         _ => None,
     }
@@ -2200,9 +2198,9 @@ mod tests {
 
     /// `--loadup` loads Romacs's own Lisp from its runtime tree as `load'
     /// does: each file has its `load-history' entry, so a world keys what
-    /// it read and `find-function' reaches its definitions. The kill ring's
-    /// functions are the tree's simple.el's, which the chain loaded, and not
-    /// the VM's native `kill-new'.
+    /// it read and `find-function' reaches its definitions. The chain left no
+    /// GNU editing function to fill in, and the kill ring's are the tree's
+    /// simple.el's, not the VM's native `kill-new'.
     #[test]
     fn loadup_loads_romacs_lisp_from_its_tree() {
         let dir = lisp_root(&lisp_dir()).unwrap();
@@ -2214,6 +2212,8 @@ mod tests {
                 let file = lisp_string(&runtime_lisp(&dir, path).to_string_lossy());
                 printed(&mut vm, &format!("(and (assoc {file} load-history) t)")) != "t"
             }).collect::<Vec<_>>();
+            // Nothing of GNU's editing is missing after the chain: no GNU file is read.
+            define_gnu_editing(&mut vm, |file| Err(format!("read {file}"))).unwrap();
             let simple = lisp_string(&runtime_lisp(&dir, "simple.el").to_string_lossy());
             let kill_ring = printed(&mut vm, &format!("(mapcar (lambda (f) (and (not (subrp (symbol-function f)))
                                                                                (equal (symbol-file f) {simple})))
@@ -2246,13 +2246,26 @@ mod tests {
     }
 
     /// A chain that stopped before simple.el: the launch takes the GNU
-    /// editing functions romacs-editing.el calls from the tree's GNU files,
-    /// so C-SPC sets the mark and `mark-whole-buffer' selects the buffer;
-    /// a tree's own mailheader.el is the one it reads.
+    /// editing functions romacs-editing.el calls from the GNU files of its
+    /// tree, here a simple.el of the tree's own, so C-SPC sets the mark and
+    /// `mark-whole-buffer' selects the buffer.
     #[test]
     fn loadup_after_a_short_chain_takes_gnu_editing_from_its_tree() {
-        let mailheader = "(defun mail-header-extract () 'from-the-tree)\n(defvar mail-header-format-function nil)\n";
-        let dir = scratch_runtime("short-chain", "", &[("mail/mailheader.el", mailheader)]);
+        let simple = "(defun mark (&optional _force) 'from-the-tree)
+(defun set-mark (position) (set-marker (mark-marker) position))
+(defun push-mark (&optional location _nomsg _activate) (set-marker (mark-marker) (or location (point))) nil)
+(defun pop-mark () nil)
+(defun push-mark-command (_arg &optional _nomsg) nil)
+(defun pop-to-mark-command () nil)
+(defun set-mark-command (_arg) (interactive \"P\") (push-mark))
+(defun beginning-of-buffer (&optional _arg) (interactive) (goto-char (point-min)))
+(defun kill-new (string &optional _replace) string)
+(defun current-kill (_n &optional _do-not-move) nil)
+(defun backward-word (&optional _arg) (interactive) nil)
+(defun kill-word (_arg) (interactive \"p\") nil)
+(defun backward-kill-word (_arg) (interactive \"p\") nil)
+";
+        let dir = scratch_runtime("short-chain", "", &[("simple.el", simple)]);
         let marked = on_evaluator(move || {
             let mut vm = Vm::new();
             vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
@@ -2260,7 +2273,7 @@ mod tests {
             printed(&mut vm, "(progn (set-buffer (get-buffer-create \"marked\")) (insert \"abc\") (goto-char 2)
                                 (mark-whole-buffer)
                                 (list (key-binding [0]) (point) (marker-position (mark-marker))
-                                      (subrp (symbol-function 'kill-new)) (mail-header-extract)))")
+                                      (subrp (symbol-function 'kill-new)) (mark)))")
         });
         assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
     }
