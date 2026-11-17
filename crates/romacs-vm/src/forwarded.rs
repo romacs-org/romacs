@@ -894,9 +894,9 @@ pub(crate) struct Forwarded {
     /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
     /// locally, else usize::MAX (`Vm::eval_limit_local').
     pub(super) eval_limit_symbol: usize,
-    /// Advanced by every change of a local-binding table and by collection,
-    /// which moves buffers and reclaims bindings.
-    pub(super) local_epoch: u64,
+    /// Advanced by every collection, which may move buffers: what a cache
+    /// that names a buffer by its Value (`Places`) holds under.
+    pub(super) collection_epoch: u64,
 }
 
 impl Default for Forwarded {
@@ -909,7 +909,7 @@ impl Default for Forwarded {
             ints: vec![],
             eval_limit_index: 0,
             eval_limit_symbol: usize::MAX,
-            local_epoch: 0,
+            collection_epoch: 0,
             gc_cons: (0, 0),
             gc_done: (0, 0),
             defaults: vec![],

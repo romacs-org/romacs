@@ -1863,8 +1863,8 @@ impl Vm {
     /// before it forks (phoenix M1): the caches that name objects by value
     /// without rooting them, so none still names one the mark finds dead.
     pub(crate) fn clear_collection_caches(&mut self) {
-        // Buffers move and local bindings go (`Vm::eval_limit_local').
-        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
+        // Buffers move (`Places`).
+        self.forwarded.collection_epoch = self.forwarded.collection_epoch.wrapping_add(1);
         self.resolved_buffer = None;
         // Patterns kept for a table name it by a Value this may move.
         self.clear_regexp_cache(true);

@@ -1052,8 +1052,6 @@ impl Vm {
     }
     pub(super) fn declaration_hash_remove(&mut self, table: Value, key: Value) -> Result<()> {
         count_declaration_store();
-        // Local-binding tables are declaration tables (`Vm::eval_limit_local').
-        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (found, _, _) = self.table_lookup(table, key).map_err(|_| "hash table required")?;
         let i = self.table_index(table).map_err(|_| "hash table required")?;
         if let Some(slot) = found {
@@ -1069,7 +1067,6 @@ impl Vm {
         value: Value,
     ) -> Result<()> {
         count_declaration_store();
-        self.forwarded.local_epoch = self.forwarded.local_epoch.wrapping_add(1);
         let (found, hash, moving) = self
             .table_lookup(table, key)
             .map_err(|_| "hash table required")?;

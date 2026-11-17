@@ -174,7 +174,7 @@ enum Place {
 /// set-buffer swapped the buffer's binding. A place holds for its buffer
 /// until the buffer's locals change which variables they hold
 /// (`LocalVars::version`) or a collection moves the buffer
-/// (`Forwarded::local_epoch`), and while the variable's redirect is the one
+/// (`Forwarded::collection_epoch`), and while the variable's redirect is the one
 /// it was found under (an alias, a tracking and a first localization each
 /// change it).
 #[derive(Clone, Copy)]
@@ -414,7 +414,7 @@ impl Vm {
     /// for [`Self::find_places`].
     #[inline]
     pub(crate) fn read_places<const N: usize>(&self, places: &Places<N>) -> Option<[Value; N]> {
-        if places.buffer != self.slots[self.buffer_slot].value || places.epoch != self.forwarded.local_epoch {
+        if places.buffer != self.slots[self.buffer_slot].value || places.epoch != self.forwarded.collection_epoch {
             return None;
         }
         let locals = self.per_buffer(places.index)?.locals();
@@ -453,7 +453,7 @@ impl Vm {
         places.index = self.buffer_index()?;
         places.buffer = self.slots[self.buffer_slot].value;
         places.version = self.per_buffer(places.index).map_or(0, |b| b.locals().version());
-        places.epoch = self.forwarded.local_epoch;
+        places.epoch = self.forwarded.collection_epoch;
         Ok(values)
     }
     /// Where `variable_value` reads SLOT's value in the current buffer.
@@ -612,7 +612,6 @@ impl Vm {
             self.declare_local(slot, Localness::Explicit);
         }
         let index = self.buffer_index()?;
-        let symbol = Value::reference(slot + 1, 7);
         self.store_local(index, slot, LocalStore::Make(value));
         Ok(())
     }
