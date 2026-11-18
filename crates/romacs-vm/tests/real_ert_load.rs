@@ -1069,14 +1069,22 @@ fn file_names_links_and_copies_match_gnu() {
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let directory = format!("{}/", dir.display());
+    // GNU truncates a copy's destination before finding it is the source,
+    // emptying the source; Romacs signals the same error with the source
+    // intact (ledger/divergences/VM2-COPY-FILE-SAME-FILE.md). For these the
+    // value is GNU's and the directory is the fixture, untouched.
+    let keeps_source = [r#"(copy-file "a" "a" t)"#];
     let mut failures = Vec::new();
     for expression in cases {
         let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
         fixture();
+        let mut untouched = vec![];
+        snapshot(&dir, &dir, &mut untouched);
         let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
         snapshot(&dir, &dir, &mut expected.1);
+        if keeps_source.contains(&expression) { expected.1 = untouched; }
         fixture();
         let mut actual = (vm.eval_source(&source).unwrap().display().unwrap(), vec![]);
         snapshot(&dir, &dir, &mut actual.1);
