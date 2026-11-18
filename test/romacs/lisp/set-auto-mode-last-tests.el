@@ -36,6 +36,17 @@ Mode does for a style (`c-file-style'), before `run-mode-hooks' applies
 them again."
   (hack-local-variables))
 
+(define-derived-mode set-auto-mode-last-tests-other-mode prog-mode "Other"
+  "The mode `set-auto-mode-last-tests-pick-mode' picks for a file whose
+text says so.")
+
+(defun set-auto-mode-last-tests-pick-mode ()
+  "Pick a mode by the text, as `c-or-c++-mode' does: the other mode for a
+file that starts with \"other\", else the real one."
+  (if (save-excursion (goto-char (point-min)) (looking-at-p "other"))
+      (set-auto-mode-last-tests-other-mode)
+    (set-auto-mode-last-tests-real-mode)))
+
 (defun set-auto-mode-last-tests--files (texts &optional dir-locals)
   "Write each of TEXTS to its own .samlt file in a new directory, with
 DIR-LOCALS as its .dir-locals.el when given; return the files."
@@ -109,6 +120,25 @@ GNU: 1)."
                    '("a\n")
                    '((set-auto-mode-last-tests-twice-mode . ((mode . set-auto-mode-last-tests-minor)))))))
       (should (equal (set-auto-mode-last-tests--one-buffer files) '(0 1 t))))))
+
+(ert-deftest set-auto-mode-last-tests-a-picking-mode-runs-again-for-each-file ()
+  "A function that picks a major mode by the text is never kept by a
+dir-local minor mode's record: in one buffer, a file the pick makes the
+real mode and then one it makes the other mode each get the mode their
+text asks for (pinned GNU: the same)."
+  (set-auto-mode-last-tests--with-remap
+    (let* ((auto-mode-alist (cons '("\\.samlt\\'" . set-auto-mode-last-tests-pick-mode) auto-mode-alist))
+           (files (set-auto-mode-last-tests--files
+                   '("real\n" "other\n")
+                   '((nil . ((mode . set-auto-mode-last-tests-minor))))))
+           modes)
+      (with-temp-buffer
+        (dolist (file files)
+          (insert-file-contents file nil nil nil t)
+          (let ((buffer-file-name file))
+            (set-auto-mode t))
+          (push major-mode modes)))
+      (should (equal (nreverse modes) '(set-auto-mode-last-tests-real-mode set-auto-mode-last-tests-other-mode))))))
 
 (ert-deftest set-auto-mode-last-tests-revert-runs-the-mode-again ()
   "Reverting a visited file runs its mode again, as GNU does (pinned GNU:
