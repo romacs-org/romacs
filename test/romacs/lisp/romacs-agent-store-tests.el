@@ -751,9 +751,8 @@ has it: in a transaction of its own, after the statement FIRST when given."
 
 (ert-deftest romacs-agent-store-a-fill-makes-the-marks-what-the-files-say ()
   ;; Known marks a fact went unmarked under (an older build wrote it, a
-  ;; stop cut its mark short), or kept for a fact gone: a store's fill
-  ;; makes them what each session's files say, and names the ones newly
-  ;; marked, which a start would have missed.
+  ;; stop cut its mark short): a store's fill marks it, and names the ones
+  ;; newly marked, which a start would have missed.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
     (let ((one "aaaaaaaa-0000-4000-8000-000000000501") (two "aaaaaaaa-0000-4000-8000-000000000502"))
@@ -765,7 +764,8 @@ has it: in a transaction of its own, after the statement FIRST when given."
       (should-not (gethash one (romacs-agent--marked)))
       (should (equal (romacs-agent--marks-reconcile) (list one)))
       (should (gethash one (romacs-agent--marked)))
-      (should-not (gethash two (romacs-agent--marked)))
+      ;; A mark too many stays: removing it could race a fact's writing.
+      (should (gethash two (romacs-agent--marked)))
       (should-not (romacs-agent--marks-reconcile))
       ;; What a fill printed of them, for the editor to load.
       (should (equal (romacs-agent-store--marked-ids
@@ -800,3 +800,30 @@ has it: in a transaction of its own, after the statement FIRST when given."
         (cl-letf (((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
           (should (member (dir 7) (romacs-agent--recorded-since)))
           (should-not (member (dir 1) (romacs-agent--recorded-since))))))))
+
+(ert-deftest romacs-agent-store-a-session-marked-late-is-known-as-restored ()
+  ;; A fill that finds no row missing but a session newly marked, after
+  ;; the start's restore ended: the session is loaded, and known as a
+  ;; restore knows one (its watches, a restart to tell), its hook run once.
+  ;; With no listing answering, a start asks of every session.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((id "aaaaaaaa-0000-4000-8000-000000000701") (restored 0)
+           (romacs-agent--restore-pending nil) (romacs-agent--restoring nil) (romacs-agent--late-loads nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored))))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil))
+      (record id "late")
+      (romacs-agent-store-fill)
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (romacs-agent-store--filled (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" id))
+        (should (romacs-agent-loaded id))
+        (should (= restored 1))
+        (should-not romacs-agent--late-loads))
+      (let ((noninteractive nil) (listed nil))
+        (romacs-agent--marks-known)
+        (cl-letf (((symbol-function 'romacs-agent-store-rows-since) #'ignore)
+                  ((symbol-function 'romacs-agent--new-session-dirs) (lambda () (setq listed t) nil)))
+          (romacs-agent--start-dirs)
+          (should listed))))))

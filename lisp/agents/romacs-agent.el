@@ -5135,10 +5135,13 @@ files (`romacs-agent-mark-kinds')."
   (and (romacs-agent--waits-on dir) t))
 
 (defun romacs-agent--marks-reconcile ()
-  "Make every session's marks what its own files say, then say the marks
-are known: off the editor, at each start (a store's fill), so a fact an
-older build wrote, or one whose mark a stop cut short, is marked.  The
-ids newly marked, for the editor to load."
+  "Mark every session whose own files say something waits on it, then say
+the marks are known: off the editor, at each start (a store's fill), so
+a fact an older build wrote, or one whose mark a stop cut short, is
+marked.  A mark is never removed here: one too many only loads a session
+nothing waits on, while one removed as its fact is written meanwhile
+would lose it; the code ending a fact removes its mark.  The ids newly
+marked, for the editor to load."
   (let ((root (romacs-agent--state-root)) (marked (make-hash-table :test #'equal)) (new nil))
     (when (file-directory-p (romacs-agent--marks-dir))
       (dolist (file (directory-files (romacs-agent--marks-dir) nil "\\`[0-9a-f]"))
@@ -5148,10 +5151,7 @@ ids newly marked, for the editor to load."
         (dolist (kind on)
           (unless (gethash (format "%s.%s" id kind) marked)
             (romacs-agent-mark id kind t)
-            (cl-pushnew id new :test #'equal)))
-        (pcase-dolist (`(,kind . ,_) romacs-agent-mark-kinds)
-          (when (and (gethash (format "%s.%s" id kind) marked) (not (memq kind on)))
-            (romacs-agent-mark id kind nil)))))
+            (cl-pushnew id new :test #'equal)))))
     (romacs-agent--marks-known)
     new))
 
@@ -5202,11 +5202,13 @@ start's fill's to find (`romacs-agent-store--load-missing').  Else every
 session recorded (`romacs-agent--new-session-dirs')."
   (if-let* (((not noninteractive))
             (marked (romacs-agent--marked))
-            ((and romacs-agent-prefixed-ids romacs-agent-rows-since)))
-      (let ((dirs nil) (since (funcall romacs-agent-rows-since nil)))
+            ((and romacs-agent-prefixed-ids romacs-agent-rows-since))
+            ;; The listing answering: else every session, as with none.
+            (since (funcall romacs-agent-rows-since nil)))
+      (let ((dirs nil))
         ;; Every session recorded by now chosen among: a view's later look
         ;; asks only of those whose rows were written since.
-        (when since (setq romacs-agent--rows-seen (cons romacs-agent--sessions (cdr since))))
+        (setq romacs-agent--rows-seen (cons romacs-agent--sessions (cdr since)))
         (dolist (id (delete-dups (append (hash-table-keys marked) (romacs-agent--live-at-start))) dirs)
           (let ((dir (expand-file-name id (romacs-agent--state-root))))
             (unless (or (gethash id romacs-agent--sessions) (not (file-directory-p dir)))
@@ -5428,7 +5430,8 @@ start, so sessions survive it."
     (if-let* ((dirs (condition-case err (romacs-agent--to-load (romacs-agent--start-dirs))
                       ;; Not chosen (the store held): no start under way, so
                       ;; the next view's asks again.
-                      (error (setq romacs-agent--restoring nil) (signal (car err) (cdr err))))))
+                      (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
+                             (signal (car err) (cdr err))))))
         (progn (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
                (romacs-agent--restore-progress 'running)
                (run-at-time 0 nil #'romacs-agent--restore-step))
@@ -5451,9 +5454,18 @@ on."
         (run-at-time 0 nil #'romacs-agent--restore-step)
       (romacs-agent--restore-finish))))
 
+(defvar romacs-agent--late-loads nil
+  "Non-nil while sessions found after a start's restore ended load
+\(`romacs-agent-store--load-missing'): known as a restore knows them once
+they have (`romacs-agent-restored-hook').")
+
 (defun romacs-agent--restore-finish ()
   "A `romacs-agent-restore-soon' with nothing left to load, nor folded
-aside, ends: its tail runs, and its progress says done."
+aside, ends: its tail runs, and its progress says done.  Sessions loaded
+after it ended are known as it knows them: its hook runs again."
+  (when (and romacs-agent--late-loads (not romacs-agent--restoring) (null romacs-agent--restore-pending))
+    (setq romacs-agent--late-loads nil)
+    (run-hooks 'romacs-agent-restored-hook))
   (when romacs-agent--restoring
     (if (or romacs-agent--restore-pending (> (hash-table-count romacs-agent--folding) 0))
         (romacs-agent--restore-progress 'running)

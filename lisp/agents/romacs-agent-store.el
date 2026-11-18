@@ -462,13 +462,17 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                           "-l" "romacs-agent-store" "-f" "romacs-agent-store-fill-batch")
            :sentinel (lambda (process _event)
                        (unless (process-live-p process)
-                         (let ((marked (when (buffer-live-p (process-buffer process))
-                                         (prog1 (with-current-buffer (process-buffer process)
-                                                  (romacs-agent-store--marked-ids (buffer-string)))
-                                           (kill-buffer (process-buffer process))))))
-                           (setq romacs-agent-store--filled t)
-                           (romacs-agent-store--load-missing marked))
+                         (romacs-agent-store--filled
+                          (when (buffer-live-p (process-buffer process))
+                            (prog1 (with-current-buffer (process-buffer process) (buffer-string))
+                              (kill-buffer (process-buffer process)))))
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
+
+(defun romacs-agent-store--filled (output)
+  "A fill ended, saying OUTPUT: the sessions it found with no row and those
+it newly marked as waited on are loaded."
+  (setq romacs-agent-store--filled t)
+  (romacs-agent-store--load-missing (romacs-agent-store--marked-ids (or output ""))))
 
 (defun romacs-agent-store--marked-ids (output)
   "The ids a fill's OUTPUT says it newly marked."
@@ -491,6 +495,8 @@ the fill newly marked as waited on (`romacs-agent--marks-reconcile')."
                   (member dir romacs-agent--restore-pending))
         (setq romacs-agent--restore-pending (append romacs-agent--restore-pending (list dir)))))
     (when (and idle romacs-agent--restore-pending)
+      ;; After a start's restore: known as it knows sessions once loaded.
+      (unless romacs-agent--restoring (setq romacs-agent--late-loads t))
       (run-at-time 0 nil #'romacs-agent--restore-step))))
 
 ;;; Listing
