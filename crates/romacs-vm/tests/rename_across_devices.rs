@@ -37,8 +37,10 @@ fn clear(dir: &Path) {
 }
 
 /// The fixture: in A (tmpfs) a file, a directory with a file, a relative
-/// symlink, an unreadable file and a FIFO; in B (/home) a file and an
-/// empty directory. Times are fixed so a kept time shows.
+/// symlink, an unreadable file, a FIFO, a directory holding a regular file
+/// then a FIFO, and a file in a directory that denies unlinking; in B
+/// (/home) a file, an empty directory and a symlink back to A's file.
+/// Times are fixed so a kept time shows.
 fn fixture(a: &Path, b: &Path) {
     clear(a);
     clear(b);
@@ -54,8 +56,17 @@ fn fixture(a: &Path, b: &Path) {
     std::fs::write(a.join("locked"), "secret\n").unwrap();
     std::fs::set_permissions(a.join("locked"), std::fs::Permissions::from_mode(0)).unwrap();
     assert!(std::process::Command::new("mkfifo").arg(a.join("fifo")).status().unwrap().success());
+    std::fs::create_dir(a.join("mixed")).unwrap();
+    std::fs::write(a.join("mixed/a"), "a\n").unwrap();
+    at(&a.join("mixed/a"), 1_300_000_000);
+    assert!(std::process::Command::new("mkfifo").arg(a.join("mixed/p")).status().unwrap().success());
+    std::fs::create_dir(a.join("ro")).unwrap();
+    std::fs::write(a.join("ro/f"), "kept\n").unwrap();
+    at(&a.join("ro/f"), 1_200_000_000);
+    std::fs::set_permissions(a.join("ro"), std::fs::Permissions::from_mode(0o555)).unwrap();
     std::fs::write(b.join("exists"), "old\n").unwrap();
     std::fs::create_dir(b.join("dir")).unwrap();
+    std::os::unix::fs::symlink(a.join("f"), b.join("back")).unwrap();
 }
 
 /// DIR's entries, sorted, each with its type, mode, content or link target
@@ -154,23 +165,92 @@ fn rename_file_across_filesystems_matches_gnu() {
         "(rename-file \"A/missing\" \"B/x\")",
         // The other way, /home to tmpfs.
         "(rename-file \"B/exists\" \"A/h\")",
+        // A failure after the destination is made: a directory whose
+        // regular child is copied before its FIFO fails.
+        "(rename-file \"A/mixed\" \"B/mixed\")",
+        // A failure in the delete: the copy is made, the source's directory
+        // denies unlinking it.
+        "(rename-file \"A/ro/f\" \"B/moved\")",
     ]);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The backup setup: rename backups, never copies, into B/backups/.
+const RENAME_BACKUPS: &str = "(backup-directory-alist (list (cons \".\" \"B/backups/\"))) (make-backup-files t)
+    (backup-by-copying nil) (backup-by-copying-when-linked nil) (backup-by-copying-when-mismatch nil)
+    (backup-by-copying-when-privileged-mismatch nil) (file-precious-flag nil) (version-control nil)";
 
 /// A save of a file on tmpfs with backups under /home makes its backup by
 /// renaming the old file across filesystems, as GNU's does, and saves.
 #[test]
 fn a_backup_crosses_filesystems() {
-    let failures = compare("backup", &[
-        "(let ((backup-directory-alist (list (cons \".\" \"B/backups/\"))) (make-backup-files t) (backup-by-copying nil)
-               (b (find-file-noselect \"A/f\")))
+    let session = format!("(let* ({RENAME_BACKUPS} (b (find-file-noselect \"A/f\")))
            (with-current-buffer b
              (goto-char (point-max)) (insert \"one\\n\") (save-buffer)
-             (goto-char (point-max)) (insert \"two\\n\") (save-buffer)
              (set-buffer-modified-p nil))
            (kill-buffer b)
-           (list (current-message) (with-temp-buffer (insert-file-contents \"A/f\") (buffer-string))))",
-    ]);
+           (list (current-message) (with-temp-buffer (insert-file-contents \"A/f\") (buffer-string))
+                 (mapcar (lambda (f) (with-temp-buffer (insert-file-contents f) (buffer-string)))
+                         (directory-files \"B/backups/\" t \"~\\\\'\"))))");
+    let failures = compare("backup", &[&session]);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // And the configured backup holds the original bytes, here as in GNU.
+    let (a, b) = roots("backup-bytes");
+    fixture(&a, &b);
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
+    let fill = |case: &str| case.replace("A/", &format!("{}/", a.display())).replace("B/", &format!("{}/", b.display()));
+    let value = vm.eval_source(&fill(&session)).and_then(romacs_vm::Local::display).unwrap();
+    assert!(value.ends_with("(\"file\\n\"))"), "the backup holds the original bytes: {value}");
+    assert_eq!(std::fs::read_to_string(a.join("f")).unwrap(), "file\none\n");
+    clear(&a);
+    clear(&b);
+    let _ = std::fs::remove_dir(&a);
+    let _ = std::fs::remove_dir_all(&b);
+}
+
+/// A destination that is the source through a link is refused before
+/// anything is truncated (S1): through `rename-file` across filesystems
+/// (B/back is a symlink on /home to A/f on tmpfs) and through plain
+/// `copy-file` with OK-IF-ALREADY-EXISTS. GNU truncates the source first
+/// and loses its bytes (ledger/divergences/VM2-COPY-FILE-SAME-FILE.md).
+#[test]
+fn a_destination_aliasing_the_source_keeps_its_bytes() {
+    let (a, b) = roots("alias");
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
+    for case in ["(rename-file \"A/f\" \"B/back\" t)", "(copy-file \"A/f\" \"B/back\" t)",
+                 "(copy-file \"B/back\" \"A/f\" t)"] {
+        fixture(&a, &b);
+        let expression = case.replace("A/", &format!("{}/", a.display())).replace("B/", &format!("{}/", b.display()));
+        let value = vm.eval_source(&wrapped(&expression)).and_then(romacs_vm::Local::display).map(|v| text(&v)).unwrap();
+        assert!(value.contains("Input and output files are the same"), "{case}: {value}");
+        assert_eq!(std::fs::read_to_string(a.join("f")).unwrap(), "file\n", "{case}: the source's bytes");
+        assert!(std::fs::symlink_metadata(b.join("back")).unwrap().file_type().is_symlink(), "{case}: the link stays");
+    }
+    clear(&a);
+    clear(&b);
+    let _ = std::fs::remove_dir(&a);
+    let _ = std::fs::remove_dir_all(&b);
+}
+
+/// Advice on `copy-file` and `make-symbolic-link` that returns without
+/// copying cannot make a cross-device rename delete its source with no
+/// destination (S2): the rename calls the primitives, as GNU's C does.
+#[test]
+fn advice_cannot_skip_the_copy_before_the_delete() {
+    let (a, b) = roots("advice");
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
+    vm.eval_source("(progn (defun t-skip (&rest _) nil)
+                           (advice-add 'copy-file :override #'t-skip)
+                           (advice-add 'make-symbolic-link :override #'t-skip))").unwrap();
+    for (case, moved) in [("(rename-file \"A/f\" \"B/g\")", "g"), ("(rename-file \"A/l\" \"B/l2\")", "l2")] {
+        fixture(&a, &b);
+        let expression = case.replace("A/", &format!("{}/", a.display())).replace("B/", &format!("{}/", b.display()));
+        vm.eval_source(&expression).unwrap();
+        assert!(std::fs::symlink_metadata(b.join(moved)).is_ok(), "{case}: the destination exists");
+    }
+    vm.eval_source("(progn (advice-remove 'copy-file #'t-skip) (advice-remove 'make-symbolic-link #'t-skip))").unwrap();
+    clear(&a);
+    clear(&b);
+    let _ = std::fs::remove_dir(&a);
+    let _ = std::fs::remove_dir_all(&b);
 }

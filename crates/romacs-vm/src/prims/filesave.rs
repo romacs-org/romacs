@@ -263,7 +263,11 @@ fn rename_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
 /// is copied to NEWNAME as what it is (a directory with `copy-directory`, a
 /// regular file with `copy-file` keeping its times, owner and modes, a
 /// symbolic link as a new link to the same target), then deleted, never
-/// into the trash. Anything else is the rename's error.
+/// into the trash. Anything else is the rename's error. As GNU's C calls
+/// `Fcopy_file` and `Fmake_symbolic_link` directly, the copy goes through
+/// those primitives, not their Lisp bindings, so advice on them cannot
+/// skip it before the source is deleted; `copy-directory`, `delete-file`
+/// and `delete-directory` are called as Lisp, as GNU calls them.
 fn across_devices(cx: &mut Leaf<'_>, file: Value, newname: Value, ok: Value, source: &std::path::Path) -> Next {
     let exdev = || std::io::Error::from_raw_os_error(libc::EXDEV);
     let directory_name = cx.string_bytes(file)?.last() == Some(&b'/');
@@ -282,14 +286,16 @@ fn across_devices(cx: &mut Leaf<'_>, file: Value, newname: Value, ok: Value, sou
         super::fileio::file_name_value(cx, target.as_os_str().as_bytes())
     } else { Value::NIL };
     let kind = cx.intern(kind);
-    let source = "(lambda (file newname ok kind target)
+    let subr = |name| crate::prim::subr_named(name).ok_or_else(|| Fault::Error(format!("no primitive {name}")));
+    let (copy, symlink) = (subr("copy-file")?, subr("make-symbolic-link")?);
+    let source = "(lambda (copy symlink file newname ok kind target)
                     (cond ((eq kind 'directory) (copy-directory file newname t nil))
-                          ((eq kind 'file) (copy-file file newname ok t t t))
-                          (t (make-symbolic-link target newname ok)))
+                          ((eq kind 'file) (funcall copy file newname ok t t t))
+                          (t (funcall symlink target newname ok)))
                     (let ((delete-by-moving-to-trash nil))
                       (if (eq kind 'directory) (delete-directory file t) (delete-file file nil)))
                     nil)";
-    super::insert_coding::closure_then(cx, source, across_devices_closure, vec![file, newname, ok, kind, link])
+    super::insert_coding::closure_then(cx, source, across_devices_closure, vec![copy, symlink, file, newname, ok, kind, link])
 }
 
 fn across_devices_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
@@ -575,19 +581,25 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         Ok(output) => (output, false),
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
             may_replace(cx, ok_if_already_exists, newname, "copy-file")?;
-            let output = host::open_output(&target, host::OpenOptions::new().write(true).truncate(true))
+            // Opened without O_TRUNC, unlike GNU's (fileio.c:2393): the
+            // existing NEWNAME may be FILE itself through a link, and is
+            // truncated only once the check below rules that out.
+            let output = host::open_output(&target, host::OpenOptions::new().write(true))
                 .map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
             (output, true)
         }
         Err(e) => return Err(errno(cx, "Opening output file", &[newname], e)),
     };
     if already_exists {
-        // GNU has already truncated the output when it finds it is the input.
+        // GNU has already truncated the output when it finds it is the input,
+        // losing FILE's data; here the check comes first (ledger/divergences
+        // VM2-COPY-FILE-SAME-FILE).
         let existing = host::file_metadata(&output).map_err(|e| errno(cx, "Output file status", &[newname], e))?;
         if (existing.dev(), existing.ino()) == (status.dev(), status.ino()) {
             let same = std::io::Error::from_raw_os_error(0);
             return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
         }
+        output.set_len(0).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
     }
     if !host::clone_file(&output, &input) {
         // Read and write the rest, whatever copy_file_range did, as GNU does.
