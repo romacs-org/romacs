@@ -34,9 +34,9 @@ reparse, many buffers per grammar, and fontify by visible region.
   the callers.
 
 ## Decisions
-- Owner, 2026-11-18: this crate is Romacs's, tailored to Romacs; the old aim
+- 2026-11-18: this crate is Romacs's, tailored to Romacs; the old aim
   of shrinking back to the published crate is dropped. A change worth
-  offering upstream may still be offered, by the owner (upstream bars
+  offering upstream may still be offered by a person (upstream bars
   agent-opened pull requests), but nothing waits on it.
 - The unsafe census and smell counts still leave `crates/vendor/` out; code
   written here for Romacs is held to the workspace's rules all the same.
