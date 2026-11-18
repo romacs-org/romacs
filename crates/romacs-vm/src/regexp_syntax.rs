@@ -50,7 +50,7 @@ mod tests {
             vm.display(value).unwrap(),
             "(t syntax-table 0 (2) (4 . 41) (2) nil)"
         );
-        let source = include_str!("../../../lisp/subr.el");
+        let source = crate::host::read_to_string(crate::host::runtime_lisp("subr.el").unwrap()).unwrap();
         let start = source.find("(defun make-syntax-table ").unwrap();
         let end = start + source[start..].find("(defun syntax-after ").unwrap();
         run(&mut vm, &source[start..end]);
