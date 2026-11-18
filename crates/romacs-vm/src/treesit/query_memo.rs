@@ -108,16 +108,23 @@ mod tests {
     use super::{CAPACITY, Grammar, Memo, native};
     use std::rc::Rc;
 
-    /// The system C grammar (the one `tests/treesit.rs` needs), loaded from
-    /// a copy of its own at PATH, or from the system's when None.
+    /// The C grammar as the loader finds it (`tests/treesit.rs` needs it
+    /// too): GNU's names for a bare `libtree-sitter-c`, searched as dlopen
+    /// searches (LD_LIBRARY_PATH, the loader's cache, its default
+    /// directories); with COPY, a copy of the file it found, loaded from
+    /// there.
     fn c_grammar(copy: Option<&std::path::Path>) -> native::Language {
-        let system = std::path::Path::new("/usr/lib/libtree-sitter-c.so");
-        let path = copy.map_or(system.to_path_buf(), |to| {
-            std::fs::copy(system, to).expect("a copy of the system C grammar");
-            to.to_path_buf()
-        });
-        let library = native::open_library(path.as_os_str().as_encoded_bytes()).expect("the C grammar opens");
-        native::language_symbol(library, b"tree_sitter_c").expect("tree_sitter_c").0
+        let found = |library| native::language_symbol(library, b"tree_sitter_c").expect("tree_sitter_c");
+        let mut errors = Vec::new();
+        let (library, _) = native::open_first(&[b"libtree-sitter-c".to_vec()], &[b".so".to_vec()], &mut errors)
+            .unwrap_or_else(|| panic!("the C grammar, as the loader finds it: {errors:?}"));
+        let (language, file) = found(library);
+        eprintln!("the C grammar: {file:?}");
+        let Some(to) = copy else { return language };
+        let file = file.expect("the loader names the C grammar's file");
+        std::fs::copy(&file, to).unwrap_or_else(|e| panic!("a copy of {file}: {e}"));
+        let library = native::open_library(to.as_os_str().as_encoded_bytes()).expect("the copy opens");
+        found(library).0
     }
 
     #[test]

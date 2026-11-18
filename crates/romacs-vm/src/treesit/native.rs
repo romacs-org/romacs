@@ -44,6 +44,32 @@ pub(crate) fn open_library(path: &[u8]) -> Result<Library, String> {
     }
 }
 
+/// dynlib_open of each name GNU tries for STEMS, in its order: the
+/// first library that opens and its file name, else None with every
+/// attempt's message in ERRORS.
+pub(crate) fn open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(Library, Vec<u8>)> {
+    for stem in stems {
+        // GNU conses each suffix's names before the last's.
+        for suffix in suffixes.iter().rev() {
+            let mut plain = stem.clone();
+            plain.extend_from_slice(suffix);
+            let mut candidates = vec![plain.clone()];
+            for version in (MIN_ABI_VERSION..=ABI_VERSION).rev() {
+                candidates.push([&plain[..], format!(".{version}.0").as_bytes()].concat());
+            }
+            candidates.push([&plain[..], b".0"].concat());
+            candidates.push([&plain[..], b".0.0"].concat());
+            for candidate in candidates {
+                match open_library(&candidate) {
+                    Ok(handle) => return Some((handle, candidate)),
+                    Err(message) => errors.push(message),
+                }
+            }
+        }
+    }
+    None
+}
+
 /// dynlib_sym of the grammar function NAME in LIBRARY, called: its language
 /// and the library's file name (dynlib_addr), or dlerror's message.
 pub(crate) fn language_symbol(library: Library, name: &[u8]) -> Result<(Language, Option<String>), String> {
