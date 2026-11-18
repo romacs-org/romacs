@@ -2631,7 +2631,11 @@ nothing to draw or it would take past `romacs-agent-ui--preview-seconds'."
           ;; Its journal as it is now, read as a file however its records
           ;; move meanwhile: its size taken once, the tail and the read to it.
           (let* ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-                 (tail (romacs-agent--journal-file-tail session (or romacs-agent-ui--turns 20) size nil nil)))
+                 ;; Its choice timed as its read is: a scan past the budget is none.
+                 (tail (or (catch 'romacs-agent--past-deadline
+                             (let ((romacs-agent--scan-deadline deadline))
+                               (romacs-agent--journal-file-tail session (or romacs-agent-ui--turns 20) size nil nil)))
+                           (throw 'romacs-agent-ui--past-deadline nil))))
             (when (> (float-time) deadline) (throw 'romacs-agent-ui--past-deadline nil))
             (when (and (> (or (cdr tail) 0) 0)
                        (or (car tail) (<= size romacs-agent-journal-tail-bytes)))

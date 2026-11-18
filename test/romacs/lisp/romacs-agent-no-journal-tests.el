@@ -145,6 +145,37 @@ in a store of its own."
             (kill-buffer buffer)))
         (should (equal (with-temp-buffer (insert-file-contents manifest) (buffer-string)) before))))))
 
+(ert-deftest romacs-agent-no-journal-a-preview-keeps-to-its-budget-choosing-its-tail ()
+  ;; A tail costly to choose (a record of megabytes, then prompts written
+  ;; into a turn under way, each looking back over it): the choice is timed
+  ;; with the rest, so past the budget there is no preview, not a wait.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+      (let ((coding-system-for-write 'utf-8-unix) (seq 6))
+        (write-region
+         (concat (romacs-agent--json (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "go" "role" "user")
+                                                                              "romacsRequest" 3 "type" "user")
+                                                         "seq" (cl-incf seq) "t" 1.0))
+                 "\n"
+                 (romacs-agent--json (romacs-mcp--object "out" (romacs-mcp--object "type" "user" "message"
+                                                                                   (romacs-mcp--object "content" (make-string 2900000 ?x)))
+                                                         "seq" (cl-incf seq) "t" 1.0))
+                 "\n"
+                 (mapconcat (lambda (n)
+                              (concat (romacs-agent--json (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "steer %d" n) "role" "user")
+                                                                                                   "romacsRequest" (+ 4 n) "type" "user")
+                                                                              "seq" (cl-incf seq) "t" 1.0))
+                                      "\n"))
+                            (number-sequence 1 64) ""))
+         nil journal t 'silent))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore))
+        (let* ((romacs-agent-ui--preview-seconds 0.2) (start (float-time))
+               (buffer (romacs-agent-no-journal-tests--chat session)))
+          (should (< (- (float-time) start) 0.6))
+          (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
+          (kill-buffer buffer))))))
+
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the
   ;; session loads (a watcher's, not a command's), and drawn again once
