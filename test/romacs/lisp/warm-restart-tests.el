@@ -1036,12 +1036,13 @@ and wait for it to end."
       (with-current-buffer typed (set-buffer-modified-p nil)) (kill-buffer typed)
       (delete-directory warm-restart-directory t))))
 
+(define-derived-mode warm-restart-tests--drafting-mode text-mode "Drafting")
+
 (ert-deftest warm-restart-a-handler-s-unportable-data-sends-typed-text-in-a-companion ()
   (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
          (buffer (get-buffer-create "wr-handled-draft")))
     (unwind-protect
         (progn
-          (define-derived-mode warm-restart-tests--drafting-mode text-mode "Drafting")
           (let ((desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--drafting-mode #'ignore) desktop-buffer-mode-handlers)))
             (with-current-buffer buffer
               (warm-restart-tests--drafting-mode)
@@ -1076,6 +1077,150 @@ and wait for it to end."
           (with-current-buffer "wr-x <carried text><2>" (should (equal (buffer-string) "carried"))))
       (dolist (name '("wr-broken" "wr-x <carried text>" "wr-x <carried text><2>"))
         (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name))))))
+
+(defun warm-restart-tests--image-has (image text)
+  "Whether IMAGE's bytes hold TEXT anywhere."
+  (with-temp-buffer
+    (insert-file-contents-literally image)
+    (and (search-forward text nil t) t)))
+
+(defun warm-restart-tests--kill (&rest names)
+  "Kill the buffers NAMES that are live, unasked."
+  (dolist (name names)
+    (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name))))
+
+(ert-deftest warm-restart-a-companion-is-made-from-read-only-text ()
+  ;; A chat's sealed transcript is read-only text, its writable draft
+  ;; after it holds a secret: the companion carries both, the secret starred.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (chat (get-buffer-create "wr-sealed"))
+         image)
+    (unwind-protect
+        (progn
+          (with-current-buffer chat
+            (insert (propertize "sealed transcript\n" 'read-only t 'rear-nonsticky '(read-only)) "draft " (propertize "hunter2" 'romacs-secret t)))
+          (warm-restart-tests--failing-record '("wr-sealed")
+            (setq image (warm-restart-write)))
+          (should-not (warm-restart-tests--image-has image "hunter2"))
+          (warm-restart-tests--kill "wr-sealed")
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "wr-sealed <carried text>"
+            (should (equal (buffer-string) "sealed transcript\ndraft *******"))))
+      (warm-restart-tests--kill "wr-sealed" "wr-sealed <carried text>")
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-record-failing-late-leaves-no-text-in-the-image ()
+  ;; A shell's record fails after its text was taken: the image holds its
+  ;; companion, secret starred, and never the text taken.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (shell (get-buffer-create "wr-late"))
+         (neighbour (get-buffer-create "wr-late-neighbour"))
+         image)
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (warm-restart-tests--plain-shell-mode)
+            (insert "$ pass " (propertize "hunter2" 'romacs-secret t)))
+          (with-current-buffer neighbour (insert "the neighbour's own"))
+          (cl-letf (((symbol-function 'warm-restart--inert-record) (lambda (&rest _) (error "Late"))))
+            (setq image (warm-restart-write)))
+          (should-not (warm-restart-tests--image-has image "hunter2"))
+          (warm-restart-tests--kill "wr-late" "wr-late-neighbour")
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "wr-late <carried text>" (should (equal (buffer-string) "$ pass *******")))
+          (with-current-buffer "wr-late-neighbour" (should (equal (buffer-string) "the neighbour's own"))))
+      (warm-restart-tests--kill "wr-late" "wr-late-neighbour" "wr-late <carried text>")
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-failure-s-data-never-reaches-the-image ()
+  ;; A saver that signals with the draft it rejected, a secret in it, and
+  ;; a record failing with one: the image names each failure by its kind.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (file (expand-file-name "saved.txt" warm-restart-directory))
+         (draft (get-buffer-create "wr-rejecting"))
+         saved image)
+    (unwind-protect
+        (let ((desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--drafting-mode #'ignore) desktop-buffer-mode-handlers)))
+          (write-region "on the disk" nil file nil 'silent)
+          (setq saved (find-file-noselect file))
+          (with-current-buffer draft
+            (warm-restart-tests--drafting-mode)
+            (insert "draft " (propertize "hunter2" 'romacs-secret t))
+            (setq-local desktop-save-buffer (lambda (_dir) (error "Rejected draft: %s" (buffer-string)))))
+          (cl-letf* ((real (symbol-function 'warm-restart--record))
+                     ((symbol-function 'warm-restart--record)
+                      (lambda (entry blobs)
+                        (if (equal (plist-get entry :name) "saved.txt") (error "Cannot save hunter3")
+                          (funcall real entry blobs)))))
+            (setq image (warm-restart-write)))
+          (should-not (warm-restart-tests--image-has image "hunter2"))
+          (should-not (warm-restart-tests--image-has image "hunter3"))
+          (let ((form (car (warm-restart--read image))))
+            (should (seq-find (lambda (r) (equal (plist-get r :companion) "wr-rejecting")) (plist-get form :buffers)))
+            (should (plist-get (seq-find (lambda (e) (equal (plist-get e :buffer) "saved.txt")) (plist-get form :lost))
+                               :failed))))
+      (when (buffer-live-p saved) (kill-buffer saved))
+      (warm-restart-tests--kill "wr-rejecting")
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-companion-takes-no-later-record-s-name ()
+  ;; A buffer made here first has the companion's name, and a later
+  ;; record the next free one: each record gets a buffer of its own.
+  (let ((buffers (make-hash-table :test #'equal))
+        (blobs (vector "the companion's" "the later record's")))
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "wr-y <carried text>") (insert "the user's own"))
+          (dolist (record (warm-restart--prepare
+                           (list :transcripts t
+                                 :buffers (list (list :id "a" :name "wr-y <carried text>" :strategy 'text :mode 'fundamental-mode
+                                                      :companion "wr-y" :blob 0 :point 1 :modified t :directory "/")
+                                                (list :id "b" :name "wr-y <carried text><2>" :strategy 'text :mode 'fundamental-mode
+                                                      :blob 1 :point 1 :modified t :directory "/")))))
+            (warm-restart--restore-one record blobs buffers))
+          (should-not (eq (gethash "a" buffers) (gethash "b" buffers)))
+          (with-current-buffer (gethash "a" buffers) (should (equal (buffer-string) "the companion's")))
+          (with-current-buffer (gethash "b" buffers)
+            (should (equal (buffer-name) "wr-y <carried text><2>"))
+            (should (equal (buffer-string) "the later record's")))
+          (with-current-buffer "wr-y <carried text>" (should (equal (buffer-string) "the user's own"))))
+      (warm-restart-tests--kill "wr-y <carried text>" "wr-y <carried text><2>" "wr-y <carried text><3>"))))
+
+(ert-deftest warm-restart-a-file-that-cannot-be-checked-is-taken-for-at-risk ()
+  ;; Its record fails and its file's existence cannot be checked either:
+  ;; its text goes in a companion, and the image is written.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (file (expand-file-name "remote.txt" warm-restart-directory))
+         saved)
+    (unwind-protect
+        (progn
+          (write-region "on the disk" nil file nil 'silent)
+          (setq saved (find-file-noselect file))
+          (cl-letf* ((exists (symbol-function 'file-exists-p))
+                     ((symbol-function 'file-exists-p)
+                      (lambda (name) (if (equal name file) (error "Handler down") (funcall exists name)))))
+            (warm-restart-tests--failing-record '("remote.txt")
+              (should (seq-find (lambda (r) (equal (plist-get r :companion) "remote.txt"))
+                                (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))))))
+      (when (buffer-live-p saved) (kill-buffer saved))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-the-restore-names-failed-captures-and-companions ()
+  (let ((report (list :buffers 2 :records 2 :seconds 0.1 :file "img"
+                      :lost (list (list :buffer "wr-lost" :reason "cannot be saved: error" :failed t)
+                                  (list :buffer "wr-view" :reason "view; reopen it"))
+                      :companions (list (list :buffer "wr-draft" :carried-in "wr-draft <carried text>"))))
+        said)
+    (cl-letf (((symbol-function 'message) (lambda (&rest args) (setq said (apply #'format args)))))
+      (warm-restart--announce report))
+    (should (string-search "could not be saved: wr-lost" said))
+    (should-not (string-search "wr-view" said))
+    (should (string-search "text of wr-draft carried in wr-draft <carried text>" said))
+    (let ((warm-restart-last-report report))
+      (save-window-excursion (warm-restart-report))
+      (with-current-buffer "*Warm Restart*"
+        (should (string-search "buffer wr-draft: its text is in wr-draft <carried text>" (buffer-string))))
+      (kill-buffer "*Warm Restart*"))))
 
 (ert-deftest warm-restart-a-register-in-a-shell-s-file-jumps-to-its-transcript ()
   ;; A position in a shell's file buffer goes to its transcript, which

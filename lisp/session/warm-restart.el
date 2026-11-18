@@ -454,20 +454,29 @@ is not portable."
 
 (defun warm-restart--text-at-risk-p ()
   "Whether the current buffer's text is nowhere else: typed and not saved
-\(`warm-restart-unsaved-p'), or a file's whose file is gone."
-  (or (warm-restart-unsaved-p) (and buffer-file-name (not (file-exists-p buffer-file-name)))))
+\(`warm-restart-unsaved-p'), or a file's whose file is gone, or may be:
+its existence could not be checked."
+  (or (warm-restart-unsaved-p)
+      (and buffer-file-name (condition-case nil (not (file-exists-p buffer-file-name)) (error t)))))
 
-(defun warm-restart--redact-secrets ()
-  "Replace each character of the current buffer marked `romacs-secret' by
-`*', one for one, so every position stays where it was."
-  (let ((pos (point-min)))
-    (while (setq pos (text-property-not-all pos (point-max) 'romacs-secret nil))
-      (let ((end (or (text-property-any pos (point-max) 'romacs-secret nil) (point-max))))
-        (save-excursion
-          (goto-char pos)
-          (delete-region pos end)
-          (insert (make-string (- end pos) ?*)))
-        (setq pos end)))))
+(defun warm-restart--failure (condition)
+  "CONDITION as an image or a refusal may name it: its kind's message,
+never its data, which may hold the text it failed on, a secret too."
+  (format "%s" (or (get (car condition) 'error-message) (car condition))))
+
+(defun warm-restart--redacted (text)
+  "TEXT, a string, without its properties, each character marked
+`romacs-secret' replaced by `*', one for one, so every position stays
+where it was."
+  (let ((pos 0) (end (length text)) pieces)
+    (while (< pos end)
+      (let ((next (or (next-single-property-change pos 'romacs-secret text) end)))
+        (push (if (get-text-property pos 'romacs-secret text)
+                  (make-string (- next pos) ?*)
+                (substring-no-properties text pos next))
+              pieces)
+        (setq pos next)))
+    (apply #'concat (nreverse pieces))))
 
 (defun warm-restart--companion (buffer reason blobs staging)
   "A text record carrying BUFFER's whole text, its secrets starred, as a
@@ -482,9 +491,9 @@ in BLOBS only once the record is whole."
     (push stage (car staging))
     (with-current-buffer stage
       (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters buffer))
-      (insert (with-current-buffer buffer (save-restriction (widen) (buffer-substring (point-min) (point-max)))))
-      (warm-restart--redact-secrets)
-      (set-text-properties (point-min) (point-max) nil)
+      (let ((inhibit-modification-hooks t))
+        (insert (warm-restart--redacted
+                 (with-current-buffer buffer (save-restriction (widen) (buffer-substring (point-min) (point-max)))))))
       (let ((record (list :id (with-current-buffer buffer (warm-restart--buffer-id))
                           :name (format "%s <carried text>" name) :strategy 'text :mode 'fundamental-mode
                           :directory (buffer-local-value 'default-directory buffer)
@@ -504,16 +513,20 @@ when no text is at risk.  Signal `warm-restart-blocked' only when text at
 risk cannot be carried even so: one buffer never stops the image
 otherwise, and text at risk is never lost quietly."
   (let* ((buffer (plist-get entry :buffer)) (failed nil)
+         (count (car blobs)) (taken (cdr blobs))
          (record (condition-case err (warm-restart--record entry blobs)
-                   (error (setq failed (error-message-string err)) nil))))
+                   (error (setq failed (warm-restart--failure err))
+                          ;; Text it took before it failed is never written.
+                          (setcar blobs count) (setcdr blobs taken)
+                          nil))))
     (cond ((and record (not (plist-member record :lost))) record)
           ((not (with-current-buffer buffer (warm-restart--text-at-risk-p)))
-           (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed))))
+           (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed) :failed t)))
           (t (condition-case err
                  (warm-restart--companion buffer (or failed (plist-get record :reason)) blobs staging)
                (error (signal 'warm-restart-blocked
                               (list (format "%s: cannot be saved, nor its text: %s"
-                                            (plist-get entry :name) (error-message-string err))))))))))
+                                            (plist-get entry :name) (warm-restart--failure err))))))))))
 
 (defun warm-restart--frames ()
   "The window state of each frame that is not a child frame, selected first."
@@ -627,7 +640,8 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                                               collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
                                                               (and (plist-get e :unsaved) (list :unsaved t))))
                                      (cl-loop for r in records when (plist-member r :lost)
-                                              collect (list :buffer (plist-get r :lost) :reason (plist-get r :reason)))
+                                              collect (append (list :buffer (plist-get r :lost) :reason (plist-get r :reason))
+                                                              (and (plist-get r :failed) (list :failed t))))
                                      (mapcar (lambda (p) (append p (list :reason "ends with this process")))
                                              (plist-get plan :processes))
                                      (plist-get globals :lost)))))
@@ -917,32 +931,50 @@ or derived from one."
   "The header line of a restored transcript of a MODE shell."
   (format "Transcript of %s; its shell ended with the restart" mode))
 
-(defun warm-restart--transcript-name (name taken)
-  "The name of NAME's transcript, \"NAME (transcript)\", one TAKEN, a
-function of a name, says is free.  Not the shell's own name: a shell
-opened later makes a buffer of its own, never one over the transcript."
-  (let* ((base (format "%s (transcript)" name)) (candidate base) (n 1))
+(defun warm-restart--free-name (name taken)
+  "NAME, or NAME<2>, NAME<3>..., the first TAKEN, a function of a name,
+says is free."
+  (let ((candidate name) (n 1))
     (while (funcall taken candidate)
-      (setq candidate (format "%s<%d>" base (cl-incf n))))
+      (setq candidate (format "%s<%d>" name (cl-incf n))))
     candidate))
 
+(defun warm-restart--transcript-name (name taken)
+  "The name of NAME's transcript, \"NAME (transcript)\", one TAKEN, a
+function of a name, says is free (`warm-restart--free-name').  Not the
+shell's own name: a shell opened later makes a buffer of its own, never
+one over the transcript."
+  (warm-restart--free-name (format "%s (transcript)" name) taken))
+
 (defun warm-restart--prepare (form)
-  "FORM's records, ready to restore.  An image written before shells were
-carried as transcripts (no `:transcripts') may name a shell's mode for a
-file, text or indirect buffer: each such record carries `:legacy-names',
-a table of the image's names shared by them all, for
-`warm-restart--legacy-destination' to choose its buffer's name from at
-its own turn, before its buffer is made."
-  (let ((records (plist-get form :buffers)))
-    (if (plist-get form :transcripts)
-        records
-      (let ((names (make-hash-table :test #'equal)))
-        (dolist (record records) (puthash (plist-get record :name) t names))
-        (mapcar (lambda (record)
-                  (if (memq (plist-get record :strategy) '(file text indirect))
-                      (plist-put (copy-sequence record) :legacy-names names)
-                    record))
-                records)))))
+  "FORM's records, ready to restore.  A record that may take a name of its
+own at its turn, before its buffer is made, carries a table of the
+image's names shared by them all, so the name it takes is no other
+record's: a companion's (`:image-names', for
+`warm-restart--companion-destination'), and, in an image written before
+shells were carried as transcripts (no `:transcripts'), a file, text or
+indirect buffer's, whose mode may be a shell's (`:legacy-names', for
+`warm-restart--legacy-destination')."
+  (let ((names (make-hash-table :test #'equal)) (legacy (not (plist-get form :transcripts))))
+    (dolist (record (plist-get form :buffers)) (puthash (plist-get record :name) t names))
+    (mapcar (lambda (record)
+              (cond ((plist-get record :companion) (plist-put (copy-sequence record) :image-names names))
+                    ((and legacy (memq (plist-get record :strategy) '(file text indirect)))
+                     (plist-put (copy-sequence record) :legacy-names names))
+                    (t record)))
+            (plist-get form :buffers))))
+
+(defun warm-restart--companion-destination (record)
+  "RECORD, or, for a companion whose name a buffer made here first has, the
+record under the first free name of it that no live buffer nor record of
+the image (`:image-names') has, which it takes there: a companion never
+lands in a buffer of this session nor in a later record's."
+  (let ((name (plist-get record :name)) (names (plist-get record :image-names)))
+    (if (not (and (plist-get record :companion) (get-buffer name)))
+        record
+      (let ((free (warm-restart--free-name name (lambda (n) (or (and names (gethash n names)) (get-buffer n))))))
+        (when names (puthash free t names))
+        (plist-put (copy-sequence record) :name free)))))
 
 (defun warm-restart--legacy-destination (record)
   "RECORD, or, for a record of an older image (`:legacy-names') whose mode
@@ -994,8 +1026,7 @@ and each companion named free of the others, and the renames, as
     (dolist (record records) (unless (plist-get record :companion) (puthash (plist-get record :name) t taken)))
     (cons (mapcar (lambda (record)
                     (cond ((plist-get record :companion)
-                           (let ((name (plist-get record :name)) (n 1))
-                             (while (gethash name taken) (setq name (format "%s<%d>" (plist-get record :name) (cl-incf n))))
+                           (let ((name (warm-restart--free-name (plist-get record :name) (lambda (n) (gethash n taken)))))
                              (puthash name t taken)
                              (plist-put (copy-sequence record) :name name)))
                           ((not (and (plist-get record :transcript-of) (member (plist-get record :name) shells)))
@@ -1039,11 +1070,7 @@ signal, as a load may."
 When it fails, a buffer the attempt made is replaced by the rescue.  A
 buffer it would reuse that was edited here first is left as it is
 \(`warm-restart--beside')."
-  (let* ((record (warm-restart--legacy-destination record))
-         ;; A companion is never restored over a buffer made here first.
-         (record (if (and (plist-get record :companion) (get-buffer (plist-get record :name)))
-                     (plist-put (copy-sequence record) :name (generate-new-buffer-name (plist-get record :name)))
-                   record))
+  (let* ((record (warm-restart--companion-destination (warm-restart--legacy-destination record)))
          (existing (warm-restart--made-buffer record))
          ;; One made here meanwhile keeps the modes it has, and a modified
          ;; file, which a save may write, has its own at once: no deferral.
@@ -1622,9 +1649,12 @@ Either way it names each buffer whose unsaved text the image left out."
          (unsaved (cl-loop for entry in (plist-get report :lost)
                            when (plist-get entry :unsaved) collect (plist-get entry :buffer)))
          (unsaved (if unsaved (format "; unsaved text not carried: %s" (string-join unsaved ", ")) ""))
+         (failed (cl-loop for entry in (plist-get report :lost)
+                          when (plist-get entry :failed) collect (plist-get entry :buffer)))
          (unsaved (concat unsaved
                           (mapconcat (lambda (c) (format "; text of %s carried in %s" (plist-get c :buffer) (plist-get c :carried-in)))
-                                     (plist-get report :companions) "")))
+                                     (plist-get report :companions) "")
+                          (if failed (format "; could not be saved: %s" (string-join failed ", ")) "")))
          (problems (length (plist-get report :problems))))
     (if (warm-restart--keep-p report)
         (display-warning 'warm-restart
@@ -1724,8 +1754,11 @@ not have arrived."
     (with-current-buffer (get-buffer-create "*Warm Restart*")
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (format "Image: %s\nBuffers restored: %s\n\nNot carried:\n" (plist-get report :file)
+        (insert (format "Image: %s\nBuffers restored: %s\n\nCarried in companions:\n" (plist-get report :file)
                         (plist-get report :buffers))
+                (mapconcat (lambda (c) (format "  buffer %s: its text is in %s" (plist-get c :buffer) (plist-get c :carried-in)))
+                           (plist-get report :companions) "\n")
+                "\n\nNot carried:\n"
                 (mapconcat #'warm-restart--describe (plist-get report :lost) "\n")
                 "\n\nProblems:\n"
                 (mapconcat #'warm-restart--describe (append (plist-get report :problems) (plist-get report :locks)) "\n")
