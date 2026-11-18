@@ -2591,7 +2591,9 @@ drawn once they are, or says it cannot be when they could not move."
       (setq now nil)
       ;; Its last turns meanwhile, read from its journal, under a row
       ;; saying what they are.
-      (let* ((start (copy-marker romacs-agent-ui--end))
+      ;; A position, not a marker: the preview's text is inserted before
+      ;; every marker at the transcript's end.
+      (let* ((start (marker-position romacs-agent-ui--end))
              (preview (romacs-agent-ui--preview session)))
         (romacs-agent-ui--insert-at
          start
