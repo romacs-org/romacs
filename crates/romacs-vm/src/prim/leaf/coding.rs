@@ -97,10 +97,16 @@ impl Leaf<'_> {
                 else if code < 128 { CodingToken::Byte(code as u8) }
                 else { CodingToken::Character(code) }
             };
-            // Unpolled: one pass over the string's characters, its length
-            // bounding it; chunking it cost the conversion about 1 %.
-            source.chars().map(token).collect::<Vec<_>>()
+            let mut tokens = Vec::with_capacity(source.chars);
+            let mut chars = source.chars();
+            loop {
+                let before = tokens.len();
+                tokens.extend(chars.by_ref().take(CHUNK).map(token));
+                if tokens.len() - before < CHUNK || !pass.check() { break; }
+            }
+            tokens
         };
+        if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
         let bom = self.vector_get(attrs, num(24))?;
         let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
         let undecided = kind == self.intern("undecided");
