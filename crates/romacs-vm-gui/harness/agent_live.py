@@ -401,9 +401,11 @@ def survive(args, base):
         until(lambda: 'slow done' in a.results(sid), 30, 'the turn completed')
         a.idle(sid)
         harness_alive = Path(f'/proc/{pid_before}').exists()
+        answered = len(a.results(sid))
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(emacs-pid)"}')
         a.idle(sid)
-        new_pid = a.results(sid)[-1]
+        # Its own turn's result, not the one before (idle may be that turn's).
+        new_pid = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         retries = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'mismatch' in e.get('text', '')]
         chat = a.chat(sid)
         result = {'harness_pid_same': a.harness_pid(sid) == pid_before and harness_alive,
