@@ -3157,9 +3157,9 @@ def children(args, base):
         running = delegate('slow 300', 'long build', 'codex')
         waiting = delegate('ask true', 'needs approval', 'claude')
         failed = delegate('fail', 'broken task', 'codex')
-        until(lambda: a.state(failed) == 'idle', 20, 'failed child ended')
+        a.until(failed, lambda: a.state(failed) == 'idle', 20, 'failed child ended')
         done = delegate('say fine', 'finished task', 'codex')
-        until(lambda: a.state(done) == 'idle', 20, 'done child ended')
+        a.until(done, lambda: a.state(done) == 'idle', 20, 'done child ended')
         a.idle(parent, 60)
         until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
 
