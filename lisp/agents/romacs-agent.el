@@ -5120,12 +5120,10 @@ and no supervisor running is left unloaded, its journal unread, until it
 is asked for (`romacs-agent-get').")
 
 (defvar romacs-agent-store-background nil
-  "Whether the editor moves sessions' journals to SQLite, and fills every
-session's turn rows, in the background (worker VMs and batch processes
-beside it).  Off: a session whose records are still a journal is read
-from it, never moved by the editor, and a session's turn rows are filled
-as its turns end or its chat wants them.  A move's long transactions
-held the store's lock against every session's supervisor.")
+  "Whether the editor moves sessions' journals to SQLite in the background,
+in worker VMs.  Off: a session whose records are still a journal is read
+from it, never moved by the editor.  A move's long transactions held the
+store's lock against every session's supervisor.")
 
 (defvar romacs-agent-mark-kinds nil
   "What can wait on a session left unloaded, so a restore loads it: a list

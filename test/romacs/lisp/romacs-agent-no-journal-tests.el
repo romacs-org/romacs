@@ -13,9 +13,6 @@
 
 (defconst romacs-agent-no-journal-tests--id "c0c0c0c0-2222-4333-8444-555566667777")
 
-(defvar romacs-agent-no-journal-tests--turns '(1 2)
-  "The turns `romacs-agent-no-journal-tests--with' writes, by number.")
-
 (defmacro romacs-agent-no-journal-tests--with (&rest body)
   "BODY with `session', a Claude session of two turns, its journal written,
 in a store of its own, a preview's budget unbounded; journals moved in
@@ -46,7 +43,7 @@ the background, as these tests' chats wait for that move."
                                                                    "message" (romacs-mcp--object "id" (format "m%d" n) "content"
                                                                                                  (vector (romacs-mcp--object "type" "text" "text" (format "say %d" n))))))
                                    (line "out" (romacs-mcp--object "type" "result" "result" (format "say %d" n)))))
-                           romacs-agent-no-journal-tests--turns))
+                           '(1 2)))
             nil (expand-file-name "journal.jsonl" dir) nil 'silent)))
        (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd dir :title "nj"
                                           :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
@@ -74,28 +71,23 @@ the background, as these tests' chats wait for that move."
           (should-not waits)
           (kill-buffer buffer))))))
 
-(ert-deftest romacs-agent-no-journal-rows-behind-draw-the-tail ()
-  ;; Its turn rows end before its last turns (turns ended with no editor
-  ;; to write them): its chat draws its last turns from its records'
-  ;; tail, not every record after its rows, and asks for its rows.
+(ert-deftest romacs-agent-no-journal-earlier-turns-go-past-the-tail ()
+  ;; Read from its journal: earlier turns asked for by hand are found
+  ;; however far back they go, not the tail's bytes again.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (let ((romacs-agent-no-journal-tests--turns '(1 2 3 4 5 6)))
-    (romacs-agent-no-journal-tests--with
-      (should (romacs-agent-test-stored session))
-      ;; Its rows of the first two turns alone.
-      (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq > 6" (list id))
-      (let ((wanted nil))
-        (let ((romacs-agent-drawn-wanted-functions (list (lambda (sid _seqs) (push sid wanted)))))
-          (let ((buffer (romacs-agent-ui--make-chat session)))
-            (with-current-buffer buffer
-              (setq romacs-agent-ui--turns 2)
-              (romacs-agent-ui--fill buffer))
-            (with-current-buffer buffer
-              (should (string-search "say 6" (buffer-string)))
-              (should (string-search "say 5" (buffer-string)))
-              (should-not (string-search "say 3" (buffer-string))))
-            (should (member id wanted))
-            (kill-buffer buffer)))))))
+  (romacs-agent-no-journal-tests--with
+    (let ((romacs-agent-store-background nil)
+          (romacs-agent-chat-turns 1)
+          ;; The tail's bytes: its last turn's alone.
+          (romacs-agent-journal-tail-bytes 400))
+      (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+        (with-current-buffer buffer
+          (should (string-search "say 2" (buffer-string)))
+          (should-not (string-search "say 1" (buffer-string)))
+          (romacs-agent-chat-earlier)
+          (should (string-search "say 1" (buffer-string)))
+          (should (string-search "say 2" (buffer-string))))
+        (kill-buffer buffer)))))
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
   ;; Not moved yet: a row says so, the chat waits for the move

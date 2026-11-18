@@ -2607,8 +2607,13 @@ records not in SQLite: from its tail (`romacs-agent--journal-file-tail'),
 never a walk of a long journal on the editor.  One whose last turn alone
 is longer than that tail says so instead."
   (let* ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-         (from (car (romacs-agent--journal-file-tail session (or romacs-agent-ui--turns 20) size))))
-    (if (or from (<= size romacs-agent-journal-tail-bytes))
+         (turns (or romacs-agent-ui--turns 20))
+         ;; Turns asked for by hand (earlier ones) are looked for however
+         ;; far back they go; a chat's first draw within its tail's bytes.
+         (budget (and (> turns (or romacs-agent-chat-turns 12)) 'none))
+         ;; Nil: all of it (fewer turns than asked, or none found in the tail).
+         (from (car (romacs-agent--journal-file-tail session turns size nil budget))))
+    (if (or from budget (<= size romacs-agent-journal-tail-bytes))
         (progn (when from (romacs-agent-ui--earlier-row))
                (romacs-agent-ui--replay-from session from))
       (romacs-agent-ui--insert-at romacs-agent-ui--end
@@ -2760,16 +2765,11 @@ editor), its last turns are drawn from its records' tail."
          (page (romacs-agent-turns-page session nil turns))
          (rows (reverse (plist-get page :rows)))
          (more (plist-get page :more))
-         ;; Where to draw from when its rows do not reach its last turns
-         ;; (none yet, or behind: turns ended with no editor to write
-         ;; them): never all of its records on the editor.
-         (lag (and romacs-agent-ui--turns
-                   (when-let* ((start (car (romacs-agent-events-tail session turns))))
-                     (and (or (null rows) (> start (1+ (or (plist-get (car (last rows)) :last-seq) 0)))) start)))))
+         ;; Where to draw from with no rows and more turns than drawn:
+         ;; never all of its records on the editor.
+         (lag (and romacs-agent-ui--turns (null rows) (car (romacs-agent-events-tail session turns)))))
     (cond
      (lag (romacs-agent-ui--earlier-row)
-          ;; Its rows caught up off the editor, for the next draw.
-          (when rows (run-hook-with-args 'romacs-agent-drawn-wanted-functions (romacs-agent-id session) nil))
           (romacs-agent-ui--replay-from session lag))
      (t (if more (romacs-agent-ui--earlier-row)
           (when (romacs-agent-imported session)

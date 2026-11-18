@@ -397,11 +397,10 @@ moment more under load."
              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
      ,@body))
 
-(ert-deftest romacs-agent-events-no-background-move-or-fill ()
-  ;; With nothing moved or filled in the background (the default), a
-  ;; session whose journal is too long to import here is read as it is, at
-  ;; once; no move, row fill or turn-rows fill of every session starts.
-  ;; With them on, the same session waits for its move.
+(ert-deftest romacs-agent-events-no-background-move ()
+  ;; With nothing moved in the background (the default), a session whose
+  ;; journal is too long to import here is read as it is, at once; no move
+  ;; starts.  With it on, the same session waits for its move.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
   (require 'romacs-agent-turns)
   (dolist (background '(nil t))
@@ -428,9 +427,7 @@ moment more under load."
                         ((symbol-function 'romacs-agent-events-own) #'ignore))
                 (let ((noninteractive nil))
                   (romacs-agent-events-then session (lambda () (setq called t)))
-                  (romacs-agent-events-migrate-soon)
-                  (romacs-agent-store-fill-soon)
-                  (romacs-agent-turns-fill-soon)))
+                  (romacs-agent-events-migrate-soon)))
               (should (eq called (not background)))
               (unless background (should-not started)))
           (delete-directory dir t))))))
