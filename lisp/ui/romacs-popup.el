@@ -942,19 +942,15 @@ a fringe-less window keeps for its continuation glyph."
 ;; A menu takes no focus, so the keys of its buffer reach it through a
 ;; transient map while it shows: a key its buffer's local map binds runs
 ;; there, the menu's window selected, so point moves in the menu as in a
-;; window of its own.  Any other key hides the menu and runs as if it had
-;; never shown.  One menu takes keys at a time.
+;; window of its own, and its buffer's own `post-command-hook' runs
+;; after (`hl-line-mode' follows point).  `quit-window' hides the menu, and
+;; a buffer one of its commands shows goes to the window the user was in,
+;; the menu hidden.  Any other key hides the menu and runs as if it had
+;; never shown.  One menu takes keys at a time.  `romacs-popup-display-buffer'
+;; shows any buffer so, as a `display-buffer' action.
 
 (defvar romacs-popup--keys-buffer nil "The buffer whose menu takes keys.")
 (defvar romacs-popup--keys-exit nil "What ends its transient map.")
-(defvar romacs-popup--keys-then nil "What to call once the key's command returns.")
-
-(defvar romacs-popup--taking nil
-  "Non-nil while the menu taking keys runs a key's command.")
-
-(defvar romacs-popup-key-hook nil
-  "Run in a menu's buffer, its window selected, after each key it takes:
-a buffer-local value follows point (a highlighted row).")
 
 (defvar romacs-popup--keys-map
   (let ((map (make-sparse-keymap))) (define-key map [t] #'romacs-popup-menu-key) map)
@@ -1017,14 +1013,6 @@ minibuffer is the minibuffer's."
                                    (romacs-popup-hide buffer)
                                    (when on-exit (funcall on-exit)))))))))
 
-(defun romacs-popup-then (function)
-  "Hide the menu taking keys once this key's command returns, then call
-FUNCTION in the window and buffer the user was in: what opens something
-for the user (a buffer, a prompt of its own) runs there, not in the menu.
-A command not run by the menu (its buffer shown in a window of its own)
-calls FUNCTION now."
-  (if romacs-popup--taking (setq romacs-popup--keys-then function) (funcall function)))
-
 (defun romacs-popup-menu-key ()
   "Run the key just typed in the menu taking keys, or hide the menu and run
 the key as if it had never shown."
@@ -1032,25 +1020,63 @@ the key as if it had never shown."
   (interactive)
   (romacs-popup--menu-key (this-command-keys-vector)))
 
+(defun romacs-popup--keys-done ()
+  "Hide the menu taking keys, ending its transient map."
+  (when romacs-popup--keys-exit (funcall romacs-popup--keys-exit)))
+
+(defun romacs-popup--outside (user menu leave)
+  "A `display-buffer' action for the commands of MENU, the window of the
+menu taking keys: a buffer of its own stays, any other goes to USER, the
+window the user was in, and LEAVE is called: the menu is to hide."
+  (lambda (buffer alist)
+    (unless (eq buffer (window-buffer menu))
+      (funcall leave)
+      (window--display-buffer buffer user 'reuse alist))))
+
 (defun romacs-popup--menu-key (keys)
   "Run KEYS in the menu taking keys, or hide it and run them as typed anew."
   (let* ((window (romacs-popup--keys-window))
          (command (and window (romacs-popup--menu-command
-                               keys (with-current-buffer (window-buffer window) (current-local-map))))))
-    (if (not command)
-        (progn (when romacs-popup--keys-exit (funcall romacs-popup--keys-exit))
-               (setq unread-command-events (append (listify-key-sequence keys) unread-command-events)))
-      (setq romacs-popup--keys-then nil)
-      ;; The map is the menu's only: not in a minibuffer its command reads.
-      (let ((overriding-terminal-local-map nil) (romacs-popup--taking t))
-        (with-selected-window window
-          (setq this-command command)
-          (call-interactively command)
-          (run-hooks 'romacs-popup-key-hook)))
-      (when-let* ((then romacs-popup--keys-then))
-        (setq romacs-popup--keys-then nil)
-        (when romacs-popup--keys-exit (funcall romacs-popup--keys-exit))
-        (funcall then)))))
+                               keys (with-current-buffer (window-buffer window) (current-local-map)))))
+         (leave nil))
+    (cond ((not command)
+           (romacs-popup--keys-done)
+           (setq unread-command-events (append (listify-key-sequence keys) unread-command-events)))
+          ((eq command #'quit-window) (romacs-popup--keys-done))
+          (t
+           ;; The map is the menu's only: not in a minibuffer its command reads.
+           (let ((overriding-terminal-local-map nil)
+                 (display-buffer-overriding-action
+                  (list (romacs-popup--outside (selected-window) window (lambda () (setq leave t))))))
+             (with-selected-window window
+               (setq this-command command)
+               (call-interactively command)
+               ;; Its buffer's own hook, as after a command in its window.
+               (when (and (eq (window-buffer) (current-buffer)) (local-variable-p 'post-command-hook))
+                 (dolist (hook (remq t post-command-hook)) (funcall hook)))))
+           ;; Its map ends once the binding above is undone, or it would
+           ;; come back with it.
+           (when leave (romacs-popup--keys-done))))))
+
+;;;###autoload
+(defun romacs-popup-display-buffer (buffer alist)
+  "Show BUFFER as a centred `palette' menu taking its keys
+\(`romacs-popup-take-keys'): a `display-buffer' action, as an entry of
+`display-buffer-alist' names it.  ALIST's `window-width', a fraction of
+the frame's columns or a number of them (by default 0.7), and
+`window-height', its most lines (by default the frame's less six), size
+it.  Return its window, or nil when it cannot show."
+  (let* ((root (romacs-layer--root-frame))
+         (width (or (alist-get 'window-width alist) 0.7))
+         (columns (if (integerp width) width (floor (* (frame-width root) width))))
+         (most (or (alist-get 'window-height alist) (max 6 (- (frame-text-lines root) 6))))
+         (frame (romacs-popup-show 'palette buffer :columns columns :max-lines most
+                                   :lines (min most (with-current-buffer buffer (count-lines (point-min) (point-max)))))))
+    (when frame
+      (romacs-popup-take-keys buffer)
+      ;; A menu's own look: no mode line of its window.
+      (set-window-parameter (frame-root-window frame) 'mode-line-format 'none)
+      (frame-root-window frame))))
 
 (provide 'romacs-popup)
 ;;; romacs-popup.el ends here

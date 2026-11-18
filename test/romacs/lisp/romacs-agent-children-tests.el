@@ -162,8 +162,8 @@
         (delete-directory dir t)))))
 
 (ert-deftest romacs-agent-children-replay-finds-the-harness-subagents ()
-  ;; No supervisor: the session raised no events; opening its chat replays
-  ;; the journal, and that is where they are found.
+  ;; No supervisor: the session raised no events; its chat replays the
+  ;; turn under way from its records, and that is where they are found.
   (romacs-agent-children-tests--with
     (let ((dir (make-temp-file "romacs-children-" t)) (coding-system-for-write 'utf-8-unix))
       (unwind-protect
@@ -180,13 +180,14 @@
                                                                      "input" (romacs-mcp--object "description" "read")))))))
                      "\n")
              nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+            ;; The turn under way, from its records: its subagents found.
             (with-temp-buffer
               (romacs-agent-chat-mode)
               (let ((inhibit-read-only t))
                 (setq romacs-agent-ui--session session
                       romacs-agent-ui--messages (make-hash-table :test #'equal)
                       romacs-agent-ui--end (point-marker))
-                (romacs-agent-ui--replay session)))
+                (romacs-agent-ui--replay-from session nil)))
             (romacs-agent-ui--summarize-children session)
             (should (equal (plist-get (car (romacs-agent-children-rows session)) :title) "read"))
             ;; A journal that ends mid-call leaves it running: only a turn's

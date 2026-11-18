@@ -1158,18 +1158,6 @@ impl WgpuRenderer {
             }
         }
 
-        #[cfg(feature = "video")]
-        let mut submitted_video_ids = Vec::new();
-        #[cfg(feature = "video")]
-        let gpu_timing = self.begin_video_frame_content_pass(
-            frame
-                .glyphs
-                .iter()
-                .any(|glyph| matches!(glyph, FrameGlyph::Video { .. })),
-        );
-        #[cfg(feature = "video")]
-        let timestamp_writes = gpu_timing.as_ref().map(|timing| timing.timestamp_writes());
-        #[cfg(not(feature = "video"))]
         let timestamp_writes = None;
 
         // === GPU submission: single encoder, single submit ===
@@ -1230,12 +1218,6 @@ impl WgpuRenderer {
             &self.pipelines.stencil_composition
         } else {
             &self.pipelines.composition
-        };
-        #[cfg(feature = "video")]
-        let bi_planar_video_pl = if use_stencil {
-            &self.pipelines.stencil_bi_planar_video
-        } else {
-            &self.pipelines.bi_planar_video
         };
         let _opaque_image_pl = if use_stencil {
             &self.pipelines.stencil_opaque_image
@@ -1646,26 +1628,6 @@ impl WgpuRenderer {
             pass.set_bind_group(0, draw.binding(), &[]);
 
             // --- Draw inline videos (inherit the image pipeline set above) ---
-            #[cfg(feature = "video")]
-            {
-                if let Some(prepared) = super::layer_media::prepare_inline_videos(
-                    &self.caches.video,
-                    &frame.glyphs,
-                    offset_x,
-                    offset_y,
-                ) {
-                    self.media_budget.touch(
-                        crate::media_budget::MediaType::Video,
-                        crate::video_cache::VIDEO_GPU_POOL_ACCOUNTING_ID,
-                    );
-                    if let Some(upload) =
-                        prepared.upload(&mut self.arenas.image, &self.device, &self.queue)
-                    {
-                        submitted_video_ids.extend(prepared.quads.iter().map(|quad| quad.id));
-                        prepared.draw(&mut pass, &upload, image_pl, bi_planar_video_pl);
-                    }
-                }
-            }
 
             // --- Draw inline shader surfaces: straight alpha through the image
             // pipeline, a premultiplied one through the composition pipeline ---
@@ -1783,9 +1745,6 @@ impl WgpuRenderer {
         glyph_atlas.count_font_identities();
         stats.log_if_enabled();
 
-        #[cfg(feature = "video")]
-        self.submit_video_frame_content_pass(encoder, gpu_timing, submitted_video_ids, false);
-        #[cfg(not(feature = "video"))]
         self.submit_commands([encoder.finish()]);
         tracing::debug!("render_frame_content: submitted (1 encoder, 1 pass)");
     }

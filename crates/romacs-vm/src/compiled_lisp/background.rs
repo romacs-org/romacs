@@ -126,7 +126,7 @@ fn compiled(configured: &Configured, path: &Path) -> bool {
     let config = &configured.config;
     let Some(identity) = configured.identity() else { return false };
     let Ok(digest) = store::source_digest(&config.store, path) else { return true };
-    store::has_artifact(&config.store, &store::key(identity, path, &digest))
+    store::has_artifact(&config.store, &store::key(identity, config.root.as_deref(), path, &digest))
 }
 
 /// Compile PATH on LOAD_PATH in a compile process at the idle priority,

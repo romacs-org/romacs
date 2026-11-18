@@ -1,14 +1,10 @@
 //! Media methods for WgpuRenderer.
 
 use super::WgpuRenderer;
-#[cfg(feature = "video")]
-use romacs_display_protocol::VideoId;
 use romacs_display_protocol::{
     ImageAnimationPolicy, ImageColorContext, ImageFrameIndex, ImageId, ImageLoadToken,
     ImageMaskPolicy, ImageRealization, ImageRotation, ImageSequenceId, ImageSizeSpec,
 };
-#[cfg(feature = "video")]
-use romacs_video::{PlaybackAction, VideoOpenRequest};
 
 impl WgpuRenderer {
     pub fn upload_semantic_image(
@@ -26,49 +22,12 @@ impl WgpuRenderer {
     ///
     /// Root and child frames use different renderers, so this shared seam is
     /// the only place allowed to begin the opt-in GPU timing transaction.
-    #[cfg(feature = "video")]
-    pub(super) fn begin_video_frame_content_pass(
-        &mut self,
-        has_video_glyph: bool,
-    ) -> Option<crate::gpu_frame_timing::PendingGpuFrameTiming> {
-        for sample in self.gpu_frame_timer.drain() {
-            self.caches
-                .video
-                .record_gpu_frame_time(sample.video_ids, sample.duration_us);
-        }
-        has_video_glyph
-            .then(|| self.gpu_frame_timer.begin())
-            .flatten()
-    }
 
     /// Resolve and submit one timed video-bearing frame-content pass.
     ///
     /// Keeping queue submission and presentation accounting together prevents
     /// a render path from reporting submitted frames while silently omitting
     /// the timestamp query that describes the same GPU work.
-    #[cfg(feature = "video")]
-    pub(super) fn submit_video_frame_content_pass(
-        &mut self,
-        mut encoder: wgpu::CommandEncoder,
-        timing: Option<crate::gpu_frame_timing::PendingGpuFrameTiming>,
-        video_ids: Vec<VideoId>,
-        root_timed: bool,
-    ) {
-        if let Some(timing) = &timing {
-            timing.resolve(&mut encoder);
-        }
-        if timing.is_none() && !root_timed {
-            self.submit_commands([encoder.finish()]);
-        } else {
-            // Timing readbacks wait on this exact, real submission.
-            let submission = self.submissions.submit_now(&self.queue, [encoder.finish()]);
-            if let Some(timing) = timing {
-                self.gpu_frame_timer
-                    .submit(timing, submission, video_ids.clone());
-            }
-        }
-        self.caches.video.record_submitted_frames(video_ids);
-    }
 
     /// Exact image texture and decoded animation-sequence bytes currently
     /// retained by the renderer.
@@ -176,159 +135,45 @@ impl WgpuRenderer {
 
     /// Load video from file path (async - returns immediately)
     /// Returns video ID, frames decode in background
-    #[cfg(feature = "video")]
-    pub(crate) fn load_video_file(&mut self, path: &str) -> u32 {
-        self.caches.video.load_file(path)
-    }
 
     /// Load video from file path with a pre-allocated ID.
-    #[cfg(feature = "video")]
-    pub(crate) fn load_video_file_with_id(
-        &mut self,
-        id: u32,
-        path: &str,
-        loop_count: i32,
-        autoplay: bool,
-    ) {
-        self.caches
-            .video
-            .load_file_with_id(id, path, loop_count, autoplay);
-    }
 
     /// Load video from URI with a pre-allocated ID.
-    #[cfg(feature = "video")]
-    pub(crate) fn load_video_uri_with_id(
-        &mut self,
-        id: u32,
-        uri: &str,
-        loop_count: i32,
-        autoplay: bool,
-    ) {
-        self.caches
-            .video
-            .load_uri_with_id(id, uri, loop_count, autoplay);
-    }
 
     /// Open one stable editor video session from a fully typed request.
-    #[cfg(feature = "video")]
-    pub(crate) fn open_video(&mut self, id: VideoId, request: VideoOpenRequest) {
-        self.caches.video.open(id, request);
-    }
 
     /// Apply one typed playback transition to an existing video session.
-    #[cfg(feature = "video")]
-    pub(crate) fn control_video(&mut self, id: VideoId, action: PlaybackAction) {
-        self.caches.video.control(id, action);
-    }
 
     /// Close one stable editor video session.
-    #[cfg(feature = "video")]
-    pub(crate) fn close_video(&mut self, id: VideoId) {
-        self.caches.video.close(id);
-    }
 
     /// Snapshot the native video pipeline without exposing renderer handles.
-    #[cfg(feature = "video")]
-    pub(crate) fn video_diagnostics(&self) -> Result<romacs_video::VideoDiagnostics, String> {
-        self.caches.video.diagnostics()
-    }
 
     /// Acknowledge a new native-video diagnostics measurement epoch.
-    #[cfg(feature = "video")]
-    pub(crate) fn begin_video_measurement_epoch(&mut self) -> Result<(), String> {
-        self.caches.video.begin_measurement_epoch()?;
-        self.gpu_frame_timer.begin_measurement_epoch();
-        Ok(())
-    }
 
     /// Begin evidence collection for one swapchain-bound render transaction.
-    #[cfg(feature = "video")]
-    pub fn begin_video_surface_render(&mut self) {
-        self.caches.video.begin_surface_render();
-    }
 
     /// Discard pending submission evidence when the swapchain render did not finish.
-    #[cfg(feature = "video")]
-    pub fn cancel_video_surface_render(&mut self) {
-        self.caches.video.cancel_surface_render();
-    }
 
     /// Record surface handoff after queue.present returns for these video draws.
-    #[cfg(feature = "video")]
-    pub fn finish_submitted_video_surface(&mut self) {
-        self.caches.video.finish_submitted_surface();
-    }
 
     /// Get video dimensions
-    #[cfg(feature = "video")]
-    pub(crate) fn get_video_size(&self, id: u32) -> Option<(u32, u32)> {
-        self.caches.video.get_dimensions(id)
-    }
 
     /// Get video state
-    #[cfg(feature = "video")]
-    pub(crate) fn get_video_state(&self, id: u32) -> Option<super::super::video_cache::VideoState> {
-        self.caches.video.get_state(id)
-    }
 
     /// Play video
-    #[cfg(feature = "video")]
-    pub(crate) fn video_play(&mut self, id: u32) {
-        self.caches.video.play(id)
-    }
 
     /// Pause video
-    #[cfg(feature = "video")]
-    pub(crate) fn video_pause(&mut self, id: u32) {
-        self.caches.video.pause(id)
-    }
 
     /// Stop video
-    #[cfg(feature = "video")]
-    pub(crate) fn video_stop(&mut self, id: u32) {
-        self.caches.video.stop(id)
-    }
 
     /// Set video loop count (-1 for infinite)
-    #[cfg(feature = "video")]
-    pub(crate) fn video_set_loop(&mut self, id: u32, count: i32) {
-        self.caches.video.set_loop(id, count)
-    }
 
     /// Free a video from cache
-    #[cfg(feature = "video")]
-    pub(crate) fn free_video(&mut self, id: u32) {
-        self.caches.video.remove(id)
-    }
 
-    #[cfg(feature = "video")]
-    pub fn process_pending_videos(
-        &mut self,
-        request: romacs_video::VideoServiceRequest,
-    ) -> &romacs_video::VideoServiceResult {
-        self.caches.video.process_pending(request)
-    }
 
-    #[cfg(feature = "video")]
-    pub fn video_recovery_manifests(
-        &self,
-    ) -> Vec<super::super::video_cache::VideoRecoveryManifest> {
-        self.caches.video.recovery_manifests()
-    }
 
-    #[cfg(feature = "video")]
-    pub fn restore_videos_after_device_loss(
-        &mut self,
-        manifests: Vec<super::super::video_cache::VideoRecoveryManifest>,
-    ) {
-        self.caches.video.restore_after_device_loss(manifests);
-    }
 
     /// Get cached video for rendering
-    #[cfg(feature = "video")]
-    pub(crate) fn get_video(&self, id: u32) -> Option<&super::super::video_cache::CachedVideo> {
-        self.caches.video.get(id)
-    }
 
     // =========== Shader surfaces (docs/display-engine/SHADER_SURFACES.md) ===========
 
@@ -423,10 +268,6 @@ impl WgpuRenderer {
     /// frame from `process_shader_surfaces`.
     fn reconcile_media_budget(&mut self) {
         for event in self.caches.image.drain_accounting() {
-            self.media_budget.apply(event);
-        }
-        #[cfg(feature = "video")]
-        for event in self.caches.video.drain_accounting() {
             self.media_budget.apply(event);
         }
     }
@@ -537,19 +378,6 @@ impl WgpuRenderer {
         let sample = self.frame_sample;
         self.reconcile_media_budget();
         let sources = self.caches.surface.external_channel_sources();
-        #[cfg(feature = "video")]
-        let video_views = self.caches.video.prepare_channel_views(
-            sources.iter().filter_map(|source| match source {
-                SurfaceChannelSource::Video(id) => {
-                    Some(romacs_display_protocol::types::VideoId::new(*id))
-                }
-                SurfaceChannelSource::Surface(_) | SurfaceChannelSource::Image(_) => None,
-            }),
-            &self.device,
-            &self.queue,
-            &self.pipelines.bi_planar_video_copy,
-            self.frame_parameters().binding(),
-        );
         let mut external = std::collections::HashMap::new();
         for source in sources {
             let view = match source {
@@ -557,11 +385,6 @@ impl WgpuRenderer {
                 SurfaceChannelSource::Image(id) => {
                     self.caches.image.get(id).map(|cached| cached.view.clone())
                 }
-                #[cfg(feature = "video")]
-                SurfaceChannelSource::Video(id) => video_views
-                    .get(&romacs_display_protocol::types::VideoId::new(id))
-                    .cloned(),
-                #[cfg(not(feature = "video"))]
                 SurfaceChannelSource::Video(_) => None,
             };
             if let Some(view) = view {

@@ -108,8 +108,7 @@ fn reviewed_must_bound_stalled_fifo_write_in_completed_subprocess() {
     use std::os::unix::fs::OpenOptionsExt as _;
     let d = dir("reviewed-stalled-fifo");
     let fifo = d.join("pipe");
-    let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
-    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    rustix::fs::mknodat(rustix::fs::CWD, &fifo, rustix::fs::FileType::Fifo, rustix::fs::Mode::from_raw_mode(0o600), 0).unwrap();
     let _reader = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&fifo).unwrap();
     let mut vm = Vm::new();
     assert_eq!(eval(&mut vm, "(length (make-string 1048576 120))"), "1048576", "REVIEWED_FIFO_PAYLOAD_SUPPORTED");
@@ -527,8 +526,7 @@ fn fifo_writes_deliver_to_readers_and_fail_closed_without_one() {
     use std::os::unix::fs::OpenOptionsExt as _;
     let d = dir("fifo");
     let fifo = d.join("pipe");
-    let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
-    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo");
+    rustix::fs::mknodat(rustix::fs::CWD, &fifo, rustix::fs::FileType::Fifo, rustix::fs::Mode::from_raw_mode(0o600), 0).expect("mkfifo");
     // A reader, so a write would be delivered if it were attempted.
     let mut reader = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&fifo).unwrap();
     let f = lisp(&fifo);

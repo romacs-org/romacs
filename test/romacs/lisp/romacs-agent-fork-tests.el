@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (require 'romacs-test-notes)
@@ -161,96 +162,184 @@ start launched, its manifest written."
       (should (equal (gethash "from" note) (romacs-agent-id source)))
       (should (eql (gethash "seq" note) 1))
       (should (eql (gethash "turns" note) 1))
-      ;; Its chat shows the source's transcript to the fork, then the rule.
-      (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+      ;; Its chat says so; what the source said after is not the fork's.
+      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                (should (string-match-p "hello source" text))
                 (should-not (string-match-p "after the fork" text))
-                (should (string-match-p "Forked from Plan at its turn 1" text))
-                (should (< (string-search "hello source" text) (string-search "Forked from" text)))))
+                (should (string-match-p "Forked from Plan at its turn 1" text))))
           (kill-buffer buffer))))))
 
-(ert-deftest romacs-agent-fork-draws-its-source-s-last-turns ()
-  ;; A fork of a long conversation draws the source's last turns that
-  ;; fit the chat's, under the row that draws the rest.
+(defun romacs-agent-fork-tests--turns (session from to)
+  "Write turns FROM to TO, a prompt and its end each, as SESSION's journal
+after LEAD, a list of objects written first (their seqs from 1)."
+  (write-region (mapconcat
+                 (lambda (n)
+                   (concat (json-serialize
+                            (romacs-mcp--object
+                             "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                                      "romacsRequest" n "type" "user")
+                             "seq" (1- (* 2 n)) "t" n))
+                           "\n"
+                           (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
+                                                               "seq" (* 2 n) "t" n))
+                           "\n"))
+                 (number-sequence from to) "")
+                nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) nil 'silent))
+
+(defun romacs-agent-fork-tests--plain (title)
+  "A Claude session TITLE recorded under the state root, nothing written
+in it yet: its journal is the test's to write, as a fork's moved later."
+  (let ((session (romacs-agent--create :id (romacs-agent--uuid) :harness 'claude :provider "claude" :cwd "/work/p"
+                                       :title title :state 'idle :turns 1 :options '(:model "m" :effort "high"))))
+    (romacs-agent--manifest session nil)
+    session))
+
+(defun romacs-agent-fork-tests--note-then (fork note-objects lines)
+  "Write FORK's journal: NOTE-OBJECTS as its notes, seqs from 1, then
+LINES, objects with their own seqs."
+  (let ((seq 0))
+    (write-region (concat (mapconcat (lambda (note) (concat (json-serialize (romacs-mcp--object "note" note "seq" (cl-incf seq) "t" seq)) "\n"))
+                                     note-objects "")
+                          (mapconcat (lambda (line) (concat (json-serialize line) "\n")) lines ""))
+                  nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)))
+
+(ert-deftest romacs-agent-fork-at-seq-zero-takes-nothing-later ()
+  ;; Forked before its source said anything: what the source says later
+  ;; is not the fork's.
   (require 'romacs-agent-ui)
   (romacs-agent-fork-tests--with 'claude ()
-    (let ((romacs-agent-chat-turns 2))
-      (write-region (mapconcat
-                     (lambda (n)
-                       (concat (json-serialize
-                                (romacs-mcp--object
-                                 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
-                                                          "romacsRequest" n "type" "user")
-                                 "seq" (1- (* 2 n)) "t" n))
-                               "\n"
-                               (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
-                                                                   "seq" (* 2 n) "t" n))
-                               "\n"))
-                     (number-sequence 1 5) "")
-                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
-      (setf (romacs-agent-seq source) 10)
-      (let* ((fork (romacs-agent-fork source))
-             (buffer (save-window-excursion (romacs-agent-show fork))))
+    (romacs-agent-fork-tests--turns source 1 3)
+    (setf (romacs-agent-seq source) 6)
+    (let ((fork (romacs-agent-fork-tests--plain "F")))
+      (romacs-agent-fork-tests--note-then
+       fork (list (romacs-mcp--object "from" (romacs-agent-id source) "seq" 0 "title" "Plan" "turns" 0 "type" "fork")) nil)
+      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                           (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
-            (with-current-buffer buffer
-              (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                (should (string-prefix-p "▴ Earlier turns" text))
-                (should-not (string-search "question 3" text))
-                (should (string-search "question 4" text))
-                (should (string-search "question 5" text))
-                (should (string-search "Forked from Plan" text))))
+            (let ((text (with-current-buffer buffer (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
+              (should-not (string-search "question" text))
+              (should (string-search "Forked from Plan" text)))
           (kill-buffer buffer))))))
 
-(ert-deftest romacs-agent-fork-made-again-draws-the-latest-turns ()
-  ;; Forked at the source's turn 5, then again at its turn 10 (the fork
-  ;; had not spoken): its last two turns are the source's 9 and 10.
+;; A fork's turns taken of its source are rows of its own (seqs 1..N, its
+;; note at N+1), each naming its source, kept drawn under the fork's id.
+
+(defun romacs-agent-fork-tests--form (text)
+  "A drawn form of one turn saying TEXT."
+  (with-temp-buffer
+    (insert (propertize "> " 'face 'romacs-agent-dim)
+            (propertize text 'romacs-agent-input t 'face 'romacs-agent-prompt) "\n")
+    (romacs-agent-drawn-form (point-min) (point-max))))
+
+(defun romacs-agent-fork-tests--borrowed (fork source texts &optional drawn)
+  "FORK as a fork of SOURCE that took TEXTS, its first turns: its note at
+seq N+1 and a turn of its own after, its records stored; `turns-page'
+then answers with a borrowed row before its own for each of TEXTS,
+seqs 1..N, kept drawn under FORK's id when DRAWN (all by default) holds
+its seq."
+  (let* ((n (length texts)) (id (romacs-agent-id fork)) (seq n))
+    (romacs-agent-fork-tests--note-then
+     fork nil
+     (list (romacs-mcp--object "note" (romacs-mcp--object "from" (romacs-agent-id source) "seq" n "title" "Plan"
+                                                          "turns" n "type" "fork")
+                               "seq" (cl-incf seq) "t" seq)
+           (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "fork's own" "role" "user")
+                                                        "romacsRequest" 1 "type" "user")
+                               "seq" (cl-incf seq) "t" seq)
+           (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result") "seq" (cl-incf seq) "t" seq)))
+    (setf (romacs-agent-seq fork) seq)
+    (romacs-agent-test-stored fork)
+    (cl-loop for text in texts for first from 1
+             when (or (null drawn) (memq first drawn))
+             do (romacs-agent-drawn-put (romacs-agent-turns--db) id first (romacs-agent-fork-tests--form text)))
+    (cl-loop for first from n downto 1
+             collect (list :first-seq first :last-seq first :source-session (romacs-agent-id source)
+                           :source-first-seq (* 2 first)))))
+
+(defun romacs-agent-fork-tests--paged (borrowed)
+  "`romacs-agent-turns-page' with BORROWED, rows newest first, under the
+session's own."
+  (let ((page (symbol-function 'romacs-agent-turns-page)))
+    (lambda (session &optional before limit)
+      (let* ((limit (or limit 20))
+             (own (funcall page session before most-positive-fixnum))
+             (rows (append (plist-get own :rows)
+                           (seq-filter (lambda (row) (or (null before) (< (plist-get row :first-seq) before))) borrowed))))
+        (list :rows (seq-take rows limit) :after (plist-get own :after) :more (> (length rows) limit))))))
+
+(ert-deftest romacs-agent-fork-draws-its-borrowed-rows-then-its-note ()
+  ;; The rows it took, then the note between them and its own turn, each
+  ;; in its place by seq; a borrowed turn names its source.
   (require 'romacs-agent-ui)
   (romacs-agent-fork-tests--with 'claude ()
-    (let ((romacs-agent-chat-turns 2) (id (romacs-agent-id source)))
-      (write-region (mapconcat
-                     (lambda (n)
-                       (concat (json-serialize
-                                (romacs-mcp--object
-                                 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
-                                                          "romacsRequest" n "type" "user")
-                                 "seq" (1- (* 2 n)) "t" n))
-                               "\n"
-                               (json-serialize (romacs-mcp--object "out" (romacs-mcp--object "result" "ok" "type" "result")
-                                                                   "seq" (* 2 n) "t" n))
-                               "\n"))
-                     (number-sequence 1 10) "")
-                    nil (expand-file-name "journal.jsonl" (romacs-agent-dir source)) nil 'silent)
-      (setf (romacs-agent-seq source) 20)
-      (let ((fork (romacs-agent-fork source)))
-        (write-region (concat (json-serialize (romacs-mcp--object
-                                               "note" (romacs-mcp--object "from" id "seq" 10 "title" "Plan" "turns" 5 "type" "fork")
-                                               "seq" 1 "t" 1))
-                              "\n"
-                              (json-serialize (romacs-mcp--object
-                                               "note" (romacs-mcp--object "after" 10 "from" id "seq" 20 "title" "Plan"
-                                                                          "turns" 10 "type" "fork")
-                                               "seq" 2 "t" 2))
-                              "\n")
-                      nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)
-        (let ((buffer (save-window-excursion (romacs-agent-show fork))))
-          (unwind-protect
-              (with-current-buffer buffer
-                (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                  (should (string-prefix-p "▴ Earlier turns" text))
-                  (should-not (string-match-p "question [1-8]\\b" text))
-                  (should (string-search "question 9" text))
-                  (should (string-search "question 10" text))
-                  ;; Two more: the source's 7 and 8, point at 9, where it was.
-                  (goto-char (point-min))
-                  (romacs-agent-chat-earlier)
+    (romacs-agent-test-with-store
+      (let* ((fork (romacs-agent-fork-tests--plain "F"))
+             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two"))))
+        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
+          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+            (unwind-protect
+                (with-current-buffer buffer
                   (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                    (should-not (string-match-p "question [1-6]\\b" text))
-                    (should (string-search "question 7" text)))
-                  (should (looking-at-p "> question 9"))))
-            (kill-buffer buffer)))))))
+                    (should (string-match-p (concat "taken one\\(.\\|\n\\)*taken two\\(.\\|\n\\)*"
+                                                    "Forked from Plan at its turn 2\\(.\\|\n\\)*fork's own")
+                                            text))
+                    (should (equal (get-text-property (1+ (string-search "taken two" text)) 'romacs-agent-from)
+                                   (romacs-agent-id source)))
+                    (should-not (get-text-property (1+ (string-search "fork's own" text)) 'romacs-agent-from))))
+              (kill-buffer buffer))))))))
+
+(ert-deftest romacs-agent-fork-pages-its-borrowed-rows ()
+  ;; Its last two turns: the last taken and its own, the note between;
+  ;; the row above draws the rest.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (romacs-agent-test-with-store
+      (let* ((romacs-agent-chat-turns 2)
+             (fork (romacs-agent-fork-tests--plain "F"))
+             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two" "taken three"))))
+        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
+          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+            (unwind-protect
+                (with-current-buffer buffer
+                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                    (should (string-prefix-p "▴ Earlier turns" text))
+                    (should-not (string-search "taken two" text))
+                    (should (string-match-p "taken three\\(.\\|\n\\)*Forked from Plan\\(.\\|\n\\)*fork's own" text)))
+                  (romacs-agent-chat-earlier)
+                  (should (string-match-p "taken one\\(.\\|\n\\)*taken two\\(.\\|\n\\)*taken three"
+                                          (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
+              (kill-buffer buffer))))))))
+
+(ert-deftest romacs-agent-fork-borrowed-row-waits-for-its-form ()
+  ;; A borrowed turn with no form yet: its row waits under the fork's id,
+  ;; naming the source, and the form it gets later keeps the name.
+  (require 'romacs-agent-ui)
+  (romacs-agent-fork-tests--with 'claude ()
+    (romacs-agent-test-with-store
+      (let* ((fork (romacs-agent-fork-tests--plain "F")) (id (romacs-agent-id fork)) (wanted nil)
+             (romacs-agent-drawn-wanted-functions (list (lambda (session seqs) (push (cons session seqs) wanted))))
+             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two") '(2))))
+        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
+          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+            (unwind-protect
+                (with-current-buffer buffer
+                  (should (assoc id wanted))
+                  (should (memq 1 (cdr (assoc id wanted))))
+                  (should-not (string-search "taken one" (buffer-string)))
+                  (let ((found (save-excursion (goto-char (point-min))
+                                               (text-property-search-forward 'romacs-agent-placeholder (cons id 1) #'equal))))
+                    (should found)
+                    (should (equal (get-text-property (prop-match-beginning found) 'romacs-agent-from) (romacs-agent-id source))))
+                  (romacs-agent-drawn-put (romacs-agent-turns--db) id 1 (romacs-agent-fork-tests--form "taken one"))
+                  (romacs-agent-ui-drawn-ready id '(1))
+                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
+                    (should (string-match-p "taken one\\(.\\|\n\\)*taken two" text))
+                    (should (equal (get-text-property (1+ (string-search "taken one" text)) 'romacs-agent-from)
+                                   (romacs-agent-id source)))))
+              (kill-buffer buffer))))))))
 
 (ert-deftest romacs-agent-fork-names ()
   ;; A fork's fork is no "(fork) (fork)"; one whose only turn was cut has
@@ -282,13 +371,12 @@ start launched, its manifest written."
       (setf (romacs-agent-state fork) 'ended)
       (romacs-agent-resume fork)
       (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
-      (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
+                             (save-window-excursion (romacs-agent-show fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                (should (= (how-many "hello source" 0 (length text)) 1))
-                (should (string-match-p (concat "hello source\\(.\\|\n\\)*Forked from Plan at its turn 1"
-                                                "\\(.\\|\n\\)*after the fork\\(.\\|\n\\)*"
+                (should (string-match-p (concat "Forked from Plan at its turn 1\\(.\\|\n\\)*"
                                                 "Forked again from Plan, now at its turn 2")
                                         text))))
           (kill-buffer buffer)))
@@ -297,33 +385,6 @@ start launched, its manifest written."
       (romacs-agent-resume fork)
       (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
       (should-not (member "--fork-session" (cadr (car launched)))))))
-
-(ert-deftest romacs-agent-fork-draws-an-imported-source-as-its-own ()
-  (require 'romacs-agent-ui)
-  ;; Loaded before it is stubbed: the draw's own require would replace the stub.
-  (require 'romacs-agent-history)
-  (romacs-agent-fork-tests--with 'claude (:imported '(:path "/x.jsonl" :size 10))
-    (let* ((fork (romacs-agent-fork source)) (drawn nil))
-      (cl-letf (((symbol-function 'romacs-agent-history-draw)
-                 (lambda (session imported) (push (list session imported) drawn))))
-        (kill-buffer (save-window-excursion (romacs-agent-show fork))))
-      (should (equal drawn (list (list fork '(:path "/x.jsonl" :size 10))))))))
-
-(ert-deftest romacs-agent-fork-draws-the-source-s-rows-with-its-state ()
-  (require 'romacs-agent-ui)
-  (let* ((fork (romacs-agent--make :id "f" :turn-start 100.0))
-         (source (romacs-agent--make :id "s" :turn-start 7.0))
-         (own (romacs-agent-tools fork)) (seen nil))
-    (puthash "call" "parent" (romacs-agent-tools source))
-    (cl-letf (((symbol-function 'romacs-agent-ui--draw)
-               (lambda (session event _buffer)
-                 (push (list (romacs-agent-turn-start session) (gethash "call" (romacs-agent-tools session))
-                             (plist-get event :seq))
-                       seen))))
-      (romacs-agent-ui--draw-as fork source '(:type done :seq 5)))
-    (should (equal seen '((7.0 "parent" 5))))
-    (should (eql (romacs-agent-turn-start fork) 100.0))
-    (should (eq (romacs-agent-tools fork) own))))
 
 (ert-deftest romacs-agent-fork-of-an-unspoken-fork ()
   (romacs-agent-fork-tests--with 'claude (:turns 0 :options '(:fork "x"))

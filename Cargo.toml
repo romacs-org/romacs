@@ -3,7 +3,6 @@ members = [
     "crates/romacs-brand",
     "crates/romacs-record",
     "crates/romacs-keeper",
-    "crates/romacs-coordinate-contract",
     "crates/romacs-snapshot",
     "crates/romacs-snapshot-derive",
     "crates/romacs-vm",
@@ -25,15 +24,12 @@ members = [
     "crates/romacs-font-materializer",
     "crates/romacs-gui-oracle",
     "crates/romacs-gui-tests",
-    "crates/romacs-parity-reference",
     "crates/romacs-attach",
     "crates/romacs-imaging",
     "crates/romacs-renderer-wgpu",
     "crates/romacs-scene",
     "crates/romacs-test-fonts",
     "crates/romacs-infra",
-    "crates/romacs-video",
-    "crates/romacs-video-model",
     "crates/romacs-gnu-tests",
 ]
 default-members = [
@@ -79,8 +75,6 @@ romacs-face = { path = "crates/romacs-face" }
 romacs-font = { path = "crates/romacs-font" }
 romacs-font-materializer = { path = "crates/romacs-font-materializer" }
 romacs-test-fonts = { path = "crates/romacs-test-fonts" }
-romacs-video = { path = "crates/romacs-video", default-features = false }
-romacs-video-model = { path = "crates/romacs-video-model" }
 romacs-imaging = { path = "crates/romacs-imaging" }
 romacs-renderer-wgpu = { path = "crates/romacs-renderer-wgpu", default-features = false }
 romacs-scene = { path = "crates/romacs-scene" }
@@ -207,12 +201,6 @@ ttf-parser = "0.25"
 arboard = "3.4"
 smithay-clipboard = "0.7.3"
 
-# GStreamer (video)
-gstreamer = "0.25"
-gstreamer-video = "0.25"
-gstreamer-app = "0.25"
-gstreamer-allocators = "0.25"
-gstreamer-pbutils = "0.25"
 
 smallvec = "1.13"
 static_assertions = "1.1"

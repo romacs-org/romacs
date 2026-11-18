@@ -80,7 +80,12 @@ impl Vm {
         let line = published.and_then(|(snapshot, at)| point_line_snapshot(snapshot, at));
         let place = match line {
             Some(line) if self.has_layout_host() => self.lay_out_alone(line)?.point,
-            _ => self.point_place(window, point_byte)?,
+            // The window's own layout placed point already, as painting
+            // will; else point's line alone is laid out.
+            _ => match self.laid_point(window, point_byte)? {
+                place @ Some(_) => place,
+                None => self.point_place(window, point_byte)?,
+            },
         };
         let Some(place) = place else { return Ok(false) };
         let current_line = self.hscrolls_current_line(window, buffer)?;
