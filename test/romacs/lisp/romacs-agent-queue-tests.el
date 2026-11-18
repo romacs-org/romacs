@@ -301,9 +301,8 @@ message is sent, `romacs-agent-send' by default.")
     (should (string-match-p "has ended" (car said)))))
 
 (ert-deftest romacs-agent-a-relaunch-that-does-not-stop-stays-held ()
-  ;; Its old run never going: nothing reaches the conversation it left,
-  ;; and the session says how to go on.  A stop that cannot start holds
-  ;; nothing.
+  ;; Its old run never going, or its stop never started: nothing reaches
+  ;; the conversation it left, and the session says how to go on.
   (let* ((session (romacs-agent-test-attach
                    (romacs-agent--make :id "a0a0a0a0-0000-4000-8000-000000000000" :harness 'claude :state 'idle)
                    t))
@@ -318,10 +317,11 @@ message is sent, `romacs-agent-send' by default.")
     (should-not resumed)
     (should (romacs-agent--held-p session))
     (should (string-match-p "did not stop" (car said)))
-    (setf (romacs-agent-driver-state session) (list :ready t))
+    (setf (romacs-agent-driver-state session) (list :ready t) said nil)
     (cl-letf (((symbol-function 'romacs-agent--stop-then) (lambda (&rest _) (error "No systemctl"))))
       (should-error (romacs-agent--relaunch session)))
-    (should-not (romacs-agent--held-p session))))
+    (should (romacs-agent--held-p session))
+    (should (string-match-p "did not stop" (car said)))))
 
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):

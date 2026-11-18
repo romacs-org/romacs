@@ -3501,11 +3501,14 @@ given, is called just before the resume."
     (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :relaunching t))
     (condition-case err
         (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))
-      ;; Not stopping: no relaunch holds it.  Its stop's own failure still
-      ;; resumes it, once the old attachment has gone or its wait has.
-      (error (setf (romacs-agent-driver-state session)
-                   (plist-put (romacs-agent-driver-state session) :relaunching nil))
+      ;; Its stop not even started: held still, as for one that does not stop.
+      (error (romacs-agent--not-stopped session)
              (signal (car err) (cdr err))))))
+
+(defun romacs-agent--not-stopped (session)
+  "SESSION's old run did not stop for its relaunch: held still, so nothing
+goes to the conversation it left; a stop and a resume go on."
+  (romacs-agent--raise session (list :type 'error :text "Its harness did not stop for the relaunch: stop it, then resume it")))
 
 (defun romacs-agent--resume-when-gone (session tries &optional before)
   "Resume SESSION once its connection to the stopped supervisor is gone,
@@ -3514,9 +3517,7 @@ looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
          (when before (funcall before))
          (romacs-agent-resume session))
         ((> tries 0) (run-at-time 0.1 nil #'romacs-agent--resume-when-gone session (1- tries) before))
-        ;; Its old run did not stop: still held, so nothing goes to the
-        ;; conversation it left; a stop and a resume go on.
-        (t (romacs-agent--raise session (list :type 'error :text "Its harness did not stop for the relaunch: stop it, then resume it")))))
+        (t (romacs-agent--not-stopped session))))
 
 (defun romacs-agent--restarted (session)
   "Resume SESSION on its selection, once its harness and its unit are gone."
