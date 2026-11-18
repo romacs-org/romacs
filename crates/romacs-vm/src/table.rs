@@ -73,6 +73,9 @@ fn unreached(color: u8, sticky: u8) -> bool {
 #[path = "table_image.rs"]
 mod image_set;
 use image_set::ImageSet;
+#[path = "table_sweep.rs"]
+mod sweep;
+use sweep::Sweep;
 
 /// A table as a mark's threads see it (gc_mark.rs): entries one at a time, and
 /// atomic colours. Good only while the table neither grows nor is otherwise
@@ -151,49 +154,18 @@ impl<T> RawTable<T> {
         let (colors, entries) = unsafe {
             (std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()), std::slice::from_raw_parts_mut(self.entries.add(base), range.len()))
         };
-        let (mut freed, mut last) = (0, 0);
-        let mut at = 0;
         // OLD's bit of each byte, moved down beside its in-use bit, counts as
         // a mark in a minor's sweep; in a full's, an untouched image entry is
         // reached by its index.
         let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
-        while at < colors.len() {
-            let end = (at + 8).min(colors.len());
-            // Eight entries with none dead, by far the commonest case when
-            // the heap is mostly live: make the ones in use old in one store,
-            // or in none when they are so already, as the old are to a minor.
-            if let Ok(bytes) = <[u8; 8]>::try_from(&colors[at..end]) {
-                let word = u64::from_le_bytes(bytes);
-                let in_use = word & LOW_BITS;
-                let reached = word >> 7 | (word >> 4 & old_too) | self.image.permanent_bytes(base + at);
-                if in_use & !reached == 0 {
-                    // Each byte in use becomes OLD | IN_USE; the rest stay.
-                    // An untouched image entry is so already: nothing is
-                    // written where a word holds only those.
-                    let clean = (word & !(in_use * 0xFF)) | (in_use * u64::from(OLD | IN_USE));
-                    if clean != word { colors[at..end].copy_from_slice(&clean.to_le_bytes()); }
-                    if clean != 0 {
-                        last = base + end - clean.leading_zeros() as usize / 8;
-                    }
-                    at = end;
-                    continue;
-                }
-            }
-            for i in at..end {
-                let color = colors[i];
-                if unreached(color, self.sticky) && !self.image.permanent(base + i) {
-                    destroy(base + i, &mut entries[i]);
-                    colors[i] = dead;
-                    freed += 1;
-                    if quarantine { last = base + i + 1; }
-                } else if color != FREE {
-                    if color & IN_USE != 0 && color != OLD | IN_USE { colors[i] = OLD | IN_USE; }
-                    last = base + i + 1;
-                }
-            }
-            at = end;
-        }
-        (freed, last)
+        let mut sweep = Sweep { colors, entries, base, sticky: self.sticky, old_too, dead, quarantine, destroy: &mut destroy, freed: 0, last: 0 };
+        // The range below the image's end asks which of its entries are the
+        // image's; the rest is swept as if no image were restored.
+        let image_end = self.image.len.saturating_sub(base).min(range.len());
+        let mut at = 0;
+        while at < image_end { at = sweep.step::<true>(at, image_end, &self.image); }
+        while at < range.len() { at = sweep.step::<false>(at, range.len(), &self.image); }
+        (sweep.freed, sweep.last)
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
