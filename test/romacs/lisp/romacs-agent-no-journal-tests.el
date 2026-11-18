@@ -15,10 +15,12 @@
 
 (defmacro romacs-agent-no-journal-tests--with (&rest body)
   "BODY with `session', a Claude session of two turns, its journal written,
-in a store of its own, a preview's budget unbounded."
+in a store of its own, a preview's budget unbounded; journals moved in
+the background, as these tests' chats wait for that move."
   (declare (indent 0))
   `(romacs-agent-test-with-store
      (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
+            (romacs-agent-store-background t)
             (romacs-agent-event-functions nil)
             ;; No real time: a preview is drawn whatever the host's load,
             ;; its budget tested by the tests that set it, on a stubbed clock.
@@ -53,6 +55,21 @@ in a store of its own, a preview's budget unbounded."
   (let ((buffer (romacs-agent-ui--make-chat session)))
     (with-current-buffer buffer (romacs-agent-ui--fill buffer))
     buffer))
+
+(ert-deftest romacs-agent-no-journal-read-as-it-is-with-no-background-move ()
+  ;; Nothing moved in the background: its chat draws its last turns from
+  ;; its journal at once, no move waited for or said.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((romacs-agent-store-background nil) (waits nil))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (with-current-buffer buffer
+            (should (string-search "say 1" (buffer-string)))
+            (should (string-search "say 2" (buffer-string)))
+            (should-not (string-search "store" (buffer-string))))
+          (should-not waits)
+          (kill-buffer buffer))))))
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
   ;; Not moved yet: a row says so, the chat waits for the move

@@ -5121,11 +5121,11 @@ is asked for (`romacs-agent-get').")
 
 (defvar romacs-agent-store-background nil
   "Whether the editor moves sessions' journals to SQLite, and fills every
-session's row and turn rows, in the background (worker VMs and batch
-processes beside it).  Off: none of that runs in the editor; a session
-whose records are still a journal is read from it, its store row and its
-turns' rows written as it changes.  Their long transactions held the
-store's lock against every session's supervisor.")
+session's turn rows, in the background (worker VMs and batch processes
+beside it).  Off: a session whose records are still a journal is read
+from it, never moved by the editor, and a session's turn rows are filled
+as its turns end or its chat wants them.  A move's long transactions
+held the store's lock against every session's supervisor.")
 
 (defvar romacs-agent-mark-kinds nil
   "What can wait on a session left unloaded, so a restore loads it: a list
@@ -5157,10 +5157,7 @@ listing of the marks; nil while they are not known whole, before a
 store's fill has reconciled them (`romacs-agent--marks-reconcile'),
 unless ANY: then those marked so far."
   (let ((dir (romacs-agent--marks-dir)))
-    ;; With no background fill to reconcile them, the marks their writers
-    ;; make are all there are.
-    (when (if (or any (not romacs-agent-store-background)) (file-directory-p dir)
-            (file-exists-p (expand-file-name ".complete" dir)))
+    (when (if any (file-directory-p dir) (file-exists-p (expand-file-name ".complete" dir)))
       (let ((table (make-hash-table :test #'equal)))
         (dolist (file (directory-files dir nil "\\`[0-9a-f]"))
           (puthash (file-name-sans-extension file) t table))

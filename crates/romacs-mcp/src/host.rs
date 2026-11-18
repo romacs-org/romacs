@@ -310,17 +310,20 @@ impl Shared {
     fn append_all(&mut self, records: &[(u64, String)], sync: bool) {
         if records.is_empty() { return; }
         {
-            let mut waited = std::time::Duration::ZERO;
+            // Timed from the first try: each waits its busy timeout too.
+            let mut first: Option<std::time::Instant> = None;
             let mut told = false;
             // Kept before it is sent, whatever fails: a busy database, a full
             // disk or an I/O error holds up the harness's output (its pipe
             // fills) until the record is kept, never sends one it could not
             // replay.
             while let Err(error) = self.store.keep(records, sync) {
-                if waited.is_zero() { eprintln!("romacs-agent-host: store: {error}"); }
+                let since = *first.get_or_insert_with(|| {
+                    eprintln!("romacs-agent-host: store: {error}");
+                    std::time::Instant::now()
+                });
                 std::thread::sleep(STORE_RETRY);
-                waited += STORE_RETRY;
-                if waited >= STORE_FAILING && !told {
+                if since.elapsed() >= STORE_FAILING && !told {
                     told = true;
                     self.send(&json!({"storage": "failing"}).to_string());
                 }
