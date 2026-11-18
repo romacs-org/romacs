@@ -912,7 +912,7 @@ impl Vm {
             3 => self.conses.marked(i),
             4 => self.closures.marked(i),
             5 => self.cells.marked(i),
-            7 if v != Value::UNBOUND && self.obarray_symbol_names.contains_key(&(i - 1)) => symbols.contains(i - 1),
+            7 if v != Value::UNBOUND && !symbols.all && self.obarray_symbol_names.contains_key(&(i - 1)) => symbols.contains(i - 1),
             _ => true,
         }
     }
@@ -1835,7 +1835,7 @@ impl Vm {
         // like the rest, their names made since among the roots
         // (`names_added`), their slots by the slots' cards, and what was put
         // on any condition since by the conditions' log.
-        again.extend_from_slice(self.conditions.stored());
+        again.extend(self.conditions.changed_values());
         #[cfg(test)]
         assert!(!std::mem::take(&mut self.gc_stress.faults.minor_panics), "a planted fault");
         let none = vec![false; self.slots.len()];

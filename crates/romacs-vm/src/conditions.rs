@@ -24,22 +24,28 @@ pub(super) struct Entry {
     /// by the condition's name (`builtin_message`), so the entry holds no
     /// reference into the executable.
     builtin: Option<Vec<SymbolId>>,
+    /// Put into since the last collection: listed in `Registry::changed`.
+    changed: bool,
 }
 #[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Registry {
     pub(super) entries: HashMap<SymbolId, Entry>,
-    /// The keys and values put since the last collection (`put`): all a
-    /// minor reads of the registry, whose other values are old.
-    stored: Vec<Value>,
+    /// The conditions put into since the last collection (`put`), each
+    /// once: all a minor reads of the registry, whose other values are old.
+    changed: Vec<SymbolId>,
 }
 impl Registry {
-    /// What was put since the last collection.
-    pub(super) fn stored(&self) -> &[Value] {
-        &self.stored
+    /// Each key and value, as they are now, of the conditions put into
+    /// since the last collection.
+    pub(super) fn changed_values(&self) -> impl Iterator<Item = Value> + '_ {
+        self.changed.iter().filter_map(|id| self.entries.get(id))
+            .flat_map(|entry| entry.properties.iter().flat_map(|&(key, value)| [key, value]))
     }
     /// A collection ended: every value put is old.
     pub(super) fn settle(&mut self) {
-        self.stored.clear();
+        for id in std::mem::take(&mut self.changed) {
+            if let Some(entry) = self.entries.get_mut(&id) { entry.changed = false; }
+        }
     }
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for entry in self.entries.values_mut() {
@@ -50,8 +56,8 @@ impl Registry {
         }
     }
     pub(super) fn put(&mut self, symbol: SymbolId, property: Value, value: Value) {
-        self.stored.extend([property, value]);
         let entry = self.entries.entry(symbol).or_default();
+        if !std::mem::replace(&mut entry.changed, true) { self.changed.push(symbol); }
         entry.ancestry = None;
         if let Some((_, old)) = entry
             .properties
