@@ -1287,13 +1287,21 @@ mod tests {
         let mut held = rusqlite::Connection::open(&file).unwrap();
         let transaction = held.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
         transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
+        // Released once both writers are on their way to it, plus a second:
+        // their first records wait on the lock.
+        let (ready, started) = std::sync::mpsc::channel();
         let writers: Vec<_> = stores.into_iter().map(|mut store| {
+            let ready = ready.clone();
             std::thread::spawn(move || {
+                ready.send(()).unwrap();
                 (1..=50u64).map(|seq| store.keep(&[(seq, format!("{{\"seq\":{seq},\"note\":{{}}}}"))], false))
                     .filter(|kept| kept.is_err()).count()
             })
         }).collect();
+        for _ in 0..2 { started.recv_timeout(std::time::Duration::from_secs(10)).unwrap(); }
         std::thread::sleep(std::time::Duration::from_secs(1));
+        // Still held: no writer's record went in meanwhile.
+        assert_eq!(transaction.query_row("select count(*) from events where session in ('a', 'b')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
         transaction.commit().unwrap();
         let refused: usize = writers.into_iter().map(|writer| writer.join().unwrap()).sum();
         assert_eq!(refused, 0);
