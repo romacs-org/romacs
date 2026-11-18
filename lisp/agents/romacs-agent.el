@@ -3556,7 +3556,7 @@ relaunch until the run it ends has gone."
 
 (cl-defstruct (romacs-agent-item (:type list) (:copier nil)
                                  (:constructor romacs-agent-item
-                                               (text &key images messages delivered valid (kind 'now) own token)))
+                                               (text &key images messages delivered valid (kind 'now) own token id position kept)))
   "A message waiting for its harness.  KIND says when it may go: `now', a
 steer into the turn under way as it was sent (TURN, that turn's number,
 set at admission) while that turn runs and its harness can steer it,
@@ -4192,6 +4192,7 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 
 (declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
+(declare-function romacs-agent-store--file "romacs-agent-store" ())
 
 (defun romacs-agent--keepable-p (item)
   "Whether ITEM is all data, so kept across a restart: not a hold's own
@@ -4199,9 +4200,11 @@ prompt either, written at once or not at all."
   (not (or (romacs-agent-item-delivered item) (romacs-agent-item-valid item) (romacs-agent-item-token item))))
 
 (defun romacs-agent--keep-item (session item)
-  "Keep ITEM, waiting in SESSION's queue, across a restart: its session
-marked first, so a start loads it (`romacs-agent-mark')."
-  (when (and (romacs-agent--keepable-p item) (not (romacs-agent-item-kept item)))
+  "Keep ITEM, waiting in SESSION's queue, across a restart, in the agents'
+store when there is one (the editor's writer makes it as it starts): its
+session marked first, so a start loads it (`romacs-agent-mark')."
+  (when (and (romacs-agent--keepable-p item) (not (romacs-agent-item-kept item))
+             (file-exists-p (romacs-agent-store--file)))
     (setf (romacs-agent-item-id item) (or (romacs-agent-item-id item) (romacs-agent--uuid))
           (romacs-agent-item-kept item) t)
     (romacs-agent-mark (romacs-agent-id session) 'queued t)

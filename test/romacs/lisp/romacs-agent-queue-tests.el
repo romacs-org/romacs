@@ -8,6 +8,7 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
 (require 'romacs-agent-test-attached)
+(require 'romacs-agent-test-stored)
 
 ;; These tests start no supervisor or harness: the build's own (beside the
 ;; binary) are not needed to make a session.
@@ -322,6 +323,41 @@ message is sent, `romacs-agent-send' by default.")
       (should-error (romacs-agent--relaunch session)))
     (should (romacs-agent--held-p session))
     (should (string-match-p "did not stop" (car said)))))
+
+(ert-deftest romacs-agent-queued-messages-outlive-a-restart ()
+  ;; romacs#287: what waits in a session's queue, all data, is kept in the
+  ;; store, its session marked; a session made again (a restart) takes it
+  ;; back in order, a steer as a turn of its own; written, dropped or
+  ;; cleared, it is let go, the mark with its last.  One with a function
+  ;; (a tool's delivery) is not kept.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "b0b0b0b0-0000-4000-8000-000000000000")
+           (mark (expand-file-name (format "%s.queued" id) (romacs-agent--marks-dir)))
+           (session (romacs-agent-test-attach
+                     (romacs-agent--make :id id :harness 'claude :state 'running :title "kept")
+                     t))
+           (sent nil))
+      (romacs-agent-send-later session "a")
+      (romacs-agent-send-later session "b")
+      (romacs-agent-send-later session "first" t)
+      (romacs-agent-send session "steer")
+      (romacs-agent-send-later session "checked" nil nil #'always)
+      (should (file-exists-p mark))
+      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("first" "a" "b")))
+      ;; Its steer went at once: never kept past its write.
+      (let ((again (romacs-agent--make :id id :harness 'claude :state 'idle :title "kept")))
+        (romacs-agent-store--requeue again nil)
+        (should (equal (mapcar #'car (romacs-agent-queue again)) '("first" "a" "b")))
+        (should (cl-every (lambda (item) (eq (romacs-agent-item-kind item) 'next)) (romacs-agent-queue again)))
+        ;; Written: let go.
+        (romacs-agent-test-attach again t)
+        (romacs-agent-queue-tests--writing sent (romacs-agent--dispatch again))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("a" "b")))
+        (romacs-agent--clear-queue again))
+      (should-not (romacs-agent-store-queued id))
+      (should-not (file-exists-p mark)))))
 
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):
