@@ -432,3 +432,28 @@ fn call_process_s_stop_without_a_pidfd_hears_the_second_press() {
         drop(child);
     }
 }
+
+/// call-process's reap after its quit's SIGKILL hands a child still alive at
+/// the deadline to the reaper of deleted children, with no status made up
+/// for it (`ChildEnd::HandedOff` carries none). The reaper then owns it
+/// alone, and reports its death by no longer owning it once it is reaped.
+#[test]
+fn call_process_s_reap_hands_a_live_child_on_at_its_deadline() {
+    use std::os::unix::process::CommandExt;
+    let (mut vm, _signal) = busy_vm();
+    let child = std::process::Command::new("sleep").arg("30").process_group(0).spawn().unwrap();
+    let pid = i32::try_from(child.id()).unwrap();
+    let end = Leaf::new(&mut vm).call_process_reap(pid, &[], std::time::Duration::from_millis(50));
+    assert_eq!(end, super::leaf::ChildEnd::HandedOff, "a live child at the deadline is handed on");
+    assert!(vm.subprocesses.owns(pid), "the reaper owns the handed-off child");
+    assert!(std::path::Path::new(&format!("/proc/{pid}")).exists(), "the child still runs");
+    let _ = crate::host::kill(pid, libc::SIGKILL);
+    let started = std::time::Instant::now();
+    while vm.subprocesses.owns(pid) {
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "the reaper never took the child");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        vm.subprocesses.reap_deleted();
+    }
+    assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists(), "the child was reaped, its death noticed");
+    drop(child);
+}

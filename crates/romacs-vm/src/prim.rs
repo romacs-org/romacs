@@ -2003,6 +2003,8 @@ mod leaf {
     mod process;
     mod gnutls;
     pub(crate) use process::{CallOutput, Target, strerror};
+    #[cfg(test)]
+    pub(crate) use process::ChildEnd;
     mod random;
     mod labeled_restrictions;
     mod hash_walk;

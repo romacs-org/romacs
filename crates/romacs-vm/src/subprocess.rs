@@ -157,6 +157,11 @@ impl Table {
     pub(crate) fn remove(&mut self, serial: u64) -> Option<Channel> {
         self.channels.remove(&serial)
     }
+    /// Whether PID, a child handed to the reaper of deleted children, is still
+    /// owned there: false once it is reaped, the positive notice of its death.
+    pub(crate) fn owns(&self, pid: i32) -> bool {
+        self.deleted.iter().any(|&(owned, _)| owned == pid)
+    }
     /// Reap killed children recorded by `delete-process' and `call-process'.
     pub(crate) fn reap_deleted(&mut self) {
         self.deleted.retain(|(pid, file)| {

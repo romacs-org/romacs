@@ -19,6 +19,16 @@ fn fixnum(n: i64) -> Value {
     Value::integer(n).expect("process integer is a fixnum")
 }
 
+/// What became of call-process's child when its quit's stop ended: reaped
+/// (dead, its status taken), or handed, still alive, to the reaper of deleted
+/// children, which reports its death by no longer owning it
+/// (`subprocess::Table::owns`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildEnd {
+    Reaped,
+    HandedOff,
+}
+
 impl Leaf<'_> {
     fn process_if(&self, v: Value) -> Option<&Process> {
         match self.vm.object_if(v) {
@@ -1212,7 +1222,10 @@ impl Leaf<'_> {
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
             if revents.first().is_none_or(|&r| r == 0) {
                 if let Err(quit) = self.native_poll() {
-                    self.call_process_stop(pid, pidfd.as_ref());
+                    // A4's abort offer reads this: HandedOff leaves a live
+                    // child owned by the reaper until `Table::owns` says not.
+                    let end = self.call_process_stop(pid, pidfd.as_ref());
+                    debug_assert!(end == ChildEnd::Reaped || self.vm.subprocesses.owns(pid), "a handed-off child has one owner");
                     return Err(quit);
                 }
                 held = self.vm.quit.pressed();
@@ -1236,8 +1249,9 @@ impl Leaf<'_> {
     /// deleted children (`reap_children`, the host's reaper once the VM
     /// goes), with no status made up for it: the quit returns either way.
     /// Without a pidfd (PIDFD None) the child's end is asked every
-    /// `CHILD_TICK`, so the wait still hears the stop.
-    pub(crate) fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) {
+    /// `CHILD_TICK`, so the wait still hears the stop. What became of the
+    /// child is the answer (`ChildEnd`).
+    pub(crate) fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) -> ChildEnd {
         if crate::host::kill(-pid, libc::SIGINT).is_err() { let _ = crate::host::kill(pid, libc::SIGINT); }
         let fds: Vec<_> = pidfd.map(|fd| (fd.as_raw_fd(), libc::POLLIN)).into_iter().collect();
         let tick = pidfd.is_none().then_some(Self::CHILD_TICK);
@@ -1251,15 +1265,27 @@ impl Leaf<'_> {
                 Err(_) => break,
             }
         }
-        let end = crate::host::monotonic() + Self::KILL_GRACE;
+        self.call_process_reap(pid, &fds, Self::KILL_GRACE)
+    }
+
+    /// Child PID reaped within GRACE, FDS (its pidfd, if any) waited on and
+    /// its end asked every `CHILD_TICK`; or, still alive at the deadline,
+    /// handed to the reaper of deleted children, its one owner from then
+    /// on, with no status made up for it.
+    pub(crate) fn call_process_reap(&mut self, pid: i32, fds: &[(std::os::fd::RawFd, i16)], grace: std::time::Duration) -> ChildEnd {
+        let end = crate::host::monotonic() + grace;
         while !sp::exited(pid) {
             let left = end.saturating_duration_since(crate::host::monotonic());
             if left.is_zero() { break; }
-            let _ = sp::poll(&fds, Some(left.min(Self::CHILD_TICK)));
+            let _ = sp::poll(fds, Some(left.min(Self::CHILD_TICK)));
         }
-        if !sp::exited(pid) || sp::wait_blocking(pid).is_err() {
-            self.vm.subprocesses.deleted.push((pid, None));
+        if sp::exited(pid) {
+            // Dead, or no child of ours any more: nothing left to own.
+            let _ = sp::wait_blocking(pid);
+            return ChildEnd::Reaped;
         }
+        self.vm.subprocesses.deleted.push((pid, None));
+        ChildEnd::HandedOff
     }
 
     /// How long a quit waits for a killed child to end before it leaves
