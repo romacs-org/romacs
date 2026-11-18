@@ -33,7 +33,7 @@
   "The Romacs autoloads that declare nothing yet, read before any library loads.")
 
 (defconst romacs-idioms-test--libraries
-  '(romacs-agent-ui romacs-agent-board romacs-agent-history romacs-attach romacs-video romacs-model
+  '(romacs-agent-ui romacs-agent-board romacs-agent-history romacs-attach romacs-model
     romacs-shader-playground romacs-shaders romacs-surface romacs-mcp)
   "The libraries with keymaps a session does not load by itself.")
 
