@@ -116,13 +116,7 @@ impl Vm {
         self.initialize_environment_slot("process-environment");
         self.reseed_environment_variables();
         // GNU init_buffer: every buffer starts in the startup directory.
-        let directory = {
-            let current = self.slots[self.buffer_slot].value;
-            self.slots[self.buffer_slot].value = Value::NIL;
-            let directory = self.inherited_directory();
-            self.slots[self.buffer_slot].value = current;
-            directory
-        };
+        let directory = self.startup_directory_value();
         for buffer in 0..self.objects.len() {
             if matches!(&self.objects[buffer], crate::data::Object::Buffer(b) if b.state.live) {
                 self.set_directory_of(buffer, directory);
