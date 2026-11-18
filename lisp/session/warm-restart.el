@@ -430,10 +430,11 @@ onto BLOBS, a cell (COUNT . BUFFERS), and name its index."
 is not portable."
   (with-current-buffer (plist-get entry :buffer)
     (pcase (plist-get entry :strategy)
-      ((and (or 'file 'text) strategy) (warm-restart--text-record strategy blobs))
-      ('indirect (append (warm-restart--common)
-                         (list :strategy 'indirect
-                               :base (with-current-buffer (buffer-base-buffer) (warm-restart--buffer-id)))))
+      ((and (or 'file 'text) strategy) (warm-restart--as-transcript (warm-restart--text-record strategy blobs)))
+      ('indirect (warm-restart--as-transcript
+                  (append (warm-restart--common)
+                          (list :strategy 'indirect
+                                :base (with-current-buffer (buffer-base-buffer) (warm-restart--buffer-id))))))
       ('handler
        (let ((misc (and (functionp desktop-save-buffer)
                         (let ((desktop-dirname (warm-restart--directory))) (funcall desktop-save-buffer desktop-dirname)))))
@@ -533,17 +534,20 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
       (signal 'warm-restart-blocked
               (mapcar (lambda (e) (format "%s: %s" (plist-get e :name) (plist-get e :reason))) blocked)))
     (let* ((carried (cl-remove-if (lambda (e) (memq (plist-get e :strategy) '(blocked dropped))) (plist-get plan :buffers)))
-           (records (mapcar (lambda (e)
-                              (condition-case err (warm-restart--record e blobs)
-                                (error (signal 'warm-restart-blocked
-                                               (list (format "%s: cannot be saved: %s" (plist-get e :name)
-                                                             (error-message-string err)))))))
-                            carried))
+           (named (warm-restart--name-transcripts
+                   (mapcar (lambda (e)
+                             (condition-case err (warm-restart--record e blobs)
+                               (error (signal 'warm-restart-blocked
+                                              (list (format "%s: cannot be saved: %s" (plist-get e :name)
+                                                            (error-message-string err)))))))
+                           carried)))
+           (records (car named))
            (globals (warm-restart--globals))
            (form (list :schema warm-restart--schema :pid (emacs-pid) :created (format-time-string "%FT%T%z")
+                       :transcripts t
                        :emacs-version emacs-version
                        :buffers (cl-remove-if (lambda (r) (plist-member r :lost)) records)
-                       :frames (warm-restart--frames)
+                       :frames (warm-restart--renamed-in (warm-restart--frames) (cdr named))
                        :lost (append (cl-loop for e in (plist-get plan :buffers)
                                               when (eq (plist-get e :strategy) 'dropped)
                                               collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
@@ -569,11 +573,19 @@ where it was defined, if need be."
   (when (and mode (not (fboundp mode))) (desktop-load-file mode)))
 
 (defun warm-restart--set-mode (record)
-  "Put the current buffer in RECORD's major mode when it is defined."
+  "Put the current buffer in RECORD's major mode when it is defined.  A
+shell's mode, known once its library is loaded, gives `fundamental-mode'
+and marks the buffer a transcript (`warm-restart--transcript-of'): an
+image written before shells were carried as transcripts names it."
   (let ((mode (plist-get record :mode)))
-    (unless (eq major-mode mode)
-      (warm-restart--load-mode mode (plist-get record :library))
-      (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode)))))
+    (warm-restart--load-mode mode (plist-get record :library))
+    (cond ((warm-restart--shell-mode-p mode)
+           (fundamental-mode)
+           (setq warm-restart--transcript-of mode)
+           (unless (warm-restart--transcript-name-p (buffer-name))
+             (rename-buffer (warm-restart--transcript-name (buffer-name) #'get-buffer))))
+          ((not (eq major-mode mode))
+           (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode))))))
 
 (defun warm-restart--put-text (text unibyte)
   "Replace the current buffer's text with TEXT, recording no change."
@@ -592,6 +604,13 @@ where it was defined, if need be."
     (set-buffer-modified-p modified)))
 
 (defun warm-restart--apply-modes (record)
+  "Enable RECORD's minor modes the mode did not, and set its locals.  A
+restored transcript takes none of its shell's, only a header naming it."
+  (if warm-restart--transcript-of
+      (setq-local header-line-format (warm-restart--transcript-header warm-restart--transcript-of))
+    (warm-restart--apply-minor-modes-and-locals record)))
+
+(defun warm-restart--apply-minor-modes-and-locals (record)
   "Enable RECORD's minor modes the mode did not, and set its locals."
   (dolist (mode (plist-get record :minor-modes))
     (unless (memq mode local-minor-modes)
@@ -635,7 +654,7 @@ over a file changed on disk still asks."
   (let* ((enable-local-variables :safe)
          (large-file-warning-threshold nil)
          (text (warm-restart--carried-text record blobs))
-         (buffer (if (not warm-restart--defer)
+         (buffer (if (and (not warm-restart--defer) (not (plist-get record :transcript-of)))
                      (find-file-noselect (plist-get record :file) t (plist-get record :unibyte))
                    ;; Unseen: visited in no mode of its own, its hooks waiting.
                    (let ((auto-mode-alist nil) (magic-mode-alist nil) (magic-fallback-mode-alist nil)
@@ -652,7 +671,11 @@ over a file changed on disk still asks."
         ;; Shown before the restore ends: its first edit locks its file.
         (when (plist-get record :modified) (setq-local warm-restart-lock-pending t)))
       (warm-restart--put-properties (plist-get record :properties))
-      (if warm-restart--defer (warm-restart--defer-modes record t) (warm-restart--apply-modes record))
+      ;; A transcript's file wakes in its record's mode alone: no file mode,
+      ;; no file hooks, which could make it a shell again.
+      (if warm-restart--defer
+          (warm-restart--defer-modes record (not (plist-get record :transcript-of)))
+        (warm-restart--apply-modes record))
       (warm-restart--apply-common record)
       (when (and (warm-restart--put-undo record) (plist-get record :undo))
         (push (list :buffer (plist-get record :name) :reason "file changed on disk; reopened, undo dropped")
@@ -767,12 +790,154 @@ it, and the problem names both."
             warm-restart--problems)))
   existing)
 
+(defconst warm-restart--shell-modes
+  '(eshell-mode comint-mode term-mode inferior-emacs-lisp-mode)
+  "Modes of a shell, and the modes they derive.  A shell's buffer revived
+in its mode would read its whole transcript as input at the next RET.")
+
+(defvar-local warm-restart--transcript-of nil
+  "The shell mode this buffer's restored transcript came from, or nil.")
+
+(defun warm-restart--shell-mode-p (mode)
+  "Whether MODE, defined, is a shell's: one of `warm-restart--shell-modes'
+or derived from one."
+  (and mode (symbolp mode) (fboundp mode)
+       (apply #'provided-mode-derived-p mode warm-restart--shell-modes)
+       t))
+
+(defun warm-restart--transcript-header (mode)
+  "The header line of a restored transcript of a MODE shell."
+  (format "Transcript of %s; its shell ended with the restart" mode))
+
+(defun warm-restart--transcript-name (name taken)
+  "The name of NAME's transcript, \"NAME (transcript)\", one TAKEN, a
+function of a name, says is free.  Not the shell's own name: a shell
+opened later makes a buffer of its own, never one over the transcript."
+  (let* ((base (format "%s (transcript)" name)) (candidate base) (n 1))
+    (while (funcall taken candidate)
+      (setq candidate (format "%s<%d>" base (cl-incf n))))
+    candidate))
+
+(defun warm-restart--transcript-name-p (name)
+  "Whether NAME is a transcript's (`warm-restart--transcript-name')."
+  (string-match-p " (transcript)\\(<[0-9]+>\\)?\\'" name))
+
+(defun warm-restart--prepare (form)
+  "FORM's records, ready to restore.  An image written before shells were
+carried as transcripts (no `:transcripts') may name a shell's mode for a
+file, text or indirect buffer: each such record carries `:legacy-names',
+a table of the image's names shared by them all, for
+`warm-restart--legacy-destination' to choose its buffer's name from at
+its own turn, before its buffer is made."
+  (let ((records (plist-get form :buffers)))
+    (if (plist-get form :transcripts)
+        records
+      (let ((names (make-hash-table :test #'equal)))
+        (dolist (record records) (puthash (plist-get record :name) t names))
+        (mapcar (lambda (record)
+                  (if (memq (plist-get record :strategy) '(file text indirect))
+                      (plist-put (copy-sequence record) :legacy-names names)
+                    record))
+                records)))))
+
+(defun warm-restart--legacy-destination (record)
+  "RECORD, or, for a record of an older image (`:legacy-names') whose mode
+is a shell's, the record under its transcript's name, which no record of
+the image nor a live buffer has: its buffer is made under that name, so
+it never lands in a live shell nor waits unseen under the shell's name.
+A mode not loaded yet is loaded here with each parent not loaded yet, at
+the record's own turn and within its passive restore, to know it; one
+that cannot be resolved so is taken for a shell's.  Either way the record
+is its transcript's (`warm-restart--inert-record'): nothing retries the
+mode."
+  (let ((names (plist-get record :legacy-names)) (mode (plist-get record :mode)))
+    (if (not (and names mode (symbolp mode)))
+        record
+      (let ((inert (or (memq mode warm-restart--shell-modes)
+                       (not (condition-case nil (warm-restart--mode-resolved-p mode (plist-get record :library))
+                              (error nil)))
+                       (warm-restart--shell-mode-p mode))))
+        (if (not inert)
+            record
+          (let ((name (warm-restart--transcript-name (plist-get record :name)
+                                                     (lambda (n) (or (gethash n names) (get-buffer n))))))
+            (puthash name t names)
+            (plist-put (warm-restart--inert-record record mode) :name name)))))))
+
+(defun warm-restart--renamed-in (tree renames)
+  "TREE, a window state or a list of them, with each buffer name in
+RENAMES, an alist (OLD . NEW), renamed: a leaf's buffer and the entries
+of its previous and next buffers."
+  (cond ((and (consp tree) (eq (car tree) 'buffer) (consp (cdr tree)) (assoc (cadr tree) renames))
+         (cons 'buffer (cons (cdr (assoc (cadr tree) renames)) (warm-restart--renamed-in (cddr tree) renames))))
+        ((and (consp tree) (memq (car tree) '(prev-buffers next-buffers)))
+         (cons (car tree) (mapcar (lambda (entry)
+                                    (cond ((and (stringp entry) (assoc entry renames)) (cdr (assoc entry renames)))
+                                          ((and (consp entry) (assoc (car entry) renames))
+                                           (cons (cdr (assoc (car entry) renames)) (cdr entry)))
+                                          (t entry)))
+                                  (cdr tree))))
+        ((consp tree) (cons (warm-restart--renamed-in (car tree) renames) (warm-restart--renamed-in (cdr tree) renames)))
+        (t tree)))
+
+(defun warm-restart--name-transcripts (records)
+  "RECORDS with each shell transcript's (`warm-restart--as-transcript')
+named apart from its shell, and the renames, as (RECORDS . RENAMES)."
+  (let ((taken (make-hash-table :test #'equal)) renames)
+    (dolist (record records) (puthash (plist-get record :name) t taken))
+    (cons (mapcar (lambda (record)
+                    (if (not (plist-get record :transcript-of))
+                        record
+                      (let ((name (warm-restart--transcript-name (plist-get record :name) (lambda (n) (gethash n taken)))))
+                        (puthash name t taken)
+                        (push (cons (plist-get record :name) name) renames)
+                        (plist-put (copy-sequence record) :name name))))
+                  records)
+          renames)))
+
+(defun warm-restart--as-transcript (record)
+  "RECORD, a file, text or indirect buffer's, as its transcript's when its mode
+is a shell's: `fundamental-mode', no minor modes, its locals only a
+header naming the shell.  So any reader, an older one restoring a
+rollback included, brings it back inert, never as a shell over its
+transcript, whose input boundary it would no longer know."
+  (let ((mode (plist-get record :mode)))
+    (if (warm-restart--shell-mode-p mode) (warm-restart--inert-record record mode) record)))
+
+(defun warm-restart--inert-record (record mode)
+  "RECORD as the record of a transcript of a MODE buffer: `fundamental-mode',
+no library, minor modes or uniquify, its locals only the header naming
+MODE, `:transcript-of' MODE."
+  (let ((record (copy-sequence record)))
+    (dolist (pair `((:mode . fundamental-mode) (:library . nil) (:minor-modes . nil) (:transcript-of . ,mode) (:uniquify . nil)
+                    (:locals . ((header-line-format . ,(warm-restart--transcript-header mode))))))
+      (setq record (plist-put record (car pair) (cdr pair))))
+    record))
+
+(defun warm-restart--mode-resolved-p (mode library)
+  "Load MODE, from LIBRARY if need be, and each of its parents not loaded
+yet, through the libraries their autoloads name, an alias's target
+included; non-nil when MODE and every parent are then defined.  May
+signal, as a load may."
+  (warm-restart--load-mode mode library)
+  (let ((each mode) (resolved t) (seen nil))
+    (while (and resolved each (not (memq each seen)))
+      (push each seen)
+      (when (and (fboundp each) (autoloadp (symbol-function each)))
+        (autoload-do-load (symbol-function each) each))
+      (let ((definition (and (fboundp each) (symbol-function each))))
+        (cond ((and definition (symbolp definition)) (setq each definition)) ; an alias: its target
+              ((and definition (not (autoloadp definition))) (setq each (get each 'derived-mode-parent)))
+              (t (setq resolved nil)))))
+    resolved))
+
 (defun warm-restart--restore-buffer (record blobs buffers)
   "Restore RECORD; record its buffer under its id in BUFFERS.
 When it fails, a buffer the attempt made is replaced by the rescue.  A
 buffer it would reuse that was edited here first is left as it is
 \(`warm-restart--beside')."
-  (let* ((existing (warm-restart--made-buffer record))
+  (let* ((record (warm-restart--legacy-destination record))
+         (existing (warm-restart--made-buffer record))
          ;; One made here meanwhile keeps the modes it has, and a modified
          ;; file, which a save may write, has its own at once: no deferral.
          (warm-restart--defer (and warm-restart--defer (not (buffer-live-p existing))
@@ -904,9 +1069,10 @@ buffer."
                            (`(buffer ,name . ,props)
                             `(buffer ,(or (funcall rename name) name) ,@(funcall own-point name props)))
                            (`(,(and (or 'prev-buffers 'next-buffers) key) . ,entries)
-                            (cons key (cl-loop for (name . rest) in entries
-                                               for live = (funcall rename name)
-                                               when live collect (cons live rest))))
+                            ;; An entry is (NAME START POINT), or a bare name.
+                            (cons key (cl-loop for entry in entries
+                                               for live = (funcall rename (if (consp entry) (car entry) entry))
+                                               when live collect (if (consp entry) (cons live (cdr entry)) live))))
                            (_ item)))
                        leaf))
          (buffer (assq 'buffer leaf)))
@@ -1214,7 +1380,7 @@ globals; its registers wait for every buffer.  The problems."
   "Recreate FORM's buffers with BLOBS, and its globals.
 Return the restore's state: FORM, the records, the buffers by id, and
 the problems so far."
-  (let ((records (plist-get form :buffers)) (buffers (make-hash-table :test #'equal)) (problems nil))
+  (let ((records (warm-restart--prepare form)) (buffers (make-hash-table :test #'equal)) (problems nil))
     (dolist (record (warm-restart--ordered records))
       (setq problems (nconc (warm-restart--restore-one record blobs buffers) problems)))
     (warm-restart--applied form records buffers problems)))
@@ -1229,7 +1395,7 @@ is the `restore' stage of `romacs-startup-progress'."
   (let ((start (float-time)))
     (condition-case err
         (pcase-let* ((`(,form . ,blobs) (progn (warm-restart--claim-pending file) (warm-restart--read file)))
-                     (records (plist-get form :buffers)))
+                     (records (warm-restart--prepare form)))
           (romacs-startup-progress 'restore (format "Restoring buffers 0/%d" (length records))
                                    (list :status 'running :done 0 :of (length records) :seconds 0))
           (pcase-let ((`(,shown . ,unseen) (warm-restart--split form records)))
