@@ -1507,9 +1507,13 @@ one request id: the journal's is the one written."
     ;; Written: the next message carries no brief (a failed write keeps it).
     (when brief (setf (romacs-agent-brief session) nil))
     ;; A turn under way from the write: never idle with a message in hand
-    ;; while its record comes back, which says the same.
+    ;; while its record comes back, which says the same.  Its turn answers
+    ;; what the message does, so an exit before its record comes ends that
+    ;; turn, not the one before.
     (when (eq (romacs-agent-state session) 'idle)
-      (setf (romacs-agent-state session) 'running)
+      (setf (romacs-agent-state session) 'running
+            (romacs-agent-answering session) (plist-get (car messages) :id)
+            (romacs-agent-own-turn session) own)
       (romacs-agent--changed session))
     (run-hook-with-args 'romacs-agent-input-functions session id)))
 
@@ -1645,7 +1649,9 @@ on whatever becomes of this server."
     ;; A turn starting makes its last prediction moot.
     ('input (setf (romacs-agent-driver-state session)
                   (plist-put (plist-put (romacs-agent-driver-state session) :suggestion nil) :compact-turn
-                             (or (and (eq (romacs-agent-state session) 'running)
+                             ;; A steer: a turn its records began, not ended
+                                 ;; (running from a prompt's write is no such turn).
+                             (or (and (> (or (romacs-agent-input-seq session) 0) (romacs-agent-done-seq session))
                                       (plist-get (romacs-agent-driver-state session) :compact-turn))
                                  (let ((case-fold-search t))
                                    (and (string-match-p "\\`[ \t\n]*/compact\\(?:[ \t\n]\\|\\'\\)"

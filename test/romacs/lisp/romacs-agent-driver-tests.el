@@ -166,5 +166,27 @@ line's `env' sets only its own configuration variable."
          (should written)
          (should (eq (romacs-agent-state session) 'running)))))))
 
+(ert-deftest romacs-agent-a-message-sent-begins-its-own-turn ()
+  ;; Running from its write, a message begins a turn of its own: its
+  ;; record, come back, is no steer into the turn before (a compaction's
+  ;; mark is not carried over), and the turn answers this message, so an
+  ;; exit before its record comes ends this turn, not the one before.
+  (romacs-agent-driver-test--registry
+   (load romacs-agent-driver-test--fakerpc nil t)
+   (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (written nil))
+     (let ((session (romacs-agent--make :id "rpc-own" :harness 'fakerpc :cwd "/tmp" :state 'idle
+                                        :input-seq 3 :done-seq 4 :own-turn "renew-note")))
+       (puthash "rpc-own" session romacs-agent--sessions)
+       (setf (romacs-agent-driver-state session) (list :ready t :compact-turn t))
+       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
+                 ((symbol-function 'romacs-agent--fold-now) #'ignore)
+                 ((symbol-function 'romacs-agent--changed) #'ignore)
+                 ((symbol-function 'process-live-p) (lambda (_) t)))
+         (romacs-agent-send session "hello")
+         (should (eq (romacs-agent-state session) 'running))
+         (should-not (romacs-agent-own-turn session))
+         (romacs-agent-driver-test--feed session 5 "in" (car written))
+         (should-not (plist-get (romacs-agent-driver-state session) :compact-turn)))))))
+
 (provide 'romacs-agent-driver-tests)
 ;;; romacs-agent-driver-tests.el ends here
