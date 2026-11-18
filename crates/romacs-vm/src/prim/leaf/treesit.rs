@@ -135,7 +135,7 @@ impl Leaf<'_> {
         }
     }
     fn ts_buffer_text_mut(&mut self, buffer: Value) -> Option<&mut crate::text::Text> {
-        let index = buffer.index(0).ok()? - 1;
+        let index = buffer.object_index_if()?;
         match self.vm.objects.entry_mut(index) {
             data::Object::Buffer(b) => Some(b),
             _ => None,

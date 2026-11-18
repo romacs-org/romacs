@@ -387,6 +387,20 @@ impl Value {
         self.index_if(tag)
             .ok_or_else(|| format!("wrong value type (expected tag {tag})"))
     }
+    /// The object table entry this object reference names: its index less
+    /// one. Nil shares the tag with index 0 and names no object; taking its
+    /// entry is the caller's bug, which a debug build stops at and a release
+    /// build signals. Neither wraps to a wrong entry.
+    fn object_index(self) -> Result<usize> {
+        let index = self.index(0)?;
+        debug_assert!(index != 0, "object_index: nil names no object table entry");
+        index.checked_sub(1).ok_or_else(|| "nil names no object".into())
+    }
+    /// As `object_index`, None for nil and every other non-object, where
+    /// the caller means "no object" by them.
+    fn object_index_if(self) -> Option<usize> {
+        self.index_if(0)?.checked_sub(1)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4230,3 +4244,23 @@ mod capture_tests {
 mod orderless;
 mod fzf;
 pub use fzf::advance_completion_generation;
+
+#[cfg(test)]
+mod object_index_tests {
+    use super::*;
+    /// An object reference's entry is its index less one. Nil names none:
+    /// a debug build stops at the caller, a release build signals, and
+    /// neither wraps to an entry.
+    #[test]
+    fn nil_names_no_object_entry() {
+        assert_eq!(Value::reference(5, 0).object_index(), Ok(4));
+        assert_eq!(Value::reference(5, 0).object_index_if(), Some(4));
+        assert_eq!(Value::NIL.object_index_if(), None);
+        let taken = std::panic::catch_unwind(|| Value::NIL.object_index());
+        if cfg!(debug_assertions) {
+            assert!(taken.is_err(), "a debug build stops at the caller's bug");
+        } else {
+            assert!(taken.unwrap().is_err(), "a release build signals");
+        }
+    }
+}
