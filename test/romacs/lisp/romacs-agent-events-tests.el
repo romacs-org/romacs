@@ -398,19 +398,26 @@ moment more under load."
 
 (ert-deftest romacs-agent-events-no-background-move ()
   ;; Off (the default), a start moves no journal in the background; what
-  ;; an earlier start's workers staged is still made the sessions' own.
-  ;; On, every journal is queued to move.
+  ;; an earlier start's workers staged is still made the sessions' own,
+  ;; and the moved ones' journals backed up.  On, every journal is queued.
+  (skip-unless (fboundp 'isolate-spawn))
   (dolist (background '(nil t))
-    (let ((romacs-agent-store-background background) (romacs-agent-events--migrate-queue nil)
-          (flipped nil) (started nil))
-      (cl-letf (((symbol-function 'romacs-agent-events--db) #'ignore)
-                ((symbol-function 'sqlite-select) (lambda (&rest _) '(("staged-one"))))
-                ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+    (let ((romacs-agent-store-background background) (romacs-agent-events-store t)
+          (romacs-agent-events--migrate-queue nil)
+          (idle nil) (backed nil) (flipped nil) (started nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (_secs _repeat function) (push function idle)))
+                ((symbol-function 'isolate-main-p) (lambda () t))
+                ((symbol-function 'romacs-agent-events--db) (lambda () t))
+                ((symbol-function 'sqlite-select) (lambda (&rest _) '(("one"))))
+                ((symbol-function 'romacs-agent-events--back-up-moved) (lambda (ids) (setq backed ids)))
                 ((symbol-function 'romacs-agent-events--flip-soon) (lambda (ids) (setq flipped ids)))
                 ((symbol-function 'romacs-agent-events--journaled) (lambda () '("/journal")))
                 ((symbol-function 'romacs-agent-events--migrate-next) (lambda () (setq started t))))
-        (romacs-agent-events--migrate-start))
-      (should (equal flipped '("staged-one")))
+        (let ((noninteractive nil)) (romacs-agent-events-migrate-soon))
+        (should (= (length idle) 1))
+        (funcall (car idle)))
+      (should (equal backed '("one")))
+      (should (equal flipped '("one")))
       (should (eq started background))
       (should (equal romacs-agent-events--migrate-queue (and background '("/journal")))))))
 

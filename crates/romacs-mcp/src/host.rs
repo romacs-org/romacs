@@ -1282,30 +1282,20 @@ mod tests {
         let file = dir.join("store.sqlite");
         let sessions: Vec<PathBuf> = ["a", "b"].iter().map(|name| dir.join(name)).collect();
         for session in &sessions { create_private(session).unwrap(); }
-        // Each writer's first record goes once the holder has the lock.
         let stores: Vec<Store> = sessions.iter().map(|session| Store::open(session, Some(&file)).unwrap()).collect();
-        let locked = std::sync::Arc::new(std::sync::Barrier::new(3));
-        let holder = {
-            let (file, locked) = (file.clone(), locked.clone());
-            std::thread::spawn(move || {
-                let mut db = rusqlite::Connection::open(&file).unwrap();
-                let transaction = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-                transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
-                locked.wait();
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                transaction.commit().unwrap();
-            })
-        };
+        // The lock held here before any writer starts, for a second.
+        let mut held = rusqlite::Connection::open(&file).unwrap();
+        let transaction = held.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
         let writers: Vec<_> = stores.into_iter().map(|mut store| {
-            let locked = locked.clone();
             std::thread::spawn(move || {
-                locked.wait();
                 (1..=50u64).map(|seq| store.keep(&[(seq, format!("{{\"seq\":{seq},\"note\":{{}}}}"))], false))
                     .filter(|kept| kept.is_err()).count()
             })
         }).collect();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        transaction.commit().unwrap();
         let refused: usize = writers.into_iter().map(|writer| writer.join().unwrap()).sum();
-        holder.join().unwrap();
         assert_eq!(refused, 0);
         let kept: i64 = rusqlite::Connection::open(&file).unwrap()
             .query_row("select count(*) from events where session in ('a', 'b')", [], |row| row.get(0)).unwrap();
