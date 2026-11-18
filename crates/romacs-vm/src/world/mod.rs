@@ -154,6 +154,8 @@ impl Vm {
         // Compiled patterns' SIMD searchers hold function pointers; each is
         // compiled again at its first search.
         self.regexp_cache = Default::default();
+        // Compiled queries are the runtime's memory, made again at first use.
+        self.treesit_queries = Default::default();
         self.flat_tables.forget();
         self.mode_line_forms.clear();
         self.lambda_lists.clear();

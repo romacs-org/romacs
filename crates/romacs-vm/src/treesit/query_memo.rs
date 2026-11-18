@@ -1,22 +1,25 @@
 //! Compiled queries, shared: one `ts_query_new` per grammar and query text
-//! for the session, where a major mode compiles the same queries for every
+//! for the VM, where a major mode compiles the same queries for every
 //! buffer it sets up (c-ts-mode's font-lock settings probe each optional
 //! keyword with `treesit-query-valid-p`). A failure is kept as well, so a
 //! probe that fails fails once.
 //!
 //! Lisp sees nothing of it: each `treesit-query-compile` still makes a
-//! query object of its own, which holds the shared `Compiled`, and a
-//! failure's signal is made anew from the caller's source. The key is the
-//! text `ts_query_new` reads, so two sources that expand alike share.
-//! What is shared is immutable and `Send + Sync` (asserted below), so any
-//! thread or VM may run it.
+//! query object of its own, with its own source, which holds the shared
+//! `Compiled`, and a failure's signal is made anew from the caller's
+//! source. The key is the text `ts_query_new` reads, predicates and all,
+//! so two sources that expand alike share. The memo is the VM's
+//! (`Vm::treesit_queries`), as the compiled queries are its alone: a
+//! worker VM compiles its own. A query keeps its text (`Compiled::text`),
+//! so `romacs--treesit-query-combine` joins its parts' texts without
+//! expanding them again, and its joined text is found here in turn.
 use super::{Compiled, native};
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::rc::Rc;
 
 /// What compiling gives: the shared query, or `ts_query_new`'s error offset
 /// and GNU's description of its type.
-pub(crate) type Outcome = Result<Arc<Compiled>, (u32, &'static str)>;
+pub(crate) type Outcome = Result<Rc<Compiled>, (u32, &'static str)>;
 
 /// A loaded grammar, as the memo tells them apart: its `TSLanguage`'s
 /// address, which no other grammar can take for the session since no
@@ -46,14 +49,28 @@ struct Entry {
     used: u64,
 }
 
+/// The VM's compiled queries by grammar and text.
 #[derive(Default)]
-struct Memo {
+pub(crate) struct Memo {
     entries: HashMap<Grammar, HashMap<Box<[u8]>, Entry>>,
     len: usize,
     clock: u64,
 }
 
 impl Memo {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    /// SOURCE compiled for LANGUAGE, once per grammar and text.
+    pub(crate) fn compile(&mut self, language: &native::Language, source: &[u8]) -> Outcome {
+        let grammar = Grammar::of(language);
+        if let Some(outcome) = self.lookup(grammar, source) {
+            return outcome;
+        }
+        let outcome = native::Query::new(language, source).map(|query| Rc::new(Compiled::new(query, source)));
+        self.insert(grammar, source, outcome.clone());
+        outcome
+    }
     fn lookup(&mut self, grammar: Grammar, source: &[u8]) -> Option<Outcome> {
         self.clock += 1;
         let entry = self.entries.get_mut(&grammar)?.get_mut(source)?;
@@ -86,40 +103,10 @@ impl Memo {
     }
 }
 
-/// The memo, for every VM and thread of the process, as the grammars are.
-/// It holds no Lisp value.
-static MEMO: LazyLock<Mutex<Memo>> = LazyLock::new(Mutex::default);
-
-// What the memo hands out may cross threads and be read from several at
-// once: the compiler holds it to that, not a comment.
-const _: () = {
-    const fn shared<T: Send + Sync>() {}
-    shared::<Compiled>();
-    shared::<Outcome>();
-};
-
-fn memo() -> std::sync::MutexGuard<'static, Memo> {
-    // A panic while the lock was held left at worst an entry unwritten.
-    MEMO.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// SOURCE compiled for LANGUAGE, once per grammar and text for the session.
-/// The compile runs outside the lock: two threads that miss together each
-/// compile, and the later outcome is kept.
-pub(crate) fn compile(language: &native::Language, source: &[u8]) -> Outcome {
-    let grammar = Grammar::of(language);
-    if let Some(outcome) = memo().lookup(grammar, source) {
-        return outcome;
-    }
-    let outcome = native::Query::new(language, source).map(|query| Arc::new(Compiled::new(query)));
-    memo().insert(grammar, source, outcome.clone());
-    outcome
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{CAPACITY, Grammar, Memo, compile, native};
-    use std::sync::Arc;
+    use super::{CAPACITY, Grammar, Memo, native};
+    use std::rc::Rc;
 
     /// The system C grammar (the one `tests/treesit.rs` needs), loaded from
     /// a copy of its own at PATH, or from the system's when None.
@@ -143,13 +130,15 @@ mod tests {
         assert_eq!(Grammar::of(&first), Grammar::of(&again), "one library opened twice is one grammar");
         assert_ne!(Grammar::of(&first), Grammar::of(&other), "a copy under another path is loaded apart");
         let text = b"(number_literal) @n";
-        let (a, b, c) = (compile(&first, text).unwrap(), compile(&again, text).unwrap(), compile(&other, text).unwrap());
-        assert!(Arc::ptr_eq(&a, &b), "one grammar and text compile once");
-        assert!(!Arc::ptr_eq(&a, &c), "another load's queries are its own");
+        let mut memo = Memo::default();
+        let (a, b, c) = (memo.compile(&first, text).unwrap(), memo.compile(&again, text).unwrap(), memo.compile(&other, text).unwrap());
+        assert!(Rc::ptr_eq(&a, &b), "one grammar and text compile once");
+        assert!(!Rc::ptr_eq(&a, &c), "another load's queries are its own");
         assert_eq!(c.query.pattern_count(), 1);
         // A failure is kept, and given again as it was.
-        assert_eq!(compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
-        assert_eq!(compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
+        assert_eq!(memo.compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
+        assert_eq!(memo.compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
+        assert_eq!(memo.len, 3);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

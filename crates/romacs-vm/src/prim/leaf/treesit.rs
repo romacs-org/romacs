@@ -8,7 +8,6 @@ use crate::coordinates::{ByteOffset, CharOffset};
 use crate::treesit::{self as ts, native, Linecol};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 type R<T> = std::result::Result<T, Fault>;
 type Out = super::super::Out;
@@ -1152,10 +1151,10 @@ impl Leaf<'_> {
 
     /// SOURCE (a string, or a sexp expanded) compiled for LANGUAGE, or the
     /// `treesit-query-error' it signals.
-    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Arc<ts::Compiled>> {
+    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
         let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
         let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
-        match ts::query_memo::compile(&language, &text) {
+        match self.vm.treesit_queries.compile(&language, &text) {
             Ok(compiled) => Ok(compiled),
             Err((offset, message)) => {
                 // The signal names the text compiled: a sexp's expansion.
@@ -1166,7 +1165,7 @@ impl Leaf<'_> {
         }
     }
     /// treesit_ensure_query_compiled for the compiled query QUERY.
-    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Arc<ts::Compiled>> {
+    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Rc<ts::Compiled>> {
         let q = self.ts_query(query)?;
         if let Some(compiled) = &q.compiled {
             return Ok(compiled.clone());
@@ -1314,9 +1313,7 @@ impl Leaf<'_> {
         let mut first = 0u32;
         for (&query, &overriding) in queries.iter().zip(overrides) {
             let compiled = self.ts_ensure_compiled(query)?;
-            let source = self.ts_query(query)?.source;
-            let bytes = if self.pair(source).is_some() { self.ts_query_expand_bytes(source)?.bytes } else { self.string_bytes(source)? };
-            text.extend_from_slice(&bytes);
+            text.extend_from_slice(&compiled.text);
             text.push(b'\n');
             spans.push(self.cons(fixnum(i64::from(first)), overriding));
             first += compiled.query.pattern_count();

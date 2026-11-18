@@ -1322,6 +1322,9 @@ pub struct Vm {
     regexp: regexp::MatchState,
     #[snapshot(at_rest)]
     regexp_cache: regexp::PatternCache,
+    /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
+    #[snapshot(at_rest)]
+    treesit_queries: treesit::query_memo::Memo,
     /// The char tables read as flat rows (`char_table::flat`).
     #[snapshot(at_rest)]
     flat_tables: char_table::FlatTables,
@@ -1778,6 +1781,7 @@ impl Vm {
             buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
             caches_filled: Vec::new(),

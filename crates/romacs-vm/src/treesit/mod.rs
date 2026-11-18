@@ -16,7 +16,6 @@ use native::{TSInputEdit, TSPoint, Tree};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
@@ -487,7 +486,7 @@ pub(crate) struct Node {
 pub(crate) struct Query {
     pub language: Value,
     pub source: Value,
-    pub compiled: Option<Arc<Compiled>>,
+    pub compiled: Option<Rc<Compiled>>,
 }
 
 /// A compiled query and each pattern's predicates
@@ -496,6 +495,8 @@ pub(crate) struct Query {
 /// (`query_memo`).
 pub(crate) struct Compiled {
     pub query: native::Query,
+    /// The text compiled: a sexp's expansion, or the string.
+    pub text: Box<[u8]>,
     pub predicates: Vec<Vec<Predicate>>,
 }
 
@@ -512,7 +513,7 @@ pub(crate) enum Arg {
 }
 
 impl Compiled {
-    pub(crate) fn new(query: native::Query) -> Self {
+    pub(crate) fn new(query: native::Query, text: &[u8]) -> Self {
         let predicates = (0..query.pattern_count()).map(|p| {
             let mut out = Vec::new();
             let mut current: Vec<Arg> = Vec::new();
@@ -534,7 +535,7 @@ impl Compiled {
             }
             out
         }).collect();
-        Self { query, predicates }
+        Self { query, text: text.into(), predicates }
     }
 }
 
@@ -558,7 +559,7 @@ pub(crate) enum TaskState {
 /// holds, from index 0: the parser, then per match its capture names and
 /// nodes in pairs, as MATCHES's ranges index them.
 pub(crate) struct Capture {
-    pub compiled: Arc<Compiled>,
+    pub compiled: Rc<Compiled>,
     /// (pattern, start in `values`, capture count) per match.
     pub matches: Vec<(u32, usize, usize)>,
     pub at: usize,

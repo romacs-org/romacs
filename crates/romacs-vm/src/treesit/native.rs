@@ -339,8 +339,8 @@ impl Cursor {
 
 /// A compiled query, deleted when dropped. Nothing changes it once
 /// compiled: every method takes `&self` and only reads it, and a match
-/// runs on a cursor of its own (`matches`), so one query serves any
-/// number of threads at once (`query_memo` shares it).
+/// runs on a cursor of its own (`matches`), so query objects may share one
+/// (`query_memo`).
 pub(crate) struct Query(*mut ffi::TSQuery);
 impl Drop for Query {
     fn drop(&mut self) {
@@ -348,15 +348,6 @@ impl Drop for Query {
         unsafe { ffi::ts_query_delete(self.0) };
     }
 }
-// UNSAFE(a raw TSQuery has no safe owner: the crate's own Query evaluates predicates itself, see the module doc)
-// SAFETY: the runtime never writes a TSQuery after ts_query_new except
-// through ts_query_disable_capture and ts_query_disable_pattern, which this
-// type never calls; readers and cursors take it `const`. The tree-sitter
-// crate declares its own `Query` Send and Sync on the same ground.
-unsafe impl Send for Query {}
-// UNSAFE(a raw TSQuery has no safe owner: the crate's own Query evaluates predicates itself, see the module doc)
-// SAFETY: as for Send: every access through `&Query` reads only.
-unsafe impl Sync for Query {}
 
 /// One step of a pattern's predicates.
 pub(crate) enum PredicateStep<'a> {
