@@ -444,7 +444,9 @@ alone does."
     (dolist (dir (romacs-agent-store--missing))
       (princ (format "romacs-agent-store: missing %s\n" (file-name-nondirectory dir))))
     (dolist (id (romacs-agent--marks-reconcile))
-      (princ (format "romacs-agent-store: marked %s\n" id)))))
+      (princ (format "romacs-agent-store: marked %s\n" id)))
+    ;; Its report whole: the editor takes it for all there is.
+    (princ "romacs-agent-store: done\n")))
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
 
@@ -468,14 +470,17 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                          (romacs-agent-store--filled
                           (when (buffer-live-p (process-buffer process))
                             (prog1 (with-current-buffer (process-buffer process) (buffer-string))
-                              (kill-buffer (process-buffer process)))))
+                              (kill-buffer (process-buffer process))))
+                          (process-exit-status process))
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
 
-(defun romacs-agent-store--filled (output)
-  "A fill ended, saying OUTPUT: the sessions it left with no row and those
-it newly marked as waited on are loaded, none of the rows asked here."
+(defun romacs-agent-store--filled (output &optional status)
+  "A fill ended with STATUS (0 by default), saying OUTPUT: the sessions it
+left with no row and those it newly marked as waited on are loaded, none
+of the rows asked here, when it ended well and its report is whole;
+else every session with no row, asked here."
   (setq romacs-agent-store--filled t)
-  (if output
+  (if (and output (eql (or status 0) 0) (string-match-p "^romacs-agent-store: done$" output))
       (romacs-agent-store--load-missing (romacs-agent-store--said-ids "missing\\|marked" output) t)
     ;; What it said lost: asked here.
     (romacs-agent-store--load-missing)))
