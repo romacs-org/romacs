@@ -380,8 +380,10 @@ else none.  The turn failing, or its harness ending, gives none."
                 (progn (romacs-agent--admit session item t)
                        (when (memq item (romacs-agent-queue session)) (error "Not written")))
               (romacs-agent--dequeue session item))
-          (error (remove-hook 'romacs-agent-event-functions waiter)
-                 (funcall then nil "selection"))))))))
+          ;; A quit too: the renewal goes on without its note, and lets go
+          ;; of its hold as it does.
+          ((quit error) (remove-hook 'romacs-agent-event-functions waiter)
+           (funcall then nil "selection"))))))))
 
 (defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
   "Sessions whose journaled renewal is being finished: once each.")
