@@ -416,10 +416,12 @@ def survive(args, base):
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'session ended')
         a.eval(f'(romacs-agent-resume {a.s(sid)})')
         until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(sid)})) t)') == 't', 15, 'resumed')
+        answered = len(a.results(sid))
         a.send(sid, 'say resumed')
         a.idle(sid)
+        reply = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'resumed answered')
         resumed = [e for e in a.logged() if 'started' in e][-1]
-        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
+        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and reply == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
         return result
     finally:
