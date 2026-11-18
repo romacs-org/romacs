@@ -700,8 +700,10 @@ asked first: nil drops the message.  MESSAGES say whose it is
     ;; A parent whose harness was stopped or ended is resumed to take it.
     (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
       (romacs-agent--continue session))
+    ;; No sender keeps it: kept for the resume, should it be refused.
     (romacs-agent--admit session (romacs-agent-item text :messages messages :delivered delivered :valid valid
-                                                    :kind (or kind 'now)))))
+                                                    :kind (or kind 'now))
+                         nil t)))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")

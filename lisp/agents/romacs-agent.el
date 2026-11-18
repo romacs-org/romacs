@@ -3499,15 +3499,24 @@ given, is called just before the resume."
     ;; Held from here: nothing more goes to the run it ends, attached still
     ;; while it stops (its exit, or the resume, starts the next run's state).
     (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :relaunching t))
-    (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))))
+    (condition-case err
+        (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))
+      ;; Not stopping: no relaunch holds it.  Its stop's own failure still
+      ;; resumes it, once the old attachment has gone or its wait has.
+      (error (setf (romacs-agent-driver-state session)
+                   (plist-put (romacs-agent-driver-state session) :relaunching nil))
+             (signal (car err) (cdr err))))))
 
 (defun romacs-agent--resume-when-gone (session tries &optional before)
   "Resume SESSION once its connection to the stopped supervisor is gone,
 looking again for TRIES tenths of a second; BEFORE as `romacs-agent--relaunch'."
-  (if (and (process-live-p (romacs-agent-connection session)) (> tries 0))
-      (run-at-time 0.1 nil #'romacs-agent--resume-when-gone session (1- tries) before)
-    (when before (funcall before))
-    (romacs-agent-resume session)))
+  (cond ((not (process-live-p (romacs-agent-connection session)))
+         (when before (funcall before))
+         (romacs-agent-resume session))
+        ((> tries 0) (run-at-time 0.1 nil #'romacs-agent--resume-when-gone session (1- tries) before))
+        ;; Its old run did not stop: still held, so nothing goes to the
+        ;; conversation it left; a stop and a resume go on.
+        (t (romacs-agent--raise session (list :type 'error :text "Its harness did not stop for the relaunch: stop it, then resume it")))))
 
 (defun romacs-agent--restarted (session)
   "Resume SESSION on its selection, once its harness and its unit are gone."
@@ -3658,6 +3667,8 @@ not resumed by a message: `user-error' says to resume it."
   (cond ((romacs-agent--per-turn-p session))
         ((romacs-agent-stopped session)
          (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
+        ;; An attachment replaying still: what ran since its kept state decides.
+        ((and (process-live-p (romacs-agent-connection session)) (not (romacs-agent-caught-up session))))
         ;; Its run's exit read, whatever its supervisor still holds open.
         ((memq (romacs-agent-state session) '(ended unstarted))
          (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
@@ -3668,11 +3679,12 @@ not resumed by a message: `user-error' says to resume it."
               (processp (romacs-agent--attach session 0))))
         (t (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))))
 
-(defun romacs-agent--admit (session item &optional first)
+(defun romacs-agent--admit (session item &optional first keep)
   "Put ITEM in SESSION's queue (FIRST: ahead of what waits), start what
 lets it go, and dispatch.  A worker folding SESSION still, that waits for
 the fold.  Refused (`user-error', ITEM not kept) when SESSION's harness
-ended: nothing sends it."
+ended: nothing sends it.  KEEP, for a message no sender keeps (a tool's
+delivery): kept for the resume instead, the refusal said on SESSION."
   (let ((id (romacs-agent-id session)))
     ;; Sent into a turn under way: a steer of that turn alone.
     (when (and (eq (romacs-agent-item-kind item) 'now) (romacs-agent--turn-under-way-p session))
@@ -3689,7 +3701,10 @@ ended: nothing sends it."
                      ;; it now (the error is said on SESSION).
                      (when (memq item (romacs-agent-queue session))
                        (romacs-agent--opened session)))))
-      (romacs-agent--opened session item))
+      (if (not keep)
+          (romacs-agent--opened session item)
+        (condition-case err (romacs-agent--opened session)
+          (error (romacs-agent--raise session (list :type 'error :text (error-message-string err)))))))
     item))
 
 (defun romacs-agent--opened (session &optional item)

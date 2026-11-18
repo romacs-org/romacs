@@ -243,6 +243,11 @@ message is sent, `romacs-agent-send' by default.")
     (romacs-agent-test-attach ended t)
     (should-error (romacs-agent-send ended "hello") :type 'user-error)
     (should (= (romacs-agent-queue-length ended) 0))
+    ;; Ended as its kept state says, attached to a supervisor still
+    ;; replaying: what ran since decides, so it waits.
+    (setf (romacs-agent-caught-up ended) nil)
+    (romacs-agent-send ended "hello")
+    (should (= (romacs-agent-queue-length ended) 1))
     (cl-letf (((symbol-function 'romacs-agent--line) (lambda (&rest _) (error "Gone")))
               ((symbol-function 'romacs-agent--fold-now) #'ignore))
       (should-error (romacs-agent-send failing "hello")))
@@ -279,6 +284,44 @@ message is sent, `romacs-agent-send' by default.")
         (should (= (length sent) 3))
         (should (equal (gethash "content" (gethash "message" (car sent))) "two"))
         (should (equal (mapcar #'car (romacs-agent-queue session)) '("late")))))))
+
+(ert-deftest romacs-agent-a-delivery-to-an-ended-harness-waits ()
+  ;; A tool's delivery has no sender to keep it: refused, it waits for the
+  ;; resume, the refusal said on the session.
+  (require 'romacs-agent-tools)
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "afafafaf-0000-4000-8000-000000000000" :harness 'claude :state 'ended
+                                       :title "parent")
+                   t))
+         (said nil)
+         (romacs-agent-event-functions (list (lambda (_ event) (when (eq (plist-get event :type) 'error)
+                                                                (push (plist-get event :text) said))))))
+    (romacs-agent-tools--deliver session "a wake" #'ignore nil nil 'next)
+    (should (equal (mapcar #'car (romacs-agent-queue session)) '("a wake")))
+    (should (string-match-p "has ended" (car said)))))
+
+(ert-deftest romacs-agent-a-relaunch-that-does-not-stop-stays-held ()
+  ;; Its old run never going: nothing reaches the conversation it left,
+  ;; and the session says how to go on.  A stop that cannot start holds
+  ;; nothing.
+  (let* ((session (romacs-agent-test-attach
+                   (romacs-agent--make :id "a0a0a0a0-0000-4000-8000-000000000000" :harness 'claude :state 'idle)
+                   t))
+         (said nil) (resumed nil)
+         (romacs-agent-event-functions (list (lambda (_ event) (when (eq (plist-get event :type) 'error)
+                                                                (push (plist-get event :text) said))))))
+    ;; Its stop answered, the old attachment there past its wait.
+    (cl-letf (((symbol-function 'romacs-agent--stop-then) #'ignore)
+              ((symbol-function 'romacs-agent-resume) (lambda (_) (setq resumed t))))
+      (romacs-agent--relaunch session)
+      (romacs-agent--resume-when-gone session 0))
+    (should-not resumed)
+    (should (romacs-agent--held-p session))
+    (should (string-match-p "did not stop" (car said)))
+    (setf (romacs-agent-driver-state session) (list :ready t))
+    (cl-letf (((symbol-function 'romacs-agent--stop-then) (lambda (&rest _) (error "No systemctl"))))
+      (should-error (romacs-agent--relaunch session)))
+    (should-not (romacs-agent--held-p session))))
 
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):
