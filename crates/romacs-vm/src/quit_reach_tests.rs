@@ -217,6 +217,8 @@ fn coding_conversion_quits_between_chunks() {
                  (setq s (make-string 50000 ?é)) (setq crlf (string-to-unibyte (make-string 50000 ?\\r))))";
     reaches("encode-coding-string", setup, "(list s 'undecided)", "t");
     reaches("decode-coding-string", setup, "(list crlf 'undecided)", "t");
+    // call-process's output, decoded before it is inserted.
+    reaches("romacs--decode-output", setup, "(list crlf 'undecided)", "t");
 }
 
 #[test]

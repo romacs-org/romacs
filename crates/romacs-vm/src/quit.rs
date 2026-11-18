@@ -190,9 +190,26 @@ impl Vm {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.native_quit || !self.native_quit_reached() { return Ok(()); }
         crate::gap_probe::safepoint(Some(self));
-        let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
-        if !press && !crate::host::user_signal_waiting(self.debug_event_mask()) { return Ok(()); }
+        if !self.native_quit_wanted() { return Ok(()); }
         self.quit_fault()
+    }
+
+    /// Whether a native poll quits now: a press while `inhibit-quit` is nil
+    /// (under it the press stays pending), or a debug event whatever it is.
+    fn native_quit_wanted(&self) -> bool {
+        let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
+        press || crate::host::user_signal_waiting(self.debug_event_mask())
+    }
+
+    /// [`Self::native_poll`] for a loop whose own entry decides it may quit
+    /// and whose failures are text, as the reader's are: the escape left in
+    /// `propagated_escape` for its caller, as [`Self::poll_quit`] leaves it.
+    pub(crate) fn native_poll_text(&mut self) -> crate::Result<()> {
+        if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
+        if !self.native_quit_reached() { return Ok(()); }
+        crate::gap_probe::safepoint(Some(self));
+        if !self.native_quit_wanted() { return Ok(()); }
+        self.escape_pending()
     }
 
     /// BODY outside any quit scope, the caller's restored after. A scope is
@@ -291,6 +308,11 @@ impl Vm {
         if !self.quit_poll_due() {
             return Ok(());
         }
+        self.escape_pending()
+    }
+
+    /// `maybe_quit`'s escape, if any, left in `propagated_escape`.
+    fn escape_pending(&mut self) -> crate::Result<()> {
         match self.maybe_quit() {
             None => Ok(()),
             Some(escape) => {

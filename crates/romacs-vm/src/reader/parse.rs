@@ -69,6 +69,8 @@ struct Reader<'a, 'r, 'm, 'b, 'g> {
     labels: BTreeMap<u64, usize>,
     /// The root of a `(CONDITION . DATA)` the read failed with, when known.
     signal: Option<usize>,
+    /// Elements read, counted for the poll between them (`Reader::poll`).
+    steps: crate::quit::Steps,
     #[cfg(test)]
     collect_subforms: bool,
 }
@@ -336,8 +338,19 @@ impl Reader<'_, '_, '_, '_, '_> {
                 self.next()?;
                 return Ok(roots);
             }
+            if self.steps.tick() { self.poll()?; }
             roots.push(self.form(depth + 1)?);
         }
+    }
+    /// GNU's `maybe_quit` between a list's or a vector's elements, for a read
+    /// under the permission (Lisp's `read` and the loader): a quit fails the
+    /// read with its escape, and what was read of the form is dropped. A
+    /// stream read so far stays read, as it would at any other failure. A
+    /// read of Romacs's own text, without the permission, never stops.
+    fn poll(&mut self) -> Result<()> {
+        if self.gc.is_none() || !self.m.leaf((), |vm, ()| vm.native_poll_text().is_err()) { return Ok(()); }
+        self.signal = self.m.leaf((), build::pending_signal);
+        Err("Quit".into())
     }
     fn table(&mut self, depth: usize) -> Result<usize> {
         let sub = self.peek() == Some(94);
@@ -663,6 +676,7 @@ impl Reader<'_, '_, '_, '_, '_> {
                         tail = Some(root);
                         break;
                     }
+                    if self.steps.tick() { self.poll()?; }
                     values.push(self.form(depth + 1)?);
                 }
                 Ok(self.m.leaf((vector, values, tail), build::sequence))
@@ -829,6 +843,7 @@ pub(super) fn read_input<'b, B: Plain, R: Plain>(m: &mut Mx<'_, 'b, Vm>, gc: Opt
         eof: false,
         labels: BTreeMap::new(),
         signal: None,
+        steps: crate::quit::Steps::default(),
         #[cfg(test)]
         collect_subforms: false,
     };
@@ -904,6 +919,7 @@ mod tests {
                 eof: false,
                 labels: BTreeMap::new(),
                 signal: None,
+                steps: crate::quit::Steps::default(),
                 collect_subforms: true,
             };
             let root = reader.form(0);
@@ -985,6 +1001,45 @@ mod tests {
         assert_eq!(evaluated(&mut vm, r#"(condition-case e (read "?\\N{BULLET}") (error (car (cdr e))))"#), r#""named""#);
         evaluated(&mut vm, r"(defun char-from-name (&rest _) (throw 'name 'thrown))");
         assert_eq!(evaluated(&mut vm, r#"(catch 'name (read "?\\N{BULLET}"))"#), "thrown");
+    }
+
+    /// A read under the permission stops between a list's elements: with a
+    /// press counted it ends in `quit`; under `inhibit-quit` it reads to its
+    /// end and the press stays pending. The read is called directly, as the
+    /// engine calls it past its entry poll, so only the reader's poll can
+    /// have quit it.
+    #[test]
+    fn a_long_list_read_quits_between_elements() {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude_raw().unwrap();
+        let signal = std::sync::Arc::new(crate::quit::QuitSignal::new());
+        vm.share_quit_signal(signal.clone());
+        vm.enter_busy();
+        let text = format!("({})", (0..5000).map(|i| i.to_string()).collect::<Vec<_>>().join(" "));
+        // 0: read whole; 1: quit; 2: another failure.
+        let read = |vm: &mut Vm| -> u8 {
+            let string = vm.make_lisp_string(text.clone().into_bytes(), false);
+            let end = vm.str_view(string).unwrap().len();
+            vm.external_roots.push(string);
+            let root = vm.external_roots.len() - 1;
+            let outcome = crate::threaded::toplevel(vm, (root, end), |mut m, gc, (root, end)| {
+                super::super::read_string(&mut m, Some(gc), (root, 0, end), (), |vm, (), read| match read {
+                    Ok(Some(_)) => 0,
+                    Err((_, Some((condition, _)))) if condition == vm.intern("quit") => 1,
+                    _ => 2,
+                })
+            });
+            vm.external_roots.truncate(root);
+            outcome
+        };
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        assert_eq!(read(&mut vm), 1, "the read did not quit between elements");
+        vm.quit_unwinding = false;
+        vm.propagated_escape = None;
+        vm.eval_source_raw("(setq inhibit-quit t)").unwrap();
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        assert_eq!(read(&mut vm), 0, "under inhibit-quit the read ends");
+        assert!(signal.due(), "inhibit-quit holds the press");
     }
 
     /// A read without the permission (`Vm::read_string_unlent`) calls no

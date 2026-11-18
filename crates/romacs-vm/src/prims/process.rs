@@ -499,7 +499,8 @@ fn check_directory(cx, dir: Value, curdir: Value) {
 defsubr! { name = "romacs--decode-output", gnu = "callproc.c:812", effect = Global,
 fn decode_output(cx, bytes: Value, coding: Value) {
     let bytes = cx.string_view(bytes)?.bytes().to_vec();
-    cx.decode_output(bytes, coding)
+    // It makes a new string, nothing yet inserted: its decode quits per pass.
+    cx.quittable(|cx| cx.decode_output(bytes, coding))
 }}
 
 defsubr! { name = "romacs--signal-description", gnu = "callproc.c:933", effect = Pure,

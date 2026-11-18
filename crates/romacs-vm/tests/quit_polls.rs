@@ -53,6 +53,8 @@ const LONG: &[(&str, &str)] = &[
     ("prims/fns_distance.rs", "fn string_distance(cx"),
     ("prims/compare_buffer.rs", "fn compare_buffer_substrings(cx"),
     ("annotation_primitives.rs", "fn property_single_change("),
+    ("reader/parse.rs", "fn form_inner(&mut self"),
+    ("reader/parse.rs", "fn aggregate(&mut self"),
 ];
 
 /// What a poll looks like in a loop's function.

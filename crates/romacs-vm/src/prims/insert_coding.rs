@@ -626,7 +626,10 @@ fn decode(cx: &mut Leaf<'_>, r: &[Value]) -> std::result::Result<Option<(Value, 
     // insert-file-contents sets only once the text is in (fileio.c:5171).
     let lcsu = cx.intern("last-coding-system-used");
     let old = var(cx, "last-coding-system-used")?;
-    let decoded = decode_bytes(cx, r);
+    // The text is decoded into a string before any of it goes in, so the
+    // decode quits per pass. The change's hooks have run, as GNU's read,
+    // which quits, runs after them (fileio.c prepare_to_modify_buffer).
+    let decoded = cx.quittable(|cx| decode_bytes(cx, r));
     cx.store_variable(lcsu, old)?;
     decoded
 }
