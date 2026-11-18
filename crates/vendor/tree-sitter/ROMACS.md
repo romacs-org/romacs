@@ -30,6 +30,13 @@ Each is its own commit in Romacs's history, written for upstream.
   Such nodes are now reused whatever their entry state. A typed character's
   reparse there re-lexes 570 bytes instead of 31 KB (6.7 to 1.4 ms); trees
   equal the published runtime's after every edit `tools/treesit-fuzz` makes.
+- `perf(query): find the progress offset only when the callback runs`
+  (`src/query.c`). With a progress callback set, the cursor found the
+  current node's start byte at every step of its walk, though the callback
+  that reads it runs once in 100 steps. That cost a query 3%, enough that
+  Romacs ran its queries without the callback and a query that matched
+  nothing could not be stopped. The offset is now found just before the
+  callback runs; what the callback sees is unchanged.
 
 ## Back to stock
 
