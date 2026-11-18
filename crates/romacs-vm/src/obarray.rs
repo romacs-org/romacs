@@ -151,8 +151,11 @@ impl Vm {
         if let Some(found) = self.obarray_lookup_value(table, &bytes, chars) { return Ok(found); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         let text = symbol_key(&bytes, chars).ok_or(prim::Fault::NotUnicode(name))?;
+        // The initial obarray's names are the VM's own (`Vm::names`); its
+        // Obarray object holds none of them.
+        if initial { return Ok(self.intern(&text)); }
         let text = text.as_str();
-        let symbol = if initial { self.intern(text) } else {
+        let symbol = {
             let id = expand::generated_id();
             let slot = if let Some(slot) = self.obarray_free_slots.pop() { self.allocation.consed.reused_symbols += 1; slot } else {
                 let slot = self.slots.len();
@@ -196,6 +199,13 @@ impl Vm {
         }
         if let Object::Obarray(t) = self.object_mut(table).map_err(prim::Fault::Error)? { t.clear(); }
         Ok(())
+    }
+    /// How many symbols TABLE, an obarray, holds, as `obarray_next` walks
+    /// them: the initial obarray's are `nil`, `t` and the VM's other names
+    /// (a walk of the name table).
+    pub(super) fn obarray_count(&self, table: &Obarray) -> usize {
+        if !table.initial { return table.len(); }
+        2 + self.names.iter().filter(|(name, _)| !matches!(name.as_str(), "nil" | "t")).count()
     }
     pub(super) fn obarray_next(&self, table: Value, bucket_index: usize, current: Value) -> Option<(usize, Value)> {
         let Object::Obarray(t) = self.object_if(table)? else { return None };

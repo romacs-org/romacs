@@ -3930,7 +3930,7 @@ impl Vm {
                 data::Object::SubCharTable(_) => Ok("#<sub-char-table>".into()),
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(t) => self.display_table(t, depth),
-                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", t.len())),
+                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", self.obarray_count(t))),
                 data::Object::Free => Err("invalid object reference".into()),
                 data::Object::Bytes(v) => Ok(format!(
                     "#u8({})",
