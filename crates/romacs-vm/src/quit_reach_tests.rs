@@ -532,3 +532,11 @@ fn chunked_rows_quit_before_they_make_anything() {
     reaches("string-to-multibyte", "(setq s (string-to-unibyte (make-string 50000 ?a)))", "(list s)", "(not (multibyte-string-p s))");
     reaches("find-coding-systems-region-internal", "(setq s (make-string 50000 ?é))", "(list s nil)", "t");
 }
+
+/// Base64 encoding polls between 3-byte-aligned slices, before anything is
+/// made; its text matches an unpolled encode across the slice edges.
+#[test]
+fn base64_encoding_quits_between_slices() {
+    reaches("base64-encode-string", "(setq s (make-string 100000 ?a))", "(list s)", "t");
+    reaches("base64url-encode-string", "(setq s (make-string 100000 ?a))", "(list s)", "t");
+}

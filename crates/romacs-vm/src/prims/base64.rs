@@ -26,12 +26,30 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
     else { b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" }
 }
 
-/// fns.c base64_encode_1 over octets.
-fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
+/// OCTETS encoded, inside the caller's own scope: 3-byte-aligned slices
+/// encode to text that concatenates exactly, so the encoder takes the input
+/// a slice at a time and polls between slices, the group count carried on
+/// for the line breaks. Nothing is made before it ends.
+fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
+    const SLICE: usize = 3 << 12;
+    cx.quittable(|cx| {
+        let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
+        let mut group = 0;
+        for part in octets.chunks(SLICE) {
+            encode_into(&mut out, part, &mut group, line_break, pad, url);
+            if part.len() == SLICE { cx.native_poll()?; }
+        }
+        Ok(out)
+    })
+}
+
+/// fns.c base64_encode_1 over OCTETS, appended to OUT, GROUP counting the
+/// groups written so far, across slices.
+fn encode_into(out: &mut Vec<u8>, octets: &[u8], group: &mut usize, line_break: bool, pad: bool, url: bool) {
     let table = alphabet(url);
-    let mut out = Vec::with_capacity(octets.len() / 3 * 4 + 4);
-    for (group, chunk) in octets.chunks(3).enumerate() {
-        if line_break && group > 0 && group % LINE_GROUPS == 0 { out.push(b'\n'); }
+    for chunk in octets.chunks(3) {
+        if line_break && *group > 0 && *group % LINE_GROUPS == 0 { out.push(b'\n'); }
+        *group += 1;
         let value = chunk.iter().enumerate().fold(0u32, |v, (i, &b)| v | u32::from(b) << (16 - 8 * i));
         let digits = chunk.len() + 1;
         for i in 0..4 {
@@ -39,7 +57,6 @@ fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
             else if pad { out.push(b'='); }
         }
     }
-    out
 }
 
 /// The input a chunk at a time: when a chunk's bytes run out, the quit
@@ -158,13 +175,15 @@ fn octets(cx: &mut Leaf<'_>, string: Value) -> std::result::Result<Vec<u8>, Faul
 defsubr! { name = "base64-encode-string", gnu = "fns.c:4168", effect = Pure,
 fn base64_encode_string(cx, string: Value; optional no_line_break: Value) {
     let octets = octets(cx, string)?;
-    Ok(cx.make_string(encode(&octets, no_line_break == Value::NIL, true, false), false))
+    let text = encoded(cx, &octets, no_line_break == Value::NIL, true, false)?;
+    Ok(cx.make_string(text, false))
 }}
 
 defsubr! { name = "base64url-encode-string", gnu = "fns.c:4179", effect = Pure,
 fn base64url_encode_string(cx, string: Value; optional no_pad: Value) {
     let octets = octets(cx, string)?;
-    Ok(cx.make_string(encode(&octets, false, no_pad == Value::NIL, true), false))
+    let text = encoded(cx, &octets, false, no_pad == Value::NIL, true)?;
+    Ok(cx.make_string(text, false))
 }}
 
 defsubr! { name = "base64-decode-string", gnu = "fns.c:4409", effect = Pure,
@@ -219,7 +238,9 @@ fn deleted(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
 fn encode_region(cx: &mut Leaf<'_>, beg: Value, end: Value, line_break: bool, pad: bool, url: bool) -> Next {
     let (from, to) = cx.validate_region(beg, end)?;
     let text = cx.region_text(from, to)?;
-    let encoded = encode(&octets(cx, text)?, line_break, pad, url);
+    // Encoded before the region changes.
+    let octets = octets(cx, text)?;
+    let encoded = encoded(cx, &octets, line_break, pad, url)?;
     let length = encoded.len() as i64;
     let text = cx.make_string(encoded, false);
     replace_region(cx, from, to, text, length, false)
