@@ -942,30 +942,27 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
 /// over SOCKET says `unavailable` and why, in place of a boot. The spawner
 /// settles the worker's jobs with that (`romacs--isolate-world-refused` in
 /// `lisp/vm/isolate.el`) and ends the worker, rather than starting it
-/// again. Until then the socket stays open, so a job the spawner writes
-/// meanwhile finds a worker, not a closed socket, and is settled by the
-/// refusal; and a zygote's unforked children die only after it.
+/// again. Until then the socket stays open, however long the spawner
+/// takes, so a job it writes meanwhile finds a worker, not a closed
+/// socket, and is settled by the refusal; and a zygote's unforked children
+/// die only after it. What arrives meanwhile is read and dropped. A
+/// spawner gone closes the socket, or its death signal ends the worker.
 ///
 /// # Errors
 ///
-/// When the hello cannot be sent or the socket read: the spawner is gone.
+/// When the hello cannot be sent or the socket read.
 pub fn refuse(socket: OwnedFd, reason: &str) -> std::result::Result<(), String> {
     let _ = crate::host::set_nonblocking(socket.as_fd());
     let text = hello(&format!("{REFUSED}\n{}", reason.replace('\n', " ")));
     let mut peer = Peer::new(socket);
     peer.send(Kind::Hello, 0, &Payload::Text(text), true).map_err(|e| e.to_string())?;
-    let deadline = crate::host::monotonic() + REFUSAL_WAIT;
     while !peer.closed {
-        let left = deadline.saturating_duration_since(crate::host::monotonic());
-        if left.is_zero() { break; }
-        crate::subprocess::poll(&[(peer.socket.as_raw_fd(), libc::POLLIN)], Some(left)).map_err(|e| e.to_string())?;
-        peer.drain(|_| {}).map_err(|e| e.to_string())?;
+        crate::subprocess::poll(&[(peer.socket.as_raw_fd(), libc::POLLIN)], None).map_err(|e| e.to_string())?;
+        peer.receive(&mut |_| {}).map_err(|e| e.to_string())?;
+        peer.inbox.clear();
     }
     Ok(())
 }
-
-/// How long a refusing worker waits for its spawner to end it.
-const REFUSAL_WAIT: std::time::Duration = std::time::Duration::from_mins(1);
 
 /// The boot a refusing worker's hello names (`refuse`).
 const REFUSED: &str = "unavailable";

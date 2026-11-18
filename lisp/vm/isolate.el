@@ -277,7 +277,12 @@ and has the features of :require loaded."
          (program (or isolate-worker-program (romacs--isolate-executable)))
          (id (romacs--isolate-start program arguments))
          (isolate (romacs--isolate-make id name require program
-                                        (and (eq isolate-boot 'world) isolate-world))))
+                                        ;; A copy: the arguments are what the
+                                        ;; worker was told, whatever later
+                                        ;; becomes of `isolate-world'.
+                                        (and (eq isolate-boot 'world) isolate-world
+                                             (cons (copy-sequence (car isolate-world))
+                                                   (copy-sequence (cdr isolate-world)))))))
     (push isolate romacs--isolates)
     (romacs--isolate-submit isolate 'romacs--isolate-prepare (list (romacs--isolate-seeds) require) nil nil nil)
     isolate))
@@ -803,9 +808,12 @@ still names it, so later workers boot from source
     (romacs--isolate-signal id 9)
     (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
     ;; Out of the dispatch before its futures' callbacks run: the death
-    ;; the reap queued is not reported as well.
+    ;; the reap queued is not reported as well; and closed whatever a
+    ;; callback signals, since no later dispatch will see it.
     (setq romacs--isolates (delq isolate romacs--isolates))
-    (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))))
+    (unwind-protect
+        (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))
+      (romacs--isolate-close id))))
 
 (defun romacs--isolate-memory-error (budget)
   "A job's reply when its child ended for growing past BUDGET bytes."

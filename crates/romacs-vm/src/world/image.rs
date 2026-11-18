@@ -261,7 +261,9 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result
     if fields.key != *key {
         return Err("made for another key".into());
     }
-    if fields.carry != carry_tag::<T>() {
+    // The tag decides, and the name, as far as the image keeps it, must
+    // agree: two types would need both to coincide.
+    if fields.carry != carry_tag::<T>() || fields.carry_name != carry_name::<T>() {
         let found = fields.carry_name.split(|&b| b == 0).next().unwrap_or_default();
         return Err(format!("made for the carry {}; this process needs {}", String::from_utf8_lossy(found), std::any::type_name::<T>()));
     }

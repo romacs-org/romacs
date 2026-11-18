@@ -132,8 +132,8 @@ pub struct ImageFields {
     /// The type of the carry beside the VM (`image::carry_tag`): a restore
     /// as another type is refused, as one for another key is.
     pub carry: u64,
-    /// That type's name, cut to fit, for the refusal to say (zero padded);
-    /// the tag alone decides.
+    /// That type's name, cut to fit (zero padded): the refusal says it, and
+    /// a restore requires it as well as the tag.
     pub carry_name: [u8; CARRY_NAME],
 }
 
