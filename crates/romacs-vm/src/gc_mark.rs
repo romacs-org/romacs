@@ -13,7 +13,7 @@
 //! `Send' by construction, dropped after the pause.
 use super::*;
 use crate::gc::{Census, traced};
-use crate::table::RawTable;
+use crate::table::{RangeSwept, RawTable};
 use crossbeam_deque::{Injector, Steal};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -292,12 +292,12 @@ pub(super) struct Worker {
     graves: Vec<Grave>,
 }
 
-/// What a sweep did: each table's freed count and the end of its last entry
-/// in use, and the dead objects whose end has side effects (`Grave::takes`
-/// refuses them), left where they were for the collecting thread.
+/// What a sweep did: each table's figures (`RangeSwept`), and the dead
+/// objects whose end has side effects (`Grave::takes` refuses them), left
+/// where they were for the collecting thread.
 #[derive(Default)]
 pub(super) struct Swept {
-    pub(super) tables: [(usize, usize); 4],
+    pub(super) tables: [RangeSwept; 4],
     pub(super) dead: Vec<u32>,
 }
 
@@ -307,6 +307,9 @@ pub(super) struct Marking {
     pub(super) closures: RawTable<Closure>,
     pub(super) cells: RawTable<Value>,
     pub(super) objects: RawTable<data::Object>,
+    /// A minor's: its sweep passes the cards no entry was handed out or
+    /// stored into in (`Table::touched`), all old.
+    minor: bool,
     verify: bool,
     n: usize,
     /// Whether this process may hold threads (`threads`): then what the
@@ -391,7 +394,7 @@ impl Marking {
         // SAFETY: the caller's.
         let (conses, closures, cells, objects) = unsafe { (vm.conses.raw(minor), vm.closures.raw(minor), vm.cells.raw(minor), vm.objects.raw(minor)) };
         Self {
-            conses, closures, cells, objects,
+            conses, closures, cells, objects, minor,
             verify: vm.gc_stress.verify, n, graves: threads(vm.gc_stress.threads) > 1, batch: Mutex::default(),
             queue: Injector::new(), outstanding: AtomicUsize::new(0),
             stop: AtomicBool::new(false), parked: AtomicUsize::new(0), park: Mutex::new(()), wake: Condvar::new(),
@@ -695,16 +698,21 @@ impl Marking {
         // One batch waits at a time (`DROPPING'); a process with no threads
         // has none.
         let defer = self.graves && !DROPPING.load(Ordering::Acquire);
-        let lens = [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()];
-        let chunks: Vec<(usize, Range<usize>)> = lens.iter().enumerate()
-            .flat_map(|(table, &len)| (0..len).step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(len))))
+        // A full's ranges are its tables, a minor's their set cards.
+        let ranges: [Vec<Range<usize>>; 4] = if self.minor {
+            [vm.conses.touched(), vm.closures.touched(), vm.cells.touched(), vm.objects.touched()]
+        } else {
+            [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()].map(|len| vec![0..len])
+        };
+        let chunks: Vec<(usize, Range<usize>)> = ranges.iter().enumerate()
+            .flat_map(|(table, runs)| runs.iter().flat_map(move |run| run.clone().step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(run.end)))))
             .collect();
         let swept = Mutex::new(Swept::default());
         self.share_out(own, chunks.len(), |w, i| {
             let (table, range) = chunks[i].clone();
-            let (freed, last, mut dead) = self.sweep_range(w, table, range, defer);
+            let (figures, mut dead) = self.sweep_range(w, table, range, defer);
             let mut swept = swept.lock().unwrap();
-            swept.tables[table] = (swept.tables[table].0 + freed, swept.tables[table].1.max(last));
+            swept.tables[table] = swept.tables[table].and(figures);
             swept.dead.append(&mut dead);
         });
         // In index order whatever the threads' chunks were: their side
@@ -713,16 +721,16 @@ impl Marking {
         swept.dead.sort_unstable();
         swept
     }
-    /// One range of a sweep: its freed count, the end of its last entry in
-    /// use, and its dead objects with side effects, left in place. Conses
+    /// One range of a sweep: its figures (`RangeSwept`), and its dead
+    /// objects with side effects, left in place. Conses
     /// and cells own nothing; a closure's vectors are small and few; what an
     /// object owns goes to W's graves when DEFER, or is dropped here (one
     /// thread, or the dropper busy).
-    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (usize, usize, Vec<u32>) {
+    fn sweep_range(&self, w: &mut Worker, table: usize, range: Range<usize>, defer: bool) -> (RangeSwept, Vec<u32>) {
         let dead = if self.verify { crate::gc::POISON } else { Value::NIL };
         let mut kept = Vec::new();
         // SAFETY: each range is one chunk's, and starts on a multiple of 8.
-        let (freed, last) = unsafe {
+        let figures = unsafe {
             match table {
                 0 => self.conses.sweep_range(range, self.verify, |_, pair| *pair = (dead, dead)),
                 1 => self.closures.sweep_range(range, self.verify, |_, c| *c = Closure { function: usize::MAX, captures: vec![], metadata: vec![], document: dead }),
@@ -735,7 +743,7 @@ impl Marking {
                 }),
             }
         };
-        (freed, last, kept)
+        (figures, kept)
     }
     fn claim_code(view: &MarkView<'_>, id: usize) -> bool {
         // Some low-level arena tests construct capture-only closures.

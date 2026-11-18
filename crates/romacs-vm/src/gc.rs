@@ -1709,10 +1709,10 @@ impl Vm {
         for &i in &dead {
             self.objects.collector_entries_mut()[i as usize] = data::Object::Free;
         }
-        self.conses.swept(swept[0].0, swept[0].1, verify);
-        self.closures.swept(swept[1].0, swept[1].1, verify);
-        self.cells.swept(swept[2].0, swept[2].1, verify);
-        self.objects.swept(swept[3].0, swept[3].1, verify);
+        self.conses.swept(swept[0], verify);
+        self.closures.swept(swept[1], verify);
+        self.cells.swept(swept[2], verify);
+        self.objects.swept(swept[3], verify);
         marking.finish(own);
         #[cfg(test)]
         { self.gc_stress.buried += marking.buried.load(std::sync::atomic::Ordering::Acquire); }
@@ -1766,6 +1766,12 @@ impl Vm {
         self.clear_dead_tails();
         let mut lap = Lap::start();
         self.clear_collection_caches();
+        if self.gc_stress.verify {
+            self.conses.check_cards("cons");
+            self.closures.check_cards("closure");
+            self.cells.check_cards("cell");
+            self.objects.check_cards("object");
+        }
         let mut again: Vec<Value> = roots.to_vec();
         again.extend(self.conses.read_again().into_iter().map(|i| Value::reference(i, 3)));
         again.extend(self.closures.read_again().into_iter().map(|i| Value::reference(i, 4)));

@@ -21,9 +21,9 @@ fn a_full_frees_no_permanent_entry_and_sweeps_keep_the_image() {
     let raw = raw_of(&mut t);
     assert!(!raw.claim(3), "a permanent entry counts as reached");
     assert!(raw.claim(2) && raw.claim(5), "a remembered one is read");
-    let (freed, _) = sweep_whole(&raw, false, |_, _| {});
-    t.swept(freed, t.len(), false);
-    assert_eq!(freed, 0);
+    let swept = sweep_whole(&raw, false, |_, _| {});
+    t.swept(swept, false);
+    assert_eq!(swept.freed, 0);
     assert!((0..20).all(|i| t.old(i)) && t.permanent(3) && t.is_remembered(2) && t.is_remembered(5) && t.settled());
 }
 

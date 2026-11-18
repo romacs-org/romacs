@@ -56,6 +56,9 @@ const REMEMBERED: u8 = 0x20;
 /// An entry of the restored image, either way: never freed, never moved.
 const IMAGE: u8 = PERMANENT | REMEMBERED;
 const LOW_BITS: u64 = 0x0101_0101_0101_0101;
+/// Entries a card covers (`Table::cards`): a multiple of eight, so that a
+/// card's colours are whole words.
+pub(crate) const CARD: usize = 64;
 
 /// Bytes of entries past which a table stops copying to grow.
 const RESERVE_FROM: usize = 1 << 20;
@@ -89,6 +92,29 @@ fn recorded(color: u8) -> u8 {
 #[inline]
 fn survivor(color: u8) -> u8 {
     OLD | IN_USE | (color & IMAGE)
+}
+
+/// What a sweep of entries did (`RawTable::sweep_range`): how many it freed,
+/// the end of the last still in use, and the lowest freed (`usize::MAX` for
+/// none). Sweeps of several ranges add up (`RangeSwept::and`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RangeSwept {
+    pub(crate) freed: usize,
+    pub(crate) last: usize,
+    pub(crate) lowest: usize,
+}
+
+impl Default for RangeSwept {
+    fn default() -> Self {
+        Self { freed: 0, last: 0, lowest: usize::MAX }
+    }
+}
+
+impl RangeSwept {
+    /// This sweep's figures and OTHER's, of ranges apart.
+    pub(crate) fn and(self, other: Self) -> Self {
+        Self { freed: self.freed + other.freed, last: self.last.max(other.last), lowest: self.lowest.min(other.lowest) }
+    }
 }
 
 /// A table as a mark's threads see it (gc_mark.rs): entries one at a time, and
@@ -149,10 +175,10 @@ impl<T> RawTable<T> {
     }
     /// A sweep of entries RANGE: each dead one through DESTROY, which leaves a
     /// tombstone owning nothing, then free (QUARANTINE: quarantined), and
-    /// every survivor exactly old. The entries freed, and the end of the last
-    /// still in use. SAFETY: RANGE is this caller's alone, and starts on a
-    /// multiple of 8.
-    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
+    /// every survivor exactly old. The entries freed, the end of the last
+    /// still in use, and the lowest freed (`usize::MAX` for none). SAFETY:
+    /// RANGE is this caller's alone, and starts on a multiple of 8.
+    pub(crate) unsafe fn sweep_range(&self, range: std::ops::Range<usize>, quarantine: bool, mut destroy: impl FnMut(usize, &mut T)) -> RangeSwept {
         assert!(range.end <= self.len, "a range past its table");
         debug_assert!(range.start % 8 == 0);
         let dead = if quarantine { QUARANTINED } else { FREE };
@@ -165,7 +191,7 @@ impl<T> RawTable<T> {
         let (colors, entries) = unsafe {
             (std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()), std::slice::from_raw_parts_mut(self.entries.add(base), range.len()))
         };
-        let (mut freed, mut last) = (0, 0);
+        let (mut freed, mut last, mut lowest) = (0, 0, usize::MAX);
         let mut at = 0;
         // The sticky bit of each byte (OLD in a minor's sweep, PERMANENT in
         // a full's), moved down beside its in-use bit, counts as a mark.
@@ -197,6 +223,7 @@ impl<T> RawTable<T> {
                     destroy(base + i, &mut entries[i]);
                     colors[i] = dead;
                     freed += 1;
+                    lowest = lowest.min(base + i);
                     if quarantine { last = base + i + 1; }
                 } else if color != FREE {
                     if color & IN_USE != 0 { colors[i] = survivor(color); }
@@ -205,7 +232,7 @@ impl<T> RawTable<T> {
             }
             at = end;
         }
-        (freed, last)
+        RangeSwept { freed, last, lowest }
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
@@ -332,6 +359,13 @@ pub(crate) struct Table<T> {
     /// Which marks the colours hold: a new mark, or marks cleared, is another.
     generation: u64,
     barrier: Barrier,
+    /// A byte per `CARD` entries, set when an entry of the card is handed
+    /// out or stored into, and cleared when a collection leaves every entry
+    /// old and clean. Outside a set card every entry in use is exactly old
+    /// and clean (image bits aside), so a minor reads and sweeps the set
+    /// cards alone: what changed since the last collection, not the table.
+    /// Never shorter than the colours need (`store_at`).
+    cards: Vec<u8>,
     /// Free entries `alloc' has handed out again, for tests.
     #[cfg(test)]
     pub(crate) reused: usize,
@@ -340,7 +374,7 @@ pub(crate) struct Table<T> {
 impl<T> Default for Table<T> {
     fn default() -> Self {
         Self {
-            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, sticky: 0, generation: 0, barrier: Barrier::default(),
+            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, sticky: 0, generation: 0, barrier: Barrier::default(), cards: Vec::new(),
             #[cfg(test)]
             reused: 0,
         }
@@ -471,6 +505,7 @@ impl<T> Table<T> {
         // and `collector_compact` shorten the entries first, and `dense`
         // makes them equal. Nothing else changes either length.
         let color = unsafe { self.colors.get_unchecked_mut(i) };
+        self.cards[i / CARD] = 1;
         (entry, color, &mut self.barrier)
     }
     #[inline]
@@ -504,6 +539,7 @@ impl<T> Table<T> {
         { self.reused += 1; }
         self.free -= 1;
         self.cursor = i + 1;
+        self.cards[i / CARD] = 1;
         self.colors[i] = IN_USE;
         self.entries[i] = value;
         i
@@ -514,7 +550,9 @@ impl<T> Table<T> {
         if self.entries.len() == self.entries.capacity() {
             self.grow();
         }
-        // The colour first: no entry is ever without one (`store_at`).
+        // The card and the colour first: no entry is ever without them (`store_at`).
+        let i = self.colors.len();
+        if i / CARD == self.cards.len() { self.cards.push(1) } else { self.cards[i / CARD] = 1 }
         self.colors.push(IN_USE);
         self.entries.push(value);
         self.entries.len() - 1
@@ -631,21 +669,32 @@ impl<T> Table<T> {
     pub(crate) fn sweep(&mut self, quarantine: bool, destroy: impl FnMut(&mut T)) -> usize {
         let raw = tests::raw_of(self);
         let mut destroy = destroy;
-        let (freed, last) = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
-        self.swept(freed, last, quarantine);
-        freed
+        let swept = tests::sweep_whole(&raw, quarantine, |_, entry| destroy(entry));
+        self.swept(swept, quarantine);
+        swept.freed
     }
-    /// The books of a sweep in ranges (`RawTable::sweep_range'): FREED entries
-    /// in all, the last in use before LAST.
-    pub(crate) fn swept(&mut self, freed: usize, last: usize, quarantine: bool) {
-        if quarantine { self.quarantined += freed } else { self.free += freed }
-        // From the start again: `next_free` crosses the live entries below
-        // the first free one many at a time.
-        (self.cursor, self.marking, self.sticky) = (0, false, 0);
+    /// The books of a sweep in ranges (`RawTable::sweep_range'), SWEPT in
+    /// all: a full's of every entry, a minor's of the set cards (`touched`).
+    pub(crate) fn swept(&mut self, swept: RangeSwept, quarantine: bool) {
+        if quarantine { self.quarantined += swept.freed } else { self.free += swept.freed }
+        // No free entry lay below the cursor, and the sweep freed none
+        // below its lowest: `next_free` starts from there, not from the
+        // bottom of an old generation it would cross each minor.
+        if !quarantine { self.cursor = self.cursor.min(swept.lowest); }
+        // A minor swept the set cards alone: what is in use in the others,
+        // old, ends the table where it is above the last it swept.
+        let last = if self.sticky == OLD {
+            let len = self.colors.len().min(self.entries.len());
+            self.colors[swept.last.min(len)..len].iter().rposition(|&color| color != FREE).map_or(swept.last, |i| swept.last + i + 1)
+        } else {
+            swept.last
+        };
+        (self.marking, self.sticky) = (false, 0);
         self.generation += 1;
         // Every survivor is old and clean, so nothing logged still stands.
         self.barrier = Barrier::default();
         self.cut(last);
+        self.cards.fill(0);
     }
     /// Drop the entries from LEN on, all free tombstones.
     fn cut(&mut self, len: usize) {
@@ -653,6 +702,7 @@ impl<T> Table<T> {
         self.free -= self.entries.len() - len;
         self.entries.truncate(len);
         self.colors.truncate(len);
+        self.cards.truncate(len.div_ceil(CARD));
     }
     /// Give back what the table holds beyond twice its entries, or FLOOR:
     /// a reserved table, past what the next BUDGET allocations will touch.
@@ -747,6 +797,7 @@ impl<T> Table<T> {
         }
         self.colors.clear();
         self.colors.extend_from_slice(&colors);
+        self.cards = vec![0; end.div_ceil(CARD)];
         (self.cursor, self.free, self.quarantined, self.marking, self.sticky) = (0, free, 0, false, 0);
         self.generation += 1;
         self.barrier = Barrier::default();
@@ -756,7 +807,8 @@ impl<T> Table<T> {
         if n == 0 {
             return;
         }
-        // Colours for them first, whatever FILLER does (`store_at`).
+        // Cards and colours for them first, whatever FILLER does (`store_at`).
+        self.cards.resize((self.entries.len() + n).div_ceil(CARD), 0);
         self.colors.resize(self.entries.len() + n, FREE);
         self.entries.splice(0..0, std::iter::repeat_with(filler).take(n));
         self.dense();
@@ -767,6 +819,8 @@ impl<T> Table<T> {
         // Never shorter than the entries on the way (`store_at`).
         self.colors.resize(self.entries.len(), OLD | IN_USE);
         self.colors.fill(OLD | IN_USE);
+        self.cards.resize(self.entries.len().div_ceil(CARD), 0);
+        self.cards.fill(0);
         (self.cursor, self.free, self.quarantined, self.marking, self.sticky) = (self.entries.len(), 0, 0, false, 0);
         self.generation += 1;
         self.barrier = Barrier::default();
@@ -778,27 +832,48 @@ impl<T> Table<T> {
     /// and read as it does the young; being roots, all survive, and the
     /// sweep leaves them old again. No other colour is written. A minor that
     /// ends any other way promotes everything (`Vm::promote_all`), which
-    /// ages them again. A word of eight colours with none dirty is passed at
-    /// one test.
+    /// ages them again. Only the set cards are looked at (`touched`), and in
+    /// them a word of eight colours with none dirty is passed at one test.
     pub(crate) fn read_again(&mut self) -> Vec<usize> {
         let mut again = Vec::new();
-        let len = self.entries.len();
-        let colors = &mut self.colors[..len];
-        let mut look = |colors: &mut [u8], i: usize| {
-            let color = &mut colors[i];
-            if *color & (IN_USE | OLD | DIRTY) == (IN_USE | OLD | DIRTY) {
-                *color = recorded(*color) & !OLD;
-                again.push(i);
+        for run in self.touched() {
+            let colors = &mut self.colors[run.clone()];
+            for (w, word) in colors.chunks_mut(8).enumerate() {
+                if word.iter().all(|&color| color & DIRTY == 0) { continue; }
+                for (k, color) in word.iter_mut().enumerate() {
+                    if *color & (IN_USE | OLD | DIRTY) == (IN_USE | OLD | DIRTY) {
+                        *color = recorded(*color) & !OLD;
+                        again.push(run.start + w * 8 + k);
+                    }
+                }
             }
-        };
-        let dirty = LOW_BITS * u64::from(DIRTY);
-        let words = len / 8;
-        for w in 0..words {
-            let word = u64::from_le_bytes(colors[w * 8..w * 8 + 8].try_into().expect("eight colours"));
-            if word & dirty != 0 { for i in w * 8..w * 8 + 8 { look(colors, i); } }
         }
-        for i in words * 8..len { look(colors, i); }
         again
+    }
+    /// The entries of the set cards, in runs of whole cards (the last cut
+    /// at the table's end): all of the table a minor reads or sweeps.
+    pub(crate) fn touched(&self) -> Vec<std::ops::Range<usize>> {
+        let len = self.entries.len();
+        let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+        for (card, _) in self.cards.iter().enumerate().filter(|&(_, &set)| set != 0) {
+            let range = card * CARD..((card + 1) * CARD).min(len);
+            if range.is_empty() { break; }
+            match runs.last_mut() {
+                Some(run) if run.end == range.start => run.end = range.end,
+                _ => runs.push(range),
+            }
+        }
+        runs
+    }
+    /// Under verify, at a minor's start: every entry in use outside a set
+    /// card is exactly old and clean, which is what lets a minor pass the
+    /// card unread. A store or an allocation that set no card fails here.
+    pub(crate) fn check_cards(&self, table: &str) {
+        for (i, &color) in self.colors[..self.entries.len()].iter().enumerate() {
+            if self.cards[i / CARD] == 0 && color & IN_USE != 0 {
+                assert!(color & (OLD | DIRTY | MARK) == OLD, "{table} entry {i} is young or dirty (colour {color:#x}) outside a set card");
+            }
+        }
     }
     /// The entries in use that the mark standing did not reach and WANTED
     /// accepts: the dead, before their sweep.
@@ -815,6 +890,8 @@ impl<T> Table<T> {
             let (Some(color), Some(entry)) = (colors.get_mut(i), entries.get(i)) else { continue };
             if *color & (IN_USE | OLD) == (IN_USE | OLD) && whole(entry) {
                 *color &= !OLD;
+                // Young for this collection: its sweep must meet it.
+                self.cards[i / CARD] = 1;
                 again.push(i);
             }
         }
@@ -832,6 +909,7 @@ impl<T> Table<T> {
         for color in &mut self.colors {
             if *color & IN_USE != 0 { *color = survivor(recorded(*color)); }
         }
+        self.cards.fill(0);
         self.sticky = 0;
         self.barrier = Barrier::default();
     }
@@ -852,6 +930,7 @@ impl<T> Table<T> {
                 *color = OLD | IN_USE | if remembered(entry) { REMEMBERED } else { PERMANENT };
             }
         }
+        self.cards.fill(0);
     }
     /// A full's roots in the image: every remembered entry, a permanent one
     /// stored into since the last collection first made so. A word of eight
@@ -964,7 +1043,7 @@ mod tests {
         unsafe { t.raw(false) }
     }
     /// A sweep of all RAW sees, on the test's one thread.
-    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
+    pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> RangeSwept {
         // SAFETY: the whole table is this thread's, and the range starts at 0.
         unsafe { raw.sweep_range(0..raw.len(), quarantine, destroy) }
     }
@@ -1249,7 +1328,7 @@ mod tests {
         let raw = raw_of(&mut t);
         for i in (0..16).filter(|i| i % 2 == 0) { assert!(raw.claim(i)); }
         // The sweep, and no `swept': a collection stopped after its sweep.
-        assert_eq!(sweep_whole(&raw, false, |_, entry| *entry = u64::MAX).0, 8);
+        assert_eq!(sweep_whole(&raw, false, |_, entry| *entry = u64::MAX).freed, 8);
         assert_eq!(t.unused(), 0, "nothing counted yet");
         t.settle_old();
         assert!(t.settled() && t.marks().all(|marked| !marked));
@@ -1462,8 +1541,8 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        let (freed, last) = sweep_whole(&raw, false, |_, _| {});
-        t.swept(freed, last, false);
+        let swept = sweep_whole(&raw, false, |_, _| {});
+        t.swept(swept, false);
         assert!(!raw.holds(&t), "swept with every entry kept");
     }
 }
