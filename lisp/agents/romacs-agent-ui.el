@@ -495,7 +495,9 @@ what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     (when-let* ((child (romacs-agent-get (plist-get wake :id))))
+                     ;; A preview loads no session: a child loaded, or none.
+                     (when-let* ((child (if romacs-agent-ui--previewing (romacs-agent-loaded (plist-get wake :id))
+                                          (romacs-agent-get (plist-get wake :id)))))
                        (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
                    wakes)
          wakes)))
@@ -2603,6 +2605,10 @@ drawn once they are, or says it cannot be when they could not move."
                              (if preview ": a preview of its last turns, from its journal, meanwhile\n" "\n"))
                      'face 'romacs-agent-placeholder 'romacs-agent-moving t))))))
 
+(defvar romacs-agent-ui--previewing nil
+  "Non-nil while a chat's preview is drawn (`romacs-agent-ui--preview'):
+what it draws loads no session.")
+
 (defconst romacs-agent-ui--preview-seconds 1.0
   "The most a chat waiting for its records' move spends drawing their
 journal's tail meanwhile (`romacs-agent-ui--preview'): past it, the row
@@ -2622,11 +2628,14 @@ nothing to draw or it would take past `romacs-agent-ui--preview-seconds'."
     (or (catch 'romacs-agent-ui--past-deadline
           ;; Its tail's start, nil for the journal's own: only when all of
           ;; it is within the tail's bytes, else nothing is read.
-          (let ((tail (romacs-agent--journal-tail session (or romacs-agent-ui--turns 20)))
-                (size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)))
+          ;; Its journal as it is now, read as a file however its records
+          ;; move meanwhile: its size taken once, the tail and the read to it.
+          (let* ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
+                 (tail (romacs-agent--journal-file-tail session (or romacs-agent-ui--turns 20) size nil nil)))
+            (when (> (float-time) deadline) (throw 'romacs-agent-ui--past-deadline nil))
             (when (and (> (or (cdr tail) 0) 0)
                        (or (car tail) (<= size romacs-agent-journal-tail-bytes)))
-              (romacs-agent-ui--replay-from session (car tail) nil deadline)
+              (romacs-agent-ui--replay-from session (car tail) size deadline)
               t)))
         ;; Not drawn whole: none of it kept, nor what it set of the chat's.
         (progn (let ((inhibit-read-only t)) (delete-region start romacs-agent-ui--end))
@@ -2665,11 +2674,11 @@ the row that said they were moving.  An edit to no undo."
        (let ((inhibit-read-only t))
          (save-excursion
            (goto-char (point-min))
-           (if-let* ((found (text-property-search-forward 'romacs-agent-moving t t)))
-               (progn (delete-region (prop-match-beginning found) (prop-match-end found))
-                      ;; In its place, above the preview it heads.
-                      (romacs-agent-ui--insert-at (prop-match-beginning found) (romacs-agent-ui--not-moved-row)))
-             (romacs-agent-ui--moved-here session))))))))
+           ;; Its waiting row, in its place, above the preview it heads;
+           ;; none, another wait of this chat said it already.
+           (when-let* ((found (text-property-search-forward 'romacs-agent-moving t t)))
+             (delete-region (prop-match-beginning found) (prop-match-end found))
+             (romacs-agent-ui--insert-at (prop-match-beginning found) (romacs-agent-ui--not-moved-row)))))))))
 
 (defun romacs-agent-ui--replay-rows (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns as kept drawn, under
@@ -2949,6 +2958,7 @@ manifest), and past DEADLINE it throws `romacs-agent-ui--past-deadline'."
   ;; A copy parses, so the live session's own state is not replayed over.
   (unless (and from end (>= from end))
     (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t)
+          (romacs-agent-ui--previewing (and deadline t))
           (romacs-agent--manifest-frozen (and deadline t)))
       (cl-flet ((due () (when (and deadline (> (float-time) deadline)) (throw 'romacs-agent-ui--past-deadline nil))))
         (let ((romacs-agent-event-functions
@@ -2963,11 +2973,16 @@ manifest), and past DEADLINE it throws `romacs-agent-ui--past-deadline'."
                          ;; follows a replay (`romacs-agent-show').
                          (romacs-agent-ui--track-children session event))
                        (romacs-agent-ui--render (if deadline scratch session) event)))))
-          (romacs-agent--read-journal session (lambda (record) (due) (romacs-agent--record scratch record)) from end))
+          (if deadline
+              ;; A preview reads the journal as it found it, whatever moves
+              ;; to the store meanwhile.
+              (romacs-agent--read-journal-file session (lambda (record) (due) (romacs-agent--record scratch record)) from end nil)
+            (romacs-agent--read-journal session (lambda (record) (due) (romacs-agent--record scratch record)) from end)))
         (due)))
     ;; A turn its records leave running goes on in its run; any other run
     ;; is done.
-    (unless (romacs-agent-ui--running-p) (romacs-agent-ui--run-settle))))
+    (unless (romacs-agent-ui--running-p) (romacs-agent-ui--run-settle))
+    (when (and deadline (> (float-time) deadline)) (throw 'romacs-agent-ui--past-deadline nil))))
 
 (defun romacs-agent-ui--later-p (name)
   "Whether a call of tool NAME draws its row's end without its output:

@@ -124,6 +124,27 @@ in a store of its own."
             (should (< (string-search "could not move" (buffer-string)) (string-search "say 2" (buffer-string)))))
           (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-no-journal-a-preview-writes-no-manifest ()
+  ;; A record a preview reads would have the session's manifest written (a
+  ;; harness naming another conversation): read for the view alone, it
+  ;; writes nothing.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let* ((manifest (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+      (let ((coding-system-for-write 'utf-8-unix))
+        (write-region (concat (romacs-agent--json (romacs-mcp--object "out" (romacs-mcp--object "type" "system" "subtype" "init"
+                                                                                                "session_id" "another-conversation")
+                                                                      "seq" 7 "t" 7.0))
+                              "\n")
+                      nil journal t 'silent))
+      (let ((before (with-temp-buffer (insert-file-contents manifest) (buffer-string))))
+        (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore))
+          (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+            (should (string-search "a preview of its last turns" (with-current-buffer buffer (buffer-string))))
+            (kill-buffer buffer)))
+        (should (equal (with-temp-buffer (insert-file-contents manifest) (buffer-string)) before))))))
+
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the
   ;; session loads (a watcher's, not a command's), and drawn again once
