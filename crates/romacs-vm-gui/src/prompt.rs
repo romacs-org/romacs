@@ -87,6 +87,10 @@ pub struct GuiHost {
     pub processes: Vec<(std::os::fd::RawFd, i16)>,
 }
 
+/// Whether EVENT closes the window.
+#[must_use]
+pub fn closes(event: &InputEvent) -> bool { matches!(classify(event), Some(HostEvent::Closed)) }
+
 /// What one transport event means to a waiting prompt. By reference: a
 /// tracked event's receipt must not be cloned or dropped here, only consumed
 /// with the event itself.

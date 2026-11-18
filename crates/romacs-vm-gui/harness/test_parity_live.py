@@ -1,5 +1,7 @@
 """Focused harness tests; no Cargo build or ambient compositor required."""
+import tempfile
 import unittest
+from pathlib import Path
 
 import layout_journey_live
 import parity_live
@@ -30,6 +32,31 @@ class KeyTests(unittest.TestCase):
         self.assertEqual(counts, [1, 1, 3, 1, 1])
         for group in layout_journey_live.DOWN + layout_journey_live.KEYS:
             self.assertGreater(parity_live.inputs(group), 0, group)
+
+
+class StartupFailedTests(unittest.TestCase):
+    def test_a_stopped_startup_is_found_in_whole_lines_read_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            engine = parity_live.Engine('romacs', [], Path(root), None, {}, 1)
+            log = Path(root) / 'engine.log'
+            log.write_bytes(b'romacs-world: {}\nromacs: evaluator st')
+            self.assertIsNone(engine.startup_failed(), 'a line not yet whole')
+            with log.open('ab') as more:
+                more.write(b'opped: x.el: No such file\nromacs-exit: {}\n')
+            self.assertEqual(engine.startup_failed(), 'romacs: evaluator stopped: x.el: No such file')
+            self.assertEqual(engine.log_read, log.stat().st_size)
+            log.write_bytes(b'')
+            self.assertEqual(engine.startup_failed(), 'romacs: evaluator stopped: x.el: No such file', 'kept once found')
+
+    def test_a_launcher_s_session_log_is_read_once_it_is_made(self):
+        with tempfile.TemporaryDirectory() as root:
+            engine = parity_live.Engine('romacs', [], Path(root), None, {}, 1)
+            engine.editor_log = 'home/sessions/*/stderr.log'
+            self.assertIsNone(engine.startup_failed(), 'no session yet')
+            session = Path(root) / 'home/sessions/s1'
+            session.mkdir(parents=True)
+            (session / 'stderr.log').write_bytes(b'romacs: evaluator stopped: y.el: gone\n')
+            self.assertEqual(engine.startup_failed(), 'romacs: evaluator stopped: y.el: gone')
 
 
 if __name__ == '__main__':

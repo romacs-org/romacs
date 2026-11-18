@@ -38,6 +38,14 @@ const CAP: f64 = 0.97;
 const FIRST_GUESS: f64 = 4.0;
 /// The bar's width at most, in columns.
 const BAR: usize = 48;
+/// The words over the bar once startup failed.
+const FAILED: &str = "Startup failed";
+/// The rows a failed startup's error shows at most.
+const ERROR_ROWS: usize = 8;
+/// A failed step's colour.
+const FAILED_COLOUR: u32 = 0x00ff_5f59;
+/// The stage of the step a failed startup was at.
+const FAILED_STAGE: &str = "failed";
 
 /// One launch's events in order: each key (a stage, `#N` after it when it
 /// came N times) and its time in seconds since the screen began.
@@ -98,6 +106,8 @@ struct Report {
     label: String,
     /// The steps that count, in the order they first spoke.
     steps: Vec<Step>,
+    /// When startup failed, in seconds since the screen began, and why.
+    failed: Option<(f64, String)>,
 }
 
 static REPORT: Mutex<Option<Report>> = Mutex::new(None);
@@ -108,7 +118,7 @@ fn report() -> std::sync::MutexGuard<'static, Option<Report>> {
 
 impl Report {
     fn new(expected: Profile) -> Self {
-        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned(), steps: vec![] }
+        Self { began: Instant::now(), expected, seen: vec![], counts: HashMap::new(), label: "Opening the world".to_owned(), steps: vec![], failed: None }
     }
 
     /// STAGE reached, now at LABEL (empty: the words stay); a step that
@@ -128,6 +138,21 @@ impl Report {
             }
         }
     }
+
+    /// Startup failed with ERROR: the step it was at fails, and the bar
+    /// stops where it was.
+    fn fail(&mut self, error: &str) {
+        let at = std::mem::replace(&mut self.label, FAILED.to_owned());
+        self.step(FAILED_STAGE, &at, None, true);
+        self.failed = Some((self.began.elapsed().as_secs_f64(), error.to_owned()));
+    }
+
+    /// What the screen says now.
+    fn now(&self) -> Now {
+        let elapsed = self.failed.as_ref().map_or_else(|| self.began.elapsed().as_secs_f64(), |(at, _)| *at);
+        Now { label: self.label.clone(), filled: fraction(&self.expected, &self.seen, elapsed), steps: self.steps.clone(),
+              error: self.failed.as_ref().map(|(_, error)| error.clone()) }
+    }
 }
 
 /// Startup reached STAGE, now at LABEL (empty: the words stay).  Nothing
@@ -138,6 +163,12 @@ pub fn step(stage: &str, label: &str) { step_counted(stage, label, None, false);
 /// whether a screen showed it.
 pub fn step_counted(stage: &str, label: &str, count: Option<(u64, u64)>, failed: bool) -> bool {
     report().as_mut().map(|report| report.step(stage, label, count, failed)).is_some()
+}
+
+/// Startup failed with ERROR: the screen shows the step it was at failed,
+/// ERROR under it, and its bar stopped.  Nothing when no screen shows.
+pub fn fail(error: &str) {
+    if let Some(report) = report().as_mut() { report.fail(error); }
 }
 
 /// What a finished startup phase (`startup::mark_phase`) leads to next,
@@ -170,6 +201,8 @@ struct Now {
     /// The bar, 0 to 1.
     filled: f64,
     steps: Vec<Step>,
+    /// Why startup failed, once it did.
+    error: Option<String>,
 }
 
 impl Now {
@@ -177,15 +210,13 @@ impl Now {
     /// bar at the same cell.
     fn looks_like(&self, next: &Self) -> bool {
         let cells = |f: f64| (f * BAR as f64).round() as usize;
-        self.label == next.label && self.steps == next.steps && cells(self.filled) == cells(next.filled)
+        self.label == next.label && self.steps == next.steps && self.error == next.error && cells(self.filled) == cells(next.filled)
     }
 }
 
-/// The words, the bar and the counting steps now.
+/// The words, the bar, the counting steps and a failure's error now.
 fn view() -> Option<Now> {
-    report().as_ref().map(|r| Now {
-        label: r.label.clone(), filled: fraction(&r.expected, &r.seen, r.began.elapsed().as_secs_f64()), steps: r.steps.clone(),
-    })
+    report().as_ref().map(Report::now)
 }
 
 /// The user's Romacs state directory's profile of launches.
@@ -252,20 +283,47 @@ struct Shown<'a> {
     filled: f64,
     /// A line each, under the bar.
     steps: &'a [Step],
+    /// Why startup failed, under the steps.
+    error: Option<&'a str>,
+}
+
+/// TEXT in rows of at most WIDTH characters, its own lines kept, and at
+/// most ROWS of them: the last of rows cut short ends in an ellipsis.
+fn wrapped(text: &str, width: usize, rows: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut all = text.lines().flat_map(|line| {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() { vec![String::new()] } else { chars.chunks(width).map(|row| row.iter().collect()).collect() }
+    });
+    let mut kept: Vec<String> = all.by_ref().take(rows).collect();
+    if all.next().is_some() && let Some(last) = kept.last_mut() {
+        if last.chars().count() >= width { last.pop(); }
+        last.push('…');
+    }
+    kept
 }
 
 /// SHOWN in a WIDTH by HEIGHT window of CELL (line height, character
 /// width) cells: the logo, and under it the words over the bar.
 fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &Shown<'_>) -> FrameSnapshot {
-    let Shown { t, scale, label, filled, steps } = *shown;
+    let Shown { t, scale, label, filled, steps, error } = *shown;
     let (line, char_width) = (cell.0.max(1), cell.1.max(1));
     let (columns, lines) = ((width / char_width) as usize, (height / line) as usize);
+    let cols = columns.saturating_sub(1).clamp(1, 400);
+    // A failure's words come first: when the other steps leave no row for
+    // its error, only the step it was at shows; its error gets the rows
+    // the words and the bar leave, and the logo only rows left over.
+    let fits = error.is_none() || lines >= 3 + steps.len();
+    let steps: Vec<&Step> = steps.iter().filter(|step| fits || step.stage == FAILED_STAGE).collect();
+    let error_rows = ERROR_ROWS.min(lines.saturating_sub(2 + steps.len()).max(1));
+    let error = error.map(|error| wrapped(error, cols.saturating_sub(4), error_rows)).unwrap_or_default();
+    let room = lines.saturating_sub(5 + steps.len() + error.len());
     let view = romacs_logo::View {
-        cols: columns.saturating_sub(1).clamp(1, 400),
-        rows: ((lines.saturating_sub(5 + steps.len()) as f64 * scale) as usize).clamp(1, 200),
+        cols,
+        rows: ((room as f64 * scale) as usize).clamp(1, 200),
         cell_aspect: (f64::from(char_width) / f64::from(line)).clamp(0.05, 2.0),
     };
-    let cells = romacs_logo::frame(view, t);
+    let cells = if room > 0 || error.is_empty() { romacs_logo::frame(view, t) } else { Vec::new() };
     // A face per colour, like the default one.
     let mut faces = vec![face.clone()];
     let mut face_runs: Vec<FaceRun> = vec![];
@@ -288,7 +346,8 @@ fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &
         at = end;
     }
     let centred = |text_width: usize| " ".repeat(view.cols.saturating_sub(text_width) / 2);
-    let mut utf8 = format!("{}\n\n{}{label}\n", romacs_logo::text(&cells, view.cols), centred(label.chars().count()));
+    let logo = if cells.is_empty() { String::new() } else { format!("{}\n\n", romacs_logo::text(&cells, view.cols)) };
+    let mut utf8 = format!("{logo}{}{label}\n", centred(label.chars().count()));
     let bar = BAR.min(view.cols.saturating_sub(4)).max(1);
     let full = ((filled.clamp(0.0, 1.0) * bar as f64).round() as usize).min(bar);
     utf8.push_str(&centred(bar));
@@ -302,7 +361,7 @@ fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &
     run(&mut face_runs, rest..utf8.len(), dim);
     // Each counting step: its words over a bar of its own, or its failure.
     let short = (bar / 3).max(4);
-    for step in steps {
+    for step in &steps {
         let line = match (step.failed, step.count) {
             (true, _) => format!("✗ {}", step.label),
             (false, Some((done, of))) => {
@@ -315,7 +374,14 @@ fn snapshot(face: &Face, (width, height): (u32, u32), cell: (u32, u32), shown: &
         utf8.push_str(&centred(line.chars().count()));
         let start = utf8.len();
         utf8.push_str(&line);
-        if step.failed { run(&mut face_runs, start..utf8.len(), handle(&mut faces, rgb(0xff5f59))); }
+        if step.failed { run(&mut face_runs, start..utf8.len(), handle(&mut faces, rgb(FAILED_COLOUR))); }
+    }
+    // Why startup failed: a block, centred as one.
+    let block = centred(error.iter().map(|row| row.chars().count()).max().unwrap_or(0));
+    for row in &error {
+        utf8.push('\n');
+        utf8.push_str(&block);
+        utf8.push_str(row);
     }
     FrameSnapshot {
         font_selection: Default::default(), font_alternatives: Default::default(), fontsets: Default::default(), no_font: Default::default(), width, height,
@@ -352,7 +418,8 @@ pub fn start(sender: Arc<PaintSender>, width: u32, height: u32, profile: Option<
             let scale = scales.entry((width, height)).or_insert(1.0);
             let mut tries = 0;
             loop {
-                let screen = snapshot(&face, (width, height), cell, &Shown { t, scale: *scale, label: &now.label, filled: now.filled, steps: &now.steps });
+                let screen = snapshot(&face, (width, height), cell, &Shown { t, scale: *scale, label: &now.label, filled: now.filled, steps: &now.steps,
+                                                                              error: now.error.as_deref() });
                 let length = screen.windows[0].snapshot.text.utf8.len();
                 let (frame, ends) = engine.layout_frame(&screen, presentation, None)?;
                 tries += 1;
@@ -460,7 +527,7 @@ mod tests {
         let face = romacs_vm::Vm::new().display_default_face().expect("a default face");
         let steps = [Step { stage: "agents".into(), label: "Agents".into(), count: Some((3, 12)), failed: false },
                      Step { stage: "restore".into(), label: "Restoring buffers".into(), count: None, failed: true }];
-        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: "Loading your init: org", filled: 0.5, steps: &steps });
+        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: "Loading your init: org", filled: 0.5, steps: &steps, error: None });
         let text = &frame.windows[0].snapshot.text.utf8;
         assert!(text.contains("Loading your init: org"));
         let short = (BAR / 3).max(4);
@@ -469,10 +536,69 @@ mod tests {
         assert_eq!(text.matches('─').count(), BAR - BAR / 2 + short - agents_lit);
         assert!(text.contains("Agents") && text.contains("3/12") && text.contains("✗ Restoring buffers"));
         let cell = romacs_layout::LayoutEngine::new().unwrap().frame_metrics(&face).unwrap();
+        let long = format!("{}\n{}", "e".repeat(600), "f".repeat(20));
         for (width, height) in [(1280, 900), (800, 600), (1600, 1000), (640, 1400)] {
-            let frame = snapshot(&face, (width, height), cell, &Shown { t: 0.0, scale: 1.0, label: "x", filled: 0.0, steps: &[] });
-            let rows = frame.windows[0].snapshot.text.utf8.lines().count();
-            assert!(rows as u32 * cell.0 <= height, "{width}x{height}: {rows} rows of {} px", cell.0);
+            for (steps, error) in [(&[][..], None), (&steps[..], Some(long.as_str()))] {
+                let frame = snapshot(&face, (width, height), cell, &Shown { t: 0.0, scale: 1.0, label: "x", filled: 0.0, steps, error });
+                let rows = frame.windows[0].snapshot.text.utf8.lines().count();
+                assert!(rows as u32 * cell.0 <= height, "{width}x{height}: {rows} rows of {} px", cell.0);
+            }
         }
+    }
+
+    #[test]
+    fn a_failed_startup_says_where_and_why_and_its_bar_stops() {
+        let mut report = Report::new(Profile::default());
+        report.phase("world-restored");
+        let first = report.now();
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(report.now().filled > first.filled, "a first launch's bar moves with the clock");
+        report.fail("lisp/session/romacs-loadup-bootstrap.el: No such file or directory");
+        let failed = report.now();
+        assert_eq!(failed.label, FAILED);
+        assert_eq!(failed.steps, [Step { stage: FAILED_STAGE.into(), label: "Starting Lisp".into(), count: None, failed: true }]);
+        assert_eq!(failed.error.as_deref(), Some("lisp/session/romacs-loadup-bootstrap.el: No such file or directory"));
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(report.now(), failed, "nothing moves once startup failed");
+        let face = romacs_vm::Vm::new().display_default_face().expect("a default face");
+        let frame = snapshot(&face, (800, 600), (20, 10), &Shown { t: 0.0, scale: 1.0, label: &failed.label, filled: failed.filled,
+                                                                   steps: &failed.steps, error: failed.error.as_deref() });
+        let text = &frame.windows[0].snapshot.text.utf8;
+        let (failed_at, error_at) = (text.find("✗ Starting Lisp").expect("the failed step"), text.find("lisp/session/").expect("the error"));
+        assert!(text.contains(FAILED) && failed_at < error_at, "{text}");
+        let red = frame.windows[0].snapshot.faces.iter().position(|f| f.foreground == rgb(FAILED_COLOUR)).expect("a red face");
+        let red = FaceHandle(u32::try_from(red).expect("a face index"));
+        assert!(frame.windows[0].snapshot.text.face_runs.iter().any(|run| run.face == red
+            && text[run.bytes.clone()] == *"✗ Starting Lisp"), "the failed step is red");
+    }
+
+    #[test]
+    fn a_short_window_shows_a_failure_s_words_before_the_logo() {
+        let face = romacs_vm::Vm::new().display_default_face().expect("a default face");
+        let cell = romacs_layout::LayoutEngine::new().unwrap().frame_metrics(&face).unwrap();
+        let steps = [Step { stage: "agents".into(), label: "Agents".into(), count: Some((3, 12)), failed: false },
+                     Step { stage: "init".into(), label: "Loading your init".into(), count: None, failed: true },
+                     Step { stage: FAILED_STAGE.into(), label: "Starting Lisp".into(), count: None, failed: true }];
+        let error = format!("{}\nNo such file or directory", "x".repeat(300));
+        for lines in [4, 5, 8, 10] {
+            let height = lines * cell.0;
+            let frame = snapshot(&face, (800, height), cell, &Shown { t: 0.0, scale: 1.0, label: FAILED, filled: 0.1, steps: &steps,
+                                                                     error: Some(&error) });
+            let text = &frame.windows[0].snapshot.text.utf8;
+            let rows = text.lines().count();
+            assert!(u32::try_from(rows).expect("rows") * cell.0 <= height, "{lines} lines: {rows} rows\n{text}");
+            assert!(text.trim_start().starts_with(FAILED), "no logo above the words: {text}");
+            assert!(text.contains("✗ Starting Lisp") && text.contains("xxx"), "{lines} lines: {text}");
+            assert_eq!(text.contains("Agents"), lines >= 6, "{lines} lines: the other steps, where they fit: {text}");
+            assert_eq!(text.contains("Loading your init"), lines >= 6, "{lines} lines: an earlier failed step too: {text}");
+        }
+    }
+
+    #[test]
+    fn an_error_wraps_to_the_screen_and_stops_at_its_rows() {
+        assert_eq!(wrapped("abcdef\n\nxyz", 4, 8), ["abcd", "ef", "", "xyz"]);
+        assert_eq!(wrapped(&"x".repeat(25), 10, 2), ["x".repeat(10), format!("{}…", "x".repeat(9))]);
+        assert_eq!(wrapped("ab\ncd\nef", 4, 2), ["ab", "cd…"]);
+        assert_eq!(wrapped("abc", 0, 8), ["a", "b", "c"]);
     }
 }

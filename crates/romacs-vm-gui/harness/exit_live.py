@@ -23,6 +23,17 @@ summariser, summarises them.
   compositor  the session's compositor killed (SIGKILL): the session ends
               with status 1, stderr saying `romacs-exit' with the reason
               display-lost.
+  startup-failed  a session whose GNU Lisp chain has no bootstrap file
+              (ROMACS_LISP_DIR, a tree of links without it), so its
+              startup fails: the launch screen stays, saying "Startup
+              failed" over the step that failed, red, and the error under
+              it, until the window is closed (Alt+F4): status 1, stderr
+              saying `romacs-exit' with the reason evaluator-error and the
+              file.  Always the binary itself, without a world.
+  startup-failed-server  the same as a server whose client asked for its
+              window at its start (--serve NAME --serve-frame): the
+              window it asked for shows the same screen, and the same
+              close ends it.
 
 usage: exit_live.py --romacs BIN --output DIR [--workflow NAME]...
                    [--launcher LAUNCHER --launcher-runtime REL --launcher-sessions REL [--sessions SUMMARISER]]
@@ -38,6 +49,9 @@ import time
 
 import parity_live
 from parity_live import C, K, M, T, Engine, lisp_string, plist, prepare_world, private_tree, wait
+
+# The GNU chain's first file (lisp/session/): without it no Lisp starts.
+BOOTSTRAP = 'romacs-loadup-bootstrap.el'
 
 INIT = ''';; -*- lexical-binding: t -*-
 (setq inhibit-startup-screen t initial-scratch-message nil)
@@ -85,13 +99,40 @@ def start(args, base, name):
         env['ROMACS_USAGE_LOG'] = str(root / 'usage.jsonl')
         argv = [args.romacs, '--loadup']
     prepare_world(args.romacs, env, root / 'work')
-    engine = Engine('romacs', argv, root, None, env, args.timeout).start(args.tools)
+    engine = Engine('romacs', argv, root, None, env, args.timeout)
+    if args.launcher:
+        # The launcher keeps the editor's stderr in the session's directory.
+        engine.editor_log = str((home / args.launcher_sessions).relative_to(root) / '*' / 'stderr.log')
+    engine.start(args.tools)
     # Keys typed before the window has the keyboard are lost.
     ready(engine, '(eq (frame-focus-state) t)', 'focus')
     if args.launcher:
         session = next((home / args.launcher_sessions).glob('*/'))
         return engine, session / 'stderr.log', session / 'usage.jsonl'
     return engine, root / 'engine.log', root / 'usage.jsonl'
+
+
+def start_failed(args, base, name, serve=()):
+    """A session for workflow NAME whose startup fails: its Lisp tree is
+    this checkout's but for the chain's bootstrap file, launched with
+    SERVE's arguments too.  Nothing waits for an init, which never runs."""
+    root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
+    lisp = root / 'lisp'
+    (lisp / 'session').mkdir(parents=True)
+    for entry in (parity_live.ROOT / 'lisp').iterdir():
+        if entry.name != 'session':
+            (lisp / entry.name).symlink_to(entry)
+    for entry in (parity_live.ROOT / 'lisp/session').iterdir():
+        if entry.name != BOOTSTRAP:
+            (lisp / 'session' / entry.name).symlink_to(entry)
+    env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_WORLD='off', ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
+    engine = Engine('romacs', [args.romacs, '--loadup', *serve], root, None, env, args.timeout)
+    try:
+        engine.spawn(args.tools)
+    except Exception:
+        engine.stop()
+        raise
+    return engine, root / 'engine.log', None
 
 
 def exit_line(log):
@@ -154,7 +195,41 @@ def run_compositor(engine, stderr, usage):
     return checks, {'status': status, 'exit': line}
 
 
-WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor}
+def screen_text(engine):
+    """What the screen shows, read back (grim, tesseract)."""
+    shot = engine.root / 'screen.png'
+    subprocess.run([f'{engine.tools}/grim', str(shot)], env=engine.env, check=True, timeout=30, capture_output=True)
+    return subprocess.run([f'{engine.tools}/tesseract', str(shot), '-'], capture_output=True, text=True, timeout=60).stdout
+
+
+def run_startup_failed(engine, stderr, usage):
+    wait(engine.startup_failed, engine.timeout, 'the failed startup', engine.process)
+
+    # The window shows once the display has started, which may be after the error.
+    def shown():
+        text = screen_text(engine)
+        return text if 'Startup failed' in text else None
+    screen = wait(shown, engine.timeout, 'the failed startup shown', engine.process, 1)
+    time.sleep(2)
+    held = engine.process.poll() is None
+    engine.keys(M('F4'))
+    status = ended(engine)
+    line = exit_line(stderr)
+    checks = {
+        'the window outlives the error': held,
+        'the screen says at which step the startup failed': 'Starting Lisp' in screen,
+        'and why': 'No such file or directory' in screen,
+        'closed: status 1': status == 1,
+        'romacs-exit evaluator-error naming the file': bool(line) and line['reason'] == 'evaluator-error'
+            and line['status'] == 1 and BOOTSTRAP in line['detail'],
+    }
+    return checks, {'status': status, 'exit': line, 'screen': screen}
+
+
+WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor, 'startup-failed': run_startup_failed,
+             'startup-failed-server': run_startup_failed}
+STARTS = {'startup-failed': start_failed,
+          'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame'))}
 
 
 def main():
@@ -181,7 +256,7 @@ def main():
         report['workflows'].append(entry)
         engine = None
         try:
-            engine, stderr, usage = start(args, Path(args.work), name)
+            engine, stderr, usage = STARTS.get(name, start)(args, Path(args.work), name)
             checks, entry['observed'] = WORKFLOWS[name](engine, stderr, usage)
             entry['checks'] = checks
             if args.launcher and args.sessions:
