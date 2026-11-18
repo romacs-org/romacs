@@ -15,12 +15,10 @@
 
 (defmacro romacs-agent-no-journal-tests--with (&rest body)
   "BODY with `session', a Claude session of two turns, its journal written,
-in a store of its own, a preview's budget unbounded; journals moved in
-the background, as these tests' chats wait for that move."
+in a store of its own, a preview's budget unbounded."
   (declare (indent 0))
   `(romacs-agent-test-with-store
      (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
-            (romacs-agent-store-background t)
             (romacs-agent-event-functions nil)
             ;; No real time: a preview is drawn whatever the host's load,
             ;; its budget tested by the tests that set it, on a stubbed clock.
@@ -55,57 +53,6 @@ the background, as these tests' chats wait for that move."
   (let ((buffer (romacs-agent-ui--make-chat session)))
     (with-current-buffer buffer (romacs-agent-ui--fill buffer))
     buffer))
-
-(ert-deftest romacs-agent-no-journal-read-as-it-is-with-no-background-move ()
-  ;; Nothing moved in the background: its chat draws its last turns from
-  ;; its journal at once, no move waited for or said.
-  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (romacs-agent-no-journal-tests--with
-    (let ((romacs-agent-store-background nil) (waits nil))
-      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
-        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
-          (with-current-buffer buffer
-            (should (string-search "say 1" (buffer-string)))
-            (should (string-search "say 2" (buffer-string)))
-            (should-not (string-search "store" (buffer-string))))
-          (should-not waits)
-          (kill-buffer buffer))))))
-
-(ert-deftest romacs-agent-no-journal-earlier-turns-go-past-the-tail ()
-  ;; Read from its journal: earlier turns asked for by hand are found
-  ;; however far back they go, not the tail's bytes again.
-  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (romacs-agent-no-journal-tests--with
-    (let ((romacs-agent-store-background nil)
-          (romacs-agent-chat-turns 1)
-          ;; The tail's bytes: its last turn's alone.
-          (romacs-agent-journal-tail-bytes 400))
-      (let ((buffer (romacs-agent-no-journal-tests--chat session)))
-        (with-current-buffer buffer
-          (should (string-search "say 2" (buffer-string)))
-          (should-not (string-search "say 1" (buffer-string)))
-          (romacs-agent-chat-earlier)
-          (should (string-search "say 1" (buffer-string)))
-          (should (string-search "say 2" (buffer-string))))
-        (kill-buffer buffer))
-      ;; Its last turn alone past the tail: said so, then drawn whole when
-      ;; asked for.
-      (let* ((romacs-agent-journal-tail-bytes 10)
-             (buffer (romacs-agent-no-journal-tests--chat session)))
-        (with-current-buffer buffer
-          (should (string-search "too long" (buffer-string)))
-          (should-not (string-search "say" (buffer-string)))
-          (romacs-agent-chat-earlier)
-          (should (string-search "say 2" (buffer-string)))
-          (should-not (string-search "too long" (buffer-string))))
-        (kill-buffer buffer))
-      ;; Every turn drawn (no count): within the tail's bytes still.
-      (let* ((romacs-agent-chat-turns nil)
-             (buffer (romacs-agent-no-journal-tests--chat session)))
-        (with-current-buffer buffer
-          (should (string-search "say 2" (buffer-string)))
-          (should-not (string-search "say 1" (buffer-string))))
-        (kill-buffer buffer)))))
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
   ;; Not moved yet: a row says so, the chat waits for the move

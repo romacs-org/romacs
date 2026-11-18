@@ -970,11 +970,6 @@ the writer to make the store it moves to.  Several are called in the
 order given."
   (let ((id (romacs-agent-id session)) (own (romacs-agent-events-own session)))
     (cond
-     ;; Nothing moved in the background: a journal too long to import
-     ;; here is read as it is (`romacs-agent--journal-pager').
-     ((and (not romacs-agent-store-background) (not (eq own 'queued)) (not (romacs-agent-events-p session))
-           (not (gethash id romacs-agent-events--migrating)))
-      (funcall then))
      ;; The store not readable here yet, early in a fresh start: a worker
      ;; moves it once the writer has made the store, so it waits for that
      ;; (`romacs-agent-events--store-readable'), not taken for unmovable.
