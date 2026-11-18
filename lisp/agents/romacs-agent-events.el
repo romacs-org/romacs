@@ -741,34 +741,41 @@ exits 1 when one failed."
     (kill-emacs (if (plist-get report :failed) 1 0))))
 
 (defun romacs-agent-events-migrate (&optional say)
-  "Move every recorded session still in a journal to SQLite, here:
-\(:migrated N :skipped IDS :failed IDS).  Each journal stays where it is,
-whole: no reader reads an imported session's journal (SQLite has its
-records), so it is a backup, and an editor still running reads it whole.
-A session whose supervisor runs (its lock held) is left in its journal,
-skipped.  SAY, when given, is called with a line for each skipped or
-failed one."
+  "Write every recorded session still in a journal into SQLite, here, as
+a worker's move does (`romacs-agent-events--migrate-one': its records
+staged, compacted, its turn rows filled), but not yet its own:
+\(:migrated N :skipped IDS :failed IDS).  An editor still running reads
+its journal as before; the next editor's start makes the staged records
+the sessions' own (`romacs-agent-events--flip-soon'), each loaded one
+told where it now is.  A session whose supervisor runs (its lock held) is
+left in its journal, skipped.  SAY, when given, is called with a line for
+each skipped or failed one."
+  (require 'romacs-agent-turns)
+  (require 'romacs-agent-ui)
   (romacs-agent-store--made)
   (let* ((db (or (romacs-agent-events--db) (error "No agents store to migrate to")))
          (say (or say #'ignore))
-         (imported (make-hash-table :test #'equal))
+         (imported (make-hash-table :test #'equal)) (staged (make-hash-table :test #'equal))
          (dirs nil) (migrated 0) (skipped nil) (failed nil))
     (dolist (row (sqlite-select db "select session from imported")) (puthash (car row) t imported))
+    (dolist (row (sqlite-select db "select session, size from staged")) (puthash (car row) (cadr row) staged))
     (dolist (dir (and (file-directory-p (romacs-agent--state-root))
                       (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
-      (when (and (not (gethash (file-name-nondirectory dir) imported))
-                 (file-exists-p (expand-file-name "journal.jsonl" dir)))
-        (push dir dirs)))
+      (let ((id (file-name-nondirectory dir))
+            (size (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir)))))
+        ;; Not its own yet, nor staged as its journal is now (a journal an
+        ;; editor wrote to since is staged again).
+        (when (and size (not (gethash id imported)) (not (eql (gethash id staged) size)))
+          (push dir dirs))))
     (let ((held (romacs-agent-events--supervised dirs)))
       (dolist (dir (nreverse dirs))
         (let ((id (file-name-nondirectory dir)))
           (if (gethash dir held)
               (progn (push id skipped) (funcall say (format "skipped %s" id)))
-            (condition-case err
-                (when (romacs-agent-events-import (romacs-agent--make :id id :dir dir) t)
-                  (cl-incf migrated))
-              (error (push id failed)
-                     (funcall say (format "failed %s: %s" id (error-message-string err)))))))))
+            (if (romacs-agent-events--migrate-job (list dir))
+                (cl-incf migrated)
+              (push id failed)
+              (funcall say (format "failed %s" id)))))))
     (list :migrated migrated :skipped (nreverse skipped) :failed (nreverse failed))))
 
 (defun romacs-agent-events--back-up-moved (ids)

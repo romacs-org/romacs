@@ -408,12 +408,18 @@ moment more under load."
          (should (member (format "skipped %s" id) said))
          (should (file-exists-p journal))
          (should-not (romacs-agent-events-p session))
-         ;; Let go: moved, its records its own, its journal left whole (a
-         ;; backup, and whole for an editor still reading it).
+         ;; Let go: its records written, staged, not yet its own (an editor
+         ;; still running reads its journal as before).
          (should (equal (romacs-agent-events-migrate) (list :migrated 1 :skipped nil :failed nil)))
-         (should (romacs-agent-events-p session))
+         (should-not (romacs-agent-events-p session))
          (should (file-exists-p journal))
-         (should (> (caar (sqlite-select (romacs-agent-events--db) "select count(*) from events where session = ?" (list id))) 0))
+         (should (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id)))
+         ;; Again, before an editor starts: staged as it is, passed over.
+         (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil)))
+         ;; The next editor's start makes them its own.
+         (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+           (romacs-agent-events--flip-soon (list id)))
+         (should (romacs-agent-events-p session))
          ;; Again: nothing to do.
          (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil))))))))
 
