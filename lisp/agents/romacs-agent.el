@@ -2031,12 +2031,17 @@ goes."
      ((plist-get (romacs-agent-driver-state session) :ready))
      (t
       (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :ready t))
-      ;; Ready between turns: idle, and the first message waiting goes.
-      (when (and (memq (romacs-agent-state session) '(starting running))
-                 (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))
-        (setf (romacs-agent-state session) 'idle)
-        (romacs-agent--changed session))
-      (when (romacs-agent-queue session) (romacs-agent--send-next session t))))))
+      ;; Ready between turns: the first message waiting goes; idle only
+      ;; when none went nor waits.  One written makes the session running
+      ;; as its record comes back: never idle meanwhile, a prompt in hand.
+      (let ((requests (romacs-agent-requests session)))
+        (when (romacs-agent-queue session) (romacs-agent--send-next session t))
+        (when (and (memq (romacs-agent-state session) '(starting running))
+                   (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))
+                   (= requests (romacs-agent-requests session))
+                   (null (romacs-agent-queue session)))
+          (setf (romacs-agent-state session) 'idle)
+          (romacs-agent--changed session)))))))
 
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
