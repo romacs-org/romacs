@@ -398,14 +398,17 @@ for the editor to back up; t when imported."
 
 (defun romacs-agent-events--host (&rest args)
   "Run the supervisor's program with ARGS to its end: (STATUS . OUTPUT),
-its standard output and error together."
+its standard output and error together; STATUS its exit code, or the
+signal that ended it, negated."
   (let* ((buffer (generate-new-buffer " *romacs-agent-host*" t))
+         ;; No sentinel's line in what it said: its end is the status.
          (process (make-process :name "romacs-agent-host" :noquery t :connection-type 'pipe :buffer buffer
-                                :command (cons (romacs-agent-events--host-program) args))))
+                                :sentinel #'ignore :command (cons (romacs-agent-events--host-program) args))))
     (unwind-protect
         (progn
           (while (process-live-p process) (accept-process-output process 0.05))
-          (cons (process-exit-status process) (with-current-buffer buffer (buffer-string))))
+          (cons (if (eq (process-status process) 'signal) (- (process-exit-status process)) (process-exit-status process))
+                (with-current-buffer buffer (buffer-string))))
       (kill-buffer buffer))))
 
 (defun romacs-agent-events--stage (session)
@@ -424,7 +427,14 @@ last line is cut short or it cannot run."
                  (romacs-agent-events--host "--stage" journal "--store" (romacs-agent-store--file) "--session" id)))
       (if (and (eql status 0) (string-match "\\`\\([0-9]+\\) \\([0-9]+\\)$" output))
           (cons (string-to-number (match-string 1 output)) (string-to-number (match-string 2 output)))
-        (error "Importing %s: %s" id (string-trim output))))))
+        (error "Importing %s: the host's --stage %s%s" id
+               (cond ((not (integerp status)) "did not run")
+                     ((< status 0) (format "was killed by signal %d" (- status)))
+                     ((eql status 0) "said nothing it could read")
+                     (t (format "exited %d" status)))
+               (let ((said (string-trim output)))
+                 (if (string-empty-p said) ", saying nothing"
+                   (concat ": " (substring said (max 0 (- (length said) 500)))))))))))
 
 (defun romacs-agent-events--holding (dir function)
   "Call FUNCTION holding the lock of the session recorded in DIR, so no
