@@ -3564,8 +3564,10 @@ else as a new turn; `next' only as a new turn.  OWN, Romacs's own
 prompt (`romacs-agent--input'), goes as a new turn through the hold whose
 TOKEN it carries.  VALID, when given, is asked as it would go: nil drops
 it.  DELIVERED is called once it is written.  IMAGES and MESSAGES as
-`romacs-agent--input' says."
-  text images messages delivered valid kind own token turn)
+`romacs-agent--input' says.  One that is all data (no DELIVERED, no
+VALID, no TOKEN) is kept across a restart (`romacs-agent--keep-item'): ID names it,
+POSITION orders it, KEPT says its record is there."
+  text images messages delivered valid kind own token turn id position kept)
 
 (defun romacs-agent--turn-under-way-p (session)
   "Whether SESSION's records, or the message written last, have a turn
@@ -4151,17 +4153,24 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 
 (defun romacs-agent--enqueue-first (session item)
   "Put ITEM ahead of what waits for SESSION's harness."
+  (unless (romacs-agent-item-position item)
+    (setf (romacs-agent-item-position item)
+          (1- (or (and (romacs-agent-queue session) (romacs-agent-item-position (car (romacs-agent-queue session))))
+                  (float-time)))))
   (push item (romacs-agent-queue session))
   (cl-incf (romacs-agent-queue-length session))
-  (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session))))
+  (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session)))
+  (romacs-agent--keep-item session item))
 
 (defun romacs-agent--enqueue (session item)
+  (unless (romacs-agent-item-position item) (setf (romacs-agent-item-position item) (float-time)))
   (cl-incf (romacs-agent-queue-length session))
   (let ((cell (list item)))
     (if (romacs-agent-queue session)
         (setcdr (romacs-agent-queue-tail session) cell)
       (setf (romacs-agent-queue session) cell))
-    (setf (romacs-agent-queue-tail session) cell)))
+    (setf (romacs-agent-queue-tail session) cell))
+  (romacs-agent--keep-item session item))
 
 (defun romacs-agent--dequeue (session item)
   "Take ITEM (by identity) out of SESSION's queue; non-nil when it was there."
@@ -4169,7 +4178,43 @@ files the user attached to it.  MESSAGES: it comes from other sessions
     (setf (romacs-agent-queue session) (delq item (romacs-agent-queue session))
           (romacs-agent-queue-tail session) (last (romacs-agent-queue session)))
     (cl-decf (romacs-agent-queue-length session))
+    (romacs-agent--unkeep-item session item)
     t))
+
+(defun romacs-agent--clear-queue (session)
+  "Take every message out of SESSION's queue."
+  (dolist (item (romacs-agent-queue session)) (romacs-agent--dequeue session item)))
+
+;; What waits in a queue is kept across a restart (romacs#287): the user's
+;; prompts and every other item that is all data.  One with a function
+;; (a tool's delivery, a send's check) has its own keeping, or none
+;; worth having after a restart.
+
+(declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
+(declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
+
+(defun romacs-agent--keepable-p (item)
+  "Whether ITEM is all data, so kept across a restart: not a hold's own
+prompt either, written at once or not at all."
+  (not (or (romacs-agent-item-delivered item) (romacs-agent-item-valid item) (romacs-agent-item-token item))))
+
+(defun romacs-agent--keep-item (session item)
+  "Keep ITEM, waiting in SESSION's queue, across a restart: its session
+marked first, so a start loads it (`romacs-agent-mark')."
+  (when (and (romacs-agent--keepable-p item) (not (romacs-agent-item-kept item)))
+    (setf (romacs-agent-item-id item) (or (romacs-agent-item-id item) (romacs-agent--uuid))
+          (romacs-agent-item-kept item) t)
+    (romacs-agent-mark (romacs-agent-id session) 'queued t)
+    (romacs-agent-store-queued-put (romacs-agent-id session) item)))
+
+(defun romacs-agent--unkeep-item (session item)
+  "ITEM is out of SESSION's queue: so is its record; the session's mark
+goes with its last."
+  (when (romacs-agent-item-kept item)
+    (setf (romacs-agent-item-kept item) nil)
+    (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))
+    (unless (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
+      (romacs-agent-mark (romacs-agent-id session) 'queued nil))))
 
 (defun romacs-agent-interrupt (session)
   "Interrupt SESSION's turn; queued messages stay.  A per-turn harness's

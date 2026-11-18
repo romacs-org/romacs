@@ -45,7 +45,9 @@
     "create index if not exists sessions_recent on sessions (last_time desc)"
     "create index if not exists sessions_cwd on sessions (cwd)"
     "create index if not exists sessions_parent on sessions (parent, request)"
-    "create table if not exists board_folds (project text primary key)")
+    "create table if not exists board_folds (project text primary key)"
+    "create table if not exists queued (session text not null, id text not null, position real not null,
+       item text not null, primary key (session, id))")
   "The table and its indexes, made when the database is opened.")
 
 (defconst romacs-agent-store--version 5
@@ -607,6 +609,70 @@ on one loads it, `romacs-agent-get')."
                   (sqlite-select db (concat "select id, dir, harness, provider, model, title, cwd, parent, state,"
                                             " last_time, cost, input_seq, done_seq, seen_seq, settled_seq"
                                             " from sessions order by last_time desc"))))))
+
+;;; Messages waiting in a session's queue (romacs#287)
+
+(defun romacs-agent-store--item-json (item)
+  "ITEM, a queued message all data, as the JSON its row keeps."
+  (json-serialize
+   (romacs-mcp--object "text" (romacs-agent-item-text item)
+                       "images" (vconcat (romacs-agent-item-images item))
+                       "messages" (vconcat (mapcar #'romacs-agent--message-json (romacs-agent-item-messages item)))
+                       "own" (or (romacs-agent-item-own item) :null))))
+
+(defun romacs-agent-store--item-of (id position json)
+  "The queued message a row keeps: ID, POSITION and its JSON.  A steer
+comes back as a turn of its own: the turn it steered is no next run's."
+  (let ((object (json-parse-string json)))
+    (romacs-agent-item (gethash "text" object)
+                       :images (append (gethash "images" object) nil)
+                       :messages (mapcar #'romacs-agent--message-of (gethash "messages" object))
+                       :kind 'next :own (romacs-agent--value (gethash "own" object))
+                       :id id :position position :kept t)))
+
+(defun romacs-agent-store-queued-put (id item)
+  "Keep ITEM, waiting in the queue of the session ID names, by the writer."
+  (romacs-agent-write 'romacs-agent-store--queued-row
+                      (list id (romacs-agent-item-id item) (romacs-agent-item-position item)
+                            (romacs-agent-store--item-json item))
+                      nil (list 'queued id (romacs-agent-item-id item))))
+
+(defun romacs-agent-store-queued-delete (id item-id)
+  "Let go of the kept message ITEM-ID of the session ID names, by the writer."
+  (romacs-agent-write 'romacs-agent-store--queued-row (list id item-id nil nil)
+                      nil (list 'queued id item-id)))
+
+(defun romacs-agent-store--queued-row (id item-id position json)
+  "Keep the message ITEM-ID of session ID at POSITION as JSON, or with
+none let it go, here.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a queued message in"))))
+    (if json
+        (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json))
+      (sqlite-execute db "delete from queued where session = ? and id = ?" (list id item-id)))
+    t))
+
+(defun romacs-agent-store-queued (id)
+  "The messages kept waiting for the session ID names, in order."
+  (when-let* ((db (romacs-agent-store--open)))
+    (condition-case err
+        (mapcar (lambda (row) (apply #'romacs-agent-store--item-of row))
+                (sqlite-select db "select id, position, item from queued where session = ? order by position"
+                               (list id)))
+      (error (message "romacs-agent-store: %s" (error-message-string err)) nil))))
+
+(defun romacs-agent-store--requeue (session _manifest)
+  "SESSION, loaded: what was kept waiting in its queue waits there again,
+sent once its harness may take it."
+  (unless (romacs-agent-queue session)
+    (dolist (item (romacs-agent-store-queued (romacs-agent-id session)))
+      (romacs-agent--enqueue session item))
+    (when (romacs-agent-queue session) (romacs-agent--dispatch session))))
+
+(add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
+;; A session with messages kept waiting is loaded as a restore runs.
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'queued (lambda (dir _manifest)
+                             (and (romacs-agent-store-queued (file-name-nondirectory (directory-file-name dir))) t))))
 
 ;;; The board's folds
 

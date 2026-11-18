@@ -1541,8 +1541,8 @@ once its running turn ends (`romacs-agent-renew-soon')."
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
-    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil
-          (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
+    (setf (romacs-agent-cancelled child) t)
+    (romacs-agent--clear-queue child)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
     ;; An idle one has no end of a run to tell its views.
