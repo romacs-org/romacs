@@ -611,24 +611,32 @@ fn image_frees(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept)}));
 }
 
-/// The bytes of each of an image's carried blocks: two runs of four pages
-/// side by side, then one of five.
-const BLOCK: usize = 3 * 4096 + 100;
-
-/// The whole 4 KiB pages within the LEN bytes at AT.
-fn whole_pages(at: usize, len: usize) -> std::ops::Range<usize> {
-    at.next_multiple_of(4096) / 4096..(at + len) / 4096
+/// The kernel's page: what a discard drops whole, and what
+/// `/proc/self/pagemap` has an entry for.
+fn page() -> usize {
+    rustix::param::page_size()
 }
 
-/// How many of the whole 4 KiB pages within the LEN bytes at AT are this
+/// The bytes of each of the first two of an image's carried blocks, side by
+/// side: three kernel pages and a bit. The third is five pages.
+fn block() -> usize {
+    3 * page() + 100
+}
+
+/// The whole kernel pages within the LEN bytes at AT, by number.
+fn whole_pages(at: usize, len: usize) -> std::ops::Range<usize> {
+    at.next_multiple_of(page()) / page()..(at + len) / page()
+}
+
+/// How many of the whole kernel pages within the LEN bytes at AT are this
 /// process's private copies, from `/proc/self/pagemap`: present, and no
 /// file's page (bit 61 clear).
 fn private_pages(at: usize, len: usize) -> usize {
     use std::os::unix::fs::FileExt;
     let pagemap = std::fs::File::open("/proc/self/pagemap").unwrap();
-    whole_pages(at, len).filter(|page| {
+    whole_pages(at, len).filter(|number| {
         let mut entry = [0u8; 8];
-        pagemap.read_exact_at(&mut entry, (page * 8) as u64).unwrap();
+        pagemap.read_exact_at(&mut entry, (number * 8) as u64).unwrap();
         let entry = u64::from_le_bytes(entry);
         entry >> 63 == 1 && (entry >> 61) & 1 == 0
     }).count()
@@ -648,7 +656,7 @@ fn image_blocks(store: &Path) {
             let built = world.build(|| {
                 let mut vm = Vm::new();
                 vm.world_begin();
-                Ok((vm, vec![vec![1u8; BLOCK], vec![2u8; BLOCK], vec![3u8; 5 * 4096]], json!({})))
+                Ok((vm, vec![vec![1u8; block()], vec![2u8; block()], vec![3u8; 5 * page()]], json!({})))
             });
             std::process::exit(i32::from(built.is_err()));
         }
@@ -656,19 +664,20 @@ fn image_blocks(store: &Path) {
             for block in &mut blocks { block.fill(0xab); }
             let census = arena::image_census().unwrap();
             let freed = std::mem::take(&mut blocks[0]);
-            let (at, written) = (freed.as_ptr() as usize, private_pages(freed.as_ptr() as usize, BLOCK));
+            let (block, tail_len) = (block(), 5 * page() - 100);
+            let (at, written) = (freed.as_ptr() as usize, private_pages(freed.as_ptr() as usize, block));
             drop(freed);
-            let (head, tail) = (blocks[2].as_ptr() as usize, private_pages(blocks[2].as_ptr() as usize + 100, 5 * 4096 - 100));
+            let (head, tail) = (blocks[2].as_ptr() as usize, private_pages(blocks[2].as_ptr() as usize + 100, tail_len));
             blocks[2].truncate(100);
             blocks[2].shrink_to_fit();
             let after = arena::image_census().unwrap();
             println!("WORLD-IMAGE {}", json!({
                 // Every whole page of each was copied by the writes, and
                 // there are some.
-                "written": written == whole_pages(at, BLOCK).len() && written >= 2
-                    && tail == whole_pages(head + 100, 5 * 4096 - 100).len() && tail >= 3,
-                "freed_released": private_pages(at, BLOCK) == 0,
-                "tail_released": blocks[2].as_ptr() as usize == head && private_pages(head + 100, 5 * 4096 - 100) == 0,
+                "written": written == whole_pages(at, block).len() && written >= 2
+                    && tail == whole_pages(head + 100, tail_len).len() && tail >= 3,
+                "freed_released": private_pages(at, block) == 0,
+                "tail_released": blocks[2].as_ptr() as usize == head && private_pages(head + 100, tail_len) == 0,
                 "kept": blocks[1].iter().all(|&b| b == 0xab) && blocks[2].iter().all(|&b| b == 0xab),
                 "linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept),
             }));
