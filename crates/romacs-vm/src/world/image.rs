@@ -227,13 +227,13 @@ fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
     }
 }
 
-/// The type T names in an image: one carried as T is restored only as T.
-/// An image serves the executable that made it, so the name of a type in
-/// it is that type's.
-fn carry_tag<T: ?Sized>() -> u64 {
+/// The tag of type T in an image: one carried as T is restored only as T.
+/// An image serves the executable that made it, so T's `TypeId` there is
+/// T's here.
+fn carry_tag<T: ?Sized + 'static>() -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
-    std::any::type_name::<T>().hash(&mut hasher);
+    std::any::TypeId::of::<T>().hash(&mut hasher);
     hasher.finish()
 }
 

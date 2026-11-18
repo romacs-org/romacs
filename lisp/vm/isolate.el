@@ -189,8 +189,9 @@ spawner to run on a worker with the features they were queued for.")
 ;; ROLE nil for a worker `isolate-create' made, `pool' for one the pool
 ;; made, `zygote', or `job' for a child forked for one job; ZYGOTE the
 ;; zygote record a `job' child is of.
-(defun romacs--isolate-make (id name require program)
-  (record 'isolate id name 'live require nil nil nil program nil nil nil))
+(defun romacs--isolate-make (id name require program &optional world)
+  "An isolate's record; WORLD is the (STORE . KEY) its worker was told to adopt."
+  (record 'isolate id name 'live require nil nil nil program nil nil nil world))
 (defun isolate-p (object) "Non-nil for an isolate." (eq (type-of object) 'isolate))
 (defun romacs--isolate-id (isolate) (aref isolate 1))
 (defun isolate-name (isolate) "ISOLATE's name, or nil." (aref isolate 2))
@@ -275,7 +276,8 @@ and has the features of :require loaded."
                             isolate-worker-arguments))
          (program (or isolate-worker-program (romacs--isolate-executable)))
          (id (romacs--isolate-start program arguments))
-         (isolate (romacs--isolate-make id name require program)))
+         (isolate (romacs--isolate-make id name require program
+                                        (and (eq isolate-boot 'world) isolate-world))))
     (push isolate romacs--isolates)
     (romacs--isolate-submit isolate 'romacs--isolate-prepare (list (romacs--isolate-seeds) require) nil nil nil)
     isolate))
@@ -790,15 +792,19 @@ have sent), its futures settle, the event is reported, and it is forgotten."
         (run-hook-with-args 'isolate-error-functions isolate event (list data children))))))
 
 (defun romacs--isolate-world-refused (isolate reason)
-  "ISOLATE's worker could not adopt `isolate-world', for REASON, and exits.
-Its jobs settle with `isolate-world-unavailable', whose data is REASON
-and the world, and the world is forgotten: later workers boot from source
+  "ISOLATE's worker could not adopt the world it was told to, for REASON.
+It is ended; its jobs settle with `isolate-world-unavailable', whose data
+is REASON and that world; and the world is forgotten when `isolate-world'
+still names it, so later workers boot from source
 \(`romacs--isolate-boot-arguments'), none of them refused again."
   (let ((id (romacs--isolate-id isolate))
-        (world isolate-world))
-    (setq isolate-world nil)
+        (world (aref isolate 12)))
+    (when (equal isolate-world world) (setq isolate-world nil))
     (romacs--isolate-signal id 9)
     (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
+    ;; Out of the dispatch before its futures' callbacks run: the death
+    ;; the reap queued is not reported as well.
+    (setq romacs--isolates (delq isolate romacs--isolates))
     (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))))
 
 (defun romacs--isolate-memory-error (budget)
