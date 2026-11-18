@@ -55,7 +55,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
-    // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
+    // A pattern's syntax table goes at every collection (`forget_table_bound_patterns`).
     ("regexp_cache", Cache),
     // Copies of char tables' entries, dropped at every collection
     // (`clear_collection_caches`) and every char-table write.
