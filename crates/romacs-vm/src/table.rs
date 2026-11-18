@@ -325,7 +325,7 @@ pub(crate) struct Table<T> {
     /// old and clean. Outside a set card every entry in use is exactly old
     /// and clean (image bits aside), so a minor reads and sweeps the set
     /// cards alone: what changed since the last collection, not the table.
-    /// Never shorter than the colours need (`store_at`).
+    /// Never shorter than the colours need (`store_parts`).
     cards: Vec<u8>,
     /// The restored image's entries (`ImageSet`).
     image: ImageSet,
@@ -476,9 +476,14 @@ impl<T> Table<T> {
         // the shorter, at any instruction, so that a panic part way leaves it
         // so: `push` and `collector_prepend` lengthen the colours first, `cut`
         // and `collector_compact` shorten the entries first, and `dense`
-        // makes them equal. Nothing else changes either length.
-        let color = unsafe { self.colors.get_unchecked_mut(i) };
-        self.cards[i / CARD] = 1;
+        // makes them equal. Nothing else changes either length. `cards`
+        // covers every colour the same way: `push`, `collector_prepend` and
+        // `dense` lengthen it before the colours, and `cut` shortens it after.
+        // (No bounds check on the card: this is every store's path.)
+        let color = unsafe {
+            *self.cards.get_unchecked_mut(i / CARD) = 1;
+            self.colors.get_unchecked_mut(i)
+        };
         (entry, color, &mut self.barrier, &mut self.image)
     }
     #[inline]
@@ -759,7 +764,9 @@ impl<T> Table<T> {
     }
     /// Every entry in use, and old: what a compaction leaves are survivors.
     fn dense(&mut self) {
-        // Never shorter than the entries on the way (`store_at`).
+        // Never shorter than the entries on the way (`store_parts`), the
+        // cards before the colours.
+        self.cards.resize(self.entries.len().div_ceil(CARD), 0);
         self.colors.resize(self.entries.len(), OLD | IN_USE);
         // The image's colours are written only where a mark is to clear:
         // its pages stay the image's.
@@ -769,7 +776,6 @@ impl<T> Table<T> {
         }
         self.colors[image..].fill(OLD | IN_USE);
         (self.cursor, self.free, self.quarantined, self.marking, self.sticky, self.image_reached) = (self.entries.len(), 0, 0, false, 0, false);
-        self.cards.resize(self.entries.len().div_ceil(CARD), 0);
         self.cards.fill(0);
         self.generation += 1;
         self.barrier = Barrier::default();
@@ -810,12 +816,17 @@ impl<T> Table<T> {
     pub(crate) fn touched(&self) -> Vec<std::ops::Range<usize>> {
         let len = self.entries.len();
         let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
-        for (card, _) in self.cards.iter().enumerate().filter(|&(_, &set)| set != 0) {
-            let range = card * CARD..((card + 1) * CARD).min(len);
-            if range.is_empty() { break; }
-            match runs.last_mut() {
-                Some(run) if run.end == range.start => run.end = range.end,
-                _ => runs.push(range),
+        // Eight cards a word: a table's cards are mostly clear.
+        for (w, word) in self.cards.chunks(8).enumerate() {
+            if word.iter().all(|&set| set == 0) { continue; }
+            for (k, _) in word.iter().enumerate().filter(|&(_, &set)| set != 0) {
+                let card = w * 8 + k;
+                let range = card * CARD..((card + 1) * CARD).min(len);
+                if range.is_empty() { return runs; }
+                match runs.last_mut() {
+                    Some(run) if run.end == range.start => run.end = range.end,
+                    _ => runs.push(range),
+                }
             }
         }
         runs
