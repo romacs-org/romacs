@@ -113,9 +113,12 @@ of those segments' names.")
 (defvar romacs-mode-line--functions (make-hash-table :test 'eq)
   "Each hook to the adapter function this file adds to it.")
 
-(defun romacs-mode-line--variable (name)
-  "The variable of the segment NAME."
-  (intern (format "romacs-mode-line-%s" name)))
+(eval-and-compile
+  ;; `romacs-mode-line-define-segment' calls it as it expands, so it
+  ;; must exist when this file is compiled.
+  (defun romacs-mode-line--variable (name)
+    "The variable of the segment NAME."
+    (intern (format "romacs-mode-line-%s" name))))
 
 (defun romacs-mode-line--adapter (hook)
   "The adapter a segment refreshed on HOOK is run by: by the hook's
