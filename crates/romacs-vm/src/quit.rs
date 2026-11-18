@@ -202,14 +202,15 @@ impl Vm {
     }
 
     /// [`Self::native_poll`] for a loop whose own entry decides it may quit
-    /// and whose failures are text, as the reader's are: the escape left in
-    /// `propagated_escape` for its caller, as [`Self::poll_quit`] leaves it.
+    /// and whose failures are text (the reader, a primitive the engine runs
+    /// as a kernel): the escape left in `propagated_escape`, as
+    /// [`Self::poll_quit`] leaves it, and the failure [`ESCAPED`].
     pub(crate) fn native_poll_text(&mut self) -> crate::Result<()> {
         if crate::host::inspect_pending() { self.with_site_leaf(|vm| vm.inspect_capture()); }
         if !self.native_quit_reached() { return Ok(()); }
         crate::gap_probe::safepoint(Some(self));
         if !self.native_quit_wanted() { return Ok(()); }
-        self.escape_pending()
+        self.escape_pending().map_err(|_| ESCAPED.into())
     }
 
     /// BODY outside any quit scope, the caller's restored after. A scope is
@@ -509,6 +510,11 @@ impl Vm {
         self.deferred_event.is_some() || self.host_input.as_mut().is_some_and(|host| host.input_pending())
     }
 }
+
+/// The failure of a primitive whose failures are text when a native poll's
+/// escape waits in `propagated_escape` ([`Vm::native_poll_text`]): the
+/// engine raises that escape, a quit or `throw-on-input`'s throw.
+pub(crate) const ESCAPED: &str = "a native poll's escape is pending";
 
 /// Steps between two polls of a long loop: GNU's `rarely_quit` polls
 /// every 2^16 steps of a cheap loop, `invisible.rs` every 1024.

@@ -53,10 +53,7 @@ impl Vm {
         let outer = std::mem::replace(&mut self.native_quit, true);
         let mut formatted = self.format_string(start, n);
         if formatted.as_ref().is_err_and(|error| error == crate::eval_data::PRINT_STOPPED) {
-            formatted = match self.native_poll() {
-                Ok(()) => self.format_string(start, n),
-                Err(_) => Err(crate::eval_data::PRINT_QUIT.into()),
-            };
+            formatted = self.native_poll_text().and_then(|()| self.format_string(start, n));
         }
         self.native_quit = outer;
         formatted

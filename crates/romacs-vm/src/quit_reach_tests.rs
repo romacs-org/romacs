@@ -345,3 +345,41 @@ fn a_quit_scope_ends_at_lisp_entry() {
     assert_eq!(count.ok().and_then(|v| v.integer_value()), Some(3000), "the Lisp ran to its end");
     assert!(vm.native_quit, "the scope is the caller's again once the Lisp returns");
 }
+
+/// A kernel the engine runs for a primitive whose failures are text polls
+/// per chunk: `append`'s new list, `min` and `max` over their arguments,
+/// `format`'s print. Its quit waits in `propagated_escape` behind
+/// `quit::ESCAPED` for the engine to raise, so a `throw-on-input` throw
+/// would cross it whole. Under `inhibit-quit` each runs to its end.
+#[test]
+fn kernels_the_engine_runs_quit_per_chunk() {
+    use crate::Primitive::{Append, Format, Min};
+    fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value]) -> crate::Result<Value> {
+        let start = vm.stack.len();
+        vm.stack.extend_from_slice(args);
+        let outcome = vm.primitive(p, start, args.len());
+        vm.stack.truncate(start);
+        outcome
+    }
+    for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))")] {
+        let (mut vm, signal) = busy_vm();
+        let list = eval(&mut vm, args);
+        let mut values = Vec::new();
+        let mut tail = list;
+        while let Some((car, cdr)) = Leaf::new(&mut vm).pair(tail) {
+            values.push(car);
+            tail = cdr;
+        }
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let outcome = call(&mut vm, p, &values);
+        assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
+        let quit = vm.intern("quit");
+        assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+        vm.propagated_escape = None;
+        vm.quit_unwinding = false;
+        eval(&mut vm, "(setq inhibit-quit t)");
+        assert!(signal.interrupt());
+        assert!(call(&mut vm, p, &values).is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
+        assert!(signal.due(), "{p:?}: inhibit-quit holds the press");
+    }
+}

@@ -48,9 +48,14 @@ impl Vm {
                         }
                     }
                 }
+                // The new list is the caller's only once it returns: a quit
+                // between chunks drops it.
                 let mut tail = self.stack[start + n - 1];
-                for value in prefix.into_iter().rev() {
-                    tail = self.alloc_cons(value, tail);
+                for chunk in prefix.rchunks(KERNEL_CHUNK) {
+                    for &value in chunk.iter().rev() {
+                        tail = self.alloc_cons(value, tail);
+                    }
+                    self.native_poll_text()?;
                 }
                 Ok(tail)
             }
@@ -708,11 +713,12 @@ impl Default for PrintOptions {
     fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false, objects: std::cell::Cell::new(0) } }
 }
 
+/// Elements a kernel the engine runs for a primitive (`append`, `min`,
+/// `max`) takes between its polls.
+const KERNEL_CHUNK: usize = 1 << 14;
+
 /// A print a quit probe stopped (`print_object`): its caller polls.
 pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";
-/// The quit that poll raised, as the error text of a primitive whose errors
-/// are text (`Vm::primitive_condition` makes it `quit`).
-pub(crate) const PRINT_QUIT: &str = "quit at a print's poll";
 
 /// Objects printed between two looks at the quit probe; GNU's
 /// `print_object` looks at each (`maybe_quit` at `print_obj`).
@@ -748,13 +754,17 @@ impl Vm {
     /// its own type), and a NaN that does not win is returned at once.
     pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
         let mut accum = self.coerce_number(args[0], true)?;
-        for &arg in &args[1..] {
-            let value = self.coerce_number(arg, true)?;
-            if self.numeric_cmp(value, accum)? == Some(better) {
-                accum = value;
-            } else if self.number(value)?.is_nan() {
-                return Ok(value);
+        // Only `min` and `max` call this: a quit between chunks returns nothing.
+        for chunk in args[1..].chunks(KERNEL_CHUNK) {
+            for &arg in chunk {
+                let value = self.coerce_number(arg, true)?;
+                if self.numeric_cmp(value, accum)? == Some(better) {
+                    accum = value;
+                } else if self.number(value)?.is_nan() {
+                    return Ok(value);
+                }
             }
+            self.native_poll_text()?;
         }
         Ok(accum)
     }

@@ -4444,7 +4444,7 @@ fn primitive_value(
             // `defalias-fset-function` escape comes through the queue's drain
             // instead: this engine runs, so those writes wait for its
             // completion (`Vm::write_from_native`).
-            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY)
+            if (p == Primitive::DefvarSetDefault || error == crate::frozen::READ_ONLY || error == crate::quit::ESCAPED)
                 && let Some(escape) = e.vm.propagated_escape.take() {
                 e.escape = Some(escape);
                 e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);

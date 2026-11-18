@@ -700,9 +700,12 @@ impl Vm {
             let data = self.list_value(&[self.slots[self.buffer_slot].value]);
             return Some((condition, data));
         }
-        // A native poll's quit, raised from a primitive whose errors are text.
-        if error == crate::eval_data::PRINT_QUIT {
-            return Some((self.intern("quit"), Value::NIL));
+        // A native poll's escape, for a caller that takes only a condition
+        // (the engine takes any escape first, `primitive_value`).
+        if error == crate::quit::ESCAPED
+            && let Some(crate::threaded::Escape::Signal(condition, data)) = self.propagated_escape {
+            self.propagated_escape = None;
+            return Some((condition, data));
         }
         if matches!(p, Primitive::Format | Primitive::Message) && error == "floating-point overflow" {
             return Some((self.intern("overflow-error"), Value::NIL));
