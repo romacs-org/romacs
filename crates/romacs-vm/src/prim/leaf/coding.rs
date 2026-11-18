@@ -680,7 +680,7 @@ fn coding_charbuf(chars: &[i32], pass: &mut Pass) -> Vec<u32> {
     while at < chars.len() {
         let end = (at + CHUNK).min(chars.len());
         if chars[at..end].iter().all(|&code| code >= 0) {
-            result.extend(chars[at..end].iter().map(|&code| code as u32));
+            result.extend(chars[at..end].iter().map(|&code| code.cast_unsigned()));
             at = end;
         } else {
             while at < end {

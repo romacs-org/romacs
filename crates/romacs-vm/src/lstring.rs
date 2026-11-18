@@ -125,6 +125,7 @@ impl<'a> StrView<'a> {
 
 /// The characters of BYTES, a multibyte string's internal text or a unibyte
 /// string's bytes.
+#[inline]
 fn chars_of(mut bytes: &[u8], multibyte: bool) -> impl Iterator<Item = u32> + '_ {
     std::iter::from_fn(move || {
         if bytes.is_empty() {

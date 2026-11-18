@@ -378,7 +378,7 @@ pub(super) enum HashFault {
     Wrong(&'static str, Value),
     Arity(Primitive, usize),
     Internal(String),
-    /// A polled `equal' walk its quit probe stopped (`Walk::polled`).
+    /// A polled `equal` walk its quit probe stopped (`Walk::polled`).
     Stopped,
 }
 type Hashed<T> = std::result::Result<T, HashFault>;
@@ -409,10 +409,10 @@ pub(super) fn is_hash_primitive(p: Primitive) -> bool {
     (Primitive::MakeHashTable as usize..=Primitive::HashValueAt as usize).contains(&(p as usize))
 }
 
-/// What one `equal' walk carries: the pairs it has met past GNU's depth
+/// What one `equal` walk carries: the pairs it has met past GNU's depth
 /// limit, made when first needed, and whether its own primitive asked it to
-/// poll. Only `equal' called as itself does (`Walk::polled`); a hash lookup,
-/// `member' and every other caller walk unpolled, so none of them stops
+/// poll. Only `equal` called as itself does (`Walk::polled`); a hash lookup,
+/// `member` and every other caller walk unpolled, so none of them stops
 /// halfway whatever scope it runs in.
 #[derive(Default)]
 struct Walk {
@@ -657,7 +657,7 @@ impl Vm {
             _ => "equal failed".to_owned(),
         })
     }
-    /// `equal' called as itself, at its engine site: the walk polled
+    /// `equal` called as itself, at its engine site: the walk polled
     /// (`Walk::polled`), UNBOUND on a fault or a stop, which the primitive's
     /// full call raises or polls (`equal_primitive`).
     #[inline(never)]
@@ -668,7 +668,7 @@ impl Vm {
             Err(_) => Value::UNBOUND,
         }
     }
-    /// `equal' called as itself, inside the scope its call target grants:
+    /// `equal` called as itself, inside the scope its call target grants:
     /// the walk polled; stopped, the poll quits (`native_poll_text`), or,
     /// with nothing to quit for after all, the walk runs again unpolled.
     /// Nothing is made, so a stop anywhere is consistent.

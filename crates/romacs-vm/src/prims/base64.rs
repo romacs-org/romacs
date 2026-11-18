@@ -59,7 +59,7 @@ impl<'a> Input<'a> {
         Self { all, end, bytes: all[..end].iter().copied(), stop, stopped: false }
     }
     /// The next byte, or None at the input's end or at a stop.
-    #[inline(always)]
+    #[inline]
     fn byte(&mut self) -> Option<u8> {
         match self.bytes.next() {
             Some(c) => Some(c),

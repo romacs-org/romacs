@@ -432,7 +432,7 @@ impl Query {
         }).collect()
     }
     /// Every match of the query under NODE whose span overlaps the byte
-    /// RANGE, in ts_query_cursor_next_match order, STOP asked between
+    /// RANGE, in `ts_query_cursor_next_match` order, STOP asked between
     /// matches and as the cursor walks (the runtime's progress callback, once
     /// in 100 of its steps), so a query that matches nothing stops too: None
     /// once it stopped.
