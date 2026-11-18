@@ -250,7 +250,8 @@ long."
                           ((char-table-p x)
                            (catch 'found
                              (map-char-table (lambda (_c v) (when (walk v) (throw 'found t))) x)
-                             (or (walk (char-table-parent x))
+                             (or (walk (char-table-range x nil))
+                                 (walk (char-table-parent x))
                                  (cl-loop for i below (or (get (char-table-subtype x) 'char-table-extra-slots) 0)
                                           thereis (walk (char-table-extra-slot x i))))))
                           (t (catch 'found
@@ -526,6 +527,7 @@ record is `:starred' when the snapshot's secrets are."
                   :undo (if stale nil (car undo)) :undo-cut (or stale (cdr undo))
                   :unibyte (not enable-multibyte-characters) :properties (and (not stale) runs))
             (and (cdr snapshot) (list :starred t))
+            (and warm-restart--starred-of (list :copy-of warm-restart--starred-of))
             (and buffer-file-name
                  (list :file buffer-file-name :modtime (visited-file-modtime) :coding buffer-file-coding-system))
             (and snapshot (progn (push (car snapshot) (cdr blobs))
@@ -552,7 +554,8 @@ STARRED."
       (cons stage (and starred t)))))
 
 (defun warm-restart--set-apart (records)
-  "RECORDS with each file buffer's whose secrets were starred set apart:
+  "RECORDS with each file buffer's whose secrets were starred, and each
+restored starred copy's (`warm-restart--starred-of'), set apart:
 \(BUFFERS STARRED . RENAMES), STARRED those records as strategy `starred',
 under \"NAME <starred>\" free of every record's name, with no file nor
 file locals, their header saying what they are; RENAMES the windows'
@@ -564,7 +567,8 @@ as a new buffer that visits no file (`warm-restart--restore-starred'),
 its clones on it."
   (let ((taken (make-hash-table :test #'equal))
         (apart (cl-loop for record in records
-                        when (and (plist-get record :starred) (plist-get record :file)) collect (plist-get record :id)))
+                        when (or (and (plist-get record :starred) (plist-get record :file)) (plist-get record :copy-of))
+                        collect (plist-get record :id)))
         buffers starred renames)
     (dolist (record records) (when (plist-get record :name) (puthash (plist-get record :name) t taken)))
     (dolist (record records)
@@ -575,11 +579,13 @@ its clones on it."
        ((not (member (plist-get record :id) apart))
         (push record buffers))
        (t
-        (let ((name (warm-restart--free-name (format "%s <starred>" (plist-get record :name)) (lambda (n) (gethash n taken))))
+        (let ((name (if (plist-get record :copy-of)
+                        (plist-get record :name) ; a restored copy keeps its name
+                      (warm-restart--free-name (format "%s <starred>" (plist-get record :name)) (lambda (n) (gethash n taken)))))
               (copy (copy-sequence record)))
           (puthash name t taken)
-          (push (cons (plist-get record :name) name) renames)
-          (dolist (pair `((:strategy . starred) (:name . ,name) (:copy-of . ,(plist-get record :file))
+          (unless (equal name (plist-get record :name)) (push (cons (plist-get record :name) name) renames))
+          (dolist (pair `((:strategy . starred) (:name . ,name) (:copy-of . ,(or (plist-get record :copy-of) (plist-get record :file)))
                           (:file . nil) (:modtime . nil) (:coding . nil) (:uniquify . nil)
                           (:locals . ,(cl-remove-if (lambda (l) (memq (car l) '(buffer-file-name buffer-file-truename
                                                                                   buffer-file-number header-line-format)))
@@ -588,11 +594,25 @@ its clones on it."
           (push copy starred)))))
     (cons (nreverse buffers) (cons (nreverse starred) renames))))
 
+(defvar-local warm-restart--starred-of nil
+  "The file whose text, its secrets starred, this restored copy holds
+\(`warm-restart--restore-starred'), or nil.  The next image sets it apart
+again (`warm-restart--set-apart'); a change of mode or a file the buffer
+is given ends it (`warm-restart--end-starred-copy').")
+
+(defun warm-restart--end-starred-copy ()
+  "The current buffer, given a file, is a starred copy no more."
+  (kill-local-variable 'warm-restart--starred-of)
+  (kill-local-variable 'header-line-format)
+  (kill-local-variable 'buffer-offer-save)
+  (remove-hook 'after-set-visited-file-name-hook #'warm-restart--end-starred-copy t))
+
 (defun warm-restart--restore-starred (record blobs)
   "Recreate RECORD, set apart by `warm-restart--set-apart', as a new buffer
 that visits no file, under its name or the first free one after it: it
 never lands in a buffer of this session.  Its header says whose copy it
-is, and it offers to be saved at exit."
+is, it offers to be saved at exit, and it stays a starred copy
+\(`warm-restart--starred-of')."
   (with-current-buffer (generate-new-buffer (warm-restart--free-name (plist-get record :name) #'get-buffer))
     (warm-restart--put-text (warm-restart--carried-text record blobs) (plist-get record :unibyte))
     (warm-restart--put-properties (plist-get record :properties))
@@ -600,6 +620,8 @@ is, and it offers to be saved at exit."
     (pcase-dolist (`(,var . ,value) (plist-get record :locals)) (set (make-local-variable var) value))
     (setq-local header-line-format (format "A copy of %s, its secrets starred: it visits no file" (plist-get record :copy-of))
                 buffer-offer-save t)
+    (setq warm-restart--starred-of (plist-get record :copy-of))
+    (add-hook 'after-set-visited-file-name-hook #'warm-restart--end-starred-copy nil t)
     (warm-restart--apply-common record)
     (warm-restart--put-undo record)
     (current-buffer)))
@@ -735,7 +757,11 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                            :buffers (cl-remove-if (lambda (r) (plist-member r :lost)) records)
                            :starred (cadr apart)
                            :frames (warm-restart--renamed-in (warm-restart--frames) renames)
-                           :lost (append (cl-loop for e in (plist-get plan :buffers)
+                           :lost (append ;; An older reader restores no starred copy: it names it as not carried.
+                                         (cl-loop for r in (cadr apart) unless (eq (plist-get r :strategy) 'indirect)
+                                                  collect (list :buffer (plist-get r :name) :unsaved t :starred t
+                                                                :reason "its text, its secrets starred, set apart: a build before this one does not restore it"))
+                                         (cl-loop for e in (plist-get plan :buffers)
                                                   when (eq (plist-get e :strategy) 'dropped)
                                                   collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
                                                                   (and (plist-get e :unsaved) (list :unsaved t))))
@@ -1696,7 +1722,8 @@ the report."
     (let ((modified (cl-loop for buffer being the hash-values of buffers
                              when (buffer-modified-p buffer) collect buffer)))
       (run-at-time 0 nil #'warm-restart--lock modified))
-    (list :buffers (hash-table-count buffers) :records (length records) :lost (plist-get form :lost)
+    (list :buffers (hash-table-count buffers) :records (length records)
+          :lost (cl-remove-if (lambda (entry) (plist-get entry :starred)) (plist-get form :lost))
           :problems (append (plist-get state :problems) (nreverse warm-restart--problems)))))
 
 (defun warm-restart--keep-p (report)
