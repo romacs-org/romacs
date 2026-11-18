@@ -377,8 +377,9 @@ stays where it is, a backup no reader reads."
 (defun romacs-agent-events--staged-p (id dir)
   "Whether the session ID names, recorded in DIR, is staged as its journal
 now is: its size at staging its journal's size."
-  (eql (caar (sqlite-select (romacs-agent-events--db) "select size from staged where session = ?" (list id)))
-       (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir)))))
+  (when-let* ((db (romacs-agent-events--db))
+              (size (caar (sqlite-select db "select size from staged where session = ?" (list id)))))
+    (eql size (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir))))))
 
 (defun romacs-agent-events--mark (id)
   "The writer's: mark the session ID, which has no journal, imported: its

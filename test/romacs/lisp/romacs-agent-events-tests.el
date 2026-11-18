@@ -455,7 +455,10 @@ moment more under load."
            (should (eq (romacs-agent-events--import-queued session) 'queued)))
          (should-not imported)
          (should (romacs-agent-events-p session))
-         (should (file-exists-p journal)))))))
+         (should (file-exists-p journal))
+         ;; No store readable yet (the writer still making it): not staged.
+         (cl-letf (((symbol-function 'romacs-agent-events--db) #'ignore))
+           (should-not (romacs-agent-events--staged-p id (romacs-agent-dir session)))))))))
 
 (defmacro romacs-agent-events-tests--workers (&rest body)
   "Run BODY with worker VMs that run each job here, at once."
