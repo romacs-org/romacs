@@ -93,6 +93,10 @@ fn sort_keyed(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
     state[7] = number(index(state[7]) + 1);
     sort_key(cx, state)
 }
+/// The orders `sort_native` takes natively: by string, or by fixnum
+/// ascending (`<`, `value<`) or descending (`>`).
+enum Native { Strings, Ascending, Descending }
+
 /// The native order of a predicate that resolves to a builtin subr, when
 /// every key is of a type it compares without signaling. GNU sort.c marks
 /// this point as where keys would be checked for faster comparison.
@@ -109,7 +113,6 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         matches!(cx.kind(k), leaf::Kind::String | leaf::Kind::Bytes)
             || symbols && matches!(cx.kind(k), leaf::Kind::Symbol)
     });
-    enum Native { Strings, Ascending, Descending }
     let native = match name {
         Some("string-lessp") if strings(true) => Native::Strings,
         Some("value<") if strings(false) => Native::Strings,
