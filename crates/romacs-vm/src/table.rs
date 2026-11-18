@@ -19,6 +19,18 @@
 //! put into a strong hash table, which is costly to read again and written
 //! often, instead logs the key and the value (`Barrier`). Marks come and go
 //! without touching either bit.
+//!
+//! The restored world image is a third generation, which no collection frees
+//! (`Vm::make_image_permanent`), kept beside the colours (`ImageSet`), so the
+//! restore writes none. The image is dense and never moves: its entries are the
+//! indices below its length. A permanent one is one nothing has written since
+//! the restore: to a full it counts as reached, as an old entry does to a
+//! minor, so a full never reads it, and never writes its colour. A remembered
+//! one, in the image's bitmap, was written since, or is of a kind the mark
+//! itself must see: every full reads it as a root. A store makes an image entry
+//! dirty, and the next collection, of either kind, remembers it before any
+//! sweep clears its DIRTY (`remember_dirty`); a put into an image strong hash
+//! table, which logs instead, remembers it at once.
 use crate::Value;
 use crate::data::Object;
 use crate::hash::HashTable;
@@ -51,11 +63,19 @@ const LOG_GIVES_UP: usize = 1 << 19;
 
 /// Whether an entry of colour COLOR is in use and no mark has reached it.
 /// STICKY is `OLD` in a minor collection's mark, to which every old entry
-/// counts as reached already, and 0 in any other.
+/// counts as reached already, and 0 in any other (to which the image's
+/// untouched entries count as reached by their index, `ImageSet`).
 #[inline]
 fn unreached(color: u8, sticky: u8) -> bool {
     color & (IN_USE | MARK | sticky) == IN_USE
 }
+
+#[path = "table_image.rs"]
+mod image_set;
+use image_set::ImageSet;
+#[path = "table_sweep.rs"]
+mod sweep;
+use sweep::Sweep;
 
 /// A table as a mark's threads see it (gc_mark.rs): entries one at a time, and
 /// atomic colours. Good only while the table neither grows nor is otherwise
@@ -70,6 +90,9 @@ pub(crate) struct RawTable<T> {
     generation: u64,
     /// `OLD` for a minor's mark, 0 for any other (`unreached`).
     sticky: u8,
+    /// The image's entries, which a full's mark counts as reached unless
+    /// remembered: a copy, empty for a minor's.
+    image: ImageSet,
 }
 
 // SAFETY: the one place a collection's threads meet outside the compiler's
@@ -92,7 +115,7 @@ impl<T> RawTable<T> {
     pub(crate) fn claim(&self, i: usize) -> bool {
         let color = self.color(i);
         // Of the threads that saw it unreached, one finds the bit clear.
-        unreached(color.load(Ordering::Relaxed), self.sticky) && color.fetch_or(MARK, Ordering::Relaxed) & MARK == 0
+        unreached(color.load(Ordering::Relaxed), self.sticky) && !self.image.permanent(i) && color.fetch_or(MARK, Ordering::Relaxed) & MARK == 0
     }
     pub(crate) fn is_free(&self, i: usize) -> bool {
         self.color(i).load(Ordering::Relaxed) & IN_USE == 0
@@ -131,46 +154,18 @@ impl<T> RawTable<T> {
         let (colors, entries) = unsafe {
             (std::slice::from_raw_parts_mut((self.colors as *mut u8).add(base), range.len()), std::slice::from_raw_parts_mut(self.entries.add(base), range.len()))
         };
-        let (mut freed, mut last) = (0, 0);
-        let mut at = 0;
-        // OLD's bit of each byte, moved down beside its in-use bit, counts
-        // as a mark in a minor's sweep.
+        // OLD's bit of each byte, moved down beside its in-use bit, counts as
+        // a mark in a minor's sweep; in a full's, an untouched image entry is
+        // reached by its index.
         let old_too = if self.sticky == 0 { 0 } else { LOW_BITS };
-        while at < colors.len() {
-            let end = (at + 8).min(colors.len());
-            // Eight entries with none dead, by far the commonest case when
-            // the heap is mostly live: make the ones in use old in one store,
-            // or in none when they are so already, as the old are to a minor.
-            if let Ok(bytes) = <[u8; 8]>::try_from(&colors[at..end]) {
-                let word = u64::from_le_bytes(bytes);
-                let in_use = word & LOW_BITS;
-                let reached = word >> 7 | (word >> 4 & old_too);
-                if in_use & !reached == 0 {
-                    // Each byte in use becomes OLD | IN_USE; the rest stay.
-                    let clean = (word & !(in_use * 0xFF)) | (in_use * u64::from(OLD | IN_USE));
-                    if clean != word { colors[at..end].copy_from_slice(&clean.to_le_bytes()); }
-                    if clean != 0 {
-                        last = base + end - clean.leading_zeros() as usize / 8;
-                    }
-                    at = end;
-                    continue;
-                }
-            }
-            for i in at..end {
-                let color = colors[i];
-                if unreached(color, self.sticky) {
-                    destroy(base + i, &mut entries[i]);
-                    colors[i] = dead;
-                    freed += 1;
-                    if quarantine { last = base + i + 1; }
-                } else if color != FREE {
-                    if color & IN_USE != 0 { colors[i] = OLD | IN_USE; }
-                    last = base + i + 1;
-                }
-            }
-            at = end;
-        }
-        (freed, last)
+        let mut sweep = Sweep { colors, entries, base, sticky: self.sticky, old_too, dead, quarantine, destroy: &mut destroy, freed: 0, last: 0 };
+        // The range below the image's end asks which of its entries are the
+        // image's; the rest is swept as if no image were restored.
+        let image_end = self.image.len.saturating_sub(base).min(range.len());
+        let mut at = 0;
+        while at < image_end { at = sweep.step::<true>(at, image_end, &self.image); }
+        while at < range.len() { at = sweep.step::<false>(at, range.len(), &self.image); }
+        (sweep.freed, sweep.last)
     }
     /// Entry I, which any thread may read. SAFETY: nothing writes it for as
     /// long as this lives.
@@ -258,6 +253,10 @@ pub(crate) struct Stores<'t> {
     /// A weak table's entries are no strong edges: the table is dirtied, for
     /// the next collection's weak rounds.
     weak: bool,
+    /// An image table's word of the remembered bitmap and its bit: a put sets
+    /// no DIRTY, so it is remembered here, whatever is put (a symbol of an
+    /// obarray of its own, which only a full reclaims, too).
+    image: Option<(&'t mut u64, u64)>,
 }
 
 impl Stores<'_> {
@@ -266,6 +265,7 @@ impl Stores<'_> {
         if self.weak {
             *self.color |= DIRTY;
         } else {
+            if let Some((word, bit)) = &mut self.image { **word |= *bit; }
             self.barrier.stored(*self.color, new);
         }
     }
@@ -294,6 +294,10 @@ pub(crate) struct Table<T> {
     /// Which marks the colours hold: a new mark, or marks cleared, is another.
     generation: u64,
     barrier: Barrier,
+    /// The restored image's entries (`ImageSet`).
+    image: ImageSet,
+    /// A full's mark stands: the image's untouched entries count as reached.
+    image_reached: bool,
     /// Free entries `alloc' has handed out again, for tests.
     #[cfg(test)]
     pub(crate) reused: usize,
@@ -302,7 +306,7 @@ pub(crate) struct Table<T> {
 impl<T> Default for Table<T> {
     fn default() -> Self {
         Self {
-            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, sticky: 0, generation: 0, barrier: Barrier::default(),
+            entries: Vec::new(), colors: Vec::new(), cursor: 0, free: 0, quarantined: 0, reserved: false, high: 0, marking: false, sticky: 0, generation: 0, barrier: Barrier::default(), image: ImageSet::default(), image_reached: false,
             #[cfg(test)]
             reused: 0,
         }
@@ -366,10 +370,11 @@ impl Table<Object> {
     /// `entry_mut`: a whole-entry hook would re-trace the table on every put.
     #[inline]
     pub(crate) fn hash_mut(&mut self, i: usize) -> Option<(&mut HashTable, Stores<'_>)> {
-        let (entry, color, barrier) = self.store_at(i);
+        let (entry, color, barrier, image) = self.store_parts(i);
         let Object::HashTable(table) = entry else { return None };
         let weak = table.weakness != crate::hash::Weakness::None;
-        Some((&mut **table, Stores { barrier, color, weak }))
+        let image = (i < image.len).then(|| (&mut image.remembered[i / 64], 1 << (i % 64)));
+        Some((&mut **table, Stores { barrier, color, weak, image }))
     }
     /// A put of VALUE into the hash table at entry I, as far as the barrier
     /// knows, for a test elsewhere of what empties the log.
@@ -425,6 +430,13 @@ impl<T> Table<T> {
     /// for one test of I.
     #[inline(always)]
     fn store_at(&mut self, i: usize) -> (&mut T, &mut u8, &mut Barrier) {
+        let (entry, color, barrier, _) = self.store_parts(i);
+        (entry, color, barrier)
+    }
+    /// As `store_at`, with the image's set beside: what a hash table's
+    /// stores need.
+    #[inline]
+    fn store_parts(&mut self, i: usize) -> (&mut T, &mut u8, &mut Barrier, &mut ImageSet) {
         debug_assert!(self.colors.len() >= self.entries.len(), "a colour for every entry");
         let entry = &mut self.entries[i];
         // SAFETY: I is within `entries` (just indexed), and `colors` is never
@@ -433,7 +445,7 @@ impl<T> Table<T> {
         // and `collector_compact` shorten the entries first, and `dense`
         // makes them equal. Nothing else changes either length.
         let color = unsafe { self.colors.get_unchecked_mut(i) };
-        (entry, color, &mut self.barrier)
+        (entry, color, &mut self.barrier, &mut self.image)
     }
     #[inline]
     pub(crate) fn len(&self) -> usize {
@@ -547,27 +559,34 @@ impl<T> Table<T> {
         }
         self.marking = true;
         self.sticky = if minor { OLD } else { 0 };
+        self.image_reached = !minor;
         self.generation += 1;
         RawTable {
             entries: self.entries.as_mut_ptr(), colors: self.colors.as_mut_ptr().cast(), len: self.entries.len(),
             free: self.free, quarantined: self.quarantined, generation: self.generation, sticky: self.sticky,
+            image: if minor { ImageSet::default() } else { self.image.clone() },
         }
     }
     /// Mark entry I, as `RawTable::claim'.
     #[cfg(test)]
     pub(crate) fn mark(&mut self, i: usize) -> bool {
-        let color = &mut self.colors[i];
-        if !unreached(*color, self.sticky) {
+        if !unreached(self.colors[i], self.sticky) || self.reached_as_image(i) {
             return false;
         }
-        *color |= MARK;
+        self.colors[i] |= MARK;
         true
+    }
+    /// Whether entry I counts as reached by a full's mark standing as an
+    /// untouched image entry.
+    #[inline]
+    fn reached_as_image(&self, i: usize) -> bool {
+        self.image_reached && self.image.permanent(i)
     }
     /// Whether a mark in progress has reached entry I.
     #[inline(always)]
     pub(crate) fn marked(&self, i: usize) -> bool {
         let color = self.colors[i];
-        color & IN_USE != 0 && color & (MARK | self.sticky) != 0
+        color & IN_USE != 0 && (color & (MARK | self.sticky) != 0 || self.reached_as_image(i))
     }
     /// Every mark gone, and the free entries counted again: a collection
     /// stopped short. A mark changes neither the generations nor the log, so
@@ -579,11 +598,12 @@ impl<T> Table<T> {
     pub(crate) fn clear_marks(&mut self) {
         let (mut free, mut quarantined) = (0, 0);
         for color in &mut self.colors {
-            if *color & IN_USE != 0 { *color &= !MARK; }
+            // Only a mark is written: an image entry's colour page stays the image's.
+            if *color & (IN_USE | MARK) == IN_USE | MARK { *color &= !MARK; }
             free += usize::from(*color == FREE);
             quarantined += usize::from(*color == QUARANTINED);
         }
-        (self.free, self.quarantined, self.cursor, self.marking, self.sticky) = (free, quarantined, 0, false, 0);
+        (self.free, self.quarantined, self.cursor, self.marking, self.sticky, self.image_reached) = (free, quarantined, 0, false, 0, false);
         self.generation += 1;
     }
     /// After a completed mark: every dead entry through DESTROY, which leaves
@@ -603,7 +623,7 @@ impl<T> Table<T> {
         if quarantine { self.quarantined += freed } else { self.free += freed }
         // From the start again: `next_free` crosses the live entries below
         // the first free one many at a time.
-        (self.cursor, self.marking, self.sticky) = (0, false, 0);
+        (self.cursor, self.marking, self.sticky, self.image_reached) = (0, false, 0, false);
         self.generation += 1;
         // Every survivor is old and clean, so nothing logged still stands.
         self.barrier = Barrier::default();
@@ -638,23 +658,50 @@ impl<T> Table<T> {
             self.high = keep;
         }
     }
-    /// Compaction: keep the marked entries, in order, each through KEEP. The
-    /// table is left dense.
-    pub(crate) fn collector_compact(&mut self, mut keep: impl FnMut(&mut T)) {
+    /// Whether any entry is of the restored image: one a compaction keeps
+    /// where it is.
+    fn holds_image(&self) -> bool {
+        self.image.len > 0
+    }
+    /// Where a compaction after the mark standing puts each entry, and how
+    /// many of PADS fillers go in front: the live ones in order, each down
+    /// past the dead; `usize::MAX` for the dead. The image's entries, dense
+    /// and never freed, have no dead below them and stay where they are; no
+    /// filler goes in front of them, which would move them, and with nothing
+    /// live, none either.
+    pub(crate) fn compaction_map(&self, pads: usize) -> (Vec<usize>, usize) {
+        let pinned = self.holds_image();
+        let (mut map, mut next, mut any) = (Vec::with_capacity(self.entries.len()), if pinned { 0 } else { pads }, false);
+        for i in 0..self.entries.len() {
+            let live = self.marked(i);
+            any |= live;
+            map.push(if live { next += 1; next - 1 } else { usize::MAX });
+        }
+        (map, if any && !pinned { pads } else { 0 })
+    }
+    /// Compaction, the entries MAP (`compaction_map`) keeps, in order, each
+    /// through KEEP but a permanent one, which names only image entries, none
+    /// of which moved. The table is left dense.
+    pub(crate) fn collector_compact(&mut self, map: &[usize], mut keep: impl FnMut(&mut T)) {
         self.high = self.high.max(self.entries.len());
-        let (colors, mut i) = (&self.colors, 0);
-        self.entries.retain_mut(|entry| {
-            let live = colors[i] & (IN_USE | MARK) == (IN_USE | MARK);
-            i += 1;
-            if live {
+        assert_eq!(map.len(), self.entries.len(), "a compaction map for every entry");
+        let (entries, image) = (&mut self.entries, &self.image);
+        let mut i = 0;
+        entries.retain_mut(|entry| {
+            let live = map[i] != usize::MAX;
+            if live && !image.permanent(i) {
                 keep(entry);
             }
+            i += 1;
             live
         });
         self.dense();
     }
     /// N fillers in front of every entry, which move up past them.
     pub(crate) fn collector_prepend(&mut self, n: usize, filler: impl FnMut() -> T) {
+        if n == 0 {
+            return;
+        }
         // Colours for them first, whatever FILLER does (`store_at`).
         self.colors.resize(self.entries.len() + n, FREE);
         self.entries.splice(0..0, std::iter::repeat_with(filler).take(n));
@@ -664,8 +711,14 @@ impl<T> Table<T> {
     fn dense(&mut self) {
         // Never shorter than the entries on the way (`store_at`).
         self.colors.resize(self.entries.len(), OLD | IN_USE);
-        self.colors.fill(OLD | IN_USE);
-        (self.cursor, self.free, self.quarantined, self.marking) = (self.entries.len(), 0, 0, false);
+        // The image's colours are written only where a mark is to clear:
+        // its pages stay the image's.
+        let image = self.image.len.min(self.colors.len());
+        for color in &mut self.colors[..image] {
+            if *color != OLD | IN_USE { *color = OLD | IN_USE; }
+        }
+        self.colors[image..].fill(OLD | IN_USE);
+        (self.cursor, self.free, self.quarantined, self.marking, self.sticky, self.image_reached) = (self.entries.len(), 0, 0, false, 0, false);
         self.generation += 1;
         self.barrier = Barrier::default();
     }
@@ -681,10 +734,13 @@ impl<T> Table<T> {
     pub(crate) fn read_again(&mut self) -> Vec<usize> {
         let mut again = Vec::new();
         let len = self.entries.len();
-        let colors = &mut self.colors[..len];
+        let (colors, image) = (&mut self.colors[..len], &mut self.image);
         let mut look = |colors: &mut [u8], i: usize| {
             let color = &mut colors[i];
             if *color & (IN_USE | OLD | DIRTY) == (IN_USE | OLD | DIRTY) {
+                // A store into an image entry, recorded before the sweep
+                // clears its DIRTY.
+                if i < image.len { image.remember(i); }
                 *color &= !OLD;
                 again.push(i);
             }
@@ -702,7 +758,7 @@ impl<T> Table<T> {
     /// accepts: the dead, before their sweep.
     pub(crate) fn unreached(&self, wanted: impl Fn(&T) -> bool) -> Vec<u32> {
         self.colors.iter().zip(&self.entries).enumerate()
-            .filter(|&(_, (&color, entry))| unreached(color, self.sticky) && wanted(entry))
+            .filter(|&(i, (&color, entry))| unreached(color, self.sticky) && !self.reached_as_image(i) && wanted(entry))
             .map(|(i, _)| i as u32).collect()
     }
     /// As `read_again`, of the entries AT alone: the old ones WHOLE asks for.
@@ -727,16 +783,91 @@ impl<T> Table<T> {
         if self.marking {
             self.clear_marks();
         }
+        self.remember_dirty();
         for color in &mut self.colors {
-            if *color & IN_USE != 0 { *color = OLD | IN_USE; }
+            // Written only where it changes: an image entry's colour page
+            // stays the image's.
+            if *color & IN_USE != 0 && *color != OLD | IN_USE { *color = OLD | IN_USE; }
         }
-        self.sticky = 0;
+        (self.sticky, self.image_reached) = (0, false);
         self.barrier = Barrier::default();
     }
-    /// Whether every entry in use is exactly old and the log is empty: what a
-    /// completed collection leaves, and what an image may hold.
+    /// Whether every entry in use is exactly old, of the image or not, and
+    /// the log is empty: what a completed collection leaves, and what an
+    /// image may hold.
     pub(crate) fn settled(&self) -> bool {
         self.barrier.values.is_empty() && !self.barrier.lost && self.colors.iter().all(|&color| matches!(color, FREE | QUARANTINED) || color == (OLD | IN_USE))
+    }
+    /// Every entry becomes of the image: remembered if REMEMBERED asks for
+    /// it, else permanent. A restore's, of a settled and dense table (a world
+    /// is captured dense): no colour is written.
+    pub(crate) fn make_permanent(&mut self, remembered: impl Fn(&T) -> bool) {
+        if self.marking {
+            self.clear_marks();
+        }
+        assert_eq!(self.unused(), 0, "an image's table is dense");
+        self.image = ImageSet { len: self.entries.len(), remembered: vec![0; self.entries.len().div_ceil(64)] };
+        for (i, entry) in self.entries.iter().enumerate() {
+            if remembered(entry) { self.image.remember(i); }
+        }
+    }
+    /// Every image entry stored into since the last collection, remembered.
+    /// Every collection runs this, or `read_again`, before a sweep clears
+    /// DIRTY. A word of eight colours with none dirty is passed at one test.
+    fn remember_dirty(&mut self) {
+        let len = self.image.len.min(self.colors.len());
+        let (colors, image) = (&self.colors[..len], &mut self.image);
+        let dirty = LOW_BITS * u64::from(DIRTY);
+        let mut look = |from: usize, chunk: &[u8]| {
+            for (k, &color) in chunk.iter().enumerate() {
+                if color & (IN_USE | DIRTY) == IN_USE | DIRTY { image.remember(from + k); }
+            }
+        };
+        let words = colors.chunks_exact(8);
+        let rest = words.remainder();
+        for (w, chunk) in words.enumerate() {
+            if u64::from_le_bytes(chunk.try_into().expect("eight colours")) & dirty != 0 { look(w * 8, chunk); }
+        }
+        look(len - rest.len(), rest);
+    }
+    /// A full's roots in the image: every remembered entry, those stored
+    /// into since the last collection first remembered.
+    pub(crate) fn remembered(&mut self) -> Vec<usize> {
+        self.remember_dirty();
+        let mut found = Vec::new();
+        for (w, &word) in self.image.remembered.iter().enumerate() {
+            let mut bits = word;
+            while bits != 0 {
+                found.push(w * 64 + bits.trailing_zeros() as usize);
+                bits &= bits - 1;
+            }
+        }
+        found
+    }
+    /// Entry I, written by the collector past the barrier after its mark:
+    /// remembered if it was permanent, and still reached by the mark
+    /// standing, which counted it reached as permanent and must not sweep it
+    /// as an unmarked remembered one.
+    pub(crate) fn remember(&mut self, i: usize) {
+        if self.image.permanent(i) {
+            self.image.remember(i);
+            if self.marking { self.colors[i] |= MARK; }
+        }
+    }
+    /// Whether entry I is of the image and untouched since the restore.
+    pub(crate) fn permanent(&self, i: usize) -> bool {
+        self.image.permanent(i) && self.colors[i] & IN_USE != 0
+    }
+    /// Whether entry I is of the image and read by every full.
+    #[cfg(test)]
+    pub(crate) fn is_remembered(&self, i: usize) -> bool {
+        i < self.image.len && self.image.remembered(i)
+    }
+    /// Whether the mark standing claimed entry I itself: not counted as
+    /// reached for its age or permanence.
+    #[cfg(test)]
+    pub(crate) fn claimed(&self, i: usize) -> bool {
+        self.colors[i] & (IN_USE | MARK) == IN_USE | MARK
     }
     /// The keys and values put into old strong hash tables since the last
     /// collection.
@@ -785,7 +916,7 @@ impl<T> Table<T> {
     }
     /// Whether a mark in progress reached each entry.
     pub(crate) fn marks(&self) -> impl Iterator<Item = bool> + '_ {
-        self.colors.iter().map(|&color| color & IN_USE != 0 && color & (MARK | self.sticky) != 0)
+        (0..self.colors.len()).map(|i| self.marked(i))
     }
 }
 
@@ -803,6 +934,11 @@ mod tests {
     pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> (usize, usize) {
         // SAFETY: the whole table is this thread's, and the range starts at 0.
         unsafe { raw.sweep_range(0..raw.len(), quarantine, destroy) }
+    }
+    /// A compaction after the mark standing, of a table with no image entry.
+    fn compact<T>(t: &mut Table<T>, keep: impl FnMut(&mut T)) {
+        let (map, _) = t.compaction_map(0);
+        t.collector_compact(&map, keep);
     }
     fn table(n: u64) -> Table<u64> {
         let mut table = Table::default();
@@ -907,7 +1043,7 @@ mod tests {
         for i in [2, 5, 7] {
             t.mark(i);
         }
-        t.collector_compact(|entry| *entry += 100);
+        compact(&mut t, |entry| *entry += 100);
         assert_eq!(t.entries, [102, 105, 107]);
         assert_eq!((t.unused(), t.live()), (0, 3));
         t.collector_prepend(2, || 0);
@@ -1174,7 +1310,7 @@ mod tests {
         assert!(t.logged().is_empty() && t.settled());
         t.hash_mut(0).unwrap().1.stored(key);
         for i in 0..3 { t.mark(i); }
-        t.collector_compact(|_| {});
+        compact(&mut t, |_| {});
         assert!(t.logged().is_empty() && t.settled());
     }
 
@@ -1228,7 +1364,7 @@ mod tests {
     fn compaction_leaves_every_entry_old() {
         let mut t = table(6);
         for i in [1, 4] { t.mark(i); }
-        t.collector_compact(|_| {});
+        compact(&mut t, |_| {});
         assert!(t.settled() && t.old(0) && t.old(1));
     }
 
@@ -1288,7 +1424,7 @@ mod tests {
         let mut t = table(100);
         let raw = raw_of(&mut t);
         for i in 0..100 { assert!(raw.claim(i)); }
-        t.collector_compact(|_| {});
+        compact(&mut t, |_| {});
         assert!(!raw.holds(&t), "compacted with every entry kept");
         let mut t = table(100);
         let raw = raw_of(&mut t);
@@ -1298,3 +1434,7 @@ mod tests {
         assert!(!raw.holds(&t), "swept with every entry kept");
     }
 }
+
+#[cfg(test)]
+#[path = "table_image_tests.rs"]
+mod image_tests;

@@ -84,14 +84,12 @@ by C-g, at its next safepoint.  0 means no budget."
         (puthash :forgotten t table)
         ;; A private file renamed over the log: an interrupted compaction
         ;; leaves the log as it was.
-        (let ((temporary (concat file ".tmp")))
-          (let ((coding-system-for-write 'utf-8-unix))
-            (with-temp-file temporary
-              (insert (romacs-agent--json (romacs-mcp--object "key" "forgotten")) "\n")
-              (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
-                (insert (romacs-agent--json (gethash key table)) "\n"))))
-          (set-file-modes temporary #o600)
-          (rename-file temporary file t))))
+        (let ((coding-system-for-write 'utf-8-unix))
+          (romacs-mcp-write-private
+           file (lambda ()
+                  (insert (romacs-agent--json (romacs-mcp--object "key" "forgotten")) "\n")
+                  (dolist (key (reverse (seq-take order romacs-agent-tools--kept)))
+                    (insert (romacs-agent--json (gethash key table)) "\n")))))))
     table))
 
 (defun romacs-agent-tools--table (session-id)
@@ -685,21 +683,27 @@ turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
          (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready))
          ;; Each is a message from another session: the chat reads these.
          (append (mapcar (lambda (item) (romacs-agent-tools--wake-message (car item) (cdr item))) ready)
-                 (mapcar (lambda (copy) (romacs-agent-tools--copy-message (car copy) (cdr copy))) copies)))))))
+                 (mapcar (lambda (copy) (romacs-agent-tools--copy-message (car copy) (cdr copy))) copies))
+         ;; A turn of its own, after the one running.
+         'next)))))
 
-(defun romacs-agent-tools--deliver (session text delivered &optional valid messages)
-  "Give SESSION's harness TEXT as its next message, then call DELIVERED.
+(defun romacs-agent-tools--deliver (session text delivered &optional valid messages kind)
+  "Give SESSION's harness TEXT as its next message, then call DELIVERED;
+KIND as `romacs-agent-item' says (`now' by default: into a turn running).
 A per-turn harness takes it as its next turn (queued behind a running
 one); another once its supervisor is attached.  VALID, when given, is
 asked first: nil drops the message.  MESSAGES say whose it is
 \(`romacs-agent--input')."
-  (let ((deliver (lambda () (when (or (null valid) (funcall valid))
-                              (romacs-agent-send session text delivered valid nil messages)))))
-    (if (romacs-agent--per-turn-p session) (funcall deliver)
-      ;; A parent whose harness was stopped or ended is resumed to take it.
-      (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
-        (romacs-agent--continue session))
-      (romacs-agent--when-attached session deliver))))
+  (if (romacs-agent--folding-p session)
+      ;; Whether it runs is known once a worker has folded it.
+      (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages kind)))
+    ;; A parent whose harness was stopped or ended is resumed to take it.
+    (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
+      (romacs-agent--continue session))
+    ;; No sender keeps it: kept for the resume, should it be refused.
+    (romacs-agent--admit session (romacs-agent-item text :messages messages :delivered delivered :valid valid
+                                                    :kind (or kind 'now))
+                         nil t)))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")
@@ -915,21 +919,25 @@ with resume it goes on with that conversation of the instance's
                   (romacs-agent-start
                    cwd (romacs-agent-tools--brief (gethash "role" arguments) (gethash "task" arguments))
                    (gethash "title" arguments) provider (append start-options worktree))))
-         (answer (lambda (child)
+         (answer (lambda (child &optional prompted)
                    (romacs-agent-tools--started
                     child (lambda ()
                             (if (equal (gethash "mode" arguments) "wait")
                                 (romacs-agent-tools--wait child (gethash "timeoutMs" arguments) arrived)
-                              (romacs-agent-tools--task child))))))
-         (known (and request (romacs-agent-requested parent request))))
+                              (romacs-agent-tools--task child)))
+                    prompted)))
+         (known (and request (romacs-agent-requested parent request)))
+         ;; A brief is sent: its answer waits for the task to have it.
+         (briefed (let ((task (gethash "task" arguments))) (and (stringp task) (not (string-empty-p task))))))
     (cond (known (funcall answer known))
           ((gethash "resume" arguments)
            (funcall answer (romacs-agent-tools--adopt arguments pinned start-options)))
           ((equal (gethash "isolation" arguments) "worktree")
            ;; A child that cannot start leaves no worktree behind.
            (romacs-agent--start-instance provider)
-           (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start) answer))
-          (t (funcall answer (funcall start cwd))))))
+           (romacs-agent-tools--isolated (romacs-agent-tools--isolating (cons parent request) cwd start)
+                                         (lambda (child) (funcall answer child briefed))))
+          (t (funcall answer (funcall start cwd) briefed)))))
 
 (defun romacs-agent-tools--own (session caller what)
   "SESSION, when CALLER delegated it (a caller that is no agent session
@@ -1185,11 +1193,13 @@ sessions' own on disk: a restarted server lists them all."
                               (sort tasks (lambda (a b) (> (or (romacs-agent-last-time a) 0)
                                                            (or (romacs-agent-last-time b) 0)))))))))
 
-(defun romacs-agent-tools--started (child then)
+(defun romacs-agent-tools--started (child then &optional prompted)
   "A deferred answer: THEN's, once CHILD's supervisor is attached (or a
-per-turn harness, which has none between turns, is created); the call's
-failure when it never started, an end then answered, so it wakes no one
-besides."
+per-turn harness, which has none between turns, is created), and, when
+PROMPTED (a task started with its brief), once its supervisor has the
+brief: an editor stopped right after leaves no task that never had it.
+The call's failure when it never started, an end then answered, so it
+wakes no one besides."
   (let ((next nil))
     (romacs-mcp-defer
      (lambda ()
@@ -1198,8 +1208,17 @@ besides."
               (romacs-agent-tools--answer child (romacs-agent-done-seq child))
               (user-error "Task %s (%s) did not start: %s" (romacs-agent-id child) (romacs-agent-title child)
                           (romacs-agent-reply child)))
-             ((or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
-                  (not (eq (romacs-agent-state child) 'starting)))
+             ;; Its harness gone before it had its brief: it never will.
+             ((and prompted (not (romacs-agent--per-turn-p child)) (not (romacs-agent-input-seq child))
+                   (eq (romacs-agent-state child) 'ended)
+                   (not (process-live-p (romacs-agent-connection child))))
+              ;; The caller has the failure: its end wakes no one besides.
+              (romacs-agent-tools--answer child (romacs-agent-done-seq child))
+              (user-error "Task %s (%s) ended before it had its brief: %s" (romacs-agent-id child)
+                          (romacs-agent-title child) (or (romacs-agent-reply child) "its harness exited")))
+             ((and (or (process-live-p (romacs-agent-connection child)) (romacs-agent--per-turn-p child)
+                       (not (eq (romacs-agent-state child) 'starting)))
+                   (or (not prompted) (romacs-agent--per-turn-p child) (romacs-agent-input-seq child)))
               (let ((value (funcall then)))
                 (if (eq (car-safe value) 'romacs-mcp--deferred)
                     (progn (romacs-mcp-deferred-retime (nth 2 value)) (funcall (setq next (cadr value))))
@@ -1301,7 +1320,11 @@ says."
 (defun romacs-agent-tools--keep-resume (session time)
   "Record in SESSION's manifest that it resumes at TIME (nil: no longer):
 its own record, written as asked, so a restarted server arms it again."
-  (romacs-agent--manifest-put session "resumeAt" (or time :null)))
+  ;; Marked before it is kept, unmarked after: a stop between leaves a mark
+  ;; too many, never a resume unmarked.
+  (when time (romacs-agent-mark (romacs-agent-id session) 'resume t))
+  (romacs-agent--manifest-put session "resumeAt" (or time :null))
+  (unless time (romacs-agent-mark (romacs-agent-id session) 'resume nil)))
 
 (defun romacs-agent-tools--arm-resume (session time)
   (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
@@ -1518,8 +1541,8 @@ once its running turn ends (`romacs-agent-renew-soon')."
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
-    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil
-          (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
+    (setf (romacs-agent-cancelled child) t)
+    (romacs-agent--clear-queue child)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
     ;; An idle one has no end of a run to tell its views.
@@ -1633,10 +1656,12 @@ editor is between commands; tell the calling session its verdict."
      ;; tells it from the wake file.
      :before (and session (lambda ()
                             (setq romacs-restart-requester id)
+                            (romacs-agent-mark id 'wake t)
                             (write-region "verdict" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
      :failed (and session (lambda (why)
                             (setq romacs-restart-requester nil)
                             (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
+                            (romacs-agent-mark id 'wake nil)
                             (romacs-agent-tools--deliver session (format "Romacs restart did not start, this session goes on: %s" why)
                                                          #'ignore))))
     (romacs-mcp--object
@@ -1672,18 +1697,19 @@ wake file says `verdict' is told by the restart's supervisor instead
         (when (and (file-exists-p file)
                    (not (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "verdict")))
           (romacs-agent-tools--deliver session (or text (setq text (romacs-agent-tools--build-text)))
-                                       (lambda () (ignore-errors (delete-file file)))
+                                       (lambda () (ignore-errors (delete-file file))
+                                         (romacs-agent-mark (romacs-agent-id session) 'wake nil))
                                        (lambda () (file-exists-p file))))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
 ;; A session that asked to be told of a restart is loaded as a restore
 ;; runs, so it is told: one left a row would never be.
-(add-hook 'romacs-agent-pending-functions
-          (lambda (dir _manifest) (file-exists-p (expand-file-name "restart-wake" dir))))
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'wake (lambda (dir _manifest) (file-exists-p (expand-file-name "restart-wake" dir)))))
 ;; A session due to resume when its limit resets is loaded as a restore
 ;; runs, so its resume is set again.
-(add-hook 'romacs-agent-pending-functions
-          (lambda (_dir manifest) (numberp (gethash "resumeAt" manifest))))
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'resume (lambda (_dir manifest) (numberp (gethash "resumeAt" manifest)))))
 
 ;;; Options
 

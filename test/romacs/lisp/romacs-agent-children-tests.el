@@ -162,8 +162,8 @@
         (delete-directory dir t)))))
 
 (ert-deftest romacs-agent-children-replay-finds-the-harness-subagents ()
-  ;; No supervisor: the session raised no events; opening its chat replays
-  ;; the journal, and that is where they are found.
+  ;; No supervisor: the session raised no events; its chat replays the
+  ;; turn under way from its records, and that is where they are found.
   (romacs-agent-children-tests--with
     (let ((dir (make-temp-file "romacs-children-" t)) (coding-system-for-write 'utf-8-unix))
       (unwind-protect
@@ -180,13 +180,14 @@
                                                                      "input" (romacs-mcp--object "description" "read")))))))
                      "\n")
              nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+            ;; The turn under way, from its records: its subagents found.
             (with-temp-buffer
               (romacs-agent-chat-mode)
               (let ((inhibit-read-only t))
                 (setq romacs-agent-ui--session session
                       romacs-agent-ui--messages (make-hash-table :test #'equal)
                       romacs-agent-ui--end (point-marker))
-                (romacs-agent-ui--replay session)))
+                (romacs-agent-ui--replay-from session nil)))
             (romacs-agent-ui--summarize-children session)
             (should (equal (plist-get (car (romacs-agent-children-rows session)) :title) "read"))
             ;; A journal that ends mid-call leaves it running: only a turn's
@@ -441,3 +442,21 @@
 
 (provide 'romacs-agent-children-tests)
 ;;; romacs-agent-children-tests.el ends here
+
+(ert-deftest romacs-agent-children-views-are-told-once-a-restore-ends ()
+  ;; While a start restores, the rows of what it loads are made as they
+  ;; come, but the views (the board) are told by the batch its end runs:
+  ;; not a turn of loading at a time, each redrawing every row.
+  (let ((romacs-agent-ui--children-changed (make-hash-table :test #'eq))
+        (romacs-agent-ui--children-timer nil) (told 0) (rows 0))
+    (cl-letf (((symbol-function 'romacs-agent-ui--flush-rows) (lambda (sessions) (cl-incf rows (length sessions))))
+              ((symbol-function 'romacs-agent-ui--status-bar) #'ignore)
+              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+      (let ((romacs-agent-ui-changed-hook (list (lambda () (cl-incf told)))))
+        (let ((romacs-agent--restoring t))
+          (dotimes (i 3) (romacs-agent-ui--children-changed (intern (format "s%d" i)))))
+        (should (= rows 3))
+        (should (= told 0))
+        ;; Its end: the restored hook's batch.
+        (romacs-agent-ui--batch)
+        (should (= told 1))))))

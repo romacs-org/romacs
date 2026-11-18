@@ -89,6 +89,30 @@ whatever TMPDIR is); `delivered' collects wakes."
       (romacs-agent-tools--flush parent)
       (should-not delivered))))
 
+(ert-deftest romacs-agent-launch-a-delegate-answers-once-its-brief-is-had ()
+  ;; A task started with its brief is answered once its supervisor has the
+  ;; brief, not only once attached: an editor stopped right after leaves no
+  ;; task that never had it.
+  (romacs-agent-launch-tests--with
+    (let ((poll (cadr (romacs-agent-tools--started child (lambda () 'answered) t))))
+      ;; Attached, idle, the brief not yet journaled back: no answer yet.
+      (setf (romacs-agent-state child) 'idle)
+      (should-not (funcall poll))
+      ;; Had: answered.
+      (setf (romacs-agent-input-seq child) 4)
+      (should (equal (funcall poll) '(answered)))))
+  ;; Its harness gone before it had the brief: the call fails, not waits,
+  ;; and the caller having the failure, its end wakes no one besides.
+  (romacs-agent-launch-tests--with
+    (let ((poll (cadr (romacs-agent-tools--started child (lambda () 'answered) t))))
+      (setf (romacs-agent-state child) 'starting)
+      (romacs-agent--raise child (list :type 'exit :status 1 :seq 3))
+      (should (eq (romacs-agent-state child) 'ended))
+      (should-error (funcall poll) :type 'user-error)
+      (romacs-agent-tools--wake child)
+      (romacs-agent-tools--flush parent)
+      (should-not delivered))))
+
 (ert-deftest romacs-agent-launch-each-failure-wakes-and-says-failed ()
   (romacs-agent-launch-tests--with
     ;; The first failure the delegate's caller had; a retry's fails again.
@@ -103,7 +127,7 @@ whatever TMPDIR is); `delivered' collects wakes."
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))
     ;; A message waiting for it does not make it running.
-    (romacs-agent--enqueue child (list "hello" nil nil nil))
+    (romacs-agent--enqueue child (romacs-agent-item "hello"))
     (should (equal (romacs-agent-tools--status child) "failed"))))
 
 (ert-deftest romacs-agent-launch-waits-for-attach-as-long-as-it-tries ()
@@ -228,3 +252,155 @@ whatever TMPDIR is); `delivered' collects wakes."
             (should (romacs-agent-failed session))
             (should (string-match-p "No such directory" (romacs-agent-reply session)))))
       (delete-directory root t))))
+
+(defun romacs-agent-launch-tests--resuming (body)
+  "Call BODY with an ended session that can be resumed, with no supervisor,
+and three functions: PLACED gives the launch waiting for its records'
+place, FIRE calls its launch attempt's last deadline, DUE returns the
+timers armed, each (FUNCTION . ARGS)."
+  (let* ((root (make-temp-file "romacs-launch-" t))
+         (romacs-agent--sessions (make-hash-table :test #'equal))
+         (romacs-agent--children (make-hash-table :test #'equal))
+         (romacs-agent--attempts (make-hash-table :test #'eq :weakness 'key))
+         (romacs-agent--resuming (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "cccccccc-0000-4000-8000-000000000000" :harness 'claude :title "janitor"
+                                      :dir (expand-file-name "child" root) :cwd root :state 'ended :input-seq 4
+                                      ;; Never listened at: its launch and attach are the test's.
+                                      :host-socket (expand-file-name "host.sock" root)))
+         (thens nil) (due nil))
+    (make-directory (romacs-agent-dir session) t)
+    (puthash (romacs-agent-id session) session romacs-agent--sessions)
+    (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore)
+              ((symbol-function 'romacs-agent--attach) #'ignore)
+              ((symbol-function 'romacs-agent-events-then) (lambda (_session then) (push then thens)))
+              ((symbol-function 'run-at-time) (lambda (_time _repeat function &rest args) (push (cons function args) due) nil)))
+      (unwind-protect
+          (funcall body session
+                   (lambda () (funcall (pop thens)))
+                   (lambda () (let ((entry (cl-find 'romacs-agent--attempt-due due :key #'car)))
+                                (apply (car entry) (cdr entry))))
+                   (lambda () due))
+        (delete-directory root t)))))
+
+(ert-deftest romacs-agent-launch-a-resume-that-fails-or-is-quit-ends-failed ()
+  "romacs#271: a resume whose launch fails or is quit, once its records'
+place is known (from a sentinel or a timer, which would swallow it) or at
+once, ends the session failed, saying why: never `starting' for ever."
+  (dolist (raised '((error "argv broke") (quit)))
+    (romacs-agent-launch-tests--resuming
+     (lambda (session placed _fire _due)
+       (cl-letf (((symbol-function 'romacs-agent--argv) (lambda (&rest _) (signal (car raised) (cdr raised)))))
+         (romacs-agent-resume session)
+         (should (eq (romacs-agent-state session) 'starting))
+         (funcall placed)
+         (should (eq (romacs-agent-state session) 'unstarted))
+         (should (romacs-agent-failed session))
+         (should (string-match-p (if (eq (car raised) 'quit) "Quit" "argv broke") (romacs-agent-reply session)))
+         (should-not (gethash (romacs-agent-id session) romacs-agent--resuming))
+         ;; At once, the caller has it too.
+         (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (_session then) (funcall then))))
+           (setf (romacs-agent-state session) 'ended)
+           (should (eq (car raised) (car (condition-case err (romacs-agent-resume session) ((error quit) err)))))
+           (should (eq (romacs-agent-state session) 'unstarted))))))))
+
+(ert-deftest romacs-agent-launch-a-resume-with-no-run-ends-failed-at-its-deadline ()
+  "romacs#271: a launch no run of its harness follows within
+`romacs-agent-start-deadline' of its launch, or whose run never comes
+up, ends the session failed, saying so; a run that comes up disarms it,
+and a move before the launch is not counted."
+  (romacs-agent-launch-tests--resuming
+   (lambda (session placed fire due)
+     (let ((launched 0))
+       (cl-letf (((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness")))
+                 ((symbol-function 'romacs-agent--launch) (lambda (&rest _) (cl-incf launched))))
+         ;; Launched, no run: failed at the deadline.
+         (romacs-agent-resume session)
+         (funcall placed)
+         (should (= launched 1))
+         (funcall fire)
+         (should (eq (romacs-agent-state session) 'unstarted))
+         (should (string-match-p "no run of its harness began" (romacs-agent-reply session)))
+         ;; Its new supervisor never attached, the session taken for
+         ;; detached by its earlier run's records: failed all the same.
+         (romacs-agent-resume session)
+         (funcall placed)
+         (setf (romacs-agent-state session) 'detached)
+         (funcall fire)
+         (should (eq (romacs-agent-state session) 'unstarted))
+         ;; A run began and came up: the deadline does nothing, whatever
+         ;; the run's state since.
+         (dolist (state '(idle detached))
+           (setf (romacs-agent-state session) 'ended)
+           (romacs-agent-resume session)
+           (funcall placed)
+           (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session))))
+           (setf (romacs-agent-state session) state)
+           (funcall fire)
+           (should (eq (romacs-agent-state session) state)))
+         ;; A run began and never came up (its startup unanswered): failed,
+         ;; saying so, its supervisor left running (no stop, no other host):
+         ;; stopped, the queue would resume it at once.
+         (setf (romacs-agent-state session) 'ended)
+         (romacs-agent-resume session)
+         (funcall placed)
+         (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session))))
+         (setf (romacs-agent-state session) 'starting)
+         (let ((touched 0))
+           (cl-letf (((symbol-function 'romacs-agent-stop) (lambda (&rest _) (cl-incf touched)))
+                     ((symbol-function 'romacs-agent--no-supervisor) (lambda (&rest _) (cl-incf touched))))
+             (funcall fire))
+           (should (= touched 0)))
+         (should (eq (romacs-agent-state session) 'unstarted))
+         (should (string-match-p "did not come up" (romacs-agent-reply session)))
+         ;; Its records still moving: no deadline runs until its launch.
+         (setf (romacs-agent-state session) 'ended)
+         (let ((armed (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car)))
+           (romacs-agent-resume session)
+           (should (= (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car) armed))
+           (funcall placed)
+           (should (= (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car) (1+ armed))))
+         (should (= launched 6)))))))
+
+(ert-deftest romacs-agent-launch-a-renewal-whose-resume-failed-waits-for-the-next ()
+  "romacs#271: a renewal whose new run failed to launch is finished by the
+next resume, and its session says so."
+  (require 'romacs-agent-renew)
+  (romacs-agent-launch-tests--resuming
+   (lambda (session placed _fire _due)
+     (let* ((said nil)
+            (romacs-agent-event-functions (cons (lambda (_ event) (when (eq (plist-get event :type) 'error)
+                                                                     (push (plist-get event :text) said)))
+                                                romacs-agent-event-functions)))
+       (setf (romacs-agent-renewing session) t)
+       (puthash session t romacs-agent-renew--finishing)
+       (cl-letf (((symbol-function 'romacs-agent--argv) (lambda (&rest _) (error "argv broke"))))
+         (romacs-agent-resume session)
+         (funcall placed))
+       (should-not (gethash session romacs-agent-renew--finishing))
+       (should (cl-some (lambda (text) (string-match-p "Renewal not finished" text)) said))))))
+
+(ert-deftest romacs-agent-launch-an-earlier-runs-exit-is-no-end-of-a-launch ()
+  "A launched supervisor not yet listening is waited for, though the
+records read on hold the exit of the run before it: only an exit after
+the launched run's own `run' note ends it."
+  (romacs-agent-launch-tests--resuming
+   (lambda (session _placed _fire _due)
+     (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+           (romacs-agent--launched (make-hash-table :test #'equal)))
+       (cl-flet ((write (&rest records)
+                   (dolist (record records)
+                     (write-region (concat (romacs-agent--json record) "\n") nil journal t 'silent))))
+         (write (romacs-mcp--object "seq" 1 "t" 1.0 "note" (romacs-mcp--object "type" "run"))
+                (romacs-mcp--object "seq" 2 "t" 2.0 "exit" 0))
+         (setf (romacs-agent-journal-start session) 0)
+         ;; No launch waits: its last run ended.
+         (should (romacs-agent--caught-up-p session))
+         ;; A launch waits: that exit was the run before it.
+         (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
+         (should-not (romacs-agent--caught-up-p session))
+         ;; The launched run began, read by one try; it ended before the
+         ;; next one attached.
+         (write (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "run")))
+         (should-not (romacs-agent--caught-up-p session))
+         (write (romacs-mcp--object "seq" 4 "t" 4.0 "exit" 0))
+         (should (romacs-agent--caught-up-p session)))))))

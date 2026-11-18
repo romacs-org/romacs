@@ -114,7 +114,7 @@ OPTIONS) in `started', newest first, and one instance configured."
      (cl-letf (((symbol-function 'romacs-agent-start)
                 (lambda (cwd _prompt _title _provider options &rest _)
                   (push (list cwd options) started)
-                  (romacs-agent--make :id "c" :harness 'claude :state 'running :cwd cwd :options options))))
+                  (romacs-agent--make :id "c" :harness 'claude :state 'running :input-seq 1 :cwd cwd :options options))))
        ,@body)))
 
 (defun romacs-agent-worktree-tests--poll (deferred)

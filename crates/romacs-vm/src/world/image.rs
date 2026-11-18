@@ -41,7 +41,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 45] = [
+        let checks: [(&str, bool); 46] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -93,6 +93,9 @@ impl Vm {
             ("rooted_write", !self.rooted_write),
             ("deferred_writes", self.deferred_writes.is_empty()),
             ("unclaimed_caches", self.request_code.unclaimed_caches_empty()),
+            // What laying a window out found is this process's: derived,
+            // never carried (`DisplayState::laid_empty`).
+            ("laid", self.display_state.laid_empty()),
         ];
         if let Some((field, _)) = checks.iter().find(|(_, ok)| !ok) {
             return Err(format!("no world captured: {field} is not at rest"));
@@ -144,11 +147,19 @@ impl Vm {
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     let mut vm = vm.at_rest_for_image()?;
+    // A restore makes the image's entries the indices below each table's
+    // length (`Vm::make_image_permanent`): a table with a free entry among
+    // them would hand it to a young one.
+    let tables = &vm.0;
+    if tables.conses.unused() + tables.closures.unused() + tables.cells.unused() + tables.objects.unused() != 0 {
+        return Err("world image: the tables are not dense (collect compacting first)".into());
+    }
     settle(&mut vm.0, &mut carry)?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
-    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
+    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>(),
+                               carry_name: carry_name::<T>() };
     // UNSAFE(write_image's root is a promise only this caller can keep)
     // SAFETY: ROOT is the Box `image_root` leaked for this capture, which the
     // image owns from here and `restore` takes back.
@@ -229,31 +240,67 @@ fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
     }
 }
 
+/// The tag of type T in an image: one carried as T is restored only as T.
+/// An image serves the executable that made it, so T's `TypeId` there is
+/// T's here.
+fn carry_tag<T: ?Sized + 'static>() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::any::TypeId::of::<T>().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// T's name as an image keeps it: cut to `arena::CARRY_NAME` bytes.
+fn carry_name<T: ?Sized>() -> [u8; arena::CARRY_NAME] {
+    let mut name = [0; arena::CARRY_NAME];
+    let full = std::any::type_name::<T>().as_bytes();
+    let kept = full.len().min(name.len());
+    name[..kept].copy_from_slice(&full[..kept]);
+    name
+}
+
 /// The VM and carry of the image this process mapped, when it was made for
-/// KEY, with the process-global counters it depends on restored. Taken once.
+/// KEY and carried a T, with the process-global counters it depends on
+/// restored. Taken once.
 ///
-/// T must be the type `capture` carried: KEY binds the embedder that made it.
-pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
+/// # Errors
+///
+/// Why not, for the world's record: no image mapped, one made for another
+/// key, one made for another carry (naming both), or one restored already.
+pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result<(Vm, T), String> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
-    let fields = arena::mapped_image().filter(|fields| fields.key == *key)?;
+    let fields = arena::mapped_image().ok_or("no image mapped")?;
+    if fields.key != *key {
+        return Err("made for another key".into());
+    }
+    // The tag decides, and the name, as far as the image keeps it, must
+    // agree: two types would need both to coincide.
+    if fields.carry != carry_tag::<T>() || fields.carry_name != carry_name::<T>() {
+        let found = fields.carry_name.split(|&b| b == 0).next().unwrap_or_default();
+        return Err(format!("made for the carry {}; this process needs {}", String::from_utf8_lossy(found), std::any::type_name::<T>()));
+    }
     if TAKEN.swap(true, Ordering::AcqRel) {
-        return None;
+        return Err("restored already".into());
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
     // UNSAFE(an image's root is a Box another process leaked: no type carries it across)
-    // SAFETY: the image KEY names was made by this binary for this embedder
-    // (KEY binds both), so its root is the `Box<(Vm, T)>` `image_root` leaked,
-    // mapped where it was made; TAKEN lets it be taken once.
+    // SAFETY: the image was made by this binary (KEY binds it) and carried a
+    // T (its carry tag and name checked above), so its root is the
+    // `Box<(Vm, T)>` `image_root` leaked, mapped where it was made; TAKEN
+    // lets it be taken once.
     let mut root = unsafe { Box::from_raw(fields.root as *mut (Vm, T)) };
     // The at-rest fields are this process's to make, before anything runs.
     // Only the VM, the image's root, has them (`#[snapshot(root)]`).
     root.0.renew();
+    // To this process the image is a generation no collection frees, and of
+    // which a full reads only what may name the rest.
+    root.0.make_image_permanent();
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.
     crate::epoch::raise(root.0.allocation.since);
-    Some(*root)
+    Ok(*root)
 }
 
 #[cfg(test)]
@@ -317,6 +364,25 @@ mod tests {
         }
     }
 
+    /// An image's entries are the indices below each table's length, so a
+    /// capture refuses a table with a free entry among them, before it
+    /// writes anything.
+    #[test]
+    fn a_capture_refuses_a_table_with_a_hole() {
+        let mut vm = Vm::new();
+        let [a, _, c] = [(); 3].map(|()| vm.alloc_cons(Value::NIL, Value::NIL));
+        let mut roots = [a, c];
+        vm.collect(&mut roots);
+        assert!(vm.conses.unused() > 0, "a hole between two live conses");
+        let path = std::env::temp_dir().join(format!("romacs-dense-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let refused = super::capture(vm, (), &file, [0; 32]).unwrap_err();
+        let written = file.metadata().unwrap().len();
+        let _ = std::fs::remove_file(&path);
+        assert!(refused.contains("not dense"), "{refused}");
+        assert_eq!(written, 0, "nothing written");
+    }
+
     /// A census meets the VM once and counts what it names by this build's
     /// tables: a fresh VM's function cells name every primitive. (Its
     /// forwarded variables' places are made as variables are first read.)
@@ -344,6 +410,8 @@ mod tests {
         assert!(not_captured(|vm| vm.deferred_writes.push((crate::watchers::NativeWrite::set(0, crate::Value::NIL), crate::Value::NIL))).contains("deferred_writes"));
         // A cache slot a builder reserved that no installed code owns.
         assert!(not_captured(|vm| { vm.install_cache(); }).contains("unclaimed_caches"));
+        // A window's layout record, derived display state.
+        assert!(not_captured(|vm| vm.display_state.record_laid_for_test()).contains("laid"));
     }
 
     #[test]

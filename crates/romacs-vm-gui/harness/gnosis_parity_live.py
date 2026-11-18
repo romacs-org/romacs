@@ -107,8 +107,8 @@ def init_source(engine, root, lisp):
     """The init both engines load: identical except where each finds gnosis."""
     # GNU gets the packages Romacs bundles, installed as package.el would:
     # their directories on `load-path' and the same bundled autoloads
-    # Romacs's --loadup loads, whose libraries (romacs-video's find-file-hook)
-    # need Romacs's directories too.  gnosis and keymap-popup come byte-compiled.
+    # Romacs's --loadup loads, whose libraries need Romacs's directories
+    # too.  gnosis and keymap-popup come byte-compiled.
     bundled = [lisp] + [d for d in lisp_layout.romacs_load_path(ROOT) if d.name not in ('gnosis', 'keymap-popup')]
     load = '' if lisp is None else (
         f'(setq load-path (append (list {" ".join(lisp_string(str(d)) for d in bundled[:1])}) load-path'

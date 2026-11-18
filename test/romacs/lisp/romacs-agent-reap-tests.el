@@ -64,7 +64,7 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
                   (clrhash (romacs-agent-approvals review))
                   (and stopped t))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-state review) 'running))))
-      (should-not (reaped-p (lambda () (romacs-agent--enqueue review (list "more" nil nil nil)))))
+      (should-not (reaped-p (lambda () (romacs-agent--enqueue review (romacs-agent-item "more")))))
       (should-not (reaped-p (lambda () (puthash "q" t (romacs-agent-approvals review)))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-cancelled review) t))))
       (should-not (reaped-p (lambda () (setf (romacs-agent-state review) 'ended))))
@@ -148,7 +148,7 @@ DELAY), `stopped' each session stopped and `asleep' each reaped to sleep;
                   ((symbol-function 'run-at-time) #'ignore))
           (setf (romacs-agent-connection session) process
                 (romacs-agent-pending-selection session) (list :state 'applying :waiting '("x") :model "new"))
-          (romacs-agent--enqueue session (list "held" nil nil nil))
+          (romacs-agent--enqueue session (romacs-agent-item "held"))
           (process-put process 'romacs-agent session)
           (romacs-agent--restart session)
           (delete-process process)

@@ -27,6 +27,10 @@ pub(super) struct RequestCode {
 }
 
 impl RequestCode {
+    /// The function ids free for a request to take.
+    pub(super) fn free_ids(&self) -> &[usize] {
+        &self.free
+    }
     /// Whether every cache slot a builder took is owned: no build is open
     /// and none left one behind.
     pub(super) fn unclaimed_caches_empty(&self) -> bool {

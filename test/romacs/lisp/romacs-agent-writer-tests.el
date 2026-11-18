@@ -428,6 +428,22 @@ connection of its own, as the writer's process has."
       (should-not (gethash "h" romacs-agent--launched))
       (should (= hosts 2)))))
 
+(ert-deftest romacs-agent-writer-held-notes-stay-when-their-connection-is-gone ()
+  ;; A connection closed as its acknowledgement is read (its attachment
+  ;; stolen, its host ended): sending the held notes through it signals
+  ;; nothing, in the filter this runs from, and the notes stay held.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (romacs-agent--launched (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "g"))
+         (process (make-process :name "gone" :command '("true") :connection-type 'pipe :noquery t)))
+    (unwind-protect
+        (progn
+          (while (process-live-p process) (accept-process-output process 0.05))
+          (puthash "g" (list (romacs-mcp--object "type" "plan")) romacs-agent--held-notes)
+          (romacs-agent--send-held session process)
+          (should (= (length (gethash "g" romacs-agent--held-notes)) 1)))
+      (delete-process process))))
+
 (ert-deftest romacs-agent-writer-the-last-resort-sends-nothing ()
   ;; While the editor makes the writes itself, what their answers queue is
   ;; made by the next round here, never sent to a writer too.
@@ -488,7 +504,6 @@ connection of its own, as the writer's process has."
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
-              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
@@ -539,8 +554,8 @@ connection of its own, as the writer's process has."
             (serve)
             (should (equal ran '(t)))
             (should (equal (caar (sqlite-select (romacs-agent-store--open) "select count(*) from events where session = ?" (list id))) 1))
-            ;; Its journal backed up here, once imported.
-            (should-not (file-exists-p (expand-file-name "journal.jsonl" dir)))))
+            ;; Its journal left where it is, a backup no reader reads.
+            (should (file-exists-p (expand-file-name "journal.jsonl" dir)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 

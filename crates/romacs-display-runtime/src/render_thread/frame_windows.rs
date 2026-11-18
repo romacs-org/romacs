@@ -1240,8 +1240,6 @@ impl GuiFrameRenderState {
             );
         }
         self.compositor.current_frame = frame.map(Arc::new);
-        #[cfg(feature = "video")]
-        self.refresh_visible_videos();
         self.refresh_present_mapping();
         let appearance_changed = if let Some(previous) = previous_presentation
             && Some(previous) != next_presentation

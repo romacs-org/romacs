@@ -225,16 +225,14 @@ fn filename_case_measures_a_real_casefold_directory() {
                 "casefold namespace run failed: {}\n{}", text(&output.stdout), text(&output.stderr));
         return;
     };
-    use std::os::fd::AsRawFd;
     let mount = std::path::PathBuf::from(mount);
     let (fold, plain) = (mount.join("fold"), mount.join("plain"));
     std::fs::create_dir(&fold).unwrap();
     std::fs::create_dir(&plain).unwrap();
     let directory = std::fs::File::open(&fold).unwrap();
-    let mut flags: libc::c_int = 0;
-    assert_eq!(unsafe { libc::ioctl(directory.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) }, 0);
-    flags |= 0x4000_0000;
-    assert_eq!(unsafe { libc::ioctl(directory.as_raw_fd(), libc::FS_IOC_SETFLAGS, &flags) }, 0, "chattr +F");
+    // FS_CASEFOLD_FL, chattr +F.
+    let flags = rustix::fs::ioctl_getflags(&directory).unwrap() | rustix::fs::IFlags::from_bits_retain(0x4000_0000);
+    rustix::fs::ioctl_setflags(&directory, flags).expect("chattr +F");
     std::fs::write(fold.join("Abc"), b"").unwrap();
     assert!(fold.join("ABC").exists(), "the directory folds case");
     let names = [fold.clone(), fold.join("Abc"), fold.join("missing/nested"), plain.clone(), plain.join("x"), mount.clone()];

@@ -752,24 +752,94 @@ contents, so two equal states print the same."
             (should-not read))
           (should (= romacs-agent--fold-running 0)))))))
 
-(ert-deftest romacs-agent-kept-a-message-to-a-folding-session-folds-it-first ()
-  ;; A message sent while a worker folds the session: what it is sent as
-  ;; is decided on its folded state, not the stub's.
+(ert-deftest romacs-agent-kept-a-message-to-a-folding-session-waits-for-its-fold ()
+  ;; romacs#279: a message sent while a worker folds the session waits in
+  ;; its queue for that fold, which goes first: the editor reads none of
+  ;; its records, and the message goes once it is folded, decided on its
+  ;; folded state.  A resume and an interrupt wait the same way.
   (romacs-agent-kept-tests--with
-    (let ((records (romacs-agent-kept-tests--claude)) (seen nil))
+    (let ((records (romacs-agent-kept-tests--claude)) (seen nil) (read 0) (resumed 0) (interrupted 0))
       (romacs-agent-kept-tests--write dir records)
       (romacs-agent-kept-tests--with-workers
         (clrhash romacs-agent--sessions)
         (let ((session (romacs-agent--load dir)))
           (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
-          (cl-letf (((symbol-function 'romacs-agent--input)
-                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
-                    ((symbol-function 'romacs-agent--enqueue)
-                     (lambda (session &rest _) (setq seen (romacs-agent-seq session))))
-                    ((symbol-function 'romacs-agent--continue) #'ignore))
-            (ignore-errors (romacs-agent-send session "again")))
-          (should (eql seen (length records)))
-          (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding)))))))
+          (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                     ((symbol-function 'romacs-agent--record)
+                      (lambda (target record) (when (eq target session) (cl-incf read)) (funcall real target record)))
+                     ((symbol-function 'romacs-agent--input)
+                      (lambda (session &rest _) (push (romacs-agent-seq session) seen)))
+                     ((symbol-function 'romacs-agent--continue) #'ignore)
+                     ((symbol-function 'romacs-agent--resume-now) (lambda (_) (cl-incf resumed)))
+                     ((symbol-function 'romacs-agent--harness-get)
+                      (let ((get (symbol-function 'romacs-agent--harness-get)))
+                        (lambda (s key) (if (eq key :interrupt) (lambda (_) (cl-incf interrupted) 'signal) (funcall get s key))))))
+            (romacs-agent-send session "again")
+            (romacs-agent-resume session)
+            (romacs-agent-interrupt session)
+            (should (= read 0))
+            (should (equal (mapcar #'car (romacs-agent-queue session)) '("again")))
+            (should (and (= resumed 0) (= interrupted 0)))
+            (should (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+            ;; Its worker folds it: everything that waited goes, in order.
+            (setq read 0)
+            (romacs-agent-kept-tests--work (car jobs))
+            (should (= read 0))
+            (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+            (should (= (romacs-agent-seq session) (length records)))
+            (should (= resumed 1))
+            (should (= interrupted 1))
+            ;; The message went on as its folded state says: written, or
+            ;; waiting in its queue still, never lost.
+            (should (or seen (equal (mapcar #'car (romacs-agent-queue session)) '("again"))))))))))
+
+(ert-deftest romacs-agent-kept-a-delivery-to-a-folding-session-waits-for-its-fold ()
+  ;; A tool's delivery (a wake, a message) to a session a worker folds:
+  ;; admitted once the fold is done, whether its harness runs known then.
+  (require 'romacs-agent-tools)
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (romacs-agent-kept-tests--with-workers
+      (clrhash romacs-agent--sessions)
+      (let ((session (romacs-agent--load dir)) (waits 0))
+        (cl-letf (((symbol-function 'romacs-agent--admit) (lambda (&rest _) (cl-incf waits)))
+                  ((symbol-function 'romacs-agent--continue) #'ignore))
+          (romacs-agent-tools--deliver session "wake" #'ignore)
+          (should (= waits 0))
+          (romacs-agent-kept-tests--work (car jobs))
+          (should (= waits 1)))))))
+
+(ert-deftest romacs-agent-kept-a-fold-that-keeps-nothing-is-retried-then-said ()
+  ;; romacs#279: a worker's fold that kept no state is given to a worker
+  ;; again, a few times, never folded here; then the session says so, and
+  ;; what waited for it is let go, saying how much.
+  (romacs-agent-kept-tests--with
+    (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
+    (romacs-agent-kept-tests--with-workers
+      (clrhash romacs-agent--sessions)
+      (let ((session (romacs-agent--load dir)) (said nil) (read 0))
+        (cl-letf* ((real (symbol-function 'romacs-agent--record))
+                   ((symbol-function 'romacs-agent--record)
+                    (lambda (target record) (when (eq target session) (cl-incf read)) (funcall real target record)))
+                   ((symbol-function 'romacs-agent--resume-now) #'ignore))
+          (let ((romacs-agent-event-functions (list (lambda (_ event) (when (eq (plist-get event :type) 'error)
+                                                                        (push (plist-get event :text) said))))))
+            (romacs-agent-resume session)
+            (romacs-agent-send session "lost")
+            (should (equal (mapcar #'car (romacs-agent-queue session)) '("lost")))
+            ;; Each fold keeps nothing: its job answers, its rows empty.
+            (dotimes (_ (1+ romacs-agent--fold-retries))
+              (let ((future (car jobs)))
+                (setf (nth 4 future) (list nil))
+                (funcall (nth 3 future) future)
+                (romacs-agent-kept-tests--drain)))))
+        (should (= (length jobs) (1+ romacs-agent--fold-retries)))
+        (should (= read 0))
+        (should-not (gethash romacs-agent-kept-tests--id romacs-agent--folding))
+        (should (cl-some (lambda (text) (string-match-p "could not be read by a worker.*2 action" text)) said))
+        ;; Its message said dropped is out of its queue.
+        (should-not (romacs-agent-queue session))
+        (should (= (romacs-agent-queue-length session) 0))))))
 
 (ert-deftest romacs-agent-kept-a-whole-restore-folds-what-folds-aside ()
   ;; A restore that ends at once (a view's first look) folds here what a

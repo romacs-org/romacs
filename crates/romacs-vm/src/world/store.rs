@@ -207,9 +207,35 @@ fn content_digest(file: &std::fs::File, len: u64) -> std::io::Result<[u8; 32]> {
 /// A directory DIR of the store's own, made 0700 if missing: private
 /// whatever the umask, as the store is.
 pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
-    match host::create_dir(dir, 0o700) {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        made => made,
+    subdir(dir, 0o700)
+}
+
+/// `BASE/p` and the pinned table's directories in it, `cwd`, `tmp` and
+/// `bin`, empty and read-only: each made, or found made by another process
+/// (two builders starting in one fresh store, or a trace runner beside
+/// one). `BASE/p`.
+///
+/// # Errors
+///
+/// When one cannot be made.
+pub fn pinned_dirs(base: &Path) -> std::io::Result<PathBuf> {
+    let p = base.join("p");
+    store_subdir(&p)?;
+    for name in ["cwd", "tmp", "bin"] {
+        subdir(&p.join(name), 0o500)?;
+    }
+    Ok(p)
+}
+
+/// DIR made with MODE, or there already as a directory: whoever makes it
+/// first, as two processes starting builders in one fresh store may both
+/// try. A file or a symlink there is refused.
+fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
+    match host::create_dir(dir, mode) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if host::symlink_metadata(dir).is_ok_and(|meta| meta.file_type().is_dir()) { Ok(()) } else { Err(e) }
+        }
+        other => other,
     }
 }
 
@@ -260,6 +286,32 @@ fn libraries_digest() -> Result<[u8; 32], String> {
     entries.sort();
     entries.dedup();
     Ok(sha256(entries.join("\n").as_bytes()))
+}
+
+/// `World::lisp_files_digest` of MANIFEST: each file-read record's path,
+/// relative to the first of ROOTS that holds it, and its recorded result
+/// (the content's length and digest, or why it could not be read).
+fn files_digest(manifest: &Json, roots: &[PathBuf]) -> Option<String> {
+    let name = |path: &str| roots.iter().enumerate()
+        .find_map(|(i, root)| Path::new(path).strip_prefix(root).ok().map(|rest| format!("root{i}/{}", rest.display())))
+        .unwrap_or_else(|| path.to_owned());
+    let mut files: Vec<String> = manifest["records"].as_array()?.iter()
+        .filter(|r| r["kind"] == "file-read")
+        .map(|r| Some(format!("{} {}", name(r["path"].as_str()?), r["result"])))
+        .collect::<Option<_>>()?;
+    files.sort();
+    files.dedup();
+    Some(hex(&sha256(files.join("\n").as_bytes())))
+}
+
+/// `libraries_digest` as hex: the shared libraries this process loaded,
+/// by content, not the executable.
+///
+/// # Errors
+///
+/// Why a loaded library could not be identified.
+pub fn libraries_identity() -> Result<String, String> {
+    libraries_digest().map(|digest| hex(&digest))
 }
 
 /// The file that makes a directory a world store: Romacs wrote it there,
@@ -463,7 +515,7 @@ impl World {
     /// with the executable and the copy of the Lisp tree beside it. Its key
     /// binds the executable, its libraries and RECIPE; what else its build
     /// read is the installation's own, so its records are kept in its
-    /// manifest (`lisp_identity` reads them) but not asked again. Nothing is
+    /// manifest (`lisp_files_digest` reads them) but not asked again. Nothing is
     /// made or written there, no lock taken, no use stamped and the digest
     /// cache, which the installer's build filled, is only read. No launch
     /// prunes such a store or builds in it.
@@ -481,7 +533,7 @@ impl World {
         let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
-                .ok_or_else(|| json!({"image": "made for another key"})),
+                .map_err(|reason| json!({"image": reason})),
             failed => Err(arena_reason(failed)),
         }
     }
@@ -490,22 +542,17 @@ impl World {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
     }
 
-    /// The identity of this world's Lisp, from its published manifest
-    /// alone (no record is checked): its key, which binds the executable
-    /// and the recipe, and the content of every file its build read. What
-    /// a compile process restores, for the compiled-Lisp key
-    /// (`crate::compiled_lisp`); a rebuild for another host fact, the
-    /// environment's say, keeps it. None when no world was published.
-    pub fn lisp_identity(&self) -> Option<String> {
+    /// The digest of the Lisp this world's build read, from its published
+    /// manifest alone (no record is checked): every file's content, each
+    /// named relative to the first of ROOTS that holds it (`root0/subr.el`),
+    /// so the same tree copied elsewhere gives the same digest. With the
+    /// embedder's build and `libraries_identity`, what compiled Lisp made
+    /// against this world depends on (`crate::compiled_lisp`): not this
+    /// executable's file, which two builds of one commit make different
+    /// (romacs#277). None when no world was published.
+    pub fn lisp_files_digest(&self, roots: &[PathBuf]) -> Option<String> {
         let text = host::read_store_file(self.file(".json")).ok()?;
-        let manifest: Json = serde_json::from_str(&text).ok()?;
-        let mut files: Vec<String> = manifest["records"].as_array()?.iter()
-            .filter(|r| r["kind"] == "file-read")
-            .map(|r| format!("{} {}", r["path"], r["sha256"]))
-            .collect();
-        files.sort();
-        files.dedup();
-        Some(format!("{} {}", hex(&self.key), hex(&sha256(files.join("\n").as_bytes()))))
+        files_digest(&serde_json::from_str(&text).ok()?, roots)
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -586,11 +633,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Launch::Restored { vm: Box::new(vm), carry, manifest }
                 }
-                None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+                Err(reason) => Launch::Chain { reason: json!({"image": reason}) },
             },
             failed => Launch::Chain { reason: arena_reason(failed) },
         }
@@ -663,13 +710,18 @@ impl World {
                 }
                 host::exit_at_once(i32::from(outcome.is_err()))
             }
-            Launch::Chain { .. } => None,
+            Launch::Chain { reason } => {
+                // Said, so a test that needs its world can tell why it has none.
+                eprintln!("test world: booting from source: {reason}");
+                None
+            }
         }
     }
 
     /// The world restored, when it is usable now, without building: for a
-    /// worker isolate, which runs its spawner's exact world or nothing
-    /// (lisp/vm/isolate.el `isolate-world-unavailable').
+    /// worker isolate, which runs its spawner's exact world or nothing; a
+    /// spawner with no world starts its workers from source instead
+    /// (lisp/vm/isolate.el `romacs--isolate-boot-arguments').
     pub fn restore_only<T: super::safe::SnapshotSafe + 'static>(&self) -> Result<(Box<Vm>, T), Json> {
         if !arena::active() {
             return Err(json!("no arena"));
@@ -678,11 +730,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Ok((Box::new(vm), carry))
                 }
-                None => Err(json!({"image": "made for another key"})),
+                Err(reason) => Err(json!({"image": reason})),
             },
             failed => Err(json!({"image": format!("{failed:?}")})),
         }
@@ -879,14 +931,7 @@ impl World {
     /// The pinned table's directories, `STORE/p/{cwd,tmp,bin}`, empty and
     /// read-only (§5 step 1). They persist, so a record naming them holds.
     fn pinned_dir(&self) -> std::io::Result<PathBuf> {
-        let p = self.store.join("p");
-        store_subdir(&p)?;
-        for name in ["cwd", "tmp", "bin"] {
-            if !host::probe(host::Probe::IsDir, p.join(name)) {
-                host::create_dir(p.join(name), 0o500)?;
-            }
-        }
-        Ok(p)
+        pinned_dirs(&self.store)
     }
 
     /// A builder, once it holds the lock: record in build mode. The builder
@@ -1031,10 +1076,8 @@ impl World {
         let mut manifest = self.manifest(trace, trace["uncaptured"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
+        // Dense, as `image::capture` requires.
         vm.collect_compacting();
-        if vm.conses.unused() + vm.closures.unused() + vm.cells.unused() + vm.objects.unused() != 0 {
-            return Err("world image: the tables did not compact".into());
-        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
             file.sync_all().map_err(|e| e.to_string())?;
@@ -1367,12 +1410,12 @@ fn lock_store(store: &Path, how: host::Flock) -> std::io::Result<std::fs::File> 
 
 /// A test's hook between opening a world's lock and locking it: with
 /// ROMACS_WORLD_TEST_PAUSE_LOCK=DIR, say so in DIR/paused and wait for
-/// DIR/resume. Only under the `world-test-hooks` feature, which only test
+/// DIR/resume. Only under the `test-hooks` feature, which only test
 /// targets enable; a shipped binary has no such hook.
-#[cfg(not(feature = "world-test-hooks"))]
+#[cfg(not(feature = "test-hooks"))]
 fn pause_for_test() {}
 
-#[cfg(feature = "world-test-hooks")]
+#[cfg(feature = "test-hooks")]
 fn pause_for_test() {
     let Some(dir) = host::getenv("ROMACS_WORLD_TEST_PAUSE_LOCK").map(PathBuf::from) else { return };
     let _ = host::write_store_file(dir.join("paused"), b"");
@@ -1430,6 +1473,21 @@ pub fn pinned_env(invoking: &[(OsString, OsString)], p: &Path) -> Vec<(OsString,
 
 #[cfg(test)]
 mod tests {
+    /// The Lisp a world read keys compiled Lisp by its content, wherever
+    /// the tree lies: a file changed in place, or a read that now fails,
+    /// changes the digest, and the same files under another root do not.
+    #[test]
+    fn a_worlds_lisp_digest_is_its_files_content_relative_to_the_tree() {
+        let manifest = |root: &str, result: serde_json::Value| serde_json::json!({"records": [
+            {"kind": "file-read", "path": format!("{root}/lisp/subr.el"), "result": result},
+            {"kind": "probe", "path": format!("{root}/etc"), "result": "ok"}]});
+        let read = |sha: &str| serde_json::json!({"len": 3, "sha256": sha});
+        let at = |root: &str| vec![std::path::PathBuf::from(root)];
+        let a = super::files_digest(&manifest("/a/tree", read("11")), &at("/a/tree")).unwrap();
+        assert_eq!(a, super::files_digest(&manifest("/b/c/tree", read("11")), &at("/b/c/tree")).unwrap());
+        assert_ne!(a, super::files_digest(&manifest("/a/tree", read("22")), &at("/a/tree")).unwrap());
+        assert_ne!(a, super::files_digest(&manifest("/a/tree", serde_json::json!({"errno": 2})), &at("/a/tree")).unwrap());
+    }
     use super::*;
 
     /// Build a shared library at OUT from SOURCE with ARGS, or None when no
@@ -1528,6 +1586,33 @@ mod tests {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// A store directory is made, or found made as a directory; a file or a
+    /// symlink in its place is refused, not taken for one.
+    #[test]
+    fn a_store_subdirectory_is_made_or_found_but_never_a_file_or_a_link() {
+        let root = std::env::temp_dir().join(format!("romacs-store-{}-subdir", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let made = root.join("made");
+        subdir(&made, 0o700).unwrap();
+        subdir(&made, 0o700).unwrap();
+        assert!(made.is_dir());
+        std::fs::write(root.join("file"), "").unwrap();
+        assert_eq!(subdir(&root.join("file"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::os::unix::fs::symlink(&made, root.join("link")).unwrap();
+        assert_eq!(subdir(&root.join("link"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        // The pinned directories, as a builder and the GNU trace runner make
+        // them: a regular file at `p/cwd` is an error, not a directory.
+        let base = root.join("base");
+        std::fs::create_dir_all(base.join("p")).unwrap();
+        std::fs::write(base.join("p/cwd"), "").unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::fs::remove_file(base.join("p/cwd")).unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap(), base.join("p"));
+        assert!(["cwd", "tmp", "bin"].iter().all(|name| base.join("p").join(name).is_dir()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

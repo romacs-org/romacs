@@ -163,7 +163,7 @@ mod linux {
     use wgpu::hal::api::Vulkan;
 
     pub(super) fn supports_dma_buf_extensions(adapter: &wgpu::Adapter) -> bool {
-        if !cfg!(feature = "video") {
+        if !false {
             return false;
         }
         // SAFETY: the guard is used only for immutable capability inspection
