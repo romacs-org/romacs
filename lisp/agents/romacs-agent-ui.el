@@ -1546,7 +1546,11 @@ then `romacs-agent-ui-changed-hook'."
     (clrhash romacs-agent-ui--children-changed)
     (romacs-agent-ui--flush-rows sessions)
     (romacs-agent-ui--status-bar)
-    (run-hooks 'romacs-agent-ui-changed-hook)))
+    ;; While a start restores, its views are told once, by the batch its
+    ;; end runs (`romacs-agent-restored-hook'): not a turn of its loading
+    ;; at a time, each redrawing every row.
+    (unless romacs-agent--restoring (run-hooks 'romacs-agent-ui-changed-hook))))
+
 
 (defun romacs-agent-ui--flush-rows (sessions)
   "Make SESSIONS' rows again; their chats and an open actions menu follow,

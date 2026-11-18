@@ -359,4 +359,92 @@ nil when it refused first.  ANSWER, when given, answers its questions
       (when (and process (process-live-p process)) (delete-process process))
       (when (get-buffer buffer-name) (kill-buffer buffer-name)))))
 
+;; An owner restart (11-18) named 24 dropped buffers "unsaved text not
+;; carried" that held nothing typed: mail views and the agent board.
+(ert-deftest warm-restart-unsaved-text-is-typed-text-not-a-filled-view ()
+  "A read-only view its package fills, and a process's output, are
+modified but hold nothing typed: an image lists them dropped, not as
+unsaved text.  Input typed after a comint buffer's process mark, narrowed
+or not, and typed text in a buffer left out of images, are named.  A
+process whose mark is not placed yet does not stop the plan."
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-" t))
+         (view (generate-new-buffer "*wr-notmuch-search*"))
+         (output (generate-new-buffer "wr-process-output"))
+         (typing (generate-new-buffer "wr-process-typing"))
+         (term (generate-new-buffer "wr-process-term"))
+         (unplaced (generate-new-buffer "wr-process-unplaced"))
+         (draft (generate-new-buffer "wr-draft-left-out"))
+         (file (find-file-noselect (expand-file-name "kept.txt" warm-restart-directory)))
+         (processes nil))
+    (unwind-protect
+        (progn
+          ;; A mail search: read-only, filled by its package, rebuilt by it.
+          (with-current-buffer view
+            (special-mode)
+            (setq-local warm-restart-regenerable "mail view; its package reopens it")
+            (let ((inhibit-read-only t)) (insert "Thread one\nThread two\n"))
+            (should (buffer-modified-p)))
+          ;; Process buffers, output before the mark.  In a comint mode the
+          ;; mark ends the output: one has input typed after it, not yet
+          ;; sent, and is narrowed to the output.  A non-comint buffer's
+          ;; text after its mark is the process's (a terminal's cursor).
+          (dolist (buffer (list output typing term))
+            (with-current-buffer buffer
+              (unless (eq buffer term) (comint-mode))
+              (let ((process (make-pipe-process :name "wr-output" :buffer buffer :noquery t)))
+                (push process processes)
+                (goto-char (process-mark process))
+                (insert "output from the process\n$ ")
+                (set-marker (process-mark process) (point)))))
+          (with-current-buffer typing
+            (goto-char (point-max))
+            (insert "ls -l")
+            (narrow-to-region (point-min) (process-mark (get-buffer-process typing))))
+          (with-current-buffer term (goto-char (point-max)) (insert "prompt redrawn"))
+          ;; A process whose mark is not placed, its writable buffer edited.
+          (with-current-buffer unplaced
+            (comint-mode)
+            (let ((process (make-pipe-process :name "wr-unplaced" :buffer unplaced :noquery t)))
+              (push process processes)
+              (set-marker (process-mark process) nil))
+            (insert "typed before any output"))
+          ;; Typed text in a buffer that never goes into an image.
+          (with-current-buffer draft
+            (setq-local warm-restart-left-out "kept off the disk")
+            (insert "typed by hand"))
+          ;; A file left out the same way, edited, then made read-only.
+          (with-current-buffer file
+            (setq-local warm-restart-left-out "kept off the disk")
+            (insert "typed into a file")
+            (read-only-mode 1))
+          (let* ((plan (warm-restart-plan))
+                 (entry (lambda (buffer) (seq-find (lambda (e) (eq (plist-get e :buffer) buffer)) (plist-get plan :buffers)))))
+            (should (plist-get (funcall entry view) :modified))
+            (should-not (plist-get (funcall entry view) :unsaved))
+            (should-not (plist-get (funcall entry output) :unsaved))
+            (should (plist-get (funcall entry typing) :unsaved))
+            (should-not (plist-get (funcall entry term) :unsaved))
+            (should (plist-get (funcall entry unplaced) :unsaved))
+            (should (plist-get (funcall entry draft) :unsaved))
+            (should (plist-get (funcall entry file) :unsaved)))
+          (let* ((image (warm-restart-write))
+                 (lost (plist-get (car (warm-restart--read image)) :lost))
+                 (named (lambda (buffer) (seq-find (lambda (e) (equal (plist-get e :buffer) (buffer-name buffer))) lost))))
+            ;; Still listed as dropped; unsaved only where something was typed.
+            (should (equal (funcall named view)
+                           (list :buffer (buffer-name view) :reason "mail view; its package reopens it")))
+            (should (funcall named output))
+            (should-not (plist-get (funcall named output) :unsaved))
+            (should (plist-get (funcall named typing) :unsaved))
+            (should (equal (funcall named draft)
+                           (list :buffer (buffer-name draft) :reason "kept off the disk" :unsaved t)))
+            (should (equal (funcall named file)
+                           (list :buffer (buffer-name file) :reason "kept off the disk" :unsaved t)))))
+      (mapc #'delete-process processes)
+      (dolist (buffer (list view output typing term unplaced draft file))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)))
+      (delete-directory warm-restart-directory t))))
+
 ;;; warm-restart-tests.el ends here

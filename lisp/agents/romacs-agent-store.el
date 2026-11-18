@@ -428,11 +428,26 @@ left to the next fill, the rows being a cache of records."
 
 (defvar romacs-agent-events-store)
 
+(declare-function romacs-agent--marks-reconcile "romacs-agent" ())
+(declare-function romacs-agent--marked "romacs-agent" (&optional any))
+
 (defun romacs-agent-store-fill-batch ()
-  "`romacs-agent-store-fill' in a batch process, its count printed.  It
-moves no session's records to SQLite: the editor alone does."
+  "`romacs-agent-store-fill' in a batch process, its count printed, and
+every session's marks made what its files say
+\(`romacs-agent--marks-reconcile'), each newly marked id printed for the
+editor to load.  It moves no session's records to SQLite: the editor
+alone does."
+  ;; Every kind of what can wait on a session, its files asked.
+  (require 'romacs-agent-watch)
   (let ((romacs-agent-events-store nil) (romacs-agent-store-patience romacs-agent-store-patient))
-    (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill)))))
+    (princ (format "romacs-agent-store: filled %d\n" (romacs-agent-store-fill)))
+    ;; Still with no row: the editor loads them, as it does the marked.
+    (dolist (dir (romacs-agent-store--missing))
+      (princ (format "romacs-agent-store: missing %s\n" (file-name-nondirectory dir))))
+    (dolist (id (romacs-agent--marks-reconcile))
+      (princ (format "romacs-agent-store: marked %s\n" id)))
+    ;; Its report whole: the editor takes it for all there is.
+    (princ "romacs-agent-store: done\n")))
 
 (defvar romacs-agent-store--filling nil "The batch process filling the database, while it runs.")
 
@@ -453,22 +468,59 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
                           "-l" "romacs-agent-store" "-f" "romacs-agent-store-fill-batch")
            :sentinel (lambda (process _event)
                        (unless (process-live-p process)
-                         (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process)))
-                         (setq romacs-agent-store--filled t)
-                         (romacs-agent-store--load-missing)
+                         (romacs-agent-store--filled
+                          (when (buffer-live-p (process-buffer process))
+                            (prog1 (with-current-buffer (process-buffer process) (buffer-string))
+                              (kill-buffer (process-buffer process))))
+                          (process-exit-status process))
                          (run-hooks 'romacs-agent-store-filled-hook)))))))
 
-(defun romacs-agent-store--load-missing ()
-  "Load, a turn at a time as a start's restore does, each recorded session
-this process does not know that still has no row once a fill has run: a
-start left it to the fill (`romacs-agent-store-listed-p'), and with no
-row it is shown only once loaded."
+(defun romacs-agent-store--filled (output &optional status)
+  "A fill ended with STATUS (0 by default), saying OUTPUT: the sessions it
+left with no row and those it newly marked as waited on are loaded, none
+of the rows asked here, when it ended well and its report is whole;
+else every session with no row and every marked one, asked here."
+  (setq romacs-agent-store--filled t)
+  (if (and output (eql (or status 0) 0) (string-match-p "^romacs-agent-store: done$" output))
+      (romacs-agent-store--load-missing (romacs-agent-store--said-ids "missing\\|marked" output) t)
+    ;; What it said lost or cut short: asked here, the rows missing and
+    ;; every marked session, one it marked before it stopped among them.
+    (romacs-agent-store--load-missing
+     (append (mapcar #'file-name-nondirectory (romacs-agent-store--missing))
+             ;; Its marks so far, known whole or not.
+             (when-let* ((marked (romacs-agent--marked t))) (hash-table-keys marked)))
+     t)))
+
+(defun romacs-agent-store--said-ids (what output)
+  "The ids a fill's OUTPUT names on its lines of WHAT (a regexp)."
+  (let ((ids nil) (start 0) (line (format "^romacs-agent-store: \\(?:%s\\) \\([0-9a-f][^ \n]*\\)$" what)))
+    (while (string-match line output start)
+      (push (match-string 1 output) ids)
+      (setq start (match-end 0)))
+    ids))
+
+(defun romacs-agent-store--marked-ids (output)
+  "The ids a fill's OUTPUT says it newly marked."
+  (romacs-agent-store--said-ids "marked" output))
+
+(defun romacs-agent-store--load-missing (&optional ids said)
+  "Load, a turn at a time as a start's restore does, each session IDS
+names that this process does not know: as a fill says, those it left
+with no row (a start left them to it, `romacs-agent-store-listed-p', and
+with none one is shown only once loaded) and those it newly marked as
+waited on (`romacs-agent--marks-reconcile').  Not SAID, every recorded
+session with no row, asked here."
   (let ((idle (null romacs-agent--restore-pending)))
-    (dolist (dir (romacs-agent-store--missing))
+    (dolist (dir (if said (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
+                   (romacs-agent-store--missing)))
+      ;; One gone (a mark it left): nothing to load, nor to know as loaded.
       (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                  (not (file-directory-p dir))
                   (member dir romacs-agent--restore-pending))
         (setq romacs-agent--restore-pending (append romacs-agent--restore-pending (list dir)))))
     (when (and idle romacs-agent--restore-pending)
+      ;; After a start's restore: known as it knows sessions once loaded.
+      (unless romacs-agent--restoring (setq romacs-agent--late-loads t))
       (run-at-time 0 nil #'romacs-agent--restore-step))))
 
 ;;; Listing
@@ -608,7 +660,33 @@ with REQUEST, or nil."
 (add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
+(defun romacs-agent-store-listed-ids ()
+  "The ids of the sessions with a row, as a table: one query, however many."
+  (let ((table (make-hash-table :test #'equal)))
+    (when-let* ((db (romacs-agent-store--open)))
+      (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t table)))
+    table))
+
+(defun romacs-agent-store-prefixed-ids (short)
+  "The ids with a row that begin with SHORT: the primary key's range."
+  (when-let* ((db (romacs-agent-store--open)))
+    (mapcar #'car (sqlite-select db "select id from sessions where id >= ? and id < ?"
+                                 (list short (concat short "\uffff"))))))
+
+(defun romacs-agent-store-rows-since (place)
+  "(IDS . PLACE): the ids of the sessions whose rows were written after
+PLACE (a rowid: a row written again takes a new one), nil for none yet,
+and the place after them; nil with no listing to ask."
+  (when-let* ((db (romacs-agent-store--open)))
+    (if (null place)
+        (cons nil (or (caar (sqlite-select db "select max(rowid) from sessions")) 0))
+      (let ((rows (sqlite-select db "select id, rowid from sessions where rowid > ? order by rowid" (list place))))
+        (cons (mapcar #'car rows) (if rows (cadr (car (last rows))) place))))))
+
 (setq romacs-agent-listed-p #'romacs-agent-store-listed-p)
+(setq romacs-agent-prefixed-ids #'romacs-agent-store-prefixed-ids)
+(setq romacs-agent-rows-since #'romacs-agent-store-rows-since)
+(setq romacs-agent-listed-ids #'romacs-agent-store-listed-ids)
 (setq romacs-agent-quiet-p #'romacs-agent-store-quiet-p)
 
 (provide 'romacs-agent-store)

@@ -94,6 +94,7 @@ fn act_in_role() -> bool {
     let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
     match std::env::var(ROLE).as_deref() {
         Ok("launch") => launch(&store.unwrap()),
+        Ok("launch-other") => launch_world(&store.unwrap(), "consumer world-image-test, another world"),
         Ok("open-launch") => {
             // As a user whose umask lets everyone write: the builder this
             // spawns inherits it.
@@ -188,8 +189,13 @@ extern "C" fn count_fork() {
 /// as fork runs every library's atfork handlers while the launch's GPU
 /// thread may be unloading a driver (`World::start_builder`).
 fn launch(store: &Path) {
+    launch_world(store, "consumer world-image-test");
+}
+
+/// `launch`, of the world of RECIPE.
+fn launch_world(store: &Path, recipe: &str) {
     unsafe { libc::pthread_atfork(Some(count_fork), None, None) };
-    let world = match World::new(store.to_owned(), vec!["consumer world-image-test".into()]) {
+    let world = match World::new(store.to_owned(), vec![recipe.into()]) {
         Ok(world) => world,
         Err(error) => {
             println!("WORLD-IMAGE {}", json!({"mode": "source", "reason": error.to_string()}));
@@ -1051,6 +1057,34 @@ fn a_restored_images_frees_link_nothing_and_dirty_no_image_page() {
     assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-frees", &store)), json!({"linked": false}).to_string());
     assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-blocks", &store)),
                json!({"written": true, "freed_released": true, "tail_released": true, "kept": true, "linked": false}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const TWO_WORLDS: &str = "two_worlds_first_launched_at_once_in_a_fresh_store_both_restore";
+
+/// The first launches of two worlds in one fresh store, at once: each
+/// starts a builder, and each builder makes the store's shared directories
+/// (`World::pinned_dir`) or finds them made by the other. Both build and
+/// restore; neither boots from source because the other made a directory
+/// first, as one once did with "File exists". Rounds of fresh stores, as the
+/// collision is a matter of timing.
+#[test]
+fn two_worlds_first_launched_at_once_in_a_fresh_store_both_restore() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(TWO_WORLDS);
+    for round in 0..4 {
+        let store = scratch.join(format!("store-{round}"));
+        let spawn = |role| child_of(TWO_WORLDS, role, &store).stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let pair = [spawn("launch"), spawn("launch-other")];
+        for child in pair {
+            let output = child.wait_with_output().unwrap();
+            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+            assert!(text.contains(&format!("WORLD-IMAGE {}", restored())), "round {round}: {text}{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
