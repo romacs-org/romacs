@@ -692,10 +692,52 @@ fn runtime_lisp(dir: &std::path::Path, path: &str) -> std::path::PathBuf {
 /// what it read, so an edited file builds the world again, a source boot
 /// reads the file as it is now, and `load-history' names it, as GNU's
 /// preloaded files are named. A launch never runs a copy of the tree
-/// compiled into this executable.
+/// compiled into this executable. A file that signals keeps what it
+/// defined before the error, and the launch goes on, as the chain goes on
+/// past a GNU file that signals: its error, naming the file and line, is
+/// noted for [`report_lisp_errors`].
 fn load_lisp(vm: &mut Vm, dir: &std::path::Path, path: &str) -> Result<(), String> {
-    let file = runtime_lisp(dir, path);
-    vm.load_file(&file).map(drop).map_err(|e| format!("{}: {e}", file.display()))
+    match vm.load_file(&runtime_lisp(dir, path)) {
+        Ok(_) => Ok(()),
+        Err(error) => note_lisp_error(vm, &error),
+    }
+}
+
+/// The Lisp variable holding the errors of Romacs's Lisp this launch noted,
+/// newest first: a world keeps those of its build, which each session
+/// restored from it reports as its own.
+const LISP_ERRORS: &str = "romacs--startup-lisp-errors";
+
+/// Note ERROR for [`report_lisp_errors`], and say it on stderr.
+fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
+    eprintln!("romacs: {error}");
+    vm.eval_source(&format!("(progn (defvar {LISP_ERRORS} nil) (setq {LISP_ERRORS} (cons {} {LISP_ERRORS})))",
+                            lisp_string(error))).map(drop)
+}
+
+/// Show each error of Romacs's Lisp this launch noted ([`load_lisp`]), once:
+/// in *Messages*, in the usage log and in a warning the first frame shows,
+/// as an init's error is shown. The form calls only what is defined, since
+/// the Lisp that failed may be what would show it, and a way of showing
+/// one that signals keeps none of the others from being shown.
+///
+/// # Errors
+///
+/// The VM's error when it cannot evaluate the report itself.
+pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
+       (let ((errors (reverse {LISP_ERRORS})))
+         (setq {LISP_ERRORS} nil)
+         (while errors
+           (let ((error (car errors)))
+             (condition-case nil (message \"Romacs Lisp failed: %s\" error) (error nil))
+             (condition-case nil
+                 (when (fboundp 'romacs-usage-log-note) (romacs-usage-log-note \"lisp-error\" :error error))
+               (error nil))
+             (condition-case nil
+                 (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error))
+               (error nil)))
+           (setq errors (cdr errors)))))")).map(drop)
 }
 
 /// Romacs's layers after the chain that only define ([`SESSION_DEFINITIONS`]).
@@ -2197,17 +2239,19 @@ mod tests {
     }
 
     /// `--loadup` loads Romacs's own Lisp from its runtime tree as `load'
-    /// does: each file has its `load-history' entry, so a world keys what
-    /// it read and `find-function' reaches its definitions. The chain left no
+    /// does, none of it signalling: each file has its `load-history' entry,
+    /// so a world keys what it read and `find-function' reaches its
+    /// definitions. The chain left no
     /// GNU editing function to fill in, and the kill ring's are the tree's
     /// simple.el's, not the VM's native `kill-new'.
     #[test]
     fn loadup_loads_romacs_lisp_from_its_tree() {
         let dir = lisp_root(&lisp_dir()).unwrap();
-        let (unloaded, kill_ring) = on_evaluator(move || {
+        let (failed, unloaded, kill_ring) = on_evaluator(move || {
             let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
             private_home(&mut vm, "tree-lisp");
             resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
+            let failed = printed(&mut vm, &format!("(and (boundp '{LISP_ERRORS}) {LISP_ERRORS})"));
             let unloaded = launch_lisp().filter(|path| {
                 let file = lisp_string(&runtime_lisp(&dir, path).to_string_lossy());
                 printed(&mut vm, &format!("(and (assoc {file} load-history) t)")) != "t"
@@ -2218,8 +2262,9 @@ mod tests {
             let kill_ring = printed(&mut vm, &format!("(mapcar (lambda (f) (and (not (subrp (symbol-function f)))
                                                                                (equal (symbol-file f) {simple})))
                                                                '(kill-new current-kill))"));
-            (unloaded, kill_ring)
+            (failed, unloaded, kill_ring)
         });
+        assert_eq!(failed, "nil", "the tree's Romacs Lisp signalled");
         assert!(unloaded.is_empty(), "not loaded from the runtime tree: {unloaded:?}");
         assert_eq!(kill_ring, "(t t)", "kill-new and current-kill are not the tree's simple.el's");
     }
@@ -2276,6 +2321,50 @@ mod tests {
                                       (subrp (symbol-function 'kill-new)) (mark)))")
         });
         assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
+    }
+
+    /// Files of Romacs's Lisp that signal end no launch: the launch goes on
+    /// with what each defined before its error, notes each error with its
+    /// file and line, and reports each once, in launch order, before the
+    /// session's last steps: in *Messages*, and in a warning and the usage
+    /// log where those are defined, a way of showing one that signals
+    /// keeping none of the others from being shown.
+    #[test]
+    fn a_romacs_file_that_signals_is_reported_not_fatal() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let broken = |path: &str| format!("(error \"broken on purpose\")\n{}", std::fs::read_to_string(source.join(path)).unwrap());
+        let files = [("completion/romacs-buffer-switch.el", broken("completion/romacs-buffer-switch.el")),
+                     ("ui/romacs-key-hint.el", broken("ui/romacs-key-hint.el"))];
+        let files: Vec<(&str, &str)> = files.iter().map(|(path, text)| (*path, text.as_str())).collect();
+        // Shown with nothing but `message': no usage log, no warnings.
+        let bare = scratch_runtime("broken-bare", "", &files);
+        // Shown where a warning signals and the usage log records.
+        let warned = scratch_runtime("broken-warned", "", &files);
+        let report = |dir: std::path::PathBuf, setup: &'static str| on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            let noted = printed(&mut vm, &format!("(length {LISP_ERRORS})"));
+            vm.eval_source(setup).unwrap();
+            report_lisp_errors(&mut vm).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
+            let messages = "(save-current-buffer (set-buffer \"*Messages*\") (buffer-string))";
+            let reported = printed(&mut vm, messages);
+            report_lisp_errors(&mut vm).unwrap();
+            (noted, reported, printed(&mut vm, messages), printed(&mut vm, "(and (boundp 'romacs-test-shown) romacs-test-shown)"))
+        });
+        let (noted, reported, again, _) = report(bare, "(fmakunbound 'romacs-usage-log-note)");
+        assert_eq!(noted, "2");
+        let at = |file: &str| reported.find(&format!("{file}: line 1 "));
+        assert!(at("completion/romacs-buffer-switch.el").is_some() && at("ui/romacs-key-hint.el").is_some(), "{reported}");
+        assert!(at("completion/romacs-buffer-switch.el") < at("ui/romacs-key-hint.el"), "in launch order: {reported}");
+        assert_eq!(reported, again, "an error is reported once");
+        let (_, reported, _, shown) = report(warned, "(progn
+            (defvar romacs-test-shown nil)
+            (defun display-warning (&rest _) (error \"a warning that signals\"))
+            (defun romacs-usage-log-note (kind &rest plist) (setq romacs-test-shown (cons (list kind (plist-get plist :error)) romacs-test-shown))))");
+        assert!(reported.contains("romacs-buffer-switch.el: line 1 ") && reported.contains("romacs-key-hint.el: line 1 "), "{reported}");
+        assert_eq!(shown.matches("\"lisp-error\"").count(), 2, "{shown}");
     }
 
     /// `--gnu-lisp`/`--loadup`: GNU's directories come before every bundled
