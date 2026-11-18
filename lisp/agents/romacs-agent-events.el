@@ -405,16 +405,18 @@ code, or the signal that ended it, negated, or nil when it could not be
 started, OUTPUT then why."
   (let ((buffer (generate-new-buffer " *romacs-agent-host*" t)))
     (unwind-protect
-        (condition-case err
-            ;; No sentinel's line in what it said: its end is the status.
-            (let ((process (make-process :name "romacs-agent-host" :noquery t :connection-type 'pipe :buffer buffer
-                                         :sentinel #'ignore :command (cons (romacs-agent-events--host-program) args))))
-              (while (process-live-p process) (accept-process-output process 0.05))
-              ;; Ended, what it wrote last may still be in its pipe.
-              (while (accept-process-output process 0))
-              (cons (if (eq (process-status process) 'signal) (- (process-exit-status process)) (process-exit-status process))
-                    (with-current-buffer buffer (buffer-string))))
-          (error (cons nil (error-message-string err))))
+        ;; No sentinel's line in what it said: its end is the status.
+        (pcase (condition-case err
+                   (make-process :name "romacs-agent-host" :noquery t :connection-type 'pipe :buffer buffer
+                                 :sentinel #'ignore :command (cons (romacs-agent-events--host-program) args))
+                 (error (cons nil (error-message-string err))))
+          ((and `(nil . ,_) not-started) not-started)
+          (process
+           (while (process-live-p process) (accept-process-output process 0.05))
+           ;; Ended, what it wrote last may still be in its pipe.
+           (while (accept-process-output process 0))
+           (cons (if (eq (process-status process) 'signal) (- (process-exit-status process)) (process-exit-status process))
+                 (with-current-buffer buffer (buffer-string)))))
       (kill-buffer buffer))))
 
 (defun romacs-agent-events--stage (session)
