@@ -640,7 +640,7 @@ impl Text {
         self.point.0 += s.len();
         self.restriction.end.0 += s.len();
         self.state.record_text_change(chars);
-        self.ts_record(at..at, s.len(), linecols);
+        self.ts_record(at..at, s.len(), linecols, s.len());
         true
     }
     pub fn replace(&mut self, r: Range<ByteOffset>, inserted: &[u8]) -> Result<()> {
@@ -661,7 +661,7 @@ impl Text {
         };
         let linecols = self.ts_linecols_before(r.start.0..r.end.0);
         let changed = self.body.replace_body(&r, &s, &local);
-        self.ts_record(r.start.0..r.end.0, s.len(), linecols);
+        self.ts_record(r.start.0..r.end.0, s.len(), linecols, r.end.0 - r.start.0 + s.len());
         self.point = shift(self.point);
         let old = self.restriction.clone();
         self.restriction = (if old.start <= r.start {
@@ -686,16 +686,19 @@ impl Text {
         let start = r.start.0;
         let old = r.end.0;
         self.body.rewrite_body(r, &s, &local);
-        self.ts_record(start..old, s.len(), linecols);
+        self.ts_record(start..old, s.len(), linecols, old - start + s.len());
         Ok(())
     }
     /// `TextBody::overwrite' of R, recorded for tree-sitter: editfns.c's
     /// subst-char-in-region and translate-region record each character, one
-    /// record of the run is the same edit.
+    /// record of the run is the same edit. Redisplay's budget is charged the
+    /// bytes that differ, old and new, as those records would charge it, so
+    /// a few changes far apart still show before their parse.
     pub(crate) fn overwrite(&mut self, r: Range<ByteOffset>, replacement: &[u8]) -> Result<()> {
         let linecols = self.ts_linecols_before(r.start.0..r.end.0);
+        let differing = if self.body.treesit.is_empty() { 0 } else { self.body.differing_bytes(r.start.0..r.end.0, replacement) };
         self.body.overwrite(r.clone(), replacement)?;
-        self.ts_record(r.start.0..r.end.0, r.end.0 - r.start.0, linecols);
+        self.ts_record(r.start.0..r.end.0, r.end.0 - r.start.0, linecols, 2 * differing);
         Ok(())
     }
     /// The linecols of a change's start and old end in a buffer tracking
@@ -708,14 +711,15 @@ impl Text {
         Some((start, crate::treesit::linecol_of_pos(&self.body, r.end as i64 + 1, start)))
     }
     /// treesit_record_change of the change of OLD to INSERTED bytes, made:
-    /// every parser's tree edited, and the linecol caches moved.
-    fn ts_record(&mut self, old: Range<usize>, inserted: usize, linecols: Option<(crate::treesit::Linecol, crate::treesit::Linecol)>) {
+    /// every parser's tree edited, CHARGE bytes against redisplay's budget
+    /// (`Registry::small_edit_due`), and the linecol caches moved.
+    fn ts_record(&mut self, old: Range<usize>, inserted: usize, linecols: Option<(crate::treesit::Linecol, crate::treesit::Linecol)>, charge: usize) {
         if self.body.treesit.is_empty() {
             return;
         }
         let (start, old_end, new_end) = (old.start as i64 + 1, old.end as i64 + 1, (old.start + inserted) as i64 + 1);
         let linecols = linecols.map(|(s, o)| (s, o, crate::treesit::linecol_of_pos(&self.body, new_end, s)));
-        self.body.treesit.record(crate::treesit::Change { start, old_end, new_end, linecols }, &self.body);
+        self.body.treesit.record(crate::treesit::Change { start, old_end, new_end, linecols }, &self.body, charge);
         if let Some(change) = linecols {
             let (begv, zv) = (self.restriction.start.0 as i64 + 1, self.restriction.end.0 as i64 + 1);
             let body = &*self.body;
@@ -865,6 +869,12 @@ impl TextBody {
             end = start;
         }
         None
+    }
+    /// How many bytes of R differ from REPLACEMENT's, compared in order (a
+    /// raw byte, internal form against stored, may count when unchanged).
+    pub(crate) fn differing_bytes(&self, r: Range<usize>, replacement: &[u8]) -> usize {
+        let mut new = replacement.iter();
+        self.chunks_in(r).flatten().filter(|old| new.next() != Some(*old)).count()
     }
     /// The bytes of R, chunk by chunk, read where they lie.
     pub(crate) fn chunks_in(&self, r: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {

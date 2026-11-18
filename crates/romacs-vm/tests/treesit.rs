@@ -283,6 +283,34 @@ fn a_small_edit_shows_for_one_frame_before_its_parse() {
     assert!(!vm.deferred_parse_done(), "zero shows nothing early");
 }
 
+/// An overwrite charges the frame's budget the bytes it changes, not the
+/// span it covers: upcasing two letters 10 KB apart is a small edit.
+#[test]
+fn casing_two_letters_far_apart_shows_before_its_parse() {
+    let mut vm = gnu_lisp(&[]);
+    vm.set_gc_stress(0);
+    vm.eval_source("(require 'treesit)").unwrap();
+    let setup = format!("(progn {SYSTEM_SETUP} \
+        (defvar romacs-treesit-show-before-parse 8) \
+        (set-window-buffer nil (get-buffer-create \"ts\")) (set-buffer \"ts\") \
+        (insert \"INT a;\\n\") (dotimes (_ 1000) (insert \"INT X0123;\\n\")) (insert \"INT b;\\n\") \
+        (setq treesit-test-parser (treesit-parser-create 'c)) \
+        (add-hook 'pre-redisplay-functions (lambda (_) (treesit-parser-root-node treesit-test-parser))))");
+    vm.eval_source(&setup).unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    vm.eval_source("(upcase-region 1 (point-max))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(vm.deferred_parse_done(), "two changed letters wait for no parse");
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(!vm.deferred_parse_done(), "the frame after parses");
+    vm.eval_source("(downcase-region 1 (point-max))").unwrap();
+    vm.defer_parse().unwrap();
+    vm.frame_snapshot(800, 600).unwrap();
+    assert!(!vm.deferred_parse_done(), "every letter changed waits for its parse");
+}
+
 /// Rows of 25 pixels, cells of 10.
 struct Cells;
 impl romacs_vm::LayoutHost for Cells {

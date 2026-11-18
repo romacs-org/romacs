@@ -87,8 +87,8 @@ pub(crate) struct Registry {
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
-    /// Bytes inserted and deleted since a frame last fontified a window of
-    /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
+    /// Bytes inserted and deleted, or an overwrite's that differ, since a
+    /// frame last fontified a window of the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
     /// parser out of view may never catch up, and one a query runs is not
     /// the frame.
     // CELL(Plain)
@@ -233,9 +233,10 @@ impl Registry {
         (1..=limit).contains(&self.edited.get())
             && self.parsers.iter().any(|(_, core)| core.borrow().need_reparse)
     }
-    /// treesit_record_change_1 for every parser of TEXT, edited already.
-    pub(crate) fn record(&self, change: Change, text: &TextBody) {
-        self.edited.set(self.edited.get() + (change.old_end - change.start) + (change.new_end - change.start));
+    /// treesit_record_change_1 for every parser of TEXT, edited already,
+    /// the change's CHARGE bytes added to `edited`.
+    pub(crate) fn record(&self, change: Change, text: &TextBody, charge: usize) {
+        self.edited.set(self.edited.get() + charge as i64);
         for (_, core) in &self.parsers {
             core.borrow_mut().record(change, text);
         }
