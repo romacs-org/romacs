@@ -254,12 +254,14 @@ fn delegated(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next {
     Ok(Step::Done(value))
 }
 
+/// CANDIDATE's name: the candidate itself in a hash table or an obarray
+/// (KEYED), else an alist entry's key; a symbol's name as a string.
 fn candidate_name(
     cx: &mut Leaf<'_>,
-    collection: Value,
+    keyed: bool,
     candidate: Value,
 ) -> std::result::Result<Value, Fault> {
-    let name = if matches!(cx.kind(collection), Kind::HashTable | Kind::Obarray) {
+    let name = if keyed {
         candidate
     } else {
         cx.pair(candidate).map_or(candidate, |(key, _)| key)
@@ -300,25 +302,31 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
     // starts again: what the candidates are matched against holds till then.
     let length = cx.string_view(state.input)?.chars;
     let fold = fold_case(cx)?;
+    // Read once for the walk, not once a candidate.
+    let input = cx.completion_input(state.input)?;
+    let keyed = matches!(cx.kind(state.collection), Kind::HashTable | Kind::Obarray);
     let regexps = variable(cx, "completion-regexp-list")? != Value::NIL;
     // Compiled at the first candidate that reaches them, as GNU checks them.
     let mut matcher = None;
     let commandp = cx.intern("commandp");
     while let Some((candidate, associated)) = state.next(cx)? {
-        let name = candidate_name(cx, state.collection, candidate)?;
-        if !matches!(cx.kind(name), Kind::String | Kind::Bytes) {
-            continue;
-        }
+        let name = candidate_name(cx, keyed, candidate)?;
         // Every name begins with the empty input.
-        if length > 0 || state.mode == Mode::Test {
-            let name_len = cx.string_chars(name).ok_or(Fault::Wrong("stringp", name))?;
+        let check = length > 0 || state.mode == Mode::Test;
+        // One read of the name: whether it is a string, its length, and,
+        // unless case folds, whether it begins with the input.
+        let compared = if check && !fold { length } else { 0 };
+        let Some((name_len, same)) = cx.completion_candidate(name, &input, compared)? else {
+            continue;
+        };
+        if check {
             if name_len < length || (state.mode == Mode::Test && name_len != length) {
                 continue;
             }
             let same = if fold {
                 super::string_compare::prefix(cx, name, state.input, length, fold)?.0 == Ordering::Equal
             } else {
-                cx.completion_same_prefix(name, state.input, length)?
+                same
             };
             if !same {
                 continue;
