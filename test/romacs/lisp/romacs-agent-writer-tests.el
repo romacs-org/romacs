@@ -504,7 +504,6 @@ connection of its own, as the writer's process has."
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
-              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
@@ -555,8 +554,8 @@ connection of its own, as the writer's process has."
             (serve)
             (should (equal ran '(t)))
             (should (equal (caar (sqlite-select (romacs-agent-store--open) "select count(*) from events where session = ?" (list id))) 1))
-            ;; Its journal backed up here, once imported.
-            (should-not (file-exists-p (expand-file-name "journal.jsonl" dir)))))
+            ;; Its journal left where it is, a backup no reader reads.
+            (should (file-exists-p (expand-file-name "journal.jsonl" dir)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 
