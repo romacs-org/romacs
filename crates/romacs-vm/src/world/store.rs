@@ -210,6 +210,23 @@ pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
     subdir(dir, 0o700)
 }
 
+/// `BASE/p` and the pinned table's directories in it, `cwd`, `tmp` and
+/// `bin`, empty and read-only: each made, or found made by another process
+/// (two builders starting in one fresh store, or a trace runner beside
+/// one). `BASE/p`.
+///
+/// # Errors
+///
+/// When one cannot be made.
+pub fn pinned_dirs(base: &Path) -> std::io::Result<PathBuf> {
+    let p = base.join("p");
+    store_subdir(&p)?;
+    for name in ["cwd", "tmp", "bin"] {
+        subdir(&p.join(name), 0o500)?;
+    }
+    Ok(p)
+}
+
 /// DIR made with MODE, or there already: whoever makes it first, as two
 /// processes starting builders in one fresh store may both try.
 fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
@@ -911,12 +928,7 @@ impl World {
     /// The pinned table's directories, `STORE/p/{cwd,tmp,bin}`, empty and
     /// read-only (§5 step 1). They persist, so a record naming them holds.
     fn pinned_dir(&self) -> std::io::Result<PathBuf> {
-        let p = self.store.join("p");
-        store_subdir(&p)?;
-        for name in ["cwd", "tmp", "bin"] {
-            subdir(&p.join(name), 0o500)?;
-        }
-        Ok(p)
+        pinned_dirs(&self.store)
     }
 
     /// A builder, once it holds the lock: record in build mode. The builder
