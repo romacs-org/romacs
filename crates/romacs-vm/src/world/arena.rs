@@ -132,7 +132,12 @@ pub struct ImageFields {
     /// The type of the carry beside the VM (`image::carry_tag`): a restore
     /// as another type is refused, as one for another key is.
     pub carry: u64,
+    /// That type's name, cut to fit, for the refusal to say (zero padded).
+    pub carry_name: [u8; CARRY_NAME],
 }
+
+/// The bytes of a carry's type name an image keeps (`ImageFields`).
+pub const CARRY_NAME: usize = 96;
 
 /// The state of the process's arena.
 const UNSET: u8 = 0;

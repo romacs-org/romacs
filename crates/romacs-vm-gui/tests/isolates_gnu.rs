@@ -390,7 +390,7 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
 
 /// A worker handed the batch world, whose carry is not the GUI's, refuses
 /// it: once restored as the GUI's carry it read bytes past the VM as one.
-/// The job settles with `isolate-world-unavailable` naming the carry, the
+/// The job settles with `isolate-world-unavailable` naming both carries, the
 /// world is forgotten, and the next worker boots from source and answers.
 /// The store is a linked copy of the installation's, so the worker takes
 /// the path of any store (`world::adopt`), not the installation's.
@@ -410,7 +410,7 @@ fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
     let script = format!("(progn {PREAMBLE}
       (setq isolate-boot 'world isolate-world (cons {store:?} {key:?}) isolate-zygotes nil)
       (prin1 (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 60)
-                     (isolate-error (list (car e) (and (string-match-p \"made for another carry\" (car (nth 2 e))) t))))
+                     (isolate-error (list (car e) (and (string-search \"made for the carry (); this process needs romacs_vm_gui::world::Carry\" (car (nth 2 e))) t))))
                    isolate-world
                    (isolate-await (isolate-spawn '+ 1 2) 120)))
       (isolate-kill-all))", store = store.display().to_string());

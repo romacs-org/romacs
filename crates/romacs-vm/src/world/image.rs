@@ -148,7 +148,8 @@ pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut c
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
-    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>() };
+    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>(),
+                               carry_name: carry_name::<T>() };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
     whole_in_memory(file, written).map(|()| written)
@@ -236,6 +237,15 @@ fn carry_tag<T: ?Sized>() -> u64 {
     hasher.finish()
 }
 
+/// T's name as an image keeps it: cut to `arena::CARRY_NAME` bytes.
+fn carry_name<T: ?Sized>() -> [u8; arena::CARRY_NAME] {
+    let mut name = [0; arena::CARRY_NAME];
+    let full = std::any::type_name::<T>().as_bytes();
+    let kept = full.len().min(name.len());
+    name[..kept].copy_from_slice(&full[..kept]);
+    name
+}
+
 /// The VM and carry of the image this process mapped, when it was made for
 /// KEY and carried a T, with the process-global counters it depends on
 /// restored. Taken once.
@@ -243,7 +253,7 @@ fn carry_tag<T: ?Sized>() -> u64 {
 /// # Errors
 ///
 /// Why not, for the world's record: no image mapped, one made for another
-/// key or another carry, or one restored already.
+/// key, one made for another carry (naming both), or one restored already.
 pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result<(Vm, T), String> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
@@ -252,7 +262,8 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result
         return Err("made for another key".into());
     }
     if fields.carry != carry_tag::<T>() {
-        return Err(format!("made for another carry than {}", std::any::type_name::<T>()));
+        let found = fields.carry_name.split(|&b| b == 0).next().unwrap_or_default();
+        return Err(format!("made for the carry {}; this process needs {}", String::from_utf8_lossy(found), std::any::type_name::<T>()));
     }
     if TAKEN.swap(true, Ordering::AcqRel) {
         return Err("restored already".into());

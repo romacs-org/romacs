@@ -501,7 +501,7 @@ fn a_world_restored_as_another_carry_is_refused() {
     let scratch = scratch(OTHER_CARRY);
     let store = scratch.join("store");
     assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
-    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for another carry than i64"}).to_string());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for the carry u64; this process needs i64"}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -745,7 +745,8 @@ fn pages(scratch: &Path) {
     unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
     block[PAGE..2 * PAGE].fill(0xab);
     let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
-    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0 };
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0,
+                                      carry_name: [0; arena::CARRY_NAME] };
     let len = unsafe { arena::write_image(&out, fields) }.unwrap();
     let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
     assert_eq!(bytes.len(), len);
