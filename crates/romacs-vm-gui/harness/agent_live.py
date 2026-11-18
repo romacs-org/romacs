@@ -710,9 +710,11 @@ def sockets(args, base):
         marks = [f'pid={pid},'.encode() for pid in pids]
         peers = set()
         for line in out.splitlines():
-            if any(mark in line for mark in marks):
-                fields = line.split(b' users:')[0].split()
-                if len(fields) > 1 and fields[1] == b'ESTAB':
+            # The owners are the last ` users:' (a path may hold the text too).
+            head, _, owners = line.rpartition(b' users:')
+            if any(mark in owners for mark in marks):
+                fields = head.split()
+                if len(fields) > 1 and fields[1] == b'ESTAB' and fields[-1].isdigit():
                     peers.add(fields[-1].decode())
         return peers & editor_sockets()
 
