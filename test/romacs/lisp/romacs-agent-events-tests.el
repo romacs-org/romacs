@@ -450,15 +450,6 @@ moment more under load."
          (cl-letf (((symbol-function 'romacs-agent-events--db) #'ignore))
            (should-not (romacs-agent-events--staged-p id (romacs-agent-dir session)))))))))
 
-(defmacro romacs-agent-events-tests--workers (&rest body)
-  "Run BODY with worker VMs that run each job here, at once."
-  `(cl-letf (((symbol-function 'isolate-main-p) (lambda () t))
-             ((symbol-function 'isolate-spawn) (lambda (function arg &rest _) (list 'done (funcall function arg))))
-             ((symbol-function 'isolate-on-done) (lambda (future then) (funcall then future)))
-             ((symbol-function 'isolate-await) #'cadr)
-             ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
-     ,@body))
-
 (ert-deftest romacs-agent-events-a-start-flips-what-is-staged-alone ()
   ;; A start makes what the installer staged the sessions' own, and moves
   ;; nothing else: no journal is queued, none backed up.

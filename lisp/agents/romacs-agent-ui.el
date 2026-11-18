@@ -2595,6 +2595,10 @@ records are still a journal is drawn from it (`romacs-agent-ui--replay-journal')
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
     (romacs-agent-ui--replay-journal session)))
 
+(defvar romacs-agent-ui--settled nil
+  "`settled' while a chat is drawn again once where its records are is
+settled (`romacs-agent-ui--replay-journal'): drawn as they are now.")
+
 (defun romacs-agent-ui--replay-journal (session)
   "Draw SESSION, whose records are still a journal (an earlier build's
 session an install found running, until an install moves it: romacs#317),
@@ -2602,13 +2606,16 @@ once where they are is settled (`romacs-agent-events-then': a stage of it
 the installer made, flipped): from SQLite when they are there now, else
 its last turns from its journal's tail (`romacs-agent-ui--preview'), or a
 row saying they are too long to draw here.  Until settled, a row says so,
-and the chat is drawn again (`romacs-agent-ui--redrawn')."
-  (let ((buffer (current-buffer)) (now t))
-    (romacs-agent-events-then
-     session (lambda ()
-               (if now (setq now 'settled)
-                 (when (buffer-live-p buffer)
-                   (with-current-buffer buffer (romacs-agent-ui--redrawn))))))
+and the chat is drawn again once it is (`romacs-agent-ui--redrawn'),
+settled whether its flip or import was done or failed: not asked again."
+  (let ((buffer (current-buffer)) (now (or romacs-agent-ui--settled t)))
+    (unless (eq now 'settled)
+      (romacs-agent-events-then
+       session (lambda ()
+                 (if now (setq now 'settled)
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (let ((romacs-agent-ui--settled 'settled)) (romacs-agent-ui--redrawn))))))))
     (cond ((not (eq now 'settled))
            (setq now nil)
            (romacs-agent-ui--insert-at romacs-agent-ui--end

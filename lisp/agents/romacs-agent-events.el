@@ -747,22 +747,20 @@ the staged ones, then one short flip each.  A moved session's journal
 stays where it is, a backup no reader reads."
   (romacs-agent-events--flip-soon (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from staged"))))
 
-(declare-function romacs-usage-log-note "romacs-usage-log" (kind &rest plist))
-
-(defun romacs-agent-events--migrate-job (dirs &optional staged-only)
+(defun romacs-agent-events--migrate-job (dirs)
   "Stage the sessions recorded in DIRS in SQLite, compact them and fill
-their turn rows, but STAGED-ONLY.  The ids staged."
+their turn rows.  The ids staged."
   (let ((romacs-agent-store-patience romacs-agent-store-patient))
     (when (romacs-agent-events--db)
       ;; It writes records; it never makes them a session's own.  The
       ;; turn rows it writes are drawn here, off the editor.
       (let ((romacs-agent-events-store nil)
             (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
-        (delq nil (mapcar (lambda (dir) (romacs-agent-events--migrate-one dir staged-only)) dirs))))))
+        (delq nil (mapcar (lambda (dir) (romacs-agent-events--migrate-one dir)) dirs))))))
 
-(defun romacs-agent-events--migrate-one (dir &optional staged-only)
-  "Move the session recorded in DIR to SQLite, compacted and its turn rows
-filled, but STAGED-ONLY; its id, or nil when it is left (its supervisor
+(defun romacs-agent-events--migrate-one (dir)
+  "Stage the session recorded in DIR in SQLite, compacted and its turn
+rows filled; its id, or nil when it is left (its supervisor
 runs, it failed)."
   (let ((romacs-agent--sessions (make-hash-table :test #'equal))
         (romacs-agent-event-functions nil))
@@ -774,8 +772,8 @@ runs, it failed)."
           ;; Its records written, not its own: the editor makes them so.
           (pcase-let* ((id (romacs-agent-id session))
                        (`(,size . ,count) (romacs-agent-events--stage session))
-                       (removed (if staged-only 0 (romacs-agent-events-compact id))))
-            (when (and (not staged-only) (fboundp 'romacs-agent-turns-fill)) (romacs-agent-turns-fill session))
+                       (removed (romacs-agent-events-compact id)))
+            (when (fboundp 'romacs-agent-turns-fill) (romacs-agent-turns-fill session))
             (romacs-agent-events--write (romacs-agent-events--db) "insert or replace into staged values (?, ?, ?)"
                                         (list (list id size (- count removed))))
             id))
@@ -799,7 +797,9 @@ that leaves it unloaded, unless something waits for it
 the lock held off is tried again a moment later."
   (dolist (id (prog1 romacs-agent-events--flip-queue (setq romacs-agent-events--flip-queue nil)))
     (let ((row (and (romacs-agent-events--flippable-p id)
-                    (car (sqlite-select (romacs-agent-events--db) "select size, count from staged where session = ?" (list id))))))
+                    ;; Unreadable: let go, read from its journal.
+                    (ignore-errors
+                      (car (sqlite-select (romacs-agent-events--db) "select size, count from staged where session = ?" (list id)))))))
       (if (not row) (romacs-agent-events--waited id)
         (romacs-agent-write
          'romacs-agent-events--flip (list id (car row) (cadr row))
@@ -856,7 +856,7 @@ writer makes the store.  Several are called in the order given."
       (puthash id (append (gethash id romacs-agent-events--waiting) (list then)) romacs-agent-events--waiting))
      ;; Staged as its journal now is (by the installer): made its own by
      ;; the flip, not written again.
-     ((and (not (romacs-agent-events-p session)) (romacs-agent-dir session)
+     ((and romacs-agent-events-store (not (romacs-agent-events-p session)) (romacs-agent-dir session)
            (romacs-agent-events--staged-p id (romacs-agent-dir session)))
       (puthash id (list then) romacs-agent-events--waiting)
       (romacs-agent-events--flip-soon (list id)))

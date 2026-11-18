@@ -85,7 +85,18 @@ in a store of its own, a preview's budget unbounded."
           (with-current-buffer buffer
             (should-not (string-search "loading" (buffer-string)))
             (should (= (cl-count-if (lambda (line) (string-search "say 2" line)) (split-string (buffer-string) "\n")) 1)))
-          (kill-buffer buffer))))))
+          (kill-buffer buffer))
+        ;; Its flip failed, its journal still in place: drawn from the
+        ;; journal once, never asked again.
+        (cl-letf (((symbol-function 'romacs-agent-events-p) #'ignore))
+          (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+            (should (string-search "loading this chat's records" (with-current-buffer buffer (buffer-string))))
+            (funcall (cdr (pop waits)))
+            (should-not waits)
+            (with-current-buffer buffer
+              (should-not (string-search "loading" (buffer-string)))
+              (should (string-search "say 2" (buffer-string))))
+            (kill-buffer buffer)))))))
 
 (ert-deftest romacs-agent-no-journal-a-preview-cut-short-leaves-nothing ()
   ;; A preview past its budget after it drew a prompt: none of it left,
