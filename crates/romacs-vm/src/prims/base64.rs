@@ -42,39 +42,74 @@ fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
     out
 }
 
+/// The input a chunk at a time: when a chunk's bytes run out, the quit
+/// probe is asked (out of line), then the next chunk follows. The decoder's
+/// hot path is the slice iterator's own end test.
+struct Input<'a> {
+    all: &'a [u8],
+    end: usize,
+    bytes: std::iter::Copied<std::slice::Iter<'a, u8>>,
+    stop: &'a crate::quit::NativeStop,
+    stopped: bool,
+}
+
+impl<'a> Input<'a> {
+    fn new(all: &'a [u8], stop: &'a crate::quit::NativeStop) -> Self {
+        let end = CHECK.min(all.len());
+        Self { all, end, bytes: all[..end].iter().copied(), stop, stopped: false }
+    }
+    /// The next byte, or None at the input's end or at a stop.
+    #[inline(always)]
+    fn byte(&mut self) -> Option<u8> {
+        match self.bytes.next() {
+            Some(c) => Some(c),
+            None => self.refill(),
+        }
+    }
+    #[cold]
+    #[inline(never)]
+    fn refill(&mut self) -> Option<u8> {
+        if self.end == self.all.len() || self.stopped { return None; }
+        if self.stop.due() { self.stopped = true; return None; }
+        let from = self.end;
+        self.end = (from + CHECK).min(self.all.len());
+        self.bytes = self.all[from..self.end].iter().copied();
+        self.bytes.next()
+    }
+}
+
 /// fns.c base64_decode_1 (unibyte result), None for invalid data, or for
-/// a stop: STOP is asked once each 16 KB decoded, and a stop sets STOPPED.
+/// a stop: STOP is asked once each 16 KB read, and a stop sets STOPPED.
 fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::NativeStop, stopped: &mut bool) -> Option<Vec<u8>> {
-    let mut bytes = input.iter().copied();
+    let mut bytes = Input::new(input, stop);
+    let decoded = decode_from(&mut bytes, input.len(), url, ignore_invalid);
+    *stopped = bytes.stopped;
+    decoded
+}
+
+fn decode_from(bytes: &mut Input<'_>, length: usize, url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.
-    let mut next = |bytes: &mut std::iter::Copied<std::slice::Iter<'_, u8>>| loop {
-        let c = bytes.next()?;
+    let next = |bytes: &mut Input<'_>| loop {
+        let c = bytes.byte()?;
         let v = digit(c, url);
         if !(v < 0 || (v == 0 && ignore_invalid)) { return Some((c, v)); }
     };
-    let mut out = Vec::with_capacity(input.len() / 4 * 3 + 3);
+    let mut out = Vec::with_capacity(length / 4 * 3 + 3);
     let short = |out: Vec<u8>| if url || ignore_invalid { Some(out) } else { None };
-    // Groups before the next ask, counted down.
-    let mut budget = CHECK / 3;
     loop {
-        budget -= 1;
-        if budget == 0 {
-            budget = CHECK / 3;
-            if probe_due(stop) { *stopped = true; return None; }
-        }
-        let Some((_, v)) = next(&mut bytes) else { return Some(out) };
+        let Some((_, v)) = next(bytes) else { return Some(out) };
         if v == 0 { return None; }
         let mut value = ((v - 1) as u32) << 18;
-        let (_, v) = next(&mut bytes)?;
+        let (_, v) = next(bytes)?;
         if v == 0 { return None; }
         value += ((v - 1) as u32) << 12;
         out.push((value >> 16) as u8);
-        let Some((c, v)) = next(&mut bytes) else { return short(out) };
+        let Some((c, v)) = next(bytes) else { return short(out) };
         if c == b'=' {
             // "==": the second pad must follow, past whitespace only.
             loop {
-                let c = bytes.next()?;
+                let c = bytes.byte()?;
                 if digit(c, url) >= 0 { if c != b'=' { return None; } break; }
             }
             continue;
@@ -82,7 +117,7 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
         if v == 0 { return None; }
         value += ((v - 1) as u32) << 6;
         out.push((value >> 8) as u8);
-        let Some((c, v)) = next(&mut bytes) else { return short(out) };
+        let Some((c, v)) = next(bytes) else { return short(out) };
         if c == b'=' { continue; }
         if v == 0 { return None; }
         value += (v - 1) as u32;
@@ -90,15 +125,8 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
     }
 }
 
-/// Octets decoded between two asks of the quit probe.
+/// Input bytes read between two asks of the quit probe.
 const CHECK: usize = 1 << 14;
-
-/// STOP asked, kept out of the decoder's loop.
-#[cold]
-#[inline(never)]
-fn probe_due(stop: &crate::quit::NativeStop) -> bool {
-    stop.due()
-}
 
 /// BYTES decoded, inside the caller's own scope: the decode stops for the
 /// quit probe, and the poll quits or, nothing to quit for after all, the
