@@ -173,7 +173,8 @@ impl Leaf<'_> {
         for (i, &code) in codes.iter().enumerate() {
             let was_inword = inword;
             inword = words.get(i).is_some_and(|&word| word && (was_inword || !prefixes[i]));
-            if let Some(special) = multibyte.then(|| special(code, down)).flatten() {
+            // No ASCII character cases to several (SpecialCasing has none).
+            if let Some(special) = (multibyte && code >= 128).then(|| special(code, down)).flatten() {
                 mappings.push(special);
                 continue;
             }
@@ -272,6 +273,46 @@ impl Leaf<'_> {
         Ok((multibyte, codes, cased))
     }
 
+    /// The new text of START..END of a multibyte current buffer, upcased or
+    /// DOWN cased, read where it lies, chunk by chunk, each character mapped
+    /// as `case_mappings` maps it: Some of the changed span (as
+    /// `same_length_span` gives it), or Some(None) when nothing changes.
+    /// None, for the general path, where a character changes its byte
+    /// length or cases to several, a capital sigma downcases (its form reads
+    /// word context), or the region holds a raw byte.
+    fn region_case_fast(&mut self, start: i64, end: i64, down: bool) -> std::result::Result<Option<Option<(usize, usize, Vec<u8>)>>, Fault> {
+        const SIGMA: u32 = 0x3a3;
+        let table = self.case_table(down)?;
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let data::Object::Buffer(b) = &self.vm.objects[index] else { return Ok(None) };
+        let char_at = |at: i64| b.byte_of_char(crate::coordinates::CharOffset((at - 1) as usize)).map_err(Fault::Error);
+        let (from, to) = (char_at(start)?.0, char_at(end)?.0);
+        if !b.raw_in(from..to).is_empty() { return Ok(None); }
+        let table = table.reader(self.vm);
+        let mut out = Vec::with_capacity(to - from);
+        // The changed span, in characters and in OUT's bytes.
+        let mut span: Option<((usize, usize), (usize, usize))> = None;
+        let mut nth = 0usize;
+        for chunk in b.body().chunks_in(from..to) {
+            let Ok(text) = std::str::from_utf8(chunk) else { return Ok(None) };
+            for c in text.chars() {
+                let code = u32::from(c);
+                if code == SIGMA && down { return Ok(None); }
+                if code >= 128 && special(code, down).is_some() { return Ok(None); }
+                let cased = match table.mapped(code)? { Some(cased) => cased, None => simple(code, down) };
+                let Some(cased) = char::from_u32(cased) else { return Ok(None) };
+                if cased.len_utf8() != c.len_utf8() { return Ok(None); }
+                let at = out.len();
+                out.extend_from_slice(cased.encode_utf8(&mut [0; 4]).as_bytes());
+                if cased != c {
+                    span = Some(span.map_or(((nth, nth + 1), (at, out.len())), |((first, _), (first_byte, _))| ((first, nth + 1), (first_byte, out.len()))));
+                }
+                nth += 1;
+            }
+        }
+        Ok(Some(span.map(|((first, last), (first_byte, last_byte))| (first, last, out[first_byte..last_byte].to_vec()))))
+    }
+
     /// casify_region's change of START..END of the current buffer once
     /// modify_text's hooks ran: the region's undo records, then each
     /// character cased in place. Returns the first and last changed
@@ -279,7 +320,13 @@ impl Leaf<'_> {
     pub(crate) fn casify_region_edit(&mut self, start: i64, end: i64, case: RegionCase) -> std::result::Result<Option<(i64, i64, i64)>, Fault> {
         let (_, begv, zv) = self.point_extent()?;
         let (start, end) = (start.max(begv), end.min(zv).max(start.max(begv)));
-        let (multibyte, codes, cased) = self.region_casing(start, end, case)?;
+        // upcase-region and downcase-region read the region where it lies,
+        // when they can (`region_case_fast`); the general path otherwise.
+        let fast = match case {
+            RegionCase::Up | RegionCase::Down => self.region_case_fast(start, end, matches!(case, RegionCase::Down))?,
+            RegionCase::Capitalize | RegionCase::InitialsUp => None,
+        };
+        let (multibyte, codes, cased) = if fast.is_some() { (true, Vec::new(), Vec::new()) } else { self.region_casing(start, end, case)? };
         self.modify_text_tail(start, end, false)?;
         let index = self.vm.buffer_index().map_err(Fault::Error)?;
         let buffer = self.current_buffer()?;
@@ -292,7 +339,8 @@ impl Leaf<'_> {
         // The common case, every changed character as many bytes long as it
         // was: one overwrite of the span from the first change to the last,
         // no position moving, so markers and text properties stay put.
-        if multibyte && let Some(span) = same_length_span(&codes, &cased) {
+        let span = fast.or_else(|| if multibyte { same_length_span(&codes, &cased) } else { None });
+        if let Some(span) = span {
             let edited = match span {
                 None => None,
                 Some((from, to, text)) => {
