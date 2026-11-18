@@ -501,7 +501,7 @@ fn a_world_restored_as_another_carry_is_refused() {
     let scratch = scratch(OTHER_CARRY);
     let store = scratch.join("store");
     assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
-    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for another key or carry"}).to_string());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for another carry than i64"}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

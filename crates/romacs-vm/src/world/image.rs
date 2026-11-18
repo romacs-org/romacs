@@ -239,12 +239,23 @@ fn carry_tag<T: ?Sized>() -> u64 {
 /// The VM and carry of the image this process mapped, when it was made for
 /// KEY and carried a T, with the process-global counters it depends on
 /// restored. Taken once.
-pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
+///
+/// # Errors
+///
+/// Why not, for the world's record: no image mapped, one made for another
+/// key or another carry, or one restored already.
+pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result<(Vm, T), String> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
-    let fields = arena::mapped_image().filter(|fields| fields.key == *key && fields.carry == carry_tag::<T>())?;
+    let fields = arena::mapped_image().ok_or("no image mapped")?;
+    if fields.key != *key {
+        return Err("made for another key".into());
+    }
+    if fields.carry != carry_tag::<T>() {
+        return Err(format!("made for another carry than {}", std::any::type_name::<T>()));
+    }
     if TAKEN.swap(true, Ordering::AcqRel) {
-        return None;
+        return Err("restored already".into());
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
@@ -258,7 +269,7 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.
     crate::epoch::raise(root.0.allocation.since);
-    Some(*root)
+    Ok(*root)
 }
 
 #[cfg(test)]

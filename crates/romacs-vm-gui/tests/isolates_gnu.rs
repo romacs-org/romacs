@@ -388,6 +388,38 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     assert_eq!(out.trim(), "(quick t live nil)", "{err}");
 }
 
+/// A worker handed the batch world, whose carry is not the GUI's, refuses
+/// it: once restored as the GUI's carry it read bytes past the VM as one.
+/// The job settles with `isolate-world-unavailable` naming the carry, the
+/// world is forgotten, and the next worker boots from source and answers.
+/// The store is a linked copy of the installation's, so the worker takes
+/// the path of any store (`world::adopt`), not the installation's.
+#[test]
+fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
+    let installed = Path::new(installed::romacs()).with_file_name("romacs-vm-gui.worlds");
+    // Beside the installation: a hard link stays on its filesystem.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("isolates-gnu-{}-batch-world", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+    let store = scratch.join("worlds");
+    let linked = Command::new("cp").arg("-al").arg(&installed).arg(&store).status().expect("cp");
+    assert!(linked.success(), "linking {}", installed.display());
+    let key = std::fs::read_dir(&store).unwrap().map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|e| e == "rwi")).expect("the batch world")
+        .file_stem().unwrap().to_string_lossy().into_owned();
+    let script = format!("(progn {PREAMBLE}
+      (setq isolate-boot 'world isolate-world (cons {store:?} {key:?}) isolate-zygotes nil)
+      (prin1 (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 60)
+                     (isolate-error (list (car e) (and (string-match-p \"made for another carry\" (car (nth 2 e))) t))))
+                   isolate-world
+                   (isolate-await (isolate-spawn '+ 1 2) 120)))
+      (isolate-kill-all))", store = store.display().to_string());
+    let (ok, out, err) = batch(&script, Path::new("/"));
+    assert!(ok, "batch failed: {err}");
+    assert_eq!(out.trim(), "((isolate-world-unavailable t) nil 3)", "{err}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 #[test]
 fn results_wait_for_a_widened_buffer_and_a_changed_setup_refuses_them() {
     // Sol r1 S1-S3: a block delivered again while the owner is narrowed; a
