@@ -695,8 +695,10 @@ impl Vm {
     }
     /// `annotation_variable` of the variable at SLOT.
     fn annotation_slot_value(&self, slot: usize) -> Value {
+        // No current buffer (nil, index 0) has no locals.
         let local = self.slots[self.buffer_slot].value.index_if(0)
-            .and_then(|index| self.per_buffer(index - 1))
+            .and_then(|index| index.checked_sub(1))
+            .and_then(|index| self.per_buffer(index))
             .and_then(|b| b.locals().get(Value::reference(slot + 1, 7)));
         let value = local.unwrap_or(self.slots[slot].value);
         if value == Value::UNBOUND { Value::NIL } else { value }
