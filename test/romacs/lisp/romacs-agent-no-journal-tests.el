@@ -167,6 +167,32 @@ in a store of its own."
                 (user-error (message "said: %s" (error-message-string err))))))
           (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-no-journal-just-moved-draws-its-tail ()
+  ;; Just moved, its turn rows not filled yet (a waited move fills them
+  ;; off the editor after): its last turns are drawn from its records'
+  ;; tail, under the row that draws earlier ones, never all its records.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((seq 6) (coding-system-for-write 'utf-8-unix))
+      (cl-flet ((line (key value) (concat (romacs-agent--json (romacs-mcp--object key value "seq" (cl-incf seq) "t" (float seq))) "\n")))
+        (write-region
+         (mapconcat (lambda (n)
+                      (concat (line "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "ask %d" n) "role" "user")
+                                                             "romacsRequest" n "type" "user"))
+                              (line "out" (romacs-mcp--object "type" "result" "result" (format "say %d" n)))))
+                    '(3 4 5) "")
+         nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))
+    (remhash id romacs-agent-events--imported)
+    (should (romacs-agent-events-import session t))
+    (should-not (plist-get (romacs-agent-turns-page session nil 10) :rows))
+    (let* ((romacs-agent-chat-turns 1)
+           (buffer (romacs-agent-no-journal-tests--chat session)))
+      (with-current-buffer buffer
+        (should (string-search "ask 5" (buffer-string)))
+        (should-not (string-search "ask 1" (buffer-string)))
+        (should (string-search "Earlier turns" (buffer-string))))
+      (kill-buffer buffer))))
+
 (ert-deftest romacs-agent-no-journal-a-preview-writes-no-manifest ()
   ;; A record a preview reads would have the session's manifest written (a
   ;; harness naming another conversation): read for the view alone, it

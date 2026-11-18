@@ -2693,22 +2693,55 @@ the row that said they were moving.  An edit to no undo."
              (romacs-agent-ui--insert-at (prop-match-beginning found)
                                          (romacs-agent-ui--not-moved-row (eq (prop-match-value found) 'preview))))))))))
 
+(defvar romacs-agent-ui--replayed nil
+  "How many prompts the chat's replay from records drew, counted while a
+number (`romacs-agent-ui--replay-rows').")
+
+(declare-function romacs-usage-log-note "romacs-usage-log" (kind &rest plist))
+
+(defun romacs-agent-ui--replay-over-note (session drew turns)
+  "Say on the usage log that SESSION's chat replayed DREW prompts from its
+records on the editor, past the TURNS it draws: a walk that should have
+started at its tail."
+  (when (fboundp 'romacs-usage-log-note)
+    (romacs-usage-log-note "agent-replay-over" :session (romacs-agent-id session) :drew drew :turns turns)))
+
+(defvar romacs-agent-ui--replay-over-function #'romacs-agent-ui--replay-over-note
+  "Called with a session, the prompts its chat's replay drew from its
+records and the turns the chat draws, when it drew more: never a walk
+of all its records on the editor.  Tests make it an error.")
+
 (defun romacs-agent-ui--replay-rows (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns as kept drawn, under
 a row that draws earlier ones when it has more, else after the
 transcript it was imported from; its records where no turn row holds
 them drawn in their place among the rows (`romacs-agent-ui--insert-turns'):
 its notes (a fork's), a turn ended since its row was written, the turn
-under way.  Its records are in SQLite: places are seqs."
-  (let* ((page (romacs-agent-turns-page session nil (or romacs-agent-ui--turns most-positive-fixnum)))
+under way.  Its records are in SQLite: places are seqs.  Its rows not
+filled yet past more turns than it draws (just moved, filled off the
+editor), its last turns are drawn from its records' tail."
+  (let* ((turns (or romacs-agent-ui--turns most-positive-fixnum))
+         (romacs-agent-ui--replayed 0)
+         (page (romacs-agent-turns-page session nil turns))
          (rows (reverse (plist-get page :rows)))
-         (more (plist-get page :more)))
-    (if more (romacs-agent-ui--earlier-row)
-      (when (romacs-agent-imported session)
-        (require 'romacs-agent-history)
-        (romacs-agent-history-draw session (romacs-agent-imported session))))
-    ;; Paged, the records before its first row are earlier turns'.
-    (romacs-agent-ui--insert-turns session rows (if (and more rows) (plist-get (car rows) :first-seq) 1))))
+         (more (plist-get page :more))
+         ;; Where to draw from when its records past its rows hold more
+         ;; turns than drawn: never all of them on the editor.
+         (lag (car (romacs-agent-events-tail session turns nil (1+ (or (plist-get page :after) 0))))))
+    (cond
+     (lag (romacs-agent-ui--earlier-row)
+          (romacs-agent-ui--replay-from session lag))
+     (t (if more (romacs-agent-ui--earlier-row)
+          (when (romacs-agent-imported session)
+            (require 'romacs-agent-history)
+            (romacs-agent-history-draw session (romacs-agent-imported session))))
+        ;; Paged, the records before its first row are earlier turns'.
+        (romacs-agent-ui--insert-turns session rows (if (and more rows) (plist-get (car rows) :first-seq) 1))))
+    ;; Its rows drawn as kept; from records, the turn under way and those
+    ;; its rows have not caught up with: about as many as it draws, a
+    ;; tail's cut a little further back, never twice as many.
+    (when (> romacs-agent-ui--replayed (* 2 turns))
+      (funcall romacs-agent-ui--replay-over-function session romacs-agent-ui--replayed turns))))
 
 (defvar romacs-agent-drawn-wanted-functions nil
   "Functions called with a session's id and the first seqs of its turns
@@ -2985,6 +3018,8 @@ manifest), and past DEADLINE it throws `romacs-agent-ui--past-deadline'."
                          ;; notes as its views' is told them by the batch that
                          ;; follows a replay (`romacs-agent-show').
                          (romacs-agent-ui--track-children session event))
+                       (when (and (numberp romacs-agent-ui--replayed) (eq (plist-get event :type) 'input))
+                         (cl-incf romacs-agent-ui--replayed))
                        (romacs-agent-ui--render (if deadline scratch session) event)))))
           (if deadline
               ;; A preview reads the journal as it found it, whatever moves
