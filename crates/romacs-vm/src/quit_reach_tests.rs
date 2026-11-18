@@ -266,6 +266,54 @@ fn a_quit_in_call_process_leaves_no_child_running() {
     }
 }
 
+/// The process group of /proc's PID: the third field after its name's
+/// closing parenthesis.
+fn process_group(pid: &str) -> i32 {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let after = &stat[stat.rfind(')').expect("a stat names its process") + 1..];
+    after.split_whitespace().nth(2).and_then(|f| f.parse().ok()).expect("a stat gives its group")
+}
+
+/// call-process's child leads a session, so a group of its own: the quit's
+/// SIGINT goes to that group alone. A process in this one's group, as a
+/// sibling Romacs started, lives on through the quit.
+#[test]
+fn a_quit_in_call_process_signals_only_the_child_s_group() {
+    let dir = std::env::temp_dir().join(format!("quit-call-process-group-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("ids");
+    let mut sibling = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let ours = process_group("self");
+    assert_eq!(process_group(&sibling.id().to_string()), ours, "the sibling shares this process's group");
+    // The child's pid and its process group (field 5 of its stat; sh's name has no space).
+    let script = format!("read -r _ _ _ _ group _ < /proc/$$/stat; echo $$ $group > {}; exec sleep 30", file.display());
+    let (mut vm, signal) = busy_vm();
+    let call = prepare(&mut vm, "romacs--call-process-run", &format!("(list '(\"sh\" \"-c\" {script:?}) nil \"/\" \"/dev/null\" nil nil t)"));
+    let presser = {
+        let (signal, file) = (signal.clone(), file.clone());
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let ids: Vec<i32> = loop {
+                let ids: Vec<i32> = std::fs::read_to_string(&file).unwrap_or_default().split_whitespace().filter_map(|w| w.parse().ok()).collect();
+                if ids.len() == 2 { break ids; }
+                assert!(started.elapsed() < std::time::Duration::from_secs(10), "the child never wrote its ids");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            assert!(signal.interrupt());
+            ids
+        })
+    };
+    let outcome = invoke(&mut vm, call);
+    let ids = presser.join().unwrap();
+    assert!(quit_signalled(&mut vm, &outcome), "the wait did not quit");
+    assert_eq!(ids[1], ids[0], "the child leads its own group");
+    assert_ne!(ids[1], ours, "the child's group is not this process's");
+    let alive = sibling.try_wait().unwrap().is_none();
+    let _ = sibling.kill();
+    let _ = sibling.wait();
+    assert!(alive, "the sibling in this process's group died with the quit");
+}
+
 /// The printer stops between objects, as GNU's `print_object` polls at
 /// each, before any text is made; `delq` polls as GNU's `FOR_EACH_TAIL` does.
 #[test]
