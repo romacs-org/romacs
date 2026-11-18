@@ -289,6 +289,26 @@ impl Leaf<'_> {
             self.vm.record_delete(index, start, text, false).map_err(Fault::Error)?;
             if !multibyte { self.vm.record_insert(index, start, end - start, false).map_err(Fault::Error)?; }
         }
+        // The common case, every changed character as many bytes long as it
+        // was: one overwrite of the span from the first change to the last,
+        // no position moving, so markers and text properties stay put.
+        if multibyte && let Some(span) = same_length_span(&codes, &cased) {
+            let edited = match span {
+                None => None,
+                Some((from, to, text)) => {
+                    let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!("multibyte is a text buffer") };
+                    let bytes = b.byte_of_char(crate::coordinates::CharOffset((start - 1) as usize + from)).map_err(Fault::Error)?
+                        ..b.byte_of_char(crate::coordinates::CharOffset((start - 1) as usize + to)).map_err(Fault::Error)?;
+                    b.overwrite(bytes, &text).map_err(Fault::Error)?;
+                    Some((start + from as i64, start + to as i64, 0))
+                }
+            };
+            self.vm.display_state.version += 1;
+            if recording {
+                self.vm.record_insert(index, start, end - start, false).map_err(Fault::Error)?;
+            }
+            return Ok(edited);
+        }
         let (mut first, mut last, mut added) = (None, 0, 0);
         for (i, (&code, out)) in codes.iter().zip(&cased).enumerate() {
             let at = start - 1 + i as i64 + added;
@@ -330,6 +350,24 @@ impl Leaf<'_> {
         }
         Ok(first.map(|first| (first, last, added)))
     }
+}
+
+/// The span CASED changes in CODES, as one same-length replacement: Some
+/// of the first changed index, one past the last, and the span's new text,
+/// or Some(None) when nothing changes; None when a changed character's
+/// bytes are not as many as before, or it becomes several.
+fn same_length_span(codes: &[u32], cased: &[Vec<u32>]) -> Option<Option<(usize, usize, Vec<u8>)>> {
+    let width = |c: u32| crate::lstring::char_string(c, &mut [0; 5]);
+    let mut span: Option<(usize, usize)> = None;
+    for (i, (&code, out)) in codes.iter().zip(cased).enumerate() {
+        if out.as_slice() == [code] { continue; }
+        if out.len() != 1 || width(out[0]) != width(code) { return None; }
+        span = Some((span.map_or(i, |(from, _)| from), i + 1));
+    }
+    Some(span.map(|(from, to)| {
+        let text: Vec<u32> = codes[from..to].iter().zip(&cased[from..to]).map(|(&code, out)| out.first().copied().unwrap_or(code)).collect();
+        (from, to, internal_bytes(&text))
+    }))
 }
 
 /// CODES in GNU's internal form (raw bytes as C0/C1 forms).
