@@ -53,12 +53,16 @@ pub fn list(family: Option<&str>) -> Vec<Entity> {
 /// The catalog listings come from: Fontconfig's configuration once its own
 /// refresh has run, which reloads it, at most once per rescan interval, when
 /// a font directory or configuration file changed. Two compare equal when
-/// no reload came between them, so a listing kept from one still holds.
+/// no reload came between them, so a listing kept from one still holds. A
+/// font added to the application set (`register_font_file`) changes the
+/// configuration in place, which equality does not see: the GUI adds its
+/// bundled fonts before its display lists any.
 #[derive(PartialEq, Eq)]
 pub struct Catalog(crate::fc::Config);
 
 impl Catalog {
-    /// The current catalog, None without Fontconfig.
+    /// The current catalog; None without Fontconfig or when its reload
+    /// failed, as a listing then finds nothing.
     pub fn current() -> Option<Self> {
         crate::fontconfig_catalog::current_config().map(Self)
     }

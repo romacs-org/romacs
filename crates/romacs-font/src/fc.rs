@@ -253,15 +253,15 @@ impl Config {
     /// The current configuration once Fontconfig has brought it up to date,
     /// as `FcFontList` on the current one does: at most once per rescan
     /// interval it checks its configuration files and font directories, and
-    /// reloads the configuration when one changed.
+    /// reloads the configuration when one changed. None when that reload
+    /// fails, when `FcFontList` lists nothing.
     pub fn current() -> Option<Self> {
         // UNSAFE(Fontconfig's refresh and its reference counts are only reachable through its C API)
         // SAFETY: FcInitBringUptoDate takes nothing; FcConfigReference on a
         // null config references the current one, which this owner releases
         // once.
         let config = unsafe {
-            sys::FcInitBringUptoDate();
-            sys::FcConfigReference(null_mut())
+            if sys::FcInitBringUptoDate() == 0 { null_mut() } else { sys::FcConfigReference(null_mut()) }
         };
         Owned::new(config, sys::FcConfigDestroy).map(Self)
     }
