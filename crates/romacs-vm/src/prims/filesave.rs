@@ -241,18 +241,59 @@ fn rename_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         match cx.filesave_rename(&source, &target, false) {
             Ok(()) => return Ok(Step::Done(Value::NIL)),
             Err(e) if e.raw_os_error() == Some(libc::EEXIST) => return Err(refusal("rename-file interactive overwrite confirmation")),
-            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => return Err(refusal("rename-file cross-device copy/delete")),
+            // fileio.c:2809: past the no-replace rename, a non-nil
+            // OK-IF-ALREADY-EXISTS is t.
+            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => return across_devices(cx, source_value, target_value, Value::TRUE, &source),
             Err(e) => return Err(errno(cx, "Renaming", &[source_value, target_value], e)),
         }
     }
     match cx.filesave_rename(&source, &target, overwrite != Value::NIL) {
         Ok(()) => Ok(Step::Done(Value::NIL)),
-        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => Err(refusal("rename-file cross-device copy/delete")),
+        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
+            let ok = if overwrite == Value::NIL { Value::NIL } else { Value::TRUE };
+            across_devices(cx, source_value, target_value, ok, &source)
+        }
         // GNU queries before renaming, so EEXIST names only the destination.
         Err(e) if e.raw_os_error() == Some(libc::EEXIST) => Err(already_exists(cx, target_value)),
         Err(e) => Err(errno(cx, "Renaming", &[source_value, target_value], e)),
     }
 }
+
+/// fileio.c:2814-2847, Frename_file once the rename failed with EXDEV: FILE
+/// is copied to NEWNAME as what it is (a directory with `copy-directory`, a
+/// regular file with `copy-file` keeping its times, owner and modes, a
+/// symbolic link as a new link to the same target), then deleted, never
+/// into the trash. Anything else is the rename's error.
+fn across_devices(cx: &mut Leaf<'_>, file: Value, newname: Value, ok: Value, source: &std::path::Path) -> Next {
+    let exdev = || std::io::Error::from_raw_os_error(libc::EXDEV);
+    let directory_name = cx.string_bytes(file)?.last() == Some(&b'/');
+    let kind = if directory_name { "directory" } else {
+        let meta = host::symlink_metadata(source).map_err(|e| errno(cx, "Renaming", &[file, newname], e))?;
+        let kind = meta.file_type();
+        if kind.is_dir() { "directory" } else if kind.is_file() { "file" } else if kind.is_symlink() { "symlink" }
+        else { return Err(errno(cx, "Renaming", &[file, newname], exdev())) }
+    };
+    let link = if kind == "symlink" {
+        use std::os::unix::ffi::OsStrExt as _;
+        let target = host::read_link(source).map_err(|e| errno(cx, "Renaming", &[file, newname], e))?;
+        super::fileio::file_name_value(cx, target.as_os_str().as_bytes())
+    } else { Value::NIL };
+    let kind = cx.intern(kind);
+    let source = "(lambda (file newname ok kind target)
+                    (cond ((eq kind 'directory) (copy-directory file newname t nil))
+                          ((eq kind 'file) (copy-file file newname ok t t t))
+                          (t (make-symbolic-link target newname ok)))
+                    (let ((delete-by-moving-to-trash nil))
+                      (if (eq kind 'directory) (delete-directory file t) (delete-file file nil)))
+                    nil)";
+    super::insert_coding::closure_then(cx, source, across_devices_closure, vec![file, newname, ok, kind, link])
+}
+
+fn across_devices_closure(_: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
+    Ok(Step::Call { f: closure, args: saved.to_vec(), then: renamed, saved: vec![] })
+}
+
+fn renamed(_: &mut Leaf<'_>, _: Value, _: &[Value]) -> Next { Ok(Step::Done(Value::NIL)) }
 
 defsubr! { name = "make-temp-name", gnu = "fileio.c:830", effect = Global,
 fn make_temp_name(cx, prefix: Value) {
