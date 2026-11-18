@@ -734,6 +734,34 @@ turns, and its journal's file; a state root of its own."
         (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
         (delete-directory root t)))))
 
+(ert-deftest romacs-agent-events-a-start-asks-the-host-once-however-many-sessions ()
+  ;; A start backs up moved journals and lists those still to move: which
+  ;; a supervisor holds is asked of the host's program once, not once a
+  ;; session: its cost stays flat however many sessions there are.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     1
+     (lambda (_session _journal)
+       (let ((ids (mapcar (lambda (n) (format "a0a00000-0000-4000-8000-%012d" n)) (number-sequence 1 40)))
+             (calls 0) (backed 0))
+         (dolist (id ids)
+           (let ((dir (expand-file-name id (romacs-agent--state-root))))
+             (make-directory dir t)
+             (write-region "" nil (expand-file-name "host.lock" dir) nil 'silent)
+             (write-region "{}\n" nil (expand-file-name "journal.jsonl" dir) nil 'silent)))
+         (cl-letf (((symbol-function 'romacs-agent-events--host)
+                    (lambda (&rest _) (cl-incf calls) (cons 0 "")))
+                   ((symbol-function 'romacs-agent-events--back-up) (lambda (_) (cl-incf backed))))
+           (romacs-agent-events--back-up-moved ids)
+           (should (= calls 1))
+           (should (= backed 40))
+           (setq calls 0)
+           (should (>= (length (romacs-agent-events--journaled)) 40))
+           (should (= calls 1))))))))
+
 (ert-deftest romacs-agent-events-a-socket-left-behind-supervises-nothing ()
   ;; One holds a session while its lock is held (a host running, a move);
   ;; a socket and a lock file a host left behind (its unit stopped, a
