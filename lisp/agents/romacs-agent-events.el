@@ -95,10 +95,12 @@ asked about: its command line stays far inside the system's limit.")
 `romacs-agent-events--held-batch' of them."
   (let ((held (make-hash-table :test #'equal)))
     (while dirs
-      (dolist (line (split-string (cdr (apply #'romacs-agent-events--host "--supervised"
-                                              (seq-take dirs romacs-agent-events--held-batch)))
-                                  "\n" t))
-        (puthash line t held))
+      (pcase-let ((`(,status . ,output) (apply #'romacs-agent-events--host "--supervised"
+                                               (seq-take dirs romacs-agent-events--held-batch))))
+        ;; Not started: as `make-process' would have, not its words for lines.
+        (unless status (error "romacs-agent-host --supervised: %s" output))
+        (dolist (line (split-string output "\n" t))
+          (puthash line t held)))
       (setq dirs (nthcdr romacs-agent-events--held-batch dirs)))
     held))
 
@@ -398,17 +400,21 @@ for the editor to back up; t when imported."
 
 (defun romacs-agent-events--host (&rest args)
   "Run the supervisor's program with ARGS to its end: (STATUS . OUTPUT),
-its standard output and error together; STATUS its exit code, or the
-signal that ended it, negated."
-  (let* ((buffer (generate-new-buffer " *romacs-agent-host*" t))
-         ;; No sentinel's line in what it said: its end is the status.
-         (process (make-process :name "romacs-agent-host" :noquery t :connection-type 'pipe :buffer buffer
-                                :sentinel #'ignore :command (cons (romacs-agent-events--host-program) args))))
+its standard output and error together, all of it; STATUS its exit
+code, or the signal that ended it, negated, or nil when it could not be
+started, OUTPUT then why."
+  (let ((buffer (generate-new-buffer " *romacs-agent-host*" t)))
     (unwind-protect
-        (progn
-          (while (process-live-p process) (accept-process-output process 0.05))
-          (cons (if (eq (process-status process) 'signal) (- (process-exit-status process)) (process-exit-status process))
-                (with-current-buffer buffer (buffer-string))))
+        (condition-case err
+            ;; No sentinel's line in what it said: its end is the status.
+            (let ((process (make-process :name "romacs-agent-host" :noquery t :connection-type 'pipe :buffer buffer
+                                         :sentinel #'ignore :command (cons (romacs-agent-events--host-program) args))))
+              (while (process-live-p process) (accept-process-output process 0.05))
+              ;; Ended, what it wrote last may still be in its pipe.
+              (while (accept-process-output process 0))
+              (cons (if (eq (process-status process) 'signal) (- (process-exit-status process)) (process-exit-status process))
+                    (with-current-buffer buffer (buffer-string))))
+          (error (cons nil (error-message-string err))))
       (kill-buffer buffer))))
 
 (defun romacs-agent-events--stage (session)
