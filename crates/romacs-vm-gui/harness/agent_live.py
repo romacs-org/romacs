@@ -655,12 +655,15 @@ def budget(args, base):
 
 
 def sockets(args, base):
-    """romacs#262: the editor's sockets go back to their count once the
-    sessions it ran have ended, whether the editor ended them
-    (`romacs-agent-stop') or their directories went (a test's tree removed
-    with its harnesses waiting), and no supervisor of this tree is left."""
+    """romacs#262: once the sessions it ran have ended, whether the editor
+    ended them (`romacs-agent-stop') or their directories went (a test's
+    tree removed with its harnesses waiting), no supervisor of this tree is
+    left and the editor holds no socket whose peer is gone, none it keeps
+    on an ended supervisor.  Told by each socket's peer, not by a count:
+    the editor opens sockets of its own meanwhile (a worker's, a route's)."""
     a = Agents(args, base, 'sk')
     agents = a.home / '.local/state/romacs/agents'
+    ss = shutil.which('ss') or '/usr/sbin/ss'
 
     def socks():
         count = 0
@@ -670,6 +673,14 @@ def sockets(args, base):
             except OSError:
                 pass
         return count
+
+    def dangling():
+        """The inodes of the editor's connected sockets whose peer is gone:
+        `ss' gives such a peer's inode as 0.  Each is an fd the editor has
+        not closed."""
+        out = subprocess.run([ss, '-xapH'], capture_output=True, text=True, check=True).stdout
+        return [f[5] for f in (line.split() for line in out.splitlines() if f'pid={a.pid},' in line)
+                if len(f) > 7 and f[1] == 'ESTAB' and f[7] == '0']
 
     def hosts():
         found = []
@@ -683,31 +694,35 @@ def sockets(args, base):
         return found
 
     def run(n, end):
+        """N sessions run to idle, then ended by END: the editor's socket
+        count before and while they run (they connected), and once every
+        supervisor is gone, its sockets whose peer went with them closed."""
+        before = socks()
         ids = [a.start(f'say {i}') for i in range(n)]
         for sid in ids:
             a.idle(sid)
         during = socks()
         end(ids)
         until(lambda: not hosts(), 30, 'every supervisor ended')
-        return during
+        try:
+            until(lambda: not dangling(), 30, 'no socket left on an ended supervisor')
+        except RuntimeError:
+            processes = a.eval('(mapcar (lambda (p) (list (process-name p) (process-status p))) (process-list))')
+            raise RuntimeError(f'the editor keeps {len(dangling())} of its {socks()} sockets with their peer gone; '
+                               f'its processes: {processes[:600]}')
+        return before, during
 
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
-        # A first session: what the editor opens once and keeps (its
-        # routes' listener) is in the count the rest come back to.
+        # A first session: what the editor opens once and keeps is open
+        # before the rest are counted.
         run(1, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
-        baseline = socks()
         stopped = run(3, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
-        until(lambda: socks() <= baseline, 30, 'sockets back after stops')
-        after_stop = socks()
         removed = run(3, lambda ids: [shutil.rmtree(agents / sid) for sid in ids])
-        until(lambda: socks() <= baseline, 30, 'sockets back after removals')
-        after_removal = socks()
-        return {'baseline': baseline, 'with_3_stopped_later': stopped, 'after_stops': after_stop,
-                'with_3_removed_later': removed, 'after_removals': after_removal, 'hosts_left': len(hosts()),
-                'ok': stopped > baseline and removed > baseline and after_stop <= baseline
-                      and after_removal <= baseline and not hosts()}
+        return {'stopped_before_during': stopped, 'removed_before_during': removed,
+                'dangling': len(dangling()), 'hosts_left': len(hosts()),
+                'ok': stopped[1] > stopped[0] and removed[1] > removed[0] and not dangling() and not hosts()}
     finally:
         a.close()
 
