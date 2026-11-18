@@ -401,9 +401,11 @@ def survive(args, base):
         until(lambda: 'slow done' in a.results(sid), 30, 'the turn completed')
         a.idle(sid)
         harness_alive = Path(f'/proc/{pid_before}').exists()
+        answered = len(a.results(sid))
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(emacs-pid)"}')
         a.idle(sid)
-        new_pid = a.results(sid)[-1]
+        # Its own turn's result, not the one before (idle may be that turn's).
+        new_pid = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         retries = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'mismatch' in e.get('text', '')]
         chat = a.chat(sid)
         result = {'harness_pid_same': a.harness_pid(sid) == pid_before and harness_alive,
@@ -414,10 +416,12 @@ def survive(args, base):
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'session ended')
         a.eval(f'(romacs-agent-resume {a.s(sid)})')
         until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(sid)})) t)') == 't', 15, 'resumed')
+        answered = len(a.results(sid))
         a.send(sid, 'say resumed')
         a.idle(sid)
+        reply = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'resumed answered')
         resumed = [e for e in a.logged() if 'started' in e][-1]
-        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
+        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and reply == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
         return result
     finally:
@@ -655,21 +659,32 @@ def budget(args, base):
 
 
 def sockets(args, base):
-    """romacs#262: the editor's sockets go back to their count once the
-    sessions it ran have ended, whether the editor ended them
-    (`romacs-agent-stop') or their directories went (a test's tree removed
-    with its harnesses waiting), and no supervisor of this tree is left."""
+    """romacs#262: once the sessions it ran have ended, whether the editor
+    ended them (`romacs-agent-stop') or their directories went (a test's
+    tree removed with its harnesses waiting), no supervisor of this tree is
+    left and the editor has closed every socket it had on them.  Told by
+    those sockets themselves, found while the sessions run, not by a
+    count: the editor opens sockets of its own meanwhile."""
     a = Agents(args, base, 'sk')
     agents = a.home / '.local/state/romacs/agents'
+    ss = shutil.which('ss') or '/usr/sbin/ss'
 
-    def socks():
-        count = 0
-        for fd in Path(f'/proc/{a.pid}/fd').iterdir():
+    def editor_sockets():
+        """The inodes of the editor's sockets, from its fd table: an editor
+        gone fails, not an empty table."""
+        try:
+            fds = list(Path(f'/proc/{a.pid}/fd').iterdir())
+        except FileNotFoundError:
+            raise RuntimeError('the editor exited') from None
+        found = set()
+        for fd in fds:
             try:
-                count += os.readlink(fd).startswith('socket:')
+                link = os.readlink(fd)
             except OSError:
-                pass
-        return count
+                continue
+            if link.startswith('socket:['):
+                found.add(link[8:-1])
+        return found
 
     def hosts():
         found = []
@@ -682,32 +697,63 @@ def sockets(args, base):
                 found.append(int(proc.name))
         return found
 
+    def exited(pid):
+        """Whether PID's process is gone or a zombie: its fds closed either way."""
+        try:
+            stat = Path(f'/proc/{pid}/stat').read_bytes()
+        except FileNotFoundError:
+            return True
+        return stat[stat.rindex(b')') + 2:][:1] in (b'Z', b'X')
+
+    def on_supervisors(pids):
+        """The editor's sockets connected to the supervisors PIDS: the peers
+        of the sockets they hold connected, by `ss'.  Read as bytes and
+        only their own lines, from the end (the peer's inode is the last
+        field before `users:'): no other socket's address is parsed."""
+        out = subprocess.run([ss, '-xapH'], capture_output=True, check=True).stdout
+        marks = [f'pid={pid},'.encode() for pid in pids]
+        peers = set()
+        for line in out.splitlines():
+            # The owners are the last ` users:' (a path may hold the text too).
+            head, _, owners = line.rpartition(b' users:')
+            if any(mark in owners for mark in marks):
+                fields = head.split()
+                if len(fields) > 1 and fields[1] == b'ESTAB' and fields[-1].isdigit():
+                    peers.add(fields[-1].decode())
+        return peers & editor_sockets()
+
     def run(n, end):
+        """N sessions run to idle, then ended by END: how many sockets the
+        editor had on their supervisors, once every supervisor has exited
+        and the editor has closed them all."""
         ids = [a.start(f'say {i}') for i in range(n)]
         for sid in ids:
             a.idle(sid)
-        during = socks()
+        pids = hosts()
+        held = on_supervisors(pids)
+        if len(held) < n:
+            raise RuntimeError(f'{n} sessions but the editor has {len(held)} sockets on their supervisors {pids}')
         end(ids)
-        until(lambda: not hosts(), 30, 'every supervisor ended')
-        return during
+        until(lambda: all(exited(pid) for pid in pids) and not hosts(), 30, 'every supervisor ended')
+        left = held
+        def closed():
+            nonlocal left
+            left = held & editor_sockets()
+            return not left
+        try:
+            until(closed, 30, 'the editor closed its sockets on them')
+        except RuntimeError as err:
+            raise RuntimeError(f'{err}: it keeps {len(left)} of the {len(held)} it had, inodes {sorted(left)}') from None
+        return len(held)
 
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
-        # A first session: what the editor opens once and keeps (its
-        # routes' listener) is in the count the rest come back to.
-        run(1, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
-        baseline = socks()
         stopped = run(3, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
-        until(lambda: socks() <= baseline, 30, 'sockets back after stops')
-        after_stop = socks()
         removed = run(3, lambda ids: [shutil.rmtree(agents / sid) for sid in ids])
-        until(lambda: socks() <= baseline, 30, 'sockets back after removals')
-        after_removal = socks()
-        return {'baseline': baseline, 'with_3_stopped_later': stopped, 'after_stops': after_stop,
-                'with_3_removed_later': removed, 'after_removals': after_removal, 'hosts_left': len(hosts()),
-                'ok': stopped > baseline and removed > baseline and after_stop <= baseline
-                      and after_removal <= baseline and not hosts()}
+        alive = bool(editor_sockets())
+        return {'held_stopped': stopped, 'held_removed': removed, 'hosts_left': len(hosts()), 'editor_alive': alive,
+                'ok': alive and not hosts()}
     finally:
         a.close()
 
