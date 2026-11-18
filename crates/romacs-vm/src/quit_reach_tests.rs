@@ -363,7 +363,8 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         vm.stack.truncate(start);
         outcome
     }
-    for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
+    for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Append, "(list (make-string 50000 ?a) nil)"),
+                      (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
                       (DeepEqual, "(list (make-list 50000 1) (make-list 50000 1))")] {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, args);
@@ -390,8 +391,8 @@ fn kernels_the_engine_runs_quit_per_chunk() {
 }
 
 /// A C-g that lands in a kernel's poll reaches Lisp as `quit`, never as an
-/// error made of the poll's text: through `append` the engine runs, and
-/// through the loader's read of one long form.
+/// error made of the poll's text: through `append` the engine runs, `apply`'s
+/// spread, and the loader's read of one long form.
 #[test]
 fn a_kernel_s_or_the_loader_s_quit_reaches_lisp_as_quit() {
     let dir = std::env::temp_dir().join(format!("quit-kernel-{}", std::process::id()));
@@ -399,6 +400,7 @@ fn a_kernel_s_or_the_loader_s_quit_reaches_lisp_as_quit() {
     let file = dir.join("long.el");
     std::fs::write(&file, format!("(setq long '({}))\n", (0..400_000).map(|i| i.to_string()).collect::<Vec<_>>().join(" "))).unwrap();
     for form in ["(progn (setq big (make-list 2000000 1)) (condition-case nil (while t (append big nil)) (quit 'q)))".to_string(),
+                 "(progn (setq big (make-list 3000000 1)) (condition-case nil (while t (apply #'max big)) (quit 'q)))".to_string(),
                  format!("(condition-case nil (while t (load {:?} nil t t)) (quit 'q))", file.display().to_string())] {
         let (mut vm, signal) = busy_vm();
         let presser = { let signal = signal.clone(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(300)); signal.interrupt() }) };

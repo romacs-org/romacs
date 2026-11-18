@@ -35,19 +35,15 @@ impl Vm {
                 let mut prefix = Vec::new();
                 for i in 0..n - 1 {
                     let v = self.stack[start + i];
-                    if let Some(text) = self.str_view(v) {
-                        prefix.extend(
-                            text.chars()
-                                .map(|c| Value::integer(c as i64))
-                                .collect::<Result<Vec<_>>>()?,
-                        );
+                    if self.str_view(v).is_some() {
+                        self.append_string_codes(v, &mut prefix)?;
                     } else {
                         match self.object_if(v) {
                             Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
                             Some(data::Object::BoolVector(bits)) => prefix.extend(
                                 (0..bits.len).map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }),
                             ),
-                            _ => prefix.extend(self.list_values(v)?),
+                            _ => prefix.extend(self.list_values_polled(v)?),
                         }
                     }
                 }
@@ -64,6 +60,30 @@ impl Vm {
             }
             _ => unreachable!("eval data dispatch"),
         }
+    }
+
+    /// STRING's characters as fixnums, pushed onto PREFIX a part at a time,
+    /// the quit probe asked between parts. Stopped, the poll quits, or, with
+    /// nothing to quit for after all, the string's codes are taken again
+    /// unpolled: nothing is made from them yet.
+    fn append_string_codes(&mut self, string: Value, prefix: &mut Vec<Value>) -> Result<()> {
+        let before = prefix.len();
+        let stopped = {
+            let text = self.str_view(string).ok_or("string required")?;
+            let mut stopped = false;
+            for part in text.char_parts(KERNEL_CHUNK) {
+                prefix.extend(part.map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));
+                if self.native_stop_due() { stopped = true; break; }
+            }
+            stopped
+        };
+        if stopped {
+            self.native_poll_text()?;
+            prefix.truncate(before);
+            let text = self.str_view(string).ok_or("string required")?;
+            prefix.extend(text.chars().map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));
+        }
+        Ok(())
     }
 
     /// VALUE printed for a caller that cannot call Lisp: an unreadable

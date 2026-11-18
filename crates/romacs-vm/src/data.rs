@@ -620,6 +620,21 @@ impl Vm {
         }
         Ok(values)
     }
+    /// `list_values` for a primitive's own walk (`copy-sequence`, `append`,
+    /// `apply`'s spread): polled every `KERNEL_CHUNK` elements, which quits
+    /// only inside the scope its entry grants (`native_poll_text`), nothing
+    /// yet made from the elements.
+    pub(super) fn list_values_polled(&mut self, mut value: Value) -> Result<Vec<Value>> {
+        let mut values = Vec::new();
+        while value != Value::NIL {
+            let (car, cdr) = self.cons_pair(value)?;
+            values.push(car);
+            value = cdr;
+            if values.len() > self.list_limit() { return Err("circular list".into()); }
+            if values.len().is_multiple_of(crate::quit::KERNEL_CHUNK) { self.native_poll_text()?; }
+        }
+        Ok(values)
+    }
     #[inline(never)]
     /// `apply`'s spread, written at AT, the caller's end: (FUNCTION, AT,
     /// COUNT), or Err(NEED) when the file needs NEED slots to hold it with
@@ -635,7 +650,10 @@ impl Vm {
         }
         // GNU eval.c Fapply: FUNCTION, ARGS..., then the spread list; with a
         // single argument the list's first element is the function.
-        let tail = self.list_values(self.stack[start + argc - 1])?;
+        // The spread is apply's own walk: polled inside the scope granted
+        // here, its escape raised by `t2_prepare_apply`.
+        let list = self.stack[start + argc - 1];
+        let tail = self.inside_quit_scope(|vm| vm.list_values_polled(list))?;
         let mut values = self.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
@@ -1056,15 +1074,7 @@ impl Vm {
                     // A new list, the caller's only once it returns: polled
                     // per chunk of the walk and of the build, inside its own
                     // call target's scope.
-                    let mut values = Vec::new();
-                    let mut tail = x;
-                    while tail != Value::NIL {
-                        let (car, cdr) = self.cons_pair(tail)?;
-                        values.push(car);
-                        tail = cdr;
-                        if values.len() > self.list_limit() { return Err("circular list".into()); }
-                        if values.len().is_multiple_of(crate::quit::KERNEL_CHUNK) { self.native_poll_text()?; }
-                    }
+                    let values = self.list_values_polled(x)?;
                     let mut copy = Value::NIL;
                     for chunk in values.rchunks(crate::quit::KERNEL_CHUNK) {
                         for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }

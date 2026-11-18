@@ -97,21 +97,23 @@ impl<'a> StrView<'a> {
         std::str::from_utf8(self.bytes).ok()
     }
     pub(crate) fn chars(&self) -> impl Iterator<Item = u32> + 'a + use<'a> {
-        let mut bytes = self.bytes;
-        let multibyte = self.multibyte;
+        chars_of(self.bytes, self.multibyte)
+    }
+    /// The characters in parts of about SIZE bytes, each part ending on a
+    /// character boundary: a loop that polls between parts takes them whole.
+    pub(crate) fn char_parts(&self, size: usize) -> impl Iterator<Item = impl Iterator<Item = u32> + 'a + use<'a>> + 'a + use<'a> {
+        let (mut rest, multibyte): (&'a [u8], bool) = (self.bytes, self.multibyte);
         std::iter::from_fn(move || {
-            if bytes.is_empty() {
-                return None;
-            }
-            let (code, width) = if multibyte {
-                string_char(bytes)
-            } else {
-                (bytes[0] as u32, 1)
-            };
-            bytes = &bytes[width..];
-            Some(code)
+            if rest.is_empty() { return None; }
+            let mut end = size.min(rest.len());
+            // A multibyte string's continuation bytes are 10xxxxxx.
+            while multibyte && end < rest.len() && rest[end] & 0xc0 == 0x80 { end += 1; }
+            let (part, tail) = rest.split_at(end);
+            rest = tail;
+            Some(chars_of(part, multibyte))
         })
     }
+
     pub(crate) fn to_owned(&self) -> OwnedStr {
         OwnedStr {
             bytes: self.bytes.to_vec(),
@@ -119,6 +121,23 @@ impl<'a> StrView<'a> {
             multibyte: self.multibyte,
         }
     }
+}
+
+/// The characters of BYTES, a multibyte string's internal text or a unibyte
+/// string's bytes.
+fn chars_of(mut bytes: &[u8], multibyte: bool) -> impl Iterator<Item = u32> + '_ {
+    std::iter::from_fn(move || {
+        if bytes.is_empty() {
+            return None;
+        }
+        let (code, width) = if multibyte {
+            string_char(bytes)
+        } else {
+            (bytes[0] as u32, 1)
+        };
+        bytes = &bytes[width..];
+        Some(code)
+    })
 }
 
 #[derive(Clone)]

@@ -4216,6 +4216,13 @@ unsafe fn t2_prepare_apply(
                 r = rebased;
             }
             Err(error) => {
+                // A poll's escape behind the spread's text, raised as
+                // `primitive_value` raises it.
+                if error == crate::quit::ESCAPED && let Some(escape) = e.vm.propagated_escape.take() {
+                    e.escape = Some(escape);
+                    e.escape_hooked = std::mem::take(&mut e.vm.propagated_escape_hooked);
+                    e.failed_eval_depth = e.vm.propagated_eval_depth.take();
+                }
                 e.error = Some(error);
                 return None;
             }

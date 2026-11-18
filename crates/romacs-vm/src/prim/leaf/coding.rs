@@ -98,11 +98,9 @@ impl Leaf<'_> {
                 else { CodingToken::Character(code) }
             };
             let mut tokens = Vec::with_capacity(source.chars);
-            let mut chars = source.chars();
-            loop {
-                let before = tokens.len();
-                tokens.extend(chars.by_ref().take(CHUNK).map(token));
-                if tokens.len() - before < CHUNK || !pass.check() { break; }
+            for part in source.view().char_parts(CHUNK) {
+                tokens.extend(part.map(token));
+                if !pass.check() { break; }
             }
             tokens
         };
@@ -180,8 +178,13 @@ impl Leaf<'_> {
             (bytes, false)
         } else {
             let tokens = if utf8 {
-                coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"), pass)
-                    .into_iter().map(|code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }).collect()
+                let codes = coding_decode_utf8(&tokens, bom != Value::NIL, !inhibit && eol == self.intern("dos"), pass);
+                let mut tokens = Vec::with_capacity(codes.len());
+                for part in codes.chunks(CHUNK) {
+                    tokens.extend(part.iter().map(|&code| if code < 128 { CodingToken::Byte(code as u8) } else { CodingToken::Character(code) }));
+                    if !pass.check() { break; }
+                }
+                tokens
             } else { tokens };
             let tokens = coding_decode_eol(tokens, mode, pass);
             if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
@@ -603,7 +606,7 @@ fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool, pass: &mut P
         for byte in &mut bytes[1..width] {
             let Some(token) = tokens.get(at).copied() else {
                 coding_flush_utf8(&tokens[base..], &mut chars);
-                return coding_charbuf(&chars);
+                return coding_charbuf(&chars, pass);
             };
             at += 1;
             if let CodingToken::Byte(next) = token && next & 0xc0 == 0x80 { *byte = next; }
@@ -623,7 +626,7 @@ fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool, pass: &mut P
             }
         }
     }
-    coding_charbuf(&chars)
+    coding_charbuf(&chars, pass)
 }
 
 // External UTF-8 admits five-byte forms of byte8 character codes; the
@@ -669,13 +672,25 @@ fn coding_flush_utf8(tokens: &[CodingToken], chars: &mut Vec<i32>) {
     }
 }
 
-fn coding_charbuf(chars: &[i32]) -> Vec<u32> {
-    let mut result = Vec::new();
+fn coding_charbuf(chars: &[i32], pass: &mut Pass) -> Vec<u32> {
+    let mut result = Vec::with_capacity(chars.len());
     let mut at = 0;
-    while let Some(&code) = chars.get(at) {
-        if code >= 0 { result.push(code as u32); at += 1; }
-        // GNU produce_chars treats negative charbuf entries as annotation spans.
-        else { at += (-code) as usize; }
+    // A chunk at a time, PASS asked between: one without annotations taken
+    // whole, as a slice.
+    while at < chars.len() {
+        let end = (at + CHUNK).min(chars.len());
+        if chars[at..end].iter().all(|&code| code >= 0) {
+            result.extend(chars[at..end].iter().map(|&code| code as u32));
+            at = end;
+        } else {
+            while at < end {
+                let code = chars[at];
+                if code >= 0 { result.push(code as u32); at += 1; }
+                // GNU produce_chars treats negative charbuf entries as annotation spans.
+                else { at += (-code) as usize; }
+            }
+        }
+        if !pass.check() { break; }
     }
     result
 }
