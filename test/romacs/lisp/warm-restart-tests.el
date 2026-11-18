@@ -1176,6 +1176,34 @@ buffers to kill after."
         (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
       (delete-directory warm-restart-directory t))))
 
+(ert-deftest warm-restart-a-starred-copy-stays-one-through-a-change-of-mode ()
+  ;; A restored copy put in text-mode is still the copy: set apart at the
+  ;; next image.  Given a file, it is that file's buffer: not set apart.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (other (expand-file-name "kept.txt" warm-restart-directory))
+         image)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "token " (warm-restart-tests--secret "hunter28")))
+          (setq image (warm-restart-write))
+          (with-current-buffer (find-buffer-visiting file) (set-buffer-modified-p nil) (kill-buffer))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "notes.txt <starred>" (text-mode))
+          (should (seq-find (lambda (r) (equal (plist-get r :copy-of) file))
+                            (plist-get (car (warm-restart--read (warm-restart-write))) :starred)))
+          (with-current-buffer "notes.txt <starred>"
+            (let ((change-major-mode-with-file-name nil)) (set-visited-file-name other)))
+          (let ((form (car (warm-restart--read (warm-restart-write)))))
+            (should-not (plist-get form :starred))
+            (should (seq-find (lambda (r) (equal (plist-get r :file) other)) (plist-get form :buffers)))))
+      (dolist (b (buffer-list))
+        (when (or (string-prefix-p "notes.txt" (buffer-name b)) (string-prefix-p "kept.txt" (buffer-name b)))
+          (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
 (ert-deftest warm-restart-a-long-undo-with-a-secret-is-written ()
   ;; A buffer's undo 5000 entries long, one of them a secret's deletion:
   ;; the image is written, without it.

@@ -527,7 +527,8 @@ record is `:starred' when the snapshot's secrets are."
                   :undo (if stale nil (car undo)) :undo-cut (or stale (cdr undo))
                   :unibyte (not enable-multibyte-characters) :properties (and (not stale) runs))
             (and (cdr snapshot) (list :starred t))
-            (and warm-restart--starred-of (list :copy-of warm-restart--starred-of))
+            ;; A copy given a file is that file's buffer now.
+            (and warm-restart--starred-of (not buffer-file-name) (list :copy-of warm-restart--starred-of))
             (and buffer-file-name
                  (list :file buffer-file-name :modtime (visited-file-modtime) :coding buffer-file-coding-system))
             (and snapshot (progn (push (car snapshot) (cdr blobs))
@@ -597,8 +598,12 @@ its clones on it."
 (defvar-local warm-restart--starred-of nil
   "The file whose text, its secrets starred, this restored copy holds
 \(`warm-restart--restore-starred'), or nil.  The next image sets it apart
-again (`warm-restart--set-apart'); a change of mode or a file the buffer
-is given ends it (`warm-restart--end-starred-copy').")
+again (`warm-restart--set-apart').  A change of mode leaves it, as the
+text is still that copy; a file the buffer is given ends it
+\(`warm-restart--end-starred-copy').")
+(put 'warm-restart--starred-of 'permanent-local t)
+
+(put 'warm-restart--end-starred-copy 'permanent-local-hook t)
 
 (defun warm-restart--end-starred-copy ()
   "The current buffer, given a file, is a starred copy no more."
