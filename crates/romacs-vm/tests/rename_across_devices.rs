@@ -254,3 +254,33 @@ fn advice_cannot_skip_the_copy_before_the_delete() {
     let _ = std::fs::remove_dir(&a);
     let _ = std::fs::remove_dir_all(&b);
 }
+
+/// `copy-file` onto an existing FIFO with a reader writes the bytes through
+/// it and leaves it a FIFO, as GNU's does (Sol r2 S4): only a regular
+/// destination is truncated.
+#[test]
+fn copy_file_onto_a_fifo_writes_through_it() {
+    let dir = std::env::temp_dir().join(format!("romacs-copy-fifo-{}", std::process::id()));
+    let run = |engine: &mut dyn FnMut(&str) -> String| {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("src"), "data\n").unwrap();
+        assert!(std::process::Command::new("mkfifo").arg(dir.join("dst")).status().unwrap().success());
+        let mut reader = std::process::Command::new("sh").arg("-c").arg("cat dst > got").current_dir(&dir).spawn().unwrap();
+        let value = engine(&format!("(copy-file {:?} {:?} t)", dir.join("src").to_str().unwrap(), dir.join("dst").to_str().unwrap()));
+        assert!(reader.wait().unwrap().success());
+        let fifo = std::fs::symlink_metadata(dir.join("dst")).unwrap().file_type();
+        (value, std::fs::read_to_string(dir.join("got")).unwrap(), std::os::unix::fs::FileTypeExt::is_fifo(&fifo))
+    };
+    let oracle = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let gnu = run(&mut |expression| {
+        let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {})", wrapped(expression))])
+            .stdin(std::process::Stdio::null()).output().unwrap();
+        text(&String::from_utf8_lossy(&output.stdout))
+    });
+    let mut vm = gnu_lisp::gnu_lisp(&[]);
+    let romacs = run(&mut |expression| vm.eval_source(&wrapped(expression)).and_then(romacs_vm::Local::display).map(|v| text(&v)).unwrap_or_else(|e| e));
+    assert_eq!(romacs, gnu);
+    assert_eq!(romacs.1, "data\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

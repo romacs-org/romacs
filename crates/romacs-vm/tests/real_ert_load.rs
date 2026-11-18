@@ -1072,7 +1072,8 @@ fn file_names_links_and_copies_match_gnu() {
     // GNU truncates a copy's destination before finding it is the source,
     // emptying the source; Romacs signals the same error with the source
     // intact (ledger/divergences/VM2-COPY-FILE-SAME-FILE.md). For these the
-    // value is GNU's and the directory is the fixture, untouched.
+    // value is GNU's, and so is the directory but for a's entry, which is the
+    // fixture's.
     let keeps_source = [r#"(copy-file "a" "a" t)"#];
     let mut failures = Vec::new();
     for expression in cases {
@@ -1086,7 +1087,13 @@ fn file_names_links_and_copies_match_gnu() {
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
         snapshot(&dir, &dir, &mut expected.1);
-        if keeps_source.contains(&expression) { expected.1 = untouched; }
+        // Only a's own entry is the fixture's; everything else stays GNU's.
+        if keeps_source.contains(&expression) {
+            let a = |entries: &[String]| entries.iter().find(|e| e.starts_with("a ")).cloned();
+            if let Some(kept) = a(&untouched) {
+                for entry in &mut expected.1 { if entry.starts_with("a ") { entry.clone_from(&kept); } }
+            }
+        }
         fixture();
         let mut actual = (vm.eval_source(&source).unwrap().display().unwrap(), vec![]);
         snapshot(&dir, &dir, &mut actual.1);

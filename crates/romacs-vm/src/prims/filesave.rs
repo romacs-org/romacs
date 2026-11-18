@@ -599,7 +599,11 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
             let same = std::io::Error::from_raw_os_error(0);
             return Err(errno(cx, "Input and output files are the same", &[file, newname], same));
         }
-        output.set_len(0).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
+        // GNU's O_TRUNC truncates a regular file and leaves anything else (a
+        // FIFO, a device) as it is; so does this.
+        if existing.file_type().is_file() {
+            output.set_len(0).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
+        }
     }
     if !host::clone_file(&output, &input) {
         // Read and write the rest, whatever copy_file_range did, as GNU does.
