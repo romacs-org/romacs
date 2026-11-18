@@ -227,11 +227,14 @@ pub fn pinned_dirs(base: &Path) -> std::io::Result<PathBuf> {
     Ok(p)
 }
 
-/// DIR made with MODE, or there already: whoever makes it first, as two
-/// processes starting builders in one fresh store may both try.
+/// DIR made with MODE, or there already as a directory: whoever makes it
+/// first, as two processes starting builders in one fresh store may both
+/// try. A file or a symlink there is refused.
 fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
     match host::create_dir(dir, mode) {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if host::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) { Ok(()) } else { Err(e) }
+        }
         other => other,
     }
 }
@@ -1591,6 +1594,24 @@ mod tests {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// A store directory is made, or found made as a directory; a file or a
+    /// symlink in its place is refused, not taken for one.
+    #[test]
+    fn a_store_subdirectory_is_made_or_found_but_never_a_file_or_a_link() {
+        let root = std::env::temp_dir().join(format!("romacs-store-{}-subdir", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let made = root.join("made");
+        subdir(&made, 0o700).unwrap();
+        subdir(&made, 0o700).unwrap();
+        assert!(made.is_dir());
+        std::fs::write(root.join("file"), "").unwrap();
+        assert_eq!(subdir(&root.join("file"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::os::unix::fs::symlink(&made, root.join("link")).unwrap();
+        assert_eq!(subdir(&root.join("link"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

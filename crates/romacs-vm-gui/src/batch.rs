@@ -135,12 +135,14 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
     if let Some(worlds) = worlds { return made(worlds).then(|| (worlds.with_file_name("lisp"), true)); }
     let user = super::world::default_store(|name| std::env::var_os(name)).filter(|store| made(store));
     let installed = beside_executable("lisp")?;
-    // Made, or found made by a session starting beside this one: whoever
-    // comes first, both use the installation's store.
+    // Made, or found made as a directory by a session starting beside this
+    // one: whoever comes first, both use the installation's store.
     let private = |dir: &Path| {
         use std::os::unix::fs::DirBuilderExt;
         match std::fs::DirBuilder::new().mode(0o700).create(dir) {
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) { Ok(()) } else { Err(e) }
+            }
             other => other,
         }
     };
