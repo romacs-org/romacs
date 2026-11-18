@@ -106,6 +106,7 @@ fn act_in_role() -> bool {
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
         Ok("image-frees") => image_frees(&store.unwrap()),
+        Ok("image-blocks") => image_blocks(&store.unwrap()),
         Ok("heap-file") => heap_file(&store.unwrap()),
         Ok("trim") => trim(),
         Ok("alone") => alone(),
@@ -590,41 +591,84 @@ fn heap(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"outside": outside, "used_kept": arena::census().unwrap().used == used}));
 }
 
-/// The private dirty kilobytes of this process's mappings within the BASE
-/// and RESERVE bytes of an arena, from `/proc/self/smaps`.
-fn private_dirty_within(base: usize, reserve: usize) -> usize {
-    let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
-    let (mut inside, mut kb) = (false, 0);
-    for line in smaps.lines() {
-        if let Some((range, _)) = line.split_once(' ') && let Some((from, to)) = range.split_once('-')
-            && let (Ok(from), Ok(to)) = (usize::from_str_radix(from, 16), usize::from_str_radix(to, 16)) {
-            inside = from < base + reserve && base < to;
-        } else if inside && let Some(rest) = line.strip_prefix("Private_Dirty:") {
-            kb += rest.trim().trim_end_matches(" kB").parse::<usize>().unwrap();
-        }
-    }
-    kb
-}
-
 /// After a restore, the VM dropped: its blocks are the image's, and no
 /// block of an adopted image is handed out again, so freeing them links
-/// none into a free list and writes no image page; their whole pages go
-/// back to the file. What the arena's free lists hold, and the image's
-/// private dirty memory, before and after.
+/// none into the image's free lists (`image_census`).
 fn image_frees(store: &Path) {
     let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
         println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
         return;
     };
-    let (base, reserve) = arena::current_range().unwrap();
-    let census = arena::census().unwrap();
-    let dirty = private_dirty_within(base, reserve);
+    let census = arena::image_census().unwrap();
     drop(vm);
-    let after = arena::census().unwrap();
-    println!("WORLD-IMAGE {}", json!({
-        "linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept),
-        "dirtied": private_dirty_within(base, reserve) > dirty,
-    }));
+    let after = arena::image_census().unwrap();
+    println!("WORLD-IMAGE {}", json!({"linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept)}));
+}
+
+/// The bytes of each of an image's carried blocks: two runs of four pages
+/// side by side, then one of five.
+const BLOCK: usize = 3 * 4096 + 100;
+
+/// The whole 4 KiB pages within the LEN bytes at AT.
+fn whole_pages(at: usize, len: usize) -> std::ops::Range<usize> {
+    at.next_multiple_of(4096) / 4096..(at + len) / 4096
+}
+
+/// How many of the whole 4 KiB pages within the LEN bytes at AT are this
+/// process's private copies, from `/proc/self/pagemap`: present, and no
+/// file's page (bit 61 clear).
+fn private_pages(at: usize, len: usize) -> usize {
+    use std::os::unix::fs::FileExt;
+    let pagemap = std::fs::File::open("/proc/self/pagemap").unwrap();
+    whole_pages(at, len).filter(|page| {
+        let mut entry = [0u8; 8];
+        pagemap.read_exact_at(&mut entry, (page * 8) as u64).unwrap();
+        let entry = u64::from_le_bytes(entry);
+        entry >> 63 == 1 && (entry >> 61) & 1 == 0
+    }).count()
+}
+
+/// A world whose carry is three blocks of the image: built, or restored.
+/// Restored, each block is written whole (a private copy of each page),
+/// then the first is freed and the third shrunk to 100 bytes: the freed
+/// block's whole pages and the shrunk one's tail go back to the file, its
+/// neighbour and the shrunk one's head keep what was written, and the
+/// image's free lists take nothing.
+fn image_blocks(store: &Path) {
+    let world = World::new(store.to_owned(), vec!["consumer world-image-blocks".into()]).unwrap();
+    match world.launch::<Vec<Vec<u8>>>(|| std::env::args_os().skip(1).collect(), true, |_| {}) {
+        Launch::Build => {
+            world.begin_build().unwrap();
+            let built = world.build(|| {
+                let mut vm = Vm::new();
+                vm.world_begin();
+                Ok((vm, vec![vec![1u8; BLOCK], vec![2u8; BLOCK], vec![3u8; 5 * 4096]], json!({})))
+            });
+            std::process::exit(i32::from(built.is_err()));
+        }
+        Launch::Restored { carry: mut blocks, .. } => {
+            for block in &mut blocks { block.fill(0xab); }
+            let census = arena::image_census().unwrap();
+            let freed = std::mem::take(&mut blocks[0]);
+            let (at, written) = (freed.as_ptr() as usize, private_pages(freed.as_ptr() as usize, BLOCK));
+            drop(freed);
+            let (head, tail) = (blocks[2].as_ptr() as usize, private_pages(blocks[2].as_ptr() as usize + 100, 5 * 4096 - 100));
+            blocks[2].truncate(100);
+            blocks[2].shrink_to_fit();
+            let after = arena::image_census().unwrap();
+            println!("WORLD-IMAGE {}", json!({
+                // Every whole page of each was copied by the writes, and
+                // there are some.
+                "written": written == whole_pages(at, BLOCK).len() && written >= 2
+                    && tail == whole_pages(head + 100, 5 * 4096 - 100).len() && tail >= 3,
+                "freed_released": private_pages(at, BLOCK) == 0,
+                "tail_released": blocks[2].as_ptr() as usize == head && private_pages(head + 100, 5 * 4096 - 100) == 0,
+                "kept": blocks[1].iter().all(|&b| b == 0xab) && blocks[2].iter().all(|&b| b == 0xab),
+                "linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept),
+            }));
+        }
+        _ => println!("WORLD-IMAGE {}", json!({"mode": "not restored"})),
+    }
 }
 
 /// In a process whose heap is its first arena: a large block freed at the
@@ -992,10 +1036,10 @@ fn concurrent_first_launches_share_one_builder_and_say_they_wait() {
 const IMAGE_FREES: &str = "a_restored_images_frees_link_nothing_and_dirty_no_image_page";
 
 /// The restored VM's drop frees thousands of the image's blocks: none is
-/// linked into the image arena's free lists, and the image mapping's
-/// private dirty memory does not grow (its freed whole pages go back to the
-/// file). A free that linked them wrote an image page each, which every
-/// owner of the image then copied.
+/// linked into the image arena's free lists. And a freed or shrunk block
+/// of the image, written first, gives its whole pages back to the file
+/// while its neighbour keeps what was written. A free that linked them
+/// wrote an image page each, which every owner of the image then copied.
 #[test]
 fn a_restored_images_frees_link_nothing_and_dirty_no_image_page() {
     if act_in_role() {
@@ -1004,7 +1048,9 @@ fn a_restored_images_frees_link_nothing_and_dirty_no_image_page() {
     let scratch = scratch(IMAGE_FREES);
     let store = scratch.join("store");
     assert_eq!(outcome(&mut child_of(IMAGE_FREES, "launch", &store)), restored());
-    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-frees", &store)), json!({"linked": false, "dirtied": false}).to_string());
+    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-frees", &store)), json!({"linked": false}).to_string());
+    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-blocks", &store)),
+               json!({"written": true, "freed_released": true, "tail_released": true, "kept": true, "linked": false}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

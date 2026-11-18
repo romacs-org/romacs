@@ -1277,12 +1277,18 @@ fn adopted_image(arena: Published) -> bool {
     ADOPTED.load(Ordering::Acquire) && IMAGE_ARENA.published().is_some_and(|image| image.base == arena.base)
 }
 
-/// The whole pages within the LEN bytes at AT, of the adopted image ARENA,
-/// given back: each reads the file's page again, and costs no private
-/// memory. The rest of the block stays as it is: nothing reads it, and no
-/// free list holds it.
+/// The whole kernel pages within the LEN bytes at AT, of the adopted image
+/// ARENA, given back: each reads the file's page again, and costs no
+/// private memory. The ends round inward to the kernel's page, which a
+/// discard drops whole: on a host whose page holds several of the arena's,
+/// rounding to the arena's page would drop a live neighbour's changes. The
+/// rest of the block stays as it is: nothing reads it, and no free list
+/// holds it.
 fn release_within(arena: Published, at: usize, len: usize) {
-    let (start, end) = (at.next_multiple_of(PAGE), (at + len) / PAGE * PAGE);
+    // HOST(rustix::query): the kernel's page size, the unit a discard drops; read from the
+    // auxiliary vector, it allocates nothing, and no Lisp value depends on it
+    let page = rustix::param::page_size().max(PAGE);
+    let (start, end) = (at.next_multiple_of(page), (at + len) / page * page);
     if end > start {
         let mut locked = Locked::take();
         release(&locked.view(arena), start, end - start);
@@ -1381,14 +1387,16 @@ unsafe impl GlobalAlloc for Arena {
                 if ADOPTED.load(Ordering::Acquire) { PLATFORM.dealloc(at, layout) } else { System.dealloc(at, layout) }
             };
         };
+        // Before the scrub: an adopted image's block is never handed out
+        // again, so a scrub would only write its pages.
+        if adopted_image(arena) {
+            release_within(arena, at as usize, layout.size());
+            return;
+        }
         if SCRUB.load(Ordering::Relaxed) {
             // UNSAFE(a freed block is the caller's memory until this returns; no type owns it)
             // SAFETY: by dealloc's contract, AT holds LAYOUT.size() bytes the caller gives up.
             unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
-        }
-        if adopted_image(arena) {
-            release_within(arena, at as usize, layout.size());
-            return;
         }
         free(arena, at as usize, layout);
     }
@@ -1404,16 +1412,18 @@ unsafe impl GlobalAlloc for Arena {
             };
         };
         let align = layout.align();
+        // An adopted image's block shrinks in place, its tail's whole pages
+        // given back unscrubbed: the tail is never handed out again
+        // (`adopted_image`).
+        if new_size <= layout.size() && adopted_image(arena) {
+            release_within(arena, at as usize + new_size, layout.size() - new_size);
+            return at;
+        }
         if SCRUB.load(Ordering::Relaxed) && new_size < layout.size() {
             // UNSAFE(a block's tail is the caller's memory; no type owns it)
             // SAFETY: by realloc's contract, AT holds LAYOUT.size() bytes,
             // and the bytes past NEW_SIZE are given up.
             unsafe { std::ptr::write_bytes(at.add(new_size), 0, layout.size() - new_size) };
-        }
-        // An adopted image's block shrinks in place: its tail is never
-        // handed out again (`adopted_image`).
-        if new_size <= layout.size() && adopted_image(arena) {
-            return at;
         }
         match (class_of(layout.size(), align), class_of(new_size, align)) {
             (Some(old), Some(new)) if old == new => return at,
