@@ -2444,12 +2444,17 @@ recorded before it would land elsewhere."
   (let ((buffer-undo-list t)) (funcall function))
   (setq buffer-undo-list nil))
 
+(defvar-local romacs-agent-ui--earlier nil
+  "Non-nil once earlier turns were asked for in the current chat
+\(`romacs-agent-chat-earlier'): a journal is read as far back as they go.")
+
 (defun romacs-agent-chat-earlier ()
   "Draw this chat's earlier turns too, `romacs-agent-chat-turns' more,
 point at the first turn it drew before."
   (interactive nil romacs-agent-chat-mode)
   (let ((drawn (length (romacs-agent-ui--input-starts))))
-    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12)))
+    (setq romacs-agent-ui--turns (+ drawn (or romacs-agent-chat-turns 12))
+          romacs-agent-ui--earlier t)
     (romacs-agent-ui--redraw)
     ;; As far from the end as it was: the turns after it are drawn again.
     (when-let* ((at (and (> drawn 0) (nth (1- drawn) (romacs-agent-ui--input-starts drawn)))))
@@ -2607,15 +2612,17 @@ records not in SQLite: from its tail (`romacs-agent--journal-file-tail'),
 never a walk of a long journal on the editor.  One whose last turn alone
 is longer than that tail says so instead."
   (let* ((size (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0))
-         (turns (or romacs-agent-ui--turns 20))
-         ;; Turns asked for by hand (earlier ones) are looked for however
-         ;; far back they go; a chat's first draw within its tail's bytes.
-         (budget (and (> turns (or romacs-agent-chat-turns 12)) 'none))
+         ;; Earlier turns asked for (`romacs-agent-chat-earlier') are looked
+         ;; for however far back they go; else within its tail's bytes.
+         (budget (and romacs-agent-ui--earlier 'none))
          ;; Nil: all of it (fewer turns than asked, or none found in the tail).
-         (from (car (romacs-agent--journal-file-tail session turns size nil budget))))
+         (from (car (romacs-agent--journal-file-tail session (or romacs-agent-ui--turns most-positive-fixnum)
+                                                     size nil budget))))
     (if (or from budget (<= size romacs-agent-journal-tail-bytes))
         (progn (when from (romacs-agent-ui--earlier-row))
                (romacs-agent-ui--replay-from session from))
+      ;; Asked for by hand, it is drawn whole.
+      (romacs-agent-ui--earlier-row)
       (romacs-agent-ui--insert-at romacs-agent-ui--end
                                   (propertize "! this chat's last turn is too long to draw from its journal here\n"
                                               'face 'romacs-agent-error)))))

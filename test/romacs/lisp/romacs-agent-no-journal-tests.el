@@ -87,6 +87,24 @@ the background, as these tests' chats wait for that move."
           (romacs-agent-chat-earlier)
           (should (string-search "say 1" (buffer-string)))
           (should (string-search "say 2" (buffer-string))))
+        (kill-buffer buffer))
+      ;; Its last turn alone past the tail: said so, then drawn whole when
+      ;; asked for.
+      (let* ((romacs-agent-journal-tail-bytes 10)
+             (buffer (romacs-agent-no-journal-tests--chat session)))
+        (with-current-buffer buffer
+          (should (string-search "too long" (buffer-string)))
+          (should-not (string-search "say" (buffer-string)))
+          (romacs-agent-chat-earlier)
+          (should (string-search "say 2" (buffer-string)))
+          (should-not (string-search "too long" (buffer-string))))
+        (kill-buffer buffer))
+      ;; Every turn drawn (no count): within the tail's bytes still.
+      (let* ((romacs-agent-chat-turns nil)
+             (buffer (romacs-agent-no-journal-tests--chat session)))
+        (with-current-buffer buffer
+          (should (string-search "say 2" (buffer-string)))
+          (should-not (string-search "say 1" (buffer-string))))
         (kill-buffer buffer)))))
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
