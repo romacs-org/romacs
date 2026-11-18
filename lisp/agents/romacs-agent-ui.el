@@ -2463,15 +2463,16 @@ composer as it is."
      (setq romacs-agent-ui--unfilled t)
      (romacs-agent-ui--fill (current-buffer)))))
 
-(defun romacs-agent-show (session)
-  "Show SESSION's chat buffer, made from its journal when new."
+(defun romacs-agent-show (session &optional action)
+  "Show SESSION's chat buffer, made from its journal when new, as
+`pop-to-buffer' does with ACTION."
   (let ((buffer (romacs-agent-buffer session)))
     (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
     ;; Shown first: its rules fit its window.
     (when (buffer-local-value 'romacs-agent-ui--unfilled buffer)
-      (pop-to-buffer buffer)
+      (pop-to-buffer buffer action)
       (romacs-agent-ui--fill buffer))
-    (pop-to-buffer buffer)
+    (pop-to-buffer buffer action)
     (goto-char (point-max))
     ;; The replay carried the window's start along with the transcript's
     ;; end: the composer goes to the window's bottom, the turns above it.

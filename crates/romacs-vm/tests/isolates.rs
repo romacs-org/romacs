@@ -125,6 +125,7 @@ extern "C" fn count_fork() {
 #[test]
 fn a_worker_is_spawned_without_running_atfork_handlers() {
     use std::os::unix::process::CommandExt;
+    // UNSAFE(no crate registers a fork handler safely: pthread_atfork is a C call)
     // SAFETY: `count_fork', run in the parent before each fork, only counts
     // in a thread-local and cannot unwind.
     assert_eq!(unsafe { libc::pthread_atfork(Some(count_fork), None, None) }, 0);

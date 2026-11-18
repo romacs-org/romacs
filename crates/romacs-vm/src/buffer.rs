@@ -350,17 +350,15 @@ mod model_tests {
     }
 
     #[test]
-    fn killed_buffer_loses_symbol_local_bindings() {
+    fn killed_buffer_loses_its_locals() {
         let mut vm = Vm::new();
         vm.eval_source_raw("(setq lifecycle-buffer (get-buffer-create \"locals-cleanup\" t)) (with-current-buffer lifecycle-buffer (set (make-local-variable 'lifecycle-local) 9))").unwrap();
         let buffer_slot = vm.slot("lifecycle-buffer");
-        let buffer = vm.slots[buffer_slot].value;
+        let index = vm.slots[buffer_slot].value.index(0).unwrap() - 1;
         let variable = vm.slot("lifecycle-local");
-        let table = vm.slots[variable].local;
-        assert!(vm.declaration_hash_get(table, buffer).unwrap().is_some(), "BUFFER_LIFECYCLE_LOCALS_FIXTURE");
+        assert_eq!(vm.local_slots(index), [variable], "the buffer holds its local");
         vm.eval_source_raw("(kill-buffer lifecycle-buffer)").unwrap();
-        let buffer = vm.slots[buffer_slot].value;
-        assert!(vm.declaration_hash_get(table, buffer).unwrap().is_none(), "BUFFER_LIFECYCLE_LOCALS_CLEARED");
+        assert!(vm.local_slots(index).is_empty(), "and drops it when killed");
     }
 
     #[test]
@@ -703,24 +701,10 @@ impl Vm {
         chain.members.dedup();
         chain.pruned = chain.members.len();
     }
-    /// The slots of the variables the buffer at object INDEX may have a
-    /// Lisp local binding of (`Vm::local_owners`), in slot order, listed by
-    /// one pass over the local tables when unknown.
-    pub(crate) fn local_slots(&mut self, index: usize) -> Vec<usize> {
-        if self.local_owners.is_none() {
-            let mut owners: HashMap<usize, Vec<usize>> = HashMap::default();
-            for (slot, s) in self.slots.iter().enumerate() {
-                let Some(Object::HashTable(table)) = self.object_if(s.local) else { continue };
-                for (_, buffer, _) in table.entries() {
-                    if let Some(i) = buffer.index_if(0).and_then(|i| i.checked_sub(1)) { owners.entry(i).or_default().push(slot); }
-                }
-            }
-            self.local_owners = Some(owners);
-        }
-        let mut found = self.local_owners.as_ref().and_then(|owners| owners.get(&index)).cloned().unwrap_or_default();
-        found.sort_unstable();
-        found.dedup();
-        found
+    /// The slots of the variables the buffer at object INDEX has a Lisp
+    /// local of, in slot order: its own store's.
+    pub(crate) fn local_slots(&self, index: usize) -> Vec<usize> {
+        self.per_buffer(index).map_or_else(Vec::new, |b| b.locals().iter().filter_map(|(symbol, _)| symbol.index_if(7).map(|i| i - 1)).collect())
     }
     /// The slots of the variables the buffer at object INDEX may have a
     /// local binding of, in slot order: the always local
@@ -733,12 +717,6 @@ impl Vm {
         slots.sort_unstable();
         slots.dedup();
         slots
-    }
-    /// BUFFER now has a Lisp local binding of the variable at SLOT.
-    pub(crate) fn note_local_binding(&mut self, buffer: Value, slot: usize) {
-        if let (Some(owners), Some(i)) = (&mut self.local_owners, buffer.index_if(0).and_then(|i| i.checked_sub(1))) {
-            owners.entry(i).or_default().push(slot);
-        }
     }
     pub(crate) fn kill_buffer_model(&mut self, value: Value) -> Result<()> {
         if !self.buffer_state(value)?.live || self.minibuffer_window_buffer() == Some(value) { return Ok(()); }
@@ -794,11 +772,6 @@ impl Vm {
             }
         }
         self.leave_base(value)?;
-        for slot in self.local_slots(index) {
-            let table = self.slots[slot].local;
-            if table != Value::NIL { self.declaration_hash_remove(table, value)?; }
-        }
-        if let Some(owners) = &mut self.local_owners { owners.remove(&index); }
         for i in self.buffer_referrers(index) {
             match self.objects.entry_mut(i) {
                 Object::Marker(m) if m.buffer == value => {
@@ -814,7 +787,8 @@ impl Vm {
         }
         if let Some(referrers) = &mut self.referrers { referrers.chains.remove(&index); }
         // GNU kill-buffer resets ordinary locals but retains the visited filename.
-        // Reuse the native per-buffer storage without retaining other Lisp locals.
+        // Reuse the native per-buffer storage without retaining other locals:
+        // the buffer's own Lisp locals go with it, and no other's are touched.
         let fields = match self.object(value)? {
             Object::Buffer(b) => &b.per_buffer,
             Object::ByteBuffer(b) => &b.per_buffer,

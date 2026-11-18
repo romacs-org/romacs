@@ -298,8 +298,11 @@ impl Vm {
 
     /// print.c assigns Vprint_number_table directly, without watchers.
     fn set_print_number_table(&mut self, slot: usize, value: Value) -> Result<()> {
-        let local = self.variable_binding_slot(slot, true)?;
-        if self.slots[local].value != value { self.slots[local].value = value; }
+        let base = self.indirect_variable(slot);
+        match self.binding(base, true)? {
+            crate::variable_runtime::Binding::Local(local) => if self.local_value(local) != value { self.store_local(local.buffer, base, Ok(local.at), crate::variable_runtime::LocalStore::Set(value)) },
+            crate::variable_runtime::Binding::Default => if self.slots[base].value != value { self.slots[base].value = value },
+        }
         Ok(())
     }
 

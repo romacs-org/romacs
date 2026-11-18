@@ -605,7 +605,7 @@ impl FrameCoordinator {
 
     /// Replace the decoder's one outstanding service deadline. `None`
     /// withdraws it when no presented session needs another native pull.
-    #[cfg(any(feature = "video", test))]
+    #[cfg(test)]
     pub(crate) fn reconcile_video_service_deadline(&mut self, deadline: Option<EventTime>) {
         self.video_service_deadline = deadline;
     }
@@ -616,7 +616,7 @@ impl FrameCoordinator {
     /// Decoder service and frame authorization are separate domains: a media
     /// deadline only asks the decoder to run, while this operation is the
     /// explicit boundary that grants a repaint after sampling succeeded.
-    #[cfg(any(feature = "video", test))]
+    #[cfg(test)]
     pub(crate) fn submit_ready_video_frame(
         &mut self,
         id: NativeWindowId,

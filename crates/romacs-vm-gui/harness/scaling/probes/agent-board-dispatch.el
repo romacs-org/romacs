@@ -10,7 +10,6 @@
                                          :object-type 'hash-table :null-object :null :false-object :false)))
           (dolist (session it) (romacs-agent--record session record))
           ;; As if the board were shown (batch has no visible window).
-          (cl-letf (((symbol-function 'romacs-agent-board--shown) #'romacs-agent-board--buffer)
-                    ((symbol-function 'romacs-popup-show) #'ignore))
+          (cl-letf (((symbol-function 'romacs-agent-board--shown) #'romacs-agent-board--buffer))
             (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
             (romacs-agent-ui--children-flush))))

@@ -71,6 +71,11 @@ pub struct Config {
     /// The installation's Lisp trees, whose files have a compiled form as
     /// GNU's installed `.elc` files do.
     pub runtime: Vec<PathBuf>,
+    /// The installation's tree (`lisp/`, `etc/`), by its true name: what an
+    /// artifact names files of relative to (`store::rooted`), so a copy of
+    /// the tree elsewhere, a candidate install say, reuses its artifacts.
+    /// None: every file by its path.
+    pub root: Option<PathBuf>,
 }
 
 /// The configuration, with what this process read of its environment
@@ -301,6 +306,10 @@ impl Vm {
 /// its memo. Records held already are not parsed again.
 fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &str) -> bool {
     let path_seed = twox_hash::XxHash3_128::oneshot(load_path.as_bytes()) as u64;
+    // Records name files of the installation's tree relative to it
+    // (`store::rooted`): checked against this process's tree.
+    let root = configured().and_then(|c| c.config.root.clone());
+    let root = root.as_deref();
     let unknown: Vec<(&str, u128)> = {
         let mut held = HOLDING.lock().unwrap();
         let held = held.get_or_insert_default();
@@ -312,8 +321,10 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     };
     unknown.into_iter().all(|(text, memo)| {
         let Ok(record) = serde_json::from_str::<Json>(text) else { return false };
-        let record = &record;
+        let record = &store::unrooted(&record, root);
         let holds = match record["kind"].as_str() {
+            // Held by this tree only (`store::root_record').
+            Some("root") => root.is_some_and(|root| record["path"] == json!(root.display().to_string())),
             Some("loaded") => record["path"].as_str().is_some_and(|path| {
                 store::source_digest(store, Path::new(path)).is_ok_and(|d| record["sha256"] == store::hex(&d))
             }),
@@ -415,7 +426,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let digest = store::source_digest(&config.store, path)?;
         let joined = load_path.join("\n");
         Ok(configured.identity().and_then(|identity| {
-            let key = store::key(identity, path, &digest);
+            let key = store::key(identity, config.root.as_deref(), path, &digest);
             store::lookup(&config.store, &key, |artifact| self.inputs_hold(&config.store, artifact, &joined))
         }))
     }
@@ -469,7 +480,8 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             return Ok((held, true));
         }
         let digest = store::source_digest(&config.store, &source).map_err(|e| e.to_string())?;
-        let key = store::key(identity, &source, &digest);
+        let root = config.root.as_deref();
+        let key = store::key(identity, root, &source, &digest);
         host::enter_record();
         let mut names = unit::Names::default();
         let walked = self.compile_walk(&source, &mut names);
@@ -480,7 +492,9 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 !path.is_some_and(|p| p.starts_with(&config.store) || p == source)
             })
             .filter(|r| r["kind"] != "env" || r["name"].as_str().is_some_and(|name| config.inherited.contains(&name)))
+            .map(|r| store::rooted(&r, root))
             .collect();
+        let mut inputs = inputs;
         let (status, units) = match walked {
             Ok(Ok(units)) => (store::Status::Compiled, units),
             Ok(Err(reason)) => {
@@ -492,7 +506,15 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 (store::Status::Error(reason.to_string()), vec![])
             }
         };
-        let (bytes, inputs_digest) = store::encode(&status, &source, &inputs, &names.names, &units);
+        // A unit that kept a path of the tree (`macroexp-file-name' under
+        // `eval-when-compile', say), as a string or as a symbol's name in the
+        // artifact's name table, holds this tree's name: it serves this tree
+        // only (`store::root_record').
+        let captured = units.iter().map(|u| u.4.as_slice()).chain(names.names.iter().map(String::as_bytes));
+        if let Some(record) = store::root_record(root, captured) {
+            inputs.push(record);
+        }
+        let (bytes, inputs_digest) = store::encode(&status, &store::rooted_path(root, &source), &inputs, &names.names, &units);
         let path = store::publish(&config.store, &key, &inputs_digest, &bytes).map_err(|e| e.to_string())?;
         if !configured.no_prune
             && let Ok(removed) = store::prune(&config.store, store::BUDGET, &Default::default())

@@ -12,6 +12,8 @@ mod keymap_tests;
 #[cfg(test)]
 mod lazy_tests;
 #[cfg(test)]
+mod locals_ownership_tests;
+#[cfg(test)]
 mod plist_tests;
 mod keymap;
 mod char_table;
@@ -32,6 +34,8 @@ mod quit;
 mod gap_probe;
 pub use gc_mark::{forbid_threads as forbid_gc_threads, set_workers as set_gc_workers};
 pub use quit::QuitSignal;
+#[cfg(feature = "test-hooks")]
+pub use hash::declaration_stores;
 mod bidi;
 mod layout_host;
 mod display_host;
@@ -122,6 +126,7 @@ mod indirect;
 use romacs_brand as brand;
 mod gc;
 mod gc_check;
+mod gc_image;
 mod functions;
 mod epoch;
 mod slots;
@@ -162,6 +167,7 @@ mod window;
 mod fontsets;
 mod frame;
 mod hash;
+mod local_vars;
 mod intervals;
 mod properties;
 pub mod text;
@@ -1179,13 +1185,9 @@ struct Slot {
     /// symbol OBJECT, never by its name. A moving heap Value: a collector
     /// root, marked and forwarded with the slot (gc.rs).
     plist: Value,
-    /// Buffer-local binding table (GNU keeps these in the value redirect's
-    /// `struct Lisp_Buffer_Local_Value`, never on the plist). NIL when the
-    /// variable was never localized. A collector root like `plist`.
-    local: Value,
-    /// `make-local-variable` without `make-variable-buffer-local`: the table
-    /// exists but a plain `set` does not create a local binding.
-    explicit_local: bool,
+    /// Whether and how the variable may have buffer-local values, which
+    /// each buffer keeps in its own store (`local_vars.rs`).
+    localness: Localness,
     /// Object-owned declaration flag for uninterned symbols.
     declared_special: bool,
 }
@@ -1196,19 +1198,30 @@ impl Slot {
             function: Value::UNBOUND,
             version: 1,
             plist: Value::NIL,
-            local: Value::NIL,
-            explicit_local: false,
+            localness: Localness::Never,
             declared_special: false,
         }
     }
 }
+/// A variable's declaration as one with buffer-local values: written at
+/// its first localization (GNU's `SYMBOL_LOCALIZED` and `local_if_set`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
+enum Localness {
+    /// Never localized: no buffer has a local value of it.
+    Never,
+    /// `make-local-variable`: a buffer has a local once made there.
+    Explicit,
+    /// `make-variable-buffer-local`: setting it makes the buffer's local.
+    Automatic,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
 enum VariableRedirect {
     Plain,
-    /// GNU `SYMBOL_LOCALIZED`: the slot's own `local` table holds per-buffer
-    /// bindings. Set-only: never cleared once published.
+    /// GNU `SYMBOL_LOCALIZED`: buffers may hold local values of it, each in
+    /// its own store. Set-only: never cleared once published.
     Localized,
-    /// Native Boolean defaults with canonical per-buffer values in `local`.
+    /// A built-in's native default, with per-buffer values as `Localized`'s,
+    /// held as the native storage holds them (`Vm::localized_value`).
     LocalizedForwarded(forwarded::Fwd),
     /// GNU `SYMBOL_VARALIAS` (lisp.h): this variable IS another one. Holds a
     /// stable slot ID, never a moving heap Value, so it needs no tracing.
@@ -1216,6 +1229,18 @@ enum VariableRedirect {
     /// GNU `SYMBOL_FORWARDED` (lisp.h): a built-in variable whose value lives
     /// in runtime storage (`forwarded.rs`), never in the symbol's value cell.
     Forwarded(forwarded::Fwd),
+}
+/// What a `let` of a variable bound, GNU's `SPECPDL_LET` kinds (eval.c
+/// `specbind`): its one value, the default of a variable that has no
+/// local in the buffer where the `let` ran, or that buffer's local.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, romacs_snapshot::Snapshot)]
+pub(crate) enum Let {
+    /// `SPECPDL_LET`: a variable with no per-buffer values.
+    Plain,
+    /// `SPECPDL_LET_DEFAULT`: the default of a localized variable.
+    Default,
+    /// `SPECPDL_LET_LOCAL`: the owner buffer's local.
+    Local,
 }
 #[derive(romacs_snapshot::Snapshot)]
 struct Closure {
@@ -1542,13 +1567,13 @@ pub struct Vm {
     /// `char-property-alias-alist' and `default-text-properties', which
     /// textget reads for every property a character does not have.
     textget_slots: [usize; 2],
-    local_binding_slots: HashSet<usize>,
-    free_local_binding_slots: Vec<usize>,
     gc_stats: HeapStats,
     /// Where the last collection's time went (`romacs--gc-phases').
     gc_times: gc::GcTimes,
     /// What the last mark counted (`garbage-collect's statistics).
     gc_census: gc::Census,
+    /// The restored world image, as `make_image_permanent` found it.
+    world_image: gc_image::WorldImage,
     /// The collections since the usage log last read them.
     collection_log: gc::CollectionLog,
     gc_retained: usize,
@@ -1662,12 +1687,6 @@ pub struct Vm {
     /// died and with what moved where it went (`Referrers::forget`,
     /// `Referrers::forward`). A chain may name a member that left it.
     referrers: Option<buffer::Referrers>,
-    /// The slots of the variables each buffer, by its index in `objects`,
-    /// has a Lisp local binding of: GNU's per-buffer `local_var_alist`, so
-    /// killing a buffer or resetting its locals visits its own bindings,
-    /// not every symbol. None until `local_slots` lists them again after a
-    /// collection moved objects; it may name slots whose binding is gone.
-    local_owners: Option<HashMap<usize, Vec<usize>>>,
     /// The `all-completions' walks begun, and the case ranges the latest
     /// one folds with: (walk, canon table root, ranges)
     /// (prim/leaf/completion.rs `walk_case_ranges').
@@ -1709,7 +1728,9 @@ pub struct Vm {
     keymap_filters: Vec<(Value, Value)>,
     /// The first filter that walk needed: (menu item, filter, definition).
     keymap_pending_filter: Option<(Value, Value, Value)>,
-    dynamic: Vec<(usize, Value, Value, bool)>,
+    /// The `let` bindings in effect: (variable, saved value, buffer current
+    /// when bound, kind).
+    dynamic: Vec<(usize, Value, Value, Let)>,
     conditions: conditions::Registry,
     /// Embedder `Rooted` handles; see handle.rs.
     rooted: handle::RootSet,
@@ -1855,11 +1876,10 @@ impl Vm {
             forwarded: forwarded::Forwarded::default(),
             fixnum_slots: [usize::MAX; 2],
             textget_slots: [usize::MAX; 2],
-            local_binding_slots: HashSet::default(),
-            free_local_binding_slots: Vec::new(),
             gc_stats: HeapStats::default(),
             gc_times: Default::default(),
             gc_census: Default::default(),
+            world_image: gc_image::WorldImage::default(),
             collection_log: gc::CollectionLog::default(),
             gc_retained: 0,
             gc_payload_bytes: 0,
@@ -1905,7 +1925,6 @@ impl Vm {
             conses: Default::default(),
             objects: Default::default(),
             referrers: None,
-            local_owners: None,
             completion_walks: 0,
             command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
@@ -2022,7 +2041,7 @@ impl Vm {
         vm.declare_special_raw("completion-regexp-list", Value::NIL);
         vm.declare_special_raw("case-symbols-as-words", Value::NIL);
         vm.case_symbols_slot = vm.slot("case-symbols-as-words");
-        // The automatic local table is initialized lazily by variable_binding_slot.
+        // Declared automatically local at its first lookup (`Vm::binding`).
         vm.declare_special_raw("inhibit-changing-match-data", Value::NIL);
         vm.declare_special_raw("#:vm2-match-buffer", Value::NIL);
         vm.declare_special_raw("#:vm2-standard-syntax", Value::NIL);
@@ -3626,7 +3645,7 @@ impl Vm {
     /// which reports `set'.
     pub(crate) fn unbind_one(&mut self) -> Result<()> {
         // HOST(dynamic:saved): unbind: restores the saved value as the binding ends
-        let (slot, value, owner, let_default) = self.dynamic.pop().expect("compiler balances bindings");
+        let (slot, value, owner, kind) = self.dynamic.pop().expect("compiler balances bindings");
         let symbol = self.backtrace.bindings.last().filter(|(at, _)| *at == self.dynamic.len()).map(|(_, symbol)| *symbol);
         self.backtrace.unbind(self.dynamic.len());
         let base = symbol.and_then(|symbol| symbol.index_if(7)).map(|index| index - 1);
@@ -3634,13 +3653,13 @@ impl Vm {
         if let Some(forwarded::Fwd::Tracked(cell)) = self.native_forwarding(slot) {
             self.tracked_unbound(cell as usize);
             self.tracked_watched(cell as usize);
-            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, let_default));
+            return self.untracked(cell as usize, |vm| vm.restore_binding(slot, base, value, owner, kind));
         }
-        self.restore_binding(slot, base, value, owner, let_default)
+        self.restore_binding(slot, base, value, owner, kind)
     }
     /// `unbind_one`'s restore of the popped binding of SLOT (BASE its
     /// variable, when the backtrace names one) to VALUE.
-    fn restore_binding(&mut self, slot: usize, base: Option<usize>, value: Value, owner: Value, let_default: bool) -> Result<()> {
+    fn restore_binding(&mut self, slot: usize, base: Option<usize>, value: Value, owner: Value, kind: Let) -> Result<()> {
         // A local let restores the owner's current local binding, if it
         // still has one (GNU do_one_unbind, SPECPDL_LET_LOCAL): the local
         // may have been killed and made again inside the let.
@@ -3648,8 +3667,8 @@ impl Vm {
         // watcher sees them from a root frame, and the restore reads them back.
         // GNU do_one_unbind (SPECPDL_LET_LOCAL, eval.c:3871-3882) restores
         // only if OWNER still has its local binding.
-        if let Some(base) = base && self.local_binding_slots.contains(&slot) {
-            if self.owner_local_binding(base, owner).is_none() {
+        if let Some(base) = base && kind == Let::Local && !matches!(self.forwarding(slot), Some(forwarded::Fwd::Buffer(_))) {
+            if self.owner_local(base, owner).is_none() {
                 return Ok(());
             }
             let (mut value, mut owner) = (value, owner);
@@ -3660,9 +3679,9 @@ impl Vm {
                 notified?;
             }
             // set_internal finds OWNER's binding after the watchers (data.c:
-            // 1730-1760): one may have killed it, made another or let its
-            // private slot be reused. With none left the default takes it.
-            let target = self.owner_local_binding(base, owner).unwrap_or(base);
+            // 1730-1760): one may have killed it or made another. With none
+            // left the default takes it.
+            let target = self.owner_local(base, owner);
             // set-buffer-local-toplevel-value may have saved any object; an
             // integer binding refuses a non-integer and keeps its value.
             let value = match self.localized_forwarded(base) {
@@ -3675,16 +3694,19 @@ impl Vm {
                 Some(forwarded::Fwd::Bool(_)) => if value == Value::NIL { Value::NIL } else { Value::TRUE },
                 _ => value,
             };
-            self.slots[target].value = value;
+            match target {
+                Some(local) => self.store_local(local.buffer, base, Ok(local.at), crate::variable_runtime::LocalStore::Set(value)),
+                None => self.slots[base].value = value,
+            }
             return Ok(());
         }
         if let Some(fwd) = self.native_forwarding(slot) {
-            return self.unbind_forwarded(slot, fwd, value, owner, let_default);
+            return self.unbind_forwarded(slot, fwd, value, owner, kind);
         }
         let mut value = value;
         if let Some(base) = base && self.variable_trapped(base) {
             let frame = self.root_frame(&[value]);
-            let notified = if self.local_table(base)?.is_some() { self.notify_watchers_at(base, value, "set", Some(Value::NIL)) }
+            let notified = if self.localized(base) { self.notify_watchers_at(base, value, "set", Some(Value::NIL)) }
                 else { self.notify_watchers(base, value, "unlet") };
             [value] = self.release_frame(frame);
             notified?;
@@ -3694,16 +3716,14 @@ impl Vm {
         }
         Ok(())
     }
-    /// The private slot of OWNER's local binding of BASE, if OWNER is live
-    /// and still has one.
-    fn owner_local_binding(&mut self, base: usize, owner: Value) -> Option<usize> {
+    /// OWNER's local of the variable at BASE, if OWNER is live and still has
+    /// one.
+    fn owner_local(&self, base: usize, owner: Value) -> Option<crate::variable_runtime::LocalEntry> {
         if !self.live_buffer_value(owner) {
             return None;
         }
-        // A watcher may have dropped the whole table: no local binding then.
-        let table = self.slots[base].local;
-        let local = self.declaration_hash_get(table, owner).ok()??;
-        Some(local.index(7).expect("private binding") - 1)
+        let buffer = owner.index_if(0)? - 1;
+        Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, base)?.ok()? })
     }
     #[inline(never)]
     fn primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
