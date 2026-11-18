@@ -350,6 +350,9 @@ fn stray(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
     std::io::stdout().flush().unwrap();
     if guard == arena::Guard::Reserved {
+        // The fault is the test's: no core for it. Every run otherwise
+        // hands the system's core dumper this process whole.
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable).unwrap();
         // SAFETY: a load, in assembly, from a page this process reserved
         // inaccessible: it faults, which is what the parent expects. Rust
         // code never reads the address, and the instruction writes nothing.
