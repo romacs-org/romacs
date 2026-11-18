@@ -2620,7 +2620,9 @@ is longer than that tail says so instead."
                                                      size nil budget))))
     (if (or from budget (<= size romacs-agent-journal-tail-bytes))
         (progn (when from (romacs-agent-ui--earlier-row))
-               (romacs-agent-ui--replay-from session from))
+               ;; To the size its tail was found in: what its supervisor
+               ;; writes after comes to the chat live.
+               (romacs-agent-ui--replay-from session from size))
       ;; Asked for by hand, it is drawn whole.
       (romacs-agent-ui--earlier-row)
       (romacs-agent-ui--insert-at romacs-agent-ui--end
