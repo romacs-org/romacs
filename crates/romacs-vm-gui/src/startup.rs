@@ -685,6 +685,44 @@ fn load_lisp(vm: &mut Vm, dir: &std::path::Path, path: &str) -> Result<(), Strin
 /// restored from it reports as its own.
 const LISP_ERRORS: &str = "romacs--startup-lisp-errors";
 
+/// The errors of Romacs's Lisp this launch noted ([`load_lisp`]), in the
+/// order they happened, each as [`lisp_error_fields`] gives it: what a
+/// world build tells whoever prepares it.
+///
+/// # Errors
+///
+/// The VM's error when it cannot serialize the notes.
+pub fn noted_lisp_errors(vm: &mut Vm) -> Result<Vec<serde_json::Value>, String> {
+    let json = vm.eval_source(&format!("(if (and (boundp '{LISP_ERRORS}) {LISP_ERRORS})
+                                            (json-serialize (vconcat (reverse {LISP_ERRORS})))
+                                          \"[]\")"))?;
+    let errors: Vec<String> = serde_json::from_slice(json.bytes()?).map_err(|e| format!("noted Lisp errors: {e}"))?;
+    Ok(errors.iter().map(String::as_str).map(lisp_error_fields).collect())
+}
+
+/// A noted error of Romacs's Lisp as JSON: its file and line where the
+/// loader's message names them (`FILE: line N form M: ...`, at the first
+/// such whole delimiter, which a file's name may hold part of), and the
+/// message.
+#[must_use]
+pub fn lisp_error_fields(error: &str) -> serde_json::Value {
+    let number = |text: &str| -> Option<(u64, usize)> {
+        let digits = text.chars().take_while(char::is_ascii_digit).count();
+        Some((text[..digits].parse().ok()?, digits))
+    };
+    let place = error.match_indices(": line ").find_map(|(at, delimiter)| {
+        let rest = &error[at + delimiter.len()..];
+        let (line, digits) = number(rest)?;
+        let form = rest[digits..].strip_prefix(" form ")?;
+        let (_, digits) = number(form)?;
+        form[digits..].starts_with(": ").then_some((&error[..at], line))
+    });
+    match place {
+        Some((file, line)) => serde_json::json!({"file": file, "line": line, "error": error}),
+        None => serde_json::json!({"error": error}),
+    }
+}
+
 /// Note ERROR for [`report_lisp_errors`], and say it on stderr.
 fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
     eprintln!("romacs: {error}");
@@ -2294,6 +2332,18 @@ mod tests {
                                       (subrp (symbol-function 'kill-new)) (mark)))")
         });
         assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
+    }
+
+    /// A noted error's file and line, from the loader's message; a message
+    /// naming no line has neither.
+    #[test]
+    fn a_noted_lisp_error_names_its_file_and_line() {
+        assert_eq!(lisp_error_fields("/t/lisp/ui/x.el: line 12 form 3: (error \"boom\")"),
+                   serde_json::json!({"file": "/t/lisp/ui/x.el", "line": 12, "error": "/t/lisp/ui/x.el: line 12 form 3: (error \"boom\")"}));
+        assert_eq!(lisp_error_fields("file missing: /t/lisp/x.el: No such file or directory"),
+                   serde_json::json!({"error": "file missing: /t/lisp/x.el: No such file or directory"}));
+        let named = "/tmp/build: line 7/tree/x.el: line 12 form 3: (error \"boom\")";
+        assert_eq!(lisp_error_fields(named), serde_json::json!({"file": "/tmp/build: line 7/tree/x.el", "line": 12, "error": named}));
     }
 
     /// Files of Romacs's Lisp that signal end no launch: the launch goes on
