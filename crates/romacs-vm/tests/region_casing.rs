@@ -81,7 +81,7 @@ fn region_casing_to_an_unstorable_character_refuses_where_it_meets_it() {
 fn region_casing_of_a_range_a_hook_emptied_changes_nothing() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    let got = vm.eval_source("(prin1-to-string (with-temp-buffer (buffer-disable-undo) (insert \"hello world\") \
+    let got = vm.eval_source("(prin1-to-string (with-temp-buffer (setq buffer-undo-list t) (insert \"hello world\") \
         (let ((before-change-functions (list (lambda (b e) (delete-region 1 (point-max)))))) \
           (list (condition-case e (upcase-region 5 9) (error (car e))) (buffer-string)))))").unwrap().display().unwrap();
     assert_eq!(got, "\"(nil \\\"\\\")\"");
