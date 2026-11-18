@@ -224,93 +224,12 @@ where it was."
         (setq pos next)))
     (apply #'concat (nreverse pieces))))
 
-(defun warm-restart--holds-secret-p (object)
-  "Whether OBJECT, data, holds a secret's text anywhere: a string with
-`romacs-secret' text, in a cons, a vector, a record, a char table, a
-hash table's key or value, or a string's property value.  Shared and
-circular structure is walked once, and a list's spine by a loop, however
-long."
-  (let ((seen (make-hash-table :test #'eq)))
-    (cl-labels
-        ((walk (x)
-           (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x) (char-table-p x))) nil)
-                 ((gethash x seen) nil)
-                 (t (puthash x t seen)
-                    (cond ((stringp x)
-                           (or (text-property-not-all 0 (length x) 'romacs-secret nil x)
-                               (cl-some (lambda (interval) (walk (nth 2 interval))) (object-intervals x))))
-                          ((consp x)
-                           (let ((tail x) found)
-                             (while (and (not found) (consp tail))
-                               (setq found (walk (car tail)) tail (cdr tail))
-                               (when (consp tail)
-                                 (if (gethash tail seen) (setq tail nil) (puthash tail t seen))))
-                             (or found (walk tail))))
-                          ((or (vectorp x) (recordp x)) (cl-loop for i below (length x) thereis (walk (aref x i))))
-                          ((char-table-p x)
-                           (catch 'found
-                             (map-char-table (lambda (_c v) (when (walk v) (throw 'found t))) x)
-                             (or (walk (char-table-range x nil))
-                                 (walk (char-table-parent x))
-                                 (cl-loop for i below (or (get (char-table-subtype x) 'char-table-extra-slots) 0)
-                                          thereis (walk (char-table-extra-slot x i))))))
-                          (t (catch 'found
-                               (maphash (lambda (k v) (when (or (walk k) (walk v)) (throw 'found t))) x)
-                               nil)))))))
-      (and (walk object) t))))
-
-(defun warm-restart--without-secrets (object)
-  "OBJECT, data, as an image may hold it: OBJECT itself when it holds no
-secret (`warm-restart--holds-secret-p'); else a copy, its sharing and
-cycles kept, strings' included, in which each string with secret text
-is redacted (`warm-restart--redacted') and each other string whose
-properties hold one loses its properties, and a char table that holds one
-is nil.  A hash table's starred keys may then be equal, and one entry of
-each such key is kept."
-  (if (not (warm-restart--holds-secret-p object))
-      object
-    (let ((copies (make-hash-table :test #'eq)))
-      (cl-labels
-          ((copy (x)
-             (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x) (char-table-p x))) x)
-                   ((gethash x copies))
-                   ;; Not rebuilt: a char table holding a secret is not carried.
-                   ((char-table-p x) (and (not (warm-restart--holds-secret-p x)) x))
-                   ((stringp x)
-                    (puthash x (cond ((text-property-not-all 0 (length x) 'romacs-secret nil x) (warm-restart--redacted x))
-                                     ((warm-restart--holds-secret-p (object-intervals x)) (substring-no-properties x))
-                                     (t x))
-                             copies))
-                   ((consp x)
-                    (let* ((head (cons nil nil)) (cell head) (tail (cdr x)))
-                      (puthash x head copies)
-                      (setcar head (copy (car x)))
-                      (while (and (consp tail) (not (gethash tail copies)))
-                        (let ((next (cons nil nil)))
-                          (puthash tail next copies)
-                          (setcdr cell next)
-                          (setq cell next)
-                          (setcar next (copy (car tail)))
-                          (setq tail (cdr tail))))
-                      (setcdr cell (if (consp tail) (gethash tail copies) (copy tail)))
-                      head))
-                   ((or (vectorp x) (recordp x))
-                    (let ((v (copy-sequence x)))
-                      (puthash x v copies)
-                      (dotimes (i (length x)) (aset v i (copy (aref x i))))
-                      v))
-                   (t (let ((table (make-hash-table :test (hash-table-test x) :size (max 1 (hash-table-count x)))))
-                        (puthash x table copies)
-                        (maphash (lambda (k v) (puthash (copy k) (copy v) table)) x)
-                        table)))))
-        (copy object)))))
-
-(defun warm-restart--strip (object)
-  "OBJECT with the text properties of every string in it removed, each
-secret's characters starred first (`warm-restart--redacted')."
-  (cond ((stringp object) (warm-restart--redacted object))
-        ((proper-list-p object) (mapcar #'warm-restart--strip object))
-        ((consp object) (cons (warm-restart--strip (car object)) (warm-restart--strip (cdr object))))
+(defun warm-restart--strip (object &optional keep)
+  "OBJECT with each string in it starred where it holds a secret
+\(`warm-restart--redacted') and, unless KEEP, without text properties."
+  (cond ((stringp object) (if (or (not keep) (warm-restart--secret-p object)) (warm-restart--redacted object) object))
+        ((proper-list-p object) (mapcar (lambda (o) (warm-restart--strip o keep)) object))
+        ((consp object) (cons (warm-restart--strip (car object) keep) (warm-restart--strip (cdr object) keep)))
         (t object)))
 
 (defun warm-restart--print (form)
@@ -377,12 +296,15 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
      (blocker (cons 'blocked blocker))
      ((stringp warm-restart-left-out) (cons 'dropped warm-restart-left-out))
      ((string-prefix-p " " (buffer-name)) nil)
-     (base (if (memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
-               (cons 'indirect (format "indirect buffer of %s" (buffer-name base)))
-             (cons 'dropped (format "indirect buffer of %s, which is not carried" (buffer-name base)))))
+     (base (cond ((memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
+                  (cons 'indirect (format "indirect buffer of %s" (buffer-name base))))
+                 ((warm-restart--text-at-risk-p)
+                  (cons 'text (format "indirect buffer of %s, which is not carried: its text is carried apart" (buffer-name base))))
+                 (t (cons 'dropped (format "indirect buffer of %s, which is not carried" (buffer-name base))))))
      (buffer-file-name (cons 'file (if (buffer-modified-p) "unsaved text carried" "visits a file")))
      ((warm-restart--handler) (cons 'handler (format "%s restores it" major-mode)))
      ((setq regenerable (warm-restart--regenerable)) (cons 'dropped regenerable))
+     ((warm-restart--shell-mode-p major-mode) (cons 'text (format "transcript of %s, whose shell ends" major-mode)))
      (process (cons 'dropped (format "process %s ends: processes are not carried yet" (process-name process))))
      ((warm-restart--text-mode-p) (cons 'text (format "%s text" major-mode)))
      ((warm-restart-unsaved-p) (cons 'text (format "edited %s view carried as text" major-mode)))
@@ -479,10 +401,12 @@ A unibyte buffer has none: its bytes are not typed text."
                 local-minor-modes))
 
 (defun warm-restart--locals ()
-  "The buffer's values of `desktop-locals-to-save' that are data."
+  "The buffer's values of `desktop-locals-to-save' that are data, each
+secret's text starred (`warm-restart--strip')."
   (cl-loop for var in desktop-locals-to-save
-           when (and (local-variable-p var) (warm-restart--portable-p (symbol-value var)))
-           collect (cons var (symbol-value var))))
+           for value = (and (local-variable-p var) (warm-restart--strip (symbol-value var) t))
+           when (and (local-variable-p var) (warm-restart--portable-p value))
+           collect (cons var value)))
 
 (defvar warm-restart--libraries nil
   "During a write, a table from each major mode to the library defining it:
@@ -509,149 +433,32 @@ A unibyte buffer has none: its bytes are not typed text."
 
 (defun warm-restart--text-record (strategy blobs)
   "The record of the current buffer, carried by STRATEGY `file' or `text'.
-Its text goes in the image when it is not the file's: a snapshot of it
-\(`warm-restart--snapshot'), taken with the rest of the record, is
-pushed onto BLOBS, a cell (COUNT . BUFFERS), and its index named; the
-record is `:starred' when the snapshot's secrets are."
-  (let* ((tick (buffer-chars-modified-tick))
-         (undo (warm-restart--portable-undo buffer-undo-list))
-         (runs (warm-restart--property-runs))
-         (carry (or (eq strategy 'text) (buffer-modified-p) (not (file-exists-p buffer-file-name))))
-         (snapshot (and carry (warm-restart--snapshot (current-buffer))))
-         ;; Code run meanwhile (a hook after a collection) changed the text.
-         (stale (/= tick (buffer-chars-modified-tick))))
+Its text goes in the image when it is not the file's: push the buffer
+onto BLOBS, a cell (COUNT . BUFFERS), and name its index."
+  (let* ((undo (warm-restart--portable-undo buffer-undo-list))
+         (carry (or (eq strategy 'text) (buffer-modified-p) (not (file-exists-p buffer-file-name)))))
     (append (warm-restart--common)
-            (list :strategy strategy :hash (with-current-buffer (or (car snapshot) (current-buffer)) (buffer-hash))
-                  :size (with-current-buffer (or (car snapshot) (current-buffer)) (buffer-size))
-                  :modified (and (buffer-modified-p) t)
-                  :undo (if stale nil (car undo)) :undo-cut (or stale (cdr undo))
-                  :unibyte (not enable-multibyte-characters) :properties (and (not stale) runs))
-            (and (cdr snapshot) (list :starred t))
-            ;; A copy given a file is that file's buffer now.
-            (and warm-restart--starred-of (not buffer-file-name) (list :copy-of warm-restart--starred-of))
+            (list :strategy strategy :hash (buffer-hash) :size (buffer-size)
+                  :modified (and (buffer-modified-p) t) :undo (car undo) :undo-cut (cdr undo)
+                  :unibyte (not enable-multibyte-characters) :properties (warm-restart--property-runs))
             (and buffer-file-name
                  (list :file buffer-file-name :modtime (visited-file-modtime) :coding buffer-file-coding-system))
-            (and snapshot (progn (push (car snapshot) (cdr blobs))
-                                 (list :blob (1- (cl-incf (car blobs)))))))))
-
-(defvar warm-restart--staging nil
-  "During a write, a cell whose car lists the buffers staged for its
-blobs (`warm-restart--snapshot'), killed once it is written.")
-
-(defun warm-restart--snapshot (buffer)
-  "A copy of BUFFER's whole text as the image takes it, (STAGE . STARRED):
-a staging buffer of its own, listed in `warm-restart--staging', which no
-code run later (a handler, a hook after a collection) edits, its
-secrets' characters starred one for one (`warm-restart--redacted') when
-STARRED."
-  (let ((stage (generate-new-buffer " *warm-restart staged*" t))
-        (text (with-current-buffer buffer (save-restriction (widen) (buffer-string)))))
-    (when warm-restart--staging (push stage (car warm-restart--staging)))
-    (let ((starred (text-property-not-all 0 (length text) 'romacs-secret nil text)))
-      (with-current-buffer stage
-        (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters buffer))
-        (let ((inhibit-modification-hooks t))
-          (insert (if starred (warm-restart--redacted text) (substring-no-properties text)))))
-      (cons stage (and starred t)))))
-
-(defun warm-restart--set-apart (records)
-  "RECORDS with each file buffer's whose secrets were starred, and each
-restored starred copy's (`warm-restart--starred-of'), set apart:
-\(BUFFERS STARRED . RENAMES), STARRED those records as strategy `starred',
-under \"NAME <starred>\" free of every record's name, with no file nor
-file locals, their header saying what they are; RENAMES the windows'
-\(OLD . NEW).  An indirect record on one goes with it into STARRED, as it
-is.  An image keeps STARRED out of `:buffers', so no reader that
-predates them restores them, nor lands their stars in a buffer visiting
-the file, and `:buffers' names no base it lacks; this one restores each
-as a new buffer that visits no file (`warm-restart--restore-starred'),
-its clones on it."
-  (let ((taken (make-hash-table :test #'equal))
-        (apart (cl-loop for record in records
-                        when (or (and (plist-get record :starred) (plist-get record :file)) (plist-get record :copy-of))
-                        collect (plist-get record :id)))
-        buffers starred renames)
-    (dolist (record records) (when (plist-get record :name) (puthash (plist-get record :name) t taken)))
-    (dolist (record records)
-      (cond
-       ;; Its clones go with it: `:buffers' never names a base it lacks.
-       ((and (eq (plist-get record :strategy) 'indirect) (member (plist-get record :base) apart))
-        (push record starred))
-       ((not (member (plist-get record :id) apart))
-        (push record buffers))
-       (t
-        (let ((name (if (plist-get record :copy-of)
-                        (plist-get record :name) ; a restored copy keeps its name
-                      (warm-restart--free-name (format "%s <starred>" (plist-get record :name)) (lambda (n) (gethash n taken)))))
-              (copy (copy-sequence record)))
-          (puthash name t taken)
-          (unless (equal name (plist-get record :name)) (push (cons (plist-get record :name) name) renames))
-          (dolist (pair `((:strategy . starred) (:name . ,name) (:copy-of . ,(or (plist-get record :copy-of) (plist-get record :file)))
-                          (:file . nil) (:modtime . nil) (:coding . nil) (:uniquify . nil)
-                          (:locals . ,(cl-remove-if (lambda (l) (memq (car l) '(buffer-file-name buffer-file-truename
-                                                                                  buffer-file-number header-line-format)))
-                                                    (plist-get record :locals)))))
-            (setq copy (plist-put copy (car pair) (cdr pair))))
-          (push copy starred)))))
-    (cons (nreverse buffers) (cons (nreverse starred) renames))))
-
-(defvar-local warm-restart--starred-of nil
-  "The file whose text, its secrets starred, this restored copy holds
-\(`warm-restart--restore-starred'), or nil.  The next image sets it apart
-again (`warm-restart--set-apart').  A change of mode leaves it, as the
-text is still that copy; a file the buffer is given ends it
-\(`warm-restart--end-starred-copy').")
-(put 'warm-restart--starred-of 'permanent-local t)
-
-(put 'warm-restart--end-starred-copy 'permanent-local-hook t)
-
-(defun warm-restart--end-starred-copy ()
-  "The current buffer, given a file, is a starred copy no more."
-  (kill-local-variable 'warm-restart--starred-of)
-  (kill-local-variable 'header-line-format)
-  (kill-local-variable 'buffer-offer-save)
-  (remove-hook 'after-set-visited-file-name-hook #'warm-restart--end-starred-copy t))
-
-(defun warm-restart--restore-starred (record blobs)
-  "Recreate RECORD, set apart by `warm-restart--set-apart', as a new buffer
-that visits no file, under its name or the first free one after it: it
-never lands in a buffer of this session.  Its header says whose copy it
-is, it offers to be saved at exit, and it stays a starred copy
-\(`warm-restart--starred-of')."
-  (with-current-buffer (generate-new-buffer (warm-restart--free-name (plist-get record :name) #'get-buffer))
-    (warm-restart--put-text (warm-restart--carried-text record blobs) (plist-get record :unibyte))
-    (warm-restart--put-properties (plist-get record :properties))
-    (set-buffer-modified-p t)
-    (pcase-dolist (`(,var . ,value) (plist-get record :locals)) (set (make-local-variable var) value))
-    (setq-local header-line-format (format "A copy of %s, its secrets starred: it visits no file" (plist-get record :copy-of))
-                buffer-offer-save t)
-    (setq warm-restart--starred-of (plist-get record :copy-of))
-    (add-hook 'after-set-visited-file-name-hook #'warm-restart--end-starred-copy nil t)
-    (warm-restart--apply-common record)
-    (warm-restart--put-undo record)
-    (current-buffer)))
+            (and carry (progn (push (current-buffer) (cdr blobs))
+                              (list :blob (1- (cl-incf (car blobs)))))))))
 
 (defun warm-restart--record (entry blobs)
   "The image record of plan ENTRY's buffer, or a `lost' entry when its data
 is not portable."
   (with-current-buffer (plist-get entry :buffer)
     (pcase (plist-get entry :strategy)
-      ((and (or 'file 'text) strategy)
-       (if-let* ((shell (warm-restart--transcript-source)))
-           ;; Detached text, even a file's: no reader visits the file, so
-           ;; no file mode or file hook can make it a shell again.
-           (thread-first (warm-restart--inert-record (warm-restart--text-record 'text blobs) shell)
-                         (plist-put :file nil) (plist-put :modtime nil) (plist-put :coding nil))
-         (warm-restart--text-record strategy blobs)))
-      ('indirect (let ((record (append (warm-restart--common)
-                                       (list :strategy 'indirect
-                                             :base (with-current-buffer (buffer-base-buffer) (warm-restart--buffer-id))))))
-                   (if-let* ((shell (warm-restart--transcript-source)))
-                       (warm-restart--inert-record record shell)
-                     record)))
+      ((and (or 'file 'text) strategy) (warm-restart--text-record strategy blobs))
+      ('indirect (append (warm-restart--common)
+                         (list :strategy 'indirect
+                               :base (with-current-buffer (buffer-base-buffer) (warm-restart--buffer-id)))))
       ('handler
        (let ((misc (and (functionp desktop-save-buffer)
-                        (let ((desktop-dirname (warm-restart--directory))) (funcall desktop-save-buffer desktop-dirname)))))
+                        (let ((desktop-dirname (warm-restart--directory)))
+                          (warm-restart--strip (funcall desktop-save-buffer desktop-dirname) t)))))
          (if (warm-restart--portable-p misc)
              (append (warm-restart--common) (list :strategy 'handler :misc misc :file buffer-file-name))
            (list :lost (buffer-name) :reason (format "%s data is not portable" major-mode))))))))
@@ -670,52 +477,123 @@ its existence could not be checked."
 never its data, which may hold the text it failed on, a secret too."
   (format "%s" (or (get (car condition) 'error-message) (car condition))))
 
-(defun warm-restart--companion (buffer reason blobs)
-  "A text record carrying BUFFER's whole text, its secrets starred, as a
-companion: the record of a buffer whose own could not be made, for
-REASON.  It keeps BUFFER's id, so what pointed to BUFFER points to it,
-and comes back as \"NAME <carried text>\" in `fundamental-mode', a header
-saying why.  The text is a snapshot (`warm-restart--snapshot'); the blob
-is taken in BLOBS only once the record is whole."
-  (let ((stage (car (warm-restart--snapshot buffer)))
-        (name (buffer-name buffer)))
+(defvar warm-restart--staging nil
+  "During a write, a cell whose car lists the staging buffers made for its
+blobs (`warm-restart--starred-copy'), killed once it is written.")
+
+(defun warm-restart--starred-copy (buffer)
+  "A staging buffer holding BUFFER's whole text, each secret's characters
+starred one for one (`warm-restart--redacted')."
+  (let ((stage (generate-new-buffer " *warm-restart staged*" t))
+        (text (with-current-buffer buffer (save-restriction (widen) (buffer-string)))))
+    (when warm-restart--staging (push stage (car warm-restart--staging)))
     (with-current-buffer stage
-      (let ((record (list :id (with-current-buffer buffer (warm-restart--buffer-id))
-                          :name (format "%s <carried text>" name) :strategy 'text :mode 'fundamental-mode
-                          :directory (buffer-local-value 'default-directory buffer)
-                          :point (min (with-current-buffer buffer (point)) (1+ (buffer-size)))
-                          :hash (buffer-hash) :size (buffer-size) :unibyte (not enable-multibyte-characters)
-                          :modified t :read-only nil :companion name
-                          :locals (list (cons 'header-line-format (format "Text carried from %s, whose own record could not be saved: %s"
-                                                                          name reason))))))
-        (push stage (cdr blobs))
-        (plist-put record :blob (1- (cl-incf (car blobs))))))))
+      (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters buffer))
+      (insert (warm-restart--redacted text)))
+    stage))
+
+(defun warm-restart--companion (buffer label header blobs)
+  "A text record carrying BUFFER's whole text under BUFFER's id, so what
+pointed to BUFFER points to it: \"NAME (LABEL)\" in `fundamental-mode',
+HEADER its header line, visiting no file, so any reader, an older one
+included, brings it back as plain text.  Text holding a secret goes as
+a starred copy (`warm-restart--starred-copy'); BUFFER itself is the blob
+otherwise.  The blob is taken in BLOBS once the record is whole."
+  (let* ((secret (with-current-buffer buffer
+                   (save-restriction (widen) (text-property-not-all (point-min) (point-max) 'romacs-secret nil))))
+         (blob (if secret (warm-restart--starred-copy buffer) buffer))
+         (record (with-current-buffer blob
+                   (list :id (with-current-buffer buffer (warm-restart--buffer-id))
+                         :name (format "%s (%s)" (buffer-name buffer) label) :companion (buffer-name buffer)
+                         :strategy 'text :mode 'fundamental-mode
+                         :directory (buffer-local-value 'default-directory buffer)
+                         :point (with-current-buffer buffer (point))
+                         :hash (buffer-hash) :size (buffer-size) :unibyte (not enable-multibyte-characters)
+                         :modified t :read-only nil
+                         :locals (list (cons 'header-line-format header))))))
+    (push blob (cdr blobs))
+    (plist-put record :blob (1- (cl-incf (car blobs))))))
+
+(defun warm-restart--companion-why (strategy)
+  "Why the current buffer, planned as STRATEGY, goes as a companion
+\(`warm-restart--companion'), as (LABEL . HEADER), or nil: a shell's
+transcript, whose input boundary no restored buffer knows; an indirect
+buffer whose base is not carried; text holding a secret, whose stars
+must never come back in its file's buffer."
+  (when (memq strategy '(file text))
+    (cond ((warm-restart--shell-mode-p major-mode)
+           (cons "transcript" (warm-restart--transcript-header major-mode)))
+          ((buffer-base-buffer)
+           (cons "carried text" (format "Text of %s, whose base buffer %s is not carried"
+                                        (buffer-name) (buffer-name (buffer-base-buffer)))))
+          ((and (save-restriction (widen) (text-property-not-all (point-min) (point-max) 'romacs-secret nil))
+                (or (eq strategy 'text) (buffer-modified-p)
+                    (condition-case nil (not (file-exists-p buffer-file-name)) (error t))))
+           (cons "carried text" (format "Text of %s, its secrets starred" (buffer-name)))))))
 
 (defun warm-restart--record-or-companion (entry blobs)
-  "ENTRY's record, or, when it cannot be made or its handler's data is not
-portable while its buffer's text is at risk (`warm-restart--text-at-risk-p'),
-a companion carrying that text (`warm-restart--companion'); a lost entry
-when no text is at risk.  Signal `warm-restart-blocked' only when text at
+  "ENTRY's record, or a companion carrying its buffer's whole text
+\(`warm-restart--companion'): when `warm-restart--companion-why' says
+why, or when the record cannot be made or its handler's data is not
+portable while the text is at risk (`warm-restart--text-at-risk-p').  An
+indirect buffer of a companion's buffer is left out: its text goes with
+it.  A failed capture with no text at risk is a lost entry, marked so
+the restore names it.  Signal `warm-restart-blocked' only when text at
 risk cannot be carried even so: one buffer never stops the image
 otherwise, and text at risk is never lost quietly."
-  (let* ((buffer (plist-get entry :buffer)) (failed nil)
-         (count (car blobs)) (taken (cdr blobs))
-         (record (condition-case err (warm-restart--record entry blobs)
-                   (error (setq failed (warm-restart--failure err))
-                          ;; Text it took before it failed is never written.
-                          (setcar blobs count) (setcdr blobs taken)
-                          nil))))
-    (cond ((and record (not (plist-member record :lost))) record)
-          ;; A failed capture, signalled or its data not portable, is
-          ;; marked so the restore names it.
-          ((not (with-current-buffer buffer (warm-restart--text-at-risk-p)))
-           (append (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed)))
-                   (list :failed t)))
-          (t (condition-case err
-                 (warm-restart--companion buffer (or failed (plist-get record :reason)) blobs)
-               (error (signal 'warm-restart-blocked
-                              (list (format "%s: cannot be saved, nor its text: %s"
-                                            (plist-get entry :name) (warm-restart--failure err))))))))))
+  (let* ((buffer (plist-get entry :buffer)) (base (buffer-base-buffer buffer))
+         (why (with-current-buffer buffer (warm-restart--companion-why (plist-get entry :strategy))))
+         (failed nil) (count (car blobs)) (taken (cdr blobs))
+         (companion (lambda (label header)
+                      (condition-case err (warm-restart--companion buffer label header blobs)
+                        (error (signal 'warm-restart-blocked
+                                       (list (format "%s: cannot be saved, nor its text: %s"
+                                                     (plist-get entry :name) (warm-restart--failure err)))))))))
+    (cond
+     (why (funcall companion (car why) (cdr why)))
+     ((and base (eq (plist-get entry :strategy) 'indirect)
+           (with-current-buffer base (warm-restart--companion-why (car (warm-restart--classify)))))
+      (list :lost (plist-get entry :name) :reason (format "its text is carried with %s's" (buffer-name base))))
+     (t
+      (let ((record (condition-case err (warm-restart--record entry blobs)
+                      (error (setq failed (warm-restart--failure err))
+                             ;; Text it took before it failed is never written.
+                             (setcar blobs count) (setcdr blobs taken)
+                             nil))))
+        (cond ((and record (not (plist-member record :lost))) record)
+              ((not (with-current-buffer buffer (warm-restart--text-at-risk-p)))
+               (append (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed)))
+                       (list :failed t)))
+              (t (funcall companion "carried text"
+                          (format "Text carried from %s, whose own record could not be saved: %s"
+                                  (plist-get entry :name) (or failed (plist-get record :reason)))))))))))
+
+(defun warm-restart--based (records)
+  "RECORDS with each indirect one whose base none of them is a lost entry:
+an image names no base it lacks.  Its base was left out with no text at
+risk, and it shares that text."
+  (let ((ids (cl-loop for r in records unless (plist-member r :lost) collect (plist-get r :id))))
+    (mapcar (lambda (r)
+              (if (and (eq (plist-get r :strategy) 'indirect) (not (member (plist-get r :base) ids)))
+                  (list :lost (plist-get r :name) :reason "its base buffer could not be saved")
+                r))
+            records)))
+
+(defun warm-restart--name-companions (records)
+  "RECORDS with each companion's (`warm-restart--companion') name made
+free of every other record's, and the renames of the windows that showed
+the buffers they carry, as (RECORDS . RENAMES)."
+  (let ((taken (make-hash-table :test #'equal)) renames)
+    (dolist (record records) (unless (plist-get record :companion) (puthash (plist-get record :name) t taken)))
+    (cons (mapcar (lambda (record)
+                    (if (not (plist-get record :companion))
+                        record
+                      (let ((name (warm-restart--free-name (plist-get record :name) (lambda (n) (gethash n taken)))))
+                        (puthash name t taken)
+                        (push (cons (plist-get record :companion) name) renames)
+                        (plist-put (copy-sequence record) :name name))))
+                  records)
+          renames)))
 
 (defun warm-restart--frames ()
   "The window state of each frame that is not a child frame, selected first."
@@ -732,17 +610,15 @@ with the `romacs-secret' property anywhere, as the password manager
 marks its secrets."
   (and (stringp value) (text-property-not-all 0 (length value) 'romacs-secret nil value) t))
 
-(defun warm-restart--register (value detached)
+(defun warm-restart--register (value)
   "Register VALUE as data: a position becomes (file-query FILE POS) in a
-file's buffer or (warm-restart-position ID POS) in another carried one,
-one of DETACHED, the file buffers the image carries without their file,
-included.  nil when it cannot be carried, or is a secret."
+file's buffer or (warm-restart-position ID POS) in another carried one.
+nil when it cannot be carried, or is a secret."
   (cond ((warm-restart--secret-p value) nil)
         ((markerp value)
          (let ((buffer (marker-buffer value)))
            (cond ((null buffer) nil)
-                 ((and (buffer-file-name buffer) (not (memq buffer detached)))
-                  (list 'file-query (buffer-file-name buffer) (marker-position value)))
+                 ((buffer-file-name buffer) (list 'file-query (buffer-file-name buffer) (marker-position value)))
                  (t (list 'warm-restart-position (with-current-buffer buffer (warm-restart--buffer-id))
                           (marker-position value))))))
         (t (let ((value (warm-restart--strip value))) (and (warm-restart--portable-p value) value)))))
@@ -763,11 +639,10 @@ names of those that are not."
           (bound-and-true-p savehist-additional-variables)
           warm-restart-history-variables))
 
-(defun warm-restart--globals (&optional detached)
-  "The session-wide part of an image, and what of it is lost; DETACHED as
-for `warm-restart--register', nil when there are none.  The kill ring's
-secrets (`warm-restart--secret-p') are left out."
-  (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell) detached))) register-alist))
+(defun warm-restart--globals ()
+  "The session-wide part of an image, and what of it is lost.
+The kill ring's secrets (`warm-restart--secret-p') are left out."
+  (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell)))) register-alist))
         (histories (warm-restart--variables (warm-restart--history-variables)))
         (globals (warm-restart--variables warm-restart-globals))
         (kills (seq-remove #'warm-restart--secret-p kill-ring)))
@@ -812,39 +687,16 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
               (mapcar (lambda (e) (format "%s: %s" (plist-get e :name) (plist-get e :reason))) blocked)))
     (unwind-protect
         (let* ((carried (cl-remove-if (lambda (e) (memq (plist-get e :strategy) '(blocked dropped))) (plist-get plan :buffers)))
-               (made (mapcar (lambda (e) (warm-restart--record-or-companion e blobs)) carried))
-               (apart (warm-restart--set-apart made))
-               (named (warm-restart--name-transcripts
-                       (car apart)
-                       (cl-loop for e in carried
-                                for buffer = (plist-get e :buffer)
-                                when (with-current-buffer buffer (warm-restart--shell-mode-p major-mode))
-                                collect (buffer-name buffer))
-                       (mapcar (lambda (r) (plist-get r :name)) (cadr apart))))
-               (renames (let ((transcripts (cdr named)))
-                          (append (mapcar (lambda (r) (cons (car r) (or (cdr (assoc (cdr r) transcripts)) (cdr r))))
-                                          (cddr apart))
-                                  transcripts)))
-               (records (car named))
-               ;; Registers go by id into the file buffers written without their
-               ;; file: detached text, a starred copy set apart.
-               (apart-ids (mapcar (lambda (r) (plist-get r :id)) (cadr apart)))
-               (globals (warm-restart--globals
-                         (cl-loop for e in carried for r in made
-                                  when (and (buffer-file-name (plist-get e :buffer)) (not (plist-member r :lost))
-                                            (or (not (plist-get r :file)) (member (plist-get r :id) apart-ids)))
-                                  collect (plist-get e :buffer))))
+               (named (warm-restart--name-companions
+                       (mapcar (lambda (e) (warm-restart--record-or-companion e blobs)) carried)))
+               (records (warm-restart--based (car named)))
+               (globals (warm-restart--globals))
                (form (list :schema warm-restart--schema :pid (emacs-pid) :created (format-time-string "%FT%T%z")
                            :transcripts t
                            :emacs-version emacs-version
                            :buffers (cl-remove-if (lambda (r) (plist-member r :lost)) records)
-                           :starred (cadr apart)
-                           :frames (warm-restart--renamed-in (warm-restart--frames) renames)
-                           :lost (append ;; An older reader restores no starred copy: it names it as not carried.
-                                         (cl-loop for r in (cadr apart) unless (eq (plist-get r :strategy) 'indirect)
-                                                  collect (list :buffer (plist-get r :name) :unsaved t :starred t
-                                                                :reason "its text, its secrets starred, set apart: a build before this one does not restore it"))
-                                         (cl-loop for e in (plist-get plan :buffers)
+                           :frames (warm-restart--renamed-in (warm-restart--frames) (cdr named))
+                           :lost (append (cl-loop for e in (plist-get plan :buffers)
                                                   when (eq (plist-get e :strategy) 'dropped)
                                                   collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
                                                                   (and (plist-get e :unsaved) (list :unsaved t))))
@@ -855,10 +707,8 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                                                  (plist-get plan :processes))
                                          (plist-get globals :lost)))))
           (setq form (append form (cl-loop for (key value) on globals by #'cddr unless (eq key :lost) append (list key value))))
-          ;; No secret's text in any string the image holds.
-          (romacs--session-image-write file (warm-restart--print (warm-restart--without-secrets form)) (nreverse (cdr blobs)))
+          (romacs--session-image-write file (warm-restart--print form) (nreverse (cdr blobs)))
           file)
-      ;; Staged blobs, written or not.
       (mapc #'kill-buffer (car warm-restart--staging)))))
 
 ;;;; Restoring a buffer
@@ -874,25 +724,18 @@ where it was defined, if need be."
 
 (defun warm-restart--set-mode (record)
   "Put the current buffer in RECORD's major mode when it is defined.  A
-transcript's record gives `fundamental-mode' and makes the buffer the
-transcript (`warm-restart--become-transcript'), again when it wakes; so
-does a shell's mode, known once its library is loaded, which an image
-written before shells were carried as transcripts names."
+shell's mode, known once its library is loaded, gives `fundamental-mode'
+and marks the buffer a transcript (`warm-restart--transcript-of'): an
+image written before shells were carried as transcripts names it."
   (let ((mode (plist-get record :mode)))
     (warm-restart--load-mode mode (plist-get record :library))
-    (cond ((plist-get record :transcript-of)
-           (unless (eq major-mode 'fundamental-mode) (fundamental-mode))
-           (warm-restart--become-transcript (plist-get record :transcript-of)))
-          ((warm-restart--shell-mode-p mode)
-           ;; A mode that became a shell's since the image was written.
+    (cond ((warm-restart--shell-mode-p mode)
            (fundamental-mode)
-           (warm-restart--become-transcript mode)
-           (rename-buffer (warm-restart--transcript-name (buffer-name) #'get-buffer)))
-          (t
-           ;; A buffer reused as an ordinary record's is no transcript.
-           (when warm-restart--transcript-of (warm-restart--end-transcript))
-           (unless (eq major-mode mode)
-             (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode)))))))
+           (setq warm-restart--transcript-of mode)
+           (unless (warm-restart--transcript-name-p (buffer-name))
+             (rename-buffer (warm-restart--transcript-name (buffer-name) #'get-buffer))))
+          ((not (eq major-mode mode))
+           (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode))))))
 
 (defun warm-restart--put-text (text unibyte)
   "Replace the current buffer's text with TEXT, recording no change."
@@ -912,24 +755,25 @@ written before shells were carried as transcripts names."
 
 (defun warm-restart--apply-modes (record)
   "Enable RECORD's minor modes the mode did not, and set its locals.  A
-restored transcript takes none of its shell's: its header is its own
-\(`warm-restart--become-transcript')."
-  (unless warm-restart--transcript-of
-    (dolist (mode (plist-get record :minor-modes))
-      (unless (memq mode local-minor-modes)
-        (desktop-load-file mode)
-        (let ((handler (cdr (assq mode desktop-minor-mode-handlers))))
-          (with-demoted-errors "warm-restart: %S"
-            (cond (handler (funcall handler (plist-get record :locals)))
-                  ((functionp mode) (funcall mode 1)))))))
-    (pcase-dolist (`(,var . ,value) (plist-get record :locals))
-      (set (make-local-variable var) value))))
+restored transcript takes none of its shell's, only a header naming it."
+  (if warm-restart--transcript-of
+      (setq-local header-line-format (warm-restart--transcript-header warm-restart--transcript-of))
+    (warm-restart--apply-minor-modes-and-locals record)))
+
+(defun warm-restart--apply-minor-modes-and-locals (record)
+  "Enable RECORD's minor modes the mode did not, and set its locals."
+  (dolist (mode (plist-get record :minor-modes))
+    (unless (memq mode local-minor-modes)
+      (desktop-load-file mode)
+      (let ((handler (cdr (assq mode desktop-minor-mode-handlers))))
+        (with-demoted-errors "warm-restart: %S"
+          (cond (handler (funcall handler (plist-get record :locals)))
+                ((functionp mode) (funcall mode 1)))))))
+  (pcase-dolist (`(,var . ,value) (plist-get record :locals))
+    (set (make-local-variable var) value)))
 
 (defun warm-restart--apply-common (record)
-  "Apply RECORD's positions, directory and read-only flag, and make a
-transcript's buffer one (`warm-restart--become-transcript')."
-  (when-let* ((shell (plist-get record :transcript-of)))
-    (warm-restart--become-transcript shell))
+  "Apply RECORD's positions, directory and read-only flag."
   (let ((clamp (lambda (n) (and n (max (point-min) (min n (1+ (buffer-size))))))))
     (widen)
     (setq default-directory (plist-get record :directory))
@@ -1067,18 +911,15 @@ or nil when there is neither."
       (when (and (plist-get record :file) (plist-get record :blob)) (setq buffer-file-name (plist-get record :file)))
       (set-buffer-modified-p t)
       (setq default-directory (plist-get record :directory))
-      (when-let* ((shell (plist-get record :transcript-of))) (warm-restart--become-transcript shell))
       (push (list :buffer (plist-get record :name) :text t
                   :reason (format "restored as plain text: %s" (error-message-string condition)))
             warm-restart--problems)
       (current-buffer))))
 
 (defun warm-restart--made-buffer (record)
-  "The buffer RECORD's restore makes or reuses, if it exists.  A starred
-record's never exists: it makes a new buffer (`warm-restart--restore-starred')."
-  (and (not (eq (plist-get record :strategy) 'starred))
-       (or (and (plist-get record :file) (find-buffer-visiting (plist-get record :file)))
-           (get-buffer (plist-get record :name)))))
+  "The buffer RECORD's restore makes or reuses, if it exists."
+  (or (and (plist-get record :file) (find-buffer-visiting (plist-get record :file)))
+      (get-buffer (plist-get record :name))))
 
 (defun warm-restart--discard (buffer)
   "Kill BUFFER, half made by a failed restore, without asking."
@@ -1086,21 +927,18 @@ record's never exists: it makes a new buffer (`warm-restart--restore-starred')."
   (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))
 
 (defun warm-restart--beside (record blobs existing)
-  "The buffer RECORD's id names: EXISTING, a buffer edited here before
-RECORD's turn in the restore came, which keeps its edits; RECORD's
-carried text goes in a new buffer beside it, and the problem names both.
-A transcript's id names that new buffer: EXISTING holds none of it."
-  (let ((copy (when-let* ((text (warm-restart--carried-text record blobs)))
-                (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
-                  (warm-restart--put-text text (plist-get record :unibyte))
-                  (setq default-directory (plist-get record :directory))
-                  (when-let* ((shell (plist-get record :transcript-of))) (warm-restart--become-transcript shell))
-                  (push (list :buffer (plist-get record :name) :text t
-                              :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
-                                              (buffer-name existing) (buffer-name)))
-                        warm-restart--problems)
-                  (current-buffer)))))
-    (if (and copy (plist-get record :transcript-of)) copy existing)))
+  "EXISTING, a buffer edited here before RECORD's turn in the restore came,
+which keeps its edits; RECORD's carried text goes in a new buffer beside
+it, and the problem names both."
+  (when-let* ((text (warm-restart--carried-text record blobs)))
+    (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
+      (warm-restart--put-text text (plist-get record :unibyte))
+      (setq default-directory (plist-get record :directory))
+      (push (list :buffer (plist-get record :name) :text t
+                  :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
+                                  (buffer-name existing) (buffer-name)))
+            warm-restart--problems)))
+  existing)
 
 (defconst warm-restart--shell-modes
   '(eshell-mode comint-mode term-mode inferior-emacs-lisp-mode)
@@ -1108,34 +946,7 @@ A transcript's id names that new buffer: EXISTING holds none of it."
 in its mode would read its whole transcript as input at the next RET.")
 
 (defvar-local warm-restart--transcript-of nil
-  "The shell mode this buffer's restored transcript came from, or nil:
-set by `warm-restart--become-transcript', and gone once the user makes
-the buffer something else, by a change of mode or a file of its own.")
-
-(defun warm-restart--become-transcript (mode)
-  "Make the current buffer a restored transcript of a MODE shell, its
-header naming MODE.  A change of mode drops the mark with the header,
-and visiting a file it is given ends it (`warm-restart--end-transcript'):
-either way the next image writes the buffer as what it has become."
-  (setq warm-restart--transcript-of mode)
-  (setq-local header-line-format (warm-restart--transcript-header mode))
-  (add-hook 'after-set-visited-file-name-hook #'warm-restart--end-transcript nil t))
-
-(defun warm-restart--end-transcript ()
-  "The current buffer, given a file, is a transcript no more: its mark
-and header go, and so do the modes its record left waiting, which would
-make it one again when it wakes."
-  (kill-local-variable 'warm-restart--transcript-of)
-  (kill-local-variable 'header-line-format)
-  (setq warm-restart--deferred nil)
-  (remove-hook 'after-set-visited-file-name-hook #'warm-restart--end-transcript t))
-
-(defun warm-restart--transcript-source ()
-  "The shell mode whose transcript the current buffer is or holds: its own
-mode when that is a shell's, else the mode a restored transcript came
-from, or nil."
-  (cond ((warm-restart--shell-mode-p major-mode) major-mode)
-        (warm-restart--transcript-of)))
+  "The shell mode this buffer's restored transcript came from, or nil.")
 
 (defun warm-restart--shell-mode-p (mode)
   "Whether MODE, defined, is a shell's: one of `warm-restart--shell-modes'
@@ -1163,36 +974,27 @@ shell's own name: a shell opened later makes a buffer of its own, never
 one over the transcript."
   (warm-restart--free-name (format "%s (transcript)" name) taken))
 
-(defun warm-restart--prepare (form)
-  "FORM's records, ready to restore, its set-apart ones (`:starred') after
-its own.  A record that may take a name of its own at its turn, before
-its buffer is made, carries a table of the image's names shared by them
-all, so the name it takes is no other record's: a companion's
-\(`:image-names', for `warm-restart--companion-destination'), and, in an
-image written before shells were carried as transcripts (no
-`:transcripts'), a file, text or indirect buffer's, whose mode may be a
-shell's (`:legacy-names', for `warm-restart--legacy-destination')."
-  (let ((names (make-hash-table :test #'equal)) (legacy (not (plist-get form :transcripts)))
-        (records (append (plist-get form :buffers) (plist-get form :starred))))
-    (dolist (record records) (puthash (plist-get record :name) t names))
-    (mapcar (lambda (record)
-              (cond ((plist-get record :companion) (plist-put (copy-sequence record) :image-names names))
-                    ((and legacy (memq (plist-get record :strategy) '(file text indirect)))
-                     (plist-put (copy-sequence record) :legacy-names names))
-                    (t record)))
-            records)))
+(defun warm-restart--transcript-name-p (name)
+  "Whether NAME is a transcript's (`warm-restart--transcript-name')."
+  (string-match-p " (transcript)\\(<[0-9]+>\\)?\\'" name))
 
-(defun warm-restart--companion-destination (record)
-  "RECORD, or, for a companion whose name a buffer made here first has, the
-record under the first free name of it that no live buffer nor record of
-the image (`:image-names') has, which it takes there: a companion never
-lands in a buffer of this session nor in a later record's."
-  (let ((name (plist-get record :name)) (names (plist-get record :image-names)))
-    (if (not (and (plist-get record :companion) (get-buffer name)))
-        record
-      (let ((free (warm-restart--free-name name (lambda (n) (or (and names (gethash n names)) (get-buffer n))))))
-        (when names (puthash free t names))
-        (plist-put (copy-sequence record) :name free)))))
+(defun warm-restart--prepare (form)
+  "FORM's records, ready to restore.  An image written before shells were
+carried as transcripts (no `:transcripts') may name a shell's mode for a
+file, text or indirect buffer: each such record carries `:legacy-names',
+a table of the image's names shared by them all, for
+`warm-restart--legacy-destination' to choose its buffer's name from at
+its own turn, before its buffer is made."
+  (let ((records (plist-get form :buffers)))
+    (if (plist-get form :transcripts)
+        records
+      (let ((names (make-hash-table :test #'equal)))
+        (dolist (record records) (puthash (plist-get record :name) t names))
+        (mapcar (lambda (record)
+                  (if (memq (plist-get record :strategy) '(file text indirect))
+                      (plist-put (copy-sequence record) :legacy-names names)
+                    record))
+                records)))))
 
 (defun warm-restart--legacy-destination (record)
   "RECORD, or, for a record of an older image (`:legacy-names') whose mode
@@ -1234,30 +1036,6 @@ of its previous and next buffers."
         ((consp tree) (cons (warm-restart--renamed-in (car tree) renames) (warm-restart--renamed-in (cdr tree) renames)))
         (t tree)))
 
-(defun warm-restart--name-transcripts (records shells &optional reserved)
-  "RECORDS with the transcript (`warm-restart--inert-record') of each live
-shell, one SHELLS names, named apart from its shell, whatever its name,
-and each companion named free of the others, and the renames, as
-\(RECORDS . RENAMES).  A restored transcript keeps its name.  RESERVED,
-other records' names (those set apart), are taken too."
-  (let ((taken (make-hash-table :test #'equal)) renames)
-    ;; A companion's own name is chosen below, free of the others'.
-    (dolist (record records) (unless (plist-get record :companion) (puthash (plist-get record :name) t taken)))
-    (dolist (name reserved) (puthash name t taken))
-    (cons (mapcar (lambda (record)
-                    (cond ((plist-get record :companion)
-                           (let ((name (warm-restart--free-name (plist-get record :name) (lambda (n) (gethash n taken)))))
-                             (puthash name t taken)
-                             (plist-put (copy-sequence record) :name name)))
-                          ((not (and (plist-get record :transcript-of) (member (plist-get record :name) shells)))
-                           record)
-                          (t (let ((name (warm-restart--transcript-name (plist-get record :name) (lambda (n) (gethash n taken)))))
-                               (puthash name t taken)
-                               (push (cons (plist-get record :name) name) renames)
-                               (plist-put (copy-sequence record) :name name)))))
-                  records)
-          renames)))
-
 (defun warm-restart--inert-record (record mode)
   "RECORD as the record of a transcript of a MODE buffer: `fundamental-mode',
 no library, minor modes or uniquify, its locals only the header naming
@@ -1290,13 +1068,12 @@ signal, as a load may."
 When it fails, a buffer the attempt made is replaced by the rescue.  A
 buffer it would reuse that was edited here first is left as it is
 \(`warm-restart--beside')."
-  (let* ((record (warm-restart--companion-destination (warm-restart--legacy-destination record)))
+  (let* ((record (warm-restart--legacy-destination record))
          (existing (warm-restart--made-buffer record))
          ;; One made here meanwhile keeps the modes it has, and a modified
          ;; file, which a save may write, has its own at once: no deferral.
          (warm-restart--defer (and warm-restart--defer (not (buffer-live-p existing))
-                                   (not (and (eq (plist-get record :strategy) 'file) (plist-get record :modified)))
-                                   (not (eq (plist-get record :strategy) 'starred))))
+                                   (not (and (eq (plist-get record :strategy) 'file) (plist-get record :modified)))))
          (buffer
          (if (and (buffer-live-p existing) (buffer-modified-p existing)
                   (memq (plist-get record :strategy) '(file text)))
@@ -1306,8 +1083,7 @@ buffer it would reuse that was edited here first is left as it is
                              ('file (warm-restart--restore-file record blobs))
                              ('text (warm-restart--restore-text record blobs))
                              ('indirect (warm-restart--restore-indirect record buffers))
-                             ('handler (warm-restart--restore-handler record))
-                             ('starred (warm-restart--restore-starred record blobs)))))
+                             ('handler (warm-restart--restore-handler record)))))
                (with-current-buffer buffer (setq warm-restart-buffer-id (cons (plist-get record :id) buffer)))
                buffer)
            (error (let ((made (warm-restart--made-buffer record)))
@@ -1638,13 +1414,11 @@ A file changed on disk since it was read is named: saving asks."
 (defun warm-restart--invalid (form blobs)
   "Why FORM, with BLOBS, is not an image this build can apply, or nil."
   (let ((ids (make-hash-table :test #'equal))
-        (records (and (proper-list-p (plist-get form :buffers)) (proper-list-p (plist-get form :starred))
-                      (append (plist-get form :buffers) (plist-get form :starred)))))
+        (records (plist-get form :buffers)))
     (cond
      ((not (eql (plist-get form :schema) warm-restart--schema))
       (format "image schema %S; this build reads %d" (plist-get form :schema) warm-restart--schema))
-     ((not (and (proper-list-p (plist-get form :buffers)) (proper-list-p (plist-get form :starred))))
-      "its buffers are not a list")
+     ((not (proper-list-p records)) "its buffers are not a list")
      (t (cl-loop for record in records
                  for id = (plist-get record :id)
                  for blob = (plist-get record :blob)
@@ -1652,11 +1426,11 @@ A file changed on disk since it was read is named: saving asks."
                  unless (and (stringp id) (stringp (plist-get record :name)) (not (gethash id ids)))
                  return (format "record %S has no name or a repeated id" id)
                  do (puthash id t ids)
-                 unless (memq strategy '(file text indirect handler starred))
+                 unless (memq strategy '(file text indirect handler))
                  return (format "record %S has strategy %S" id strategy)
                  unless (or (null blob) (and (natnump blob) (< blob (length blobs))))
                  return (format "record %S names blob %S of %d" id blob (length blobs))
-                 when (and (memq strategy '(text starred)) (null blob)) return (format "text record %S has no blob" id)
+                 when (and (eq strategy 'text) (null blob)) return (format "text record %S has no blob" id)
                  when (and (eq strategy 'file) (not (stringp (plist-get record :file))))
                  return (format "file record %S has no file" id)
                  finally return
@@ -1665,11 +1439,36 @@ A file changed on disk since it was read is named: saving asks."
                                     (not (gethash (plist-get record :base) ids)))
                           return (format "indirect record %S has no base" (plist-get record :id))))))))
 
+(defun warm-restart--fold-starred (form)
+  "FORM, an image's, with the copies a build before this one set apart
+\(`:starred': a file's text, its secrets starred) among its buffers, each
+a text record headed as a companion is, and the lost entries that named
+them for older readers gone."
+  (let ((starred (plist-get form :starred)))
+    (if (not (and (consp starred) (proper-list-p starred) (proper-list-p (plist-get form :buffers))))
+        form
+      (thread-first form
+                    (plist-put :buffers
+                               (append (plist-get form :buffers)
+                                       (mapcar (lambda (r)
+                                                 (if (not (eq (plist-get r :strategy) 'starred))
+                                                     r
+                                                   (thread-first (copy-sequence r)
+                                                                 (plist-put :strategy 'text) (plist-put :companion (plist-get r :copy-of))
+                                                                 (plist-put :locals (cons (cons 'header-line-format
+                                                                                                (format "Text of %s, its secrets starred"
+                                                                                                        (plist-get r :copy-of)))
+                                                                                          (plist-get r :locals))))))
+                                               starred)))
+                    (plist-put :starred nil)
+                    (plist-put :lost (cl-remove-if (lambda (e) (plist-get e :starred)) (plist-get form :lost)))))))
+
 (defun warm-restart--read (file)
   "The form and the blob vector of image FILE, checked whole before any of
 it is applied."
   (pcase-let* ((`(,text . ,blobs) (romacs--session-image-read file))
-               (`(,form . ,end) (read-from-string text)))
+               (`(,form . ,end) (read-from-string text))
+               (form (warm-restart--fold-starred form)))
     (when-let* ((why (or (and (/= end (length text)) "text after the image's form")
                          (warm-restart--invalid form blobs))))
       (error "Not a usable session image: %s" why))
@@ -1714,10 +1513,6 @@ and the buffer is rescued as text).  Its problems."
     (condition-case err (warm-restart--restore-buffer record blobs buffers)
       (error (push (list :buffer (plist-get record :name) :reason (format "not restored: %s" (error-message-string err)))
                    warm-restart--problems)))
-    ;; Saved over, a file would get the stars: the user is told.
-    (when (plist-get record :starred)
-      (push (list :buffer (plist-get record :name) :reason "its secrets were carried as stars, not as their text")
-            warm-restart--problems))
     warm-restart--problems))
 
 (defun warm-restart--applied (form records buffers problems &optional laid-out)
@@ -1853,8 +1648,7 @@ the report."
     (let ((modified (cl-loop for buffer being the hash-values of buffers
                              when (buffer-modified-p buffer) collect buffer)))
       (run-at-time 0 nil #'warm-restart--lock modified))
-    (list :buffers (hash-table-count buffers) :records (length records)
-          :lost (cl-remove-if (lambda (entry) (plist-get entry :starred)) (plist-get form :lost))
+    (list :buffers (hash-table-count buffers) :records (length records) :lost (plist-get form :lost)
           :companions (cl-loop for record in records
                                for buffer = (gethash (plist-get record :id) buffers)
                                when (and (plist-get record :companion) (buffer-live-p buffer))
