@@ -306,7 +306,11 @@ class Agents(Server):
         return host['harness']
 
     def logged(self):
-        return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+        """The fake harnesses' log, its whole lines: one a fake writes this
+        moment has no newline yet, and is read next time."""
+        if not self.calls.exists():
+            return []
+        return [json.loads(line) for line in self.calls.read_text().split('\n')[:-1] if line]
 
     def restart(self):
         """A new server: what a user's next `romacs' starts."""
