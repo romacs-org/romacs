@@ -22,6 +22,7 @@
   ;; and the message is still first, counted, for the next end or a resume.
   (let ((session (romacs-agent--make :id "55555555-6666-4777-8888-999999999999" :harness 'claude :driver-state (list :initialized t :ready t)
                                      :state 'running :host-socket "/nonexistent/host.sock")))
+    (setf (romacs-agent-caught-up session) t)
     (romacs-agent-send-later session "first")
     (romacs-agent-send-later session "second")
     (romacs-agent-send-later session "ahead" t)

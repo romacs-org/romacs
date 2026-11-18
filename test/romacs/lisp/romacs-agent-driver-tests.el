@@ -162,6 +162,7 @@ line's `env' sets only its own configuration variable."
                  ((symbol-function 'romacs-agent--fold-now) #'ignore)
                  ((symbol-function 'romacs-agent--changed) #'ignore)
                  ((symbol-function 'process-live-p) (lambda (_) t)))
+         (setf (romacs-agent-caught-up session) t)
          (romacs-agent-send session "hello")
          (should written)
          (should (eq (romacs-agent-state session) 'running)))))))
@@ -182,11 +183,32 @@ line's `env' sets only its own configuration variable."
                  ((symbol-function 'romacs-agent--fold-now) #'ignore)
                  ((symbol-function 'romacs-agent--changed) #'ignore)
                  ((symbol-function 'process-live-p) (lambda (_) t)))
+         (setf (romacs-agent-caught-up session) t)
          (romacs-agent-send session "hello")
          (should (eq (romacs-agent-state session) 'running))
          (should-not (romacs-agent-own-turn session))
          (romacs-agent-driver-test--feed session 5 "in" (car written))
          (should-not (plist-get (romacs-agent-driver-state session) :compact-turn)))))))
+
+(ert-deftest romacs-agent-a-message-sent-while-replaying-claims-no-turn ()
+  ;; Written before its attachment caught up with its records: the turn
+  ;; they may yet end (an exit replayed) is not this message's, so the
+  ;; session stays as its records leave it, the message's asker unclaimed.
+  (romacs-agent-driver-test--registry
+   (load romacs-agent-driver-test--fakerpc nil t)
+   (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (written nil))
+     (let ((session (romacs-agent--make :id "rpc-replay" :harness 'fakerpc :cwd "/tmp" :state 'idle
+                                        :answering "earlier")))
+       (puthash "rpc-replay" session romacs-agent--sessions)
+       (setf (romacs-agent-driver-state session) (list :ready t))
+       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
+                 ((symbol-function 'romacs-agent--fold-now) #'ignore)
+                 ((symbol-function 'romacs-agent--changed) #'ignore)
+                 ((symbol-function 'process-live-p) (lambda (_) t)))
+         (romacs-agent-send session "hello")
+         (should written)
+         (should (eq (romacs-agent-state session) 'idle))
+         (should (equal (romacs-agent-answering session) "earlier")))))))
 
 (provide 'romacs-agent-driver-tests)
 ;;; romacs-agent-driver-tests.el ends here

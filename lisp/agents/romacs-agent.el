@@ -1510,7 +1510,9 @@ one request id: the journal's is the one written."
     ;; while its record comes back, which says the same.  Its turn answers
     ;; what the message does, so an exit before its record comes ends that
     ;; turn, not the one before.
-    (when (eq (romacs-agent-state session) 'idle)
+    ;; Caught up only: one still replaying its records may yet read the
+    ;; turn before ending, which is not this message's (romacs#308).
+    (when (and (eq (romacs-agent-state session) 'idle) (romacs-agent-caught-up session))
       (setf (romacs-agent-state session) 'running
             (romacs-agent-answering session) (plist-get (car messages) :id)
             (romacs-agent-own-turn session) own)
