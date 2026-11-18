@@ -104,7 +104,38 @@ import time
 import parity_live
 from romacs_mcp_client import RomacsMcp
 import server_live
-from server_live import Server, until, lisp
+from server_live import Server, lisp
+
+
+def patient(seconds):
+    """SECONDS, stretched by how loaded the host is: a wait that holds at
+    rest holds when the train runs the machine at several times its cores."""
+    return seconds * load_factor()[1]
+
+
+def load_factor():
+    """(LOAD, FACTOR): the host's 1-minute load and what a wait is stretched by."""
+    load = os.getloadavg()[0]
+    return load, min(4.0, max(1.0, load / (os.cpu_count() or 1)))
+
+
+def outlasted(what, took, seconds):
+    """Say on stderr that a wait for WHAT took TOOK seconds, past its
+    SECONDS at rest: a slowdown the stretch let pass is still seen."""
+    load, factor = load_factor()
+    print(f'agent_live: slow wait: {what} took {took:.1f}s, over its {seconds}s at rest '
+          f'(load {load:.0f}, factor {factor:.2f})', file=sys.stderr, flush=True)
+
+
+def until(predicate, seconds, what):
+    """`server_live.until', its deadline `patient'; one that outlasts its
+    deadline at rest is said (`outlasted')."""
+    started = time.time()
+    try:
+        return server_live.until(predicate, patient(seconds), what)
+    finally:
+        if time.time() - started > seconds:
+            outlasted(what, time.time() - started, seconds)
 
 HARNESS = Path(__file__).resolve().parent / 'fake_harness.py'
 CODEX = Path(__file__).resolve().parent / 'fake_codex.py'
@@ -314,9 +345,11 @@ def session(args, base):
                     '"edits": [{"start": 1, "end": 6, "text": "ALPHA"}]}')
         a.idle(sid)
         edited = a.eval('(with-current-buffer "notes" (buffer-string))')
+        answered = len(a.results(sid))
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(+ 20 22)"}')
         a.idle(sid)
-        evaluated = a.results(sid)[-1]
+        # Its own turn's result, not the one before (idle may be that turn's).
+        evaluated = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         a.send(sid, 'ask touch approved.txt')
         until(lambda: a.state(sid) == 'waiting-approval', 20, 'approval raised')
         a.eval(f'(let ((s {a.s(sid)})) (romacs-agent-respond s (car (hash-table-keys (romacs-agent-approvals s))) t))')
@@ -399,6 +432,10 @@ def renew(args, base):
         a.idle(sid)
         a.send(sid, 'say before')
         a.idle(sid)
+        # Its finished turns' rows filled (a moment after each end), so the
+        # renewal reads them, not its records.
+        until(lambda: a.eval(f"(progn (require 'romacs-agent-turns) (romacs-agent-turns-count {a.s(sid)}))") == '2',
+              30, 'its turns rows filled')
         # Its only session: a renewed run is logged under its new conversation.
         runs = lambda: [e for e in a.logged() if 'started' in e]
         before = len(runs())
@@ -410,11 +447,15 @@ def renew(args, base):
                "(advice-add f :before (lambda (&rest _) (setq rn-reads (1+ rn-reads))) '((name . rn)))) "
                "(advice-add 'isolate-spawn :before (lambda (f &rest _) (when (eq f 'romacs-agent-renew--thread) "
                "(setq rn-workers (1+ rn-workers)))) '((name . rn))) t)")
+        isolates = int(a.eval('(length (isolate-list))'))
         a.eval(f'(progn (setq romacs-agent-renew-summary (quote selection)) (defvar rn-outcome nil) '
                f'(romacs-agent-renew {a.s(sid)} "harness" (lambda (r) (setq rn-outcome r))) t)')
         until(lambda: a.eval('(car rn-outcome)') in (':done', ':error'), 60, 'renewed')
         outcome = a.eval('(prin1-to-string rn-outcome)')
         main_reads, workers = int(a.eval('rn-reads')), int(a.eval('rn-workers'))
+        # Its worker of its own let go once it answered: no more live
+        # workers than before the renewal.
+        until(lambda: int(a.eval('(length (isolate-list))')) <= isolates, 15, 'the renewal worker let go')
         a.eval("(progn (dolist (f '(romacs-agent-events romacs-agent--journal-pager romacs-agent-events-async isolate-spawn)) "
                "(advice-remove f 'rn)) t)")
         a.until(sid, lambda: len(runs()) > before, 60, 'a run after the renewal')
@@ -423,7 +464,14 @@ def renew(args, base):
         a.idle(sid, 60)
         a.send(sid, 'say after')
         a.idle(sid, 60)
-        briefed = [r for r in a.journal(sid) if isinstance(r.get('in'), dict) and r['in'].get('romacsBrief')]
+        # The record of the message the brief went with, once written to
+        # the store (the writer's, a moment after).
+        briefed = lambda: [r for r in a.journal(sid) if isinstance(r.get('in'), dict) and r['in'].get('romacsBrief')]
+        try:
+            until(lambda: briefed(), 15, 'the briefed message recorded')
+        except RuntimeError:
+            pass
+        briefed = briefed()
         result = {'outcome': outcome, 'native': native, 'new_conversation': native != sid,
                   'session_id': argv[argv.index('--session-id') + 1] if '--session-id' in argv else None,
                   'resumed_old': '--resume' in argv, 'briefed': len(briefed), 'main_reads': main_reads, 'workers': workers}
@@ -680,11 +728,14 @@ def host(args, base):
         reader.connect(str(sock))
         reader.sendall(b'{"attach":{"from":1}}\n')
         started = time.time()
-        process.wait(30)
+        process.wait(patient(30))
         seconds = time.time() - started
         last = json.loads((journal_dir / 'journal.jsonl').read_text().splitlines()[-1])
         reader.close()
-        flood = {'seconds': round(seconds, 2), 'exit_record': last.get('exit'), 'ok': last.get('exit') == 3 and seconds < 20}
+        if seconds > 20:
+            outlasted('the flood', seconds, 20)
+        flood = {'seconds': round(seconds, 2), 'exit_record': last.get('exit'), 'factor': round(load_factor()[1], 2),
+                 'ok': last.get('exit') == 3 and seconds < patient(20)}
         # A harness whose descendant holds its stdin unread: server A blocks
         # writing to it; server B steals the attachment and writes, waiting
         # behind A; only then does the harness exit. Its exit must still be
@@ -1742,8 +1793,14 @@ def unicode(args, base):
              'message': {'role': 'user', 'content': UNICODE}}, ensure_ascii=False, separators=(',', ':')) + '\n',
             encoding='utf-8')
         a.providers([('claude', claude_dir)])
-        listed = parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
-                                              '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        # Listed once its scan has found it: the scan runs off the editor.
+        listed_now = lambda: parity_live.read_sexp(a.eval('(progn (require (quote romacs-agent-history)) (romacs-agent-history-list t) '
+                                                          '(mapcar (lambda (i) (plist-get i :title)) (romacs-agent-history-items)))')) or []
+        try:
+            listed = until(lambda: (lambda titles: titles if any(UNICODE in t for t in titles) else None)(listed_now()),
+                           30, 'the transcript listed')
+        except RuntimeError:
+            listed = listed_now()
         view = parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-history-open '
                                             f'(seq-find (lambda (i) (equal (plist-get i :id) {lisp_text(cid)})) (romacs-agent-history-items)))) '
                                             '(buffer-substring-no-properties (point-min) (point-max)))'))
@@ -2072,7 +2129,8 @@ def rpc(args, base):
         # for this one's; a message sent meanwhile waits for its readiness.
         a.eval(f'(romacs-agent-stop {a.s(sid)})')
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'stopped again')
-        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        held_gate = a.root / 'init-held'
+        a.eval(f'(progn (setenv "FAKERPC_SLOW_INIT" {lisp(held_gate)}) t)')
         seen_pids = {e.get('pid') for e in rpcs()}
         a.eval(f'(romacs-agent-resume {a.s(sid)})')
         until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'initialize read')
@@ -2082,6 +2140,7 @@ def rpc(args, base):
         until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'restored')
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
+        held_gate.touch()
         before = done(sid)
         a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
@@ -2089,7 +2148,8 @@ def rpc(args, base):
         a.eval('(progn (setenv "FAKERPC_SLOW_INIT" nil) t)')
 
         # A new session's server restart in the middle of its startup.
-        a.eval('(progn (setenv "FAKERPC_SLOW_INIT" "4") t)')
+        fresh_gate = a.root / 'init-fresh'
+        a.eval(f'(progn (setenv "FAKERPC_SLOW_INIT" {lisp(fresh_gate)}) t)')
         seen_pids = {e.get('pid') for e in rpcs()}
         fresh = a.start('', 'fakerpc')
         until(lambda: any(e.get('rpc') == 'initialize' and e.get('pid') not in seen_pids for e in rpcs()), 15, 'fresh initialize read')
@@ -2098,6 +2158,7 @@ def rpc(args, base):
         a.restart()
         until(lambda: a.eval(f'(and {a.s(fresh)} t)') == 't', 15, 'fresh restored')
         a.send(fresh, 'say fresh')
+        fresh_gate.touch()
         until(lambda: done(fresh) > 0, 30, 'fresh answered')
         fresh_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         fresh_run = [e.get('rpc') for e in rpcs() if e.get('pid') == fresh_pid and 'rpc' in e]
@@ -2731,12 +2792,13 @@ def real(args, base):
 
 
 def board_keys(args, base):
-    """The agent board by real keys (C-x C-a a, RET): on a project, its
-    first row opens, the thread that wants the user most, else the newest
-    (a delegated one folds under its parent) or, with no thread, its
-    newest transcript; on "◇ N more", every transcript is shown and the
-    board stays; a thread gone since the board was drawn is said so, and
-    the board is drawn again."""
+    """The agent board by real keys (C-x C-a a, RET), a buffer in the
+    selected window: on a project, its first row opens in the board's
+    window, the thread that wants the user most, else the newest (a
+    delegated one folds under its parent) or, with no thread, its newest
+    transcript; on "◇ N more", every transcript is shown and the board
+    stays; a thread gone since the board was drawn is said so, and the
+    board is drawn again."""
     a = Agents(args, base, 'hk')
     try:
         a.up()
@@ -2774,9 +2836,8 @@ def board_keys(args, base):
             '(and (bound-and-true-p romacs-agent-ui--session) (romacs-agent-id romacs-agent-ui--session)))'))
 
         def open_board():
-            # A key typed as a layer hides or shows can be lost on a loaded
-            # host (seen: no command ran for it): keys must reach the frame,
-            # then the board, before one is relied on.
+            # Keys must reach the frame, then the board, before one is
+            # relied on: a loaded host runs a key later than it is typed.
             a.keyboard_ready()
             a.keys('-M', 'ctrl', '-k', 'x', '-k', 'a', '-m', 'ctrl', '-k', 'a')
             until(lambda: shown() == 't', 15, 'board shown')
@@ -2829,6 +2890,11 @@ def board_keys(args, base):
         # The newest thread gone after the board was drawn: its records too
         # (a session still recorded is listed from its row and loaded when asked).
         # Removed from outside the editor, whose own connection only reads.
+        # The board is not told until RET: a redraw (a batch of session
+        # events, the store's rows, a transcript scan ending) would drop
+        # its row before the key reaches it.
+        hooks = "'(romacs-agent-ui-changed-hook romacs-agent-store-filled-hook romacs-agent-history-indexed-hook)"
+        a.eval(f'(progn (dolist (hook {hooks}) (remove-hook hook (function romacs-agent-board--refresh))) t)')
         a.eval(f'(let ((id {lisp_text(sids[1])})) (delete-directory (romacs-agent-dir (romacs-agent-get id)) t) '
                '(remhash id romacs-agent--sessions) t)')
         store = a.home / '.local/state/romacs/agents/sessions.sqlite'
@@ -2838,6 +2904,7 @@ def board_keys(args, base):
         ret_on('say two')
         steps['gone'] = settled(lambda: [shown(), parity_live.read_sexp(a.eval('(current-message)'))],
                                 ['t', 'That thread is gone: the board is drawn again'])
+        a.eval(f'(progn (dolist (hook {hooks}) (add-hook hook (function romacs-agent-board--refresh))) t)')
         ret_on('^work  ')
         steps['after_gone'] = settled(showing, sids[0])
         result = {'steps': steps, 'sessions': sids, 'codex_file': str(codex_file)}

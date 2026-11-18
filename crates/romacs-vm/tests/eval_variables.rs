@@ -26,6 +26,19 @@ fn explicit_local_only_affects_current_buffer_and_keeps_void_local() {
     assert_eq!(answer(&mut vm, "(set-buffer (get-buffer-create \"s124-local-b\")) local-s124"), Ok("19".into()));
     assert_eq!(answer(&mut vm, "(set-buffer (get-buffer-create \"s124-local-c\")) local-s124"), Ok("19".into()));
 }
+/// `defvar' inside a `let' of a void default, itself inside a buffer's
+/// local `let': it writes the value the default `let' saved, passing the
+/// local `let' by (eval.c Fdefvar, default_toplevel_binding), as pinned
+/// GNU answers `(t 9 1)'.
+#[test]
+fn defvar_passes_a_local_let_to_the_default_let_under_it() {
+    let mut vm = Vm::new();
+    assert_eq!(answer(&mut vm, "(defvar dv-s124 nil) (makunbound 'dv-s124)
+      (setq dv-a (get-buffer-create \"dv-a\") dv-b (get-buffer-create \"dv-b\"))
+      (set-buffer dv-a) (set (make-local-variable 'dv-s124) 1)
+      (let ((dv-s124 2)) (set-buffer dv-b) (let ((dv-s124 3)) (defvar dv-s124 9)))
+      (list (default-boundp 'dv-s124) (and (default-boundp 'dv-s124) (default-value 'dv-s124)) (buffer-local-value 'dv-s124 dv-a))"), Ok("(t 9 1)".into()));
+}
 #[test]
 fn local_values_survive_counted_collection() {
     let mut vm = Vm::new();

@@ -225,3 +225,24 @@ fn a_unibyte_buffers_boundaries_are_the_mirrors() {
     vm.eval_source("(make-overlay 5 6)").unwrap();
     assert_eq!((next(&vm, 3), next(&vm, 6)), (6, 7), "from the overlay's start, past the raw byte at 4");
 }
+
+/// While insert-file-contents decides a coding, the buffer's multibyte
+/// representation is held aside and the unibyte one is current: its locals
+/// live in the current one alone, so a local the decision kills lets go of
+/// its value at the next collection, and the toggle back keeps the rest.
+#[test]
+fn a_held_representation_keeps_no_copy_of_the_locals() {
+    let mut vm = Vm::new();
+    vm.eval_source_raw("(setq hb (get-buffer-create \"hb\") hb-weak (make-hash-table :weakness 'value))
+      (set-buffer hb)
+      (set (make-local-variable 'hb-dropped) (list 'dropped))
+      (set (make-local-variable 'hb-kept) 'kept)
+      (puthash 1 hb-dropped hb-weak)").unwrap();
+    assert!(Leaf::new(&mut vm).fileio_set_multibyte_flag(false).is_ok());
+    vm.eval_source_raw("(kill-local-variable 'hb-dropped)").unwrap();
+    vm.collect(&mut []);
+    assert_eq!(vm.eval_source_raw("(hash-table-count hb-weak)").unwrap(), Value::integer(0).unwrap(), "the killed local's value is free");
+    assert!(Leaf::new(&mut vm).fileio_set_multibyte_flag(true).is_ok());
+    let after = vm.eval_source_raw("(list enable-multibyte-characters (local-variable-p 'hb-dropped) hb-kept)").unwrap();
+    assert_eq!(vm.display(after).unwrap(), "(t nil kept)");
+}
