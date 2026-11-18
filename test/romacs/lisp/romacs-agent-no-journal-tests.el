@@ -15,11 +15,14 @@
 
 (defmacro romacs-agent-no-journal-tests--with (&rest body)
   "BODY with `session', a Claude session of two turns, its journal written,
-in a store of its own."
+in a store of its own, a preview's budget unbounded."
   (declare (indent 0))
   `(romacs-agent-test-with-store
      (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
             (romacs-agent-event-functions nil)
+            ;; No real time: a preview is drawn whatever the host's load,
+            ;; its budget tested by the tests that set it, on a stubbed clock.
+            (romacs-agent-ui--preview-seconds 1e9)
             (id romacs-agent-no-journal-tests--id)
             (dir (expand-file-name id (romacs-agent--state-root)))
             (seq 0))
@@ -237,12 +240,25 @@ in a store of its own."
                                       "\n"))
                             (number-sequence 1 64) ""))
          nil journal t 'silent))
-      (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore))
-        (let* ((romacs-agent-ui--preview-seconds 0.2) (start (float-time))
-               (buffer (romacs-agent-no-journal-tests--chat session)))
-          (should (< (- (float-time) start) 0.6))
-          (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
-          (kill-buffer buffer))))))
+      ;; A clock that moves a tick each time it is read: the budget is
+      ;; spent after so many reads, whatever the host's load.
+      (let* ((now 0.0) (looks 0) (looked (symbol-function 'romacs-agent--turn-free-p)))
+        (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore)
+                  ((symbol-function 'float-time) (lambda (&rest _) (cl-incf now 0.001)))
+                  ((symbol-function 'romacs-agent--turn-free-p)
+                   (lambda (&rest args) (cl-incf looks) (apply looked args))))
+          ;; Unbounded, how many prompts its choice looks back from.
+          (let ((romacs-agent-ui--preview-seconds 1e9))
+            (kill-buffer (romacs-agent-no-journal-tests--chat session)))
+          (let ((all looks))
+            (setq looks 0)
+            (let* ((romacs-agent-ui--preview-seconds 0.2)
+                   (buffer (romacs-agent-no-journal-tests--chat session)))
+              (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
+              (should-not (string-search "steer" (with-current-buffer buffer (buffer-string))))
+              ;; Its choice cut short by the budget, not run to its end.
+              (should (< looks all))
+              (kill-buffer buffer))))))))
 
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the
