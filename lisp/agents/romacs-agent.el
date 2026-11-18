@@ -5193,18 +5193,25 @@ directories that do."
   "(SESSIONS . PLACE): for the session table SESSIONS, the place in the
 listing its sessions were last looked for up to (`romacs-agent-rows-since').")
 
-(defun romacs-agent--start-dirs ()
+(defun romacs-agent--start-quick ()
+  "Whether an editor's start may ask only of the marked and the live
+sessions (`romacs-agent--start-dirs'): its marks known and the listing
+answering; then the listing's place now."
+  (and (not noninteractive)
+       (romacs-agent--marked)
+       romacs-agent-prefixed-ids romacs-agent-rows-since
+       (funcall romacs-agent-rows-since nil)))
+
+(defun romacs-agent--start-dirs (&optional quick)
   "The session directories an editor's start asks whether to load
 \(`romacs-agent--to-load').  Its marks known, only those something waits
 on and those whose supervisor's socket is there: every other one with a
 row is left unloaded, and one with neither a row nor a supervisor is the
 start's fill's to find (`romacs-agent-store--load-missing').  Else every
-session recorded (`romacs-agent--new-session-dirs')."
-  (if-let* (((not noninteractive))
-            (marked (romacs-agent--marked))
-            ((and romacs-agent-prefixed-ids romacs-agent-rows-since))
-            ;; The listing answering: else every session, as with none.
-            (since (funcall romacs-agent-rows-since nil)))
+session recorded (`romacs-agent--new-session-dirs').  QUICK, when given,
+is `romacs-agent--start-quick''s answer."
+  (if-let* ((since (or quick (romacs-agent--start-quick)))
+            (marked (romacs-agent--marked)))
       (let ((dirs nil))
         ;; Every session recorded by now chosen among: a view's later look
         ;; asks only of those whose rows were written since.
@@ -5224,7 +5231,7 @@ listing; at its first look, those a start asks of (`romacs-agent--start-dirs')."
     (when since (setq romacs-agent--rows-seen (cons romacs-agent--sessions (cdr since))))
     (if (not since)
         ;; Its first look, or no listing: as a start's.
-        (romacs-agent--start-dirs)
+        (romacs-agent--start-dirs (romacs-agent--start-quick))
       (delq nil (mapcar (lambda (id) (unless (gethash id romacs-agent--sessions)
                                        (expand-file-name id (romacs-agent--state-root))))
                         (delete-dups (car since)))))))
@@ -5268,13 +5275,14 @@ LISTED, MARKED and LIVE, tables of ids, answer for every session at once
          (not (if marked (gethash id marked) (romacs-agent--waiting-p dir)))
          (progn (when live (romacs-agent--quiet-watch dir quiet)) t))))
 
-(defun romacs-agent--to-load (dirs)
+(defun romacs-agent--to-load (dirs &optional few)
   "Those of the session directories DIRS a start loads: not left unloaded
 \(`romacs-agent--unloaded-p'), asked of the listing, the marks and the
 runtime directory once for them all, so a start costs the sessions it
-loads, not those recorded."
+loads, not those recorded.  FEW: DIRS are a quick start's, their rows
+asked of one at a time, never every row."
   (let* (;; Every row asked at once for many; a row each for few.
-         (listed (and romacs-agent-listed-ids (> (length dirs) 64) (funcall romacs-agent-listed-ids)))
+         (listed (and romacs-agent-listed-ids (not few) (> (length dirs) 64) (funcall romacs-agent-listed-ids)))
          (marked (romacs-agent--marked))
          (live (romacs-agent--live-ids (mapcar #'file-name-nondirectory dirs)))
          (load (seq-remove (lambda (dir) (romacs-agent--unloaded-p dir listed marked live)) dirs)))
@@ -5427,7 +5435,8 @@ start, so sessions survive it."
     ;; Restoring as the sessions to load are chosen: one with no row yet
     ;; is listed while a start's fill runs (`romacs-agent-listed-p').
     (setq romacs-agent--restoring t)
-    (if-let* ((dirs (condition-case err (romacs-agent--to-load (romacs-agent--start-dirs))
+    (if-let* ((dirs (condition-case err (let ((quick (romacs-agent--start-quick)))
+                                          (romacs-agent--to-load (romacs-agent--start-dirs quick) quick))
                       ;; Not chosen (the store held): no start under way, so
                       ;; the next view's asks again.
                       (error (setq romacs-agent--restoring nil romacs-agent--rows-seen nil)
@@ -5463,7 +5472,9 @@ they have (`romacs-agent-restored-hook').")
   "A `romacs-agent-restore-soon' with nothing left to load, nor folded
 aside, ends: its tail runs, and its progress says done.  Sessions loaded
 after it ended are known as it knows them: its hook runs again."
-  (when (and romacs-agent--late-loads (not romacs-agent--restoring) (null romacs-agent--restore-pending))
+  (when (and romacs-agent--late-loads (not romacs-agent--restoring) (null romacs-agent--restore-pending)
+             ;; Their records read: a worker folding one still calls this.
+             (zerop (hash-table-count romacs-agent--folding)))
     (setq romacs-agent--late-loads nil)
     (run-hooks 'romacs-agent-restored-hook))
   (when romacs-agent--restoring
