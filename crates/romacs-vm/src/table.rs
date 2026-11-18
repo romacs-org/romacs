@@ -471,6 +471,7 @@ impl<T> Table<T> {
     #[inline]
     fn store_parts(&mut self, i: usize) -> (&mut T, &mut u8, &mut Barrier, &mut ImageSet) {
         debug_assert!(self.colors.len() >= self.entries.len(), "a colour for every entry");
+        debug_assert!(self.cards.len() * CARD >= self.colors.len(), "a card for every colour");
         let entry = &mut self.entries[i];
         // SAFETY: I is within `entries` (just indexed), and `colors` is never
         // the shorter, at any instruction, so that a panic part way leaves it

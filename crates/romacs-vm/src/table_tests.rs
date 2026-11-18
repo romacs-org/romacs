@@ -2,16 +2,27 @@
 //! apart from the table (`super`).
 use super::*;
 
-/// The table for a mark, as these tests use it.
+/// The table for a full's mark, as these tests use it.
 pub(super) fn raw_of<T>(t: &mut Table<T>) -> RawTable<T> {
+    raw_for(t, false)
+}
+/// The table for a mark, a minor's when MINOR.
+fn raw_for<T>(t: &mut Table<T>, minor: bool) -> RawTable<T> {
     // SAFETY: each test drops its table only after the last use of this,
     // and whatever else changes the table is what `holds' is to notice.
-    unsafe { t.raw(false) }
+    unsafe { t.raw(minor) }
 }
 /// A sweep of all RAW sees, on the test's one thread.
 pub(super) fn sweep_whole<T>(raw: &RawTable<T>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> RangeSwept {
-    // SAFETY: the whole table is this thread's, and the range starts at 0.
-    unsafe { raw.sweep_range(0..raw.len(), quarantine, destroy) }
+    sweep_in(raw, 0..raw.len(), quarantine, destroy)
+}
+/// A sweep of RANGE of RAW, which starts on a multiple of 8, on the
+/// test's one thread.
+fn sweep_in<T>(raw: &RawTable<T>, range: std::ops::Range<usize>, quarantine: bool, destroy: impl FnMut(usize, &mut T)) -> RangeSwept {
+    assert!(range.start.is_multiple_of(8), "a range on a word");
+    // SAFETY: the table is this thread's, and the range starts on a
+    // multiple of 8 (asserted).
+    unsafe { raw.sweep_range(range, quarantine, destroy) }
 }
 /// A compaction after the mark standing, of a table with no image entry.
 fn compact<T>(t: &mut Table<T>, keep: impl FnMut(&mut T)) {
@@ -146,13 +157,9 @@ fn age<T>(table: &mut Table<T>) {
 /// alone, LIVE claimed first.
 fn minor_sweep(t: &mut Table<Value>, live: &[usize]) -> RangeSwept {
     let runs = t.touched();
-    // SAFETY: the table is this thread's until the books are kept.
-    let raw = unsafe { t.raw(true) };
+    let raw = raw_for(t, true);
     for &i in live { assert!(raw.claim(i), "{i} young and unclaimed"); }
-    let swept = runs.into_iter().fold(RangeSwept::default(), |all, run| {
-        // SAFETY: each run is whole cards, so starts on a multiple of 8.
-        all.and(unsafe { raw.sweep_range(run, false, |_, v| *v = Value::NIL) })
-    });
+    let swept = runs.into_iter().fold(RangeSwept::default(), |all, run| all.and(sweep_in(&raw, run, false, |_, v| *v = Value::NIL)));
     t.swept(swept, false);
     swept
 }
