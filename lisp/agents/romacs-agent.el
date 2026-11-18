@@ -2054,11 +2054,11 @@ goes."
       ;; written makes it running, never idle with a prompt in hand.  One
       ;; held (a selection to confirm) waits idle, sent as the hold ends.
       (let ((idle (and (memq (romacs-agent-state session) '(starting running))
-                       (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session))))
-            (requests (romacs-agent-requests session)))
+                       (<= (or (romacs-agent-input-seq session) 0) (romacs-agent-completed-seq session)))))
         (when idle (setf (romacs-agent-state session) 'idle))
-        (romacs-agent--dispatch session)
-        (when (and idle (= requests (romacs-agent-requests session))) (romacs-agent--changed session)))))))
+        (unwind-protect (romacs-agent--dispatch session)
+          ;; Nothing written (or its write failed): idle, said once.
+          (when (and idle (eq (romacs-agent-state session) 'idle)) (romacs-agent--changed session))))))))
 
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
@@ -3496,6 +3496,9 @@ it (a rollback's, a renewal's): stopped first when it runs.  BEFORE, when
 given, is called just before the resume."
   (if (not (process-live-p (romacs-agent-connection session)))
       (progn (when before (funcall before)) (romacs-agent-resume session))
+    ;; Held from here: nothing more goes to the run it ends, attached still
+    ;; while it stops (its exit, or the resume, starts the next run's state).
+    (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :relaunching t))
     (romacs-agent--stop-then session (lambda () (romacs-agent--resume-when-gone session 50 before)))))
 
 (defun romacs-agent--resume-when-gone (session tries &optional before)
@@ -3530,8 +3533,11 @@ any true holds them (`romacs-agent--held-p').")
 (defun romacs-agent--held-p (session)
   "Whether SESSION's messages wait whatever its harness does: a rollback
 or a renewal (romacs-agent-renew.el) holds them for the conversation it
-leaves them to, a renewal until its new conversation's run starts."
-  (or (plist-get (romacs-agent-driver-state session) :rolling-back) (romacs-agent-renewing session)
+leaves them to, a renewal until its new conversation's run starts, and a
+relaunch until the run it ends has gone."
+  (or (plist-get (romacs-agent-driver-state session) :rolling-back)
+      (plist-get (romacs-agent-driver-state session) :relaunching)
+      (romacs-agent-renewing session)
       (run-hook-with-args-until-success 'romacs-agent-hold-functions session)))
 
 ;; A message for a harness is an item of its queue, written by one
@@ -3541,13 +3547,15 @@ leaves them to, a renewal until its new conversation's run starts."
 (cl-defstruct (romacs-agent-item (:type list) (:copier nil)
                                  (:constructor romacs-agent-item
                                                (text &key images messages delivered valid (kind 'now) own token)))
-  "A message waiting for its harness.  KIND says when it may go: `now' at
-once, a steer into a turn under way that its harness can steer; `next'
-only as a new turn.  OWN, Romacs's own prompt (`romacs-agent--input'),
-goes as a new turn through the hold whose TOKEN it carries.  VALID, when
-given, is asked as it would go: nil drops it.  DELIVERED is called once
-it is written.  IMAGES and MESSAGES as `romacs-agent--input' says."
-  text images messages delivered valid kind own token)
+  "A message waiting for its harness.  KIND says when it may go: `now', a
+steer into the turn under way as it was sent (TURN, that turn's number,
+set at admission) while that turn runs and its harness can steer it,
+else as a new turn; `next' only as a new turn.  OWN, Romacs's own
+prompt (`romacs-agent--input'), goes as a new turn through the hold whose
+TOKEN it carries.  VALID, when given, is asked as it would go: nil drops
+it.  DELIVERED is called once it is written.  IMAGES and MESSAGES as
+`romacs-agent--input' says."
+  text images messages delivered valid kind own token turn)
 
 (defun romacs-agent--turn-under-way-p (session)
   "Whether SESSION's records, or the message written last, have a turn
@@ -3583,7 +3591,9 @@ stopped or ended: a new turn when none is under way, else a steer."
               (romacs-agent--ready-p session)
               (not (romacs-agent-startup-pending session))
               (or (not (romacs-agent--turn-under-way-p session))
-                  (and (eq (romacs-agent-item-kind item) 'now) (romacs-agent--steerable-p session)))
+                  ;; A steer: the turn it was sent into still runs.
+                  (and (eql (romacs-agent-item-turn item) (romacs-agent-turns session))
+                       (romacs-agent--steerable-p session)))
               ;; Its mark is a file: asked last.
               (not (romacs-agent-stopped session))))))
 
@@ -3642,13 +3652,17 @@ first).  One timer for however many records come meanwhile."
 
 (defun romacs-agent--open (session)
   "Start what lets SESSION's waiting messages go: a supervisor still
-running is attached; a stopped one's harness is resumed once it has gone
+running is attached; a stopped harness is resumed once it has gone
 \(`romacs-agent--sentinel' resumes it otherwise).  An ended harness is
 not resumed by a message: `user-error' says to resume it."
   (cond ((romacs-agent--per-turn-p session))
+        ((romacs-agent-stopped session)
+         (unless (process-live-p (romacs-agent-connection session)) (romacs-agent-resume session)))
+        ;; Its run's exit read, whatever its supervisor still holds open.
+        ((memq (romacs-agent-state session) '(ended unstarted))
+         (user-error "Session %s has ended: resume it (r) to go on" (romacs-agent-title session)))
         ((process-live-p (romacs-agent-connection session)))
         ((eq (romacs-agent-state session) 'starting))
-        ((romacs-agent-stopped session) (romacs-agent-resume session))
         ;; A stopped supervisor leaves its socket: only a connection says it listens.
         ((and (romacs-agent-host-socket session) (file-exists-p (romacs-agent-host-socket session))
               (processp (romacs-agent--attach session 0))))
@@ -3660,6 +3674,9 @@ lets it go, and dispatch.  A worker folding SESSION still, that waits for
 the fold.  Refused (`user-error', ITEM not kept) when SESSION's harness
 ended: nothing sends it."
   (let ((id (romacs-agent-id session)))
+    ;; Sent into a turn under way: a steer of that turn alone.
+    (when (and (eq (romacs-agent-item-kind item) 'now) (romacs-agent--turn-under-way-p session))
+      (setf (romacs-agent-item-turn item) (romacs-agent-turns session)))
     (if first (romacs-agent--enqueue-first session item) (romacs-agent--enqueue session item))
     (if (romacs-agent--folding-p session)
         (progn

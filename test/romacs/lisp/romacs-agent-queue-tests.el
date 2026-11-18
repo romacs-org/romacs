@@ -156,10 +156,12 @@ replay over."
                     ,(lambda (s) (romacs-agent--raise s (list :type 'done :seq 4))
                        (romacs-agent-queue-tests--settle))
                     romacs-agent-send-later)
-    ;; Path 6: a run ended: nothing opens it but a resume.
-    (ended ,(lambda (s) (romacs-agent--raise s (list :type 'exit :status 0 :seq 3)))
-           ,(lambda (s) (romacs-agent--dispatch s))
-           nil)
+    ;; A rollback's or a renewal's relaunch, its old run still stopping:
+    ;; its exit, then the resume, opens it.
+    (relaunching ,(lambda (s) (cl-letf (((symbol-function 'romacs-agent--stop-then) #'ignore))
+                                (romacs-agent--relaunch s)))
+                 ,(lambda (s) (romacs-agent-queue-tests--settle) (romacs-agent--dispatch s))
+                 nil)
     ;; Path 7: stopped, its harness going: the resumed one takes it.
     (stopped ,(lambda (s) (romacs-agent--set-stopped s t))
              ,(lambda (s) (romacs-agent--dispatch s))
@@ -237,11 +239,46 @@ message is sent, `romacs-agent-send' by default.")
     (should-error (romacs-agent-send ended "hello") :type 'user-error)
     (should-not (romacs-agent-queue ended))
     (should (= (romacs-agent-queue-length ended) 0))
+    ;; Its exit read, its supervisor still attached (path 6).
+    (romacs-agent-test-attach ended t)
+    (should-error (romacs-agent-send ended "hello") :type 'user-error)
+    (should (= (romacs-agent-queue-length ended) 0))
     (cl-letf (((symbol-function 'romacs-agent--line) (lambda (&rest _) (error "Gone")))
               ((symbol-function 'romacs-agent--fold-now) #'ignore))
       (should-error (romacs-agent-send failing "hello")))
     (should-not (romacs-agent-queue failing))
     (should (= (romacs-agent-queue-length failing) 0))))
+
+(ert-deftest romacs-agent-a-steer-is-its-turns-alone ()
+  ;; Sent into a running turn, a message steers it at once; sent while
+  ;; none runs (its harness starting), each waits for a turn of its own;
+  ;; one whose turn ended before it could go waits for a turn of its own.
+  (require 'romacs-agent-rollback)
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "aeaeaeae-0000-4000-8000-000000000000" :harness 'claude :state 'idle)))
+        (sent nil))
+    (romacs-agent-queue-tests--writing sent
+      (cl-letf (((symbol-function 'romacs-agent--changed) #'ignore))
+        ;; Starting: not ready.
+        (romacs-agent-send session "one")
+        (romacs-agent-send session "two")
+        (should-not sent)
+        (setf (romacs-agent-driver-state session) (list :initialized t :ready t))
+        (romacs-agent--dispatch session)
+        (should (= (length sent) 1))
+        (should (= (romacs-agent-queue-length session) 1))
+        ;; Into the turn "one" began: at once.
+        (romacs-agent-send session "steer")
+        (should (= (length sent) 2))
+        (should (equal (mapcar #'car (romacs-agent-queue session)) '("two")))
+        ;; A steer held (a rollback) past its turn's end: a turn of its own.
+        (romacs-agent-rollback--hold session 'token)
+        (romacs-agent-send session "late")
+        (romacs-agent--raise session (list :type 'done :seq 5))
+        (romacs-agent-rollback--release session 'token)
+        (should (= (length sent) 3))
+        (should (equal (gethash "content" (gethash "message" (car sent))) "two"))
+        (should (equal (mapcar #'car (romacs-agent-queue session)) '("late")))))))
 
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):

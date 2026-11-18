@@ -591,7 +591,7 @@ message's record for TEXT, `interrupted' each interrupted."
   (romacs-agent-delegate-tests--family ((a nil) (b nil))
     (let ((got nil))
       (cl-letf (((symbol-function 'romacs-agent-tools--deliver)
-                 (lambda (_session text done &optional _valid messages) (push (cons text messages) got) (funcall done))))
+                 (lambda (_session text done &optional _valid messages &rest _) (push (cons text messages) got) (funcall done))))
         (puthash (romacs-agent-id parent) (list (list a b "steer" "the interface is X")) romacs-agent-tools--copies)
         (romacs-agent-delegate-tests--end a 5 "A done")
         (romacs-agent-tools--flush parent))
