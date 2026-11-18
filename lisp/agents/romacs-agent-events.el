@@ -711,8 +711,8 @@ turn rows filled), but not yet its own: (:migrated N :skipped IDS
 :failed IDS).  An editor still running reads its journal as before; the
 next editor's start makes the staged records the sessions' own
 \(`romacs-agent-events--flip-soon').  A session whose supervisor runs
-\(its lock held) is left in its journal, skipped.  SAY, when given, is called with a line for
-each skipped or failed one."
+\(its lock held) is left in its journal, skipped.  SAY, when given, is
+called with a line for each skipped or failed one."
   (require 'romacs-agent-turns)
   (require 'romacs-agent-ui)
   (romacs-agent-store--made)

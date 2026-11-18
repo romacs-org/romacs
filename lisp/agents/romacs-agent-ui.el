@@ -2591,7 +2591,8 @@ was open, loading no session; one is loaded when its chat is used
   "Draw SESSION's last `romacs-agent-ui--turns' turns into the current
 chat: its finished turns as they were kept drawn, the one under way
 from its records, by seq (`romacs-agent-ui--replay-rows').  One whose
-records are still a journal is drawn from it (`romacs-agent-ui--replay-journal')."
+records are still a journal is drawn from it
+\(`romacs-agent-ui--replay-journal')."
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
     (romacs-agent-ui--replay-journal session)))
 
