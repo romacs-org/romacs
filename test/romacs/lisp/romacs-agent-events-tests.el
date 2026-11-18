@@ -760,7 +760,12 @@ turns, and its journal's file; a state root of its own."
            (should (= backed 40))
            (setq calls 0)
            (should (>= (length (romacs-agent-events--journaled)) 40))
-           (should (= calls 1))))))))
+           (should (= calls 1))
+           ;; A great many: a call a batch, each command line bounded.
+           (let ((romacs-agent-events--held-batch 15))
+             (setq calls 0)
+             (romacs-agent-events--journaled)
+             (should (= calls 3)))))))))
 
 (ert-deftest romacs-agent-events-a-socket-left-behind-supervises-nothing ()
   ;; One holds a session while its lock is held (a host running, a move);
