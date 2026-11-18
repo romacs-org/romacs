@@ -91,6 +91,39 @@ in a store of its own."
             (should (= (cl-count-if (lambda (line) (string-search "say 2" line)) (split-string (buffer-string) "\n")) 1)))
           (kill-buffer buffer))))))
 
+(ert-deftest romacs-agent-no-journal-a-preview-cut-short-leaves-nothing ()
+  ;; A preview past its budget after it drew a prompt: none of it left,
+  ;; nor what it set of the chat's drawing; the row says the records move.
+  ;; A preview touches nothing of the session's: not its manifest.  Its
+  ;; move failing, the row that says so takes the waiting row's place.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let* ((manifest (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           (before (with-temp-buffer (insert-file-contents manifest) (buffer-string)))
+           (waits nil) (renders 0) (time (symbol-function 'float-time))
+           (render (symbol-function 'romacs-agent-ui--render)))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits)))
+                ((symbol-function 'romacs-agent-ui--render)
+                 (lambda (s e) (prog1 (funcall render s e) (cl-incf renders))))
+                ;; Its budget spent once it drew its first event.
+                ((symbol-function 'float-time) (lambda (&rest args) (if (> renders 0) 1e12 (apply time args)))))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (should (> renders 0))
+          (with-current-buffer buffer
+            (should (string-search "move to the store" (buffer-string)))
+            (should-not (string-search "ask" (buffer-string)))
+            (should-not (string-search "preview" (buffer-string)))
+            (should (zerop (or romacs-agent-ui--shown 0))))
+          (kill-buffer buffer)))
+      (should (equal (with-temp-buffer (insert-file-contents manifest) (buffer-string)) before))
+      (setq waits nil)
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (funcall (cdr (pop waits)))
+          (with-current-buffer buffer
+            (should (< (string-search "could not move" (buffer-string)) (string-search "say 2" (buffer-string)))))
+          (kill-buffer buffer))))))
+
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the
   ;; session loads (a watcher's, not a command's), and drawn again once

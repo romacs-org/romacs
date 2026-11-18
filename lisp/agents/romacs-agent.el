@@ -1785,19 +1785,25 @@ other; empty for none."
             (romacs-agent-title-auto session) nil)
       (romacs-agent--update-manifest session))))
 
+(defvar romacs-agent--manifest-frozen nil
+  "Non-nil while a session's records are read into a copy for a view of
+them alone (a chat's preview): its manifest is written nothing then.")
+
 (defun romacs-agent--manifest-put (session &rest fields)
-  "Write FIELDS (NAME VALUE ...) into SESSION's manifest, when it differs."
-  (let* ((file (expand-file-name "manifest.json" (romacs-agent-dir session)))
-         ;; Read with null and false kept: they are written back.
-         (manifest (and (file-readable-p file)
-                        (with-temp-buffer
-                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                          (ignore-errors (json-parse-buffer :object-type 'hash-table
-                                                            :null-object :null :false-object :false))))))
-    (when (and manifest (cl-loop for (name value) on fields by #'cddr
-                                 thereis (not (equal (gethash name manifest) value))))
-      (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
-      (romacs-agent--write-json file manifest))))
+  "Write FIELDS (NAME VALUE ...) into SESSION's manifest, when it differs;
+nothing while `romacs-agent--manifest-frozen'."
+  (unless romacs-agent--manifest-frozen
+    (let* ((file (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           ;; Read with null and false kept: they are written back.
+           (manifest (and (file-readable-p file)
+                          (with-temp-buffer
+                            (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                            (ignore-errors (json-parse-buffer :object-type 'hash-table
+                                                              :null-object :null :false-object :false))))))
+      (when (and manifest (cl-loop for (name value) on fields by #'cddr
+                                   thereis (not (equal (gethash name manifest) value))))
+        (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
+        (romacs-agent--write-json file manifest)))))
 
 (defun romacs-agent--update-manifest (session)
   "Write SESSION's title back to its manifest."
