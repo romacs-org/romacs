@@ -80,6 +80,22 @@ journal one turn long."
       (should (equal (sqlite-select (romacs-agent-store--open) "select title, state from sessions")
                      '(("second" "idle")))))))
 
+(ert-deftest romacs-agent-store-a-rename-reaches-the-row ()
+  ;; A rename at a state already kept rewrites no row by its keep: its
+  ;; title alone is written to the row, the rest of it as it was.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000002" :harness 'claude
+                                       :title "first" :cwd "/p/two/" :dir (expand-file-name "b" root) :seq 3)))
+      (make-directory (romacs-agent-dir session))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
+      (romacs-agent--keep session 'idle)
+      (setf (romacs-agent-title session) "renamed")
+      (romacs-agent--update-manifest session)
+      (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, cwd from sessions")
+                     '(("renamed" "idle" "/p/two/")))))))
+
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()
   ;; Restored: a listed session with no kept state and no supervisor is
   ;; not loaded (its journal unread), one whose supervisor runs a turn is;

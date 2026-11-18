@@ -750,6 +750,18 @@ quietly nothing when the database cannot be written."
                     (list project))
     t))
 
+(defun romacs-agent-store-title (id title)
+  "Keep TITLE as what the row of the session ID names says, by the writer:
+a rename reaches the row at once, whatever state its session keeps."
+  (romacs-agent-write 'romacs-agent-store--title-row (list id title) nil (list 'title id)))
+
+(defun romacs-agent-store--title-row (id title)
+  "Set the title in the row of the session ID names to TITLE, here, and
+nothing else of it.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a title in"))))
+    (sqlite-execute db "update sessions set title = ? where id = ?" (list title id))
+    t))
+
 (defun romacs-agent-store-requested (parent request)
   "The id of the session PARENT (nil: no session) started with client
 request id REQUEST: from its row; while a fill still writes the rows (a

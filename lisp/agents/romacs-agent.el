@@ -1822,9 +1822,14 @@ nothing while `romacs-agent--manifest-frozen'."
         (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
         (romacs-agent--write-json file manifest)))))
 
+(declare-function romacs-agent-store-title "romacs-agent-store" (id title))
+
 (defun romacs-agent--update-manifest (session)
-  "Write SESSION's title back to its manifest."
-  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false))
+  "Write SESSION's title back to its manifest, and to its row: a kept
+state rewrites no row for a rename."
+  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false)
+  (unless (or romacs-agent--manifest-frozen (not (file-exists-p (romacs-agent-store--file))))
+    (romacs-agent-store-title (romacs-agent-id session) (romacs-agent-title session))))
 
 (defun romacs-agent-activity-seq (session)
   "The seq of SESSION's last turn activity: its last prompt or turn end."
