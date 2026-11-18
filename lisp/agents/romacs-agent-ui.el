@@ -2594,7 +2594,32 @@ drawn once they are, or says it cannot be when they could not move."
        (propertize (if (romacs-agent-events-migrating-p (romacs-agent-id session))
                        "⋯ moving this chat's records to the store\n"
                      "⋯ waiting for this chat's records to move to the store\n")
-                   'face 'romacs-agent-placeholder 'romacs-agent-moving t)))))
+                   'face 'romacs-agent-placeholder 'romacs-agent-moving t))
+      ;; Its last turns meanwhile, read from its journal.
+      (romacs-agent-ui--preview session))))
+
+(defconst romacs-agent-ui--preview-seconds 1.0
+  "The most a chat waiting for its records' move spends drawing their
+journal's tail meanwhile (`romacs-agent-ui--preview'): past it, the row
+saying they move is all it shows.")
+
+(defun romacs-agent-ui--preview (session)
+  "Draw SESSION's last turns into the current chat from its journal's
+tail (its last `romacs-agent-journal-tail-bytes' at most), while its
+records move to SQLite: never blank, and redrawn from SQLite once they
+are (`romacs-agent-ui--moved').  It holds no place in the journal, so
+nothing keeps them from moving.  Nil, nothing left drawn, when there is
+nothing to draw or it would take past `romacs-agent-ui--preview-seconds'."
+  (let ((start (copy-marker romacs-agent-ui--end))
+        (deadline (+ (float-time) romacs-agent-ui--preview-seconds)))
+    (or (catch 'romacs-agent-ui--past-deadline
+          ;; Its tail's start, nil for the journal's own when all of it fits.
+          (let ((tail (romacs-agent--journal-tail session (or romacs-agent-ui--turns 20))))
+            (when (> (or (cdr tail) 0) 0)
+              (romacs-agent-ui--replay-from session (car tail) nil deadline)
+              t)))
+        (progn (let ((inhibit-read-only t)) (delete-region start romacs-agent-ui--end))
+               nil))))
 
 (defun romacs-agent-ui--moved-here (session)
   "Draw SESSION in the current chat, its records' move over: from them
@@ -2609,7 +2634,17 @@ when they are in SQLite, else a row saying they could not move."
   "SESSION's records' move is over: the current chat, which waited for it,
 is drawn again from them; one they could not move says so in place of
 the row that said they were moving.  An edit to no undo."
-  (if (romacs-agent-events-p session) (romacs-agent-ui--redraw)
+  (if (romacs-agent-events-p session)
+      ;; What its windows show of the composer stays shown: the transcript
+      ;; above it is all that changes.
+      (let ((at (and (>= (point) romacs-agent-ui--end) (- (point-max) (point))))
+            (windows (seq-filter (lambda (window) (>= (window-point window) romacs-agent-ui--end))
+                                 (get-buffer-window-list nil nil t))))
+        (romacs-agent-ui--redraw)
+        (when at (goto-char (max romacs-agent-ui--end (- (point-max) at))))
+        (dolist (window windows)
+          (set-window-point window (max romacs-agent-ui--end (- (point-max) (or at 0))))
+          (with-selected-window window (recenter -1))))
     (romacs-agent-ui--unrecorded
      (lambda ()
        (let ((inhibit-read-only t))
@@ -2889,15 +2924,17 @@ turn rows to keep with them (`romacs-agent-drawn-put')."
           (romacs-agent-drawn-form (point-min) romacs-agent-ui--end))
       (kill-buffer buffer))))
 
-(defun romacs-agent-ui--replay-from (session from &optional end)
+(defun romacs-agent-ui--replay-from (session from &optional end deadline)
   "Render SESSION's records from place FROM (a record's, or nil for its
 start) to END (its end by default) into the current chat buffer; none
-when END is not after FROM."
+when END is not after FROM.  Past DEADLINE (a `float-time'), when given,
+it throws `romacs-agent-ui--past-deadline'."
   ;; A copy parses, so the live session's own state is not replayed over.
   (unless (and from end (>= from end))
   (let ((scratch (romacs-agent--scratch session)) (romacs-agent-ui--replaying t))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
+                   (when (and deadline (> (float-time) deadline)) (throw 'romacs-agent-ui--past-deadline nil))
                    ;; The scratch copy's turn data, for the footers it draws.
                    (setf (romacs-agent-turn-start session) (or (romacs-agent-turn-start scratch) (romacs-agent-turn-start session)))
                    ;; With no supervisor, no event reached the session: its

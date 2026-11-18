@@ -53,30 +53,39 @@ in a store of its own."
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
   ;; Not moved yet: a row says so, the chat waits for the move
-  ;; (`romacs-agent-events-then'), its journal unread; moved, it draws.
+  ;; (`romacs-agent-events-then'), its last turns drawn from its journal's
+  ;; tail meanwhile, never blank; moved, it is drawn again from the store.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-no-journal-tests--with
     (let ((waits nil))
-      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits)))
-                ((symbol-function 'romacs-agent--read-journal-file) (lambda (&rest _) (error "Read the journal"))))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
         ;; Its move failed: said so, not waited for again.
         (let ((buffer (romacs-agent-no-journal-tests--chat session)))
           (should (equal (mapcar #'car waits) (list id)))
           (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
-          (should-not (string-search "ask 1" (with-current-buffer buffer (buffer-string))))
+          (should (string-search "say 2" (with-current-buffer buffer (buffer-string))))
+          ;; Drawn, and nothing of the session's own state changed by it.
+          (should (= (romacs-agent-seq session) 0))
           (funcall (cdr (pop waits)))
           (with-current-buffer buffer
             (should (string-search "could not move" (buffer-string)))
             (should-not (string-search "moving" (buffer-string))))
           (should-not waits)
           (kill-buffer buffer))
-        ;; Moved: drawn from the store.
+        ;; A tail past its budget: the row alone, nothing half drawn.
+        (let* ((romacs-agent-ui--preview-seconds -1)
+               (buffer (romacs-agent-no-journal-tests--chat session)))
+          (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
+          (should-not (string-search "say" (with-current-buffer buffer (buffer-string))))
+          (kill-buffer buffer))
+        (pop waits)
+        ;; Moved: drawn from the store, its preview gone.
         (let ((buffer (romacs-agent-no-journal-tests--chat session)))
           (romacs-agent-test-stored session)
           (funcall (cdr (pop waits)))
           (with-current-buffer buffer
             (should-not (string-search "move to the store" (buffer-string)))
-            (should (string-search "say 2" (buffer-string))))
+            (should (= (cl-count-if (lambda (line) (string-search "say 2" line)) (split-string (buffer-string) "\n")) 1)))
           (kill-buffer buffer))))))
 
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
