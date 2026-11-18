@@ -311,9 +311,6 @@ mod leaf {
         pub(crate) fn lossage_limit(&self) -> usize { self.vm.lossage_limit() }
         pub(crate) fn set_lossage_limit(&mut self, limit: usize) { self.vm.set_lossage_limit(limit) }
         pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
-        pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
-            self.symbol_slot(v)
-        }
         /// WRITE from this leaf (`Vm::write_from_native'). A failure comes back
         /// only from a write made at once: with no engine to complete the
         /// leaf, a watcher's signal stays pending as itself and a `throw',
@@ -1106,6 +1103,7 @@ mod leaf {
         pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal_including_properties(a, b)
         }
+        #[inline]
         fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
@@ -1640,7 +1638,8 @@ mod leaf {
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
                 7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
-                0 if Vm::image_string(v) => Kind::String,
+                // A private object first: an executable-image string is past
+                // the private table, so `object_if' answers None for it.
                 0 => match self.vm.object_if(v) {
                     Some(data::Object::Float(_)) => Kind::Float,
                     Some(data::Object::Bignum(_)) => Kind::Bignum,
@@ -1674,6 +1673,7 @@ mod leaf {
                         crate::treesit::Object::Query(_) => Kind::TreesitQuery,
                         crate::treesit::Object::Task(_) => Kind::Invalid,
                     },
+                    None if Vm::image_string(v) => Kind::String,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
