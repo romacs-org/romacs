@@ -336,8 +336,9 @@ impl romacs_vm::DisplayHost for Display {
         romacs_vm::DisplayHost::family_fonts(self, query.family.as_deref()).iter().filter(|entity| matches(query, entity)).cloned().collect()
     }
     fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>> {
-        // Fontconfig's refresh, which each listing used to run, may have
-        // reloaded the catalog: the listings kept from the old one go.
+        // The catalog moves when Fontconfig's refresh, which each listing
+        // used to run, reloads it, or a font is added to it: the listings
+        // kept from the old one go.
         let catalog = entity::Catalog::current();
         if catalog != self.catalog {
             self.families.clear();

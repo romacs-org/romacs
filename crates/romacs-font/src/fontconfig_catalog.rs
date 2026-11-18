@@ -37,27 +37,48 @@ impl ListedFace {
 
 /// Fontconfig's configuration is not safe to extend while another thread
 /// queries it (`FcConfigAppFontAddFile` rebuilds the font set in place), so
-/// every call this module makes holds this lock. It keeps the files
-/// `register_font_file` added to the application font set, which `refresh`
-/// adds again to a configuration Fontconfig reloads.
-pub(crate) fn serialize() -> std::sync::MutexGuard<'static, Vec<CString>> {
-    static LOCK: std::sync::Mutex<Vec<CString>> = std::sync::Mutex::new(Vec::new());
+/// every call this module makes holds this lock, over what the catalog
+/// answers from.
+pub(crate) fn serialize() -> std::sync::MutexGuard<'static, State> {
+    static LOCK: std::sync::Mutex<State> = std::sync::Mutex::new(State { files: Vec::new(), config: None, generation: 0 });
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Fontconfig's current configuration once brought up to date, as a listing
-/// on it is (`fc::Config::current`); None when a reload failed. A reload
-/// builds the configuration from its files alone, so the fonts REGISTERED
-/// (the lock's files) are added to it again. Every question this module asks
-/// starts here.
-fn refresh(registered: &[CString]) -> Option<fc::Config> {
-    let config = fc::Config::current()?;
-    if !registered.is_empty() && !fc::has_application_fonts() {
-        for file in registered {
-            fc::add_app_font_file(file);
+/// What the catalog answers from.
+pub(crate) struct State {
+    /// The files `register_font_file` added to the application font set,
+    /// each with whether `config` has it.
+    files: Vec<(CString, bool)>,
+    /// The configuration last prepared.
+    config: Option<fc::Config>,
+    /// Counts the changes to what the catalog lists: each configuration
+    /// prepared, and each file added to the one held.
+    generation: u64,
+}
+
+impl State {
+    /// The configuration every question asks: Fontconfig's current one once
+    /// its own refresh has run (`fc::Config::current`), with the registered
+    /// files in it. A reload builds the configuration from its files alone,
+    /// so the files are added to each new one, and one that could not be
+    /// added is tried again at the next question.
+    fn prepare(&mut self) -> Option<&fc::Config> {
+        let current = fc::Config::current()?;
+        let State { files, config, generation } = self;
+        if config.as_ref() != Some(&current) {
+            *config = Some(current);
+            *generation += 1;
+            for (_, added) in files.iter_mut() {
+                *added = false;
+            }
         }
+        let config = config.as_ref()?;
+        for (file, added) in files.iter_mut().filter(|(_, added)| !*added) {
+            *added = fc::add_app_font_file(config, file);
+            *generation += u64::from(*added);
+        }
+        Some(config)
     }
-    Some(config)
 }
 
 pub(crate) fn handle() -> Option<&'static fontconfig::Fontconfig> {
@@ -73,18 +94,22 @@ pub(crate) fn register_font_file(path: &std::path::Path) -> bool {
     let Ok(file) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };
-    let mut registered = serialize();
-    let added = fc::add_app_font_file(&file);
+    let mut state = serialize();
+    let added = state.prepare().is_some_and(|config| fc::add_app_font_file(config, &file));
     if added {
-        registered.push(file);
+        state.files.push((file, true));
+        state.generation += 1;
     }
     added
 }
 
-/// Fontconfig's catalog as its own refresh leaves it (`fc::Config::current`).
-pub(crate) fn current_config() -> Option<fc::Config> {
+/// The generation of what the catalog lists (`State::generation`), once
+/// prepared; None without Fontconfig.
+pub(crate) fn generation() -> Option<u64> {
     handle()?;
-    refresh(&serialize())
+    let mut state = serialize();
+    state.prepare()?;
+    Some(state.generation)
 }
 
 /// What Fontconfig's answers depend on: its configuration files and
@@ -101,8 +126,11 @@ pub(crate) fn configuration_inputs() -> Vec<String> {
 /// `monospace`, or a family that is not installed), if any.
 pub(crate) fn match_family(generic: &str) -> Option<String> {
     let fc = handle()?;
-    let serial = serialize();
-    refresh(&serial);
+    let mut state = serialize();
+    // The match asks the current configuration, which is the one prepared:
+    // only `prepare' runs Fontconfig's refresh, as the catalog's listings
+    // name their configuration.
+    state.prepare()?;
     let mut pattern = fontconfig::Pattern::new(fc).ok()?;
     let value = CString::new(generic).ok()?;
     pattern.add_string(fontconfig::FC_FAMILY, &value).ok()?;
@@ -154,20 +182,19 @@ pub(crate) fn list_faces(family: Option<&str>, required: Option<char>) -> Vec<Li
     if handle().is_none() {
         return Vec::new();
     }
-    let serial = serialize();
-    refresh(&serial);
-    list_faces_inner(family, required).unwrap_or_default()
+    let mut state = serialize();
+    state.prepare().and_then(|config| list_faces_inner(config, family, required)).unwrap_or_default()
 }
 
-fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<ListedFace>> {
+fn list_faces_inner(config: &fc::Config, family: Option<&str>, required: Option<char>) -> Option<Vec<ListedFace>> {
     let mut pattern = family_pattern(family)?;
     if let Some(ch) = required {
         let charset = charset_of([u32::from(ch)])?;
         pattern.add_charset(fontconfig::FC_CHARSET, &charset).then_some(())?;
     }
-    let set = FontSet::list(&pattern, &ObjectSet::of(&LISTED)?)?;
+    let set = FontSet::list(config, &pattern, &ObjectSet::of(&LISTED)?)?;
     let mut out: Vec<_> = set.patterns().filter_map(|face| listed_face(face, family)).collect();
-    registered_first(&mut out, |face| &face.file);
+    registered_first(config, &mut out, |face| &face.file);
     Some(out)
 }
 
@@ -175,8 +202,8 @@ fn list_faces_inner(family: Option<&str>, required: Option<char>) -> Option<Vec<
 /// Fontconfig's order, so a font Romacs ships wins a tie with a system
 /// face of the same family and style (`best_face' keeps the first best):
 /// the bundled Iosevka, not a system copy of another version.
-fn registered_first<T>(listed: &mut [T], file: impl Fn(&T) -> &str) {
-    let registered: std::collections::HashSet<String> = fc::application_files().into_iter().collect();
+fn registered_first<T>(config: &fc::Config, listed: &mut [T], file: impl Fn(&T) -> &str) {
+    let registered: std::collections::HashSet<String> = fc::application_files(config).into_iter().collect();
     if !registered.is_empty() {
         listed.sort_by_key(|face| !registered.contains(file(face)));
     }
@@ -214,8 +241,8 @@ impl FaceList {
 
 pub(crate) fn list_constrained(spec: &ListSpec) -> Option<FaceList> {
     handle()?;
-    let serial = serialize();
-    refresh(&serial);
+    let mut state = serialize();
+    let config = state.prepare()?;
     let mut pattern = family_pattern(spec.family.as_deref())?;
     if let Some(foundry) = &spec.foundry {
         let value = CString::new(foundry.as_str()).ok()?;
@@ -234,13 +261,13 @@ pub(crate) fn list_constrained(spec: &ListSpec) -> Option<FaceList> {
     }
     let mut objects = LISTED.to_vec();
     objects.push(fontconfig::FC_CHARSET);
-    let set = FontSet::list(&pattern, &ObjectSet::of(&objects)?)?;
+    let set = FontSet::list(config, &pattern, &ObjectSet::of(&objects)?)?;
     let mut faces: Vec<_> = set
         .patterns()
         .enumerate()
         .filter_map(|(index, face)| Some((index, listed_face(face, spec.family.as_deref())?)))
         .collect();
-    registered_first(&mut faces, |(_, face)| &face.file);
+    registered_first(config, &mut faces, |(_, face)| &face.file);
     Some(FaceList { set, faces })
 }
 
@@ -251,13 +278,12 @@ pub(crate) fn list_families() -> Vec<String> {
     if handle().is_none() {
         return Vec::new();
     }
-    let serial = serialize();
-    refresh(&serial);
-    list_families_inner().unwrap_or_default()
+    let mut state = serialize();
+    state.prepare().and_then(list_families_inner).unwrap_or_default()
 }
 
-fn list_families_inner() -> Option<Vec<String>> {
-    let set = FontSet::list(&Pattern::new()?, &ObjectSet::of(&[fontconfig::FC_FAMILY])?)?;
+fn list_families_inner(config: &fc::Config) -> Option<Vec<String>> {
+    let set = FontSet::list(config, &Pattern::new()?, &ObjectSet::of(&[fontconfig::FC_FAMILY])?)?;
     Some(set.patterns().filter_map(|face| face.string(fontconfig::FC_FAMILY)).collect())
 }
 
@@ -270,17 +296,16 @@ pub(crate) fn sort_faces(family: &str, ch: char) -> Vec<ListedFace> {
     if handle().is_none() {
         return Vec::new();
     }
-    let serial = serialize();
-    refresh(&serial);
-    sort_faces_inner(family, ch).unwrap_or_default()
+    let mut state = serialize();
+    state.prepare().and_then(|config| sort_faces_inner(config, family, ch)).unwrap_or_default()
 }
 
-fn sort_faces_inner(family: &str, ch: char) -> Option<Vec<ListedFace>> {
+fn sort_faces_inner(config: &fc::Config, family: &str, ch: char) -> Option<Vec<ListedFace>> {
     let mut pattern = family_pattern(Some(family))?;
     let charset = charset_of([u32::from(ch)])?;
     pattern.add_charset(fontconfig::FC_CHARSET, &charset).then_some(())?;
-    pattern.substitute();
-    let set = FontSet::sort(&pattern)?;
+    pattern.substitute(config);
+    let set = FontSet::sort(config, &pattern)?;
     Some(
         set.patterns()
             .filter(|face| face.has_char(ch))
