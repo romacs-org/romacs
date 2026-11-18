@@ -232,12 +232,25 @@ reach an image."
   "Why the current buffer cannot be handed over now, or nil."
   (run-hook-with-args-until-success 'warm-restart-blocker-functions))
 
-(defun warm-restart--edited-p ()
-  "Non-nil when the current buffer is writable and holds unsaved edits.
-A widget buffer is neither: its text is generated, and its widgets, which
-are what make it work, can't be carried."
-  (and (not buffer-read-only) (buffer-modified-p)
-       (not (memq 'widget-before-change before-change-functions))))
+(defun warm-restart-unsaved-p ()
+  "Non-nil when the current buffer holds unsaved text someone typed: a
+modified file buffer, or a modified writable buffer.  Not a read-only
+view its package fills (a mail search, the agent board), nor a widget
+buffer, whose text is generated and whose widgets, which make it work,
+can't be carried.  A process's buffer only in a comint mode, whose
+process mark ends the output: when text follows the mark (narrowing
+aside), input typed and not yet sent, or when the mark is not placed."
+  (and (buffer-modified-p)
+       (or buffer-file-name
+           (and (not buffer-read-only)
+                (not (memq 'widget-before-change before-change-functions))
+                (let ((process (get-buffer-process (current-buffer))))
+                  (or (not process)
+                      (and (derived-mode-p 'comint-mode)
+                           (let ((mark (process-mark process)))
+                             (or (not (eq (marker-buffer mark) (current-buffer)))
+                                 (< mark (1+ (buffer-size))))))))))
+       t))
 
 (defun warm-restart--handler ()
   "The desktop handler restoring the current buffer, or nil."
@@ -245,7 +258,7 @@ are what make it work, can't be carried."
 
 (defun warm-restart--regenerable ()
   "Why the current buffer is a view rebuilt by its package, or nil."
-  (cond ((warm-restart--edited-p) nil)
+  (cond ((warm-restart-unsaved-p) nil)
         ((cl-some (lambda (re) (string-match-p re (buffer-name))) warm-restart-regenerable-buffers)
          "generated buffer")
         ((stringp warm-restart-regenerable) warm-restart-regenerable)
@@ -274,7 +287,7 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
      ((setq regenerable (warm-restart--regenerable)) (cons 'dropped regenerable))
      (process (cons 'dropped (format "process %s ends: processes are not carried yet" (process-name process))))
      ((warm-restart--text-mode-p) (cons 'text (format "%s text" major-mode)))
-     ((warm-restart--edited-p) (cons 'text (format "edited %s view carried as text" major-mode)))
+     ((warm-restart-unsaved-p) (cons 'text (format "edited %s view carried as text" major-mode)))
      (t (cons 'dropped (format "%s view; reopen it" major-mode))))))
 
 (defun warm-restart--processes ()
@@ -290,13 +303,16 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
 (defun warm-restart-plan ()
   "What a session image made now would carry, as a plist.
 :buffers lists (:name NAME :strategy STRATEGY :reason REASON :modified
-FLAG) per buffer, internal ones aside; :processes lists the processes,
-which end with this process."
+FLAG :unsaved FLAG) per buffer, internal ones aside, :unsaved when it
+holds unsaved typed text (`warm-restart-unsaved-p'); :processes lists the
+processes, which end with this process."
   (list :buffers (cl-loop for buffer in (buffer-list)
                           for entry = (with-current-buffer buffer (warm-restart--classify))
                           when entry
                           collect (list :name (buffer-name buffer) :strategy (car entry) :reason (cdr entry)
-                                        :modified (and (buffer-modified-p buffer) t) :buffer buffer))
+                                        :modified (and (buffer-modified-p buffer) t)
+                                        :unsaved (with-current-buffer buffer (warm-restart-unsaved-p))
+                                        :buffer buffer))
         :processes (warm-restart--processes)))
 
 (defun warm-restart--entries (plan strategy)
@@ -529,7 +545,7 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                        :lost (append (cl-loop for e in (plist-get plan :buffers)
                                               when (eq (plist-get e :strategy) 'dropped)
                                               collect (append (list :buffer (plist-get e :name) :reason (plist-get e :reason))
-                                                              (and (plist-get e :modified) (list :unsaved t))))
+                                                              (and (plist-get e :unsaved) (list :unsaved t))))
                                      (cl-loop for r in records when (plist-member r :lost)
                                               collect (list :buffer (plist-get r :lost) :reason (plist-get r :reason)))
                                      (mapcar (lambda (p) (append p (list :reason "ends with this process")))
