@@ -1404,17 +1404,19 @@ mod leaf {
         pub fn batch_warning(&self, kind: &str, text: &str) {
             eprintln!("Warning ({kind}): {text}");
         }
+        /// The slot whose function cell symbol V names: `nil` and `t`, which
+        /// are not slot references, by their names, None if not yet made. The
+        /// one lookup for reading and writing a cell and its macro flag.
+        fn cell_slot(&self, v: Value) -> std::result::Result<Option<usize>, Fault> {
+            if v == Value::NIL || v == Value::TRUE {
+                let name = if v == Value::NIL { "nil" } else { "t" };
+                return Ok(self.vm.names.get(name).copied());
+            }
+            self.symbol_slot(v).map(Some)
+        }
         /// The function cell itself; aliases are not followed and void is nil.
         pub fn symbol_function(&self, v: Value) -> std::result::Result<Value, Fault> {
-            let slot = if v == Value::NIL || v == Value::TRUE {
-                let name = if v == Value::NIL { "nil" } else { "t" };
-                let Some(&slot) = self.vm.names.get(name) else {
-                    return Ok(Value::NIL);
-                };
-                slot
-            } else {
-                self.symbol_slot(v)?
-            };
+            let Some(slot) = self.cell_slot(v)? else { return Ok(Value::NIL) };
             let value = self.vm.slots[slot].function;
             Ok(if value == Value::UNBOUND {
                 Value::NIL
@@ -1426,8 +1428,7 @@ mod leaf {
         /// Leaf allocation cannot compact, so RAW stays valid until returned.
         pub fn symbol_definition(&mut self, v: Value) -> std::result::Result<Value, Fault> {
             let raw = self.symbol_function(v)?;
-            if v.index_if(7).and_then(|i| i.checked_sub(1))
-                .is_some_and(|slot| self.vm.macros.contains(&slot)) {
+            if self.cell_slot(v)?.is_some_and(|slot| self.vm.macros.contains(&slot)) {
                 let tag = self.intern("macro");
                 Ok(self.cons(tag, raw))
             } else {
@@ -1447,10 +1448,9 @@ mod leaf {
                     Err(Fault::SettingConstant(v))
                 };
             }
-            let slot = if v == Value::TRUE {
-                self.vm.slot("t")
-            } else {
-                self.symbol_slot(v)?
+            let slot = match self.cell_slot(v)? {
+                Some(slot) => slot,
+                None => self.vm.slot("t"),
             };
             let (definition, is_macro) = if let Some((head, body)) = self.pair(value) {
                 if head == self.intern("macro") {

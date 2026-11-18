@@ -159,6 +159,20 @@ fn sort_native_path_takes_only_what_a_call_would_call() {
     ] {
         check(name, &format!("(progn {setup} (condition-case e (sort (list 3 1 2) {predicate}) (error (car e))))"), expected);
     }
+    // Sol's round-3 case: `t`'s cell, which is no slot reference, holding
+    // a macro wrapping the built-in subr; and `symbol-function` reading the
+    // macro flag back through the same slot lookup.
+    // The native path refuses it and the call signals. Which error is the
+    // dispatcher's: pinned GNU says invalid-function; Romacs's dispatcher
+    // does not read `t`'s cell at all yet, and says void-function.
+    for op in ["<", ">"] {
+        check(&format!("t_macro_{op}"),
+              &format!("(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '{op}))) (condition-case nil (progn (sort [1 3 2] t) 'sorted) (error 'signalled))) (fset 't old)))"),
+              "signalled");
+    }
+    check("t_symbol_function_macro",
+          "(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '>))) (car-safe (symbol-function 't))) (fset 't old)))",
+          "macro");
     // Sol's case, on a vector: an uninterned symbol whose cell is a macro
     // wrapping the built-in subr.
     for op in ["<", ">"] {
