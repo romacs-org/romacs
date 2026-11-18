@@ -658,29 +658,29 @@ def sockets(args, base):
     """romacs#262: once the sessions it ran have ended, whether the editor
     ended them (`romacs-agent-stop') or their directories went (a test's
     tree removed with its harnesses waiting), no supervisor of this tree is
-    left and the editor holds no socket whose peer is gone, none it keeps
-    on an ended supervisor.  Told by each socket's peer, not by a count:
-    the editor opens sockets of its own meanwhile (a worker's, a route's)."""
+    left and the editor has closed every socket it had on them.  Told by
+    those sockets themselves, found while the sessions run, not by a
+    count: the editor opens sockets of its own meanwhile."""
     a = Agents(args, base, 'sk')
     agents = a.home / '.local/state/romacs/agents'
     ss = shutil.which('ss') or '/usr/sbin/ss'
 
-    def socks():
-        count = 0
-        for fd in Path(f'/proc/{a.pid}/fd').iterdir():
+    def editor_sockets():
+        """The inodes of the editor's sockets, from its fd table: an editor
+        gone fails, not an empty table."""
+        try:
+            fds = list(Path(f'/proc/{a.pid}/fd').iterdir())
+        except FileNotFoundError:
+            raise RuntimeError('the editor exited') from None
+        found = set()
+        for fd in fds:
             try:
-                count += os.readlink(fd).startswith('socket:')
+                link = os.readlink(fd)
             except OSError:
-                pass
-        return count
-
-    def dangling():
-        """The inodes of the editor's connected sockets whose peer is gone:
-        `ss' gives such a peer's inode as 0.  Each is an fd the editor has
-        not closed."""
-        out = subprocess.run([ss, '-xapH'], capture_output=True, text=True, check=True).stdout
-        return [f[5] for f in (line.split() for line in out.splitlines() if f'pid={a.pid},' in line)
-                if len(f) > 7 and f[1] == 'ESTAB' and f[7] == '0']
+                continue
+            if link.startswith('socket:['):
+                found.add(link[8:-1])
+        return found
 
     def hosts():
         found = []
@@ -693,36 +693,61 @@ def sockets(args, base):
                 found.append(int(proc.name))
         return found
 
+    def exited(pid):
+        """Whether PID's process is gone or a zombie: its fds closed either way."""
+        try:
+            stat = Path(f'/proc/{pid}/stat').read_bytes()
+        except FileNotFoundError:
+            return True
+        return stat[stat.rindex(b')') + 2:][:1] in (b'Z', b'X')
+
+    def on_supervisors(pids):
+        """The editor's sockets connected to the supervisors PIDS: the peers
+        of the sockets they hold connected, by `ss'.  Read as bytes and
+        only their own lines, from the end (the peer's inode is the last
+        field before `users:'): no other socket's address is parsed."""
+        out = subprocess.run([ss, '-xapH'], capture_output=True, check=True).stdout
+        marks = [f'pid={pid},'.encode() for pid in pids]
+        peers = set()
+        for line in out.splitlines():
+            if any(mark in line for mark in marks):
+                fields = line.split(b' users:')[0].split()
+                if len(fields) > 1 and fields[1] == b'ESTAB':
+                    peers.add(fields[-1].decode())
+        return peers & editor_sockets()
+
     def run(n, end):
-        """N sessions run to idle, then ended by END: the editor's socket
-        count before and while they run (they connected), and once every
-        supervisor is gone, its sockets whose peer went with them closed."""
-        before = socks()
+        """N sessions run to idle, then ended by END: how many sockets the
+        editor had on their supervisors, once every supervisor has exited
+        and the editor has closed them all."""
         ids = [a.start(f'say {i}') for i in range(n)]
         for sid in ids:
             a.idle(sid)
-        during = socks()
+        pids = hosts()
+        held = on_supervisors(pids)
+        if len(held) < n:
+            raise RuntimeError(f'{n} sessions but the editor has {len(held)} sockets on their supervisors {pids}')
         end(ids)
-        until(lambda: not hosts(), 30, 'every supervisor ended')
+        until(lambda: all(exited(pid) for pid in pids) and not hosts(), 30, 'every supervisor ended')
+        left = held
+        def closed():
+            nonlocal left
+            left = held & editor_sockets()
+            return not left
         try:
-            until(lambda: not dangling(), 30, 'no socket left on an ended supervisor')
-        except RuntimeError:
-            processes = a.eval('(mapcar (lambda (p) (list (process-name p) (process-status p))) (process-list))')
-            raise RuntimeError(f'the editor keeps {len(dangling())} of its {socks()} sockets with their peer gone; '
-                               f'its processes: {processes[:600]}')
-        return before, during
+            until(closed, 30, 'the editor closed its sockets on them')
+        except RuntimeError as err:
+            raise RuntimeError(f'{err}: it keeps {len(left)} of the {len(held)} it had, inodes {sorted(left)}') from None
+        return len(held)
 
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
-        # A first session: what the editor opens once and keeps is open
-        # before the rest are counted.
-        run(1, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
         stopped = run(3, lambda ids: [a.eval(f'(romacs-agent-stop {a.s(sid)})') for sid in ids])
         removed = run(3, lambda ids: [shutil.rmtree(agents / sid) for sid in ids])
-        return {'stopped_before_during': stopped, 'removed_before_during': removed,
-                'dangling': len(dangling()), 'hosts_left': len(hosts()),
-                'ok': stopped[1] > stopped[0] and removed[1] > removed[0] and not dangling() and not hosts()}
+        alive = bool(editor_sockets())
+        return {'held_stopped': stopped, 'held_removed': removed, 'hosts_left': len(hosts()), 'editor_alive': alive,
+                'ok': alive and not hosts()}
     finally:
         a.close()
 
