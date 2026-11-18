@@ -387,6 +387,38 @@ moment more under load."
          (should-not (file-exists-p journal))
          (should-not (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id))))))))
 
+(ert-deftest romacs-agent-events-the-installer-migrates-every-journal ()
+  ;; The installer's migration, before any editor: a session in a journal
+  ;; moves to SQLite, its journal backed up; one whose supervisor runs is
+  ;; skipped, for the next install; run again, it finds nothing to do.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     3
+     (lambda (session journal)
+       (let ((dir (romacs-agent-dir session)) (id (romacs-agent-id session)) (said nil))
+         (remhash id romacs-agent--sessions)
+         ;; Its supervisor runs: skipped, left in its journal.
+         (let ((host (romacs-agent-events-tests--hold id)))
+           (should (equal (romacs-agent-events-migrate (lambda (line) (push line said)))
+                          (list :migrated 0 :skipped (list id) :failed nil)))
+           (romacs-agent-events-tests--let-go host))
+         (should (member (format "skipped %s" id) said))
+         (should (file-exists-p journal))
+         (should-not (romacs-agent-events-p session))
+         ;; Let go: moved, its records its own, its journal backed up.
+         (should (equal (romacs-agent-events-migrate) (list :migrated 1 :skipped nil :failed nil)))
+         (should (romacs-agent-events-p session))
+         (should-not (file-exists-p journal))
+         (should (> (caar (sqlite-select (romacs-agent-events--db) "select count(*) from events where session = ?" (list id))) 0))
+         (should (file-exists-p (expand-file-name (concat id ".jsonl")
+                                                  (expand-file-name (format-time-string "journal-backup-%Y%m%d/")
+                                                                    (romacs-agent--state-root)))))
+         ;; Again: nothing to do.
+         (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil))))))))
+
 (defmacro romacs-agent-events-tests--workers (&rest body)
   "Run BODY with worker VMs that run each job here, at once."
   `(cl-letf (((symbol-function 'isolate-main-p) (lambda () t))

@@ -729,6 +729,45 @@ supervisor."
            (held (romacs-agent-events--supervised candidates)))
       (cl-remove-if (lambda (dir) (gethash dir held)) candidates))))
 
+(defun romacs-agent-events-migrate-batch ()
+  "`romacs-agent-events-migrate' in a batch process before any editor
+starts (the installer's, on every install: done ones are passed over),
+then the rows of sessions that have none filled.  Prints `skipped ID'
+and `failed ID: WHY' as it goes, then `migrated N' and `rows filled N';
+exits 1 when one failed."
+  (let ((report (romacs-agent-events-migrate (lambda (line) (princ (concat line "\n"))))))
+    (princ (format "migrated %d\n" (plist-get report :migrated)))
+    (princ (format "rows filled %d\n" (romacs-agent-store-fill)))
+    (kill-emacs (if (plist-get report :failed) 1 0))))
+
+(defun romacs-agent-events-migrate (&optional say)
+  "Move every recorded session still in a journal to SQLite, here, its
+journal backed up: (:migrated N :skipped IDS :failed IDS).  A session
+whose supervisor runs (its lock held) is left in its journal, skipped.
+SAY, when given, is called with a line for each skipped or failed one."
+  (romacs-agent-store--made)
+  (let* ((db (or (romacs-agent-events--db) (error "No agents store to migrate to")))
+         (say (or say #'ignore))
+         (imported (make-hash-table :test #'equal))
+         (dirs nil) (migrated 0) (skipped nil) (failed nil))
+    (dolist (row (sqlite-select db "select session from imported")) (puthash (car row) t imported))
+    (dolist (dir (and (file-directory-p (romacs-agent--state-root))
+                      (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-")))
+      (when (and (not (gethash (file-name-nondirectory dir) imported))
+                 (file-exists-p (expand-file-name "journal.jsonl" dir)))
+        (push dir dirs)))
+    (let ((held (romacs-agent-events--supervised dirs)))
+      (dolist (dir (nreverse dirs))
+        (let ((id (file-name-nondirectory dir)))
+          (if (gethash dir held)
+              (progn (push id skipped) (funcall say (format "skipped %s" id)))
+            (condition-case err
+                (when (romacs-agent-events-import (romacs-agent--make :id id :dir dir))
+                  (cl-incf migrated))
+              (error (push id failed)
+                     (funcall say (format "failed %s: %s" id (error-message-string err)))))))))
+    (list :migrated migrated :skipped (nreverse skipped) :failed (nreverse failed))))
+
 (defun romacs-agent-events--back-up-moved (ids)
   "Move to the backup directory the journals of the sessions IDS names
 that are imported, none of them loaded here, nor run by a supervisor:
