@@ -62,7 +62,7 @@ impl Memo {
         self.len == 0
     }
     /// SOURCE compiled for LANGUAGE, once per grammar and text.
-    pub(crate) fn compile(&mut self, language: &native::Language, source: &[u8]) -> Outcome {
+    pub(crate) fn compiled(&mut self, language: &native::Language, source: &[u8]) -> Outcome {
         let grammar = Grammar::of(language);
         if let Some(outcome) = self.lookup(grammar, source) {
             return outcome;
@@ -138,13 +138,13 @@ mod tests {
         assert_ne!(Grammar::of(&first), Grammar::of(&other), "a copy under another path is loaded apart");
         let text = b"(number_literal) @n";
         let mut memo = Memo::default();
-        let (a, b, c) = (memo.compile(&first, text).unwrap(), memo.compile(&again, text).unwrap(), memo.compile(&other, text).unwrap());
+        let (a, b, c) = (memo.compiled(&first, text).unwrap(), memo.compiled(&again, text).unwrap(), memo.compiled(&other, text).unwrap());
         assert!(Rc::ptr_eq(&a, &b), "one grammar and text compile once");
         assert!(!Rc::ptr_eq(&a, &c), "another load's queries are its own");
         assert_eq!(c.query.pattern_count(), 1);
         // A failure is kept, and given again as it was.
-        assert_eq!(memo.compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
-        assert_eq!(memo.compile(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
+        assert_eq!(memo.compiled(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
+        assert_eq!(memo.compiled(&first, b"(bogus) @n").err(), Some((1, "Node type error at")));
         assert_eq!(memo.len, 3);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -1129,7 +1129,7 @@ impl Leaf<'_> {
     fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
         let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
         let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
-        match self.vm.treesit_queries.compile(&language, &text) {
+        match self.vm.treesit_queries.compiled(&language, &text) {
             Ok(compiled) => Ok(compiled),
             Err((offset, message)) => {
                 // The signal names the text compiled: a sexp's expansion.
