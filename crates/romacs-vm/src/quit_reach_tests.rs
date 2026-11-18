@@ -406,3 +406,29 @@ fn a_kernel_s_or_the_loader_s_quit_reaches_lisp_as_quit() {
         assert_eq!(outcome.as_deref(), Ok("q"), "{form}: the quit did not reach Lisp as `quit`");
     }
 }
+
+/// call-process's stop without a pidfd (as when `pidfd_open` fails): it asks
+/// the child's end every tick, so a second C-g still kills a child that
+/// ignores SIGINT, and the child is reaped, not left running; one that dies
+/// of SIGINT is reaped with no press.
+#[test]
+fn call_process_s_stop_without_a_pidfd_hears_the_second_press() {
+    use std::os::unix::process::CommandExt;
+    for (script, presses) in [("trap '' INT; exec sleep 30", 1), ("exec sleep 30", 0)] {
+        let (mut vm, signal) = busy_vm();
+        let child = std::process::Command::new("sh").args(["-c", script]).process_group(0).spawn().unwrap();
+        let pid = i32::try_from(child.id()).unwrap();
+        // The shell's trap in place before the SIGINT.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let presser = { let signal = signal.clone(); std::thread::spawn(move || {
+            for _ in 0..presses { std::thread::sleep(std::time::Duration::from_millis(300)); assert!(signal.interrupt()); }
+        }) };
+        let started = std::time::Instant::now();
+        Leaf::new(&mut vm).call_process_stop(pid, None);
+        presser.join().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{script}: the stop outlasted the press");
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists(), "{script}: child {pid} still exists after the stop");
+        assert!(vm.subprocesses.deleted.is_empty(), "{script}: the child was reaped, not handed on");
+        drop(child);
+    }
+}

@@ -1200,15 +1200,17 @@ impl Leaf<'_> {
         let mut buf = vec![0; 64 * 1024];
         let mut held = false;
         loop {
-            let fd = match (&reader, &pidfd) {
-                (Some(read), _) => read.as_raw_fd(),
-                (None, Some(pidfd)) => pidfd.as_raw_fd(),
-                (None, None) => break,
+            let (fds, tick) = match (&reader, &pidfd) {
+                (Some(read), _) => (vec![(read.as_raw_fd(), libc::POLLIN)], None),
+                (None, Some(pidfd)) => (vec![(pidfd.as_raw_fd(), libc::POLLIN)], None),
+                // No pidfd (pidfd_open failed): the child's end is asked
+                // every tick, left for the caller's wait to reap.
+                (None, None) if sp::exited(pid) => break,
+                (None, None) => (Vec::new(), Some(Self::CHILD_TICK)),
             };
-            let fds = [(fd, libc::POLLIN)];
-            let revents = if held { sp::poll(&fds, None) } else { self.vm.poll_quittable(&fds, None) }
+            let revents = if held { sp::poll(&fds, tick) } else { self.vm.poll_quittable(&fds, tick) }
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
-            if revents[0] == 0 {
+            if revents.first().is_none_or(|&r| r == 0) {
                 if let Err(quit) = self.native_poll() {
                     self.call_process_stop(pid, pidfd.as_ref());
                     return Err(quit);
@@ -1232,18 +1234,15 @@ impl Leaf<'_> {
     /// child is reaped here, or, if SIGKILL has not ended it within
     /// `KILL_GRACE` (a child in uninterruptible sleep), left to the reaper of
     /// deleted children (`reap_children`, the host's reaper once the VM
-    /// goes): the quit returns either way.
-    fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) {
+    /// goes), with no status made up for it: the quit returns either way.
+    /// Without a pidfd (PIDFD None) the child's end is asked every
+    /// `CHILD_TICK`, so the wait still hears the stop.
+    pub(crate) fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) {
         if crate::host::kill(-pid, libc::SIGINT).is_err() { let _ = crate::host::kill(pid, libc::SIGINT); }
-        let Some(pidfd) = pidfd else {
-            // No pidfd to wait on: wait_for_termination's blocking wait.
-            if sp::wait_blocking(pid).is_err() { self.vm.subprocesses.deleted.push((pid, None)); }
-            return;
-        };
-        let fds = [(pidfd.as_raw_fd(), libc::POLLIN)];
-        loop {
-            match self.vm.poll_quittable(&fds, None) {
-                Ok(revents) if revents[0] != 0 => break,
+        let fds: Vec<_> = pidfd.map(|fd| (fd.as_raw_fd(), libc::POLLIN)).into_iter().collect();
+        let tick = pidfd.is_none().then_some(Self::CHILD_TICK);
+        while !sp::exited(pid) {
+            match self.vm.poll_quittable(&fds, tick) {
                 Ok(_) if self.call_process_stop_requested() => {
                     if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
                     break;
@@ -1252,8 +1251,13 @@ impl Leaf<'_> {
                 Err(_) => break,
             }
         }
-        let _ = sp::poll(&fds, Some(Self::KILL_GRACE));
-        if sp::wait_status(pid, rustix::process::WaitOptions::empty()).is_none() {
+        let end = crate::host::monotonic() + Self::KILL_GRACE;
+        while !sp::exited(pid) {
+            let left = end.saturating_duration_since(crate::host::monotonic());
+            if left.is_zero() { break; }
+            let _ = sp::poll(&fds, Some(left.min(Self::CHILD_TICK)));
+        }
+        if !sp::exited(pid) || sp::wait_blocking(pid).is_err() {
             self.vm.subprocesses.deleted.push((pid, None));
         }
     }
@@ -1261,6 +1265,9 @@ impl Leaf<'_> {
     /// How long a quit waits for a killed child to end before it leaves
     /// the child to the reaper and returns.
     const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
+
+    /// How often a wait without a pidfd asks whether the child has ended.
+    const CHILD_TICK: std::time::Duration = std::time::Duration::from_millis(10);
 
     /// Whether the wait after the quit's SIGINT should kill the child now
     /// (SIGKILL, reap, return), the request taken: today a second C-g, taken
