@@ -3579,18 +3579,22 @@ driver's :steerable says, else any turn may be steered."
   (funcall (or (romacs-agent--harness-get session :steerable) #'always) session))
 
 (defun romacs-agent--may-write-p (session item)
-  "Whether ITEM may be written to SESSION's harness now.  Nothing goes
-while a worker folds SESSION, its selection changes, or a rollback or a
-renewal holds it (but the holder's own prompt).  A per-turn harness's
-starts a turn when none runs.  A persistent harness's goes on the current
-attachment only, once it has replayed its records (caught up), its driver
-is ready and the line it wrote last is journaled back, never to a harness
-stopped or ended: a new turn when none is under way, else a steer."
+  "Whether ITEM may be written to SESSION's harness now: the gate is open
+for it (`romacs-agent--open-p') and it goes as a new turn or a steer
+\(`romacs-agent--goes-p')."
+  (and (romacs-agent--open-p session (romacs-agent-item-token item)) (romacs-agent--goes-p session item)))
+
+(defun romacs-agent--open-p (session token)
+  "Whether SESSION's harness takes a message now, whatever it is.  Nothing
+goes while a worker folds SESSION, its selection changes, or a rollback, a
+renewal or a relaunch holds it (but the holder's own prompt, of TOKEN).  A
+per-turn harness's starts a turn when none runs.  A persistent harness's
+goes on the current attachment only, once it has replayed its records
+\(caught up), its driver is ready and the line it wrote last is journaled
+back, never to a harness stopped or ended."
   (and (not (romacs-agent--folding-p session))
        (not (romacs-agent-pending-selection session))
-       (if (romacs-agent-item-token item)
-           (eq (romacs-agent-item-token item) (romacs-agent--held-p session))
-         (not (romacs-agent--held-p session)))
+       (if token (eq token (romacs-agent--held-p session)) (not (romacs-agent--held-p session)))
        (if (romacs-agent--per-turn-p session)
            ;; Its last run retired: its supervisor gone.
            (not (or (process-live-p (romacs-agent-connection session))
@@ -3600,12 +3604,31 @@ stopped or ended: a new turn when none is under way, else a steer."
               (not (memq (romacs-agent-state session) '(ended unstarted detached)))
               (romacs-agent--ready-p session)
               (not (romacs-agent-startup-pending session))
-              (or (not (romacs-agent--turn-under-way-p session))
-                  ;; A steer: the turn it was sent into still runs.
-                  (and (eql (romacs-agent-item-turn item) (romacs-agent-turns session))
-                       (romacs-agent--steerable-p session)))
               ;; Its mark is a file: asked last.
               (not (romacs-agent-stopped session))))))
+
+(defun romacs-agent--goes-p (session item)
+  "Whether ITEM goes to SESSION's open harness now: a new turn when none
+is under way, else a steer of the turn it was sent into, still running."
+  (or (romacs-agent--per-turn-p session)
+      (not (romacs-agent--turn-under-way-p session))
+      (romacs-agent--steer-p session item)))
+
+(defun romacs-agent--steer-p (session item)
+  "Whether ITEM steers SESSION's turn under way: the turn it was sent into,
+which its harness can steer."
+  (and (eql (romacs-agent-item-turn item) (romacs-agent-turns session))
+       (romacs-agent--steerable-p session)))
+
+(defun romacs-agent--next-item (session)
+  "The first of SESSION's waiting messages that may go now
+\(`romacs-agent--may-write-p'), or nil: the gate asked once, a steer
+passing those waiting for a new turn.  A hold's own prompt waits first."
+  (when-let* ((head (car (romacs-agent-queue session)))
+              ((romacs-agent--open-p session (romacs-agent-item-token head))))
+    (if (romacs-agent--goes-p session head) head
+      (cl-find-if (lambda (item) (and (romacs-agent-item-turn item) (romacs-agent--steer-p session item)))
+                  (cdr (romacs-agent-queue session))))))
 
 (defun romacs-agent--dispatch (session)
   "Write the first of SESSION's waiting messages that may go
@@ -3622,8 +3645,7 @@ queue.  Called wherever what the predicate reads may have changed."
           (while more
             (setq more nil)
             ;; Dropped as they would go: those no longer wanted.
-            (let ((next (cl-find-if (lambda (item) (romacs-agent--may-write-p session item))
-                                    (romacs-agent-queue session))))
+            (let ((next (romacs-agent--next-item session)))
               (when (and next (romacs-agent-item-valid next)
                          (not (funcall (romacs-agent-item-valid next))))
                 (romacs-agent--dequeue session next)
@@ -4166,8 +4188,12 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 (defun romacs-agent--dequeue (session item)
   "Take ITEM (by identity) out of SESSION's queue; non-nil when it was there."
   (when (memq item (romacs-agent-queue session))
-    (setf (romacs-agent-queue session) (delq item (romacs-agent-queue session))
-          (romacs-agent-queue-tail session) (last (romacs-agent-queue session)))
+    (if (eq item (car (romacs-agent-queue session)))
+        ;; The head, as a write takes it: at once.
+        (unless (setf (romacs-agent-queue session) (cdr (romacs-agent-queue session)))
+          (setf (romacs-agent-queue-tail session) nil))
+      (setf (romacs-agent-queue session) (delq item (romacs-agent-queue session))
+            (romacs-agent-queue-tail session) (last (romacs-agent-queue session))))
     (cl-decf (romacs-agent-queue-length session))
     t))
 
