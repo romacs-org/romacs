@@ -1100,4 +1100,465 @@ and wait for it to end."
         (when (get-buffer b) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
       (delete-directory warm-restart-directory t))))
 
+(defvar warm-restart-tests--secret-local nil "A local a test fills with a secret.")
+(defvar warm-restart-tests--secret-history nil "A history a test fills with a secret.")
+(define-derived-mode warm-restart-tests--handled-mode text-mode "Handled")
+
+(defun warm-restart-tests--secret (text)
+  "TEXT marked a secret, as the password manager marks one."
+  (propertize text 'romacs-secret t))
+
+(ert-deftest warm-restart-no-image-holds-a-secret ()
+  ;; A secret pasted or typed into a buffer, deleted but in its undo, in a
+  ;; modified file, in a handler's data, a buffer-local or a history: none
+  ;; of its text is in the image's bytes.  A buffer's secret comes back as
+  ;; stars, one for one, and the restore says so.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (desktop-locals-to-save (cons 'warm-restart-tests--secret-local desktop-locals-to-save))
+         (desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--handled-mode #'ignore) desktop-buffer-mode-handlers))
+         (warm-restart-history-variables (cons 'warm-restart-tests--secret-history warm-restart-history-variables))
+         (warm-restart-tests--secret-history (list "plain" (warm-restart-tests--secret "hunter7")))
+         (secrets '("hunter2" "hunter3" "hunter4" "hunter5" "hunter6" "hunter7"))
+         draft visiting handled image)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (setq draft (get-buffer-create "wr-secret-draft")
+                visiting (find-file-noselect file)
+                handled (get-buffer-create "wr-secret-handled"))
+          (with-current-buffer draft
+            (buffer-enable-undo)
+            (insert "pasted " (warm-restart-tests--secret "hunter2") " typed")
+            (undo-boundary)
+            (insert (warm-restart-tests--secret "hunter3"))
+            (undo-boundary)
+            (delete-region (- (point) 7) (point))
+            (setq-local warm-restart-tests--secret-local (list "a" (warm-restart-tests--secret "hunter6"))))
+          (with-current-buffer visiting
+            (goto-char (point-max))
+            (insert "token " (warm-restart-tests--secret "hunter4")))
+          (with-current-buffer handled
+            (warm-restart-tests--handled-mode)
+            (setq-local desktop-save-buffer
+                        (lambda (_dir) (list :draft (concat "my " (warm-restart-tests--secret "hunter5"))))))
+          (setq image (warm-restart-write))
+          (with-temp-buffer
+            (insert-file-contents-literally image)
+            (dolist (secret secrets)
+              (goto-char (point-min))
+              (should-not (search-forward secret nil t))))
+          (let* ((form (car (warm-restart--read image))) (records (plist-get form :buffers)))
+            (should (plist-get (seq-find (lambda (r) (equal (plist-get r :name) "wr-secret-draft")) records) :starred))
+            ;; The file's starred copy is set apart, where no older reader looks.
+            (should-not (seq-find (lambda (r) (equal (plist-get r :file) file)) records))
+            (let ((apart (seq-find (lambda (r) (equal (plist-get r :name) "notes.txt <starred>")) (plist-get form :starred))))
+              (should (eq (plist-get apart :strategy) 'starred))
+              (should-not (plist-get apart :file))
+              (should (equal (plist-get apart :copy-of) file))))
+          ;; No staging buffer outlives the write.
+          (should-not (seq-find (lambda (b) (string-prefix-p " *warm-restart staged*" (buffer-name b))) (buffer-list)))
+          (dolist (b (list draft visiting handled))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (kill-buffer b))
+          (let* ((romacs-progress-state nil) (report (warm-restart-restore-image image)))
+            (should (seq-find (lambda (p) (and (equal (plist-get p :buffer) "notes.txt <starred>")
+                                               (string-search "as stars" (plist-get p :reason))))
+                              (plist-get report :problems))))
+          (with-current-buffer "wr-secret-draft" (should (equal (buffer-string) "pasted ******* typed")))
+          (should-not (find-buffer-visiting file))
+          (with-current-buffer "notes.txt <starred>"
+            (should-not buffer-file-name)
+            (should (equal (buffer-string) "on the disk\ntoken *******"))
+            (should buffer-offer-save))
+          (with-temp-buffer (insert-file-contents file) (should (equal (buffer-string) "on the disk\n"))))
+      (dolist (name (list "wr-secret-draft" "wr-secret-handled" "notes.txt <starred>"))
+        (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name)))
+      (when-let* ((b (find-buffer-visiting file))) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
+      (delete-directory warm-restart-directory t))))
+
+(defvar warm-restart-tests--secret-global nil "A global a test fills with a secret.")
+
+(defun warm-restart-tests--image-holds (image text)
+  "Whether IMAGE's bytes hold TEXT."
+  (with-temp-buffer
+    (insert-file-contents-literally image)
+    (and (search-forward text nil t) t)))
+
+(defun warm-restart-tests--secret-alone (secret setup)
+  "Whether an image written after SETUP, a function that puts SECRET where
+it is the only secret, is free of SECRET's text; SETUP returns the
+buffers to kill after."
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t)) buffers)
+    (unwind-protect
+        (save-window-excursion
+          (setq buffers (funcall setup))
+          (not (warm-restart-tests--image-holds (warm-restart-write) secret)))
+      (dolist (b buffers) (when (buffer-live-p b) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-no-image-holds-a-secret-however-it-is-held ()
+  ;; Each way a secret reaches session data, alone in its image, so no
+  ;; other secret makes the writer look closer: its text is in no image.
+  (let ((desktop-locals-to-save (cons 'warm-restart-tests--secret-local desktop-locals-to-save))
+        (desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--handled-mode #'ignore) desktop-buffer-mode-handlers))
+        (warm-restart-globals (cons 'warm-restart-tests--secret-global warm-restart-globals))
+        (window-persistent-parameters (cons '(warm-restart-tests--param . writable) window-persistent-parameters))
+        (handled (lambda (name saver)
+                   (with-current-buffer (get-buffer-create name)
+                     (warm-restart-tests--handled-mode)
+                     (setq-local desktop-save-buffer saver)
+                     (current-buffer)))))
+    ;; A handler typing a secret into a buffer captured before it.
+    (should (warm-restart-tests--secret-alone
+             "hunter10"
+             (lambda ()
+               (list (with-current-buffer (get-buffer-create "wr-s-early") (insert "early text") (current-buffer))
+                     (funcall handled "wr-s-handler"
+                              (lambda (_dir)
+                                (with-current-buffer "wr-s-early"
+                                  (goto-char (point-max)) (insert (warm-restart-tests--secret "hunter10")))
+                                (list :x 1)))))))
+    ;; A handler's hash table: a key, then a value.
+    (should (warm-restart-tests--secret-alone
+             "hunter11"
+             (lambda () (list (funcall handled "wr-s-key" (lambda (_dir) (let ((table (make-hash-table :test #'equal)))
+                                                                         (puthash (warm-restart-tests--secret "hunter11") 1 table)
+                                                                         (list :table table))))))))
+    (should (warm-restart-tests--secret-alone
+             "hunter19"
+             (lambda () (list (funcall handled "wr-s-value" (lambda (_dir) (let ((table (make-hash-table :test #'equal)))
+                                                                           (puthash "k" (warm-restart-tests--secret "hunter19") table)
+                                                                           (list :table table))))))))
+    ;; A global's vector.
+    (should (let ((warm-restart-tests--secret-global (vector "plain" (warm-restart-tests--secret "hunter12"))))
+              (warm-restart-tests--secret-alone "hunter12" (lambda () nil))))
+    ;; A `hard' property's value.
+    (should (warm-restart-tests--secret-alone
+             "hunter13"
+             (lambda () (list (with-current-buffer (get-buffer-create "wr-s-hard")
+                                (insert "abcdef")
+                                (put-text-property 1 3 'hard (warm-restart-tests--secret "hunter13"))
+                                (current-buffer))))))
+    ;; A property change in the undo list.
+    (should (warm-restart-tests--secret-alone
+             "hunter14"
+             (lambda () (list (with-current-buffer (get-buffer-create "wr-s-undo")
+                                (buffer-enable-undo)
+                                (insert "abcdef")
+                                (undo-boundary)
+                                (put-text-property 3 5 'help-echo (warm-restart-tests--secret "hunter14"))
+                                (undo-boundary)
+                                (remove-text-properties 3 5 '(help-echo nil))
+                                (current-buffer))))))
+    ;; A saved local's string, the secret in its property.
+    (should (warm-restart-tests--secret-alone
+             "hunter15"
+             (lambda () (list (with-current-buffer (get-buffer-create "wr-s-local")
+                                (insert "x")
+                                (setq-local warm-restart-tests--secret-local
+                                            (propertize "plain" 'help-echo (warm-restart-tests--secret "hunter15")))
+                                (current-buffer))))))
+    ;; A left-out buffer's reason.
+    (should (warm-restart-tests--secret-alone
+             "hunter16"
+             (lambda () (list (with-current-buffer (get-buffer-create "wr-s-out")
+                                (setq-local warm-restart-left-out (warm-restart-tests--secret "hunter16"))
+                                (current-buffer))))))
+    ;; A handler's circular data.
+    (should (warm-restart-tests--secret-alone
+             "hunter17"
+             (lambda () (list (funcall handled "wr-s-cycle"
+                                       (lambda (_dir) (let ((cell (list (warm-restart-tests--secret "hunter17"))))
+                                                        (setcdr cell cell) cell)))))))
+    ;; A window parameter's vector.
+    (should (warm-restart-tests--secret-alone
+             "hunter18"
+             (lambda () (set-window-parameter nil 'warm-restart-tests--param (vector (warm-restart-tests--secret "hunter18")))
+               nil)))))
+
+(ert-deftest warm-restart-a-buffer-is-written-as-it-was-captured ()
+  ;; A handler later types a secret into a buffer captured before it, and
+  ;; replaces another's text: the image holds each as captured, its undo
+  ;; matching its text, and no secret.
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+        (desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--handled-mode #'ignore) desktop-buffer-mode-handlers))
+        image)
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "wr-s-early") (insert "early text"))
+          (with-current-buffer (get-buffer-create "wr-s-draft")
+            (buffer-enable-undo)
+            (insert "nine char")
+            (undo-boundary))
+          (with-current-buffer (get-buffer-create "wr-s-handler")
+            (warm-restart-tests--handled-mode)
+            (setq-local desktop-save-buffer
+                        (lambda (_dir)
+                          (with-current-buffer "wr-s-early"
+                            (goto-char (point-max)) (insert (warm-restart-tests--secret "hunter10")))
+                          (with-current-buffer "wr-s-draft"
+                            (erase-buffer) (insert (warm-restart-tests--secret "abc")))
+                          (list :x 1))))
+          (setq image (warm-restart-write))
+          (should-not (warm-restart-tests--image-holds image "hunter10"))
+          (let ((records (plist-get (car (warm-restart--read image)) :buffers)))
+            (should-not (plist-get (seq-find (lambda (r) (equal (plist-get r :name) "wr-s-early")) records) :starred))
+            (should (eql (plist-get (seq-find (lambda (r) (equal (plist-get r :name) "wr-s-draft")) records) :size) 9)))
+          (dolist (name '("wr-s-early" "wr-s-draft" "wr-s-handler")) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name))
+          (let* ((romacs-progress-state nil) (report (warm-restart-restore-image image)))
+            (should-not (seq-find (lambda (p) (and (member (plist-get p :buffer) '("wr-s-early" "wr-s-draft")) (plist-get p :text)))
+                                  (plist-get report :problems))))
+          (with-current-buffer "wr-s-early" (should (equal (buffer-string) "early text")))
+          (with-current-buffer "wr-s-draft"
+            (should (equal (buffer-string) "nine char"))
+            ;; Its undo is the captured text's.
+            (goto-char (point-max))
+            (undo)
+            (should (equal (buffer-string) ""))))
+      (dolist (name '("wr-s-early" "wr-s-draft" "wr-s-handler"))
+        (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name)))
+      (delete-directory warm-restart-directory t))))
+
+(cl-defstruct warm-restart-tests--holder value)
+
+(ert-deftest warm-restart-a-secret-in-a-record-is-starred-and-strings-keep-their-identity ()
+  ;; A record in a window parameter holding a secret, alone in its image;
+  ;; and handler data whose eq table is keyed by a starred string: the
+  ;; table finds it after the walk and after the image's round trip.
+  (let ((window-persistent-parameters (cons '(warm-restart-tests--param . writable) window-persistent-parameters))
+        (desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--handled-mode #'ignore) desktop-buffer-mode-handlers)))
+    (should (warm-restart-tests--secret-alone
+             "hunter21"
+             (lambda () (set-window-parameter nil 'warm-restart-tests--param
+                                              (make-warm-restart-tests--holder :value (warm-restart-tests--secret "hunter21")))
+               nil)))
+    (let* ((key (warm-restart-tests--secret "hunter22"))
+           (table (let ((h (make-hash-table :test #'eq))) (puthash key 17 h) h))
+           (data (list key table))
+           (walked (warm-restart--without-secrets data))
+           (read (car (read-from-string (warm-restart--print walked)))))
+      (should (eql (gethash (car walked) (cadr walked)) 17))
+      (should (eql (gethash (car read) (cadr read)) 17)))))
+
+(ert-deftest warm-restart-a-starred-file-is-never-reattached ()
+  ;; A starred file buffer whose saved locals name its file, restored with
+  ;; a buffer visiting that file renamed to the copy's name first: the copy
+  ;; is a new buffer that visits no file, and the visiting one keeps the
+  ;; file's text.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (desktop-locals-to-save (cons 'buffer-file-name desktop-locals-to-save))
+         image visiting)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "token " (warm-restart-tests--secret "hunter23")))
+          (setq image (warm-restart-write))
+          (let ((apart (car (plist-get (car (warm-restart--read image)) :starred))))
+            (should-not (assq 'buffer-file-name (plist-get apart :locals))))
+          (with-current-buffer (find-buffer-visiting file) (set-buffer-modified-p nil) (kill-buffer))
+          (setq visiting (find-file-noselect file))
+          (with-current-buffer visiting (rename-buffer "notes.txt <starred>"))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer visiting
+            (should-not (buffer-modified-p))
+            (should (equal (buffer-string) "on the disk\n")))
+          (with-current-buffer "notes.txt <starred><2>"
+            (should-not buffer-file-name)
+            (should (equal (buffer-string) "on the disk\ntoken ********"))))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-char-table-holding-a-secret-is-not-carried ()
+  (let ((window-persistent-parameters (cons '(warm-restart-tests--param . writable) window-persistent-parameters)))
+    (should (warm-restart-tests--secret-alone
+             "hunter24"
+             (lambda () (let ((table (make-char-table 'warm-restart-tests nil)))
+                          (aset table ?a (warm-restart-tests--secret "hunter24"))
+                          (set-window-parameter nil 'warm-restart-tests--param table))
+               nil)))))
+
+(ert-deftest warm-restart-a-text-changed-while-captured-keeps-no-stale-undo ()
+  ;; Code run while the record is made (as a hook after a collection may)
+  ;; changes the text: the snapshot is the new text, and no undo or
+  ;; property run of the old one comes with it.
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t)) image)
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "wr-s-moving")
+            (buffer-enable-undo) (insert "nine char") (undo-boundary))
+          (cl-letf* ((real (symbol-function 'warm-restart--snapshot))
+                     ((symbol-function 'warm-restart--snapshot)
+                      (lambda (buffer)
+                        (when (equal (buffer-name buffer) "wr-s-moving")
+                          (with-current-buffer buffer (erase-buffer) (insert (warm-restart-tests--secret "abc"))))
+                        (funcall real buffer))))
+            (setq image (warm-restart-write)))
+          (let ((record (seq-find (lambda (r) (equal (plist-get r :name) "wr-s-moving"))
+                                  (plist-get (car (warm-restart--read image)) :buffers))))
+            (should-not (plist-get record :undo))
+            (should (eql (plist-get record :size) 3)))
+          (with-current-buffer "wr-s-moving" (set-buffer-modified-p nil) (kill-buffer))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "wr-s-moving" (should (equal (buffer-string) "***"))))
+      (when (get-buffer "wr-s-moving") (with-current-buffer "wr-s-moving" (set-buffer-modified-p nil)) (kill-buffer "wr-s-moving"))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-starred-file-s-clone-goes-apart-with-it ()
+  ;; A starred file buffer with an indirect clone: `:buffers' names no
+  ;; base it lacks, and the restored clone is on the starred copy.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         image)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "token " (warm-restart-tests--secret "hunter25"))
+            (make-indirect-buffer (current-buffer) "notes.txt view" t))
+          (setq image (warm-restart-write))
+          (let* ((form (car (warm-restart--read image)))
+                 (ids (mapcar (lambda (r) (plist-get r :id)) (plist-get form :buffers))))
+            (should-not (seq-find (lambda (r) (and (eq (plist-get r :strategy) 'indirect)
+                                                   (not (member (plist-get r :base) ids))))
+                                  (plist-get form :buffers)))
+            (should (seq-find (lambda (r) (equal (plist-get r :name) "notes.txt view")) (plist-get form :starred))))
+          (dolist (name '("notes.txt view" "notes.txt")) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "notes.txt view"
+            (should (equal (buffer-name (buffer-base-buffer)) "notes.txt <starred>"))
+            (should-not (string-search "hunter25" (buffer-string)))))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-char-table-s-default-secret-is-not-carried ()
+  (let ((window-persistent-parameters (cons '(warm-restart-tests--param . writable) window-persistent-parameters)))
+    (should (warm-restart-tests--secret-alone
+             "hunter26"
+             (lambda () (let ((table (make-char-table 'warm-restart-tests nil)))
+                          (set-char-table-range table nil (warm-restart-tests--secret "hunter26"))
+                          (set-char-table-range table t "everywhere")
+                          (set-window-parameter nil 'warm-restart-tests--param table))
+               nil)))))
+
+(ert-deftest warm-restart-a-starred-copy-stays-one-restart-after-restart ()
+  ;; Restored, a starred copy keeps its header, its offer to be saved and
+  ;; its place apart at the next image; that restore again never lands it
+  ;; in a buffer visiting the file, whatever that buffer is named.  An
+  ;; older reader is told the copy was not carried; this one is not.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         image report)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "token " (warm-restart-tests--secret "hunter27")))
+          (setq image (warm-restart-write))
+          (should (seq-find (lambda (e) (and (plist-get e :starred) (plist-get e :unsaved)))
+                            (plist-get (car (warm-restart--read image)) :lost)))
+          (with-current-buffer (find-buffer-visiting file) (set-buffer-modified-p nil) (kill-buffer))
+          (let ((romacs-progress-state nil)) (setq report (warm-restart-restore-image image)))
+          (should-not (seq-find (lambda (e) (plist-get e :starred)) (plist-get report :lost)))
+          ;; The next restart: the copy is set apart again.
+          (setq image (warm-restart-write))
+          (let ((apart (seq-find (lambda (r) (equal (plist-get r :name) "notes.txt <starred>"))
+                                 (plist-get (car (warm-restart--read image)) :starred))))
+            (should (equal (plist-get apart :copy-of) file)))
+          (with-current-buffer "notes.txt <starred>" (set-buffer-modified-p nil) (kill-buffer))
+          (with-current-buffer (find-file-noselect file) (rename-buffer "notes.txt <starred>"))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "notes.txt <starred>"
+            (should (equal buffer-file-name file))
+            (should-not (buffer-modified-p))
+            (should (equal (buffer-string) "on the disk\n")))
+          (with-current-buffer "notes.txt <starred><2>"
+            (should-not buffer-file-name)
+            (should buffer-offer-save)
+            (should (string-search "its secrets starred" (format "%s" header-line-format)))
+            (should (equal (buffer-string) "on the disk\ntoken ********"))))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-starred-copy-stays-one-through-a-change-of-mode ()
+  ;; A restored copy put in text-mode is still the copy: set apart at the
+  ;; next image.  Given a file, it is that file's buffer: not set apart.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (other (expand-file-name "kept.txt" warm-restart-directory))
+         image)
+    (unwind-protect
+        (progn
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max)) (insert "token " (warm-restart-tests--secret "hunter28")))
+          (setq image (warm-restart-write))
+          (with-current-buffer (find-buffer-visiting file) (set-buffer-modified-p nil) (kill-buffer))
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "notes.txt <starred>" (text-mode))
+          (should (seq-find (lambda (r) (equal (plist-get r :copy-of) file))
+                            (plist-get (car (warm-restart--read (warm-restart-write))) :starred)))
+          (with-current-buffer "notes.txt <starred>"
+            (let ((change-major-mode-with-file-name nil)) (set-visited-file-name other)))
+          (let ((form (car (warm-restart--read (warm-restart-write)))))
+            (should-not (plist-get form :starred))
+            (should (seq-find (lambda (r) (equal (plist-get r :file) other)) (plist-get form :buffers)))))
+      (dolist (b (buffer-list))
+        (when (or (string-prefix-p "notes.txt" (buffer-name b)) (string-prefix-p "kept.txt" (buffer-name b)))
+          (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-long-undo-with-a-secret-is-written ()
+  ;; A buffer's undo 5000 entries long, one of them a secret's deletion:
+  ;; the image is written, without it.
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t)) image)
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "wr-s-long")
+            (buffer-enable-undo)
+            (let ((undo-limit most-positive-fixnum) (undo-strong-limit most-positive-fixnum) (undo-outer-limit nil))
+              (dotimes (i 2500)
+                (insert (if (= i 1200) (warm-restart-tests--secret "hunter20") "x"))
+                (undo-boundary))
+              (delete-region (point-min) (point-max))))
+          (setq image (warm-restart-write))
+          (should-not (warm-restart-tests--image-holds image "hunter20")))
+      (when (get-buffer "wr-s-long") (with-current-buffer "wr-s-long" (set-buffer-modified-p nil)) (kill-buffer "wr-s-long"))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-register-in-a-starred-file-goes-to-its-copy ()
+  ;; A register in a file buffer whose secret was starred lands in the
+  ;; starred copy at its place, though the file is visited again.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (register-alist nil)
+         image)
+    (unwind-protect
+        (save-window-excursion
+          (write-region "on the disk\n" nil file nil 'silent)
+          (with-current-buffer (find-file-noselect file)
+            (goto-char (point-max))
+            (insert "token " (warm-restart-tests--secret "hunter29") " ")
+            (point-to-register ?s)
+            (insert "after"))
+          (set-window-buffer nil (get-buffer-create "*scratch*"))
+          (setq image (warm-restart-write))
+          (should (eq (car (alist-get ?s (plist-get (car (warm-restart--read image)) :registers))) 'warm-restart-position))
+          (with-current-buffer (find-buffer-visiting file) (set-buffer-modified-p nil) (kill-buffer))
+          (setq register-alist nil)
+          (find-file-noselect file)
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (jump-to-register ?s)
+          (should (equal (buffer-name) "notes.txt <starred>"))
+          (should-not buffer-file-name)
+          (should (looking-at-p "after")))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
+      (delete-directory warm-restart-directory t))))
+
 ;;; warm-restart-tests.el ends here
