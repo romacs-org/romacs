@@ -3147,10 +3147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "romacs-coordinate-contract"
-version = "0.1.0"
-
-[[package]]
 name = "romacs-display-protocol"
 version = "0.0.20"
 dependencies = [
@@ -3528,7 +3524,6 @@ dependencies = [
  "rayon",
  "romacs-allocator",
  "romacs-brand",
- "romacs-coordinate-contract",
  "romacs-display-protocol",
  "romacs-face",
  "romacs-keeper",
