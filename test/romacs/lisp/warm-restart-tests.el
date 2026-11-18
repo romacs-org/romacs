@@ -826,4 +826,114 @@ transcripts holds them, with BLOBS, as the restore does: prepared first."
         (dolist (name (list eshell-buffer-name transcript)) (when (get-buffer name) (kill-buffer name))))
       (delete-directory warm-restart-directory t))))
 
+(defmacro warm-restart-tests--failing-record (names &rest body)
+  "BODY with `warm-restart--record' signalling for the buffers NAMES."
+  (declare (indent 1))
+  `(cl-letf* ((real (symbol-function 'warm-restart--record))
+              ((symbol-function 'warm-restart--record)
+               (lambda (entry blobs)
+                 (if (member (plist-get entry :name) ,names) (error "A record that cannot be saved")
+                   (funcall real entry blobs)))))
+     ,@body))
+
+(ert-deftest warm-restart-a-record-that-fails-sends-its-text-in-a-companion ()
+  ;; Degrade per entry: a buffer whose record fails, its text typed, comes
+  ;; back as a companion under its id; the next buffer's text is its own.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (failing (get-buffer-create "wr-fails"))
+         (draft (get-buffer-create "wr-draft"))
+         image id)
+    (unwind-protect
+        (progn
+          (with-current-buffer failing
+            (insert "typed and at risk " (propertize "hunter2" 'romacs-secret t) " end")
+            (setq id (warm-restart--buffer-id)))
+          (with-current-buffer draft (insert "a draft of its own"))
+          (warm-restart-tests--failing-record '("wr-fails")
+            (setq image (warm-restart-write)))
+          (should-not (cl-some (lambda (b) (string-prefix-p " *warm-restart companion*" (buffer-name b))) (buffer-list)))
+          (with-temp-buffer
+            (insert-file-contents-literally image)
+            (should-not (search-forward "hunter2" nil t)))
+          (let ((record (seq-find (lambda (r) (equal (plist-get r :companion) "wr-fails"))
+                                  (plist-get (car (warm-restart--read image)) :buffers))))
+            (should (equal (plist-get record :id) id))
+            (should (equal (plist-get record :name) "wr-fails <carried text>")))
+          (kill-buffer failing) (kill-buffer draft)
+          (let* ((romacs-progress-state nil) (report (warm-restart-restore-image image)))
+            (should (equal (plist-get report :companions)
+                           '((:buffer "wr-fails" :carried-in "wr-fails <carried text>")))))
+          (with-current-buffer "wr-fails <carried text>"
+            (should (eq major-mode 'fundamental-mode))
+            (should (equal (buffer-string) "typed and at risk ******* end"))
+            (should (string-search "could not be saved" (format "%s" header-line-format))))
+          (with-current-buffer "wr-draft" (should (equal (buffer-string) "a draft of its own"))))
+      (dolist (name '("wr-fails" "wr-draft" "wr-fails <carried text>"))
+        (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name)))
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-record-that-fails-blocks-only-when-its-text-cannot-go ()
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (file (expand-file-name "saved.txt" warm-restart-directory))
+         (saved nil) (typed (get-buffer-create "wr-typed")))
+    (unwind-protect
+        (progn
+          (write-region "on the disk" nil file nil 'silent)
+          (setq saved (find-file-noselect file))
+          (with-current-buffer typed (insert "typed"))
+          ;; Nothing at risk: listed lost, the image written.
+          (warm-restart-tests--failing-record '("saved.txt")
+            (let ((form (car (warm-restart--read (warm-restart-write)))))
+              (should (seq-find (lambda (e) (equal (plist-get e :buffer) "saved.txt")) (plist-get form :lost)))
+              (should-not (seq-find (lambda (r) (equal (plist-get r :companion) "saved.txt")) (plist-get form :buffers)))))
+          ;; Text at risk and no companion either: the restart stops.
+          (warm-restart-tests--failing-record '("wr-typed")
+            (cl-letf (((symbol-function 'warm-restart--companion) (lambda (&rest _) (error "No room"))))
+              (should-error (warm-restart-write) :type 'warm-restart-blocked)))
+          (should-not (cl-some (lambda (b) (string-prefix-p " *warm-restart companion*" (buffer-name b))) (buffer-list))))
+      (when (buffer-live-p saved) (kill-buffer saved))
+      (with-current-buffer typed (set-buffer-modified-p nil)) (kill-buffer typed)
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-handler-s-unportable-data-sends-typed-text-in-a-companion ()
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (buffer (get-buffer-create "wr-handled-draft")))
+    (unwind-protect
+        (progn
+          (define-derived-mode warm-restart-tests--drafting-mode text-mode "Drafting")
+          (let ((desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--drafting-mode #'ignore) desktop-buffer-mode-handlers)))
+            (with-current-buffer buffer
+              (warm-restart-tests--drafting-mode)
+              (setq-local desktop-save-buffer (lambda (_dir) (list (point-marker))))
+              (insert "a draft its handler cannot save"))
+            (let ((record (seq-find (lambda (r) (equal (plist-get r :companion) "wr-handled-draft"))
+                                    (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))))
+              (should record)
+              (should (string-search "not portable" (format "%s" (plist-get record :locals)))))))
+      (with-current-buffer buffer (set-buffer-modified-p nil)) (kill-buffer buffer)
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-record-that-fails-to-restore-stops-no-other ()
+  ;; A failure outside the record's dispatch (here, finding the buffer it
+  ;; would reuse) is noted and the next record restores; a companion never
+  ;; lands in a live buffer of its name.
+  (let ((live (get-buffer-create "wr-x <carried text>")) problems)
+    (unwind-protect
+        (progn
+          (with-current-buffer live (insert "the user's own") (set-buffer-modified-p t))
+          (cl-letf* ((real (symbol-function 'warm-restart--made-buffer))
+                     ((symbol-function 'warm-restart--made-buffer)
+                      (lambda (record) (if (equal (plist-get record :name) "wr-broken") (error "Broken lookup")
+                                         (funcall real record)))))
+            (setq problems (warm-restart-tests--restore-older
+                            (list (list :id "b" :name "wr-broken" :strategy 'text :mode 'text-mode :blob 0 :point 1 :directory "/")
+                                  (list :id "c" :name "wr-x <carried text>" :strategy 'text :mode 'fundamental-mode :companion "wr-x"
+                                        :blob 1 :point 1 :directory "/"))
+                            (vector "broken" "carried"))))
+          (should (seq-find (lambda (p) (equal (plist-get p :buffer) "wr-broken")) problems))
+          (with-current-buffer live (should (equal (buffer-string) "the user's own")))
+          (with-current-buffer "wr-x <carried text><2>" (should (equal (buffer-string) "carried"))))
+      (dolist (name '("wr-broken" "wr-x <carried text>" "wr-x <carried text><2>"))
+        (when (get-buffer name) (with-current-buffer name (set-buffer-modified-p nil)) (kill-buffer name))))))
+
 ;;; warm-restart-tests.el ends here
