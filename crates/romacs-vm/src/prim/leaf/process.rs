@@ -1229,25 +1229,38 @@ impl Leaf<'_> {
     /// (its own, made by spawn's setsid), then a wait for it to die, which a
     /// further C-g ends with SIGKILL (`call_process_kill`), as "If you quit,
     /// the process is killed with SIGINT, or SIGKILL if you quit again". The
-    /// child is reaped here: none is left running.
+    /// child is reaped here, or, if SIGKILL has not ended it within
+    /// `KILL_GRACE` (a child in uninterruptible sleep), left to the reaper of
+    /// deleted children (`reap_children`, the host's reaper once the VM
+    /// goes): the quit returns either way.
     fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) {
         if crate::host::kill(-pid, libc::SIGINT).is_err() { let _ = crate::host::kill(pid, libc::SIGINT); }
-        if let Some(pidfd) = pidfd {
-            let fds = [(pidfd.as_raw_fd(), libc::POLLIN)];
-            loop {
-                match self.vm.poll_quittable(&fds, None) {
-                    Ok(revents) if revents[0] != 0 => break,
-                    Ok(_) if self.call_process_stop_requested() => {
-                        if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(_) => break,
+        let Some(pidfd) = pidfd else {
+            // No pidfd to wait on: wait_for_termination's blocking wait.
+            if sp::wait_blocking(pid).is_err() { self.vm.subprocesses.deleted.push((pid, None)); }
+            return;
+        };
+        let fds = [(pidfd.as_raw_fd(), libc::POLLIN)];
+        loop {
+            match self.vm.poll_quittable(&fds, None) {
+                Ok(revents) if revents[0] != 0 => break,
+                Ok(_) if self.call_process_stop_requested() => {
+                    if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
+                    break;
                 }
+                Ok(_) => {}
+                Err(_) => break,
             }
         }
-        if sp::wait_blocking(pid).is_err() { self.vm.subprocesses.deleted.push((pid, None)); }
+        let _ = sp::poll(&fds, Some(Self::KILL_GRACE));
+        if sp::wait_status(pid, rustix::process::WaitOptions::empty()).is_none() {
+            self.vm.subprocesses.deleted.push((pid, None));
+        }
     }
+
+    /// How long a quit waits for a killed child to end before it leaves
+    /// the child to the reaper and returns.
+    const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
 
     /// Whether the wait after the quit's SIGINT should kill the child now
     /// (SIGKILL, reap, return), the request taken: today a second C-g, taken
