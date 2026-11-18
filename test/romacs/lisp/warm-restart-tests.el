@@ -645,21 +645,17 @@ transcripts holds them, with BLOBS, as the restore does: prepared first."
           (with-current-buffer saved
             (warm-restart-tests--plain-shell-mode)
             (set-buffer-modified-p nil))
-          (let ((record (seq-find (lambda (r) (equal (plist-get r :name) "saved.log (transcript)"))
-                                  (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))))
-            (should (eq (plist-get record :strategy) 'text))
-            (should-not (plist-get record :file))
-            (should (plist-get record :blob)))
           ;; Detached text: no reader, an older one included, visits the file,
           ;; so no file mode or hook of it can make it a shell again.
-          (let ((record (seq-find (lambda (r) (eq (plist-get r :transcript-of) 'warm-restart-tests--plain-shell-mode))
-                                  (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))))
-            (should (eq (plist-get record :strategy) 'text))
-            (should-not (plist-get record :file))
-            (should (equal (plist-get record :name) "session.log (transcript)"))
-            (should (eq (plist-get record :mode) 'fundamental-mode))
-            (should (eq (plist-get record :transcript-of) 'warm-restart-tests--plain-shell-mode))
-            (should (plist-get record :blob))))
+          (let* ((records (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))
+                 (named (lambda (name) (seq-find (lambda (r) (equal (plist-get r :name) name)) records))))
+            (dolist (name '("session.log (transcript)" "saved.log (transcript)"))
+              (let ((record (funcall named name)))
+                (should (eq (plist-get record :strategy) 'text))
+                (should-not (plist-get record :file))
+                (should (eq (plist-get record :mode) 'fundamental-mode))
+                (should (eq (plist-get record :transcript-of) 'warm-restart-tests--plain-shell-mode))
+                (should (plist-get record :blob))))))
       (dolist (b (list buffer saved)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
       (delete-directory dir t))))
 
@@ -1251,6 +1247,89 @@ and wait for it to end."
         (when (get-buffer name)
           (with-current-buffer name (set-buffer-modified-p nil))
           (kill-buffer name)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-register-follows-a-transcript-beside-an-edited-buffer ()
+  ;; A buffer edited under the transcript's name before its turn keeps its
+  ;; edits; the transcript goes beside it, and its register goes there.
+  (let* ((dir (make-temp-file "romacs-wr-register-" t))
+         (warm-restart-directory dir)
+         (file (expand-file-name "session.log" dir))
+         (register-alist nil)
+         (buffer (progn (write-region "on disk\n" nil file nil 'silent) (find-file-noselect file))))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer buffer
+            (warm-restart-tests--plain-shell-mode)
+            (goto-char (point-max))
+            (point-to-register ?w)
+            (insert "$ typed"))
+          (set-window-buffer nil (get-buffer-create "*scratch*"))
+          (let ((image (warm-restart-write)))
+            (with-current-buffer buffer (set-buffer-modified-p nil))
+            (kill-buffer buffer)
+            (setq register-alist nil)
+            (with-current-buffer (get-buffer-create "session.log (transcript)") (insert "the user's own"))
+            (warm-restart-tests--restore-image image nil))
+          (jump-to-register ?w)
+          (should (equal (buffer-name) "session.log (transcript) (restored)"))
+          (should warm-restart--transcript-of)
+          (should (looking-at-p "\\$ typed"))
+          (with-current-buffer "session.log (transcript)" (should (equal (buffer-string) "the user's own"))))
+      (dolist (name '("session.log (transcript)" "session.log (transcript) (restored)" "session.log"))
+        (when (get-buffer name)
+          (with-current-buffer name (set-buffer-modified-p nil))
+          (kill-buffer name)))
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-register-in-a-left-out-shell-file-goes-by-its-file ()
+  ;; A shell's file buffer the image leaves out: its register names the
+  ;; file, not an id no record has.
+  (let* ((dir (make-temp-file "romacs-wr-register-" t))
+         (warm-restart-directory dir)
+         (file (expand-file-name "session.log" dir))
+         (register-alist nil)
+         (buffer (progn (write-region "on disk\n" nil file nil 'silent) (find-file-noselect file))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (warm-restart-tests--plain-shell-mode)
+          (setq-local warm-restart-left-out "left out")
+          (point-to-register ?w)
+          (should (equal (alist-get ?w (plist-get (car (warm-restart--read (warm-restart-write))) :registers))
+                         (list 'file-query file 1))))
+      (with-current-buffer buffer (set-buffer-modified-p nil))
+      (kill-buffer buffer)
+      (delete-directory dir t))))
+
+(ert-deftest warm-restart-an-ordinary-record-over-a-transcript-ends-it ()
+  ;; An older image's shell file comes back as its transcript; a later
+  ;; image's ordinary record of that file, restored into the same buffer,
+  ;; makes it that file's buffer again, its own locals applied.
+  (let* ((dir (make-temp-file "romacs-wr-reused-" t))
+         (warm-restart-directory dir)
+         (file (expand-file-name "session.log" dir)))
+    (unwind-protect
+        (progn
+          (write-region "$ ls\n" nil file nil 'silent)
+          (warm-restart-tests--restore-older
+           (list (list :id "s" :name "session.log" :strategy 'file :file file :mode 'warm-restart-tests--plain-shell-mode
+                       :point 1 :directory dir))
+           (vector))
+          (with-current-buffer (find-buffer-visiting file) (should warm-restart--transcript-of))
+          (warm-restart--restore-one
+           (car (warm-restart--prepare
+                 (list :transcripts t
+                       :buffers (list (list :id "f" :name "session.log" :strategy 'file :file file :mode 'fundamental-mode
+                                            :point 1 :directory dir :locals '((fill-column . 33)))))))
+           (vector) (make-hash-table :test #'equal))
+          (with-current-buffer (find-buffer-visiting file)
+            (should-not warm-restart--transcript-of)
+            (should-not header-line-format)
+            (should (eql fill-column 33))
+            (let ((record (warm-restart-tests--transcript-record (buffer-name))))
+              (should (equal (plist-get record :file) file))
+              (should-not (plist-get record :transcript-of)))))
+      (when-let* ((b (find-buffer-visiting file))) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b))
       (delete-directory dir t))))
 
 (ert-deftest warm-restart-a-transcript-s-copy-beside-an-edited-buffer-is-one-too ()
