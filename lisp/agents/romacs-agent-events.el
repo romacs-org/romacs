@@ -762,9 +762,7 @@ store beside it (one writer at a time: they would only hold it up)."
           ;; unless that launch waits for it.
           (unless (and (gethash id romacs-agent--sessions) (not (gethash id romacs-agent-events--waiting)))
             (puthash id t romacs-agent-events--migrating)
-            (when (gethash id romacs-agent-events--waiting)
-              (push id waited)
-              (romacs-agent-events--move-note id 'spawned))
+            (when (gethash id romacs-agent-events--waiting) (push id waited))
             (push dir batch))))
       (when batch
         (setq batch (nreverse batch))
@@ -777,6 +775,7 @@ store beside it (one writer at a time: they would only hold it up)."
                                          :bindings (romacs-agent--fold-bindings))
                         (error (list 'error err)))))
           (if (eq (car-safe future) 'error) (romacs-agent-events--migrated batch future)
+            (dolist (id waited) (romacs-agent-events--move-note id 'spawned))
             (isolate-on-done future (lambda (done) (romacs-agent-events--migrated batch done))))))
       (run-at-time 0 nil #'romacs-agent-events--migrate-next))))
 
@@ -883,7 +882,8 @@ tried again a moment later."
                   ;; Waited for: moved without its turn rows, filled now,
                   ;; off the editor, as a live turn's are.
                   (when (and (gethash id romacs-agent-events--waiting) (fboundp 'romacs-agent-turns-fill-soon))
-                    (romacs-agent-turns-fill-soon (list id)))
+                    (with-demoted-errors "romacs-agent-events: filling turn rows: %S"
+                      (romacs-agent-turns-fill-soon (list id))))
                   (romacs-agent-events--waited id))
                  ;; A worker writing: tried again a moment later.
                  (`(error (sqlite-locked-error . ,_))
@@ -1000,6 +1000,9 @@ or for the store it moves to (`romacs-agent-events--until-store')."
 order it came."
   (when-let* ((thens (gethash id romacs-agent-events--waiting)))
     (remhash id romacs-agent-events--waiting)
+    ;; The last waited for: the other moves held for it go on.
+    (when (zerop (hash-table-count romacs-agent-events--waiting))
+      (run-at-time 0 nil #'romacs-agent-events--migrate-next))
     (dolist (then thens)
       (with-demoted-errors "romacs-agent-events: after a move: %S" (funcall then)))))
 

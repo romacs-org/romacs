@@ -493,9 +493,9 @@ turns, and its journal's file; a state root of its own."
       (push "/root/waited" romacs-agent-events--migrate-queue)
       (romacs-agent-events--migrate-next)
       (should (equal spawned '((romacs-agent-events--stage-job "/root/waited"))))
-      ;; Nothing waits any more: the others go on.
-      (clrhash romacs-agent-events--waiting)
-      (romacs-agent-events--migrate-next)
+      ;; Its waiter let go, the last: the others go on, of themselves.
+      (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (romacs-agent-events--waited "waited"))
       (should (equal (car spawned) '(romacs-agent-events--migrate-job "/root/other"))))))
 
 ;; Sent to twice while its move waits: one resume, one launch.
