@@ -1540,27 +1540,17 @@ then `romacs-agent-ui-changed-hook'."
   (puthash session t romacs-agent-ui--children-changed)
   (romacs-agent-ui--batch))
 
-(defvar romacs-agent-ui--changed-later nil
-  "Whether the views were left untold while a start restored.")
-
 (defun romacs-agent-ui--children-flush ()
   (setq romacs-agent-ui--children-timer nil)
   (let ((sessions (hash-table-keys romacs-agent-ui--children-changed)))
     (clrhash romacs-agent-ui--children-changed)
     (romacs-agent-ui--flush-rows sessions)
     (romacs-agent-ui--status-bar)
-    ;; While a start restores, its views are told once, as it ends: not a
-    ;; turn of its loading at a time, each redrawing every row.
-    (if romacs-agent--restoring (setq romacs-agent-ui--changed-later t)
-      (run-hooks 'romacs-agent-ui-changed-hook))))
+    ;; While a start restores, its views are told once, by the batch its
+    ;; end runs (`romacs-agent-restored-hook'): not a turn of its loading
+    ;; at a time, each redrawing every row.
+    (unless romacs-agent--restoring (run-hooks 'romacs-agent-ui-changed-hook))))
 
-(defun romacs-agent-ui--restored ()
-  "A start's restore ended: its views are told what changed meanwhile."
-  (when romacs-agent-ui--changed-later
-    (setq romacs-agent-ui--changed-later nil)
-    (run-hooks 'romacs-agent-ui-changed-hook)))
-
-(add-hook 'romacs-agent-restored-hook #'romacs-agent-ui--restored)
 
 (defun romacs-agent-ui--flush-rows (sessions)
   "Make SESSIONS' rows again; their chats and an open actions menu follow,

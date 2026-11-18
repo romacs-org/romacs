@@ -53,6 +53,9 @@ KEYS the first words of the entries already there.")
   "Keep SESSION's watches in its directory, or none."
   (let ((watches (gethash (romacs-agent-id session) romacs-agent-watch--watches))
         (file (romacs-agent-watch--file session)))
+    ;; Marked before its file is written, unmarked after it goes: a stop
+    ;; between leaves a mark too many, which a load sees through.
+    (when watches (romacs-agent-mark (romacs-agent-id session) 'watches t))
     (if watches
         (romacs-agent--write-json
          file (vconcat (mapcar (lambda (w)
@@ -65,7 +68,7 @@ KEYS the first words of the entries already there.")
                                                        "since" (plist-get w :since))))
                                watches)))
       (when (file-exists-p file) (delete-file file)))
-    (romacs-agent-mark (romacs-agent-id session) 'watches (and watches t))))
+    (unless watches (romacs-agent-mark (romacs-agent-id session) 'watches nil))))
 
 (defun romacs-agent-watch--load (session)
   "SESSION's watches kept in its directory, known again."

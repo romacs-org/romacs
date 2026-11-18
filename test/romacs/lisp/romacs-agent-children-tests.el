@@ -445,24 +445,18 @@
 
 (ert-deftest romacs-agent-children-views-are-told-once-a-restore-ends ()
   ;; While a start restores, the rows of what it loads are made as they
-  ;; come, but the views (the board) are told once, as it ends: not a turn
-  ;; of loading at a time, each redrawing every row.
+  ;; come, but the views (the board) are told by the batch its end runs:
+  ;; not a turn of loading at a time, each redrawing every row.
   (let ((romacs-agent-ui--children-changed (make-hash-table :test #'eq))
-        (romacs-agent-ui--children-timer nil) (romacs-agent-ui--changed-later nil)
-        (told 0) (rows 0))
+        (romacs-agent-ui--children-timer nil) (told 0) (rows 0))
     (cl-letf (((symbol-function 'romacs-agent-ui--flush-rows) (lambda (sessions) (cl-incf rows (length sessions))))
-              ((symbol-function 'romacs-agent-ui--status-bar) #'ignore))
+              ((symbol-function 'romacs-agent-ui--status-bar) #'ignore)
+              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
       (let ((romacs-agent-ui-changed-hook (list (lambda () (cl-incf told)))))
         (let ((romacs-agent--restoring t))
-          (dotimes (i 3)
-            (puthash (intern (format "s%d" i)) t romacs-agent-ui--children-changed)
-            (romacs-agent-ui--children-flush)))
+          (dotimes (i 3) (romacs-agent-ui--children-changed (intern (format "s%d" i)))))
         (should (= rows 3))
         (should (= told 0))
-        (romacs-agent-ui--restored)
-        (should (= told 1))
-        (romacs-agent-ui--restored)
-        (should (= told 1))
-        ;; No restore: told at each flush.
-        (romacs-agent-ui--children-flush)
-        (should (= told 2))))))
+        ;; Its end: the restored hook's batch.
+        (romacs-agent-ui--batch)
+        (should (= told 1))))))

@@ -733,8 +733,11 @@ has it: in a transaction of its own, after the statement FIRST when given."
         (let ((oracle (seq-remove #'romacs-agent--unloaded-p dirs)))
           (should (equal oracle (cdr dirs)))
           (should-not (romacs-agent--marked))
-          ;; Not known: each session's files read, then known.
+          ;; Not known: each session's files asked, as before.
           (should (equal (romacs-agent--to-load dirs) oracle))
+          (should-not (romacs-agent--marked))
+          ;; A store's fill makes them known, saying which it marked.
+          (should (equal (sort (romacs-agent--marks-reconcile) #'string<) (list (id 2) (id 5) (id 6))))
           (should (romacs-agent--marked))
           ;; Known: from the marks, no manifest read.
           (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read"))))
@@ -746,28 +749,54 @@ has it: in a transaction of its own, after the statement FIRST when given."
             (should-not (member (dir 1) (romacs-agent--to-load dirs)))
             (should-not (member (dir 5) (romacs-agent--to-load dirs)))))))))
 
-(ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
-  ;; Its marks known, an editor's start asks whether to load only the
-  ;; sessions something waits on or whose supervisor's socket is there:
-  ;; no session's directory listed or read.  A later look at the state
-  ;; directory takes what the start chose among as seen, and finds only a
-  ;; session recorded since.
+(ert-deftest romacs-agent-store-a-fill-makes-the-marks-what-the-files-say ()
+  ;; Known marks a fact went unmarked under (an older build wrote it, a
+  ;; stop cut its mark short), or kept for a fact gone: a store's fill
+  ;; makes them what each session's files say, and names the ones newly
+  ;; marked, which a start would have missed.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-store-tests--with
-    (let* ((ids (cl-loop for i from 1 to 5 collect (format "aaaaaaaa-0000-4000-8000-00000000040%d" i)))
+    (let ((one "aaaaaaaa-0000-4000-8000-000000000501") (two "aaaaaaaa-0000-4000-8000-000000000502"))
+      (record one "one")
+      (record two "two")
+      (romacs-agent--marks-known)
+      (romacs-agent-mark two 'watches t)
+      (write-region "[]" nil (expand-file-name "watches.json" (expand-file-name one root)) nil 'silent)
+      (should-not (gethash one (romacs-agent--marked)))
+      (should (equal (romacs-agent--marks-reconcile) (list one)))
+      (should (gethash one (romacs-agent--marked)))
+      (should-not (gethash two (romacs-agent--marked)))
+      (should-not (romacs-agent--marks-reconcile))
+      ;; What a fill printed of them, for the editor to load.
+      (should (equal (romacs-agent-store--marked-ids
+                      (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" one))
+                     (list one))))))
+
+(ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
+  ;; Its marks known, an editor's start asks whether to load only the
+  ;; sessions something waits on and those whose supervisor's socket is
+  ;; there, a live one with no row yet too: no session's directory listed
+  ;; or read.  A view's later look finds a session by the row written
+  ;; for it since.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((ids (cl-loop for i from 1 to 7 collect (format "aaaaaaaa-0000-4000-8000-00000000060%d" i)))
            (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
-           (romacs-agent--root-seen nil) (noninteractive nil) (romacs-agent-writer-queued nil))
+           (romacs-agent--rows-seen nil) (noninteractive nil) (romacs-agent-writer-queued nil))
       (cl-flet ((id (n) (nth (1- n) ids)) (dir (n) (expand-file-name (nth (1- n) ids) root)))
         (dotimes (i 5) (record (id (1+ i)) (format "s%d" (1+ i)) (= i 2)))
         (romacs-agent-store-fill)
         (romacs-agent--marks-known)
         (romacs-agent-mark (id 4) 'watches t)
+        ;; Live, its row not written yet.
+        (record (id 6) "s6" t)
         (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read")))
                   ((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
-          (should (equal (sort (romacs-agent--start-dirs) #'string<) (list (dir 3) (dir 4)))))
-        ;; The first look: every one there seen; then only what is new.
-        (should-not (romacs-agent--unseen-dirs))
-        (should-not (romacs-agent--unseen-dirs))
-        (set-file-times root (time-subtract nil 60))
-        (record "aaaaaaaa-0000-4000-8000-000000000499" "new")
-        (should (equal (romacs-agent--unseen-dirs) (list (expand-file-name "aaaaaaaa-0000-4000-8000-000000000499" root))))))))
+          (should (equal (sort (romacs-agent--start-dirs) #'string<) (list (dir 3) (dir 4) (dir 6)))))
+        ;; The start chose among every one recorded: a view's look finds
+        ;; one by the row written for it since, listing none.
+        (record (id 7) "s7")
+        (romacs-agent-store-fill)
+        (cl-letf (((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
+          (should (member (dir 7) (romacs-agent--recorded-since)))
+          (should-not (member (dir 1) (romacs-agent--recorded-since))))))))

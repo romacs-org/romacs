@@ -24,6 +24,12 @@
     (write-region "" nil (expand-file-name "journal.jsonl" dir) nil 'silent)
     (romacs-agent-know-tests--live id)))
 
+(defun romacs-agent-know-tests--recorded-since (root id)
+  "A session ID recorded under ROOT since the others, its row written as
+the editor that made it writes one (its first kept state)."
+  (romacs-agent-know-tests--record root id)
+  (when (fboundp 'romacs-agent-store-fill) (romacs-agent-store-fill)))
+
 (ert-deftest romacs-agent-know-sessions-restores-once ()
   ;; The first view restores every session, attaching where a supervisor
   ;; runs; a later one reads no known session's records and attaches none
@@ -63,7 +69,9 @@
           (should-not manifests)
           (should-not attached)
           ;; Recorded since: known, and attached as a new one is.
-          (romacs-agent-know-tests--record root three)
+          (romacs-agent-know-tests--recorded-since root three)
+          ;; What its row's writing read is not a view's.
+          (setq manifests nil)
           (romacs-agent-know-sessions)
           (should (equal manifests (list three)))
           (should (romacs-agent-get three))
@@ -95,7 +103,7 @@
           (should (= restored 1))
           (romacs-agent-know-sessions)
           (should (= restored 1))
-          (romacs-agent-know-tests--record root "aaaaaaaa-0000-4000-8000-000000000002")
+          (romacs-agent-know-tests--recorded-since root "aaaaaaaa-0000-4000-8000-000000000002")
           (romacs-agent-know-sessions)
           (should (= restored 2)))
       (delete-directory root t))))

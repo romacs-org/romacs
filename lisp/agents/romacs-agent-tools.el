@@ -1320,8 +1320,11 @@ says."
 (defun romacs-agent-tools--keep-resume (session time)
   "Record in SESSION's manifest that it resumes at TIME (nil: no longer):
 its own record, written as asked, so a restarted server arms it again."
+  ;; Marked before it is kept, unmarked after: a stop between leaves a mark
+  ;; too many, never a resume unmarked.
+  (when time (romacs-agent-mark (romacs-agent-id session) 'resume t))
   (romacs-agent--manifest-put session "resumeAt" (or time :null))
-  (romacs-agent-mark (romacs-agent-id session) 'resume time))
+  (unless time (romacs-agent-mark (romacs-agent-id session) 'resume nil)))
 
 (defun romacs-agent-tools--arm-resume (session time)
   (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
@@ -1653,8 +1656,8 @@ editor is between commands; tell the calling session its verdict."
      ;; tells it from the wake file.
      :before (and session (lambda ()
                             (setq romacs-restart-requester id)
-                            (write-region "verdict" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)
-                            (romacs-agent-mark id 'wake t)))
+                            (romacs-agent-mark id 'wake t)
+                            (write-region "verdict" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
      :failed (and session (lambda (why)
                             (setq romacs-restart-requester nil)
                             (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
