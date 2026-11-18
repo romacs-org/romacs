@@ -2495,10 +2495,23 @@ composer as it is."
 ;; (desktop.el, warm-restart.el) carries only which session it shows and
 ;; the composer's unsent text; the transcript replays from the journal.
 (defun romacs-agent-ui--desktop-save (_dirname)
-  "The session this chat shows and its unsent message."
+  "The session this chat shows and its unsent message, the whole of it
+whatever ordinary narrowing the chat has; a clone of a chat, which shares
+its text and its composer, saves the same message."
   (list :session (romacs-agent-id romacs-agent-ui--session)
-        :draft (and (markerp romacs-agent-ui--end) (buffer-substring-no-properties romacs-agent-ui--end (point-max)))
+        :draft (romacs-agent-ui--draft)
         :images romacs-agent-ui--draft-images))
+
+(defun romacs-agent-ui--draft ()
+  "The composer's whole text, whatever ordinary narrowing the chat has;
+nil when its marker is in neither the chat nor the chat a clone shares
+its text with, or in no buffer."
+  (when-let* (((markerp romacs-agent-ui--end))
+              (owner (marker-buffer romacs-agent-ui--end))
+              ((memq owner (list (current-buffer) (buffer-base-buffer)))))
+    (save-restriction
+      (widen)
+      (buffer-substring-no-properties romacs-agent-ui--end (point-max)))))
 
 (defun romacs-agent-ui--ensure-live ()
   "Before a command that acts on the current chat's session (one of the
@@ -3250,8 +3263,7 @@ history; when SEND fails, the draft stays.  Nothing when it is empty."
   (let ((next (if romacs-agent-ui--history-at (cdr romacs-agent-ui--history-at) romacs-agent-ui--history)))
     (when next
       (unless romacs-agent-ui--history-at
-        (setq romacs-agent-ui--history-draft
-              (cons (buffer-substring-no-properties romacs-agent-ui--end (point-max)) romacs-agent-ui--draft-images)))
+        (setq romacs-agent-ui--history-draft (cons (or (romacs-agent-ui--draft) "") romacs-agent-ui--draft-images)))
       (push romacs-agent-ui--history-at romacs-agent-ui--history-back)
       (setq romacs-agent-ui--history-at next)
       (romacs-agent-ui--set-draft-parts (caar next) (cdar next)))))
@@ -3379,10 +3391,13 @@ clipboard holds none, one picked by sight (`romacs-agent-images-pick')."
 
 (defun romacs-agent-ui--set-draft-parts (text images)
   "Make TEXT, as it is, the composer's and IMAGES the tray's, in place of
-what was there."
-  (delete-region romacs-agent-ui--end (point-max))
-  (goto-char (point-max))
-  (insert text)
+what was there: all of it, whatever ordinary narrowing the chat has,
+which stays as it was."
+  (save-restriction
+    (widen)
+    (delete-region romacs-agent-ui--end (point-max))
+    (goto-char (point-max))
+    (insert text))
   (setq romacs-agent-ui--draft-images images)
   (when images (require 'romacs-agent-images))
   (romacs-agent-ui--tray))
