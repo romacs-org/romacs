@@ -408,11 +408,15 @@ moment more under load."
          (should (member (format "skipped %s" id) said))
          (should (file-exists-p journal))
          (should-not (romacs-agent-events-p session))
-         ;; Let go: moved, its records its own, its journal backed up.
+         ;; Let go: moved, its records its own, its journal left whole for
+         ;; an editor still reading it.
          (should (equal (romacs-agent-events-migrate) (list :migrated 1 :skipped nil :failed nil)))
          (should (romacs-agent-events-p session))
-         (should-not (file-exists-p journal))
+         (should (file-exists-p journal))
          (should (> (caar (sqlite-select (romacs-agent-events--db) "select count(*) from events where session = ?" (list id))) 0))
+         ;; The next editor's start backs it up.
+         (romacs-agent-events--back-up-moved (list id))
+         (should-not (file-exists-p journal))
          (should (file-exists-p (expand-file-name (concat id ".jsonl")
                                                   (expand-file-name (format-time-string "journal-backup-%Y%m%d/")
                                                                     (romacs-agent--state-root)))))

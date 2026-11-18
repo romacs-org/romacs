@@ -741,10 +741,12 @@ exits 1 when one failed."
     (kill-emacs (if (plist-get report :failed) 1 0))))
 
 (defun romacs-agent-events-migrate (&optional say)
-  "Move every recorded session still in a journal to SQLite, here, its
-journal backed up: (:migrated N :skipped IDS :failed IDS).  A session
-whose supervisor runs (its lock held) is left in its journal, skipped.
-SAY, when given, is called with a line for each skipped or failed one."
+  "Move every recorded session still in a journal to SQLite, here:
+\(:migrated N :skipped IDS :failed IDS).  Each journal stays where it is,
+so an editor still running reads it whole; the next editor's start backs
+it up (`romacs-agent-events--back-up-moved').  A session whose supervisor
+runs (its lock held) is left in its journal, skipped.  SAY, when given,
+is called with a line for each skipped or failed one."
   (romacs-agent-store--made)
   (let* ((db (or (romacs-agent-events--db) (error "No agents store to migrate to")))
          (say (or say #'ignore))
@@ -762,7 +764,7 @@ SAY, when given, is called with a line for each skipped or failed one."
           (if (gethash dir held)
               (progn (push id skipped) (funcall say (format "skipped %s" id)))
             (condition-case err
-                (when (romacs-agent-events-import (romacs-agent--make :id id :dir dir))
+                (when (romacs-agent-events-import (romacs-agent--make :id id :dir dir) t)
                   (cl-incf migrated))
               (error (push id failed)
                      (funcall say (format "failed %s: %s" id (error-message-string err)))))))))
