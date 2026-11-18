@@ -380,11 +380,11 @@ moment more under load."
            (romacs-agent-events--flip-soon (list id))
            (should-not (romacs-agent-events-p session))
            (should (file-exists-p journal))
-           ;; Unloaded: made its own, its journal backed up.
+           ;; Unloaded: made its own, its journal left where it is.
            (remhash id romacs-agent--sessions)
            (romacs-agent-events--flip-soon (list id)))
          (should (romacs-agent-events-p session))
-         (should-not (file-exists-p journal))
+         (should (file-exists-p journal))
          (should-not (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id))))))))
 
 (ert-deftest romacs-agent-events-the-installer-migrates-every-journal ()
@@ -435,25 +435,23 @@ moment more under load."
 (ert-deftest romacs-agent-events-no-background-move ()
   ;; Off (the default), a start moves no journal in the background; what
   ;; an earlier start's workers staged is still made the sessions' own,
-  ;; and the moved ones' journals backed up.  On, every journal is queued.
+  ;; with no other work.  On, every journal is queued.
   (skip-unless (fboundp 'isolate-spawn))
   (dolist (background '(nil t))
     (let ((romacs-agent-store-background background) (romacs-agent-events-store t)
           (romacs-agent-events--migrate-queue nil)
-          (idle nil) (backed nil) (flipped nil) (started nil))
+          (idle nil) (flipped nil) (started nil))
       (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (_secs _repeat function) (push function idle)))
                 ((symbol-function 'isolate-main-p) (lambda () t))
                 ((symbol-function 'romacs-agent-events--db) (lambda () t))
                 ((symbol-function 'sqlite-select)
                  (lambda (_db query &rest _) (if (string-search "imported" query) '(("moved")) '(("staged")))))
-                ((symbol-function 'romacs-agent-events--back-up-moved) (lambda (ids) (setq backed ids)))
                 ((symbol-function 'romacs-agent-events--flip-soon) (lambda (ids) (setq flipped ids)))
                 ((symbol-function 'romacs-agent-events--journaled) (lambda () '("/journal")))
                 ((symbol-function 'romacs-agent-events--migrate-next) (lambda () (setq started t))))
         (let ((noninteractive nil)) (romacs-agent-events-migrate-soon))
         (should (= (length idle) 1))
         (funcall (car idle)))
-      (should (equal backed '("moved")))
       (should (equal flipped '("staged")))
       (should (eq started background))
       (should (equal romacs-agent-events--migrate-queue (and background '("/journal")))))))
@@ -636,7 +634,6 @@ moment more under load."
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (&rest _) '((10 3))))
-              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-events--flip)
                (lambda (&rest _) (if (= (cl-incf flips) 1) (signal 'sqlite-locked-error '("database is locked")) t)))
@@ -832,8 +829,7 @@ moment more under load."
         (delete-directory root t)))))
 
 (ert-deftest romacs-agent-events-a-start-asks-the-host-once-however-many-sessions ()
-  ;; A start backs up moved journals and lists those still to move: which
-  ;; a supervisor holds is asked of the host's program once, not once a
+  ;; A start lists the journals still to move: which a supervisor holds is asked of the host's program once, not once a
   ;; session: its cost stays flat however many sessions there are.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
@@ -843,7 +839,7 @@ moment more under load."
      1
      (lambda (_session _journal)
        (let ((ids (mapcar (lambda (n) (format "a0a00000-0000-4000-8000-%012d" n)) (number-sequence 1 40)))
-             (calls 0) (backed 0))
+             (calls 0))
          (dolist (id ids)
            (let ((dir (expand-file-name id (romacs-agent--state-root))))
              (make-directory dir t)
@@ -851,11 +847,7 @@ moment more under load."
              (write-region "{}\n" nil (expand-file-name "journal.jsonl" dir) nil 'silent)))
          (cl-letf (((symbol-function 'romacs-agent-events--host)
                     (lambda (&rest _) (cl-incf calls) (cons 0 "")))
-                   ((symbol-function 'romacs-agent-events--back-up) (lambda (_) (cl-incf backed))))
-           (romacs-agent-events--back-up-moved ids)
-           (should (= calls 1))
-           (should (= backed 40))
-           (setq calls 0)
+                   )
            (should (>= (length (romacs-agent-events--journaled)) 40))
            (should (= calls 1))
            ;; A great many: a call a batch, each command line bounded.

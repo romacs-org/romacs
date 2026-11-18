@@ -778,29 +778,13 @@ each skipped or failed one."
               (funcall say (format "failed %s" id)))))))
     (list :migrated migrated :skipped (nreverse skipped) :failed (nreverse failed))))
 
-(defun romacs-agent-events--back-up-moved (ids)
-  "Move to the backup directory the journals of the sessions IDS names
-that are imported, none of them loaded here, nor run by a supervisor:
-no reader has them.  A loaded one's goes at a later start."
-  ;; Only those with a journal left, then which a supervisor holds: one
-  ;; asking for them all, at every start.
-  (let* ((dirs (seq-filter (lambda (dir) (and (not (gethash (file-name-nondirectory dir) romacs-agent--sessions))
-                                              (file-exists-p (expand-file-name "journal.jsonl" dir))))
-                           (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)))
-         (held (romacs-agent-events--supervised dirs)))
-    (dolist (dir dirs)
-      (unless (gethash dir held)
-        (with-demoted-errors "romacs-agent-events: backing up: %S"
-          (romacs-agent-events--back-up (romacs-agent--make :id (file-name-nondirectory dir) :dir dir)))))))
-
 (defun romacs-agent-events--migrate-start ()
-  "Back up the journals of sessions moved before, make the moves an
-earlier start's workers staged the sessions' own, and, moving in the
-background (`romacs-agent-store-background'), queue every session still
-in a journal and start the jobs."
-  (romacs-agent-events--back-up-moved
-   (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from imported")))
-  ;; Written by an earlier start's workers: made theirs first.
+  "Make the moves an earlier start's workers or the installer staged the
+sessions' own: one query of the staged ones, then one short flip each.
+Moving in the background (`romacs-agent-store-background'), queue every
+session still in a journal and start the jobs.  A moved session's
+journal stays where it is, a backup no reader reads."
+  ;; Written by an earlier start's workers or the installer: made theirs first.
   (romacs-agent-events--flip-soon (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from staged")))
   (when romacs-agent-store-background
     (setq romacs-agent-events--migrate-queue
@@ -941,7 +925,7 @@ the command loop (`romacs-agent-events--flip-step')."
 (defun romacs-agent-events--flip-step ()
   "Make the waiting sessions' written records theirs, each in one short
 transaction (`romacs-agent-events--flip') the writer makes, its journal
-then backed up.  One loaded here is left as it is, written, for a start
+left where it is.  One loaded here is left as it is, written, for a start
 that leaves it unloaded, unless something waits for it
 \(`romacs-agent-events-then'), which is then called, moved or not.  The
 ones made theirs are told at once, when every flip is answered
@@ -951,7 +935,6 @@ tried again a moment later."
         (asked 0) (moved nil) (all nil))
     (cl-flet ((answered ()
                 (when (and all (zerop asked))
-                  (romacs-agent-events--back-up-moved moved)
                   (when moved (run-hook-with-args 'romacs-agent-events-migrated-functions (nreverse moved))))))
       (dolist (id ids)
         (let ((row (and (romacs-agent-events--flippable-p id)

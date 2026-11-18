@@ -504,7 +504,6 @@ connection of its own, as the writer's process has."
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
-              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
