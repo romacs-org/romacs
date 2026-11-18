@@ -637,6 +637,29 @@ comes back as a turn of its own: the turn it steered is no next run's."
                             (romacs-agent-store--item-json item))
                       nil (list 'queued id (romacs-agent-item-id item))))
 
+(defun romacs-agent-store-queued-reorder (id items)
+  "Keep ITEMS, waiting for the session ID names, at their positions now,
+all in one transaction, by the writer."
+  (when items
+    (romacs-agent-write 'romacs-agent-store--queued-rows
+                        (list id (mapcar (lambda (item) (list (romacs-agent-item-id item) (romacs-agent-item-position item)
+                                                              (romacs-agent-store--item-json item)))
+                                         items))
+                        nil (list 'queued-order id))))
+
+(defun romacs-agent-store--queued-rows (id rows)
+  "Keep ROWS, each (ITEM-ID POSITION JSON), for session ID in one
+transaction, here.  A failure signals, none of them kept."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep queued messages in"))))
+    (sqlite-execute db "begin immediate")
+    (condition-case err
+        (progn (pcase-dolist (`(,item-id ,position ,json) rows)
+                 (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json)))
+               (sqlite-execute db "commit"))
+      (error (ignore-errors (sqlite-execute db "rollback"))
+             (signal (car err) (cdr err))))
+    t))
+
 (defun romacs-agent-store-queued-delete (id item-id)
   "Let go of the kept message ITEM-ID of the session ID names, by the writer."
   (romacs-agent-write 'romacs-agent-store--queued-row (list id item-id nil nil)
@@ -692,8 +715,9 @@ may take it.  A cancelled task's is let go."
           (when waiting
             (let ((place (- (apply #'min (mapcar #'romacs-agent-item-position order)) 1e-3)))
               (dolist (item order)
-                (setf (romacs-agent-item-position item) (setq place (+ place 1e-3)))
-                (when (romacs-agent-item-kept item) (romacs-agent-store-queued-put (romacs-agent-id session) item)))))
+                (setf (romacs-agent-item-position item) (setq place (+ place 1e-3))))
+              ;; In one transaction: an end part way never leaves two out of order.
+              (romacs-agent-store-queued-reorder (romacs-agent-id session) (cl-remove-if-not #'romacs-agent-item-kept order))))
           (dolist (item order) (romacs-agent--enqueue session item)))
         (romacs-agent--dispatch session)))))
 

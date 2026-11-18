@@ -3659,8 +3659,9 @@ queue.  Called wherever what the predicate reads may have changed."
               (when next
                 ;; Off the queue once written: a write that fails (the
                 ;; harness gone meanwhile) keeps it for the next chance.
-                ;; Its kept record goes first: a crash between the two
-                ;; loses it rather than sends it twice.
+                ;; Its kept record goes first; a restore after an end
+                ;; between the two finds it sent by its id in the journal
+                ;; (`romacs-agent--sent-queued') and sends it no second time.
                 (romacs-agent--unkeep-item session next)
                 (condition-case err (romacs-agent--write session next)
                   (error (romacs-agent--keep-item session next)
