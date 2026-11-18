@@ -348,7 +348,7 @@ impl Reader<'_, '_, '_, '_, '_> {
     /// stream read so far stays read, as it would at any other failure. A
     /// read of Romacs's own text, without the permission, never stops.
     fn poll(&mut self) -> Result<()> {
-        if self.gc.is_none() || !self.m.leaf((), |vm, ()| vm.native_poll_text().is_err()) { return Ok(()); }
+        if self.gc.is_none() || !self.m.leaf((), |vm, ()| vm.inside_quit_scope(Vm::native_poll_text).is_err()) { return Ok(()); }
         self.signal = self.m.leaf((), build::pending_signal);
         Err("Quit".into())
     }

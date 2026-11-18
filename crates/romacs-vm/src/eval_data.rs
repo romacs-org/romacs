@@ -754,7 +754,8 @@ impl Vm {
     /// its own type), and a NaN that does not win is returned at once.
     pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
         let mut accum = self.coerce_number(args[0], true)?;
-        // Only `min` and `max` call this: a quit between chunks returns nothing.
+        // Only `min` and `max` call this: a quit between chunks returns
+        // nothing, and polls only inside their scope (`native_poll_text`).
         for chunk in args[1..].chunks(KERNEL_CHUNK) {
             for &arg in chunk {
                 let value = self.coerce_number(arg, true)?;

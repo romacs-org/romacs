@@ -47,15 +47,14 @@ impl Vm {
         Ok(self.list_value(&lines))
     }
     /// The `format` primitive: its `%S` prints poll as GNU's `print_object`
-    /// does, before any text is made, so a quit leaves nothing behind. Only
-    /// the primitive: `message` and `error` format with `format_string`.
+    /// does, before any text is made, so a quit leaves nothing behind;
+    /// inside the scope the engine's call target grants, so only the
+    /// primitive: `message` and `error` format with `format_string`.
     pub(super) fn format_polled(&mut self, start: usize, n: usize) -> Result<Value> {
-        let outer = std::mem::replace(&mut self.native_quit, true);
-        let mut formatted = self.format_string(start, n);
+        let formatted = self.format_string(start, n);
         if formatted.as_ref().is_err_and(|error| error == crate::eval_data::PRINT_STOPPED) {
-            formatted = self.native_poll_text().and_then(|()| self.format_string(start, n));
+            return self.native_poll_text().and_then(|()| self.format_string(start, n));
         }
-        self.native_quit = outer;
         formatted
     }
     pub(super) fn format_string(&mut self, start: usize, n: usize) -> Result<Value> {

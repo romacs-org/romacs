@@ -4314,7 +4314,10 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual | Min | Append => Vm::eval_data_primitive,
+        DeepEqual => Vm::eval_data_primitive,
+        // Their own entry, which raises a poll's escape (`primitive_value`).
+        Min | Append => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        Max => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.bootstrap_primitive(p, start, n)),
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
@@ -4335,7 +4338,7 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         Vector | Aref | Aset | CopySequence => Vm::data_primitive,
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
-        Format => |vm, _, start, n| vm.format_polled(start, n),
+        Format => |vm, _, start, n| vm.inside_quit_scope(|vm| vm.format_polled(start, n)),
         // Traversal and Message retain their ordinary arity/error adapter.
         Car | Cdr | Null | Eq | Memq | Assq | Nth | Setcar | Setcdr => {
             Vm::traversal_primitive

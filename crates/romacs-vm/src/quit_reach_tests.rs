@@ -347,17 +347,19 @@ fn a_quit_scope_ends_at_lisp_entry() {
 }
 
 /// A kernel the engine runs for a primitive whose failures are text polls
-/// per chunk: `append`'s new list, `min` and `max` over their arguments,
-/// `format`'s print. Its quit waits in `propagated_escape` behind
-/// `quit::ESCAPED` for the engine to raise, so a `throw-on-input` throw
-/// would cross it whole. Under `inhibit-quit` each runs to its end.
+/// per chunk inside the scope the engine's call target grants: `append`'s
+/// new list, `min` and `max` over their arguments, `format`'s print. Its
+/// quit waits in `propagated_escape` behind `quit::ESCAPED` for the engine
+/// to raise, so a `throw-on-input` throw would cross it whole. Under
+/// `inhibit-quit` each runs to its end; so does each without the scope, as
+/// the source cache's direct tier, which has no escape channel, calls it.
 #[test]
 fn kernels_the_engine_runs_quit_per_chunk() {
     use crate::Primitive::{Append, Format, Min};
-    fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value]) -> crate::Result<Value> {
+    fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value], scoped: bool) -> crate::Result<Value> {
         let start = vm.stack.len();
         vm.stack.extend_from_slice(args);
-        let outcome = vm.primitive(p, start, args.len());
+        let outcome = if scoped { vm.inside_quit_scope(|vm| vm.primitive(p, start, args.len())) } else { vm.primitive(p, start, args.len()) };
         vm.stack.truncate(start);
         outcome
     }
@@ -371,7 +373,9 @@ fn kernels_the_engine_runs_quit_per_chunk() {
             tail = cdr;
         }
         assert!(signal.interrupt(), "a busy evaluator takes the press");
-        let outcome = call(&mut vm, p, &values);
+        assert!(call(&mut vm, p, &values, false).is_ok(), "{p:?}: without the scope the call ends with a value");
+        assert!(signal.due(), "{p:?}: without the scope the press stays pending");
+        let outcome = call(&mut vm, p, &values, true);
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
         let quit = vm.intern("quit");
         assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
@@ -379,7 +383,26 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         vm.quit_unwinding = false;
         eval(&mut vm, "(setq inhibit-quit t)");
         assert!(signal.interrupt());
-        assert!(call(&mut vm, p, &values).is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
+        assert!(call(&mut vm, p, &values, true).is_ok(), "{p:?}: under inhibit-quit the call ends with a value");
         assert!(signal.due(), "{p:?}: inhibit-quit holds the press");
+    }
+}
+
+/// A C-g that lands in a kernel's poll reaches Lisp as `quit`, never as an
+/// error made of the poll's text: through `append` the engine runs, and
+/// through the loader's read of one long form.
+#[test]
+fn a_kernel_s_or_the_loader_s_quit_reaches_lisp_as_quit() {
+    let dir = std::env::temp_dir().join(format!("quit-kernel-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("long.el");
+    std::fs::write(&file, format!("(setq long '({}))\n", (0..400_000).map(|i| i.to_string()).collect::<Vec<_>>().join(" "))).unwrap();
+    for form in ["(progn (setq big (make-list 2000000 1)) (condition-case nil (while t (append big nil)) (quit 'q)))".to_string(),
+                 format!("(condition-case nil (while t (load {:?} nil t t)) (quit 'q))", file.display().to_string())] {
+        let (mut vm, signal) = busy_vm();
+        let presser = { let signal = signal.clone(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(300)); signal.interrupt() }) };
+        let outcome = vm.eval_source_raw(&form).map(|v| vm.display(v).unwrap());
+        assert!(presser.join().unwrap(), "a busy evaluator takes the press");
+        assert_eq!(outcome.as_deref(), Ok("q"), "{form}: the quit did not reach Lisp as `quit`");
     }
 }
