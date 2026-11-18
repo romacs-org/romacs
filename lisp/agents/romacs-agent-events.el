@@ -743,10 +743,11 @@ exits 1 when one failed."
 (defun romacs-agent-events-migrate (&optional say)
   "Move every recorded session still in a journal to SQLite, here:
 \(:migrated N :skipped IDS :failed IDS).  Each journal stays where it is,
-so an editor still running reads it whole; the next editor's start backs
-it up (`romacs-agent-events--back-up-moved').  A session whose supervisor
-runs (its lock held) is left in its journal, skipped.  SAY, when given,
-is called with a line for each skipped or failed one."
+whole: no reader reads an imported session's journal (SQLite has its
+records), so it is a backup, and an editor still running reads it whole.
+A session whose supervisor runs (its lock held) is left in its journal,
+skipped.  SAY, when given, is called with a line for each skipped or
+failed one."
   (romacs-agent-store--made)
   (let* ((db (or (romacs-agent-events--db) (error "No agents store to migrate to")))
          (say (or say #'ignore))
