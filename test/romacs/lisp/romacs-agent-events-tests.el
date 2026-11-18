@@ -11,6 +11,7 @@
 
 (require 'romacs-agent-claude)
 (require 'romacs-test-notes)
+(require 'romacs-agent-test-stored)
 
 (defun romacs-agent-events-tests--line (seq key value)
   "Record SEQ's line as the supervisor writes it: keys sorted."
@@ -396,6 +397,44 @@ moment more under load."
              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
      ,@body))
 
+(ert-deftest romacs-agent-events-no-background-move-or-fill ()
+  ;; With nothing moved or filled in the background (the default), a
+  ;; session whose journal is too long to import here is read as it is, at
+  ;; once; no move, row fill or turn-rows fill of every session starts.
+  ;; With them on, the same session waits for its move.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
+  (require 'romacs-agent-turns)
+  (dolist (background '(nil t))
+    (romacs-agent-test-with-store
+      (make-directory (file-name-directory (romacs-agent-store--file)) t)
+      (should (romacs-agent-store--open))
+      (let* ((romacs-agent-store-background background)
+             (romacs-agent-events-store t)
+             (dir (make-temp-file "romacs-calm-" t))
+             (romacs-agent-fold-bytes 10)
+             (romacs-agent-events--waiting (make-hash-table :test #'equal))
+             (romacs-agent-events--migrating (make-hash-table :test #'equal))
+             (romacs-agent-events--migrate-queue nil)
+             (session (romacs-agent--make :id "c0c0c0c0-0000-4000-8000-000000000000" :harness 'claude :dir dir
+                                          :host-socket (expand-file-name "none.sock" dir)))
+             (called nil) (started nil))
+        (unwind-protect
+            (progn
+              (write-region (concat (json-serialize (romacs-mcp--object "seq" 1 "t" 0.0 "note" (romacs-mcp--object))) "\n")
+                            nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+              (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest args) (push args started)))
+                        ((symbol-function 'make-process) (lambda (&rest args) (push args started)))
+                        ((symbol-function 'romacs-agent-events--migrate-next) (lambda () (push 'move started)))
+                        ((symbol-function 'romacs-agent-events-own) #'ignore))
+                (let ((noninteractive nil))
+                  (romacs-agent-events-then session (lambda () (setq called t)))
+                  (romacs-agent-events-migrate-soon)
+                  (romacs-agent-store-fill-soon)
+                  (romacs-agent-turns-fill-soon)))
+              (should (eq called (not background)))
+              (unless background (should-not started)))
+          (delete-directory dir t))))))
+
 (ert-deftest romacs-agent-events-a-loaded-session-waits-for-its-move ()
   ;; A launch or a note on a loaded session too long to move here waits
   ;; for a worker to move it, ahead of the rest, and then goes to SQLite:
@@ -403,7 +442,7 @@ moment more under load."
   ;; shows goes on in its journal at once.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
   (require 'romacs-agent-turns)
-  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+  (let ((romacs-agent-store-background t) (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
         (romacs-agent-events--imported (make-hash-table :test #'equal))
         (romacs-agent-events--migrating (make-hash-table :test #'equal))
         (romacs-agent-events--waiting (make-hash-table :test #'equal))
@@ -723,7 +762,7 @@ moment more under load."
   (require 'romacs-agent-history)
   (dolist (made '(t nil unasked))
     (let* ((root (make-temp-file "romacs-long-" t))
-           (romacs-agent-store--making nil)
+           (romacs-agent-store--making nil) (romacs-agent-store-background t)
            (process-environment (cons (concat "XDG_STATE_HOME=" root) process-environment))
            (romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-events-store t)
            (romacs-agent-events--imported (make-hash-table :test #'equal))

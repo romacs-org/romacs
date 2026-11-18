@@ -704,8 +704,8 @@ job moves; a journal past the bytes goes alone.")
 (defun romacs-agent-events-migrate-soon ()
   "Move every session still in a journal to SQLite, in worker VMs, once the
 editor is idle: with the store on, in an editor whose worker VMs run."
-  (when (and romacs-agent-events-store (not noninteractive) (fboundp 'isolate-spawn) (isolate-main-p)
-             (romacs-agent-events--db))
+  (when (and romacs-agent-store-background romacs-agent-events-store (not noninteractive)
+             (fboundp 'isolate-spawn) (isolate-main-p) (romacs-agent-events--db))
     (run-with-idle-timer 5 nil #'romacs-agent-events--migrate-start)))
 
 (defun romacs-agent-events--journaled ()
@@ -970,6 +970,11 @@ the writer to make the store it moves to.  Several are called in the
 order given."
   (let ((id (romacs-agent-id session)) (own (romacs-agent-events-own session)))
     (cond
+     ;; Nothing moved in the background: a journal too long to import
+     ;; here is read as it is (`romacs-agent--journal-pager').
+     ((and (not romacs-agent-store-background) (not (eq own 'queued)) (not (romacs-agent-events-p session))
+           (not (gethash id romacs-agent-events--migrating)))
+      (funcall then))
      ;; The store not readable here yet, early in a fresh start: a worker
      ;; moves it once the writer has made the store, so it waits for that
      ;; (`romacs-agent-events--store-readable'), not taken for unmovable.

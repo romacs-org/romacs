@@ -568,7 +568,8 @@ all of them.")
   "Catch the rows of the sessions IDS names (all of them, with none) up with
 their records in a batch process of this build, off the editor; while one
 runs, once it ends."
-  (when (and (not noninteractive) (romacs-agent-turns--db))
+  ;; Every session's (none named) only in the background (`romacs-agent-store-background').
+  (when (and (not noninteractive) (or ids romacs-agent-store-background) (romacs-agent-turns--db))
     (if (process-live-p romacs-agent-turns--filling)
         (setq romacs-agent-turns--waiting
               (if (or (null ids) (eq romacs-agent-turns--waiting t)) t

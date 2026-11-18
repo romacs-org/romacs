@@ -118,6 +118,11 @@ fn record(seq: u64, key: &str, line: &str) -> String {
     json!({"seq": seq, "t": now(), key: value}).to_string()
 }
 
+/// How long a write waits for another's lock before it is busy: longer
+/// than any transaction in normal use holds it (each is one record, or a
+/// few, and commits in milliseconds), so a writer never sees one locked.
+const STORE_BUSY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How long a record waits before it is tried again while the database is
 /// busy, and how long before the attached server is told storage fails.
 const STORE_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
@@ -185,7 +190,7 @@ impl Store {
 
     fn open_sqlite(database: &Path) -> rusqlite::Result<rusqlite::Connection> {
         let db = rusqlite::Connection::open(database)?;
-        db.busy_timeout(std::time::Duration::from_millis(200))?;
+        db.busy_timeout(STORE_BUSY)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "NORMAL")?;
         // As lisp/agents/romacs-agent-events.el makes them.
@@ -221,7 +226,9 @@ impl Store {
                 // A turn's end, an exit, a note: as durable as the journal's sync.
                 if sync { db.pragma_update(None, "synchronous", "FULL").map_err(|e| e.to_string())?; }
                 let kept = (|| {
-                    let transaction = db.transaction()?;
+                    // Its write lock taken at once, the busy wait with it: a
+                    // deferred one taken on its first insert could not wait.
+                    let transaction = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                     {
                         let mut insert = transaction.prepare_cached(
                             "insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)")?;
@@ -1261,6 +1268,45 @@ mod tests {
         assert!(matches!(again.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
         drop(held);
         assert!(again.try_lock().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writers_never_see_the_store_locked() {
+        // Two sessions' hosts keep records at once while a third writer
+        // (the editor's, a turn's rows) holds a transaction for a second:
+        // each record waits its turn, none is refused as locked.
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-locked-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let file = dir.join("store.sqlite");
+        let sessions: Vec<PathBuf> = ["a", "b"].iter().map(|name| dir.join(name)).collect();
+        for session in &sessions { create_private(session).unwrap(); }
+        drop(Store::open(&sessions[0], Some(&file)).unwrap());
+        let holder = {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                let mut db = rusqlite::Connection::open(&file).unwrap();
+                let transaction = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                transaction.commit().unwrap();
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let writers: Vec<_> = sessions.iter().cloned().map(|session| {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                let mut store = Store::open(&session, Some(&file)).unwrap();
+                (1..=50u64).map(|seq| store.keep(&[(seq, format!("{{\"seq\":{seq},\"note\":{{}}}}"))], false))
+                    .filter(|kept| kept.is_err()).count()
+            })
+        }).collect();
+        let refused: usize = writers.into_iter().map(|writer| writer.join().unwrap()).sum();
+        holder.join().unwrap();
+        assert_eq!(refused, 0);
+        let kept: i64 = rusqlite::Connection::open(&file).unwrap()
+            .query_row("select count(*) from events where session in ('a', 'b')", [], |row| row.get(0)).unwrap();
+        assert_eq!(kept, 100);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
