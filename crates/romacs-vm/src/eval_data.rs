@@ -205,7 +205,15 @@ impl Vm {
             }
         }
         let mut pending = vec![CharTableSlot::Value(value)];
+        // Polled as the print is (`PRINT_STOPPED`, its caller polling and
+        // printing again), the numbering it advanced given back.
+        let (index, mut objects) = (self.print_number_index, 0u32);
         while let Some(slot) = pending.pop() {
+            objects = objects.wrapping_add(1);
+            if objects.is_multiple_of(PRINT_POLL) && self.native_stop_due() {
+                self.print_number_index = index;
+                return Err(PRINT_STOPPED.into());
+            }
             let v = match slot {
                 CharTableSlot::Node(node) => {
                     let key = (1, char_table::char_table_node_id(&node) as u64);
@@ -719,9 +727,7 @@ impl Default for PrintOptions {
     fn default() -> Self { Self { graph: std::cell::RefCell::default(), unreadable: Unreadable::Ignored, length: None, level: None, quoted: true, newlines: false, nonascii: false, multibyte: false, controls: false, circle: false, gensym: false, buffer: false, objects: std::cell::Cell::new(0) } }
 }
 
-/// Elements a kernel the engine runs for a primitive (`append`, `min`,
-/// `max`) takes between its polls.
-const KERNEL_CHUNK: usize = 1 << 14;
+use crate::quit::KERNEL_CHUNK;
 
 /// A print a quit probe stopped (`print_object`): its caller polls.
 pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";

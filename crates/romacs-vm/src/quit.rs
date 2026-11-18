@@ -537,6 +537,10 @@ impl Vm {
 /// engine raises that escape, a quit or `throw-on-input`'s throw.
 pub(crate) const ESCAPED: &str = "a native poll's escape is pending";
 
+/// Elements a kernel the engine runs for a primitive (`append`, `min`,
+/// `max`, `copy-sequence`, `nreverse`) takes between its polls.
+pub(crate) const KERNEL_CHUNK: usize = 1 << 14;
+
 /// Steps between two polls of a long loop: GNU's `rarely_quit` polls
 /// every 2^16 steps of a cheap loop, `invisible.rs` every 1024.
 pub(crate) const POLL_STEPS: u32 = 1024;

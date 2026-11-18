@@ -16,7 +16,9 @@ use crate::gc::MEMORY_FULL;
 /// elements of LIST, `(wrong-type-argument listp TERMINATOR)` for a dotted
 /// list, and `(circular-list TAIL)` naming the tail at which Brent's check
 /// fired (the tortoise teleports at power-of-two multiples of 4096 steps).
-fn list_elements(cx: &Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
+/// LIST's elements, polled every 4096 (`Leaf::native_poll`, which quits only
+/// inside the caller's own scope): nothing is made from them yet.
+fn list_elements(cx: &mut Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
     let mut out = Vec::new();
     let mut tail = list;
     let mut tortoise = list;
@@ -26,7 +28,10 @@ fn list_elements(cx: &Leaf<'_>, list: Value) -> Result<Vec<Value>, Fault> {
         tail = cdr;
         if tail == tortoise { return Err(Fault::Circular(tail)); }
         steps += 1;
-        if steps & 4095 == 0 && steps.is_power_of_two() { tortoise = tail; }
+        if steps & 4095 == 0 {
+            if steps.is_power_of_two() { tortoise = tail; }
+            cx.native_poll()?;
+        }
     }
     if tail != Value::NIL { return Err(Fault::Wrong("listp", tail)); }
     Ok(out)
@@ -57,8 +62,13 @@ fn make_vector(cx, length: Value, init: Value) {
 
 defsubr! { name = "vconcat", gnu = "fns.c:750", effect = Pure,
 fn vconcat(cx; rest sequences) {
-    // concat_to_vector (fns.c:1114): every argument's type and length is
-    // checked, in order, before the result exists.
+    // Its walks quit: the vector is made only after them.
+    cx.quittable(|cx| vconcat_values(cx, sequences)).map(|values| allocate_vector(cx, values))
+}}
+
+/// concat_to_vector (fns.c:1114): every argument's type and length is
+/// checked, in order, before the result exists.
+fn vconcat_values(cx: &mut Leaf<'_>, sequences: &[Value]) -> Result<Vec<Value>, Fault> {
     let mut values = Vec::new();
     for &arg in sequences {
         if arg == Value::NIL { continue; }
@@ -75,8 +85,8 @@ fn vconcat(cx; rest sequences) {
             return Err(Fault::Wrong("sequencep", arg));
         }
     }
-    Ok(allocate_vector(cx, values))
-}}
+    Ok(values)
+}
 
 defsubr! { name = "propertize", gnu = "editfns.c:3296", effect = Pure,
 fn propertize(cx, string: Value; rest properties) {

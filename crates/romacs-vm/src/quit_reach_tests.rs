@@ -496,3 +496,26 @@ fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
     vm.stack.truncate(start);
     assert_eq!(count.ok().and_then(Value::integer_value), Some(entries), "every key went in");
 }
+
+/// `vconcat`'s list walk polls inside its own scope, the vector made only
+/// after it; `copy-sequence` and `nreverse` poll inside the scope their call
+/// target grants. Each quit leaves the list as it was: `nreverse` stops in
+/// its first pass, which writes nothing.
+#[test]
+fn list_walks_quit_inside_their_own_scope() {
+    use crate::Primitive::{CopySequence, Nreverse};
+    reaches("vconcat", "(setq l (make-list 50000 1))", "(list l)", "(= (length l) 50000)");
+    for p in [CopySequence, Nreverse] {
+        let (mut vm, signal) = busy_vm();
+        let list = eval(&mut vm, "(setq l (make-list 50000 1))");
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        let start = vm.stack.len();
+        vm.stack.push(list);
+        let outcome = vm.inside_quit_scope(|vm| vm.primitive(p, start, 1));
+        vm.stack.truncate(start);
+        assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
+        vm.propagated_escape = None;
+        vm.quit_unwinding = false;
+        assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
+    }
+}

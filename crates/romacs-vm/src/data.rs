@@ -1053,8 +1053,24 @@ impl Vm {
                     return Ok(x);
                 }
                 if x.tag() == 3 {
-                    let values = self.list_values(x)?;
-                    return Ok(self.list_value(&values));
+                    // A new list, the caller's only once it returns: polled
+                    // per chunk of the walk and of the build, inside its own
+                    // call target's scope.
+                    let mut values = Vec::new();
+                    let mut tail = x;
+                    while tail != Value::NIL {
+                        let (car, cdr) = self.cons_pair(tail)?;
+                        values.push(car);
+                        tail = cdr;
+                        if values.len() > self.list_limit() { return Err("circular list".into()); }
+                        if values.len().is_multiple_of(crate::quit::KERNEL_CHUNK) { self.native_poll_text()?; }
+                    }
+                    let mut copy = Value::NIL;
+                    for chunk in values.rchunks(crate::quit::KERNEL_CHUNK) {
+                        for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }
+                        self.native_poll_text()?;
+                    }
+                    return Ok(copy);
                 }
                 if Self::image_string(x) {
                     let copy = LispString::new(self.string_value(x)?);
