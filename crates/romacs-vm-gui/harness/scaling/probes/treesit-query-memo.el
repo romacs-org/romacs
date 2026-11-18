@@ -5,9 +5,12 @@
 ;; query_memo.rs) finds it by its grammar and text, so the N cost nothing.
 ;; Held by its slope, instructions per query already compiled, not by an
 ;; exponent: the body is the same 400 hits at every N.  Measured
-;; 2026-11-18: 1.8M at N and 4N (about 4,500 instructions a hit), slope
-;; -3; the same body without the memo is 4.37G, a compile each time.
-(scaling-probe treesit-query-memo :n 100 :slope 50
+;; 2026-11-18: 1.8M at N and 4N (about 4,500 instructions a hit); over
+;; eight runs the slope was -25 to +35, and 225 once at load 70, so the
+;; budget is 300.  A lookup that scanned its entries would cost about
+;; 10,000 a unit.  The same body without the memo is 4.37G, a compile
+;; each time.
+(scaling-probe treesit-query-memo :n 100 :slope 300
   :setup (progn (require 'treesit)
                 (dotimes (i n)
                   (treesit-query-compile 'c (format "((identifier) @i (#eq? @i \"memo-%d\"))" i) t))
