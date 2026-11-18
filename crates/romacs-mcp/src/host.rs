@@ -148,10 +148,11 @@ enum Store {
 }
 
 impl Store {
-    /// The journal FILE at PATH, appended to from its end.
-    fn journal(file: File, path: PathBuf) -> Store {
-        let len = file.metadata().map_or(0, |m| m.len());
-        Store::Journal { file, path, cut: None, len }
+    /// The journal FILE at PATH, appended to from its end: its length
+    /// known, or none (a failed write is cut back to where it began).
+    fn journal(file: File, path: PathBuf) -> Result<Store, String> {
+        let len = file.metadata().map_err(|e| format!("{}: {e}", path.display()))?.len();
+        Ok(Store::Journal { file, path, cut: None, len })
     }
 
     fn open(dir: &Path, database: Option<&Path>) -> Result<Store, String> {
@@ -159,7 +160,7 @@ impl Store {
             None => {
                 let path = dir.join("journal.jsonl");
                 let file = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                Ok(Store::journal(file, path))
+                Store::journal(file, path)
             }
             Some(database) => {
                 let session = dir.file_name().and_then(|n| n.to_str()).ok_or("--dir names no session")?.to_owned();
@@ -959,7 +960,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::journal(journal, path.clone()), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -984,7 +985,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let (server, mut ours) = UnixStream::pair().unwrap();
         let serving = std::thread::spawn(move || serve(shared, server, false));
@@ -1022,7 +1023,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
@@ -1050,7 +1051,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()), attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -1100,7 +1101,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
-        let mut shared = Shared { seq: 4, store: Store::journal(journal, path.clone()), attached: Some((1, server)), next_attachment: 1,
+        let mut shared = Shared { seq: 4, store: Store::journal(journal, path.clone()).unwrap(), attached: Some((1, server)), next_attachment: 1,
                                   stdin: Arc::new(Mutex::new(None)) };
         let note = json!({"type": "selection"});
         assert!(shared.note(1, &note));
