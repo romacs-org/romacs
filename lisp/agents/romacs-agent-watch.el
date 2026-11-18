@@ -64,7 +64,8 @@ KEYS the first words of the entries already there.")
                                                        "output" (or (plist-get w :output) :null)
                                                        "since" (plist-get w :since))))
                                watches)))
-      (when (file-exists-p file) (delete-file file)))))
+      (when (file-exists-p file) (delete-file file)))
+    (romacs-agent-mark (romacs-agent-id session) 'watches (and watches t))))
 
 (defun romacs-agent-watch--load (session)
   "SESSION's watches kept in its directory, known again."
@@ -270,8 +271,8 @@ at once; report what changed."
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-watch--restore)
 ;; A session with watches kept is loaded as a restore runs, so they go on.
-(add-hook 'romacs-agent-pending-functions
-          (lambda (dir _manifest) (file-exists-p (expand-file-name "watches.json" dir))))
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'watches (lambda (dir _manifest) (file-exists-p (expand-file-name "watches.json" dir)))))
 
 ;;; The tool
 

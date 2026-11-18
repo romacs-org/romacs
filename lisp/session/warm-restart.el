@@ -52,6 +52,8 @@
 (declare-function romacs-agent-load-session "romacs-agent" (id))
 (declare-function romacs-agent-tools--deliver "romacs-agent-tools" (session text delivered &optional valid))
 (declare-function romacs-agent-tools--restart-wake-file "romacs-agent-tools" (session))
+(declare-function romacs-agent-mark "romacs-agent" (id kind on))
+(declare-function romacs-agent-id "romacs-agent" (session))
 (declare-function romacs-startup-progress "animate.rs" (stage &optional label state))
 (defvar savehist-minibuffer-history-variables)
 (defvar savehist-additional-variables)
@@ -1591,7 +1593,8 @@ session that serves once it has judged it."
     (when (and (stringp requester) (require 'romacs-agent nil t) (fboundp 'romacs-agent-tools--deliver))
       (when-let* ((session (romacs-agent-load-session requester)))
         (romacs-agent-tools--deliver session (format "%s\nRecord: %s" text file)
-                                     (lambda () (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))))))
+                                     (lambda () (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
+                                       (romacs-agent-mark (romacs-agent-id session) 'wake nil)))))
     text))
 
 (defun romacs-restart--start (command image log)

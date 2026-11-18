@@ -608,7 +608,15 @@ with REQUEST, or nil."
 (add-hook 'romacs-agent-requested-functions #'romacs-agent-store-requested)
 ;; Restored: the rows of sessions recorded with none are made, off the editor.
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-store-fill-soon)
+(defun romacs-agent-store-listed-ids ()
+  "The ids of the sessions with a row, as a table: one query, however many."
+  (let ((table (make-hash-table :test #'equal)))
+    (when-let* ((db (romacs-agent-store--open)))
+      (dolist (row (sqlite-select db "select id from sessions")) (puthash (car row) t table)))
+    table))
+
 (setq romacs-agent-listed-p #'romacs-agent-store-listed-p)
+(setq romacs-agent-listed-ids #'romacs-agent-store-listed-ids)
 (setq romacs-agent-quiet-p #'romacs-agent-store-quiet-p)
 
 (provide 'romacs-agent-store)

@@ -704,3 +704,41 @@ has it: in a transaction of its own, after the statement FIRST when given."
         (should (equal (sqlite-select db "select * from sessions order by id") rows))
         (should (sqlite-select db "select 1 from sqlite_master where type = 'index' and name = 'sessions_parent'"))
         (should-not (sqlite-select db "select 1 from sqlite_master where name = 'sessions_reformed'"))))))
+
+(ert-deftest romacs-agent-store-a-start-chooses-from-rows-as-from-files ()
+  ;; A start chooses the sessions to load from the rows, the marks and one
+  ;; listing of where sockets are: the same as asking each session's own
+  ;; files, whether the marks are known yet or not.  Known, no session's
+  ;; manifest is read; a mark made or ended changes what is loaded.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((ids (cl-loop for i from 1 to 7 collect (format "aaaaaaaa-0000-4000-8000-00000000030%d" i)))
+           (dirs (mapcar (lambda (id) (expand-file-name id root)) ids))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+           (romacs-agent--restoring nil))
+      (cl-flet ((id (n) (nth (1- n) ids)) (dir (n) (nth (1- n) dirs)))
+        (dotimes (i 7) (record (id (1+ i)) (format "s%d" (1+ i)) (memq (1+ i) '(3 4))))
+        (romacs-agent-store-fill)
+        ;; 1 quiet; 2 due to resume; 3 and 4 live; 5 watched; 6 told of a
+        ;; restart; 7 with no row.
+        (write-region (json-serialize (romacs-mcp--object "id" (id 2) "harness" "claude" "title" "s2" "cwd" "/p/one/"
+                                                          "resumeAt" 1e10))
+                      nil (expand-file-name "manifest.json" (dir 2)) nil 'silent)
+        (write-region "[]" nil (expand-file-name "watches.json" (dir 5)) nil 'silent)
+        (write-region "verdict" nil (expand-file-name "restart-wake" (dir 6)) nil 'silent)
+        (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list (id 7)))
+        (let ((oracle (seq-remove #'romacs-agent--unloaded-p dirs)))
+          (should (equal oracle (cdr dirs)))
+          (should-not (romacs-agent--marked))
+          ;; Not known: each session's files read, then known.
+          (should (equal (romacs-agent--to-load dirs) oracle))
+          (should (romacs-agent--marked))
+          ;; Known: from the marks, no manifest read.
+          (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read"))))
+            (should (equal (romacs-agent--to-load dirs) oracle))
+            (romacs-agent-mark (id 1) 'watches t)
+            (should (member (dir 1) (romacs-agent--to-load dirs)))
+            (romacs-agent-mark (id 1) 'watches nil)
+            (romacs-agent-mark (id 5) 'watches nil)
+            (should-not (member (dir 1) (romacs-agent--to-load dirs)))
+            (should-not (member (dir 5) (romacs-agent--to-load dirs)))))))))
