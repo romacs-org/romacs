@@ -222,6 +222,7 @@ impl LispString {
         // it, with the flag.
         unsafe { std::str::from_utf8_unchecked(&self.bytes) }
     }
+    #[inline]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

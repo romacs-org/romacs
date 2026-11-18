@@ -152,7 +152,11 @@ impl Vm {
             // at the first image cons; Brent's walk finds it, a private end or
             // a private cycle in bounded steps without mutating.
             let (mut slow, mut fast, mut power, mut lam) = (seq, seq, 1usize, 0usize);
-            let mut cyclic = false;
+            // Polled inside its own call target's scope as this walk goes,
+            // which writes nothing: Brent's one compare a step is against
+            // the nearer of its restart and the next poll.
+            let mut poll_at = crate::quit::KERNEL_CHUNK;
+            let mut stop = power.min(poll_at);
             while fast.tag() == 3 {
                 if Self::image_value(fast) {
                     return Err(self.refuse_read_only(seq));
@@ -160,40 +164,34 @@ impl Vm {
                 fast = self.conses[fast.index(3)?].1;
                 lam += 1;
                 if fast == slow {
-                    cyclic = true;
                     break;
                 }
-                if lam == power {
-                    (slow, power, lam) = (fast, power * 2, 0);
+                if lam == stop {
+                    if lam == poll_at {
+                        self.native_poll_text()?;
+                        poll_at += crate::quit::KERNEL_CHUNK;
+                    }
+                    if lam == power {
+                        (slow, power, lam) = (fast, power * 2, 0);
+                        poll_at -= power / 2;
+                    }
+                    stop = power.min(poll_at);
                 }
             }
-            // Brent's walk took power - 1 steps before its last restart: an
-            // acyclic list's length, which counts the reversal's chunks.
-            let mut left = if cyclic { usize::MAX } else { power - 1 + lam };
+            // The reversal is unpolled, bounded by the walk above.
             let mut prev = Value::NIL;
             let mut tail = seq;
             while tail.tag() == 3 {
-                // A chunk at a time, polled between inside its own call
-                // target's scope: a quit leaves the list part reversed, as
-                // GNU's Fnreverse's rarely_quit does. A cyclic list is
-                // walked whole, to its error.
-                let chunk = if cyclic { usize::MAX } else { left.min(crate::quit::KERNEL_CHUNK) };
-                // The count is exact for an acyclic list, and `index`
-                // refuses any non-cons, so no tag test is added here.
-                for _ in 0..chunk {
-                    let i = tail.index(3)?;
-                    let next = self.conses[i].1;
-                    // "If SEQ contains a cycle, attempting to reverse it in-place
-                    // will inevitably come back to SEQ."
-                    if next == seq {
-                        return Err("circular list".into());
-                    }
-                    self.conses.set_cdr(i, prev);
-                    prev = tail;
-                    tail = next;
+                let i = tail.index(3)?;
+                let next = self.conses[i].1;
+                // "If SEQ contains a cycle, attempting to reverse it in-place
+                // will inevitably come back to SEQ."
+                if next == seq {
+                    return Err("circular list".into());
                 }
-                left = left.saturating_sub(chunk);
-                if tail.tag() == 3 { self.native_poll_text()?; }
+                self.conses.set_cdr(i, prev);
+                prev = tail;
+                tail = next;
             }
             if tail != Value::NIL {
                 return Err("list required".into());

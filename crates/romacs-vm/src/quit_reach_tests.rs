@@ -501,9 +501,8 @@ fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
 
 /// `vconcat`'s list walk polls inside its own scope, the vector made only
 /// after it; `copy-sequence` and `nreverse` poll inside the scope their call
-/// target grants. `copy-sequence`'s quit leaves the list as it was;
-/// `nreverse`'s, in its reversal, leaves it part reversed, as GNU's
-/// Fnreverse's rarely_quit does: still a proper list from its old head.
+/// target grants. Each quit leaves the list as it was: `nreverse` polls in
+/// its first walk, which writes nothing.
 #[test]
 fn list_walks_quit_inside_their_own_scope() {
     use crate::Primitive::{CopySequence, Nreverse};
@@ -519,12 +518,7 @@ fn list_walks_quit_inside_their_own_scope() {
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
         vm.propagated_escape = None;
         vm.quit_unwinding = false;
-        let length = eval(&mut vm, "(length l)").integer_value();
-        if p == CopySequence {
-            assert_eq!(length, Some(50000), "copy-sequence: the list is whole");
-        } else {
-            assert!(length.is_some_and(|n| (1..50000).contains(&n)), "nreverse: the list stopped part reversed, {length:?}");
-        }
+        assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
     }
 }
 

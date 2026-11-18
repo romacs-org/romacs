@@ -61,7 +61,7 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
         budget -= 1;
         if budget == 0 {
             budget = CHECK / 3;
-            if stop.due() { *stopped = true; return None; }
+            if probe_due(stop) { *stopped = true; return None; }
         }
         let Some((_, v)) = next(&mut bytes) else { return Some(out) };
         if v == 0 { return None; }
@@ -92,6 +92,13 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
 
 /// Octets decoded between two asks of the quit probe.
 const CHECK: usize = 1 << 14;
+
+/// STOP asked, kept out of the decoder's loop.
+#[cold]
+#[inline(never)]
+fn probe_due(stop: &crate::quit::NativeStop) -> bool {
+    stop.due()
+}
 
 /// BYTES decoded, inside the caller's own scope: the decode stops for the
 /// quit probe, and the poll quits or, nothing to quit for after all, the
