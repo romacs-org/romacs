@@ -105,7 +105,8 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
     // (`(macro . F)`, rebuilt from the slot's flag) or an autoload ends the
     // walk, and the general path calls it, signalling as GNU does. `nil`
     // and `t` end it too: the general path's dispatcher does not read their
-    // cells (a ticket of its own), and the two paths must agree.
+    // cells (romacs#309), and the two paths must agree. This fallback goes
+    // when #309 is fixed.
     let mut f = state[1];
     let mut name = None;
     for _ in 0..64 {
