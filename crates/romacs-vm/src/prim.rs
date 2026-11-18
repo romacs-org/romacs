@@ -625,11 +625,24 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            let name = if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) };
-            if let Some(name) = name { return Ok(f(&mut name.chars().map(u32::from))); }
+            if let Some(name) = self.symbol_text(v) { return Ok(f(&mut name.chars().map(u32::from))); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
+        }
+        /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
+        /// its name: the same character count, byte count and bytes, read in
+        /// place, with nothing copied.
+        pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
+            let text = |v| match self.symbol_text(v) {
+                Some(name) => Ok((name.chars().count(), name.as_bytes())),
+                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or(Fault::Wrong("stringp", v)),
+            };
+            Ok(text(v)? == text(w)?)
+        }
+        /// V's name when it is a symbol (`nil' and `t' too), borrowed.
+        fn symbol_text(&self, v: Value) -> Option<&str> {
+            if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
