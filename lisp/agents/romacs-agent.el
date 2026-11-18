@@ -5107,12 +5107,13 @@ says so meanwhile (`romacs-agent-mark').")
           (write-region "" nil file nil 'silent))
       (when (file-exists-p file) (delete-file file)))))
 
-(defun romacs-agent--marked ()
+(defun romacs-agent--marked (&optional any)
   "The ids of the sessions something waits on, as a table, from one
 listing of the marks; nil while they are not known whole, before a
-store's fill has reconciled them (`romacs-agent--marks-reconcile')."
+store's fill has reconciled them (`romacs-agent--marks-reconcile'),
+unless ANY: then those marked so far."
   (let ((dir (romacs-agent--marks-dir)))
-    (when (file-exists-p (expand-file-name ".complete" dir))
+    (when (if any (file-directory-p dir) (file-exists-p (expand-file-name ".complete" dir)))
       (let ((table (make-hash-table :test #'equal)))
         (dolist (file (directory-files dir nil "\\`[0-9a-f]"))
           (puthash (file-name-sans-extension file) t table))

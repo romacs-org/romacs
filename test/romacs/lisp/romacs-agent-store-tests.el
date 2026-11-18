@@ -863,4 +863,20 @@ has it: in a transaction of its own, after the statement FIRST when given."
                   ((symbol-function 'romacs-startup-progress) #'ignore)
                   ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
           (romacs-agent-store--filled (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" marked)))
-        (should (romacs-agent-loaded marked))))))
+        (should (romacs-agent-loaded marked))
+        ;; Marked before its marks were known whole, by a fill that then
+        ;; stopped: loaded all the same.  A mark whose session is gone
+        ;; loads nothing and starts no restore.
+        (let ((first "aaaaaaaa-0000-4000-8000-000000000704"))
+          (record first "first")
+          (romacs-agent-store-fill)
+          (delete-file (expand-file-name ".complete" (romacs-agent--marks-dir)))
+          (romacs-agent-mark first 'watches t)
+          (romacs-agent-mark "aaaaaaaa-0000-4000-8000-000000000799" 'watches t)
+          (setq romacs-agent--late-loads nil)
+          (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                    ((symbol-function 'romacs-startup-progress) #'ignore)
+                    ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+            (romacs-agent-store--filled "romacs-agent-store: filled 0\n"))
+          (should (romacs-agent-loaded first))
+          (should-not romacs-agent--restore-pending))))))

@@ -429,7 +429,7 @@ left to the next fill, the rows being a cache of records."
 (defvar romacs-agent-events-store)
 
 (declare-function romacs-agent--marks-reconcile "romacs-agent" ())
-(declare-function romacs-agent--marked "romacs-agent" ())
+(declare-function romacs-agent--marked "romacs-agent" (&optional any))
 
 (defun romacs-agent-store-fill-batch ()
   "`romacs-agent-store-fill' in a batch process, its count printed, and
@@ -487,7 +487,8 @@ else every session with no row and every marked one, asked here."
     ;; every marked session, one it marked before it stopped among them.
     (romacs-agent-store--load-missing
      (append (mapcar #'file-name-nondirectory (romacs-agent-store--missing))
-             (when-let* ((marked (romacs-agent--marked))) (hash-table-keys marked)))
+             ;; Its marks so far, known whole or not.
+             (when-let* ((marked (romacs-agent--marked t))) (hash-table-keys marked)))
      t)))
 
 (defun romacs-agent-store--said-ids (what output)
@@ -512,7 +513,9 @@ session with no row, asked here."
   (let ((idle (null romacs-agent--restore-pending)))
     (dolist (dir (if said (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)
                    (romacs-agent-store--missing)))
+      ;; One gone (a mark it left): nothing to load, nor to know as loaded.
       (unless (or (gethash (file-name-nondirectory dir) romacs-agent--sessions)
+                  (not (file-directory-p dir))
                   (member dir romacs-agent--restore-pending))
         (setq romacs-agent--restore-pending (append romacs-agent--restore-pending (list dir)))))
     (when (and idle romacs-agent--restore-pending)
