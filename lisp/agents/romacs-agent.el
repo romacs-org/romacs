@@ -4224,18 +4224,26 @@ files the user attached to it.  MESSAGES: it comes from other sessions
     (romacs-agent--unkeep-item session item)
     t))
 
-(defun romacs-agent--sent-queued (session)
-  "The ids of kept messages SESSION's last turns' records say were sent
-\(romacsQueued): one written as an editor ended, its kept row not yet let
-go, is among them."
-  (let ((ids nil))
-    (romacs-agent--read-journal
-     session (lambda (record)
-               (when-let* ((in (gethash "in" record)) ((hash-table-p in))
-                           (id (gethash "romacsQueued" in)) ((stringp id)))
-                 (push id ids)))
-     (car (romacs-agent--journal-tail session 5)))
-    ids))
+(declare-function romacs-agent-events--db "romacs-agent-events" ())
+
+(defun romacs-agent--sent-queued (session ids)
+  "Those of IDS, kept messages of SESSION's, its records say were sent
+\(an input record's romacsQueued): one written as an editor ended, its
+kept row not yet let go.  Looked for as they are written, never by
+reading its records here: in SQLite by a query of its own inputs, in a
+journal by grep."
+  (let ((key (lambda (id) (format "\"romacsQueued\":%s" (json-serialize id)))))
+    (if (romacs-agent-events-p session)
+        (when-let* ((db (romacs-agent-events--db)))
+          (cl-remove-if-not
+           (lambda (id)
+             (sqlite-select db "select 1 from events where session = ? and kind = 'in' and instr(record, ?) > 0 limit 1"
+                            (list (romacs-agent-id session) (funcall key id))))
+           ids))
+      (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+        (when (file-readable-p journal)
+          (cl-remove-if-not (lambda (id) (eql 0 (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)))
+                            ids))))))
 
 (defun romacs-agent--clear-queue (session)
   "Take every message out of SESSION's queue, and every one kept for it,

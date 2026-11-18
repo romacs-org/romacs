@@ -699,7 +699,7 @@ may take it.  A cancelled task's is let go."
            (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
                                (romacs-agent-store-queued (romacs-agent-id session))))
            ;; Sent already (an editor that ended before its row went): let go.
-           (sent (and kept (romacs-agent--sent-queued session))))
+           (sent (and kept (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept)))))
       (dolist (item kept)
         (when (member (romacs-agent-item-id item) sent)
           (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))))
