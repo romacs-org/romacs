@@ -765,7 +765,8 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                        (cl-loop for e in carried
                                 for buffer = (plist-get e :buffer)
                                 when (with-current-buffer buffer (warm-restart--shell-mode-p major-mode))
-                                collect (buffer-name buffer))))
+                                collect (buffer-name buffer))
+                       (mapcar (lambda (r) (plist-get r :name)) (cadr apart))))
                (renames (let ((transcripts (cdr named)))
                           (append (mapcar (lambda (r) (cons (car r) (or (cdr (assoc (cdr r) transcripts)) (cdr r))))
                                           (cddr apart))
@@ -1167,13 +1168,15 @@ of its previous and next buffers."
         ((consp tree) (cons (warm-restart--renamed-in (car tree) renames) (warm-restart--renamed-in (cdr tree) renames)))
         (t tree)))
 
-(defun warm-restart--name-transcripts (records shells)
+(defun warm-restart--name-transcripts (records shells &optional reserved)
   "RECORDS with the transcript (`warm-restart--inert-record') of each live
 shell, one SHELLS names, named apart from its shell, whatever its name,
 and the renames, as (RECORDS . RENAMES).  A restored transcript keeps
-its name."
+its name.  RESERVED, other records' names (those set apart), are taken
+too."
   (let ((taken (make-hash-table :test #'equal)) renames)
     (dolist (record records) (puthash (plist-get record :name) t taken))
+    (dolist (name reserved) (puthash name t taken))
     (cons (mapcar (lambda (record)
                     (if (not (and (plist-get record :transcript-of) (member (plist-get record :name) shells)))
                         record

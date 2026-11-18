@@ -1561,4 +1561,14 @@ buffers to kill after."
         (when (string-prefix-p "notes.txt" (buffer-name b)) (with-current-buffer b (set-buffer-modified-p nil)) (kill-buffer b)))
       (delete-directory warm-restart-directory t))))
 
+(ert-deftest warm-restart-a-transcript-s-name-is-free-of-the-records-set-apart ()
+  ;; A starred file's clone already has the name a live shell's
+  ;; transcript would take: the transcript takes the next free one.
+  (let ((named (warm-restart--name-transcripts
+                (list (list :id "s" :name "*sh*" :transcript-of 'eshell-mode))
+                '("*sh*")
+                '("*sh* (transcript)"))))
+    (should (equal (plist-get (caar named) :name) "*sh* (transcript)<2>"))
+    (should (equal (cdr named) '(("*sh*" . "*sh* (transcript)<2>"))))))
+
 ;;; warm-restart-tests.el ends here
