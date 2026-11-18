@@ -294,7 +294,7 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
 /// is that file's to answer for.
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
     ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
-    ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
+    ("hash_mut", |file| ["table.rs", "table_tests.rs", "hash.rs"].contains(&file)),
     ("collector_visit_node", char_table_collector), ("collector_visit_values", char_table_collector),
 ];
 
@@ -302,7 +302,7 @@ const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
 type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
-    ["table.rs", "table_image_tests.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
+    ["table.rs", "table_tests.rs", "table_image_tests.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
 }
 
 /// The collector, and the char table and keymap cursor files that give it
