@@ -4234,23 +4234,28 @@ as they are written, never by reading its records here: in SQLite by a
 query of its own inputs, in a journal by grep."
   ;; Its id a UUID: as JSON, itself in quotes.
   (let* ((key (lambda (id) (format "\"romacsQueued\":\"%s\"" id)))
+         ;; Where its records are; not known, every lookup is unsure.
+         (where (condition-case nil (if (romacs-agent-events-p session) 'store 'journal) (error 'unknown)))
          ;; Each: t sent, nil not, `unsure' its lookup failed.
-        (look
-         (if (romacs-agent-events-p session)
-             (let ((db (romacs-agent-events--db)))
-               (lambda (id)
-                 (if (null db) 'unsure
-                   (condition-case nil
-                       (and (sqlite-select db "select 1 from events where session = ? and kind = 'in' and instr(record, ?) > 0 limit 1"
-                                           (list (romacs-agent-id session) (funcall key id)))
-                            t)
-                     (error 'unsure)))))
-           (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
-             (lambda (id)
-               (and (file-exists-p journal)
-                    (let ((status (condition-case nil (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)
-                                    (error 2))))
-                      (cond ((eql status 0) t) ((eql status 1) nil) (t 'unsure))))))))
+         (look
+          (cond
+           ((eq where 'unknown) (lambda (_) 'unsure))
+           ((eq where 'store)
+            (let ((db (ignore-errors (romacs-agent-events--db))))
+              (lambda (id)
+                (if (null db) 'unsure
+                  (condition-case nil
+                      (and (sqlite-select db "select 1 from events where session = ? and kind = 'in' and instr(record, ?) > 0 limit 1"
+                                          (list (romacs-agent-id session) (funcall key id)))
+                           t)
+                    (error 'unsure))))))
+           (t
+            (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+              (lambda (id)
+                (and (file-exists-p journal)
+                     (let ((status (condition-case nil (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)
+                                     (error 2))))
+                       (cond ((eql status 0) t) ((eql status 1) nil) (t 'unsure)))))))))
         (sent nil) (unsure nil))
     (dolist (id ids)
       (let ((said (funcall look id)))
