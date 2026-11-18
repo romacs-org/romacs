@@ -590,7 +590,9 @@ class Transport(unittest.TestCase):
         self.say(child, {"jsonrpc": "2.0", "id": 30, "method": "tools/call", "params": {"name": "t"}})
         self.say(child, {"jsonrpc": "2.0", "id": 31, "method": "tools/call", "params": {"name": "t"}})
         self.say(child, {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 30}})
-        time.sleep(.5)
+        # Past the relay's wait for its first connection (2 s, before it reads
+        # a line): no server came, so the calls are held, not sent.
+        time.sleep(2.5)
         server = socket.socket(socket.AF_UNIX)
         server.bind(later)
         server.listen(4)
