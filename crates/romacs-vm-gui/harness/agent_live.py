@@ -2140,8 +2140,10 @@ def rpc(args, base):
         until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'restored')
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
-        held_gate.touch()
+        # Counted before the gate opens: the fake answers within a
+        # millisecond of it, before a count read after.
         before = done(sid)
+        held_gate.touch()
         a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
