@@ -1548,6 +1548,8 @@ pub struct Vm {
     resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// The slot of `obarray`, the variable (`Vm::initial_obarray`).
+    obarray_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
     variable_redirects: Vec<Option<VariableRedirect>>,
@@ -1861,6 +1863,7 @@ impl Vm {
             resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            obarray_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
@@ -2061,6 +2064,7 @@ impl Vm {
         }
         vm.declare_special_raw("macroexp--dynvars", Value::NIL);
         vm.truncate_lines_slot = vm.slot("truncate-lines");
+        vm.obarray_slot = vm.slot("obarray");
         vm.declare_special_raw("menu-bar-lines", Value::integer(0).unwrap());
         vm.specials.insert("major-mode".into());
         // GNU's DEFVAR macros mark every built-in variable special.
