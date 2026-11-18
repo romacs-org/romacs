@@ -28,8 +28,19 @@ pub(super) struct Entry {
 #[derive(Default, romacs_snapshot::Snapshot)]
 pub(super) struct Registry {
     pub(super) entries: HashMap<SymbolId, Entry>,
+    /// The keys and values put since the last collection (`put`): all a
+    /// minor reads of the registry, whose other values are old.
+    stored: Vec<Value>,
 }
 impl Registry {
+    /// What was put since the last collection.
+    pub(super) fn stored(&self) -> &[Value] {
+        &self.stored
+    }
+    /// A collection ended: every value put is old.
+    pub(super) fn settle(&mut self) {
+        self.stored.clear();
+    }
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {
         for entry in self.entries.values_mut() {
             for (key, value) in &mut entry.properties {
@@ -39,6 +50,7 @@ impl Registry {
         }
     }
     pub(super) fn put(&mut self, symbol: SymbolId, property: Value, value: Value) {
+        self.stored.extend([property, value]);
         let entry = self.entries.entry(symbol).or_default();
         entry.ancestry = None;
         if let Some((_, old)) = entry
