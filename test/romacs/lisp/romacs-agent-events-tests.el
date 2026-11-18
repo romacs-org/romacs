@@ -473,6 +473,31 @@ turns, and its journal's file; a state root of its own."
                  (should-not romacs-agent-events--migrate-queue))
              (delete-process host))))))))
 
+(ert-deftest romacs-agent-events-no-job-starts-beside-a-waited-move ()
+  ;; While a move is waited for (a chat opened, a resume), no other job
+  ;; starts, though one could: it would only write the store beside it.
+  ;; Its own job starts however many run.
+  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal))
+        (romacs-agent-events--migrate-running 0) (romacs-agent-events-migrate-jobs 2)
+        (romacs-agent-events--migrate-queue (list "/root/other"))
+        (romacs-agent--sessions (make-hash-table :test #'equal))
+        (spawned nil))
+    (cl-letf (((symbol-function 'isolate-spawn) (lambda (function batch &rest _) (push (cons function batch) spawned) 'future))
+              ((symbol-function 'isolate-on-done) #'ignore)
+              ((symbol-function 'run-at-time) #'ignore))
+      (puthash "waited" (list #'ignore) romacs-agent-events--waiting)
+      (romacs-agent-events--migrate-next)
+      (should-not spawned)
+      ;; Its own, queued first: started alone, at once.
+      (push "/root/waited" romacs-agent-events--migrate-queue)
+      (romacs-agent-events--migrate-next)
+      (should (equal spawned '((romacs-agent-events--stage-job "/root/waited"))))
+      ;; Nothing waits any more: the others go on.
+      (clrhash romacs-agent-events--waiting)
+      (romacs-agent-events--migrate-next)
+      (should (equal (car spawned) '(romacs-agent-events--migrate-job "/root/other"))))))
+
 ;; Sent to twice while its move waits: one resume, one launch.
 (ert-deftest romacs-agent-events-a-resume-waiting-for-its-move-is-one ()
   (let ((romacs-agent--resuming (make-hash-table :test #'equal))

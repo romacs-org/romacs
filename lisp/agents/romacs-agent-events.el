@@ -725,6 +725,15 @@ opened before its turn came."
   "Whether a running job is moving the session ID names to SQLite."
   (and (gethash id romacs-agent-events--migrating) t))
 
+(declare-function romacs-usage-log-note "romacs-usage-log" (kind &rest plist))
+
+(defun romacs-agent-events--move-note (id phase)
+  "Put PHASE of the move of the session ID names on the usage log, while
+something waits for it (a chat, a resume): where that wait goes, a phase
+at a time (`waited', `spawned', `staged', `flip', `flipped')."
+  (when (and (gethash id romacs-agent-events--waiting) (fboundp 'romacs-usage-log-note))
+    (romacs-usage-log-note "agent-move" :session id :phase (symbol-name phase) :at (float-time))))
+
 (defun romacs-agent-events--waited-dir-p (dir)
   "Whether something waits for the session recorded in DIR to move."
   (and (gethash (file-name-nondirectory dir) romacs-agent-events--waiting) t))
@@ -733,10 +742,13 @@ opened before its turn came."
   "Give the next waiting sessions to a worker VM when fewer than
 `romacs-agent-events-migrate-jobs' jobs run, a job a turn of the command
 loop: a worker's start is the editor's time.  One something waits for
-goes alone, at once, however many run: only its import is waited for."
+goes alone, at once, however many run: only its import is waited for;
+and while any is waited for, no other job starts, so none writes the
+store beside it (one writer at a time: they would only hold it up)."
   (when (and romacs-agent-events--migrate-queue
-             (or (< romacs-agent-events--migrate-running (max 1 romacs-agent-events-migrate-jobs))
-                 (romacs-agent-events--waited-dir-p (car romacs-agent-events--migrate-queue))))
+             (if (romacs-agent-events--waited-dir-p (car romacs-agent-events--migrate-queue)) t
+               (and (< romacs-agent-events--migrate-running (max 1 romacs-agent-events-migrate-jobs))
+                    (zerop (hash-table-count romacs-agent-events--waiting)))))
     (let ((batch nil) (waited nil) (bytes 0))
       (while (and romacs-agent-events--migrate-queue (< (length batch) (car romacs-agent-events--migrate-batch))
                   (not waited)
@@ -750,7 +762,9 @@ goes alone, at once, however many run: only its import is waited for."
           ;; unless that launch waits for it.
           (unless (and (gethash id romacs-agent--sessions) (not (gethash id romacs-agent-events--waiting)))
             (puthash id t romacs-agent-events--migrating)
-            (when (gethash id romacs-agent-events--waiting) (push id waited))
+            (when (gethash id romacs-agent-events--waiting)
+              (push id waited)
+              (romacs-agent-events--move-note id 'spawned))
             (push dir batch))))
       (when batch
         (setq batch (nreverse batch))
@@ -814,6 +828,7 @@ ERR) when none started): the ones it moved are told
   (let ((moved (unless (eq (car-safe done) 'error)
                  (condition-case err (isolate-await done)
                    (error (message "romacs-agent-events: a migration job: %s" (error-message-string err)) nil)))))
+    (dolist (id moved) (romacs-agent-events--move-note id 'staged))
     (romacs-agent-events--flip-soon moved)
     ;; Not moved: what waits for it goes on with its journal.
     (dolist (dir batch)
@@ -849,10 +864,12 @@ tried again a moment later."
                         (car (sqlite-select (romacs-agent-events--db) "select size, count from staged where session = ?" (list id))))))
           (if (not row) (romacs-agent-events--waited id)
             (cl-incf asked)
+            (romacs-agent-events--move-note id 'flip)
             (romacs-agent-write
              'romacs-agent-events--flip (list id (car row) (cadr row))
              (lambda (answer)
                (cl-decf asked)
+               (romacs-agent-events--move-note id 'flipped)
                (pcase (if (and (equal answer '(ok nil)) (romacs-agent-events--imported-row-p id))
                           ;; Made before a writer that ended, sent again.
                           '(ok t)
@@ -929,6 +946,7 @@ order given."
       (funcall then))
      (t
       (puthash id (append (gethash id romacs-agent-events--waiting) (list then)) romacs-agent-events--waiting)
+      (romacs-agent-events--move-note id 'waited)
       (let ((dir (romacs-agent-dir session)))
         ;; A job moving it already: it is flipped as that job ends; the
         ;; writer importing it: it is done as that import is; moved, its
