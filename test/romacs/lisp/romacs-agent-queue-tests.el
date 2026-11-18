@@ -22,6 +22,7 @@
   ;; and the message is still first, counted, for the next end or a resume.
   (let ((session (romacs-agent--make :id "55555555-6666-4777-8888-999999999999" :harness 'claude :driver-state (list :initialized t :ready t)
                                      :state 'running :host-socket "/nonexistent/host.sock")))
+    (setf (romacs-agent-caught-up session) t)
     (romacs-agent-send-later session "first")
     (romacs-agent-send-later session "second")
     (romacs-agent-send-later session "ahead" t)
@@ -34,6 +35,9 @@
     (let ((sent nil))
       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
         (romacs-agent--send-next session)
+        ;; Each at a turn's end: the first's turn runs till then.
+        (should (eq (romacs-agent-state session) 'running))
+        (setf (romacs-agent-state session) 'idle)
         (romacs-agent--send-next session))
       (should (= (length sent) 2))
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))

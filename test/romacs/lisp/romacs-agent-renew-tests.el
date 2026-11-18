@@ -232,7 +232,9 @@ state root that has said two things, its writes to its harness in
         (romacs-agent-renew-tests--append
          session (romacs-mcp--object "seq" (+ seq 1) "t" 50.0 "in" (cdr (car written)))
          (romacs-mcp--object "seq" (+ seq 2) "t" 51.0 "out" (romacs-mcp--object "type" "result" "result" "docs written")))
-        (setf (romacs-agent-seq session) (+ seq 2))
+        (setf (romacs-agent-seq session) (+ seq 2)
+              ;; Its turn ended, as its result says.
+              (romacs-agent-state session) 'idle)
         ;; Read back, as its journal now says.
         (remhash session romacs-agent-renew--written))
       (romacs-agent-renew-tests--run session)
