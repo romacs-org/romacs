@@ -536,8 +536,10 @@ indirect buffer whose base is not carried."
 (defun warm-restart--record-or-companion (entry blobs)
   "ENTRY's record, or a companion carrying its buffer's whole text
 \(`warm-restart--companion'): when `warm-restart--companion-why' says
-why, or when the record cannot be made or its handler's data is not
-portable while the text is at risk (`warm-restart--text-at-risk-p').  An
+why, when the text the record would carry holds a secret
+\(`warm-restart-secret'), or when the record cannot be made or its
+handler's data is not portable while the text is at risk
+\(`warm-restart--text-at-risk-p').  An
 indirect buffer of a companion's buffer is left out: its text goes with
 it.  A failed capture with no text at risk is a lost entry, marked so
 the restore names it.  Signal `warm-restart-blocked' only when text at
@@ -558,11 +560,17 @@ otherwise, and text at risk is never lost quietly."
       (list :lost (plist-get entry :name) :reason (format "its text is carried with %s's" (buffer-name base))))
      (t
       (let ((record (condition-case err (warm-restart--record entry blobs)
+                      (warm-restart-secret
+                       (setq failed 'secret)
+                       nil)
                       (error (setq failed (warm-restart--failure err))
                              ;; Text it took before it failed is never written.
                              (setcar blobs count) (setcdr blobs taken)
                              nil))))
         (cond ((and record (not (plist-member record :lost))) record)
+              ;; Text the record would carry holds a secret: it goes starred.
+              ((eq failed 'secret)
+               (funcall companion "carried text" (format "Text of %s, its secrets starred" (plist-get entry :name))))
               ((not (with-current-buffer buffer (warm-restart--text-at-risk-p)))
                (append (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed)))
                        (list :failed t)))
@@ -628,7 +636,8 @@ nil when it cannot be carried, or is a secret."
 
 (defconst warm-restart--credentials
   '(password-data auth-source-netrc-cache auth-source--session-nonce epa-file-passphrase-alist
-    plstore-passphrase-alist url-http-real-basic-auth-storage url-digest-auth-storage romacs-pass--copies)
+    plstore-passphrase-alist url-http-real-basic-auth-storage url-http-proxy-basic-auth-storage url-digest-auth-storage
+    mail-source-password-cache romacs-pass--copies)
   "Caches of credentials: never in an image, whoever lists them.")
 
 (defun warm-restart--variables (variables)
@@ -1467,12 +1476,12 @@ after the build that stopped writing them."
                                                    (thread-first (copy-sequence r)
                                                                  (plist-put :strategy 'text) (plist-put :companion (plist-get r :copy-of))
                                                                  (plist-put :mode 'fundamental-mode) (plist-put :library nil)
-                                                                 (plist-put :minor-modes nil)
-                                                                 (plist-put :locals (append (list (cons 'header-line-format
+                                                                 (plist-put :minor-modes nil) (plist-put :modified t)
+                                                                 (plist-put :locals (append (plist-get r :locals)
+                                                                                            (list (cons 'header-line-format
                                                                                                         (format "Text of %s, its secrets starred"
                                                                                                                 (plist-get r :copy-of)))
-                                                                                                  (cons 'buffer-offer-save t))
-                                                                                            (plist-get r :locals))))))
+                                                                                                  (cons 'buffer-offer-save t)))))))
                                                starred)))
                     (plist-put :starred nil)
                     (plist-put :lost (cl-remove-if (lambda (e) (plist-get e :starred)) (plist-get form :lost)))))))

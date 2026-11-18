@@ -1403,7 +1403,8 @@ and wait for it to end."
            (warm-restart--print
             (list :schema warm-restart--schema :transcripts t :buffers nil
                   :starred (list (list :id "s1" :name "notes.txt <starred>" :strategy 'starred :copy-of "/x/notes.txt"
-                                       :mode 'text-mode :minor-modes '(auto-fill-mode) :directory "/" :point 1 :modified t :blob 0
+                                       :mode 'text-mode :minor-modes '(auto-fill-mode) :directory "/" :point 1 :modified nil :blob 0
+                                       :locals '((buffer-offer-save . nil) (fill-column . 60))
                                        :hash (with-current-buffer stage (buffer-hash)) :size (buffer-size stage)))
                   :lost (list (list :buffer "notes.txt <starred>" :unsaved t :starred t :reason "set apart"))))
            (list stage))
@@ -1416,25 +1417,52 @@ and wait for it to end."
             (should (eq major-mode 'fundamental-mode))
             (should-not auto-fill-function)
             (should buffer-offer-save)
+            (should (buffer-modified-p))
+            (should (= fill-column 60))
             (should (equal (buffer-string) "on the disk\ntoken *******"))
             (should (string-search "starred" header-line-format))))
       (warm-restart-tests--kill " wr-stage" "notes.txt <starred>")
       (delete-directory warm-restart-directory t))))
 
 
+(ert-deftest warm-restart-a-clean-buffer-s-secret-goes-starred ()
+  ;; An unmodified buffer with no file, carried as text, holds a secret:
+  ;; nothing typed is at risk, and it goes as a starred companion all the same.
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t)) image)
+    (unwind-protect
+        (progn
+          (with-current-buffer (get-buffer-create "wr-s-clean")
+            (text-mode) (insert "kept " (warm-restart-tests--secret "hunter25")) (set-buffer-modified-p nil))
+          (setq image (warm-restart-write))
+          (should-not (warm-restart-tests--image-has image "hunter25"))
+          (warm-restart-tests--kill "wr-s-clean")
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (with-current-buffer "wr-s-clean (carried text)" (should (equal (buffer-string) "kept ********"))))
+      (warm-restart-tests--kill "wr-s-clean" "wr-s-clean (carried text)")
+      (delete-directory warm-restart-directory t))))
+
 (ert-deftest warm-restart-a-cached-credential-is-in-no-image ()
   ;; A cache of credentials listed as a saved global or a history is never
-  ;; written: a secret auth-source remembered is in no image.
+  ;; written: a secret auth-source remembered, a proxy's Basic credentials,
+  ;; a mail source's password are in no image.
   (require 'auth-source)
+  (defvar url-http-proxy-basic-auth-storage)
+  (defvar mail-source-password-cache)
   (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
-        (warm-restart-globals (append '(password-data auth-source-netrc-cache) warm-restart-globals))
+        (warm-restart-globals (append '(password-data auth-source-netrc-cache url-http-proxy-basic-auth-storage
+                                        mail-source-password-cache)
+                                      warm-restart-globals))
+        (url-http-proxy-basic-auth-storage (list (list "proxy:8080" (cons "realm" (base64-encode-string "user:hunter23")))))
+        (mail-source-password-cache (list (cons "pop:me@mail.example" "hunter24")))
         (warm-restart-history-variables (cons 'password-data warm-restart-history-variables))
         (password-cache t) (auth-source-do-cache t))
     (unwind-protect
         (progn
           (auth-source-remember '(:host "wr.example" :user "me") '((:secret "hunter22")))
           (should (password-in-cache-p (auth-source-format-cache-entry '(:host "wr.example" :user "me"))))
-          (should-not (warm-restart-tests--image-has (warm-restart-write) "hunter22")))
+          (let ((image (warm-restart-write)))
+            (dolist (text (list "hunter22" (base64-encode-string "user:hunter23") "hunter24"))
+              (should-not (warm-restart-tests--image-has image text)))))
       (auth-source-forget '(:host "wr.example" :user "me"))
       (delete-directory warm-restart-directory t))))
 
