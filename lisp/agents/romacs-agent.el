@@ -1798,19 +1798,25 @@ other; empty for none."
             (romacs-agent-title-auto session) nil)
       (romacs-agent--update-manifest session))))
 
+(defvar romacs-agent--manifest-frozen nil
+  "Non-nil while a session's records are read into a copy for a view of
+them alone (a chat's preview): its manifest is written nothing then.")
+
 (defun romacs-agent--manifest-put (session &rest fields)
-  "Write FIELDS (NAME VALUE ...) into SESSION's manifest, when it differs."
-  (let* ((file (expand-file-name "manifest.json" (romacs-agent-dir session)))
-         ;; Read with null and false kept: they are written back.
-         (manifest (and (file-readable-p file)
-                        (with-temp-buffer
-                          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-                          (ignore-errors (json-parse-buffer :object-type 'hash-table
-                                                            :null-object :null :false-object :false))))))
-    (when (and manifest (cl-loop for (name value) on fields by #'cddr
-                                 thereis (not (equal (gethash name manifest) value))))
-      (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
-      (romacs-agent--write-json file manifest))))
+  "Write FIELDS (NAME VALUE ...) into SESSION's manifest, when it differs;
+nothing while `romacs-agent--manifest-frozen'."
+  (unless romacs-agent--manifest-frozen
+    (let* ((file (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           ;; Read with null and false kept: they are written back.
+           (manifest (and (file-readable-p file)
+                          (with-temp-buffer
+                            (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
+                            (ignore-errors (json-parse-buffer :object-type 'hash-table
+                                                              :null-object :null :false-object :false))))))
+      (when (and manifest (cl-loop for (name value) on fields by #'cddr
+                                   thereis (not (equal (gethash name manifest) value))))
+        (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
+        (romacs-agent--write-json file manifest)))))
 
 (defun romacs-agent--update-manifest (session)
   "Write SESSION's title back to its manifest."
@@ -4511,6 +4517,7 @@ starts at the journal's start."
   (save-excursion
     (let ((records nil))
       (while (and (not (bobp)) (< (length records) romacs-agent--turn-free-reach))
+        (romacs-agent--scan-due)
         (forward-line -1)
         (push (ignore-errors
                 (json-parse-string (let ((line (buffer-substring (point) (line-end-position))))
@@ -4609,6 +4616,16 @@ by default; `none', no bound)."
                      (<= (- (romacs-agent--journal-end session) from) bound))))
       (cons from turns))))
 
+(defvar romacs-agent--scan-deadline nil
+  "A `float-time' a scan of a journal for its last turns must end by, or
+nil: past it the scan throws `romacs-agent--past-deadline'.  Bound by a
+view that must not wait (a chat's preview).")
+
+(defun romacs-agent--scan-due ()
+  "Throw `romacs-agent--past-deadline' when past `romacs-agent--scan-deadline'."
+  (when (and romacs-agent--scan-deadline (> (float-time) romacs-agent--scan-deadline))
+    (throw 'romacs-agent--past-deadline nil)))
+
 (defun romacs-agent--journal-file-tail (session turns &optional end begin budget)
   "Where to replay SESSION's journal from to draw its last TURNS prompts
 between bytes BEGIN and END (its start and end by default): (FROM .
@@ -4644,6 +4661,7 @@ go."
             ;; before it.  With no prompt before it, it is no cut.
             (let ((prompts (romacs-agent--prompt-lines)))
               (while (and prompts (not (and cut (> seen cut))))
+                (romacs-agent--scan-due)
                 (goto-char (pop prompts))
                 (setq seen (1+ seen))
                 (when (and (not cut) (>= seen turns) (romacs-agent--turn-free-p session probe (= start begin)))
