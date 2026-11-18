@@ -730,8 +730,8 @@ opened before its turn came."
 (defun romacs-agent-events--move-note (id phase)
   "Put PHASE of the move of the session ID names on the usage log, while
 something waits for it (a chat, a resume): where that wait goes, a phase
-at a time (`waited', `submitted' (its job taken by the pool, not yet a
-worker's), `staged', `flip', `flipped')."
+at a time (`waited', `submitted' (its job taken by the pool, whether
+queued there or handed to a worker already), `staged', `flip', `flipped')."
   (when (and (gethash id romacs-agent-events--waiting) (fboundp 'romacs-usage-log-note))
     (romacs-usage-log-note "agent-move" :session id :phase (symbol-name phase) :at (float-time))))
 
