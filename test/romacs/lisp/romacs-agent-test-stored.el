@@ -58,6 +58,8 @@ more, as a chat opened later draws it: (TEXT . BUFFER)."
       (setf (romacs-agent-buffer session) nil)
       (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
 
+;; Every test that requires this: a chat's replay walking its records on
+;; the editor fails it (`romacs-agent-ui--replay-over-function').
 (setq romacs-agent-ui--replay-over-function
       (lambda (session drew turns)
         (error "Chat of %s replayed %d prompts from records, drawing %d" (romacs-agent-id session) drew turns)))

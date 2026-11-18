@@ -137,7 +137,7 @@ in a store of its own."
 
 (ert-deftest romacs-agent-no-journal-a-preview-tool-row-opens-nothing ()
   ;; A preview's tool row holds no seq: RET on it folds what the preview
-  ;; drew, or finds nothing kept for it; never an error.
+  ;; drew; never an error.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-no-journal-tests--with
     (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))) (seq 6))
@@ -163,8 +163,7 @@ in a store of its own."
             (let ((row (text-property-search-forward 'romacs-agent-tool nil (lambda (_ v) v))))
               (should row)
               (goto-char (prop-match-beginning row))
-              (condition-case err (romacs-agent-chat-toggle)
-                (user-error (message "said: %s" (error-message-string err))))))
+              (romacs-agent-chat-toggle)))
           (kill-buffer buffer))))))
 
 (ert-deftest romacs-agent-no-journal-just-moved-draws-its-tail ()
@@ -180,7 +179,7 @@ in a store of its own."
                       (concat (line "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "ask %d" n) "role" "user")
                                                              "romacsRequest" n "type" "user"))
                               (line "out" (romacs-mcp--object "type" "result" "result" (format "say %d" n)))))
-                    '(3 4 5) "")
+                    (number-sequence 3 15) "")
          nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))
     (remhash id romacs-agent-events--imported)
     (should (romacs-agent-events-import session t))
@@ -188,8 +187,8 @@ in a store of its own."
     (let* ((romacs-agent-chat-turns 1)
            (buffer (romacs-agent-no-journal-tests--chat session)))
       (with-current-buffer buffer
-        (should (string-search "ask 5" (buffer-string)))
-        (should-not (string-search "ask 1" (buffer-string)))
+        (should (string-search "ask 15" (buffer-string)))
+        (should-not (string-search "> ask 1\n" (buffer-string)))
         (should (string-search "Earlier turns" (buffer-string))))
       (kill-buffer buffer))))
 
