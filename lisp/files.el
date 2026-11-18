@@ -3787,6 +3787,11 @@ Return nil if MODE could not be applied."
               nil)
           (funcall modefun)
           (unless (or (eq mode major-mode) ;`set-auto-mode--last' is overkill.
+                      ;; A minor mode, as a local `mode' names one, is not
+                      ;; the major mode MODE stands for: recording it here,
+                      ;; inside the major mode's own setup, would make the
+                      ;; outer call skip its record (LISP-SET-AUTO-MODE-LAST).
+                      (memq modefun minor-mode-list)
                       ;; `modefun' is something like a minor mode.
                       (local-variable-p 'set-auto-mode--last))
             (setq set-auto-mode--last (cons mode major-mode)))
