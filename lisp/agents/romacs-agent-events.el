@@ -70,13 +70,36 @@ says so then."
       (let ((socket (or socket (romacs-agent--host-socket id))))
         (and socket (file-exists-p socket))))))
 
+(defun romacs-agent-events--supervised (dirs)
+  "The session directories of DIRS one holds, as a table, as
+`romacs-agent-events--supervised-p' says of one: every lock asked of
+the host's program at once (`romacs-agent-events--held'), never a call
+a session; one with no host.lock (a host older than the lock) by its
+socket."
+  (let ((locked nil) (unlocked nil))
+    (dolist (dir dirs)
+      (if (file-exists-p (expand-file-name "host.lock" dir)) (push dir locked) (push dir unlocked)))
+    (let ((held (romacs-agent-events--held locked)))
+      (dolist (dir unlocked)
+        (let ((socket (romacs-agent--host-socket (file-name-nondirectory dir))))
+          (when (and socket (file-exists-p socket)) (puthash dir t held))))
+      held)))
+
+(defconst romacs-agent-events--held-batch 1000
+  "The most session directories one `romacs-agent-host --supervised' is
+asked about: its command line stays far inside the system's limit.")
+
 (defun romacs-agent-events--held (dirs)
   "The session directories of DIRS whose lock one holds, as a table: one
-`romacs-agent-host --supervised' for them all."
+`romacs-agent-host --supervised' for them all, a call for each
+`romacs-agent-events--held-batch' of them."
   (let ((held (make-hash-table :test #'equal)))
-    (when dirs
-      (dolist (line (split-string (cdr (apply #'romacs-agent-events--host "--supervised" dirs)) "\n" t))
-        (puthash line t held)))
+    (while dirs
+      (dolist (line (split-string (cdr (apply #'romacs-agent-events--host "--supervised"
+                                              (seq-take dirs romacs-agent-events--held-batch)))
+                                  "\n" t))
+        (puthash line t held))
+      (setq dirs (nthcdr romacs-agent-events--held-batch dirs)))
     held))
 
 (defun romacs-agent-events-p (session)
@@ -589,12 +612,14 @@ records removed."
 compacted and no supervisor running: none is writing to them."
   (when-let* ((db (romacs-agent-events--db)))
     (romacs-agent-events--compact-schema db)
-    (cl-remove-if #'romacs-agent-events--supervised-p
-                  (mapcar #'car (sqlite-select
-                                 db (concat "select imported.session from imported"
-                                            " left join compacted on compacted.session = imported.session"
-                                            " where coalesce(compacted.seq, 0) <"
-                                            " (select max(seq) from events where events.session = imported.session)"))))))
+    (let* ((ids (mapcar #'car (sqlite-select
+                               db (concat "select imported.session from imported"
+                                          " left join compacted on compacted.session = imported.session"
+                                          " where coalesce(compacted.seq, 0) <"
+                                          " (select max(seq) from events where events.session = imported.session)"))))
+           (held (romacs-agent-events--supervised
+                  (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids))))
+      (cl-remove-if (lambda (id) (gethash (expand-file-name id (romacs-agent--state-root)) held)) ids))))
 
 (defun romacs-agent-events-compact-all ()
   "Compact every compactable session, then give back the freed pages when
@@ -683,24 +708,23 @@ supervisor."
              (and (file-directory-p (romacs-agent--state-root))
                   (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))))
            ;; Which a supervisor holds: one asking for them all.
-           (locked (seq-filter (lambda (dir) (file-exists-p (expand-file-name "host.lock" dir))) candidates))
-           (held (romacs-agent-events--held locked)))
-      (cl-remove-if (lambda (dir)
-                      (if (member dir locked) (gethash dir held)
-                        (romacs-agent-events--supervised-p (file-name-nondirectory dir))))
-                    candidates))))
+           (held (romacs-agent-events--supervised candidates)))
+      (cl-remove-if (lambda (dir) (gethash dir held)) candidates))))
 
 (defun romacs-agent-events--back-up-moved (ids)
   "Move to the backup directory the journals of the sessions IDS names
 that are imported, none of them loaded here, nor run by a supervisor:
 no reader has them.  A loaded one's goes at a later start."
-  (dolist (id ids)
-    (let ((dir (expand-file-name id (romacs-agent--state-root))))
-      (when (and (not (gethash id romacs-agent--sessions))
-                 (not (romacs-agent-events--supervised-p id))
-                 (file-exists-p (expand-file-name "journal.jsonl" dir)))
+  ;; Only those with a journal left, then which a supervisor holds: one
+  ;; asking for them all, at every start.
+  (let* ((dirs (seq-filter (lambda (dir) (and (not (gethash (file-name-nondirectory dir) romacs-agent--sessions))
+                                              (file-exists-p (expand-file-name "journal.jsonl" dir))))
+                           (mapcar (lambda (id) (expand-file-name id (romacs-agent--state-root))) ids)))
+         (held (romacs-agent-events--supervised dirs)))
+    (dolist (dir dirs)
+      (unless (gethash dir held)
         (with-demoted-errors "romacs-agent-events: backing up: %S"
-          (romacs-agent-events--back-up (romacs-agent--make :id id :dir dir)))))))
+          (romacs-agent-events--back-up (romacs-agent--make :id (file-name-nondirectory dir) :dir dir)))))))
 
 (defun romacs-agent-events--migrate-start ()
   "Back up the journals of sessions moved before, queue every session
