@@ -432,6 +432,32 @@ moment more under load."
              ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
      ,@body))
 
+(ert-deftest romacs-agent-events-no-background-move ()
+  ;; Off (the default), a start moves no journal in the background; what
+  ;; an earlier start's workers staged is still made the sessions' own,
+  ;; and the moved ones' journals backed up.  On, every journal is queued.
+  (skip-unless (fboundp 'isolate-spawn))
+  (dolist (background '(nil t))
+    (let ((romacs-agent-store-background background) (romacs-agent-events-store t)
+          (romacs-agent-events--migrate-queue nil)
+          (idle nil) (backed nil) (flipped nil) (started nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (_secs _repeat function) (push function idle)))
+                ((symbol-function 'isolate-main-p) (lambda () t))
+                ((symbol-function 'romacs-agent-events--db) (lambda () t))
+                ((symbol-function 'sqlite-select)
+                 (lambda (_db query &rest _) (if (string-search "imported" query) '(("moved")) '(("staged")))))
+                ((symbol-function 'romacs-agent-events--back-up-moved) (lambda (ids) (setq backed ids)))
+                ((symbol-function 'romacs-agent-events--flip-soon) (lambda (ids) (setq flipped ids)))
+                ((symbol-function 'romacs-agent-events--journaled) (lambda () '("/journal")))
+                ((symbol-function 'romacs-agent-events--migrate-next) (lambda () (setq started t))))
+        (let ((noninteractive nil)) (romacs-agent-events-migrate-soon))
+        (should (= (length idle) 1))
+        (funcall (car idle)))
+      (should (equal backed '("moved")))
+      (should (equal flipped '("staged")))
+      (should (eq started background))
+      (should (equal romacs-agent-events--migrate-queue (and background '("/journal")))))))
+
 (ert-deftest romacs-agent-events-a-loaded-session-waits-for-its-move ()
   ;; A launch or a note on a loaded session too long to move here waits
   ;; for a worker to move it, ahead of the rest, and then goes to SQLite:

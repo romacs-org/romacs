@@ -118,6 +118,11 @@ fn record(seq: u64, key: &str, line: &str) -> String {
     json!({"seq": seq, "t": now(), key: value}).to_string()
 }
 
+/// How long a write waits for another's lock before it is busy: longer
+/// than any transaction in normal use holds it (each is one record, or a
+/// few, and commits in milliseconds), so a writer never sees one locked.
+const STORE_BUSY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How long a record waits before it is tried again while the database is
 /// busy, and how long before the attached server is told storage fails.
 const STORE_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
@@ -185,7 +190,7 @@ impl Store {
 
     fn open_sqlite(database: &Path) -> rusqlite::Result<rusqlite::Connection> {
         let db = rusqlite::Connection::open(database)?;
-        db.busy_timeout(std::time::Duration::from_millis(200))?;
+        db.busy_timeout(STORE_BUSY)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "NORMAL")?;
         // As lisp/agents/romacs-agent-events.el makes them.
@@ -221,7 +226,9 @@ impl Store {
                 // A turn's end, an exit, a note: as durable as the journal's sync.
                 if sync { db.pragma_update(None, "synchronous", "FULL").map_err(|e| e.to_string())?; }
                 let kept = (|| {
-                    let transaction = db.transaction()?;
+                    // Its write lock taken at once, the busy wait with it: a
+                    // deferred one taken on its first insert could not wait.
+                    let transaction = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                     {
                         let mut insert = transaction.prepare_cached(
                             "insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)")?;
@@ -303,17 +310,18 @@ impl Shared {
     fn append_all(&mut self, records: &[(u64, String)], sync: bool) {
         if records.is_empty() { return; }
         {
-            let mut waited = std::time::Duration::ZERO;
+            // Timed from the first try: each waits its busy timeout too.
+            let since = std::time::Instant::now();
+            let mut said = false;
             let mut told = false;
             // Kept before it is sent, whatever fails: a busy database, a full
             // disk or an I/O error holds up the harness's output (its pipe
             // fills) until the record is kept, never sends one it could not
             // replay.
             while let Err(error) = self.store.keep(records, sync) {
-                if waited.is_zero() { eprintln!("romacs-agent-host: store: {error}"); }
+                if !said { said = true; eprintln!("romacs-agent-host: store: {error}"); }
                 std::thread::sleep(STORE_RETRY);
-                waited += STORE_RETRY;
-                if waited >= STORE_FAILING && !told {
+                if since.elapsed() >= STORE_FAILING && !told {
                     told = true;
                     self.send(&json!({"storage": "failing"}).to_string());
                 }
@@ -1261,6 +1269,45 @@ mod tests {
         assert!(matches!(again.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
         drop(held);
         assert!(again.try_lock().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writers_never_see_the_store_locked() {
+        // Two sessions' hosts keep records at once while a third writer
+        // (the editor's, a turn's rows) holds a transaction for a second:
+        // each record waits its turn, none is refused as locked.
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-locked-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let file = dir.join("store.sqlite");
+        let sessions: Vec<PathBuf> = ["a", "b"].iter().map(|name| dir.join(name)).collect();
+        for session in &sessions { create_private(session).unwrap(); }
+        let stores: Vec<Store> = sessions.iter().map(|session| Store::open(session, Some(&file)).unwrap()).collect();
+        // The lock held here before any writer starts, for a second.
+        let mut held = rusqlite::Connection::open(&file).unwrap();
+        let transaction = held.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
+        // Released once both writers are on their way to it, plus a second:
+        // their first records wait on the lock.
+        let (ready, started) = std::sync::mpsc::channel();
+        let writers: Vec<_> = stores.into_iter().map(|mut store| {
+            let ready = ready.clone();
+            std::thread::spawn(move || {
+                ready.send(()).unwrap();
+                (1..=50u64).map(|seq| store.keep(&[(seq, format!("{{\"seq\":{seq},\"note\":{{}}}}"))], false))
+                    .filter(|kept| kept.is_err()).count()
+            })
+        }).collect();
+        for _ in 0..2 { started.recv_timeout(std::time::Duration::from_secs(10)).unwrap(); }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // Still held: no writer's record went in meanwhile.
+        assert_eq!(transaction.query_row("select count(*) from events where session in ('a', 'b')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        transaction.commit().unwrap();
+        let refused: usize = writers.into_iter().map(|writer| writer.join().unwrap()).sum();
+        assert_eq!(refused, 0);
+        let kept: i64 = rusqlite::Connection::open(&file).unwrap()
+            .query_row("select count(*) from events where session in ('a', 'b')", [], |row| row.get(0)).unwrap();
+        assert_eq!(kept, 100);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

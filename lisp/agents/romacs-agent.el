@@ -5119,6 +5119,13 @@ listing has it (romacs-agent-store): such a session with no kept state
 and no supervisor running is left unloaded, its journal unread, until it
 is asked for (`romacs-agent-get').")
 
+(defvar romacs-agent-store-background nil
+  "Whether the editor moves every session's journal to SQLite in the
+background, in worker VMs, once it is idle after a start.  Off: a
+journal moves only when something waits for it (a chat opened, a
+resume).  Those moves' long transactions held the store's lock against
+every session's supervisor.")
+
 (defvar romacs-agent-mark-kinds nil
   "What can wait on a session left unloaded, so a restore loads it: a list
 of (KIND . FUNCTION), FUNCTION of a session's directory and its manifest
