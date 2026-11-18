@@ -176,7 +176,8 @@ impl Vm {
 
     /// clone_per_buffer_values (buffer.c:727) from BASE to its new indirect
     /// buffer BUFFER: the per-buffer variables, with a positioned mark
-    /// remade in BUFFER and the visited file forgotten, the Lisp locals,
+    /// remade in BUFFER and the visited file forgotten, the Lisp locals
+    /// (`buffer_lisp_local_variables`, which the per-buffer store carries),
     /// the keymap and tables, and copies of the overlays.
     pub(crate) fn clone_indirect_state(&mut self, buffer: Value, base: Value) -> Result<()> {
         let Object::Buffer(from) = &self.objects[arena(base)?] else { return Err("buffer required".into()) };
@@ -207,7 +208,6 @@ impl Vm {
         to.case_tables = cases;
         to.syntax_table = syntax;
         to.category_table = category;
-        self.clone_lisp_locals(base, buffer)?;
         for name in ["buffer-file-name", "buffer-file-truename", "buffer-auto-save-file-name", "buffer-backed-up", "local-minor-modes"] {
             self.set_per_buffer_of(arena(buffer)?, name, Value::NIL);
         }
@@ -229,25 +229,6 @@ impl Vm {
         }
         for (overlay, start, end, _) in overlays {
             self.copy_overlay(overlay, start, end, buffer)?;
-        }
-        Ok(())
-    }
-
-    /// buffer_lisp_local_variables (buffer.c) copied: every Lisp local of
-    /// FROM becomes a binding of TO's own with FROM's value.
-    fn clone_lisp_locals(&mut self, from: Value, to: Value) -> Result<()> {
-        for slot in self.local_slots(from.index(0)? - 1) {
-            let table = self.slots[slot].local;
-            if table == Value::NIL {
-                continue;
-            }
-            if let Some(binding) = self.declaration_hash_get(table, from)? {
-                let value = self.slots[binding.index(7)? - 1].value;
-                let local = self.allocate_local_binding_slot();
-                self.slots[local].value = value;
-                self.declaration_hash_put(table, to, Value::reference(local + 1, 7))?;
-                self.note_local_binding(to, slot);
-            }
         }
         Ok(())
     }

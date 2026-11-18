@@ -1,5 +1,6 @@
-//! Implementation-independent acceptance seam for the future VM2 text owner.
-//! This crate supplies no production text representation or coordinate index.
+//! The character and byte coordinate contract `text.rs`'s tests hold its
+//! text to: generic suites over the `Coordinates` traits, independent of how
+//! a text stores its bytes or indexes its positions.
 use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,9 +21,6 @@ pub trait Coordinates {
     fn byte_of_char(&self, char_pos: usize) -> Result<usize, InvalidPosition>;
     fn char_of_byte(&self, byte_pos: usize) -> Result<usize, InvalidPosition>;
     fn replace(&mut self, bytes: Range<usize>, inserted: &[u8]) -> Result<(), InvalidPosition>;
-    /// Reinterpret unchanged bytes; they must be valid in the target mode.
-    /// General unibyte-to-multibyte normalization is a separate owner operation.
-    fn set_mode(&mut self, mode: Mode);
 }
 
 /// Exhaustively check all boundaries against an independent linear oracle.
@@ -283,6 +281,7 @@ pub fn narrowing<T: RestrictedCoordinates>(make: impl Fn(&[u8], Mode) -> T) {
 /// coordinate assertion ("char-to-byte at 3").
 pub struct Stale<T> {
     inner: T,
+    // CELL(Plain): the cached byte of char 3; no Lisp value.
     anchor: std::cell::Cell<Option<usize>>,
 }
 
@@ -316,8 +315,5 @@ impl<T: Coordinates> Coordinates for Stale<T> {
     }
     fn replace(&mut self, r: Range<usize>, b: &[u8]) -> Result<(), InvalidPosition> {
         self.inner.replace(r, b)
-    }
-    fn set_mode(&mut self, mode: Mode) {
-        self.inner.set_mode(mode);
     }
 }

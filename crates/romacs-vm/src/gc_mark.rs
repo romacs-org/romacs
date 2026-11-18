@@ -251,21 +251,20 @@ pub(super) struct MarkView<'a> {
     /// The running engine's register stack, then the suspended ones'.
     stacks: Vec<&'a [Value]>,
     in_obarray: &'a [bool],
-    local_binding: &'a [bool],
     code_marks: &'a [AtomicBool],
 }
 
 impl Vm {
     /// What a mark's threads read of the VM. A minor gives the slots it
     /// reads in place of them all (`Slots::written`).
-    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], local_binding: &'a [bool], code_marks: &'a [AtomicBool], written_slots: Option<Vec<Range<usize>>>) -> MarkView<'a> {
+    pub(super) fn mark_view<'a>(&'a self, in_obarray: &'a [bool], code_marks: &'a [AtomicBool], written_slots: Option<Vec<Range<usize>>>) -> MarkView<'a> {
         MarkView {
             written_slots,
             slots: &self.slots, variable_redirects: &self.variable_redirects, functions: &self.functions,
             generated_symbols: &self.generated_symbols, cell_pairs: &self.cell_pairs,
             execution: &self.execution, spare_programs: &self.spare_programs,
             stacks: self.register_roots(),
-            in_obarray, local_binding, code_marks,
+            in_obarray, code_marks,
         }
     }
 }
@@ -576,11 +575,9 @@ impl Marking {
                     if keep(&s.function) { w.stack.push(s.function); }
                     // GNU alloc.c:6673 marks `u.s.plist` with the symbol. VM2
                     // symbols are never reclaimed (DIVERGENCES VM2-BOOT4), so a
-                    // plist and a buffer-local table are roots for every slot,
-                    // interned or not.
+                    // plist is a root for every slot, interned or not.
                     if keep(&s.plist) { w.stack.push(s.plist); }
-                    if keep(&s.local) { w.stack.push(s.local); }
-                    if !view.local_binding[slot] && keep(&s.value) { w.stack.push(s.value); }
+                    if keep(&s.value) { w.stack.push(s.value); }
                 }
                 units
             }
@@ -997,10 +994,9 @@ mod tests {
         let mut vm = Vm::new();
         let (first, second) = (Value::integer(1).unwrap(), Value::integer(2).unwrap());
         let in_obarray = vec![false; vm.slots.len()];
-        let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
+        let view = vm.mark_view(&in_obarray, &code_marks, None);
         let mut own = Worker::default();
         own.serial.push(first);
         marking.hand_over(&mut own);
@@ -1028,10 +1024,9 @@ mod tests {
         vm.set_gc_stress(0);
         let list = vm.eval_source_raw(&format!("(setq pk-kept (make-list {LENGTH} 0))")).unwrap();
         let in_obarray = vec![false; vm.slots.len()];
-        let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
+        let view = vm.mark_view(&in_obarray, &code_marks, None);
         let mut w = Worker::default();
         w.stack.push(list);
         marking.stop.store(true, Ordering::Release);
@@ -1047,10 +1042,9 @@ mod tests {
         let mut vm = Vm::new();
         vm.set_gc_stress(0);
         let in_obarray = vec![false; vm.slots.len()];
-        let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 2);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
+        let view = vm.mark_view(&in_obarray, &code_marks, None);
         marking.outstanding.fetch_add(1, Ordering::AcqRel);
         let (ended, wait) = std::sync::mpsc::channel::<()>();
         let found = std::thread::scope(|scope| {
@@ -1454,10 +1448,9 @@ mod tests {
         let mut vm = Vm::new();
         vm.eval_source_raw("(let ((i 0)) (while (< i 2000) (eval (list 'defun (intern (format \"f%d\" i)) nil (list '+ i 1))) (setq i (1+ i))))").unwrap();
         let in_obarray = vec![false; vm.slots.len()];
-        let local_binding = vec![false; vm.slots.len()];
         let code_marks: Vec<AtomicBool> = vm.functions.iter().map(|_| AtomicBool::new(false)).collect();
         let marking = marking_of(&mut vm, 1);
-        let view = vm.mark_view(&in_obarray, &local_binding, &code_marks, None);
+        let view = vm.mark_view(&in_obarray, &code_marks, None);
         let mut own = Worker::default();
         own.code = (0..vm.functions.len()).collect();
         let queued = own.code.len();

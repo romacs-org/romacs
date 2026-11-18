@@ -584,8 +584,7 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
     // byte-run.el replaces it; the host's paint and quit checks read them.
     vm.eval_source(GUI_SUPPORT)?;
     if launch == Launch::Loadup {
-        vm.eval_source(include_str!("../../../lisp/session/romacs-startup.el"))?;
-        vm.eval_source(include_str!("../../../lisp/session/romacs-install-command.el"))?;
+        for path in CHAIN_LISP { load_lisp(vm, dir, path)?; }
         crate::eval_last_sexp::define(vm)?;
     }
     if let Some(font) = font { vm.eval_source(font)?; }
@@ -621,80 +620,140 @@ pub fn resume_loadup(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup)
     started
 }
 
-/// Romacs's layers after the chain that only define: icomplete, which its
-/// completion defaults build on, and the session's command libraries. They
-/// read and set nothing of the process, so a world holds them with the
-/// chain (world.rs); a source boot takes them after it. Dired is GNU's
-/// dired.el here: the workspace's browser would shadow its autoloads and
-/// its `defvar` of `dired-mode-map` would keep GNU's keys out.
-pub fn install_session_definitions(vm: &mut Vm, launch: Launch, _dir: &std::path::Path) -> Result<(), String> {
-    if launch == Launch::GnuOnly {
-        return Ok(());
-    }
-    if launch == Launch::Loadup {
-        // GNU's icomplete, which lisp/completion/romacs-completion-defaults.el requires
-        // and whose own require signals when a runtime lacks it.
-        // The orderless and fzf completion styles, matched natively; styles
-        // any init can name in `completion-styles', where the runtime has
-        // GNU's completion.
-        if vm.eval_source("(require 'icomplete nil t)")? != romacs_vm::Fixed::NIL {
-            vm.eval_source(include_str!("../../../lisp/completion/romacs-completion-candidates.el"))?;
-            vm.eval_source(include_str!("../../../lisp/completion/romacs-orderless.el"))?;
-            vm.eval_source(include_str!("../../../lisp/completion/romacs-fzf.el"))?;
-        }
-    }
-    vm.eval_source(include_str!("../../../lisp/completion/romacs-buffer-switch.el"))?;
-    vm.eval_source(include_str!("../../../lisp/ui/romacs-key-hint.el"))?;
-    vm.eval_source(include_str!("../../../lisp/terminal/romacs-term.el"))?;
-    vm.eval_source(include_str!("../../../lisp/vm/process.el"))?;
-    // The session's command log, which each interactive process starts
+/// Romacs's Lisp a `--loadup` launch takes from its runtime tree before the
+/// chain, on the VM's own `defun`: the session's startup steps and its
+/// install command.
+const CHAIN_LISP: [&str; 2] = ["session/romacs-startup.el", "session/romacs-install-command.el"];
+
+/// Romacs's layers after the chain that only define, in order, each group
+/// where its Lisp test holds (None: always): icomplete, which its completion
+/// defaults build on, and the session's command libraries.
+const SESSION_DEFINITIONS: [(Option<&str>, &[&str]); 7] = [
+    // GNU's icomplete, which lisp/completion/romacs-completion-defaults.el
+    // requires and whose own require signals when a runtime lacks it. The
+    // orderless and fzf completion styles, matched natively; styles any
+    // init can name in `completion-styles', where the runtime has GNU's
+    // completion.
+    (Some("(require 'icomplete nil t)"), &["completion/romacs-completion-candidates.el",
+                                           "completion/romacs-orderless.el", "completion/romacs-fzf.el"]),
+    // The session's command log is one each interactive process starts
     // itself (`romacs-usage-log-start').
-    if launch == Launch::Loadup {
-        vm.eval_source(include_str!("../../../lisp/session/romacs-usage-log.el"))?;
-    }
+    (None, &["completion/romacs-buffer-switch.el", "ui/romacs-key-hint.el", "terminal/romacs-term.el",
+             "vm/process.el", "session/romacs-usage-log.el"]),
     // Compiled Lisp made ahead while the session is idle, so a first
     // `require' finds its artifact (`romacs-precompile-start').
-    if launch == Launch::Loadup && vm.eval_source("(fboundp 'add-hook)")? != romacs_vm::Fixed::NIL {
-        vm.eval_source(include_str!("../../../lisp/session/romacs-precompile.el"))?;
-    }
-    // Layers are child frames, which GNU's frame.el makes.
-    if launch == Launch::Loadup && vm.eval_source("(fboundp 'make-frame)")? != romacs_vm::Fixed::NIL {
-        // Pane chrome, applied to the frame once the session is on its
-        // display (romacs-gui-loadup.el), and the chrome colours layers use.
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-chrome.el"))?;
-        // The renderer's options: cursor motion, transitions, effects.
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-effects.el"))?;
-        // A bar where text goes in, a block where it does not.
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-cursor.el"))?;
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-layer.el"))?;
-        // Romacs's menus over layers: one look, motion and keyboard model.
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-popup.el"))?;
-        // Its icons and its mode line, off until `romacs-mode-line-mode'
-        // is enabled.
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-icons.el"))?;
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-mode-line.el"))?;
-        // Vertical completion with the minibuffer in a layer, off until
-        // `romacs-complete-mode' is enabled.
-        if vm.eval_source("(featurep 'minibuffer)")? != romacs_vm::Fixed::NIL {
-            vm.eval_source(include_str!("../../../lisp/completion/romacs-complete.el"))?;
-            // Evaluation results in a chip after the sexp, off until
-            // `romacs-eval-chip-mode' is enabled.
-            vm.eval_source(include_str!("../../../lisp/ui/romacs-eval-chip.el"))?;
-        }
-    }
+    (Some("(fboundp 'add-hook)"), &["session/romacs-precompile.el"]),
+    // Layers are child frames, which GNU's frame.el makes. Pane chrome,
+    // applied to the frame once the session is on its display
+    // (romacs-gui-loadup.el), and the chrome colours layers use; the
+    // renderer's options (cursor motion, transitions, effects); a bar where
+    // text goes in, a block where it does not; Romacs's menus over layers
+    // (one look, motion and keyboard model); its icons and its mode line,
+    // off until `romacs-mode-line-mode' is enabled.
+    (Some("(fboundp 'make-frame)"), &["ui/romacs-chrome.el", "ui/romacs-effects.el", "ui/romacs-cursor.el",
+                                      "ui/romacs-layer.el", "ui/romacs-popup.el", "ui/romacs-icons.el",
+                                      "ui/romacs-mode-line.el"]),
+    // Vertical completion with the minibuffer in a layer, off until
+    // `romacs-complete-mode' is enabled; evaluation results in a chip after
+    // the sexp, off until `romacs-eval-chip-mode' is enabled.
+    (Some("(and (fboundp 'make-frame) (featurep 'minibuffer))"), &["completion/romacs-complete.el",
+                                                                   "ui/romacs-eval-chip.el"]),
     // The scheduler for animations drawn in buffer text, and the startup
-    // screen's logo, its first client, where the chain gave
-    // them the GNU Lisp they use (simple.el, nadvice.el, timer.el).
-    if launch == Launch::Loadup
-        && vm.eval_source("(and (fboundp 'buffer-disable-undo) (fboundp 'add-function) (fboundp 'run-at-time) (fboundp 'make-composed-keymap))")? != romacs_vm::Fixed::NIL {
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-animate.el"))?;
-        vm.eval_source(include_str!("../../../lisp/ui/romacs-landing.el"))?;
-    }
+    // screen's logo, its first client, where the chain gave them the GNU
+    // Lisp they use (simple.el, nadvice.el, timer.el).
+    (Some("(and (fboundp 'buffer-disable-undo) (fboundp 'add-function) (fboundp 'run-at-time) (fboundp 'make-composed-keymap))"),
+     &["ui/romacs-animate.el", "ui/romacs-landing.el"]),
     // Romacs's interactive defaults and the GNU libraries they set, which
     // [`before_init`] turns on, where the chain's tree has those libraries
     // (elec-pair, the first, standing for them; a test's scratch tree may not).
-    if launch == Launch::Loadup && vm.eval_source("(require 'elec-pair nil t)")? != romacs_vm::Fixed::NIL {
-        vm.eval_source(include_str!("../../../lisp/session/romacs-defaults.el"))?;
+    (Some("(require 'elec-pair nil t)"), &["session/romacs-defaults.el"]),
+];
+
+/// Romacs's editing commands and the libraries they visit and fontify
+/// with, which each `--loadup` process loads after its startup steps.
+const EDITING_LISP: [&str; 5] = ["romacs-find-file.el", "romacs-editing.el", "progmodes/romacs-project.el",
+                                 "romacs-fontify.el", "romacs-treesit.el"];
+
+/// Every file of Romacs's Lisp a `--loadup` launch loads from its tree but
+/// the session's own (`start_session`), which a test's scratch tree stands
+/// in for.
+#[cfg(test)]
+fn launch_lisp() -> impl Iterator<Item = &'static str> {
+    CHAIN_LISP.into_iter().chain(SESSION_DEFINITIONS.into_iter().flat_map(|(_, paths)| paths.iter().copied()))
+        .chain(EDITING_LISP)
+}
+
+/// The runtime tree's lisp/PATH, around GNU's Lisp in DIR.
+fn runtime_lisp(dir: &std::path::Path, path: &str) -> std::path::PathBuf {
+    runtime_of(dir).unwrap_or(dir).join("lisp").join(path)
+}
+
+/// Load the runtime tree's lisp/PATH, as `load' does: a world build records
+/// what it read, so an edited file builds the world again, a source boot
+/// reads the file as it is now, and `load-history' names it, as GNU's
+/// preloaded files are named. A launch never runs a copy of the tree
+/// compiled into this executable. A file that signals keeps what it
+/// defined before the error, and the launch goes on, as the chain goes on
+/// past a GNU file that signals: its error, naming the file and line, is
+/// noted for [`report_lisp_errors`].
+fn load_lisp(vm: &mut Vm, dir: &std::path::Path, path: &str) -> Result<(), String> {
+    match vm.load_file(&runtime_lisp(dir, path)) {
+        Ok(_) => Ok(()),
+        Err(error) => note_lisp_error(vm, &error),
+    }
+}
+
+/// The Lisp variable holding the errors of Romacs's Lisp this launch noted,
+/// newest first: a world keeps those of its build, which each session
+/// restored from it reports as its own.
+const LISP_ERRORS: &str = "romacs--startup-lisp-errors";
+
+/// Note ERROR for [`report_lisp_errors`], and say it on stderr.
+fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
+    eprintln!("romacs: {error}");
+    vm.eval_source(&format!("(progn (defvar {LISP_ERRORS} nil) (setq {LISP_ERRORS} (cons {} {LISP_ERRORS})))",
+                            lisp_string(error))).map(drop)
+}
+
+/// Show each error of Romacs's Lisp this launch noted ([`load_lisp`]), once:
+/// in *Messages*, in the usage log and in a warning the first frame shows,
+/// as an init's error is shown. The form calls only what is defined, since
+/// the Lisp that failed may be what would show it, and a way of showing
+/// one that signals keeps none of the others from being shown.
+///
+/// # Errors
+///
+/// The VM's error when it cannot evaluate the report itself.
+pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
+    vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
+       (let ((errors (reverse {LISP_ERRORS})))
+         (setq {LISP_ERRORS} nil)
+         (while errors
+           (let ((error (car errors)))
+             (condition-case nil (message \"Romacs Lisp failed: %s\" error) (error nil))
+             (condition-case nil
+                 (when (fboundp 'romacs-usage-log-note) (romacs-usage-log-note \"lisp-error\" :error error))
+               (error nil))
+             (condition-case nil
+                 (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error))
+               (error nil)))
+           (setq errors (cdr errors)))))")).map(drop)
+}
+
+/// Romacs's layers after the chain that only define ([`SESSION_DEFINITIONS`]).
+/// They read and set nothing of the process, so a world holds them with the
+/// chain (world.rs); a source boot takes them after it. Dired is GNU's
+/// dired.el here: the workspace's browser would shadow its autoloads and
+/// its `defvar` of `dired-mode-map` would keep GNU's keys out.
+pub fn install_session_definitions(vm: &mut Vm, launch: Launch, dir: &std::path::Path) -> Result<(), String> {
+    if launch != Launch::Loadup {
+        return Ok(());
+    }
+    for (test, paths) in SESSION_DEFINITIONS {
+        let held = match test { None => true, Some(test) => vm.eval_source(test)? != romacs_vm::Fixed::NIL };
+        if held {
+            for path in paths { load_lisp(vm, dir, path)?; }
+        }
     }
     mark_phase("session-definitions");
     Ok(())
@@ -717,8 +776,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
         vm.open_display();
         for path in ["session/romacs-gui-loadup.el", "completion/romacs-completion-defaults.el"] {
             let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
-            let file = runtime_of(dir).unwrap_or(dir).join("lisp").join(path);
-            vm.load_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            load_lisp(vm, dir, path)?;
             mark_phase(name);
         }
     }
@@ -727,11 +785,15 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     if launch == Launch::GnuOnly {
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
-    vm.eval_source(include_str!("../../../lisp/romacs-find-file.el"))?;
-    initialize_editing(vm)?;
-    vm.eval_source(include_str!("../../../lisp/progmodes/romacs-project.el"))?;
-    vm.eval_source(include_str!("../../../lisp/romacs-fontify.el"))?;
-    vm.eval_source(include_str!("../../../lisp/romacs-treesit.el"))?;
+    for path in EDITING_LISP { load_lisp(vm, dir, path)?; }
+    // A chain that stopped short leaves GNU editing functions romacs-editing.el
+    // calls undefined: each comes from the GNU file in the tree that defines it.
+    define_gnu_editing(vm, |file| {
+        let path = dir.join(file);
+        let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let spans = std::rc::Rc::new(crate::loadup::form_spans(&source)?);
+        Ok((std::borrow::Cow::Owned(source), spans))
+    })?;
     mark_phase("find-file+editing");
     let bindings = bind_journey_keys(vm, true)?;
     mark_phase("journey-keys");
@@ -835,39 +897,62 @@ fn startup_screen(vm: &mut Vm, started: &Started, concise: bool) -> Result<(), S
     Ok(())
 }
 
-fn initialize_editing(vm: &mut Vm) -> Result<(), String> {
-    initialize_editing_from_sources(vm, None)
-}
-
 fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) -> Result<(), String> {
     policy!(vm, root, "romacs-editing.el")?;
-    for (source, names) in [
-        (include_str!("../../../lisp/subr.el"), &[
-            "plusp", "add-to-history", "ignore", "string=", "undefined",
-        ][..]),
-        (include_str!("../../../lisp/files.el"), &[
-            "files--ensure-directory", "make-directory",
-        ][..]),
-        (include_str!("../../../lisp/mail/mailheader.el"), &[
-            "mail-header-extract", "mail-header-format-function",
-        ][..]),
-        (include_str!("../../../lisp/simple.el"), &[
-            "mark", "set-mark", "push-mark", "pop-mark", "push-mark-command",
-            "pop-to-mark-command", "set-mark-command", "beginning-of-buffer",
-            "kill-new", "current-kill", "backward-word", "kill-word", "backward-kill-word",
-        ][..]),
-    ] {
-        let spans = gnu_form_spans(source)?;
+    define_gnu_editing(vm, |file| {
+        let source = compiled_gnu_editing(file).ok_or_else(|| format!("No GNU editing file {file}"))?;
+        Ok((std::borrow::Cow::Borrowed(source), gnu_form_spans(source)?))
+    })
+}
+
+/// GNU's editing functions romacs-editing.el calls, by the GNU file that
+/// defines each.
+const GNU_EDITING: [(&str, &[&str]); 3] = [
+    ("subr.el", &["plusp", "add-to-history", "ignore", "string=", "undefined"]),
+    ("files.el", &["files--ensure-directory", "make-directory"]),
+    ("simple.el", &["mark", "set-mark", "push-mark", "pop-mark", "push-mark-command", "pop-to-mark-command",
+                    "set-mark-command", "beginning-of-buffer", "kill-new", "current-kill", "backward-word",
+                    "kill-word", "backward-kill-word"]),
+];
+
+/// The workspace's copy of FILE of [`GNU_EDITING`]: it runs no GNU Lisp tree.
+fn compiled_gnu_editing(file: &str) -> Option<&'static str> {
+    match file {
+        "subr.el" => Some(include_str!("../../../lisp/subr.el")),
+        "files.el" => Some(include_str!("../../../lisp/files.el")),
+        "simple.el" => Some(include_str!("../../../lisp/simple.el")),
+        _ => None,
+    }
+}
+
+/// Spans of top-level forms, as `crate::loadup::form_spans` gives them.
+type Spans = std::rc::Rc<Vec<(usize, usize, usize)>>;
+
+/// Define each function of [`GNU_EDITING`] this VM lacks from its GNU file,
+/// which SOURCE gives with its forms' spans, read only for a file one is
+/// missing from. A function is missing when unbound; the kill ring's also
+/// while it is still the VM's native function, which GNU's replace.
+fn define_gnu_editing<'a>(vm: &mut Vm, source: impl Fn(&str) -> Result<(std::borrow::Cow<'a, str>, Spans), String>)
+                          -> Result<(), String> {
+    for (file, names) in GNU_EDITING {
+        let mut missing = Vec::new();
         for name in names {
-            if !matches!(*name, "kill-new" | "current-kill")
-                && vm.eval_source(&format!("(fboundp '{name})"))? != romacs_vm::Fixed::NIL { continue; }
+            let test = if matches!(*name, "kill-new" | "current-kill") {
+                format!("(or (not (fboundp '{name})) (subrp (symbol-function '{name})))")
+            } else {
+                format!("(not (fboundp '{name}))")
+            };
+            if vm.eval_source(&test)? != romacs_vm::Fixed::NIL { missing.push(*name); }
+        }
+        if missing.is_empty() { continue; }
+        let (source, spans) = source(file)?;
+        for name in missing {
             let prefixes = [format!("(defun {name}"), format!("(defvar {name}"), format!("(defalias '{name}")];
             let definitions: Vec<_> = spans.iter().filter(|&&(start, end, _)| {
                 prefixes.iter().any(|prefix| source[start..end].strip_prefix(prefix)
                     .is_some_and(|tail| tail.starts_with(char::is_whitespace)))
             }).collect();
-            if definitions.len() != 1 { return Err(format!("Expected one GNU editing definition: {name}")); }
-            let &&(start, end, _) = definitions.first().unwrap();
+            let [&(start, end, _)] = definitions[..] else { return Err(format!("Expected one GNU editing definition: {name}")) };
             vm.eval_source(&source[start..end])?;
         }
     }
@@ -876,8 +961,8 @@ fn initialize_editing_from_sources(vm: &mut Vm, root: Option<&std::path::Path>) 
 
 /// `form_spans` of an embedded GNU source, scanned once per thread: editing
 /// and coding take forms from the same large files (subr.el, files.el).
-fn gnu_form_spans(source: &'static str) -> Result<std::rc::Rc<Vec<(usize, usize, usize)>>, String> {
-    type Scans = std::collections::HashMap<usize, std::rc::Rc<Vec<(usize, usize, usize)>>>;
+fn gnu_form_spans(source: &'static str) -> Result<Spans, String> {
+    type Scans = std::collections::HashMap<usize, Spans>;
     thread_local! { static SCANS: std::cell::RefCell<Scans> = Default::default(); }
     let key = source.as_ptr() as usize;
     if let Some(spans) = SCANS.with(|scans| scans.borrow().get(&key).cloned()) { return Ok(spans); }
@@ -1958,7 +2043,19 @@ mod tests {
         for directory in ["lisp/session", "lisp/completion"] {
             std::fs::create_dir_all(root.join(directory)).unwrap();
         }
-        for (file, text) in files { std::fs::write(gnu.join(file), text).unwrap(); }
+        // Romacs's own Lisp, which the launch loads from its tree, and the
+        // GNU files it takes editing functions a short chain lacks from.
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        for path in launch_lisp().chain(GNU_EDITING.iter().map(|(file, _)| *file)) {
+            let link = gnu.join(path);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(source.join(path), link).unwrap();
+        }
+        for (file, text) in files {
+            // A file of the tree's own replaces its link, never the source.
+            let _ = std::fs::remove_file(gnu.join(file));
+            std::fs::write(gnu.join(file), text).unwrap();
+        }
         std::fs::write(loadup_bootstrap(&gnu), bootstrap).unwrap();
         // A scratch chain has no startup.el: its session file clears
         // `noninteractive', stands in for the screen's directory and
@@ -2139,6 +2236,135 @@ mod tests {
         assert_eq!(gnu_only, "(nil nil)", "--gnu-lisp activates no bundled package");
         assert_eq!(loadup, [r#"("gnosis-dashboard" t nil t nil)"#, r#"("jabber" t nil t nil)"#],
             "interactive autoloads of the bundled files, not yet loaded");
+    }
+
+    /// `--loadup` loads Romacs's own Lisp from its runtime tree as `load'
+    /// does, none of it signalling: each file has its `load-history' entry,
+    /// so a world keys what it read and `find-function' reaches its
+    /// definitions. The chain left no
+    /// GNU editing function to fill in, and the kill ring's are the tree's
+    /// simple.el's, not the VM's native `kill-new'.
+    #[test]
+    fn loadup_loads_romacs_lisp_from_its_tree() {
+        let dir = lisp_root(&lisp_dir()).unwrap();
+        let (failed, unloaded, kill_ring) = on_evaluator(move || {
+            let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot::LOADUP);
+            private_home(&mut vm, "tree-lisp");
+            resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
+            let failed = printed(&mut vm, &format!("(and (boundp '{LISP_ERRORS}) {LISP_ERRORS})"));
+            let unloaded = launch_lisp().filter(|path| {
+                let file = lisp_string(&runtime_lisp(&dir, path).to_string_lossy());
+                printed(&mut vm, &format!("(and (assoc {file} load-history) t)")) != "t"
+            }).collect::<Vec<_>>();
+            // Nothing of GNU's editing is missing after the chain: no GNU file is read.
+            define_gnu_editing(&mut vm, |file| Err(format!("read {file}"))).unwrap();
+            let simple = lisp_string(&runtime_lisp(&dir, "simple.el").to_string_lossy());
+            let kill_ring = printed(&mut vm, &format!("(mapcar (lambda (f) (and (not (subrp (symbol-function f)))
+                                                                               (equal (symbol-file f) {simple})))
+                                                               '(kill-new current-kill))"));
+            (failed, unloaded, kill_ring)
+        });
+        assert_eq!(failed, "nil", "the tree's Romacs Lisp signalled");
+        assert!(unloaded.is_empty(), "not loaded from the runtime tree: {unloaded:?}");
+        assert_eq!(kill_ring, "(t t)", "kill-new and current-kill are not the tree's simple.el's");
+    }
+
+    /// An edited file of Romacs's Lisp in the runtime tree is what a
+    /// `--loadup` launch runs: none runs a copy compiled into the executable.
+    #[test]
+    fn loadup_runs_the_romacs_lisp_its_tree_holds_now() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let edited = |path: &str| format!("{}\n(defvar romacs-test-edited-in-tree {path:?})\n",
+                                          std::fs::read_to_string(source.join(path)).unwrap());
+        let paths = ["session/romacs-startup.el", "ui/romacs-key-hint.el", "romacs-editing.el"];
+        let files: Vec<(&str, String)> = paths.iter().map(|path| (*path, edited(path))).collect();
+        for (path, text) in files {
+            let dir = scratch_runtime("tree-edit", "", &[(path, &text)]);
+            let ran = on_evaluator(move || {
+                let mut vm = Vm::new();
+                vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+                initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+                printed(&mut vm, "(and (boundp 'romacs-test-edited-in-tree) romacs-test-edited-in-tree)")
+            });
+            assert_eq!(ran, format!("{path:?}"), "the launch ran another {path} than its tree's");
+        }
+    }
+
+    /// A chain that stopped before `simple.el`: the launch takes the GNU
+    /// editing functions romacs-editing.el calls from the GNU files of its
+    /// tree, here a simple.el of the tree's own, so C-SPC sets the mark and
+    /// `mark-whole-buffer` selects the buffer.
+    #[test]
+    fn loadup_after_a_short_chain_takes_gnu_editing_from_its_tree() {
+        let simple = "(defun mark (&optional _force) 'from-the-tree)
+(defun set-mark (position) (set-marker (mark-marker) position))
+(defun push-mark (&optional location _nomsg _activate) (set-marker (mark-marker) (or location (point))) nil)
+(defun pop-mark () nil)
+(defun push-mark-command (_arg &optional _nomsg) nil)
+(defun pop-to-mark-command () nil)
+(defun set-mark-command (_arg) (interactive \"P\") (push-mark))
+(defun beginning-of-buffer (&optional _arg) (interactive) (goto-char (point-min)))
+(defun kill-new (string &optional _replace) string)
+(defun current-kill (_n &optional _do-not-move) nil)
+(defun backward-word (&optional _arg) (interactive) nil)
+(defun kill-word (_arg) (interactive \"p\") nil)
+(defun backward-kill-word (_arg) (interactive \"p\") nil)
+";
+        let dir = scratch_runtime("short-chain", "", &[("simple.el", simple)]);
+        let marked = on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            printed(&mut vm, "(progn (set-buffer (get-buffer-create \"marked\")) (insert \"abc\") (goto-char 2)
+                                (mark-whole-buffer)
+                                (list (key-binding [0]) (point) (marker-position (mark-marker))
+                                      (subrp (symbol-function 'kill-new)) (mark)))")
+        });
+        assert_eq!(marked, "(set-mark-command 1 4 nil from-the-tree)");
+    }
+
+    /// Files of Romacs's Lisp that signal end no launch: the launch goes on
+    /// with what each defined before its error, notes each error with its
+    /// file and line, and reports each once, in launch order, before the
+    /// session's last steps: in *Messages*, and in a warning and the usage
+    /// log where those are defined, a way of showing one that signals
+    /// keeping none of the others from being shown.
+    #[test]
+    fn a_romacs_file_that_signals_is_reported_not_fatal() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let broken = |path: &str| format!("(error \"broken on purpose\")\n{}", std::fs::read_to_string(source.join(path)).unwrap());
+        let files = [("completion/romacs-buffer-switch.el", broken("completion/romacs-buffer-switch.el")),
+                     ("ui/romacs-key-hint.el", broken("ui/romacs-key-hint.el"))];
+        let files: Vec<(&str, &str)> = files.iter().map(|(path, text)| (*path, text.as_str())).collect();
+        // Shown with nothing but `message': no usage log, no warnings.
+        let bare = scratch_runtime("broken-bare", "", &files);
+        // Shown where a warning signals and the usage log records.
+        let warned = scratch_runtime("broken-warned", "", &files);
+        let report = |dir: std::path::PathBuf, setup: &'static str| on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            let started = initialize_loadup_from(&mut vm, Launch::Loadup, None, &dir).unwrap();
+            let noted = printed(&mut vm, &format!("(length {LISP_ERRORS})"));
+            vm.eval_source(setup).unwrap();
+            report_lisp_errors(&mut vm).unwrap();
+            finish_loadup(&mut vm, &started).unwrap();
+            let messages = "(save-current-buffer (set-buffer \"*Messages*\") (buffer-string))";
+            let reported = printed(&mut vm, messages);
+            report_lisp_errors(&mut vm).unwrap();
+            (noted, reported, printed(&mut vm, messages), printed(&mut vm, "(and (boundp 'romacs-test-shown) romacs-test-shown)"))
+        });
+        let (noted, reported, again, _) = report(bare, "(fmakunbound 'romacs-usage-log-note)");
+        assert_eq!(noted, "2");
+        let at = |file: &str| reported.find(&format!("{file}: line 1 "));
+        assert!(at("completion/romacs-buffer-switch.el").is_some() && at("ui/romacs-key-hint.el").is_some(), "{reported}");
+        assert!(at("completion/romacs-buffer-switch.el") < at("ui/romacs-key-hint.el"), "in launch order: {reported}");
+        assert_eq!(reported, again, "an error is reported once");
+        let (_, reported, _, shown) = report(warned, "(progn
+            (defvar romacs-test-shown nil)
+            (defun display-warning (&rest _) (error \"a warning that signals\"))
+            (defun romacs-usage-log-note (kind &rest plist) (setq romacs-test-shown (cons (list kind (plist-get plist :error)) romacs-test-shown))))");
+        assert!(reported.contains("romacs-buffer-switch.el: line 1 ") && reported.contains("romacs-key-hint.el: line 1 "), "{reported}");
+        assert_eq!(shown.matches("\"lisp-error\"").count(), 2, "{shown}");
     }
 
     /// `--gnu-lisp`/`--loadup`: GNU's directories come before every bundled

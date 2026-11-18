@@ -324,6 +324,34 @@ def test_environment(scratch, environ=os.environ):
     return {k: v for k, v in environ.items() if k not in launch} | {'TMPDIR': scratch}
 
 
+# The editor runs these programs from beside its own binary (romacs-keeper.el,
+# romacs-agent.el). Cargo builds a package's own binaries for its tests, never
+# another package's, so a run of the editor's tests builds them first.
+HOST = 'romacs-vm-gui'
+COMPANIONS = {'romacs-mcp': ('romacs-mcp', 'romacs-agent-host'), 'romacs-keeper': ('romacs-keeper',)}
+
+
+def companion_build(runs):
+    """The command that builds the editor's companions into the gate profile's
+    directory before RUNS, or None when no run is the editor's. Cargo makes it
+    a no-op once they are built."""
+    if all(package != HOST for package, _, _ in runs):
+        return None
+    return ['cargo', 'build', '--profile', 'gate', '--locked', '--offline',
+            *(flag for package in COMPANIONS for flag in ('-p', package)),
+            *(flag for names in COMPANIONS.values() for name in names for flag in ('--bin', name))]
+
+
+def commands(runs, threads):
+    """The commands the tests stage runs for RUNS, in order."""
+    build = companion_build(runs)
+    return ([build] if build else []) + [
+        ['cargo', 'nextest', 'run', '--cargo-profile', 'gate', '--locked', '--offline', '-p', package, *flags,
+         '--test-threads', str(threads), '--no-fail-fast', '--retries', '0', '--no-tests=fail',
+         '--status-level', 'fail', '--final-status-level', 'fail', '-E', rule]
+        for package, flags, rule in runs]
+
+
 def run_tests(root, names, threads):
     """The tests stage on ROOT's tree, with the toolchain on PATH."""
     answer = impact.select(names, root, impact.metadata_of(root))
@@ -335,10 +363,7 @@ def run_tests(root, names, threads):
     log, started, status = log_path(root), time.monotonic(), 0
     with log.open('w') as sink, tempfile.TemporaryDirectory(prefix='rdc-', dir=log.parent) as scratch:
         env = test_environment(scratch)
-        for package, flags, rule in runs:
-            command = ['cargo', 'nextest', 'run', '--cargo-profile', 'gate', '--locked', '--offline', '-p', package, *flags,
-                       '--test-threads', str(threads), '--no-fail-fast', '--retries', '0', '--no-tests=fail',
-                       '--status-level', 'fail', '--final-status-level', 'fail', '-E', rule]
+        for command in commands(runs, threads):
             sink.write(f'$ {" ".join(command)}\n')
             sink.flush()
             status |= subprocess.run(command, cwd=root, env=env, stdin=subprocess.DEVNULL,

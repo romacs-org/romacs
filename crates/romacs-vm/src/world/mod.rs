@@ -428,8 +428,8 @@ impl Vm {
         let per_buffer = matches!(cell.redirect, Some(VariableRedirect::Forwarded(Fwd::Buffer(_))));
         let saved = matches!(access, Access::SavedRead | Access::SavedWrite);
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, let_default))|
-            bound == slot && !cell.older.contains(&at) && (!per_buffer || let_default || owner == buffer));
+        let shadowed = !saved && self.dynamic.iter().enumerate().any(|(at, &(bound, _, owner, kind))|
+            bound == slot && !cell.older.contains(&at) && (!per_buffer || kind == crate::Let::Default || owner == buffer));
         if !shadowed {
             let within = self.innermost_function();
             host::note_uncaptured("per-process", json!({"root": cell.root as u8, "access": access_name(access),

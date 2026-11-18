@@ -168,6 +168,14 @@ records as they were drawn live with RECORDS-ONLY
           (should (equal text (car (romacs-agent-drawn-tests--drawn session t))))))
       (kill-buffer (cdr drawn)))))
 
+(ert-deftest romacs-agent-drawn-ready-loads-no-session ()
+  ;; A fill tells of every session's turns kept drawn: a session not loaded
+  ;; has no chat, and is not loaded to look.
+  (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (asked nil))
+    (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id asked) nil)))
+      (romacs-agent-ui-drawn-ready "aaaaaaaa-0000-4000-8000-00000000d00d" '(1 5)))
+    (should-not asked)))
+
 (ert-deftest romacs-agent-drawn-a-live-turn-is-kept-as-drawn ()
   ;; A turn drawn live is kept as it was drawn at its end, by its prompt's
   ;; seq, and a chat opened later inserts it.

@@ -49,8 +49,8 @@
   "The table and its indexes, made when the database is opened.")
 
 (defconst romacs-agent-store--version 5
-  "The table's form (`user_version'): a database of another is made again,
-as a cache is.")
+  "The table's form (`user_version'): a database of another has its table
+made in this form, its rows kept (`romacs-agent-store--reform').")
 
 (defvar romacs-agent-store--db nil
   "The open database, as ((FILE . QUEUED) . DB), or nil: QUEUED when it
@@ -116,20 +116,34 @@ never waits on a writer."
 
 (defvar romacs-agent-store--making nil "Whether the writer is making the store.")
 
+(defvar romacs-agent-store-readable-hook nil
+  "Run in the editor once the writer has answered its asking to make the
+store (`romacs-agent-store--make-soon'): what waited for the store to be
+read here goes on.")
+
 (defun romacs-agent-store--make-soon ()
   "Ask the writer to make the store, once until it has."
   (unless romacs-agent-store--making
     (setq romacs-agent-store--making t)
     (romacs-agent-write 'romacs-agent-store--made nil
-                        (lambda (_answer) (setq romacs-agent-store--making nil)))))
+                        (lambda (_answer)
+                          (setq romacs-agent-store--making nil)
+                          (run-hooks 'romacs-agent-store-readable-hook)))))
 
 (defvar romacs-agent-store-made-functions nil
   "Functions that make the tables of the store's other modules, called by
 the writer once it has opened it (`romacs-agent-store--made').")
 
+(defun romacs-agent-store--writer-open ()
+  "In a writer: the store opened, its directory made first.  The writer
+makes the store, in a home where no agent has run yet as well: nothing
+else may have made the state directory."
+  (make-directory (file-name-directory (romacs-agent-store--file)) t)
+  (romacs-agent-store--open))
+
 (defun romacs-agent-store--made ()
   "In a writer: the store opened, every module's tables made."
-  (when (romacs-agent-store--open) (run-hooks 'romacs-agent-store-made-functions) t))
+  (when (romacs-agent-store--writer-open) (run-hooks 'romacs-agent-store-made-functions) t))
 
 (defun romacs-agent-store--writer-start ()
   "The writer's start: the store opened, its tables made, its waits long,
@@ -137,7 +151,7 @@ its commits not synced one by one (`synchronous=NORMAL', as a supervisor's
 are): what a crash may lose of them is the writer's queue's window."
   ;; Its connection waits long; the editor, which runs this when it ends
   ;; with no writer (`romacs-agent-writer--here'), keeps its own short.
-  (when-let* ((db (let ((romacs-agent-store-patience romacs-agent-store-patient)) (romacs-agent-store--open))))
+  (when-let* ((db (let ((romacs-agent-store-patience romacs-agent-store-patient)) (romacs-agent-store--writer-open))))
     (sqlite-pragma db "synchronous = NORMAL")
     (romacs-agent-store--made)))
 
@@ -149,6 +163,29 @@ wait for the store's lock, every connection of its life."
 
 (setq romacs-agent-writer-bindings-function #'romacs-agent-store--writer-bindings)
 
+(defun romacs-agent-store--reform (db)
+  "Make DB's sessions table, of another version, in this one's form, every
+row kept with the columns both forms have, in one transaction: a row lost
+hides its session until a fill writes it again.  A row the new form
+refuses (a column it needs, missing) is left out."
+  (sqlite-execute db "begin immediate")
+  (condition-case err
+      (progn
+        (when (sqlite-select db "select 1 from sqlite_master where type = 'table' and name = 'sessions'")
+          (sqlite-execute db "drop table if exists sessions_reformed")
+          (sqlite-execute db (string-replace "create table if not exists sessions ("
+                                             "create table sessions_reformed ("
+                                             (car romacs-agent-store--schema)))
+          (let* ((new (mapcar #'cadr (sqlite-select db "pragma table_info(sessions_reformed)")))
+                 (old (mapcar #'cadr (sqlite-select db "pragma table_info(sessions)")))
+                 (both (string-join (seq-filter (lambda (column) (member column old)) new) ", ")))
+            (sqlite-execute db (format "insert or ignore into sessions_reformed (%s) select %s from sessions" both both)))
+          (sqlite-execute db "drop table sessions")
+          (sqlite-execute db "alter table sessions_reformed rename to sessions"))
+        (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version))
+        (sqlite-execute db "commit"))
+    (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
+
 (defun romacs-agent-store--open-to-write (file)
   "FILE opened to write and its tables made; nil when it cannot be."
   (setq romacs-agent-store--readonly nil)
@@ -159,8 +196,7 @@ wait for the store's lock, every connection of its life."
           (sqlite-pragma db (format "busy_timeout = %d" romacs-agent-store-patience))
           (sqlite-pragma db "journal_mode = WAL")
           (unless (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version)
-            (sqlite-execute db "drop table if exists sessions")
-            (sqlite-pragma db (format "user_version = %d" romacs-agent-store--version)))
+            (romacs-agent-store--reform db))
           (dolist (statement romacs-agent-store--schema) (sqlite-execute db statement))
           (set-file-modes file #o600)
           (setq romacs-agent-store--db (cons (cons file nil) db))

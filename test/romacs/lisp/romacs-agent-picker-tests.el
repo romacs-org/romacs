@@ -54,6 +54,30 @@
                    ("claude-haiku-4-5" :label "Haiku 4.5" :efforts nil))))
   (should-not (romacs-agent--claude-models (romacs-mcp--object))))
 
+(ert-deftest romacs-agent-picker-a-json-write-takes-no-other-writer-s-file ()
+  ;; Another process writing the same file at once (a temporary of its
+  ;; own beside it): this write neither takes nor removes that one.
+  (let* ((dir (make-temp-file "romacs-json-" t)) (file (expand-file-name "models.json" dir))
+         (other (concat file ".tmp")))
+    (unwind-protect
+        (progn
+          (with-temp-file other (insert "theirs"))
+          (romacs-agent--write-json file (romacs-mcp--object "a" 1))
+          (should (equal (gethash "a" (romacs-agent--read-json file)) 1))
+          (should (equal (with-temp-buffer (insert-file-contents other) (buffer-string)) "theirs"))
+          ;; None of its own left behind.
+          (should (equal (directory-files dir nil "\\.tmp\\'") '("models.json.tmp"))))
+      (delete-directory dir t))))
+
+(ert-deftest romacs-agent-picker-models-not-kept-are-in-no-one-s-way ()
+  ;; The models cache not written (its file taken by another writer, a
+  ;; full disk): reported, never signalled into the answer it came in.
+  (romacs-agent-picker--with
+      ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
+       (romacs-agent-providers `(("claude" :program ,program))))
+    (cl-letf (((symbol-function 'romacs-agent--write-json) (lambda (&rest _) (error "Taken"))))
+      (romacs-agent--keep-models session '(("a" :label "A"))))))
+
 (ert-deftest romacs-agent-picker-models-merge ()
   (romacs-agent-picker--with
       ((session (romacs-agent--make :id "s" :harness 'claude :provider "claude"))
@@ -243,14 +267,12 @@ affixation it saw pushed on the list in cell ASKED."
       (with-temp-buffer
         (insert (propertize "row\n" 'romacs-agent-board-row (list :kind 'project :cwd (directory-file-name sub))))
         (goto-char (point-min))
-        ;; The board hides first; then the prompt, where the user was.
-        (cl-letf (((symbol-function 'romacs-popup-then) #'funcall))
-          (romacs-agent-board-new)
-          (should (equal offered sub))
-          (should started)
-          ;; Off every section: the current project's.
-          (goto-char (point-max))
-          (romacs-agent-board-new))
+        (romacs-agent-board-new)
+        (should (equal offered sub))
+        (should started)
+        ;; Off every section: the current project's.
+        (goto-char (point-max))
+        (romacs-agent-board-new)
         (should (equal offered (expand-file-name "repository/" root))))
       (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)
