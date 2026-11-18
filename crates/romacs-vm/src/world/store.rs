@@ -1053,10 +1053,8 @@ impl World {
         let mut manifest = self.manifest(trace, trace["uncaptured"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
+        // Dense, as `image::capture` requires.
         vm.collect_compacting();
-        if vm.conses.unused() + vm.closures.unused() + vm.cells.unused() + vm.objects.unused() != 0 {
-            return Err("world image: the tables did not compact".into());
-        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
             file.sync_all().map_err(|e| e.to_string())?;
