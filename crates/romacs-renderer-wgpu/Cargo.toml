@@ -9,7 +9,6 @@ description = "WGPU text renderer primitives for Romacs"
 
 [features]
 default = []
-video = ["dep:romacs-video"]
 # The shared test GPU (gpu_policy::test_gpu), for other crates' tests.
 test-gpu = []
 
@@ -46,7 +45,6 @@ romacs-imaging.workspace = true
 romacs-font.workspace = true
 romacs-font-materializer.workspace = true
 romacs-scene.workspace = true
-romacs-video = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Its own integration tests share one test GPU (gpu_policy::test_gpu).

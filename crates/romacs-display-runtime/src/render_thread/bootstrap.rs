@@ -180,18 +180,6 @@ impl RenderApp {
         surface.configure(&device, &config);
         romacs_renderer_wgpu::diagnostics::surface_fingerprint(&adapter, &surface, &config);
 
-        #[cfg(feature = "video")]
-        let renderer = WgpuRenderer::with_device_and_video_runtime(
-            device.clone(),
-            queue.clone(),
-            pending_width,
-            pending_height,
-            format,
-            pending_scale_factor as f32,
-            self.video_gpu_generation,
-            self.video_wake.clone(),
-        );
-        #[cfg(not(feature = "video"))]
         let renderer = WgpuRenderer::with_device(
             device.clone(),
             queue.clone(),
@@ -221,13 +209,6 @@ impl RenderApp {
         self.renderer = Some(renderer);
         self.publish_image_cache_usage();
         self.note_models_renderer_ready();
-        #[cfg(feature = "video")]
-        if !self.pending_video_recovery.is_empty()
-            && let Some(renderer) = self.renderer.as_mut()
-        {
-            renderer
-                .restore_videos_after_device_loss(std::mem::take(&mut self.pending_video_recovery));
-        }
 
         self.frame_windows
             .populate_primary_native(GuiFrameNativeWindowState {
@@ -274,8 +255,6 @@ impl RenderApp {
 
         self.synchronize_toolbar_resources();
 
-        #[cfg(feature = "video")]
-        tracing::info!("Video cache initialized");
     }
 
     /// Rebuild the entire GPU stack after the wgpu device was lost (a user
@@ -297,19 +276,9 @@ impl RenderApp {
         // Renderer first: pipelines and every media cache (image, video,
         // shader surfaces, frame post shader) hold old-device
         // objects.
-        #[cfg(feature = "video")]
-        if let Some(renderer) = self.renderer.as_ref() {
-            self.pending_video_recovery = renderer.video_recovery_manifests();
-        }
         self.renderer = None;
         self.note_models_renderer_lost();
         self.publish_image_cache_usage();
-        #[cfg(feature = "video")]
-        {
-            self.video_gpu_generation = self.video_gpu_generation.next();
-            self.frame_coordinator
-                .reconcile_video_service_deadline(None);
-        }
 
         // Per-window GPU-resident compositor state. `current_frame` (CPU
         // glyph data) is deliberately kept.
@@ -451,13 +420,6 @@ fn run_render_loop_with_startup(
 ) -> Result<super::RenderLoopExit, RenderLoopError> {
     tracing::info!("Render thread starting");
 
-    #[cfg(feature = "video")]
-    let video_wake = {
-        let proxy = event_loop.create_proxy();
-        romacs_video::VideoWake::new(move || {
-            proxy.wake_up();
-        })
-    };
 
     tracing::info!("Render thread entering winit event loop");
     let exit_input = comms.input_tx.clone();
@@ -471,12 +433,6 @@ fn run_render_loop_with_startup(
             shared_monitors,
             poll_when_idle,
         );
-        #[cfg(feature = "video")]
-        let app = {
-            let mut app = app;
-            app.video_wake = video_wake;
-            app
-        };
         app
     });
     // Notify Emacs that the render thread is exiting so it can shut down gracefully.
