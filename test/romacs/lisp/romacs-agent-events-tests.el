@@ -428,8 +428,34 @@ moment more under load."
            (should drawn)
            (should-not moved))
          (should (romacs-agent-events-p session))
+         (should (file-exists-p journal))
          ;; Again: nothing to do.
          (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil))))))))
+
+(ert-deftest romacs-agent-events-a-small-staged-journal-is-flipped-not-imported ()
+  ;; A journal small enough to import at its launch, staged as it is now
+  ;; (by the installer): its launch's import flips it, never writes it
+  ;; again, and leaves its journal where it is.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-turns)
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil) (romacs-agent-turns--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal))
+        (romacs-agent-events--importing (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     2
+     (lambda (session journal)
+       (let ((id (romacs-agent-id session)) (imported nil))
+         (remhash id romacs-agent--sessions)
+         (should (equal (romacs-agent-events-migrate) (list :migrated 1 :skipped nil :failed nil)))
+         (cl-letf (((symbol-function 'romacs-agent-write)
+                    (lambda (function args &optional done _key)
+                      (let ((answer (list 'ok (apply function args)))) (when done (funcall done answer)) answer)))
+                   ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
+                   ((symbol-function 'romacs-agent-events--import-dir) (lambda (&rest _) (setq imported t) t)))
+           (should (eq (romacs-agent-events--import-queued session) 'queued)))
+         (should-not imported)
+         (should (romacs-agent-events-p session))
+         (should (file-exists-p journal)))))))
 
 (defmacro romacs-agent-events-tests--workers (&rest body)
   "Run BODY with worker VMs that run each job here, at once."
