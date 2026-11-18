@@ -689,16 +689,26 @@ impl Text {
         self.ts_record(start..old, s.len(), linecols, old - start + s.len());
         Ok(())
     }
-    /// `TextBody::overwrite' of R, recorded for tree-sitter: editfns.c's
-    /// subst-char-in-region and translate-region record each character, one
-    /// record of the run is the same edit. Redisplay's budget is charged the
-    /// bytes that differ, old and new, as those records would charge it, so
-    /// a few changes far apart still show before their parse.
+    /// `TextBody::overwrite' of R by REPLACEMENT, character for character
+    /// (casing, subst-char-in-region, translate-region), recorded for
+    /// tree-sitter: editfns.c records each changed character, one record of
+    /// the run is the same edit. Redisplay's budget is charged as those
+    /// records would charge it, each changed character's old and new width,
+    /// so a few changes far apart still show before their parse.
     pub(crate) fn overwrite(&mut self, r: Range<ByteOffset>, replacement: &[u8]) -> Result<()> {
+        let charge = if self.body.treesit.is_empty() { 0 } else { self.body.changed_characters_width(r.clone(), replacement)? };
+        self.overwrite_charged(r, replacement, charge)
+    }
+    /// `overwrite' of R where characters move (transpose-regions): the
+    /// budget is charged the whole span, old and new.
+    pub(crate) fn overwrite_moving(&mut self, r: Range<ByteOffset>, replacement: &[u8]) -> Result<()> {
+        let charge = 2 * (r.end.0 - r.start.0);
+        self.overwrite_charged(r, replacement, charge)
+    }
+    fn overwrite_charged(&mut self, r: Range<ByteOffset>, replacement: &[u8], charge: usize) -> Result<()> {
         let linecols = self.ts_linecols_before(r.start.0..r.end.0);
-        let differing = if self.body.treesit.is_empty() { 0 } else { self.body.differing_bytes(r.start.0..r.end.0, replacement) };
         self.body.overwrite(r.clone(), replacement)?;
-        self.ts_record(r.start.0..r.end.0, r.end.0 - r.start.0, linecols, 2 * differing);
+        self.ts_record(r.start.0..r.end.0, r.end.0 - r.start.0, linecols, charge);
         Ok(())
     }
     /// The linecols of a change's start and old end in a buffer tracking
@@ -870,12 +880,6 @@ impl TextBody {
         }
         None
     }
-    /// How many bytes of R differ from REPLACEMENT's, compared in order (a
-    /// raw byte, internal form against stored, may count when unchanged).
-    pub(crate) fn differing_bytes(&self, r: Range<usize>, replacement: &[u8]) -> usize {
-        let mut new = replacement.iter();
-        self.chunks_in(r).flatten().filter(|old| new.next() != Some(*old)).count()
-    }
     /// The bytes of R, chunk by chunk, read where they lie.
     pub(crate) fn chunks_in(&self, r: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
         let mut at = r.start;
@@ -992,6 +996,22 @@ impl TextBody {
             });
         }
         Ok(Cow::Owned(rope_to_internal(text.as_bytes(), r.start.0, &self.raw)))
+    }
+    /// The old and new widths, in internal form, of each character of R
+    /// that REPLACEMENT, internal and character for character, changes; when
+    /// the two do not pair up, both whole.
+    pub(crate) fn changed_characters_width(&self, r: Range<ByteOffset>, replacement: &[u8]) -> Result<usize> {
+        // A character's width in internal form, from its lead byte.
+        let width = |s: &[u8]| match s[0] { 0..=0x7f => 1, 0xc0..=0xdf => 2, 0xe0..=0xef => 3, 0xf0..=0xf7 => 4, 0xf8 => 5, _ => 0 };
+        let old = self.internal(r)?;
+        let (mut a, mut b, mut changed) = (&old[..], replacement, 0);
+        while !a.is_empty() && !b.is_empty() {
+            let (m, n) = (width(a), width(b));
+            if m == 0 || n == 0 || m > a.len() || n > b.len() { break; }
+            if a[..m] != b[..n] { changed += m + n; }
+            (a, b) = (&a[m..], &b[n..]);
+        }
+        Ok(if a.is_empty() && b.is_empty() { changed } else { old.len() + replacement.len() })
     }
     /// R of the text as a multibyte Lisp string with its properties, raw
     /// bytes kept.
