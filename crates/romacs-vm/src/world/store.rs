@@ -1611,6 +1611,15 @@ mod tests {
         assert_eq!(subdir(&root.join("file"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
         std::os::unix::fs::symlink(&made, root.join("link")).unwrap();
         assert_eq!(subdir(&root.join("link"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        // The pinned directories, as a builder and the GNU trace runner make
+        // them: a regular file at `p/cwd` is an error, not a directory.
+        let base = root.join("base");
+        std::fs::create_dir_all(base.join("p")).unwrap();
+        std::fs::write(base.join("p/cwd"), "").unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::fs::remove_file(base.join("p/cwd")).unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap(), base.join("p"));
+        assert!(["cwd", "tmp", "bin"].iter().all(|name| base.join("p").join(name).is_dir()));
         let _ = std::fs::remove_dir_all(&root);
     }
 
