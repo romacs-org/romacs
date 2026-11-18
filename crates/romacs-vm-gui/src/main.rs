@@ -63,6 +63,39 @@ const EVALUATOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 /// `kill-emacs''s exit status, unwinding the live evaluator (`evaluate').
 struct SessionEnd(i32);
 
+/// How the evaluator's RESULT ends the session, and whether it failed (a
+/// failed startup's screen then holds, `failed_screen`): an error, or a
+/// panic other than `kill-emacs`'s unwinding, which ends it as a panic.
+fn evaluator_end(result: std::thread::Result<Result<exit::Exit, String>>) -> (exit::Exit, bool) {
+    match result {
+        Ok(Ok(end)) => (end, false),
+        Ok(Err(error)) => {
+            eprintln!("romacs: evaluator stopped: {error}");
+            (exit::Exit::new("evaluator-error", error, 1), true)
+        }
+        Err(payload) => match payload.downcast::<SessionEnd>() {
+            Ok(end) => (exit::Exit::new("kill-emacs", "", end.0), false),
+            // Said and reported by the panic hook as it happened (exit.rs).
+            Err(_) => (exit::panicked("evaluator"), true),
+        },
+    }
+}
+
+#[cfg(test)]
+mod evaluator_end_tests {
+    use super::*;
+
+    #[test]
+    fn an_error_or_a_panic_fails_and_kill_emacs_ends() {
+        let ended = |status| exit::Exit::new("kill-emacs", "", status);
+        assert_eq!(evaluator_end(Ok(Ok(ended(0)))), (ended(0), false));
+        assert_eq!(evaluator_end(Ok(Err("boom".into()))), (exit::Exit::new("evaluator-error", "boom", 1), true));
+        assert_eq!(evaluator_end(Err(Box::new(SessionEnd(3)))), (ended(3), false));
+        let (end, failed) = evaluator_end(Err(Box::new("a bug")));
+        assert_eq!((end.reason, end.status, failed), ("panic", 101, true));
+    }
+}
+
 fn spawn_evaluator<F, T>(evaluate: F) -> Result<std::thread::JoinHandle<T>, String>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -975,17 +1008,7 @@ fn run() -> Result<Option<exit::Exit>, String> {
             evaluate(&sender, floor, force_gc, g1, live, launch, width, height, load_user_init, quick, restored,
                      isolate_world, store_problem, &host, quit, prune, serve, serve_landing, &mut early_window)
         }));
-        let (end, failed) = match result {
-            Ok(Ok(end)) => (end, false),
-            Ok(Err(error)) => {
-                eprintln!("romacs: evaluator stopped: {error}");
-                (exit::Exit::new("evaluator-error", error, 1), true)
-            }
-            Err(payload) => match payload.downcast::<SessionEnd>() {
-                Ok(end) => (exit::Exit::new("kill-emacs", "", end.0), false),
-                Err(payload) => std::panic::resume_unwind(payload),
-            },
-        };
+        let (end, failed) = evaluator_end(result);
         let screen = if failed { failed_screen(&host, &mut early_window, &end.detail) } else { None };
         // The end goes first: dropping the sender closes the window, and
         // the window's end lets the main thread look for it.  A failed
@@ -1039,7 +1062,7 @@ fn failed_screen(host: &std::cell::RefCell<prompt::Shared>, early_window: &mut O
                  error: &str) -> Option<loading::Loading> {
     let screen = { let mut shared = host.borrow_mut(); if shared.window_shown() { shared.loading.take() } else { None } }?;
     if let Some(ready) = early_window.take() && !made(&ready) { return None; }
-    loading::fail(error);
+    loading::fail(error, startup::first_noted_lisp_error().as_deref());
     Some(screen)
 }
 
@@ -1530,7 +1553,10 @@ fn evaluate(
         match finished {
             Err(error) => {
                 eprintln!("romacs: startup after init failed: {error}");
-                let _ = echo::show(&mut vm, &error);
+                // Shown with the first Lisp error startup went past, often its cause.
+                let shown = startup::first_noted_lisp_error().map_or_else(|| error.clone(),
+                    |first| format!("Romacs Lisp failed: {first}; then: {error}"));
+                let _ = echo::show(&mut vm, &shown);
             }
             // Not fatal: a quit typed late (`quit-flag') may end it.
             Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },

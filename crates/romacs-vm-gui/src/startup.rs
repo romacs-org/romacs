@@ -708,16 +708,33 @@ fn load_lisp(vm: &mut Vm, dir: &std::path::Path, path: &str) -> Result<(), Strin
 /// restored from it reports as its own.
 const LISP_ERRORS: &str = "romacs--startup-lisp-errors";
 
-/// Note ERROR for [`report_lisp_errors`], and say it on stderr.
+thread_local! {
+    /// The first error of Romacs's Lisp this thread's startup noted.
+    static FIRST_NOTED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The first error of Romacs's Lisp the startup on this thread noted and
+/// went on past ([`load_lisp`]): often the cause of a failure after it,
+/// so a failed start's screen and a degraded session show it first.
+#[must_use]
+pub fn first_noted_lisp_error() -> Option<String> {
+    FIRST_NOTED.with(|first| first.borrow().clone())
+}
+
+/// Note ERROR for [`report_lisp_errors`] (the first for
+/// [`first_noted_lisp_error`]), and say it on stderr.
 fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
     eprintln!("romacs: {error}");
+    FIRST_NOTED.with(|first| { first.borrow_mut().get_or_insert_with(|| error.to_owned()); });
     vm.eval_source(&format!("(progn (defvar {LISP_ERRORS} nil) (setq {LISP_ERRORS} (cons {} {LISP_ERRORS})))",
                             lisp_string(error))).map(drop)
 }
 
 /// Show each error of Romacs's Lisp this launch noted ([`load_lisp`]), once:
 /// in *Messages*, in the usage log and in a warning the first frame shows,
-/// as an init's error is shown. The form calls only what is defined, since
+/// as an init's error is shown, in the order they happened.  The first,
+/// often the cause of the others, is said last again, so the echo area
+/// keeps it. The form calls only what is defined, since
 /// the Lisp that failed may be what would show it, and a way of showing
 /// one that signals keeps none of the others from being shown.
 ///
@@ -726,7 +743,7 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 /// The VM's error when it cannot evaluate the report itself.
 pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
     vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
-       (let ((errors (reverse {LISP_ERRORS})))
+       (let* ((errors (reverse {LISP_ERRORS})) (first errors))
          (setq {LISP_ERRORS} nil)
          (while errors
            (let ((error (car errors)))
@@ -737,7 +754,11 @@ pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
              (condition-case nil
                  (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error))
                (error nil)))
-           (setq errors (cdr errors)))))")).map(drop)
+           (setq errors (cdr errors)))
+         (when (cdr first)
+           (condition-case nil
+               (message \"Romacs Lisp failed first: %s (%d more in *Warnings*)\" (car first) (1- (length first)))
+             (error nil)))))")).map(drop)
 }
 
 /// Romacs's layers after the chain that only define ([`SESSION_DEFINITIONS`]).

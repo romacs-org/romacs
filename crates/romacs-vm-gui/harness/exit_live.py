@@ -30,6 +30,12 @@ summariser, summarises them.
               it, until the window is closed (Alt+F4): status 1, stderr
               saying `romacs-exit' with the reason evaluator-error and the
               file.  Always the binary itself, without a world.
+  lisp-error-first  romacs-startup.el's first form signals, which startup
+              goes on past: the session's first frame shows that error
+              (its file named) at once.
+  lisp-error-first-failed  the same with the bootstrap gone too, so the
+              start fails: its screen shows romacs-startup.el's error
+              above what failed after it ("Then: ...").
   startup-failed-server  the same as a server whose client asked for its
               window at its start (--serve NAME --serve-frame): the
               window it asked for shows the same screen, and the same
@@ -52,6 +58,9 @@ from parity_live import C, K, M, T, Engine, lisp_string, plist, prepare_world, p
 
 # The GNU chain's first file (lisp/session/): without it no Lisp starts.
 BOOTSTRAP = 'romacs-loadup-bootstrap.el'
+# Romacs's first startup file (lisp/session/), and what a broken one signals.
+STARTUP = 'romacs-startup.el'
+BROKEN = 'broken on purpose'
 
 INIT = ''';; -*- lexical-binding: t -*-
 (setq inhibit-startup-screen t initial-scratch-message nil)
@@ -112,10 +121,12 @@ def start(args, base, name):
     return engine, root / 'engine.log', root / 'usage.jsonl'
 
 
-def start_failed(args, base, name, serve=()):
-    """A session for workflow NAME whose startup fails: its Lisp tree is
-    this checkout's but for the chain's bootstrap file, launched with
-    SERVE's arguments too.  Nothing waits for an init, which never runs."""
+def start_failed(args, base, name, serve=(), breaks=('bootstrap',)):
+    """A session for workflow NAME over this checkout's Lisp tree but for
+    BREAKS: `bootstrap', the chain's bootstrap file gone, so its startup
+    fails; `startup', romacs-startup.el's first form signalling, which
+    startup goes on past.  Launched with SERVE's arguments too.  Nothing
+    waits for an init."""
     root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
     lisp = root / 'lisp'
     (lisp / 'session').mkdir(parents=True)
@@ -123,7 +134,9 @@ def start_failed(args, base, name, serve=()):
         if entry.name != 'session':
             (lisp / entry.name).symlink_to(entry)
     for entry in (parity_live.ROOT / 'lisp/session').iterdir():
-        if entry.name != BOOTSTRAP:
+        if entry.name == STARTUP and 'startup' in breaks:
+            (lisp / 'session' / STARTUP).write_text(f'(error "{BROKEN}")\n' + entry.read_text())
+        elif entry.name != BOOTSTRAP or 'bootstrap' not in breaks:
             (lisp / 'session' / entry.name).symlink_to(entry)
     env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_WORLD='off', ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
     engine = Engine('romacs', [args.romacs, '--loadup', *serve], root, None, env, args.timeout)
@@ -226,10 +239,37 @@ def run_startup_failed(engine, stderr, usage):
     return checks, {'status': status, 'exit': line, 'screen': screen}
 
 
+def run_first_lisp_error(engine, stderr, usage):
+    """The first noted Lisp error is what the user sees first: on a failed
+    start's screen, above what failed after it; in a degraded session's
+    first frame, at once."""
+    log = engine.root / 'engine.log'
+    wait(lambda: engine.startup_failed() or '"diagnostic":"paint"' in log.read_text(errors='replace'),
+         engine.timeout * 4, 'a failed start or a first paint', engine.process)
+
+    def shown():
+        text = ' '.join(screen_text(engine).split())
+        return text if BROKEN in text else None
+    screen = wait(shown, engine.timeout, 'the first Lisp error shown', engine.process, 1)
+    failed = bool(engine.startup_failed())
+    # Read without whitespace: a long path wraps anywhere on the screen.
+    compact = ''.join(screen.split())
+    first, then = compact.find(STARTUP), compact.lower().find('then:')
+    checks = {
+        'the first error shown, its file named': first >= 0,
+        'before what failed after it': then < 0 or first < then,
+        'a failed start shows what failed after it': not failed or then >= 0,
+    }
+    return checks, {'failed': failed, 'screen': screen}
+
+
 WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor, 'startup-failed': run_startup_failed,
-             'startup-failed-server': run_startup_failed}
+             'startup-failed-server': run_startup_failed, 'lisp-error-first': run_first_lisp_error,
+             'lisp-error-first-failed': run_first_lisp_error}
 STARTS = {'startup-failed': start_failed,
-          'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame'))}
+          'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame')),
+          'lisp-error-first': lambda args, base, name: start_failed(args, base, name, breaks=('startup',)),
+          'lisp-error-first-failed': lambda args, base, name: start_failed(args, base, name, breaks=('startup', 'bootstrap'))}
 
 
 def main():

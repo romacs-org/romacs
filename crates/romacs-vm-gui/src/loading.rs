@@ -141,10 +141,17 @@ impl Report {
 
     /// Startup failed with ERROR: the step it was at fails, and the bar
     /// stops where it was.
-    fn fail(&mut self, error: &str) {
+    /// Startup failed with ERROR: the step it was at fails, FIRST (the
+    /// first error of Romacs's Lisp startup went on past, often its cause)
+    /// shows above ERROR, and the bar stops where it was.
+    fn fail(&mut self, error: &str, first: Option<&str>) {
         let at = std::mem::replace(&mut self.label, FAILED.to_owned());
         self.step(FAILED_STAGE, &at, None, true);
-        self.failed = Some((self.began.elapsed().as_secs_f64(), error.to_owned()));
+        let shown = match first {
+            Some(first) if first != error => format!("{first}\n\nThen: {error}"),
+            _ => error.to_owned(),
+        };
+        self.failed = Some((self.began.elapsed().as_secs_f64(), shown));
     }
 
     /// What the screen says now.
@@ -166,9 +173,11 @@ pub fn step_counted(stage: &str, label: &str, count: Option<(u64, u64)>, failed:
 }
 
 /// Startup failed with ERROR: the screen shows the step it was at failed,
-/// ERROR under it, and its bar stopped.  Nothing when no screen shows.
-pub fn fail(error: &str) {
-    if let Some(report) = report().as_mut() { report.fail(error); }
+/// ERROR under it with FIRST above it (the first error of Romacs's Lisp
+/// startup went on past), and its bar stopped.  Nothing when no screen
+/// shows.
+pub fn fail(error: &str, first: Option<&str>) {
+    if let Some(report) = report().as_mut() { report.fail(error, first); }
 }
 
 /// What a finished startup phase (`startup::mark_phase`) leads to next,
@@ -553,7 +562,7 @@ mod tests {
         let first = report.now();
         std::thread::sleep(Duration::from_millis(20));
         assert!(report.now().filled > first.filled, "a first launch's bar moves with the clock");
-        report.fail("lisp/session/romacs-loadup-bootstrap.el: No such file or directory");
+        report.fail("lisp/session/romacs-loadup-bootstrap.el: No such file or directory", None);
         let failed = report.now();
         assert_eq!(failed.label, FAILED);
         assert_eq!(failed.steps, [Step { stage: FAILED_STAGE.into(), label: "Starting Lisp".into(), count: None, failed: true }]);
@@ -570,6 +579,17 @@ mod tests {
         let red = FaceHandle(u32::try_from(red).expect("a face index"));
         assert!(frame.windows[0].snapshot.text.face_runs.iter().any(|run| run.face == red
             && text[run.bytes.clone()] == *"✗ Starting Lisp"), "the failed step is red");
+    }
+
+    #[test]
+    fn a_failure_after_a_noted_lisp_error_shows_that_error_first() {
+        let mut report = Report::new(Profile::default());
+        report.fail("void-function romacs-gui-split", Some("session/romacs-startup.el: line 1 form 1: broken on purpose"));
+        assert_eq!(report.now().error.as_deref(),
+                   Some("session/romacs-startup.el: line 1 form 1: broken on purpose\n\nThen: void-function romacs-gui-split"));
+        let mut alone = Report::new(Profile::default());
+        alone.fail("x.el: line 1 form 1: gone", Some("x.el: line 1 form 1: gone"));
+        assert_eq!(alone.now().error.as_deref(), Some("x.el: line 1 form 1: gone"), "a failure that is the noted error says it once");
     }
 
     #[test]
