@@ -1237,9 +1237,7 @@ impl Leaf<'_> {
             loop {
                 match self.vm.poll_quittable(&fds, None) {
                     Ok(revents) if revents[0] != 0 => break,
-                    Ok(_) if self.vm.quit.pressed() => {
-                        // The second C-g: taken here, as GNU's kill takes it.
-                        self.vm.quit.take();
+                    Ok(_) if self.call_process_stop_requested() => {
                         if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
                         break;
                     }
@@ -1249,6 +1247,16 @@ impl Leaf<'_> {
             }
         }
         if sp::wait_blocking(pid).is_err() { self.vm.subprocesses.deleted.push((pid, None)); }
+    }
+
+    /// Whether the wait after the quit's SIGINT should kill the child now
+    /// (SIGKILL, reap, return), the request taken: today a second C-g, taken
+    /// here as GNU's kill takes it. The one question the wait asks, so a
+    /// later stop (an abort) extends this and not the loop.
+    fn call_process_stop_requested(&mut self) -> bool {
+        let pressed = self.vm.quit.pressed();
+        if pressed { self.vm.quit.take(); }
+        pressed
     }
 
     /// call_process's child: run ARGV synchronously with INFILE on stdin.
