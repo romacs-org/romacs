@@ -5139,23 +5139,18 @@ files (`romacs-agent-mark-kinds'), each kind's answer marked as read."
 listing has (`romacs-agent-listed-p'), as a table, in one asking.")
 
 (defun romacs-agent--live-ids (ids)
-  "Those of IDS whose supervisor's socket is there, as a table: each
-socket's directory looked for in one listing of where those directories
-are (the runtime directory), a socket asked of only where one has its
-directory, never every session's."
-  (let ((listings (make-hash-table :test #'equal)) (live (make-hash-table :test #'equal)))
+  "Those of IDS whose supervisor's socket is there, as a table: from one
+listing of the runtime directory, where each has a directory named by its
+key (`romacs-agent--key'); a socket's path made, and asked of, only for an
+id whose short form one is named by, never every session's."
+  (let ((root (romacs-agent--runtime-root)) (shorts (make-hash-table :test #'equal))
+        (live (make-hash-table :test #'equal)))
+    (when (file-directory-p root)
+      (dolist (key (directory-files root nil "-[0-9a-f]\\{8\\}\\'"))
+        (puthash (substring key 0 -9) t shorts)))
     (dolist (id ids)
-      (let* ((socket (romacs-agent--host-socket id))
-             (dir (directory-file-name (file-name-directory socket)))
-             (parent (file-name-directory dir))
-             (names (or (gethash parent listings)
-                        (puthash parent (let ((names (make-hash-table :test #'equal)))
-                                          (when (file-directory-p parent)
-                                            (dolist (name (directory-files parent)) (puthash name t names)))
-                                          names)
-                                 listings))))
-        (when (and (gethash (file-name-nondirectory dir) names) (file-exists-p socket))
-          (puthash id t live))))
+      (when (and (gethash (romacs-agent--short id) shorts) (file-exists-p (romacs-agent--host-socket id)))
+        (puthash id t live)))
     live))
 
 (defvar romacs-agent-quiet-p nil
@@ -5285,7 +5280,8 @@ directory named by no known session's id, its records not read for one
 that is, and none left unloaded (`romacs-agent--unloaded-p').  Non-nil
 when any was loaded."
   (let ((loaded nil))
-    (dolist (dir (romacs-agent--to-load (romacs-agent--new-session-dirs)))
+    (dolist (dir (romacs-agent--to-load (if (romacs-agent--root-seen) (romacs-agent--unseen-dirs)
+                                          (prog1 (romacs-agent--start-dirs) (romacs-agent--unseen-dirs)))))
       (romacs-agent--load dir)
       (when (gethash (file-name-nondirectory dir) romacs-agent--sessions) (setq loaded t)))
     loaded))
@@ -5326,6 +5322,54 @@ waits for no step.")
        (cl-remove-if (lambda (dir) (gethash (file-name-nondirectory dir) romacs-agent--sessions))
                      (directory-files (romacs-agent--state-root) t "\\`[0-9a-f]\\{8\\}-"))))
 
+(defun romacs-agent--start-dirs ()
+  "The session directories a start asks whether to load
+\(`romacs-agent--to-load').  Its marks known, only those something waits
+on or whose supervisor's socket is there, from the marks, the rows and the
+runtime directory: every other one with a row is left unloaded, and one
+with none yet is the start's fill's to find (`romacs-agent-listed-p'),
+an editor's (a batch run fills none).  Not known, or with no rows, every
+session recorded (`romacs-agent--new-session-dirs')."
+  (if-let* (((not noninteractive))
+            (marked (romacs-agent--marked))
+            (listed (and romacs-agent-listed-ids (funcall romacs-agent-listed-ids)))
+            ((> (hash-table-count listed) 0)))
+      (let ((ids (hash-table-keys marked)) (dirs nil))
+        (maphash (lambda (id _) (push id ids)) (romacs-agent--live-ids (hash-table-keys listed)))
+        (dolist (id (delete-dups ids) dirs)
+          (let ((dir (expand-file-name id (romacs-agent--state-root))))
+            (unless (or (gethash id romacs-agent--sessions) (not (file-directory-p dir)))
+              (push dir dirs)))))
+    (romacs-agent--new-session-dirs)))
+
+(defvar romacs-agent--root-seen nil
+  "(SESSIONS ROOT MTIME . NAMES): for the session table SESSIONS and the
+state directory ROOT, its modification time and the session directories
+in it when `romacs-agent--unseen-dirs' last listed it, NAMES a table.")
+
+(defun romacs-agent--root-seen ()
+  "The last look's (MTIME . NAMES) at this state directory for this
+session table, or nil."
+  (pcase romacs-agent--root-seen
+    (`(,sessions ,root . ,look) (and (eq sessions romacs-agent--sessions)
+                                     (equal root (romacs-agent--state-root)) look))))
+
+(defun romacs-agent--unseen-dirs ()
+  "The session directories recorded since the last look, this process not
+knowing them: the state directory listed only when it changed (its
+modification time), and only the names it did not have then.  The first
+look takes every one there as seen: a start chose among them."
+  (let* ((root (romacs-agent--state-root)) (look (romacs-agent--root-seen))
+         (mtime (and (file-directory-p root) (file-attribute-modification-time (file-attributes root)))))
+    (when (and mtime (not (equal mtime (car look))))
+      (let ((names (make-hash-table :test #'equal)) (dirs nil))
+        (dolist (name (directory-files root nil "\\`[0-9a-f]\\{8\\}-"))
+          (puthash name t names)
+          (unless (or (not look) (gethash name (cdr look)) (gethash name romacs-agent--sessions))
+            (push (expand-file-name name root) dirs)))
+        (setq romacs-agent--root-seen (cons romacs-agent--sessions (cons root (cons mtime names))))
+        dirs))))
+
 (defun romacs-agent-restore ()
   "Know every recorded session, and attach to those whose supervisor runs.
 A server runs this at its start, so sessions survive it; a restore
@@ -5348,7 +5392,7 @@ start, so sessions survive it."
     ;; Restoring as the sessions to load are chosen: one with no row yet
     ;; is listed while a start's fill runs (`romacs-agent-listed-p').
     (setq romacs-agent--restoring t)
-    (if-let* ((dirs (romacs-agent--to-load (romacs-agent--new-session-dirs))))
+    (if-let* ((dirs (romacs-agent--to-load (romacs-agent--start-dirs))))
         (progn (setq romacs-agent--restore-pending dirs romacs-agent--restore-count (length dirs))
                (romacs-agent--restore-progress 'running)
                (run-at-time 0 nil #'romacs-agent--restore-step))

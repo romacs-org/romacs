@@ -10,6 +10,12 @@
   (require 'romacs-agent)
   (require 'romacs-agent-store))
 
+(defun romacs-agent-store-tests--live (id)
+  "A socket where the supervisor of session ID listens, as one running has."
+  (let ((socket (romacs-agent--host-socket id)))
+    (make-directory (file-name-directory socket) t)
+    (write-region "" nil socket nil 'silent)))
+
 (defmacro romacs-agent-store-tests--with (&rest body)
   "BODY with a state root of its own (`root'), a registry of its own, and
 `record' recording a session there (ID TITLE &optional RUNNING), its
@@ -21,7 +27,7 @@ journal one turn long."
           (romacs-agent-event-functions nil)
           (romacs-agent-store--db nil))
      (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
-               ((symbol-function 'romacs-agent--host-socket) (lambda (id) (expand-file-name (concat "run/" id ".sock") root))))
+               ((symbol-function 'romacs-agent--runtime-root) (lambda () (file-name-as-directory (expand-file-name "run" root)))))
        (cl-flet ((record (id title &optional running)
                    (let ((dir (expand-file-name id root)))
                      (make-directory dir t)
@@ -31,9 +37,7 @@ journal one turn long."
                        (insert (json-serialize (romacs-mcp--object "seq" 1 "t" 100.0 "in" (romacs-mcp--object "prompt" "hello"))) "\n"
                                (json-serialize (romacs-mcp--object "seq" 2 "t" 101.0 "ev" (romacs-mcp--object "type" "result" "result" "done it")))
                                "\n"))
-                     (when running
-                       (make-directory (expand-file-name "run" root) t)
-                       (write-region "" nil (romacs-agent--host-socket id) nil 'silent)))))
+                     (when running (romacs-agent-store-tests--live id)))))
          (unwind-protect (progn ,@body)
            (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
            (delete-directory root t))))))
@@ -230,8 +234,7 @@ journal one turn long."
                             (list (if (eq name 'busy) "running" "idle") (if (eq name 'wanting) 1 0) id))))
         ;; Written while no editor was there: past its kept state.
         (append 'behind 3)
-        (make-directory (expand-file-name "run" root) t)
-        (pcase-dolist (`(,_ . ,id) ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+        (pcase-dolist (`(,_ . ,id) ids) (romacs-agent-store-tests--live id))
         (unwind-protect
             (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (session &rest _) (push (romacs-agent-id session) attached)))
                       ((symbol-function 'romacs-agent--endpoint) #'ignore)
@@ -273,7 +276,7 @@ journal one turn long."
       (dolist (id ids) (romacs-agent-events-import (romacs-agent--quiet-session (expand-file-name id root))))
       ;; Their supervisors running since.
       (make-directory (expand-file-name "run" root) t)
-      (dolist (id ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (dolist (id ids) (romacs-agent-store-tests--live id))
       (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
         (dolist (id ids)
           (let ((dir (expand-file-name id root)))
@@ -309,7 +312,7 @@ journal one turn long."
       (romacs-agent-store-fill)
       (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'idle', attention = 0, seq = 2")
       (make-directory (expand-file-name "run" root) t)
-      (dolist (id (list late gone)) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (dolist (id (list late gone)) (romacs-agent-store-tests--live id))
       (unwind-protect
           (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
             (let ((marks (mapcar (lambda (id) (cons id (romacs-agent-store-quiet-p (expand-file-name id root)))) (list late gone))))
@@ -742,3 +745,29 @@ has it: in a transaction of its own, after the statement FIRST when given."
             (romacs-agent-mark (id 5) 'watches nil)
             (should-not (member (dir 1) (romacs-agent--to-load dirs)))
             (should-not (member (dir 5) (romacs-agent--to-load dirs)))))))))
+
+(ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
+  ;; Its marks known, an editor's start asks whether to load only the
+  ;; sessions something waits on or whose supervisor's socket is there:
+  ;; no session's directory listed or read.  A later look at the state
+  ;; directory takes what the start chose among as seen, and finds only a
+  ;; session recorded since.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((ids (cl-loop for i from 1 to 5 collect (format "aaaaaaaa-0000-4000-8000-00000000040%d" i)))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+           (romacs-agent--root-seen nil) (noninteractive nil) (romacs-agent-writer-queued nil))
+      (cl-flet ((id (n) (nth (1- n) ids)) (dir (n) (expand-file-name (nth (1- n) ids) root)))
+        (dotimes (i 5) (record (id (1+ i)) (format "s%d" (1+ i)) (= i 2)))
+        (romacs-agent-store-fill)
+        (romacs-agent--marks-known)
+        (romacs-agent-mark (id 4) 'watches t)
+        (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read")))
+                  ((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
+          (should (equal (sort (romacs-agent--start-dirs) #'string<) (list (dir 3) (dir 4)))))
+        ;; The first look: every one there seen; then only what is new.
+        (should-not (romacs-agent--unseen-dirs))
+        (should-not (romacs-agent--unseen-dirs))
+        (set-file-times root (time-subtract nil 60))
+        (record "aaaaaaaa-0000-4000-8000-000000000499" "new")
+        (should (equal (romacs-agent--unseen-dirs) (list (expand-file-name "aaaaaaaa-0000-4000-8000-000000000499" root))))))))
