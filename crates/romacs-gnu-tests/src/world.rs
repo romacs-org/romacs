@@ -50,13 +50,8 @@ pub fn trace(out: &Path) -> ! {
     let status = host::current_dir().and_then(|cwd| {
         let out = cwd.join(out);
         let dir = pinned_dir(&out);
-        host::create_dir_all(dir.join("p"))?;
-        for name in ["cwd", "tmp", "bin"] {
-            let path = dir.join("p").join(name);
-            if !host::probe(host::Probe::IsDir, &path) {
-                host::create_dir(&path, 0o500)?;
-            }
-        }
+        host::create_dir_all(&dir)?;
+        store::pinned_dirs(&dir)?;
         host::write(&out, b"")?;
         let mut args = absolute_args(&std::env::args_os().skip(1).collect::<Vec<_>>(), &cwd);
         args.extend([OsString::from("--world-trace-child"), dir.clone().into_os_string()]);

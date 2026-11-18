@@ -15,11 +15,14 @@
 
 (defmacro romacs-agent-no-journal-tests--with (&rest body)
   "BODY with `session', a Claude session of two turns, its journal written,
-in a store of its own."
+in a store of its own, a preview's budget unbounded."
   (declare (indent 0))
   `(romacs-agent-test-with-store
      (let* ((romacs-agent--sessions (make-hash-table :test #'equal))
             (romacs-agent-event-functions nil)
+            ;; No real time: a preview is drawn whatever the host's load,
+            ;; its budget tested by the tests that set it, on a stubbed clock.
+            (romacs-agent-ui--preview-seconds 1e9)
             (id romacs-agent-no-journal-tests--id)
             (dir (expand-file-name id (romacs-agent--state-root)))
             (seq 0))
@@ -53,31 +56,209 @@ in a store of its own."
 
 (ert-deftest romacs-agent-no-journal-waits-for-the-move ()
   ;; Not moved yet: a row says so, the chat waits for the move
-  ;; (`romacs-agent-events-then'), its journal unread; moved, it draws.
+  ;; (`romacs-agent-events-then'), its last turns drawn from its journal's
+  ;; tail meanwhile, never blank; moved, it is drawn again from the store.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (romacs-agent-no-journal-tests--with
     (let ((waits nil))
-      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits)))
-                ((symbol-function 'romacs-agent--read-journal-file) (lambda (&rest _) (error "Read the journal"))))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
         ;; Its move failed: said so, not waited for again.
         (let ((buffer (romacs-agent-no-journal-tests--chat session)))
           (should (equal (mapcar #'car waits) (list id)))
           (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
-          (should-not (string-search "ask 1" (with-current-buffer buffer (buffer-string))))
+          (should (string-search "say 2" (with-current-buffer buffer (buffer-string))))
+          ;; Said to be a preview, above it.
+          (should (< (with-current-buffer buffer (string-search "its last turns meanwhile" (buffer-string)))
+                     (with-current-buffer buffer (string-search "say 2" (buffer-string)))))
+          ;; Drawn, and nothing of the session's own state changed by it.
+          (should (= (romacs-agent-seq session) 0))
           (funcall (cdr (pop waits)))
           (with-current-buffer buffer
             (should (string-search "could not move" (buffer-string)))
             (should-not (string-search "moving" (buffer-string))))
           (should-not waits)
           (kill-buffer buffer))
-        ;; Moved: drawn from the store.
+        ;; A tail past its budget: the row alone, nothing half drawn.
+        (let* ((romacs-agent-ui--preview-seconds -1)
+               (buffer (romacs-agent-no-journal-tests--chat session)))
+          (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
+          (should-not (string-search "say" (with-current-buffer buffer (buffer-string))))
+          (kill-buffer buffer))
+        (pop waits)
+        ;; Moved: drawn from the store, its preview gone.
         (let ((buffer (romacs-agent-no-journal-tests--chat session)))
           (romacs-agent-test-stored session)
           (funcall (cdr (pop waits)))
           (with-current-buffer buffer
             (should-not (string-search "move to the store" (buffer-string)))
-            (should (string-search "say 2" (buffer-string))))
+            (should (= (cl-count-if (lambda (line) (string-search "say 2" line)) (split-string (buffer-string) "\n")) 1)))
           (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-no-journal-a-preview-cut-short-leaves-nothing ()
+  ;; A preview past its budget after it drew a prompt: none of it left,
+  ;; nor what it set of the chat's drawing; the row says the records move.
+  ;; A preview touches nothing of the session's: not its manifest.  Its
+  ;; move failing, the row that says so takes the waiting row's place.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let* ((manifest (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           (before (with-temp-buffer (insert-file-contents manifest) (buffer-string)))
+           (waits nil) (renders 0) (time (symbol-function 'float-time))
+           (render (symbol-function 'romacs-agent-ui--render)))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits)))
+                ((symbol-function 'romacs-agent-ui--render)
+                 (lambda (s e) (prog1 (funcall render s e) (cl-incf renders))))
+                ;; Its budget spent once it drew its first event.
+                ((symbol-function 'float-time) (lambda (&rest args) (if (> renders 0) 1e12 (apply time args)))))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (should (> renders 0))
+          (with-current-buffer buffer
+            (should (string-search "move to the store" (buffer-string)))
+            (should-not (string-search "ask" (buffer-string)))
+            (should-not (string-search "preview" (buffer-string)))
+            (should (zerop (or romacs-agent-ui--shown 0))))
+          ;; A live session's events after it draw as on an empty chat:
+          ;; nothing it set is left to draw them against.
+          (romacs-agent-ui--render session (list :type 'input :text "live question" :seq 9 :last t))
+          (romacs-agent-ui--render session (list :type 'delta :text "live words" :message "m9" :seq 10 :last t))
+          (with-current-buffer buffer
+            (should (< (string-search "move to the store" (buffer-string)) (string-search "live question" (buffer-string))
+                       (string-search "live words" (buffer-string))))
+            (should-not (string-search "ask" (buffer-string)))
+            (should (< (string-search "live words" (buffer-string)) romacs-agent-ui--end)))
+          (kill-buffer buffer)))
+      (should (equal (with-temp-buffer (insert-file-contents manifest) (buffer-string)) before))
+      (setq waits nil)
+      (cl-letf (((symbol-function 'romacs-agent-events-then) (lambda (s then) (push (cons (romacs-agent-id s) then) waits))))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (funcall (cdr (pop waits)))
+          (with-current-buffer buffer
+            (should (< (string-search "could not move" (buffer-string)) (string-search "say 2" (buffer-string))))
+            ;; Still said to be its last turns, from its journal.
+            (should (string-search "its last turns, from its journal" (buffer-string))))
+          (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-no-journal-a-preview-tool-row-opens-nothing ()
+  ;; A preview's tool row holds no seq: RET on it folds what the preview
+  ;; drew; never an error.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))) (seq 6))
+      (cl-flet ((line (key value) (concat (romacs-agent--json (romacs-mcp--object key value "seq" (cl-incf seq) "t" (float seq))) "\n")))
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region
+           (concat (line "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "look" "role" "user")
+                                                  "romacsRequest" 3 "type" "user"))
+                   (line "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                   "message" (romacs-mcp--object "id" "m3" "content"
+                                                                                 (vector (romacs-mcp--object "type" "tool_use" "id" "tu1" "name" "Bash"
+                                                                                                             "input" (romacs-mcp--object "command" "ls"))))))
+                   (line "out" (romacs-mcp--object "type" "user" "parent_tool_use_id" :null
+                                                   "message" (romacs-mcp--object "role" "user" "content"
+                                                                                 (vector (romacs-mcp--object "type" "tool_result" "tool_use_id" "tu1"
+                                                                                                             "content" "a b c")))))
+                   (line "out" (romacs-mcp--object "type" "result" "result" "done")))
+           nil journal t 'silent)))
+      (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore))
+        (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+          (with-current-buffer buffer
+            (goto-char (point-min))
+            (let ((row (text-property-search-forward 'romacs-agent-tool nil (lambda (_ v) v))))
+              (should row)
+              (goto-char (prop-match-beginning row))
+              (romacs-agent-chat-toggle)))
+          (kill-buffer buffer))))))
+
+(ert-deftest romacs-agent-no-journal-just-moved-draws-its-tail ()
+  ;; Just moved, its turn rows not filled yet (a waited move fills them
+  ;; off the editor after): its last turns are drawn from its records'
+  ;; tail, under the row that draws earlier ones, never all its records.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((seq 6) (coding-system-for-write 'utf-8-unix))
+      (cl-flet ((line (key value) (concat (romacs-agent--json (romacs-mcp--object key value "seq" (cl-incf seq) "t" (float seq))) "\n")))
+        (write-region
+         (mapconcat (lambda (n)
+                      (concat (line "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "ask %d" n) "role" "user")
+                                                             "romacsRequest" n "type" "user"))
+                              (line "out" (romacs-mcp--object "type" "result" "result" (format "say %d" n)))))
+                    (number-sequence 3 15) "")
+         nil (expand-file-name "journal.jsonl" (romacs-agent-dir session)) t 'silent)))
+    (remhash id romacs-agent-events--imported)
+    (should (romacs-agent-events-import session t))
+    (should-not (plist-get (romacs-agent-turns-page session nil 10) :rows))
+    (let* ((romacs-agent-chat-turns 1)
+           (buffer (romacs-agent-no-journal-tests--chat session)))
+      (with-current-buffer buffer
+        (should (string-search "ask 15" (buffer-string)))
+        (should-not (string-search "> ask 1\n" (buffer-string)))
+        (should (string-search "Earlier turns" (buffer-string))))
+      (kill-buffer buffer))))
+
+(ert-deftest romacs-agent-no-journal-a-preview-writes-no-manifest ()
+  ;; A record a preview reads would have the session's manifest written (a
+  ;; harness naming another conversation): read for the view alone, it
+  ;; writes nothing.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let* ((manifest (expand-file-name "manifest.json" (romacs-agent-dir session)))
+           (journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+      (let ((coding-system-for-write 'utf-8-unix))
+        (write-region (concat (romacs-agent--json (romacs-mcp--object "out" (romacs-mcp--object "type" "system" "subtype" "init"
+                                                                                                "session_id" "another-conversation")
+                                                                      "seq" 7 "t" 7.0))
+                              "\n")
+                      nil journal t 'silent))
+      (let ((before (with-temp-buffer (insert-file-contents manifest) (buffer-string))))
+        (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore))
+          (let ((buffer (romacs-agent-no-journal-tests--chat session)))
+            (should (string-search "its last turns meanwhile" (with-current-buffer buffer (buffer-string))))
+            (kill-buffer buffer)))
+        (should (equal (with-temp-buffer (insert-file-contents manifest) (buffer-string)) before))))))
+
+(ert-deftest romacs-agent-no-journal-a-preview-keeps-to-its-budget-choosing-its-tail ()
+  ;; A tail costly to choose (a record of megabytes, then prompts written
+  ;; into a turn under way, each looking back over it): the choice is timed
+  ;; with the rest, so past the budget there is no preview, not a wait.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-no-journal-tests--with
+    (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+      (let ((coding-system-for-write 'utf-8-unix) (seq 6))
+        (write-region
+         (concat (romacs-agent--json (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "go" "role" "user")
+                                                                              "romacsRequest" 3 "type" "user")
+                                                         "seq" (cl-incf seq) "t" 1.0))
+                 "\n"
+                 (romacs-agent--json (romacs-mcp--object "out" (romacs-mcp--object "type" "user" "message"
+                                                                                   (romacs-mcp--object "content" (make-string 2900000 ?x)))
+                                                         "seq" (cl-incf seq) "t" 1.0))
+                 "\n"
+                 (mapconcat (lambda (n)
+                              (concat (romacs-agent--json (romacs-mcp--object "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "steer %d" n) "role" "user")
+                                                                                                   "romacsRequest" (+ 4 n) "type" "user")
+                                                                              "seq" (cl-incf seq) "t" 1.0))
+                                      "\n"))
+                            (number-sequence 1 64) ""))
+         nil journal t 'silent))
+      ;; A clock that moves a tick each time it is read: the budget is
+      ;; spent after so many reads, whatever the host's load.
+      (let* ((now 0.0) (looks 0) (looked (symbol-function 'romacs-agent--turn-free-p)))
+        (cl-letf (((symbol-function 'romacs-agent-events-then) #'ignore)
+                  ((symbol-function 'float-time) (lambda (&rest _) (cl-incf now 0.001)))
+                  ((symbol-function 'romacs-agent--turn-free-p)
+                   (lambda (&rest args) (cl-incf looks) (apply looked args))))
+          ;; Unbounded, how many prompts its choice looks back from.
+          (let ((romacs-agent-ui--preview-seconds 1e9))
+            (kill-buffer (romacs-agent-no-journal-tests--chat session)))
+          (let ((all looks))
+            (setq looks 0)
+            (let* ((romacs-agent-ui--preview-seconds 0.2)
+                   (buffer (romacs-agent-no-journal-tests--chat session)))
+              (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
+              (should-not (string-search "steer" (with-current-buffer buffer (buffer-string))))
+              ;; Its choice cut short by the budget, not run to its end.
+              (should (< looks all))
+              (kill-buffer buffer))))))))
 
 (ert-deftest romacs-agent-no-journal-loading-session-takes-its-restored-chat ()
   ;; A chat restored from its row is taken over by its session as the

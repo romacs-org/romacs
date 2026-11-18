@@ -166,6 +166,16 @@ def ptraceable():
     ctypes.CDLL(None).prctl(0x59616d61, ctypes.c_ulong(-1), 0, 0, 0)
 
 
+def alive_at(probe_dir):
+    """The time an engine's init wrote in PROBE_DIR's alive file, or None
+    until it is there whole: the file is made, then written (with-temp-file),
+    so an empty one is not ready yet."""
+    try:
+        return float((probe_dir / 'alive').read_text())
+    except (OSError, ValueError):
+        return None
+
+
 class Engine:
     """One editor in its own private compositor, home and database copy."""
 
@@ -206,8 +216,8 @@ class Engine:
         self.process = subprocess.Popen(self.argv, env=self.env, cwd=self.root / 'work', preexec_fn=ptraceable,
                                         stdin=subprocess.DEVNULL, stdout=output, stderr=output)
         self.processes.append(self.process)
-        wait(lambda: (self.probe_dir / 'alive').exists(), self.timeout * 4, f'{self.name} init', self.process, .02)
-        self.startup_seconds = float((self.probe_dir / 'alive').read_text()) - started
+        wait(lambda: alive_at(self.probe_dir) is not None, self.timeout * 4, f'{self.name} init', self.process, .02)
+        self.startup_seconds = alive_at(self.probe_dir) - started
         return self
 
     def randr(self, width, height):

@@ -306,6 +306,50 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (should (equal saved ""))
       (should (equal (plist-get (romacs-agent-ui--desktop-save nil) :images) '("/a.png"))))))
 
+(ert-deftest romacs-agent-desktop-keeps-the-whole-draft-when-narrowed ()
+  ;; Narrowed above the composer the saver signalled, which blocked a whole
+  ;; restart image; narrowed inside it, the draft was cut short.  A clone
+  ;; saves the draft it shares, and a draft put back replaces the whole
+  ;; composer of a narrowed chat.
+  (romacs-agent-attach-tests--with-chat session
+    (let ((inhibit-read-only t))
+      (goto-char (point-min))
+      (insert-before-markers "a turn of the transcript\n"))
+    (goto-char (point-max))
+    (insert "a draft typed in full")
+    (let ((composer (marker-position romacs-agent-ui--end))
+          (saved (lambda () (plist-get (romacs-agent-ui--desktop-save nil) :draft))))
+      (should (> composer (point-min)))
+      (dolist (bounds (list (cons (point-min) (- composer 3)) (cons (point-min) (+ composer 7))))
+        (narrow-to-region (car bounds) (cdr bounds))
+        (should (equal (funcall saved) "a draft typed in full"))
+        ;; The narrowing is the user's: left as it was.
+        (should (equal (cons (point-min) (point-max)) bounds))
+        (widen))
+      (let ((clone (make-indirect-buffer (current-buffer) (generate-new-buffer-name " *chat clone*") t)))
+        (unwind-protect
+            (with-current-buffer clone
+              (should (equal (funcall saved) "a draft typed in full")))
+          (kill-buffer clone)))
+      ;; Put back into a chat narrowed to part of its old draft: the whole
+      ;; composer is replaced, and the restriction starts where it did.
+      (narrow-to-region 3 (+ composer 7))
+      (romacs-agent-ui--set-draft-parts "the saved draft" nil)
+      (should (= (point-min) 3))
+      (widen)
+      (should (equal (buffer-substring-no-properties composer (point-max)) "the saved draft"))
+      ;; A recall from a narrowed chat keeps the whole draft for M-n.
+      (setq romacs-agent-ui--history '(("sent" . nil)))
+      (narrow-to-region (point-min) (+ composer 3))
+      (romacs-agent-chat-history-previous)
+      (widen)
+      (should (equal (buffer-substring-no-properties composer (point-max)) "sent"))
+      (romacs-agent-chat-history-next)
+      (should (equal (buffer-substring-no-properties composer (point-max)) "the saved draft"))
+      ;; A composer marker in no buffer gives no draft, and no error.
+      (let ((romacs-agent-ui--end (make-marker)))
+        (should-not (plist-get (romacs-agent-ui--desktop-save nil) :draft))))))
+
 (ert-deftest romacs-agent-tray-follows-the-selected-chat ()
   ;; It reads the selected window, whatever buffer a hook runs in, and an
   ;; unchanged tray is not shown again.

@@ -74,10 +74,20 @@ turns, and its journal's file; a state root of its own."
   "A process holding the lock of the session ID, as its host does, once held."
   (let* ((lock (expand-file-name "host.lock" (expand-file-name id (romacs-agent--state-root))))
          (process (start-process "romacs-test-host-lock" nil "flock" "-o" lock "sleep" "60")))
+    (process-put process 'lock lock)
     (with-timeout (10 (error "The lock was never taken"))
       (while (eql 0 (call-process "flock" nil nil nil "-n" lock "true"))
         (accept-process-output nil 0.05)))
     process))
+
+(defun romacs-agent-events-tests--let-go (host)
+  "End HOST, a process holding a session's lock (`romacs-agent-events-tests--hold'),
+and wait until the lock is free: its process killed, it may hold it a
+moment more under load."
+  (delete-process host)
+  (with-timeout (10 (error "The lock was never let go"))
+    (while (not (eql 0 (call-process "flock" nil nil nil "-n" (process-get host 'lock) "true")))
+      (accept-process-output nil 0.05))))
 
 (ert-deftest romacs-agent-events-read-as-the-journal-was ()
   ;; Imported: the same records, the same tail, notes and places, read
@@ -357,7 +367,7 @@ turns, and its journal's file; a state root of its own."
          (let ((host (romacs-agent-events-tests--hold id)))
            (should-not (member dir (romacs-agent-events--journaled)))
            (should-not (romacs-agent-events--migrate-job (list dir)))
-           (delete-process host))
+           (romacs-agent-events-tests--let-go host))
          (should (equal (romacs-agent-events--migrate-job (list dir)) (list id)))
          ;; Written, not its own: read from its journal still, not queued again.
          (should-not (romacs-agent-events-p session))
@@ -471,7 +481,32 @@ turns, and its journal's file; a state root of its own."
                  (should (romacs-agent-events-waiting-p id))
                  ;; Its job moves it: not queued again.
                  (should-not romacs-agent-events--migrate-queue))
-             (delete-process host))))))))
+             (romacs-agent-events-tests--let-go host))))))))
+
+(ert-deftest romacs-agent-events-no-job-starts-beside-a-waited-move ()
+  ;; While a move is waited for (a chat opened, a resume), no other job
+  ;; starts, though one could: it would only write the store beside it.
+  ;; Its own job starts however many run.
+  (let ((romacs-agent-events--waiting (make-hash-table :test #'equal))
+        (romacs-agent-events--migrating (make-hash-table :test #'equal))
+        (romacs-agent-events--migrate-running 0) (romacs-agent-events-migrate-jobs 2)
+        (romacs-agent-events--migrate-queue (list "/root/other"))
+        (romacs-agent--sessions (make-hash-table :test #'equal))
+        (spawned nil))
+    (cl-letf (((symbol-function 'isolate-spawn) (lambda (function batch &rest _) (push (cons function batch) spawned) 'future))
+              ((symbol-function 'isolate-on-done) #'ignore)
+              ((symbol-function 'run-at-time) #'ignore))
+      (puthash "waited" (list #'ignore) romacs-agent-events--waiting)
+      (romacs-agent-events--migrate-next)
+      (should-not spawned)
+      ;; Its own, queued first: started alone, at once.
+      (push "/root/waited" romacs-agent-events--migrate-queue)
+      (romacs-agent-events--migrate-next)
+      (should (equal spawned '((romacs-agent-events--stage-job "/root/waited"))))
+      ;; Its waiter let go, the last: the others go on, of themselves.
+      (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        (romacs-agent-events--waited "waited"))
+      (should (equal (car spawned) '(romacs-agent-events--migrate-job "/root/other"))))))
 
 ;; Sent to twice while its move waits: one resume, one launch.
 (ert-deftest romacs-agent-events-a-resume-waiting-for-its-move-is-one ()
@@ -577,7 +612,7 @@ turns, and its journal's file; a state root of its own."
            (pcase-let ((`(,size . ,count) (romacs-agent-events--stage session))
                        (host (romacs-agent-events-tests--hold id)))
              (should-not (romacs-agent-events--flip id size count))
-             (delete-process host))
+             (romacs-agent-events-tests--let-go host))
            (should (= (events) 0))
            ;; Its last line cut short: nothing written.
            (write-region "{\"note\":{\"type\":\"cut\"" nil journal t 'silent)
@@ -616,7 +651,7 @@ turns, and its journal's file; a state root of its own."
        (let ((host (romacs-agent-events-tests--hold (romacs-agent-id session))))
          (should-error (romacs-agent-events-compact (romacs-agent-id session)))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
-         (delete-process host))))))
+         (romacs-agent-events-tests--let-go host))))))
 
 (ert-deftest romacs-agent-events-a-large-database-is-compacted-as-it-is ()
   ;; Too large to be made to give pages back: compacted all the same, its
@@ -800,3 +835,26 @@ turns, and its journal's file; a state root of its own."
                   (should (gethash dir (romacs-agent-events--held (list dir)))))
               (delete-process locker))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-events-an-import-that-fails-says-how ()
+  ;; The host's program killed by a signal reads as that signal, negated;
+  ;; an import that fails says how its stage ended and what it said last.
+  (cl-letf (((symbol-function 'romacs-agent-events--host-program) (lambda () "sh")))
+    (should (equal (romacs-agent-events--host "-c" "kill -KILL $$") '(-9 . "")))
+    (should (equal (romacs-agent-events--host "-c" "echo boom; exit 3") '(3 . "boom\n")))
+    ;; What it wrote just before it ended, all of it.
+    (should (equal (cdr (romacs-agent-events--host "-c" "head -c 200000 /dev/zero | tr '\\0' x; echo"))
+                   (concat (make-string 200000 ?x) "\n"))))
+  (cl-letf (((symbol-function 'romacs-agent-events--host-program) (lambda () "/nonexistent/romacs-agent-host")))
+    (should-not (car (romacs-agent-events--host "--stage"))))
+  (let ((session (romacs-agent--make :id "f0f0f0f0-1111-4222-8333-444455556666" :dir "/nonexistent")))
+    (cl-letf (((symbol-function 'romacs-agent-store--file) (lambda () "/nonexistent/sessions.sqlite")))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(-9 . ""))))
+        (should (string-match-p "killed by signal 9, saying nothing"
+                                (error-message-string (should-error (romacs-agent-events--stage session))))))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(nil . "Searching for program: No such file"))))
+        (should (string-match-p "did not run: Searching for program"
+                                (error-message-string (should-error (romacs-agent-events--stage session))))))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(2 . "the store is locked\n"))))
+        (should (string-match-p "exited 2: the store is locked\\'"
+                                (error-message-string (should-error (romacs-agent-events--stage session)))))))))
