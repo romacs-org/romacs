@@ -638,23 +638,23 @@ comes back as a turn of its own: the turn it steered is no next run's."
                       nil (list 'queued id (romacs-agent-item-id item))))
 
 (defun romacs-agent-store-queued-reorder (id items)
-  "Keep ITEMS, waiting for the session ID names, at their positions now,
-all in one transaction, by the writer."
+  "Move the rows of ITEMS, waiting for the session ID names, to their
+positions now, all in one transaction, by the writer."
   (when items
-    (romacs-agent-write 'romacs-agent-store--queued-rows
-                        (list id (mapcar (lambda (item) (list (romacs-agent-item-id item) (romacs-agent-item-position item)
-                                                              (romacs-agent-store--item-json item)))
+    (romacs-agent-write 'romacs-agent-store--queued-places
+                        (list id (mapcar (lambda (item) (cons (romacs-agent-item-id item) (romacs-agent-item-position item)))
                                          items))
                         nil (list 'queued-order id))))
 
-(defun romacs-agent-store--queued-rows (id rows)
-  "Keep ROWS, each (ITEM-ID POSITION JSON), for session ID in one
-transaction, here.  A failure signals, none of them kept."
+(defun romacs-agent-store--queued-places (id places)
+  "Move each row of session ID in PLACES, (ITEM-ID . POSITION), to its
+position in one transaction, here: a row let go meanwhile (sent,
+cleared) stays gone.  A failure signals, none of them moved."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep queued messages in"))))
     (sqlite-execute db "begin immediate")
     (condition-case err
-        (progn (pcase-dolist (`(,item-id ,position ,json) rows)
-                 (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json)))
+        (progn (pcase-dolist (`(,item-id . ,position) places)
+                 (sqlite-execute db "update queued set position = ? where session = ? and id = ?" (list position id item-id)))
                (sqlite-execute db "commit"))
       (error (ignore-errors (sqlite-execute db "rollback"))
              (signal (car err) (cdr err))))
