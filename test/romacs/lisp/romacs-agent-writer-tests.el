@@ -151,14 +151,14 @@ connection of its own, as the writer's process has."
 (defun romacs-agent-writer-tests--broken (_x) (error "Disk full"))
 
 (ert-deftest romacs-agent-writer-no-writer-waits-then-the-end-writes-here ()
-  ;; No writer can be started (its world gone stale under the editor):
+  ;; No writer can be started (its worker fails to start):
   ;; the editor commits nothing, the writes wait and a writer is tried
   ;; again; an ending editor makes them itself, each tried again while it
   ;; fails, one that never succeeds kept and said.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
         (romacs-agent-writer--retry-timer nil) (romacs-agent-writer-tests--flaky 2) (said nil) (retried nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) (setq retried t) 'timer))
                 ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
                 ((symbol-function 'sleep-for) #'ignore)
@@ -211,7 +211,7 @@ connection of its own, as the writer's process has."
               (let ((romacs-agent-writer-queued nil))
                 (should-error (romacs-agent-turns-fold-put "s" "(:a 1)")))
               (romacs-agent-writer-tests--with
-                (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                           ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                           ((symbol-function 'sleep-for) #'ignore)
                           ((symbol-function 'redisplay) #'ignore)
@@ -228,7 +228,7 @@ connection of its own, as the writer's process has."
   ;; and says it was not saved.
   (let ((romacs-agent-writer-start-functions nil) (said nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'romacs-agent-events--db) #'ignore)
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) #'ignore)
@@ -347,7 +347,7 @@ connection of its own, as the writer's process has."
     (romacs-agent-writer-tests--with
       (cl-letf* ((spawn (symbol-function 'isolate-spawn))
                  ((symbol-function 'isolate-spawn)
-                  (lambda (&rest args) (if available (apply spawn args) (signal 'isolate-world-unavailable '("stale")))))
+                  (lambda (&rest args) (if available (apply spawn args) (signal 'isolate-error '("Cannot start isolate worker")))))
                  ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (push (cons f args) soon) 'timer))
                  ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
                  ((symbol-function 'romacs-agent-writer-tests--flaky) (lambda (&rest _) (error "Locked")))
@@ -373,7 +373,7 @@ connection of its own, as the writer's process has."
   ;; pauses as one.
   (let ((romacs-agent-writer-start-functions nil) (pauses 0) (said nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) (lambda (&rest _) (cl-incf pauses)))
                 ((symbol-function 'redisplay) #'ignore)
@@ -478,7 +478,7 @@ connection of its own, as the writer's process has."
   ;; that one is made too, by the next round.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) #'ignore)
                 ((symbol-function 'redisplay) #'ignore)
