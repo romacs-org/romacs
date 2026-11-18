@@ -97,16 +97,10 @@ impl Leaf<'_> {
                 else if code < 128 { CodingToken::Byte(code as u8) }
                 else { CodingToken::Character(code) }
             };
-            let mut tokens = Vec::with_capacity(source.chars);
-            let mut chars = source.chars();
-            loop {
-                let before = tokens.len();
-                tokens.extend(chars.by_ref().take(CHUNK).map(token));
-                if tokens.len() - before < CHUNK || !pass.check() { break; }
-            }
-            tokens
+            // Unpolled: one pass over the string's characters, its length
+            // bounding it; chunking it cost the conversion about 1 %.
+            source.chars().map(token).collect::<Vec<_>>()
         };
-        if pass.stopped { return self.coding_stopped(string, coding, nocopy, buffer, encode, ascii_fast); }
         let bom = self.vector_get(attrs, num(24))?;
         let category = self.vector_get(attrs, num(14))?.integer_value().unwrap_or(0) as usize;
         let undecided = kind == self.intern("undecided");
@@ -584,6 +578,15 @@ fn coding_decode_utf8(tokens: &[CodingToken], bom: bool, dos: bool, pass: &mut P
                 if matches!(token, CodingToken::Byte(_)) { after_cr = Some(token); }
             }
             chars.push(i32::from(byte));
+            // The ASCII run that follows, to the chunk's end, unless a CR's
+            // lookahead comes first: the chunk check above runs once a run.
+            if after_cr.is_none() {
+                let end = next.min(tokens.len());
+                while at < end && let CodingToken::Byte(ascii) = tokens[at] && ascii < 128 && !(dos && ascii == b'\r') {
+                    chars.push(i32::from(ascii));
+                    at += 1;
+                }
+            }
             continue;
         }
         let mut bytes = [0; 5];
