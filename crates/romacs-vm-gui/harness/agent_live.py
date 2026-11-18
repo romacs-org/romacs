@@ -2167,6 +2167,21 @@ def rpc(args, base):
         run2 = [e for e in rpcs() if e.get('rpc') in ('initialize', 'session/new', 'session/load', 'session/prompt')][len(run1):]
         manifest = json.loads((a.home / '.local/state/romacs/agents' / sid / 'manifest.json').read_text())
 
+        # romacs#287: a message queued behind a turn (one waiting for an
+        # approval) outlives a server restart, and goes after that turn.
+        a.send(sid, 'ask pwd')
+        until(lambda: a.state(sid) == 'waiting-approval', 30, 'kept: approval asked')
+        a.eval(f'(romacs-agent-send-later {a.s(sid)} "say kept")')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'kept: server gone')
+        a.restart()
+        until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'kept: restored')
+        until(lambda: a.state(sid) == 'waiting-approval', 30, 'kept: approval still asked')
+        kept_queue = a.eval(f'(mapcar (quote car) (romacs-agent-queue {a.s(sid)}))')
+        a.eval(f'(romacs-agent-respond {a.s(sid)} (car (hash-table-keys (romacs-agent-approvals {a.s(sid)}))) t)')
+        until(lambda: 'kept' in a.chat(sid).split('permission allow', 1)[-1], 30, 'kept: answered after the restart')
+        a.idle(sid)
+
         # Its chat drawn again (the journal replayed into a copy): nothing
         # is written to the harness.
         written = len(rpcs())
@@ -2237,7 +2252,7 @@ def rpc(args, base):
         result = {'run1': methods(run1), 'run2': methods(run2), 'native': native, 'manifest_native': manifest.get('harnessSession'),
                   'held_state': held_state, 'slow_run': slow_run, 'fresh_run': fresh_run,
                   'redraw_writes': redraw_writes, 'items': items, 'view': view, 'imported': imported,
-                  'loads': loads, 'ids': ids}
+                  'loads': loads, 'ids': ids, 'kept_queue': kept_queue}
         result['ok'] = (methods(run1) == ['initialize', 'session/new', 'session/prompt', 'session/prompt', 'session/prompt']
                         and methods(run2) == ['initialize', 'session/load', 'session/prompt']
                         and run2[1].get('session') == native and native.startswith('rpc-')
@@ -2247,6 +2262,7 @@ def rpc(args, base):
                         and [m for m, _ in slow_run] == ['initialize', 'session/load', 'session/prompt']
                         and slow_run[1][1] == native and slow_run[2][1] == native
                         and held_state == '(1 nil)'
+                        and kept_queue == '("say kept")'
                         and fresh_run == ['initialize', 'session/new', 'session/prompt']
                         and sorted(i[1] for i in items if i[0] == 'rpc-same') == ['fakerpc', 'fakerpc2']
                         and ['rpc-fixture', 'fakerpc', 'say from the fixture'] in items
