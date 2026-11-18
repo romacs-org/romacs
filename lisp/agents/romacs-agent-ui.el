@@ -2575,7 +2575,9 @@ was open, loading no session; one is loaded when its chat is used
 chat: its finished turns as they were kept drawn, the one under way
 from its records, by seq (`romacs-agent-ui--replay-rows').  A session
 whose records are not in SQLite yet is moved first, a row saying so
-until it is (`romacs-agent-ui--moved'): its journal is never read."
+and a preview of its last turns from its journal's tail meanwhile
+\(`romacs-agent-ui--preview'), drawn again from SQLite once it is
+\(`romacs-agent-ui--moved')."
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
     (romacs-agent-ui--wait-for-move session)))
 
