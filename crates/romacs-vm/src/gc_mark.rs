@@ -702,7 +702,7 @@ impl Marking {
         let ranges: [Vec<Range<usize>>; 4] = if self.minor {
             [vm.conses.touched(), vm.closures.touched(), vm.cells.touched(), vm.objects.touched()]
         } else {
-            [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()].map(|len| vec![0..len])
+            [self.conses.len(), self.closures.len(), self.cells.len(), self.objects.len()].map(|len| std::iter::once(0..len).collect())
         };
         let chunks: Vec<(usize, Range<usize>)> = ranges.iter().enumerate()
             .flat_map(|(table, runs)| runs.iter().flat_map(move |run| run.clone().step_by(RANGE).map(move |from| (table, from..(from + RANGE).min(run.end)))))
