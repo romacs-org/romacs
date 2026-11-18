@@ -2095,6 +2095,21 @@ mod tests {
         std::thread::Builder::new().stack_size(64 << 20).spawn(f).unwrap().join().unwrap()
     }
 
+    /// A world's noted errors are newest first: a session restored from it
+    /// takes the oldest as its first, and its own later notes do not
+    /// replace it.
+    #[test]
+    fn a_restored_world_s_oldest_lisp_error_comes_first() {
+        let first = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.eval_source(&format!("(setq {LISP_ERRORS} '(\"newest\" \"oldest\"))")).unwrap();
+            first_noted_from_world(&mut vm).unwrap();
+            note_lisp_error(&mut vm, "this process's own").unwrap();
+            first_noted_lisp_error()
+        });
+        assert_eq!(first.as_deref(), Some("oldest"));
+    }
+
     fn scratch_lisp(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("romacs-startup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2359,21 +2374,6 @@ mod tests {
             });
             assert_eq!(ran, format!("{path:?}"), "the launch ran another {path} than its tree's");
         }
-    }
-
-    /// A world's noted errors are newest first: a session restored from it
-    /// takes the oldest as its first, and its own later notes do not
-    /// replace it.
-    #[test]
-    fn a_restored_world_s_oldest_lisp_error_comes_first() {
-        let first = on_evaluator(|| {
-            let mut vm = Vm::new();
-            vm.eval_source(&format!("(setq {LISP_ERRORS} '(\"newest\" \"oldest\"))")).unwrap();
-            first_noted_from_world(&mut vm).unwrap();
-            note_lisp_error(&mut vm, "this process's own").unwrap();
-            first_noted_lisp_error()
-        });
-        assert_eq!(first.as_deref(), Some("oldest"));
     }
 
     /// A chain that stopped before `simple.el`: the launch takes the GNU

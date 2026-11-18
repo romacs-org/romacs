@@ -67,6 +67,8 @@ BOOTSTRAP = 'romacs-loadup-bootstrap.el'
 # Romacs's first startup file (lisp/session/), and what a broken one signals.
 STARTUP = 'romacs-startup.el'
 BROKEN = 'broken on purpose'
+# A launch font size a launch refuses before its startup steps (6..72 points).
+BAD_FONT_SIZE = '99'
 
 INIT = ''';; -*- lexical-binding: t -*-
 (setq inhibit-startup-screen t initial-scratch-message nil)
@@ -260,7 +262,7 @@ def start_world_failed(args, base, name):
     root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
     for key in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ROMACS_LISP_DIR', 'ROMACS_GUI_FONT'):
         env[key] = first.env[key]
-    env['ROMACS_GUI_FONT_SIZE'] = '99'
+    env['ROMACS_GUI_FONT_SIZE'] = BAD_FONT_SIZE
     engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout)
     try:
         engine.spawn(args.tools)
@@ -294,6 +296,8 @@ def run_first_lisp_error(engine, stderr, usage):
         'no symptom shown without its cause': symptom < 0 or 0 <= then < symptom,
         'a failed start shows what failed after it': not failed or then >= 0,
     }
+    if engine.env.get('ROMACS_GUI_FONT_SIZE') == BAD_FONT_SIZE:
+        checks['it failed, on the launch font'] = failed and 'fontsizemustbe' in compact[max(then, 0):]
     return checks, {'failed': failed, 'screen': screen}
 
 
