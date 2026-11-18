@@ -73,10 +73,14 @@ fn evaluator_end(result: std::thread::Result<Result<exit::Exit, String>>) -> (ex
             eprintln!("romacs: evaluator stopped: {error}");
             (exit::Exit::new("evaluator-error", error, 1), true)
         }
-        Err(payload) => match payload.downcast::<SessionEnd>() {
-            Ok(end) => (exit::Exit::new("kill-emacs", "", end.0), false),
-            // Said and reported by the panic hook as it happened (exit.rs).
-            Err(_) => (exit::panicked("evaluator"), true),
+        Err(payload) => if let Ok(end) = payload.downcast::<SessionEnd>() {
+            (exit::Exit::new("kill-emacs", "", end.0), false)
+        } else {
+            // Reported by the panic hook as it happened (exit.rs); said as
+            // an error's end is, which a harness watches for.
+            let end = exit::panicked("evaluator");
+            eprintln!("romacs: evaluator stopped: {}", end.detail);
+            (end, true)
         },
     }
 }
@@ -1405,6 +1409,8 @@ fn evaluate(
         Some((vm, carry)) => {
             let mut vm = *vm;
             vm.world_reinit();
+            // Its build's first Lisp error, first, whatever fails after it.
+            if let Err(error) = startup::first_noted_from_world(&mut vm) { eprintln!("romacs: world Lisp errors: {error}"); }
             (vm, Some(carry))
         }
         None => (Vm::new(), None),
@@ -1558,8 +1564,15 @@ fn evaluate(
                     |first| format!("Romacs Lisp failed: {first}; then: {error}"));
                 let _ = echo::show(&mut vm, &shown);
             }
-            // Not fatal: a quit typed late (`quit-flag') may end it.
-            Ok(()) => if let Err(error) = echo::show_current_message(&mut vm) { eprintln!("romacs: startup message: {error}"); },
+            Ok(()) => {
+                // A session that came up degraded says why first.
+                if let Some(first) = startup::first_noted_lisp_error() {
+                    let _ = echo::show(&mut vm, &format!("Romacs Lisp failed: {first}"));
+                // Not fatal: a quit typed late (`quit-flag') may end it.
+                } else if let Err(error) = echo::show_current_message(&mut vm) {
+                    eprintln!("romacs: startup message: {error}");
+                }
+            }
         }
         startup::mark_phase("finish-loadup");
         eprintln!("romacs: {}", started.status());

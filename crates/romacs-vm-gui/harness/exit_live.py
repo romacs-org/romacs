@@ -36,6 +36,9 @@ summariser, summarises them.
   lisp-error-first-world  lisp-error-first restored from a world built
               over the broken file, which keeps its build's errors: the
               same, from the world's.
+  lisp-error-first-world-failed  that world restored by a session whose
+              launch font is out of range, so it fails before its startup
+              steps: its screen shows the world's first error above that.
   lisp-error-first-failed  the same with the bootstrap gone too, so the
               start fails: its screen shows romacs-startup.el's error
               above what failed after it ("Then: ...").
@@ -244,6 +247,29 @@ def run_startup_failed(engine, stderr, usage):
     return checks, {'status': status, 'exit': line, 'screen': screen}
 
 
+def start_world_failed(args, base, name):
+    """lisp-error-first-world's world, then a session restored from it
+    that fails before its startup steps: a launch font out of range."""
+    first, _, _ = start_failed(args, base, f'{name}-build', breaks=('startup',), world=True)
+    log = first.root / 'engine.log'
+    try:
+        wait(lambda: '"diagnostic":"paint"' in log.read_text(errors='replace'), first.timeout * 4,
+             "the world's first session", first.process)
+    finally:
+        first.stop()
+    root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
+    for key in ('HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'ROMACS_LISP_DIR', 'ROMACS_GUI_FONT'):
+        env[key] = first.env[key]
+    env['ROMACS_GUI_FONT_SIZE'] = '99'
+    engine = Engine('romacs', [args.romacs, '--loadup'], root, None, env, args.timeout)
+    try:
+        engine.spawn(args.tools)
+    except Exception:
+        engine.stop()
+        raise
+    return engine, root / 'engine.log', None
+
+
 def run_first_lisp_error(engine, stderr, usage):
     """The first noted Lisp error is what the user sees first: on a failed
     start's screen, above what failed after it; in a degraded session's
@@ -260,7 +286,9 @@ def run_first_lisp_error(engine, stderr, usage):
     # Read without whitespace: a long path wraps anywhere on the screen.
     compact = ''.join(screen.split())
     first, then, symptom = compact.find(STARTUP), compact.lower().find('then:'), compact.find('(void-')
+    world = engine.env.get('ROMACS_WORLD') != 'off'
     checks = {
+        'restored from its world, when it had one': not world or '"mode":"restored"' in log.read_text(errors='replace'),
         'the first error shown, its file named': first >= 0,
         'before what failed after it': then < 0 or first < then,
         'no symptom shown without its cause': symptom < 0 or 0 <= then < symptom,
@@ -271,12 +299,14 @@ def run_first_lisp_error(engine, stderr, usage):
 
 WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor, 'startup-failed': run_startup_failed,
              'startup-failed-server': run_startup_failed, 'lisp-error-first': run_first_lisp_error,
-             'lisp-error-first-failed': run_first_lisp_error, 'lisp-error-first-world': run_first_lisp_error}
+             'lisp-error-first-failed': run_first_lisp_error, 'lisp-error-first-world': run_first_lisp_error,
+             'lisp-error-first-world-failed': run_first_lisp_error}
 STARTS = {'startup-failed': start_failed,
           'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame')),
           'lisp-error-first': lambda args, base, name: start_failed(args, base, name, breaks=('startup',)),
           'lisp-error-first-failed': lambda args, base, name: start_failed(args, base, name, breaks=('startup', 'bootstrap')),
-          'lisp-error-first-world': lambda args, base, name: start_failed(args, base, name, breaks=('startup',), world=True)}
+          'lisp-error-first-world': lambda args, base, name: start_failed(args, base, name, breaks=('startup',), world=True),
+          'lisp-error-first-world-failed': start_world_failed}
 
 
 def main():

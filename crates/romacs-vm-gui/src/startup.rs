@@ -770,10 +770,9 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 
 /// Show each error of Romacs's Lisp this launch noted ([`load_lisp`]), once:
 /// in *Messages*, in the usage log and in a warning the first frame shows,
-/// as an init's error is shown, in the order they happened.  The first,
-/// often the cause of the others, is said last again, so the echo area
-/// keeps it, and is [`first_noted_lisp_error`] from then on when none was
-/// noted here: a session restored from a world reports its build's. The form calls only what is defined, since
+/// as an init's error is shown, in the order they happened (the session's
+/// first frame echoes the first, [`first_noted_lisp_error`]). The form
+/// calls only what is defined, since
 /// the Lisp that failed may be what would show it, and a way of showing
 /// one that signals keeps none of the others from being shown.
 ///
@@ -781,8 +780,8 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 ///
 /// The VM's error when it cannot evaluate the report itself.
 pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
-    let first = vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
-       (let* ((errors (reverse {LISP_ERRORS})) (first errors))
+    vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
+       (let ((errors (reverse {LISP_ERRORS})))
          (setq {LISP_ERRORS} nil)
          (while errors
            (let ((error (car errors)))
@@ -793,15 +792,21 @@ pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
              (condition-case nil
                  (when (fboundp 'display-warning) (display-warning 'romacs (concat \"Romacs Lisp failed: \" error) :error))
                (error nil)))
-           (setq errors (cdr errors)))
-         (when (cdr first)
-           (condition-case nil
-               (message \"Romacs Lisp failed first: %s (%d more in *Warnings*)\" (car first) (1- (length first)))
-             (error nil)))
-         (car first)))"))?;
-    if first != romacs_vm::Fixed::NIL {
-        let first = String::from_utf8_lossy(first.bytes()?).into_owned();
-        FIRST_NOTED.with(|noted| { noted.borrow_mut().get_or_insert(first); });
+           (setq errors (cdr errors)))))")).map(drop)
+}
+
+/// A session restored from a world: the oldest error of Romacs's Lisp its
+/// build noted (the world keeps them) becomes [`first_noted_lisp_error`],
+/// before any startup step of this process can fail or note its own.
+///
+/// # Errors
+///
+/// The VM's error when it cannot read the notes.
+pub fn first_noted_from_world(vm: &mut Vm) -> Result<(), String> {
+    let oldest = vm.eval_source(&format!("(and (boundp '{LISP_ERRORS}) (car (reverse {LISP_ERRORS})))"))?;
+    if oldest != romacs_vm::Fixed::NIL {
+        let oldest = String::from_utf8_lossy(oldest.bytes()?).into_owned();
+        FIRST_NOTED.with(|first| { first.borrow_mut().get_or_insert(oldest); });
     }
     Ok(())
 }
@@ -2354,6 +2359,21 @@ mod tests {
             });
             assert_eq!(ran, format!("{path:?}"), "the launch ran another {path} than its tree's");
         }
+    }
+
+    /// A world's noted errors are newest first: a session restored from it
+    /// takes the oldest as its first, and its own later notes do not
+    /// replace it.
+    #[test]
+    fn a_restored_world_s_oldest_lisp_error_comes_first() {
+        let first = on_evaluator(|| {
+            let mut vm = Vm::new();
+            vm.eval_source(&format!("(setq {LISP_ERRORS} '(\"newest\" \"oldest\"))")).unwrap();
+            first_noted_from_world(&mut vm).unwrap();
+            note_lisp_error(&mut vm, "this process's own").unwrap();
+            first_noted_lisp_error()
+        });
+        assert_eq!(first.as_deref(), Some("oldest"));
     }
 
     /// A chain that stopped before `simple.el`: the launch takes the GNU

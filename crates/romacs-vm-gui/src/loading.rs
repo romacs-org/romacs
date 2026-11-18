@@ -147,9 +147,10 @@ impl Report {
     fn fail(&mut self, error: &str, first: Option<&str>) {
         let at = std::mem::replace(&mut self.label, FAILED.to_owned());
         self.step(FAILED_STAGE, &at, None, true);
-        let shown = match first {
-            Some(first) if first != error => format!("{first}\n\nThen: {error}"),
-            _ => error.to_owned(),
+        let shown = if let Some(first) = first.filter(|first| *first != error) {
+            format!("{first}\n\nThen: {error}")
+        } else {
+            error.to_owned()
         };
         self.failed = Some((self.began.elapsed().as_secs_f64(), shown));
     }
