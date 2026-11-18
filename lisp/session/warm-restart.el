@@ -467,16 +467,16 @@ with the `romacs-secret' property anywhere, as the password manager
 marks its secrets."
   (and (stringp value) (text-property-not-all 0 (length value) 'romacs-secret nil value) t))
 
-(defun warm-restart--register (value)
+(defun warm-restart--register (value detached)
   "Register VALUE as data: a position becomes (file-query FILE POS) in a
-file's buffer or (warm-restart-position ID POS) in another carried one, a
-shell's transcript written without its file included.  nil when it
-cannot be carried, or is a secret."
+file's buffer or (warm-restart-position ID POS) in another carried one,
+one of DETACHED, the file buffers the image carries without their file,
+included.  nil when it cannot be carried, or is a secret."
   (cond ((warm-restart--secret-p value) nil)
         ((markerp value)
          (let ((buffer (marker-buffer value)))
            (cond ((null buffer) nil)
-                 ((and (buffer-file-name buffer) (not (with-current-buffer buffer (warm-restart--transcript-source))))
+                 ((and (buffer-file-name buffer) (not (memq buffer detached)))
                   (list 'file-query (buffer-file-name buffer) (marker-position value)))
                  (t (list 'warm-restart-position (with-current-buffer buffer (warm-restart--buffer-id))
                           (marker-position value))))))
@@ -498,10 +498,11 @@ names of those that are not."
           (bound-and-true-p savehist-additional-variables)
           warm-restart-history-variables))
 
-(defun warm-restart--globals ()
-  "The session-wide part of an image, and what of it is lost.
-The kill ring's secrets (`warm-restart--secret-p') are left out."
-  (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell)))) register-alist))
+(defun warm-restart--globals (detached)
+  "The session-wide part of an image, and what of it is lost; DETACHED as
+for `warm-restart--register'.  The kill ring's secrets
+\(`warm-restart--secret-p') are left out."
+  (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell) detached))) register-alist))
         (histories (warm-restart--variables (warm-restart--history-variables)))
         (globals (warm-restart--variables warm-restart-globals))
         (kills (seq-remove #'warm-restart--secret-p kill-ring)))
@@ -556,7 +557,11 @@ Return FILE.  Signal `warm-restart-blocked' when a buffer is blocked."
                             when (with-current-buffer buffer (warm-restart--shell-mode-p major-mode))
                             collect (buffer-name buffer))))
            (records (car named))
-           (globals (warm-restart--globals))
+           (globals (warm-restart--globals
+                     (cl-loop for e in carried for r in records
+                              when (and (buffer-file-name (plist-get e :buffer))
+                                        (not (plist-member r :lost)) (not (plist-get r :file)))
+                              collect (plist-get e :buffer))))
            (form (list :schema warm-restart--schema :pid (emacs-pid) :created (format-time-string "%FT%T%z")
                        :transcripts t
                        :emacs-version emacs-version
@@ -602,8 +607,11 @@ written before shells were carried as transcripts names."
            (fundamental-mode)
            (warm-restart--become-transcript mode)
            (rename-buffer (warm-restart--transcript-name (buffer-name) #'get-buffer)))
-          ((not (eq major-mode mode))
-           (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode))))))
+          (t
+           ;; A buffer reused as an ordinary record's is no transcript.
+           (when warm-restart--transcript-of (warm-restart--end-transcript))
+           (unless (eq major-mode mode)
+             (funcall (if (and mode (fboundp mode)) mode #'fundamental-mode)))))))
 
 (defun warm-restart--put-text (text unibyte)
   "Replace the current buffer's text with TEXT, recording no change."
@@ -795,19 +803,21 @@ or nil when there is neither."
   (let ((kill-buffer-query-functions nil) (kill-buffer-hook nil)) (kill-buffer buffer)))
 
 (defun warm-restart--beside (record blobs existing)
-  "EXISTING, a buffer edited here before RECORD's turn in the restore came,
-which keeps its edits; RECORD's carried text goes in a new buffer beside
-it, and the problem names both."
-  (when-let* ((text (warm-restart--carried-text record blobs)))
-    (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
-      (warm-restart--put-text text (plist-get record :unibyte))
-      (setq default-directory (plist-get record :directory))
-      (when-let* ((shell (plist-get record :transcript-of))) (warm-restart--become-transcript shell))
-      (push (list :buffer (plist-get record :name) :text t
-                  :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
-                                  (buffer-name existing) (buffer-name)))
-            warm-restart--problems)))
-  existing)
+  "The buffer RECORD's id names: EXISTING, a buffer edited here before
+RECORD's turn in the restore came, which keeps its edits; RECORD's
+carried text goes in a new buffer beside it, and the problem names both.
+A transcript's id names that new buffer: EXISTING holds none of it."
+  (let ((copy (when-let* ((text (warm-restart--carried-text record blobs)))
+                (with-current-buffer (generate-new-buffer (format "%s (restored)" (plist-get record :name)))
+                  (warm-restart--put-text text (plist-get record :unibyte))
+                  (setq default-directory (plist-get record :directory))
+                  (when-let* ((shell (plist-get record :transcript-of))) (warm-restart--become-transcript shell))
+                  (push (list :buffer (plist-get record :name) :text t
+                              :reason (format "edited in %s before its turn in the restore, which kept the edits; the carried text is in %s"
+                                              (buffer-name existing) (buffer-name)))
+                        warm-restart--problems)
+                  (current-buffer)))))
+    (if (and copy (plist-get record :transcript-of)) copy existing)))
 
 (defconst warm-restart--shell-modes
   '(eshell-mode comint-mode term-mode inferior-emacs-lisp-mode)
