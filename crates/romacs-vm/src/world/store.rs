@@ -207,9 +207,15 @@ fn content_digest(file: &std::fs::File, len: u64) -> std::io::Result<[u8; 32]> {
 /// A directory DIR of the store's own, made 0700 if missing: private
 /// whatever the umask, as the store is.
 pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
-    match host::create_dir(dir, 0o700) {
+    subdir(dir, 0o700)
+}
+
+/// DIR made with MODE, or there already: whoever makes it first, as two
+/// processes starting builders in one fresh store may both try.
+fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
+    match host::create_dir(dir, mode) {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        made => made,
+        other => other,
     }
 }
 
@@ -684,7 +690,11 @@ impl World {
                 }
                 host::exit_at_once(i32::from(outcome.is_err()))
             }
-            Launch::Chain { .. } => None,
+            Launch::Chain { reason } => {
+                // Said, so a test that needs its world can tell why it has none.
+                eprintln!("test world: booting from source: {reason}");
+                None
+            }
         }
     }
 
@@ -904,9 +914,7 @@ impl World {
         let p = self.store.join("p");
         store_subdir(&p)?;
         for name in ["cwd", "tmp", "bin"] {
-            if !host::probe(host::Probe::IsDir, p.join(name)) {
-                host::create_dir(p.join(name), 0o500)?;
-            }
+            subdir(&p.join(name), 0o500)?;
         }
         Ok(p)
     }
