@@ -498,10 +498,10 @@ names of those that are not."
           (bound-and-true-p savehist-additional-variables)
           warm-restart-history-variables))
 
-(defun warm-restart--globals (detached)
+(defun warm-restart--globals (&optional detached)
   "The session-wide part of an image, and what of it is lost; DETACHED as
-for `warm-restart--register'.  The kill ring's secrets
-\(`warm-restart--secret-p') are left out."
+for `warm-restart--register', nil when there are none.  The kill ring's
+secrets (`warm-restart--secret-p') are left out."
   (let ((registers (mapcar (lambda (cell) (cons (car cell) (warm-restart--register (cdr cell) detached))) register-alist))
         (histories (warm-restart--variables (warm-restart--history-variables)))
         (globals (warm-restart--variables warm-restart-globals))
