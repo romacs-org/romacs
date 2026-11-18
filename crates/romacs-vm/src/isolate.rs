@@ -945,8 +945,11 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
 /// again. Until then the socket stays open, however long the spawner
 /// takes, so a job it writes meanwhile finds a worker, not a closed
 /// socket, and is settled by the refusal; and a zygote's unforked children
-/// die only after it. What arrives meanwhile is read and dropped. A
-/// spawner gone closes the socket, or its death signal ends the worker.
+/// die only after it. What arrives meanwhile is read and dropped, but for
+/// the sockets of children a zygote is asked to fork: those stay open with
+/// the worker, so a job posted to such a child finds it until the refusal
+/// is handled. A spawner gone closes the socket, or its death signal ends
+/// the worker.
 ///
 /// # Errors
 ///
@@ -959,7 +962,7 @@ pub fn refuse(socket: OwnedFd, reason: &str) -> std::result::Result<(), String> 
     while !peer.closed {
         crate::subprocess::poll(&[(peer.socket.as_raw_fd(), libc::POLLIN)], None).map_err(|e| e.to_string())?;
         peer.receive(&mut |_| {}).map_err(|e| e.to_string())?;
-        peer.inbox.clear();
+        peer.inbox.retain(|frame| matches!(frame.payload, Payload::Socket(_)));
     }
     Ok(())
 }
