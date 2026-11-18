@@ -170,6 +170,13 @@ fn sort_native_path_takes_only_what_a_call_would_call() {
               &format!("(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '{op}))) (condition-case nil (progn (sort [1 3 2] t) 'sorted) (error 'signalled))) (fset 't old)))"),
               "signalled");
     }
+    // `t` holding the plain `>`: the native path gives what the general
+    // path gives. That is void-function today, because the dispatcher
+    // doesn't read `t`'s cell (pinned GNU sorts); when that is fixed, this
+    // and sort's nil/t fallback change together.
+    check("t_plain_greater_matches_the_general_path",
+          "(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (symbol-function '>)) (list (condition-case e (sort [1 3 2] t) (error (car e))) (condition-case e (sort (list 1.5 3 2) t) (error (car e))))) (fset 't old)))",
+          "(void-function void-function)");
     check("t_symbol_function_macro",
           "(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '>))) (car-safe (symbol-function 't))) (fset 't old)))",
           "macro");

@@ -103,10 +103,13 @@ enum Native { Strings, Ascending, Descending }
 fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, Fault> {
     // The predicate resolved as a call would: aliases followed; a macro
     // (`(macro . F)`, rebuilt from the slot's flag) or an autoload ends the
-    // walk, and the general path calls it, signalling as GNU does.
+    // walk, and the general path calls it, signalling as GNU does. `nil`
+    // and `t` end it too: the general path's dispatcher does not read their
+    // cells (a ticket of its own), and the two paths must agree.
     let mut f = state[1];
     let mut name = None;
     for _ in 0..64 {
+        if f == Value::NIL || f == Value::TRUE { return Ok(false); }
         if let Some(found) = crate::prim::name(f) { name = Some(found); break; }
         if !matches!(cx.kind(f), leaf::Kind::Symbol) { return Ok(false); }
         match cx.symbol_definition(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
