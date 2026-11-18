@@ -5,18 +5,18 @@ publishes version 0.27.0 (checksum `2038684e…`, from upstream's `lib/` at
 6070dbfe), without the registry's `.cargo-ok` and `Cargo.lock`, plus the
 patches listed below. The workspace's `[patch.crates-io]` points
 `tree-sitter = "=0.27.0"` here; `exclude` keeps it out of the workspace,
-and the unsafe census and smell counts leave `crates/vendor/` to upstream.
+and the unsafe census and smell counts leave `crates/vendor/` out.
 
 ## Why it exists
 
 Romacs reparses after every key, and some of upstream's rules for reusing
-the previous tree make a reparse redo far more than the edit needs. Each fix
-lands here as its own commit, written as a contribution to upstream, so that
-this copy can shrink back to the published crate.
+the previous tree make a reparse redo far more than the edit needs. This
+runtime is Romacs's own, tailored to that use (`AGENTS.md` here); each change
+lands as its own commit, listed below with its reason and measurement.
 
 ## Patches
 
-Each is its own commit in Romacs's history, written for upstream.
+Each is its own commit in Romacs's history.
 
 - `fix(parser): reuse a word token that can be no keyword` (`src/parser.c`).
   A node whose first leaf is the keyword-capture token (Python's
@@ -37,11 +37,6 @@ Each is its own commit in Romacs's history, written for upstream.
   Romacs ran its queries without the callback and a query that matched
   nothing could not be stopped. The offset is now found just before the
   callback runs; what the callback sees is unchanged.
-
-## Back to stock
-
-When a published release holds every patch above, delete this directory and
-the `[patch.crates-io]` entry, pin that release, and run `tools/treesit-fuzz`.
 
 ## Checking it
 
