@@ -269,9 +269,12 @@ fn across_devices(cx: &mut Leaf<'_>, file: Value, newname: Value, ok: Value, sou
     let directory_name = cx.string_bytes(file)?.last() == Some(&b'/');
     let kind = if directory_name { "directory" } else {
         let meta = host::symlink_metadata(source).map_err(|e| errno(cx, "Renaming", &[file, newname], e))?;
-        let kind = meta.file_type();
-        if kind.is_dir() { "directory" } else if kind.is_file() { "file" } else if kind.is_symlink() { "symlink" }
-        else { return Err(errno(cx, "Renaming", &[file, newname], exdev())) }
+        match meta.mode() & libc::S_IFMT {
+            libc::S_IFDIR => "directory",
+            libc::S_IFREG => "file",
+            libc::S_IFLNK => "symlink",
+            _ => return Err(errno(cx, "Renaming", &[file, newname], exdev())),
+        }
     };
     let link = if kind == "symlink" {
         use std::os::unix::ffi::OsStrExt as _;
