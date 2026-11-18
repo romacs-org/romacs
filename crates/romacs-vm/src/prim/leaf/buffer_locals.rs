@@ -15,8 +15,8 @@ impl Leaf<'_> {
         // enable-multibyte-characters is always local (buffer.c:5300).
         if slot == self.vm.multibyte_slot { return Ok(true); }
         if let Some(fwd) = self.vm.forwarding(slot) {
-            let index = buffer.object_index().map_err(Fault::Error)?;
-            return Ok(matches!(fwd, Fwd::Buffer(i) if self.vm.per_buffer_local_p(index, i)));
+            let Fwd::Buffer(i) = fwd else { return Ok(false) };
+            return Ok(self.vm.per_buffer_local_p(buffer.object_index().map_err(Fault::Error)?, i));
         }
         let index = buffer.object_index().map_err(Fault::Error)?;
         Ok(self.vm.per_buffer(index).is_some_and(|b| b.locals().contains(Value::reference(slot + 1, 7))))
