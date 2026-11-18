@@ -56,7 +56,8 @@ pub fn list(family: Option<&str>) -> Vec<Entity> {
 /// no reload came between them, so a listing kept from one still holds. A
 /// font added to the application set (`register_font_file`) changes the
 /// configuration in place, which equality does not see: the GUI adds its
-/// bundled fonts before its display lists any.
+/// bundled fonts before its display lists any, and they are added again to
+/// each configuration Fontconfig reloads.
 #[derive(PartialEq, Eq)]
 pub struct Catalog(crate::fc::Config);
 

@@ -165,18 +165,26 @@ fn pattern_slice<'a>(set: *mut sys::FcFontSet) -> &'a [*mut sys::FcPattern] {
     }
 }
 
-/// The files of the application font set: the fonts this process added
-/// (`add_app_font_file`).
-pub(crate) fn application_files() -> Vec<String> {
+/// The current configuration's application font set: the fonts this
+/// process added (`add_app_font_file`), none in a configuration Fontconfig
+/// reloaded.
+fn application_set<'a>() -> &'a [*mut sys::FcPattern] {
     // SAFETY: a null config names the current one, which owns the set.
     let set = unsafe { sys::FcConfigGetFonts(null_mut(), sys::FcSetApplication) };
-    if set.is_null() {
-        return Vec::new();
-    }
-    pattern_slice(set)
+    if set.is_null() { &[] } else { pattern_slice(set) }
+}
+
+/// The files of the application font set.
+pub(crate) fn application_files() -> Vec<String> {
+    application_set()
         .iter()
         .filter_map(|&pattern| PatternRef::new(pattern)?.string(fontconfig::FC_FILE))
         .collect()
+}
+
+/// Whether the application font set has a font.
+pub(crate) fn has_application_fonts() -> bool {
+    !application_set().is_empty()
 }
 
 /// A pattern owned by a font set.

@@ -37,10 +37,27 @@ impl ListedFace {
 
 /// Fontconfig's configuration is not safe to extend while another thread
 /// queries it (`FcConfigAppFontAddFile` rebuilds the font set in place), so
-/// every call this module makes holds this lock.
-pub(crate) fn serialize() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// every call this module makes holds this lock. It keeps the files
+/// `register_font_file` added to the application font set, which `refresh`
+/// adds again to a configuration Fontconfig reloads.
+pub(crate) fn serialize() -> std::sync::MutexGuard<'static, Vec<CString>> {
+    static LOCK: std::sync::Mutex<Vec<CString>> = std::sync::Mutex::new(Vec::new());
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Fontconfig's current configuration once brought up to date, as a listing
+/// on it is (`fc::Config::current`); None when a reload failed. A reload
+/// builds the configuration from its files alone, so the fonts REGISTERED
+/// (the lock's files) are added to it again. Every question this module asks
+/// starts here.
+fn refresh(registered: &[CString]) -> Option<fc::Config> {
+    let config = fc::Config::current()?;
+    if !registered.is_empty() && !fc::has_application_fonts() {
+        for file in registered {
+            fc::add_app_font_file(file);
+        }
+    }
+    Some(config)
 }
 
 pub(crate) fn handle() -> Option<&'static fontconfig::Fontconfig> {
@@ -56,15 +73,18 @@ pub(crate) fn register_font_file(path: &std::path::Path) -> bool {
     let Ok(file) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };
-    let _serial = serialize();
-    fc::add_app_font_file(&file)
+    let mut registered = serialize();
+    let added = fc::add_app_font_file(&file);
+    if added {
+        registered.push(file);
+    }
+    added
 }
 
 /// Fontconfig's catalog as its own refresh leaves it (`fc::Config::current`).
 pub(crate) fn current_config() -> Option<fc::Config> {
     handle()?;
-    let _serial = serialize();
-    fc::Config::current()
+    refresh(&serialize())
 }
 
 /// What Fontconfig's answers depend on: its configuration files and
@@ -81,7 +101,8 @@ pub(crate) fn configuration_inputs() -> Vec<String> {
 /// `monospace`, or a family that is not installed), if any.
 pub(crate) fn match_family(generic: &str) -> Option<String> {
     let fc = handle()?;
-    let _serial = serialize();
+    let serial = serialize();
+    refresh(&serial);
     let mut pattern = fontconfig::Pattern::new(fc).ok()?;
     let value = CString::new(generic).ok()?;
     pattern.add_string(fontconfig::FC_FAMILY, &value).ok()?;
@@ -133,7 +154,8 @@ pub(crate) fn list_faces(family: Option<&str>, required: Option<char>) -> Vec<Li
     if handle().is_none() {
         return Vec::new();
     }
-    let _serial = serialize();
+    let serial = serialize();
+    refresh(&serial);
     list_faces_inner(family, required).unwrap_or_default()
 }
 
@@ -192,7 +214,8 @@ impl FaceList {
 
 pub(crate) fn list_constrained(spec: &ListSpec) -> Option<FaceList> {
     handle()?;
-    let _serial = serialize();
+    let serial = serialize();
+    refresh(&serial);
     let mut pattern = family_pattern(spec.family.as_deref())?;
     if let Some(foundry) = &spec.foundry {
         let value = CString::new(foundry.as_str()).ok()?;
@@ -228,7 +251,8 @@ pub(crate) fn list_families() -> Vec<String> {
     if handle().is_none() {
         return Vec::new();
     }
-    let _serial = serialize();
+    let serial = serialize();
+    refresh(&serial);
     list_families_inner().unwrap_or_default()
 }
 
@@ -246,7 +270,8 @@ pub(crate) fn sort_faces(family: &str, ch: char) -> Vec<ListedFace> {
     if handle().is_none() {
         return Vec::new();
     }
-    let _serial = serialize();
+    let serial = serialize();
+    refresh(&serial);
     sort_faces_inner(family, ch).unwrap_or_default()
 }
 
