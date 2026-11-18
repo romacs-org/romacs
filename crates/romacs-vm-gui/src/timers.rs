@@ -407,7 +407,7 @@ mod tests {
         crate::test_home::private_home(&mut vm, "timers-prompt-collect");
         crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
         vm.set_gc_stress(0);
-        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
+        vm.eval_source(&std::fs::read_to_string(crate::startup::lisp_dir().join("vm/process.el")).unwrap()).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         // The command loop's Lisp half, as a session's first key installs it.
         printed(&mut vm, "(read-event nil nil 0)");
@@ -439,7 +439,7 @@ mod tests {
         let (mut vm, loadup) = crate::test_world::chain(crate::test_world::Boot { echo_area: true, ..crate::test_world::Boot::GNU_ONLY });
         crate::test_home::private_home(&mut vm, "timers-scheduled");
         crate::startup::resume_loadup(&mut vm, crate::startup::Launch::GnuOnly, loadup).unwrap();
-        vm.eval_source(include_str!("../../../lisp/vm/process.el")).unwrap();
+        vm.eval_source(&std::fs::read_to_string(crate::startup::lisp_dir().join("vm/process.el")).unwrap()).unwrap();
         let printed = |vm: &mut Vm, source: &str| vm.eval_source(source).unwrap().display().unwrap();
         let schedule = "(run-with-timer 0.2 nil (lambda () (setq log (cons (list 'timer (- (float-time) start)) log))))";
         // A background command completes while C-x waits (it outlasts the

@@ -630,7 +630,7 @@ fn gnu_subdirs_el(lisp: &Path, dir: &Path) -> SubdirsEl {
     }
     // GNU's build sees GNU's tree: Romacs's own directories of lisp/ (lisp/bundled.json)
     // are no GNU directory, and follow GNU's on load-path by their own rule.
-    let own = crate::lisp_layout::own_directories().unwrap_or_default();
+    let own = crate::lisp_layout::own_directories(lisp).unwrap_or_default();
     if rel.components().next().is_some_and(|c| own.iter().any(|o| c.as_os_str() == o.as_str())) {
         return SubdirsEl::None;
     }
