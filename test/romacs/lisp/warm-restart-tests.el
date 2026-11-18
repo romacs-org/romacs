@@ -637,9 +637,13 @@ transcripts holds them, with BLOBS, as the restore does: prepared first."
           (with-current-buffer buffer
             (warm-restart-tests--plain-shell-mode)
             (insert "$ typed and not saved"))
-          (let ((record (seq-find (lambda (r) (equal (plist-get r :file) (buffer-file-name buffer)))
+          ;; Detached text: no reader, an older one included, visits the file,
+          ;; so no file mode or hook of it can make it a shell again.
+          (let ((record (seq-find (lambda (r) (eq (plist-get r :transcript-of) 'warm-restart-tests--plain-shell-mode))
                                   (plist-get (car (warm-restart--read (warm-restart-write))) :buffers))))
-            (should (eq (plist-get record :strategy) 'file))
+            (should (eq (plist-get record :strategy) 'text))
+            (should-not (plist-get record :file))
+            (should (equal (plist-get record :name) "session.log (transcript)"))
             (should (eq (plist-get record :mode) 'fundamental-mode))
             (should (eq (plist-get record :transcript-of) 'warm-restart-tests--plain-shell-mode))
             (should (plist-get record :blob))))
@@ -708,7 +712,7 @@ transcripts holds them, with BLOBS, as the restore does: prepared first."
     (fmakunbound 'warm-restart-tests--gone-mode)))
 
 (ert-deftest warm-restart-a-transcript-is-named-by-the-image-not-uniquify ()
-  (should-not (plist-get (warm-restart--as-transcript (list :mode 'eshell-mode :uniquify t :name "x")) :uniquify)))
+  (should-not (plist-get (warm-restart--inert-record (list :mode 'eshell-mode :uniquify t :name "x") 'eshell-mode) :uniquify)))
 
 (ert-deftest warm-restart-an-older-record-s-mode-is-known-through-its-parents ()
   ;; A mode two libraries deep: its parent, an autoload into another
@@ -791,5 +795,35 @@ transcripts holds them, with BLOBS, as the restore does: prepared first."
       (when (get-file-buffer file) (with-current-buffer (get-file-buffer file) (set-buffer-modified-p nil)) (kill-buffer (get-file-buffer file)))
       (setq warm-restart-tests--ran nil)
       (delete-directory dir t))))
+
+(ert-deftest warm-restart-a-transcript-stays-one-across-restarts ()
+  ;; Restored, a transcript is fundamental-mode text; at the next image it
+  ;; is still written as its shell's transcript, under the same name.
+  (require 'eshell)
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-twice-" t))
+         (eshell-buffer-name (generate-new-buffer-name "*wr-twice*"))
+         (eshell-history-file-name nil)
+         (transcript (concat eshell-buffer-name " (transcript)"))
+         (shell (eshell)))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer shell (goto-char (point-max)) (insert "echo typed"))
+          (set-window-buffer nil (get-buffer-create "*scratch*"))
+          (dotimes (_ 2)
+            (let ((image (warm-restart-write)))
+              (let ((record (seq-find (lambda (r) (plist-get r :transcript-of))
+                                      (plist-get (car (warm-restart--read image)) :buffers))))
+                (should (eq (plist-get record :transcript-of) 'eshell-mode))
+                (should (equal (plist-get record :name) transcript)))
+              (let ((kill-buffer-query-functions nil))
+                (dolist (name (list eshell-buffer-name transcript)) (when (get-buffer name) (kill-buffer name))))
+              (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+              (with-current-buffer transcript
+                (should (eq major-mode 'fundamental-mode))
+                (should (eq warm-restart--transcript-of 'eshell-mode))
+                (should (string-search "echo typed" (buffer-string)))))))
+      (let ((kill-buffer-query-functions nil))
+        (dolist (name (list eshell-buffer-name transcript)) (when (get-buffer name) (kill-buffer name))))
+      (delete-directory warm-restart-directory t))))
 
 ;;; warm-restart-tests.el ends here
