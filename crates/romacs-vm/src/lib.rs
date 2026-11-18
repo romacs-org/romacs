@@ -4248,19 +4248,24 @@ pub use fzf::advance_completion_generation;
 #[cfg(test)]
 mod object_index_tests {
     use super::*;
-    /// An object reference's entry is its index less one. Nil names none:
-    /// a debug build stops at the caller, a release build signals, and
-    /// neither wraps to an entry.
+    /// An object reference's entry is its index less one; nil names none.
     #[test]
-    fn nil_names_no_object_entry() {
+    fn an_object_reference_names_its_entry_and_nil_none() {
         assert_eq!(Value::reference(5, 0).object_index(), Ok(4));
         assert_eq!(Value::reference(5, 0).object_index_if(), Some(4));
         assert_eq!(Value::NIL.object_index_if(), None);
-        let taken = std::panic::catch_unwind(|| Value::NIL.object_index());
-        if cfg!(debug_assertions) {
-            assert!(taken.is_err(), "a debug build stops at the caller's bug");
-        } else {
-            assert!(taken.unwrap().is_err(), "a release build signals");
-        }
+    }
+    /// Taking nil's entry is the caller's bug: a debug build stops there.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "nil names no object table entry")]
+    fn a_debug_build_stops_at_nils_entry() {
+        let _ = Value::NIL.object_index();
+    }
+    /// A release build signals it, and never wraps to an entry.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_signals_for_nils_entry() {
+        assert!(Value::NIL.object_index().is_err());
     }
 }
