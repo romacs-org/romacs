@@ -170,6 +170,9 @@ fn tree_sitter_parse_and_query_quit() {
     reaches("treesit-parser-root-node", c, "(list parser)", "t");
     let parsed = format!("(progn {c} (setq root (treesit-parser-root-node parser)))");
     reaches("treesit-query-capture", &parsed, "(list root '((number_literal) @n))", "t");
+    // A query that matches nothing (the text has no comments) stops in the
+    // cursor's walk, at its progress callback.
+    reaches("treesit-query-capture", &parsed, "(list root '((comment) @c))", "t");
 }
 
 #[test]

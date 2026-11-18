@@ -432,19 +432,31 @@ impl Query {
         }).collect()
     }
     /// Every match of the query under NODE whose span overlaps the byte
-    /// RANGE, in ts_query_cursor_next_match order.
-    /// The matches under NODE in RANGE, STOP asked between matches: None
-    /// once it stopped. The cursor's own progress callback is not used: it
-    /// cost 3 % of a query (`a3/REPORT.md` cycle 2), so a walk that finds no
-    /// match for long goes unpolled, a bound of the tree's nodes.
+    /// RANGE, in ts_query_cursor_next_match order, STOP asked between
+    /// matches and as the cursor walks (the runtime's progress callback, once
+    /// in 100 of its steps), so a query that matches nothing stops too: None
+    /// once it stopped.
     pub(crate) fn matches(&self, node: Node, range: (u32, u32), stop: &crate::quit::NativeStop) -> Option<Vec<Match>> {
+        // UNSAFE(the runtime's progress callback type is an unsafe extern fn)
+        // SAFETY: the runtime calls it only during this walk, with the state
+        // whose payload OPTIONS below set.
+        unsafe extern "C" fn progress(state: *mut ffi::TSQueryCursorState) -> bool {
+            // UNSAFE(the runtime hands the callback its payload back as a raw pointer)
+            // SAFETY: the payload is the probe `matches` borrows for the whole walk.
+            unsafe { &*(*state).payload.cast::<crate::quit::NativeStop>() }.due()
+        }
+        let options = ffi::TSQueryCursorOptions {
+            payload: std::ptr::from_ref(stop).cast_mut().cast(),
+            progress_callback: stop.armed().then_some(progress as unsafe extern "C" fn(*mut ffi::TSQueryCursorState) -> bool),
+        };
         let mut steps = crate::quit::Steps::default();
         // SAFETY: the cursor is ours; NODE's tree is live (see `Node`); a
-        // match's captures are read before the next step.
+        // match's captures are read before the next step; OPTIONS and the
+        // probe it points at outlive the cursor, deleted before return.
         unsafe {
             let cursor = ffi::ts_query_cursor_new();
             ffi::ts_query_cursor_set_byte_range(cursor, range.0, range.1);
-            ffi::ts_query_cursor_exec(cursor, self.0, node.0);
+            ffi::ts_query_cursor_exec_with_options(cursor, self.0, node.0, &raw const options);
             let mut out = Some(Vec::new());
             let mut found: ffi::TSQueryMatch = std::mem::zeroed();
             while ffi::ts_query_cursor_next_match(cursor, &mut found) {
@@ -454,6 +466,7 @@ impl Query {
                     out.push(Match { pattern: u32::from(found.pattern_index), captures: captures.iter().map(|c| (Node(c.node), c.index)).collect() });
                 }
             }
+            if stop.armed() && stop.due() { out = None; }
             ffi::ts_query_cursor_delete(cursor);
             out
         }
