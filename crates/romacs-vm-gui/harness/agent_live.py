@@ -2175,11 +2175,14 @@ def rpc(args, base):
         a.client('--stop=none')
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'kept: server gone')
         a.restart()
-        until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'kept: restored')
+        # Loaded by the restore, not by asking for it.
+        until(lambda: a.eval(f'(and (romacs-agent-loaded {lisp_text(sid)}) t)') == 't', 15, 'kept: restored')
         until(lambda: a.state(sid) == 'waiting-approval', 30, 'kept: approval still asked')
         kept_queue = a.eval(f'(mapcar (quote car) (romacs-agent-queue {a.s(sid)}))')
         a.eval(f'(romacs-agent-respond {a.s(sid)} (car (hash-table-keys (romacs-agent-approvals {a.s(sid)}))) t)')
-        until(lambda: 'kept' in a.chat(sid).split('permission allow', 1)[-1], 30, 'kept: answered after the restart')
+        # Its reply, a line of its own (its prompt reads "say kept").
+        until(lambda: 'kept' in [l.strip() for l in a.chat(sid).split('permission allow', 1)[-1].splitlines()],
+              30, 'kept: answered after the restart')
         a.idle(sid)
 
         # Its chat drawn again (the journal replayed into a copy): nothing

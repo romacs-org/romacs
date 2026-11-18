@@ -642,13 +642,18 @@ comes back as a turn of its own: the turn it steered is no next run's."
   (romacs-agent-write 'romacs-agent-store--queued-row (list id item-id nil nil)
                       nil (list 'queued id item-id)))
 
+(defun romacs-agent-store-queued-clear (id)
+  "Let go of every message kept for the session ID names, by the writer."
+  (when (file-exists-p (romacs-agent-store--file))
+    (romacs-agent-write 'romacs-agent-store--queued-row (list id nil nil nil) nil (list 'queued id))))
+
 (defun romacs-agent-store--queued-row (id item-id position json)
   "Keep the message ITEM-ID of session ID at POSITION as JSON, or with
-none let it go, here.  A failure signals."
+none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a queued message in"))))
-    (if json
-        (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json))
-      (sqlite-execute db "delete from queued where session = ? and id = ?" (list id item-id)))
+    (cond (json (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json)))
+          (item-id (sqlite-execute db "delete from queued where session = ? and id = ?" (list id item-id)))
+          (t (sqlite-execute db "delete from queued where session = ?" (list id))))
     t))
 
 (defun romacs-agent-store-queued (id)
@@ -662,11 +667,21 @@ none let it go, here.  A failure signals."
 
 (defun romacs-agent-store--requeue (session _manifest)
   "SESSION, loaded: what was kept waiting in its queue waits there again,
-sent once its harness may take it."
-  (unless (romacs-agent-queue session)
-    (dolist (item (romacs-agent-store-queued (romacs-agent-id session)))
-      (romacs-agent--enqueue session item))
-    (when (romacs-agent-queue session) (romacs-agent--dispatch session))))
+in order with what was sent to it while it loaded, sent once its harness
+may take it.  A cancelled task's is let go."
+  (if (romacs-agent-cancelled session)
+      (romacs-agent--clear-queue session)
+    (let* ((waiting (romacs-agent-queue session))
+           (ids (delq nil (mapcar #'romacs-agent-item-id waiting)))
+           (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
+                               (romacs-agent-store-queued (romacs-agent-id session)))))
+      (when kept
+        (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
+              (romacs-agent-queue-length session) 0)
+        (dolist (item (sort (append kept waiting)
+                            (lambda (a b) (< (romacs-agent-item-position a) (romacs-agent-item-position b)))))
+          (romacs-agent--enqueue session item))
+        (romacs-agent--dispatch session)))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
 ;; A session with messages kept waiting is loaded as a restore runs.

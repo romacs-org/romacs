@@ -3633,7 +3633,12 @@ queue.  Called wherever what the predicate reads may have changed."
               (when next
                 ;; Off the queue once written: a write that fails (the
                 ;; harness gone meanwhile) keeps it for the next chance.
-                (romacs-agent--write session next)
+                ;; Its kept record goes first: a crash between the two
+                ;; loses it rather than sends it twice.
+                (romacs-agent--unkeep-item session next)
+                (condition-case err (romacs-agent--write session next)
+                  (error (romacs-agent--keep-item session next)
+                         (signal (car err) (cdr err))))
                 (romacs-agent--dequeue session next)
                 (when (romacs-agent-item-delivered next) (funcall (romacs-agent-item-delivered next)))
                 (setq more t)))
@@ -4155,15 +4160,20 @@ files the user attached to it.  MESSAGES: it comes from other sessions
   "Put ITEM ahead of what waits for SESSION's harness."
   (unless (romacs-agent-item-position item)
     (setf (romacs-agent-item-position item)
-          (1- (or (and (romacs-agent-queue session) (romacs-agent-item-position (car (romacs-agent-queue session))))
-                  (float-time)))))
+          (if (romacs-agent-queue session) (- (romacs-agent-item-position (car (romacs-agent-queue session))) 1e-3)
+            (float-time))))
   (push item (romacs-agent-queue session))
   (cl-incf (romacs-agent-queue-length session))
   (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session)))
   (romacs-agent--keep-item session item))
 
 (defun romacs-agent--enqueue (session item)
-  (unless (romacs-agent-item-position item) (setf (romacs-agent-item-position item) (float-time)))
+  (unless (romacs-agent-item-position item)
+    (setf (romacs-agent-item-position item)
+          ;; The time it came, after the last one waiting whatever the clock says.
+          (if (romacs-agent-queue session)
+              (max (float-time) (+ (romacs-agent-item-position (car (romacs-agent-queue-tail session))) 1e-3))
+            (float-time))))
   (cl-incf (romacs-agent-queue-length session))
   (let ((cell (list item)))
     (if (romacs-agent-queue session)
@@ -4182,8 +4192,11 @@ files the user attached to it.  MESSAGES: it comes from other sessions
     t))
 
 (defun romacs-agent--clear-queue (session)
-  "Take every message out of SESSION's queue."
-  (dolist (item (romacs-agent-queue session)) (romacs-agent--dequeue session item)))
+  "Take every message out of SESSION's queue, and every one kept for it,
+loaded or not."
+  (dolist (item (romacs-agent-queue session)) (romacs-agent--dequeue session item))
+  (romacs-agent-store-queued-clear (romacs-agent-id session))
+  (romacs-agent-mark (romacs-agent-id session) 'queued nil))
 
 ;; What waits in a queue is kept across a restart (romacs#287): the user's
 ;; prompts and every other item that is all data.  One with a function
@@ -4193,6 +4206,7 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 (declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
 (declare-function romacs-agent-store--file "romacs-agent-store" ())
+(declare-function romacs-agent-store-queued-clear "romacs-agent-store" (id))
 
 (defun romacs-agent--keepable-p (item)
   "Whether ITEM is all data, so kept across a restart: not a hold's own

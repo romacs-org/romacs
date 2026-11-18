@@ -346,16 +346,21 @@ message is sent, `romacs-agent-send' by default.")
       (romacs-agent-send-later session "checked" nil nil #'always)
       (should (file-exists-p mark))
       (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("first" "a" "b")))
-      ;; Its steer went at once: never kept past its write.
-      (let ((again (romacs-agent--make :id id :harness 'claude :state 'idle :title "kept")))
-        (romacs-agent-store--requeue again nil)
-        (should (equal (mapcar #'car (romacs-agent-queue again)) '("first" "a" "b")))
-        (should (cl-every (lambda (item) (eq (romacs-agent-item-kind item) 'next)) (romacs-agent-queue again)))
-        ;; Written: let go.
+      ;; Its steer went at once: never kept past its write.  Made again,
+      ;; one sent to it as it loads goes after what was kept.
+      (let ((again (romacs-agent--make :id id :harness 'claude :state 'running :title "kept")))
         (romacs-agent-test-attach again t)
-        (romacs-agent-queue-tests--writing sent (romacs-agent--dispatch again))
-        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("a" "b")))
-        (romacs-agent--clear-queue again))
+        (romacs-agent-send-later again "meanwhile")
+        (setf (romacs-agent-state again) 'idle)
+        ;; Its harness ready: the first goes at once, let go.
+        (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil))
+        (should (equal (gethash "content" (gethash "message" (car sent))) "first"))
+        (should (equal (mapcar #'car (romacs-agent-queue again)) '("a" "b" "meanwhile")))
+        (should (cl-every (lambda (item) (eq (romacs-agent-item-kind item) 'next)) (romacs-agent-queue again)))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("a" "b" "meanwhile")))
+        ;; Cleared (a task cancelled): its kept ones too, loaded or not.
+        (let ((other (romacs-agent--make :id id :harness 'claude :state 'idle :title "kept")))
+          (romacs-agent--clear-queue other)))
       (should-not (romacs-agent-store-queued id))
       (should-not (file-exists-p mark)))))
 
