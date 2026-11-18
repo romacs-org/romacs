@@ -233,7 +233,7 @@ pub fn pinned_dirs(base: &Path) -> std::io::Result<PathBuf> {
 fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
     match host::create_dir(dir, mode) {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            if host::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) { Ok(()) } else { Err(e) }
+            if host::symlink_metadata(dir).is_ok_and(|meta| meta.file_type().is_dir()) { Ok(()) } else { Err(e) }
         }
         other => other,
     }
