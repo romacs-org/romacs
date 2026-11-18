@@ -97,7 +97,7 @@ journals what its harness writes."
   ;; Its last run ended mid-turn: Codex does not take that turn up, so its
   ;; resume ends it, and what waited goes as it is ready: its turn under way.
   (romacs-agent-codex-tests--with (:harness-session "01dd" :interrupted t :input-seq 3)
-    (romacs-agent--enqueue session (list "waited" nil nil))
+    (romacs-agent--enqueue session (romacs-agent-item "waited"))
     (let ((resume (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (echo)
       (out "id" (gethash "id" resume) "result" (romacs-mcp--object "thread" (romacs-mcp--object "id" "01dd"))))

@@ -15,6 +15,7 @@
   (require 'romacs-agent-claude)
   (require 'romacs-agent-codex)
   (require 'romacs-agent-ui))
+(require 'romacs-agent-test-attached)
 
 (defun romacs-agent-renew-tests--journal (session &rest records)
   "Make RECORDS, objects without their seq, SESSION's records: in SQLite
@@ -313,6 +314,7 @@ state root that has said two things, its writes to its harness in
   ;; goes to the new conversation, not the old.
   (romacs-agent-renew-tests--with 'claude
     (setf (romacs-agent-state session) 'running)
+    (romacs-agent-test-attach session t)
     (cl-letf (((symbol-function 'romacs-agent--live-p) (lambda (_) t)))
       (romacs-agent-renew-soon session "full")
       (romacs-agent-send-later session "next")
@@ -320,7 +322,7 @@ state root that has said two things, its writes to its harness in
       (setf (romacs-agent-state session) 'idle)
       (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
       (should (romacs-agent--held-p session))
-      (romacs-agent--send-next session t)
+      (romacs-agent--dispatch session)
       (should-not written))))
 
 (ert-deftest romacs-agent-renew-unfinished-is-finished-on-restore ()
@@ -392,6 +394,7 @@ until then."
     (while (and (not (funcall asked)) (< (float-time) end))
       (accept-process-output nil 0.05)))
   (setcar live nil)
+  (delete-process (romacs-agent-connection session))
   (romacs-agent--raise session (list :type 'input :text "note?" :own "renew-note" :seq 20))
   (romacs-agent--raise session (append (list :type 'done :seq 21) reply))
   (let ((end (+ (float-time) 30)))
@@ -405,6 +408,7 @@ there (`live') and ready; `outcome' the renewal's outcome cell."
      (let ((live (list t)) (outcome (list nil)))
        (setf (romacs-agent-options session) (list :parent "pppppppp-0000-4000-8000-000000000000")
              (romacs-agent-driver-state session) (list :ready t))
+       (romacs-agent-test-attach session)
        (cl-letf (((symbol-function 'romacs-agent--harness-live-p) (lambda (_) (car live))))
          (romacs-agent-renew session "full" (lambda (result) (setcar outcome result)))
          ,@body))))
@@ -641,6 +645,7 @@ replaying all its records gave."
       (while (and (not (cl-find-if (lambda (w) (hash-table-p (cdr w))) written)) (< (float-time) end))
         (accept-process-output nil 0.05)))
     (setcar live nil)
+    (delete-process (romacs-agent-connection session))
     (romacs-agent--raise session (list :type 'done :seq 19 :text "The follow-up was handled"))
     (accept-process-output nil 0.1)
     (should-not (car outcome))
@@ -665,7 +670,7 @@ replaying all its records gave."
     (should (eq (car (romacs-agent--codex-owed-now session)) :reply))
     (romacs-agent-renew--hold session nil)
     (should (eq (car (romacs-agent--codex-owed-now session)) :turn))
-    (romacs-agent--enqueue session (list "waiting" nil nil nil))
+    (romacs-agent--enqueue session (romacs-agent-item "waiting"))
     (romacs-agent-renew--finish session nil)
     (should (equal (mapcar #'car (romacs-agent-queue session)) '("late words" "waiting")))))
 

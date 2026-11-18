@@ -127,7 +127,7 @@ whatever TMPDIR is); `delivered' collects wakes."
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))
     ;; A message waiting for it does not make it running.
-    (romacs-agent--enqueue child (list "hello" nil nil nil))
+    (romacs-agent--enqueue child (romacs-agent-item "hello"))
     (should (equal (romacs-agent-tools--status child) "failed"))))
 
 (ert-deftest romacs-agent-launch-waits-for-attach-as-long-as-it-tries ()

@@ -14,6 +14,7 @@
   (require 'romacs-agent)
   (require 'romacs-agent-tools)
   (require 'romacs-agent-claude))
+(require 'romacs-agent-test-attached)
 
 (ert-deftest romacs-agent-delegate-brief-names-the-role ()
   (should (string-prefix-p "Act as the reviewer sub-agent for this task.\n\nRead x.el\n\n"
@@ -222,12 +223,15 @@ reaches a harness as (TASK-TITLE . TEXT), `messages' the same with the
 message's record for TEXT, `interrupted' each interrupted."
   (declare (indent 1))
   `(romacs-agent-delegate-tests--family ((a nil) (b nil))
+     (dolist (task (list parent a b)) (romacs-agent-test-attach task))
      (dolist (task (list a b)) (setf (romacs-agent-driver-state task) (list :ready t)))
      (let ((written nil) (messages nil) (interrupted nil) (romacs-agent-tools--generations (make-hash-table :test #'equal))
            (romacs-agent-tools--copies (make-hash-table :test #'equal)))
        (cl-letf (((symbol-function 'romacs-agent-tools--caller) (lambda () (romacs-agent-id ,caller)))
                  ((symbol-function 'romacs-agent--input)
-                  (lambda (task text &optional _images delivered)
+                  (lambda (task text &optional _images delivered &rest _)
+                    ;; A new turn under way from its write, as `romacs-agent--input' says.
+                    (unless (romacs-agent--turn-under-way-p task) (setf (romacs-agent-state task) 'running))
                     (push (cons (romacs-agent-title task) text) written)
                     (push (cons (romacs-agent-title task) (car delivered)) messages)))
                  ((symbol-function 'romacs-agent-interrupt) (lambda (task) (push (romacs-agent-title task) interrupted)))
@@ -235,7 +239,7 @@ message's record for TEXT, `interrupted' each interrupted."
          (cl-flet ((send (task message &optional mode)
                      (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id task) "message" message
                                                                    "mode" (or mode "queue"))))
-                   (drain (task) (setf (romacs-agent-state task) 'idle) (romacs-agent--send-next task t)))
+                   (drain (task) (setf (romacs-agent-state task) 'idle) (romacs-agent--dispatch task)))
            ,@body)))))
 
 (ert-deftest romacs-agent-delegate-send-steers-queues-and-interrupts ()
@@ -576,7 +580,7 @@ message's record for TEXT, `interrupted' each interrupted."
               ((symbol-function 'romacs-agent--configured) (lambda (_) (list :harness 'claude))))
       (romacs-agent-tools--switch (romacs-mcp--object "taskId" (romacs-agent-id a) "model" "m" "next" "go on in plan mode"))
       (setf (romacs-agent-state a) 'idle)
-      (romacs-agent--send-next a t)
+      (romacs-agent--dispatch a)
       (should (equal (cdar written) "go on in plan mode"))
       (should (equal (plist-get (cdar messages) :kind) "parent")))))
 
@@ -637,7 +641,8 @@ message's record for TEXT, `interrupted' each interrupted."
   ;; Its user answers a message in its chat: routed as an agent's answer,
   ;; said to be the user's, and kept in its journal as answered.
   (romacs-agent-delegate-tests--sending a
-    (setf (romacs-agent-dir a) (make-temp-file "a-" t))
+    ;; Not attached: its note is journaled here.
+    (setf (romacs-agent-dir a) (make-temp-file "a-" t) (romacs-agent-connection a) nil)
     (let ((asked (romacs-agent-tools--message "sibling" b)) (seen nil))
       (romacs-agent-delegate-tests--receive a asked "your interface?")
       (let* ((romacs-agent-event-functions (list (lambda (_s event) (push event seen))))
@@ -728,9 +733,10 @@ message's record for TEXT, `interrupted' each interrupted."
                                  :state 'running :driver-state (list :ready t)))
         (got nil))
     (puthash (romacs-agent-id top) top romacs-agent--sessions)
+    (romacs-agent-test-attach top)
     (cl-letf (((symbol-function 'romacs-agent-tools--caller) #'ignore)
               ((symbol-function 'romacs-agent--continue) #'ignore)
-              ((symbol-function 'romacs-agent--input) (lambda (_s _text &optional _i messages) (setq got (car messages)))))
+              ((symbol-function 'romacs-agent--input) (lambda (_s _text &optional _i messages &rest _) (setq got (car messages)))))
       (romacs-agent-tools--send (romacs-mcp--object "taskId" (romacs-agent-id top) "message" "hi" "mode" "steer"))
       (should (equal (plist-get got :kind) "external"))
       (should-not (plist-get (plist-get got :from) :session)))))

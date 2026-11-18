@@ -795,15 +795,14 @@ contents, so two equal states print the same."
 
 (ert-deftest romacs-agent-kept-a-delivery-to-a-folding-session-waits-for-its-fold ()
   ;; A tool's delivery (a wake, a message) to a session a worker folds:
-  ;; its wait for an attach starts once the fold is done, not before, so a
-  ;; long fold does not use up that wait.
+  ;; admitted once the fold is done, whether its harness runs known then.
   (require 'romacs-agent-tools)
   (romacs-agent-kept-tests--with
     (romacs-agent-kept-tests--write dir (romacs-agent-kept-tests--claude))
     (romacs-agent-kept-tests--with-workers
       (clrhash romacs-agent--sessions)
       (let ((session (romacs-agent--load dir)) (waits 0))
-        (cl-letf (((symbol-function 'romacs-agent--when-attached) (lambda (&rest _) (cl-incf waits)))
+        (cl-letf (((symbol-function 'romacs-agent--admit) (lambda (&rest _) (cl-incf waits)))
                   ((symbol-function 'romacs-agent--continue) #'ignore))
           (romacs-agent-tools--deliver session "wake" #'ignore)
           (should (= waits 0))
