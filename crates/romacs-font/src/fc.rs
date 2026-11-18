@@ -245,6 +245,36 @@ impl PatternRef<'_> {
     }
 }
 
+/// Fontconfig's current configuration, held: while this lives its address
+/// names it alone, so a configuration Fontconfig reloads compares unequal.
+pub(crate) struct Config(Owned<sys::FcConfig>);
+
+impl Config {
+    /// The current configuration once Fontconfig has brought it up to date,
+    /// as `FcFontList` on the current one does: at most once per rescan
+    /// interval it checks its configuration files and font directories, and
+    /// reloads the configuration when one changed.
+    pub fn current() -> Option<Self> {
+        // UNSAFE(Fontconfig's refresh and its reference counts are only reachable through its C API)
+        // SAFETY: FcInitBringUptoDate takes nothing; FcConfigReference on a
+        // null config references the current one, which this owner releases
+        // once.
+        let config = unsafe {
+            sys::FcInitBringUptoDate();
+            sys::FcConfigReference(null_mut())
+        };
+        Owned::new(config, sys::FcConfigDestroy).map(Self)
+    }
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl Eq for Config {}
+
 /// Add FILE's faces to the application font set.
 pub(crate) fn add_app_font_file(file: &CStr) -> bool {
     // SAFETY: a null config names the current one; FILE is NUL-terminated.

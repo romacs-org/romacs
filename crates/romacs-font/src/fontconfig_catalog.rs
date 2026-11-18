@@ -60,6 +60,13 @@ pub(crate) fn register_font_file(path: &std::path::Path) -> bool {
     fc::add_app_font_file(&file)
 }
 
+/// Fontconfig's catalog as its own refresh leaves it (`fc::Config::current`).
+pub(crate) fn current_config() -> Option<fc::Config> {
+    handle()?;
+    let _serial = serialize();
+    fc::Config::current()
+}
+
 /// What Fontconfig's answers depend on: its configuration files and
 /// directories and the font directories it scans, as it names them.
 pub(crate) fn configuration_inputs() -> Vec<String> {

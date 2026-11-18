@@ -75,9 +75,11 @@ pub struct Display {
     /// frame's font each time.
     opened: HashMap<(String, u32, i64), Option<OpenedFont>>,
     chars: HashMap<((String, u32, u16, bool, u16), char), Option<(OpenedFont, u32)>>,
-    /// Each family's fonts as `family_fonts' listed them, kept as long as
-    /// `opened' and `chars': bounded by the families faces name.
+    /// Each family's fonts as `family_fonts' listed them from `catalog', one
+    /// listing per family asked for (empty for one not installed), kept
+    /// until Fontconfig reloads its catalog or the font cache is cleared.
     families: HashMap<Option<String>, std::rc::Rc<Vec<FontEntity>>>,
+    catalog: Option<entity::Catalog>,
     /// Where `alpha' setters go, with the frame's display id: the window's
     /// opacity state.
     alpha_hook: Option<Box<dyn FnMut(u64, [f32; 2], f32)>>,
@@ -164,7 +166,7 @@ impl Worker {
 impl Display {
     pub fn new() -> Result<Self, String> {
         Ok(Self { resolver: FontResolver::new().map_err(|e| e.to_string())?,
-                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), alpha_hook: None, visual_hook: None, lose_device_hook: None, models: None,
+                  opened: HashMap::new(), chars: HashMap::new(), families: HashMap::new(), catalog: None, alpha_hook: None, visual_hook: None, lose_device_hook: None, models: None,
                   images: Default::default(), decoded: Default::default(), next_image: 0, worker: None,
                   finished: HashMap::new(), pending: Default::default(), released: Default::default(), wake: None,
                   landed: std::sync::Arc::default() })
@@ -329,11 +331,18 @@ impl romacs_vm::DisplayHost for Display {
         std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_owned())
     }
     fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity> {
-        // The family's fonts as listed once, until the font cache is cleared:
-        // `font-info' on a face's font name asks at every call.
+        // The family's listing, kept: `font-info' on a face's font name asks
+        // at every call.
         romacs_vm::DisplayHost::family_fonts(self, query.family.as_deref()).iter().filter(|entity| matches(query, entity)).cloned().collect()
     }
     fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>> {
+        // Fontconfig's refresh, which each listing used to run, may have
+        // reloaded the catalog: the listings kept from the old one go.
+        let catalog = entity::Catalog::current();
+        if catalog != self.catalog {
+            self.families.clear();
+            self.catalog = catalog;
+        }
         let key = family.map(str::to_owned);
         if let Some(found) = self.families.get(&key) { return found.clone(); }
         let fonts = std::rc::Rc::new(entity::list(family).into_iter().map(font_entity).collect::<Vec<_>>());
