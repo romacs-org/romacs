@@ -157,7 +157,7 @@ fn damaged_artifacts_are_deleted_on_lookup() {
     let store = base.join(format!("compiled-lisp-unit-{}", std::process::id()));
     std::fs::create_dir_all(&store).unwrap();
     let key = [7; 32];
-    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new("/x.el"), &[], &[], &[]);
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, "/x.el", &[], &[], &[]);
     let path = store::publish(&store, &key, &inputs, &bytes).unwrap();
     assert!(store::lookup(&store, &key, |_| true).is_some_and(|(found, _)| found == path));
     let mut damaged = bytes.clone();
@@ -166,6 +166,54 @@ fn damaged_artifacts_are_deleted_on_lookup() {
     assert!(store::lookup(&store, &key, |_| true).is_none());
     assert!(!path.exists());
     std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A file of the installation's tree is named relative to it, in a key and
+/// in an artifact's observed inputs, and only a whole component of the
+/// tree's path counts: so a copy of the tree elsewhere names it alike, and
+/// a check puts the tree it runs in back.
+#[test]
+fn files_of_the_tree_are_named_relative_to_it() {
+    let root = Path::new("/opt/romacs");
+    assert_eq!(store::rooted_path(Some(root), Path::new("/opt/romacs/lisp/subr.el")), "\0/lisp/subr.el");
+    assert_eq!(store::rooted_path(Some(root), Path::new("/opt/romacs-2/lisp/subr.el")), "/opt/romacs-2/lisp/subr.el");
+    assert_eq!(store::rooted_path(None, Path::new("/opt/romacs/lisp/subr.el")), "/opt/romacs/lisp/subr.el");
+    let record = serde_json::json!({"kind": "probe", "path": "/opt/romacs/etc/charsets", "probe": "access 4",
+                                    "result": ["/opt/romacs", "/opt/romacsy/x", 3]});
+    let kept = store::rooted(&record, Some(root));
+    assert_eq!(kept["path"], "\0/etc/charsets");
+    assert_eq!(kept["result"][0], "\0");
+    assert_eq!(kept["result"][1], "/opt/romacsy/x");
+    assert_eq!(store::unrooted(&kept, Some(Path::new("/srv/tree")))["path"], "/srv/tree/etc/charsets");
+    assert_eq!(store::unrooted(&kept, Some(root)), record);
+    assert_eq!(store::rooted(&record, None), record);
+}
+
+/// A unit that captured a path of the tree binds its artifact to that tree,
+/// so a copy elsewhere compiles its own; one that captured none serves any.
+#[test]
+fn a_unit_holding_the_trees_path_binds_its_artifact_to_the_tree() {
+    let root = Path::new("/opt/romacs");
+    assert!(store::root_record(Some(root), [b"(defconst x 1)".as_slice()].into_iter()).is_none());
+    let bound = store::root_record(Some(root), [b"..".as_slice(), b"\x05/opt/romacs/lisp/erc/erc.el".as_slice()].into_iter()).unwrap();
+    assert_eq!((bound["kind"].as_str(), bound["path"].as_str()), (Some("root"), Some("/opt/romacs")));
+    assert!(store::root_record(None, [b"/opt/romacs".as_slice()].into_iter()).is_none());
+    // A symbol interned from the path is in the name table, which is scanned as the units are.
+    let names = ["car".to_owned(), "/opt/romacs/lisp/x.el".to_owned()];
+    assert!(store::root_record(Some(root), names.iter().map(String::as_bytes)).is_some());
+}
+
+/// A copy of the tree keys its files alike; a file outside it keys by its
+/// path, a user's package as any.
+#[test]
+fn a_copy_of_the_tree_keys_alike() {
+    let digest = [3; 32];
+    let a = store::key("env", Some(Path::new("/a/tree")), Path::new("/a/tree/lisp/x.el"), &digest);
+    let b = store::key("env", Some(Path::new("/b/c/tree")), Path::new("/b/c/tree/lisp/x.el"), &digest);
+    assert_eq!(a, b);
+    let outside = store::key("env", Some(Path::new("/a/tree")), Path::new("/home/u/pkg/x.el"), &digest);
+    assert_ne!(a, outside);
+    assert_ne!(a, store::key("other env", Some(Path::new("/a/tree")), Path::new("/a/tree/lisp/x.el"), &digest));
 }
 
 /// A private store directory for one test, named NAME.
@@ -183,7 +231,7 @@ fn publish_sized(store: &Path, n: u32, size: usize) -> PathBuf {
     let mut key = [0; 32];
     key[..4].copy_from_slice(&n.to_le_bytes());
     let units = [(0, 0, 0, 1, vec![n as u8; size])];
-    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new(&format!("/f{n}.el")), &[], &[], &units);
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, &format!("/f{n}.el"), &[], &[], &units);
     store::publish(store, &key, &inputs, &bytes).unwrap()
 }
 
@@ -191,7 +239,7 @@ fn publish_sized(store: &Path, n: u32, size: usize) -> PathBuf {
 fn a_failed_compile_is_told_from_a_refused_one() {
     let store = test_store("status");
     for status in [store::Status::Source("no-byte-compile".into()), store::Status::Error("line 3: void".into())] {
-        let (bytes, inputs) = store::encode(&status, Path::new("/x.el"), &[], &[], &[]);
+        let (bytes, inputs) = store::encode(&status, "/x.el", &[], &[], &[]);
         let path = store::publish(&store, &[1; 32], &inputs, &bytes).unwrap();
         let read = store::open(&path).unwrap().status;
         assert!(match (&status, &read) {

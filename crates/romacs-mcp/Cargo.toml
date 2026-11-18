@@ -14,7 +14,7 @@ name = "romacs-agent-host"
 path = "src/host.rs"
 
 [dependencies]
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 # The agents' records in SQLite (romacs-agent-host --store), the bundled SQLite
 # romacs-vm builds.
 rusqlite = { version = "0.40", features = ["bundled"] }

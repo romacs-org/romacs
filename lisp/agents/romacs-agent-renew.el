@@ -209,30 +209,124 @@ Its records are read and replayed in a worker VM, to where they end now:
 however long its journal, the editor reads none of them."
   (let ((future (condition-case err
                     (isolate-spawn 'romacs-agent-renew--thread (romacs-agent-dir session) (romacs-agent--journal-end session)
+                                   (romacs-agent-seq session)
                                    :name "romacs-agent renew"
+                                   ;; A worker of its own: one the user waits for
+                                   ;; never queues behind background moves.
+                                   :fresh t
                                    :require '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events
-                                                           romacs-agent-renew)
+                                                           romacs-agent-turns romacs-agent-renew)
                                    :bindings (romacs-agent--fold-bindings))
                   (error (funcall fail (error-message-string err)) nil))))
     (when future
       (isolate-on-done
        future
        (lambda (done)
+         ;; Its own worker, done with: let go, answered or not.
+         (when-let* ((worker (ignore-errors (isolate-future-isolate done)))) (ignore-errors (isolate-retire worker)))
          (pcase (condition-case err (cons 'read (isolate-await done))
                   (error (cons 'failed (error-message-string err))))
            (`(read ,summary ,items) (funcall then summary items))
            (`(failed . ,why) (funcall fail why))
            (other (funcall fail (format "the worker answered %S" other)))))))))
 
-(defun romacs-agent-renew--thread (dir end)
+(declare-function romacs-agent-turns-page "romacs-agent-turns" (session &optional before limit))
+(declare-function romacs-agent-turns-first-after "romacs-agent-turns" (session seq))
+
+(defun romacs-agent-renew--thread (dir end &optional last)
   "In a worker VM: what a renewal takes of the conversation of the session
-recorded in DIR, its records to place END: (SUMMARY ITEMS), as
-`romacs-agent-renew--read' gives them."
+recorded in DIR, its records to place END, the last of them seq LAST:
+\(SUMMARY ITEMS), as `romacs-agent-renew--read' gives them.  Its turns
+since its last renewal come from their rows (romacs-agent-turns), as many
+as a brief keeps, and only what came after the newest of them from its
+records; with no rows, from its records since that renewal."
+  (require 'romacs-agent-turns)
   (let* ((romacs-agent-store-patience romacs-agent-store-patient)
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (session (romacs-agent--of-manifest dir (romacs-agent--read-json (expand-file-name "manifest.json" dir))))
-         (events (romacs-agent-events session end)))
+         (note (romacs-agent-renew--last-note session))
+         (from (if note (gethash "seq" note) 0))
+         (rows (romacs-agent-renew--rows session from (or last most-positive-fixnum)))
+         ;; What came after the newest row read, from its records; with no
+         ;; place for it there, its records since the renewal instead.
+         (after (and rows (romacs-agent--journal-after session (plist-get (car (last rows)) :last-seq))))
+         (rows (and (integerp after) rows))
+         (events (append
+                  ;; The renewal its rows come after, as its record would raise it.
+                  (and rows note (list (list :type 'renewed :brief (gethash "brief" (gethash "note" note)))))
+                  (mapcan #'romacs-agent-renew--row-events rows)
+                  (romacs-agent-events session end (cond (rows after) (note (romacs-agent-renew--place-of session from)))))))
     (list (romacs-agent-renew--compaction events) (romacs-agent-renew--items session events))))
+
+(defun romacs-agent-renew--last-note (session)
+  "The record of SESSION's last renewal note, or nil.  Only a record that
+holds the note's own type is parsed: text that speaks of renewals, its
+quotes escaped, never matches."
+  (romacs-agent--journal-last session '("\"type\":\"renew\"") (lambda (record) (romacs-agent--note-p record "renew"))))
+
+(defun romacs-agent-renew--rows (session from last)
+  "The rows of SESSION's turns after seq FROM and to seq LAST, oldest
+first, as many of the latest as a brief keeps (`romacs-agent-handoff-budget')
+and, when earlier ones are left out, the first of them and a gap's mark
+\(the symbol `gap') between: nil when it has none."
+  (let ((rows nil) (size 0) (before nil) (more t))
+    (while (and more (<= size romacs-agent-handoff-budget))
+      (let ((page (romacs-agent-turns-page session before romacs-agent-renew--rows-page)))
+        (dolist (row (plist-get page :rows))
+          (when (and (> (plist-get row :first-seq) from) (<= (plist-get row :last-seq) last)
+                     (<= size romacs-agent-handoff-budget))
+            (push row rows)
+            (cl-incf size (romacs-agent-renew--row-size row))))
+        (setq before (plist-get (car (last (plist-get page :rows))) :first-seq)
+              more (and (plist-get page :more) before (> before from)))))
+    ;; Left out: the conversation's first turn still leads, as a brief keeps it.
+    (when-let* (((and rows (> size romacs-agent-handoff-budget)))
+                (row (romacs-agent-turns-first-after session from))
+                ((< (plist-get row :first-seq) (plist-get (car rows) :first-seq))))
+      (setq rows (cons row (cons 'gap rows))))
+    rows))
+
+(defconst romacs-agent-renew--rows-page 50 "The turns' rows read at a time.")
+
+(defun romacs-agent-renew--row-size (row)
+  "About the characters ROW's turn gives a brief."
+  (+ (length (or (plist-get row :prompt) "")) (length (or (plist-get row :reply) ""))
+     (* 80 (cl-count "tool" (plist-get row :items) :key (lambda (item) (gethash "kind" item)) :test #'equal))))
+
+(defun romacs-agent-renew--input (text messages)
+  "An input event of TEXT, with MESSAGES (a row's: who said what in it, as
+tables) as its event carries them."
+  (let ((messages (mapcar (lambda (message)
+                            (let ((from (gethash "from" message)))
+                              (list :kind (gethash "kind" message)
+                                    :from (list :name (and (hash-table-p from) (gethash "name" from))))))
+                          (append messages nil))))
+    (append (list :type 'input :text text) (and messages (list :messages messages)))))
+
+(defun romacs-agent-renew--row-events (row)
+  "ROW, a turn's (`romacs-agent-turns-page'), or `gap', as the events its
+records raised, as far as a brief reads them (`romacs-agent-handoff-items')."
+  (if (eq row 'gap) (list (list :type 'gap :text "earlier turns of this conversation left out"))
+    (let ((events nil))
+      (push (romacs-agent-renew--input (plist-get row :prompt) (plist-get row :messages)) events)
+      (seq-doseq (item (plist-get row :items))
+        (pcase (gethash "kind" item)
+          ("text" (unless (gethash "parent" item)
+                    (push (list :type 'delta :text (gethash "text" item) :message (gethash "message" item)) events)
+                    (push (list :type 'message-end :message (gethash "message" item)) events)))
+          ("tool" (push (list :type 'tool :state 'started :id (gethash "id" item) :name (gethash "name" item)
+                              :input (gethash "input" item) :parent (gethash "parent" item))
+                        events))
+          ("input" (push (append (romacs-agent-renew--input (gethash "text" item) (gethash "messages" item))
+                                 (list :steer (gethash "steer" item)))
+                         events))
+          ("compacted" (push (list :type 'compacted :text (gethash "text" item)) events))))
+      (push (list :type 'done :text (plist-get row :reply)) events)
+      (nreverse events))))
+
+(defun romacs-agent-renew--place-of (session seq)
+  "The place at which SESSION's record SEQ begins, or nil."
+  (if (romacs-agent-events-p session) seq (romacs-agent--journal-file-after session seq nil t)))
 
 (defun romacs-agent-renew--compaction (events)
   "The summary of the compaction its harness made since its last turn

@@ -625,6 +625,35 @@ has it: in a transaction of its own, after the statement FIRST when given."
       (should (equal (alist-get 'romacs-agent-store-patience (funcall romacs-agent-writer-bindings-function))
                      romacs-agent-store-patient)))))
 
+;; In a home where no agent has run, nothing has made the state directory:
+;; the writer, asked to make the store, makes it, and the writer's own
+;; marks go to it (a mark once failed on no database at all).
+(ert-deftest romacs-agent-store-the-writer-makes-its-directory ()
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (require 'romacs-agent-events)
+  (let* ((home (make-temp-file "romacs-store-" t))
+         (root nil)
+         (romacs-agent-writer-queued nil)
+         (romacs-agent-store--db nil))
+    (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root)))
+      (unwind-protect
+          (progn
+            ;; At its start.
+            (setq root (expand-file-name "start/romacs/agents/" home))
+            (should-not (file-directory-p root))
+            (should (romacs-agent-store--writer-start))
+            (should (file-exists-p (romacs-agent-store--file)))
+            ;; Asked to make the store, and its mark after.
+            (setq root (expand-file-name "asked/romacs/agents/" home))
+            (should-not (file-directory-p root))
+            (should (romacs-agent-store--made))
+            (should (file-exists-p (romacs-agent-store--file)))
+            (should (romacs-agent-events--mark "aaaaaaaa-0000-4000-8000-000000000001"))
+            (should (sqlite-select (romacs-agent-store--open) "select 1 from imported where session = ?"
+                                   '("aaaaaaaa-0000-4000-8000-000000000001"))))
+        (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
+        (delete-directory home t)))))
+
 (ert-deftest romacs-agent-store-a-reader-waits-for-the-lock ()
   ;; The editor's read connection waits a moment for the lock: a WAL read
   ;; is refused while another connection checkpoints or vacuums, and a

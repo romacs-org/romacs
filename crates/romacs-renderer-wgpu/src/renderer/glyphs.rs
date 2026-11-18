@@ -1684,22 +1684,6 @@ impl WgpuRenderer {
         let mut seen_single_keys: HashSet<GlyphKey> = HashSet::new();
         let mut seen_composed_keys: HashSet<ComposedGlyphKey> = HashSet::new();
         let root_gpu_timing = self.root_gpu_timer.begin(&self.device);
-        #[cfg(feature = "video")]
-        let submitted_video_ids;
-        #[cfg(feature = "video")]
-        let gpu_timing = self.begin_video_frame_content_pass(
-            root_gpu_timing.is_none()
-                && frame_glyphs
-                    .glyphs
-                    .iter()
-                    .any(|glyph| matches!(glyph, FrameGlyph::Video { .. })),
-        );
-        #[cfg(feature = "video")]
-        let timestamp_writes = root_gpu_timing
-            .as_ref()
-            .map(|timing| timing.writes())
-            .or_else(|| gpu_timing.as_ref().map(|timing| timing.timestamp_writes()));
-        #[cfg(not(feature = "video"))]
         let timestamp_writes = root_gpu_timing.as_ref().map(|timing| timing.writes());
 
         // Create command encoder
@@ -1812,10 +1796,6 @@ impl WgpuRenderer {
 
             // === Step 7: inline media ===
             self.draw_inline_images(&mut ctx);
-            #[cfg(feature = "video")]
-            {
-                submitted_video_ids = self.draw_inline_videos(&mut ctx);
-            }
             self.draw_inline_surfaces(&mut ctx);
 
             // === Step 8: front cursors, borders, scroll bar tracks + thumbs ===
@@ -1842,9 +1822,6 @@ impl WgpuRenderer {
         }
         // A timestamp readback maps only after its resolve really submitted.
         let timed = root_gpu_timing.is_some();
-        #[cfg(feature = "video")]
-        self.submit_video_frame_content_pass(encoder, gpu_timing, submitted_video_ids, timed);
-        #[cfg(not(feature = "video"))]
         if timed {
             self.submissions.submit_now(&self.queue, [encoder.finish()]);
         } else {

@@ -1,20 +1,5 @@
 use super::RenderApp;
-#[cfg(feature = "video")]
-use super::frame_sched::{NativeWindowId, PacingAction};
 
-#[cfg(feature = "video")]
-fn video_service_request(
-    now: std::time::Instant,
-    presentations: impl IntoIterator<
-        Item = (romacs_display_protocol::types::VideoId, std::time::Duration),
-    >,
-) -> romacs_video::VideoServiceRequest {
-    let mut request = romacs_video::VideoServiceRequest::new(now);
-    for (id, lead) in presentations {
-        request.set_presentation_target(id, now.checked_add(lead).unwrap_or(now));
-    }
-    request
-}
 
 /// Publish one renderer image event, and say whether the evaluator needs to
 /// hear about it.
@@ -84,73 +69,7 @@ impl RenderApp {
     /// accepted root/child snapshots reference it. The scheduler consumes
     /// those one-shot targets; the decoder's next PTS becomes a coordinator-
     /// owned service wake rather than parallel lifecycle state.
-    #[cfg(feature = "video")]
-    pub(super) fn process_video_frames(
-        &mut self,
-        now: romacs_display_protocol::frame_time::EventTime,
-    ) {
-        tracing::trace!("process_video_frames called");
-        let presentations = self
-            .frame_windows
-            .windows
-            .iter()
-            .filter_map(|(key, window)| {
-                let native_id = match key {
-                    super::frame_windows::FrameKey::Pending => 0,
-                    super::frame_windows::FrameKey::Adopted(id) => *id,
-                };
-                self.frame_coordinator
-                    .is_eligible(super::frame_sched::NativeWindowId(native_id))
-                    .then(|| {
-                        let interval = std::time::Duration::from_secs_f64(
-                            1.0 / f64::from(Self::window_max_rate(window).get()),
-                        );
-                        (window, interval)
-                    })
-            })
-            .flat_map(|(window, interval)| {
-                window
-                    .render
-                    .presented_video_ids()
-                    .map(move |id| (id, interval))
-            });
-        // `romacs-video` keeps its own `Instant` clock domain; bridge explicitly
-        // rather than leaking EventTime into that crate's API.
-        let request = video_service_request(now.into_instant(), presentations);
-        let Some(renderer) = self.renderer.as_mut() else {
-            self.frame_coordinator
-                .reconcile_video_service_deadline(None);
-            return;
-        };
-        let service = renderer.process_pending_videos(request).clone();
-        self.frame_coordinator.reconcile_video_service_deadline(
-            service
-                .next_deadline
-                .map(romacs_display_protocol::frame_time::EventTime::from_observed_instant),
-        );
-        for ready in service.ready_frames {
-            for (key, window_state) in &self.frame_windows.windows {
-                let native_id = match key {
-                    super::frame_windows::FrameKey::Pending => 0,
-                    super::frame_windows::FrameKey::Adopted(id) => *id,
-                };
-                let native_window = NativeWindowId(native_id);
-                if !self.frame_coordinator.is_eligible(native_window) {
-                    continue;
-                }
-                if window_state.render.presents_video(ready.id) {
-                    let action = self
-                        .frame_coordinator
-                        .submit_ready_video_frame(native_window, now);
-                    if action == PacingAction::RequestRedraw {
-                        window_state.request_redraw();
-                    }
-                }
-            }
-        }
-    }
 
-    #[cfg(not(feature = "video"))]
     pub(super) fn process_video_frames(
         &mut self,
         _now: romacs_display_protocol::frame_time::EventTime,
@@ -252,7 +171,3 @@ impl RenderApp {
 #[cfg(test)]
 #[path = "media/tests/image_cache_event_test.rs"]
 mod image_cache_event_tests;
-
-#[cfg(test)]
-#[path = "tests/media_test.rs"]
-mod followup_tests;

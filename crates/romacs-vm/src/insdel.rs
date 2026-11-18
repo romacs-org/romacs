@@ -476,8 +476,9 @@ impl Vm {
     fn store_deactivated(&mut self, deactivate: usize) -> Faulty<()> {
         // This buffer's own binding is t already: nothing changes. An inherited
         // t is not its own, so the write still makes the binding.
-        let local = self.variable_binding_slot(deactivate, false).map_err(Fault::Error)?;
-        if local != deactivate && self.slots[local].value == Value::TRUE {
+        let base = self.indirect_variable(deactivate);
+        if let crate::variable_runtime::Binding::Local(local) = self.binding(base, false).map_err(Fault::Error)?
+            && self.local_value(local) == Value::TRUE {
             return Ok(());
         }
         self.assign_variable(deactivate, Value::TRUE).map_err(Fault::Error)
