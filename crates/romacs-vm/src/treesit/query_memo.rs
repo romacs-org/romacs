@@ -88,7 +88,6 @@ impl Memo {
 
 /// The memo, for every VM and thread of the process, as the grammars are.
 /// It holds no Lisp value.
-// CELL(Plain)
 static MEMO: LazyLock<Mutex<Memo>> = LazyLock::new(Mutex::default);
 
 // What the memo hands out may cross threads and be read from several at
