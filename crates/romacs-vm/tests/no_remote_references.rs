@@ -57,6 +57,8 @@ const FIELDS: &[(&str, Class)] = &[
     ("regexp", Free),
     // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
     ("regexp_cache", Cache),
+    // Compiled tree-sitter queries by grammar and text: no Value (`treesit::query_memo`).
+    ("treesit_queries", Free),
     // Copies of char tables' entries, dropped at every collection
     // (`clear_collection_caches`) and every char-table write.
     ("flat_tables", Cache),
