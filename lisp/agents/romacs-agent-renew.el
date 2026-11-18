@@ -374,12 +374,16 @@ else none.  The turn failing, or its harness ending, gives none."
       ;; Written now, through its hold, or not at all.
       (let ((item (romacs-agent-item romacs-agent-renew--note-prompt :own "renew-note" :token token)))
         (condition-case nil
-            (progn (romacs-agent--admit session item t)
-                   (when (memq item (romacs-agent-queue session))
-                     (romacs-agent--dequeue session item)
-                     (error "Not written")))
-          (error (remove-hook 'romacs-agent-event-functions waiter)
-                 (funcall then nil "selection"))))))))
+            ;; Never left queued, however this ends (a quit too): at the
+            ;; queue's head it would hold everything behind it.
+            (unwind-protect
+                (progn (romacs-agent--admit session item t)
+                       (when (memq item (romacs-agent-queue session)) (error "Not written")))
+              (romacs-agent--dequeue session item))
+          ;; A quit too: the renewal goes on without its note, and lets go
+          ;; of its hold as it does.
+          ((quit error) (remove-hook 'romacs-agent-event-functions waiter)
+           (funcall then nil "selection"))))))))
 
 (defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
   "Sessions whose journaled renewal is being finished: once each.")
