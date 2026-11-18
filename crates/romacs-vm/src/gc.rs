@@ -1332,7 +1332,7 @@ impl Vm {
             self.check_reachable(roots, &marked.code_marks, &marked.state.region_marks, &marked.state.obarray_symbols_live);
         }
         let Marked { marking, own, doomed, code_marks, census, payload: _, state } = marked;
-        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, shared_seen: _, clean_holders: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
+        let MarkState { mut native_nodes, reading: _, weak_tables, weak_kept: _, live_obarrays, obarray_symbols_live, region_marks, untraced_lists, undo_owners: _, undo: _, undo_strong: _, mut shared_seen, clean_holders: _, #[cfg(test)] weak_visits: _, #[cfg(test)] last_mark } = state;
         #[cfg(test)]
         { self.gc_stress.last_mark = last_mark; }
         lap.lap(&mut self.gc_times, Phase::Mark);
@@ -1385,6 +1385,11 @@ impl Vm {
             self.shrink_tables();
             lap.lap(&mut self.gc_times, Phase::Shrink);
             self.settle_collection(before);
+            // Every live holder was met, the image's remembered ones as
+            // roots, and none moved: the next minor's reads, in index order,
+            // so it asks no object its kind.
+            shared_seen.sort_unstable();
+            self.shared_holders = Some(shared_seen);
             lap.lap(&mut self.gc_times, Phase::Settle);
             if self.gc_stress.verify { self.check_settled(); }
             return true;
@@ -1776,13 +1781,17 @@ impl Vm {
         again.extend(self.conses.read_again().into_iter().map(|i| Value::reference(i, 3)));
         again.extend(self.closures.read_again().into_iter().map(|i| Value::reference(i, 4)));
         again.extend(self.cells.read_again().into_iter().map(|i| Value::reference(i, 5)));
-        // The old objects storing their own writes, as the last minor met
-        // them all: a later one is young, so met if it lives, and one that
-        // took the kind in place was stored into. Unknown, every object is
-        // asked its kind.
+        // The old objects storing their own writes, as the last collection
+        // met them all: a later one is young, so met if it lives, and one
+        // that took the kind in place was stored into. Unknown (after a
+        // compaction, a restore or a promote-all), every object is asked its
+        // kind.
         let shared = |object: &data::Object| shares_storage(object);
         let holders = self.shared_holders.take().unwrap_or_else(|| self.objects.iter().enumerate()
             .filter(|&(_, object)| shares_storage(object)).map(|(i, _)| i as u32).collect());
+        if self.gc_stress.verify {
+            self.check_holders(&holders);
+        }
         let mut objects = self.objects.read_again();
         let clean = self.objects.read_again_at(&holders, &shared);
         objects.extend(clean.iter().copied());
@@ -1839,6 +1848,17 @@ impl Vm {
         self.shared_holders = Some(shared_seen);
         self.settle_minor();
     }
+    /// Under verify, at a minor's start: HOLDERS, what it reads for storage
+    /// written past the entries, holds every old object in use that may
+    /// hold such storage (`shares_storage`). One a list missed would keep
+    /// a young value the minor then frees.
+    fn check_holders(&self, holders: &[u32]) {
+        for (i, object) in self.objects.iter().enumerate() {
+            if shares_storage(object) && self.objects.old(i) && !self.objects.is_free(i) {
+                assert!(u32::try_from(i).is_ok_and(|i| holders.binary_search(&i).is_ok()), "old holder {i} is not among a minor's holders");
+            }
+        }
+    }
     /// A minor's books: the young start again from here, and no poll is
     /// pending. What the last full kept stays the base a full is paced
     /// from, so what this promoted counts toward the next one.
@@ -1855,7 +1875,7 @@ impl Vm {
     }
     /// A collection's books, BEFORE being the objects it found.
     fn settle_collection(&mut self, before: usize) {
-        // A full's survivors are old unmet, and a compaction moved them.
+        // A compaction moved them; a sweep in place gives its own after this.
         self.shared_holders = None;
         self.permanent_names_added.clear();
         self.functions.settle();
@@ -2577,7 +2597,9 @@ mod tests {
           (set-buffer minor-buffer) (insert \"hello world\")
           (setq minor-indirect (make-indirect-buffer minor-buffer \"minor-listed-indirect\")) (set-buffer minor-indirect)").unwrap();
         vm.collect(&mut []);
-        // The first minor after a full asks every object its kind.
+        // A full that compacted nothing leaves the holders it met, so no
+        // minor asks every object its kind.
+        assert!(vm.shared_holders.is_some(), "the full left its list");
         assert!(vm.collect_minor(&[]));
         assert!(vm.shared_holders.is_some(), "the minor left its list");
         // Through the indirect buffer: the base's text is written, and
