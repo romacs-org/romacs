@@ -103,18 +103,56 @@ impl Leaf<'_> {
     }
     pub fn native_current_column(&mut self) -> super::super::Out {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
-        let (line, point, ..) = self.line_text()?;
-        // A part of about 16 KB at a time, polled between: it reads only.
-        let text = &line[..point];
-        let (mut column, mut at) = (0, 0);
-        while at < text.len() {
-            let mut end = (at + (1 << 14)).min(text.len());
-            while !text.is_char_boundary(end) { end += 1; }
-            column = text[at..end].chars().fold(column, |column, c| column + rule.columns(c as u32, column));
-            at = end;
-            if at < text.len() { self.native_poll()?; }
-        }
+        let stop = self.native_stop();
+        let column = match self.line_column(&rule, &stop)? {
+            Some(column) => column,
+            None => {
+                // Stopped for the probe: the poll quits, or, nothing to quit
+                // for after all, the line is counted again unpolled.
+                self.native_poll()?;
+                self.line_column(&rule, &crate::quit::NativeStop::never())?.expect("never stops")
+            }
+        };
         Value::integer(column as i64).map_err(Fault::Error)
+    }
+    /// Point's column in its line, its widths folded where the text lies,
+    /// chunk by chunk, STOP asked between chunks: None once it stopped.
+    /// Nothing is copied. A raw byte shows as `\NNN': four columns, like a
+    /// C1 control; a unibyte buffer's byte above 127 likewise.
+    fn line_column(&mut self, rule: &crate::width_rule::WidthRule, stop: &crate::quit::NativeStop) -> std::result::Result<Option<usize>, Fault> {
+        use crate::text::Newlines as _;
+        let index = self.vm.buffer_index().map_err(Fault::Error)?;
+        let mut column = 0;
+        match &self.vm.objects[index] {
+            crate::data::Object::Buffer(b) => {
+                let (r, point, body) = (b.accessible(), b.point.0, b.body());
+                let start = body.previous_newline(point, r.start.0).map_or(r.start.0, |at| at + 1);
+                let raw = b.raw_in(start..point);
+                let mut at = start;
+                for chunk in body.chunks_in(start..point) {
+                    let text = std::str::from_utf8(chunk)
+                        .map_err(|_| Fault::Error("VM2 columns cannot display non-UTF-8 bytes".into()))?;
+                    for (offset, c) in text.char_indices() {
+                        let shown = if raw.binary_search(&((at + offset) as u32)).is_ok() { 0x80 } else { c as u32 };
+                        column += rule.columns(shown, column);
+                    }
+                    at += chunk.len();
+                    if at < point && stop.due() { return Ok(None); }
+                }
+            }
+            crate::data::Object::ByteBuffer(b) => {
+                let (r, point) = (b.restriction.start.0, b.point.0);
+                let start = b.bytes.previous_newline(point, r).map_or(r, |at| at + 1);
+                for part in b.bytes[start..point].chunks(1 << 14) {
+                    for &byte in part {
+                        column += rule.columns(if byte < 128 { u32::from(byte) } else { 0x80 }, column);
+                    }
+                    if stop.due() { return Ok(None); }
+                }
+            }
+            _ => unreachable!(),
+        }
+        Ok(Some(column))
     }
 
     fn character_property(&mut self, pos: Value, key: Value) -> super::super::Out {
