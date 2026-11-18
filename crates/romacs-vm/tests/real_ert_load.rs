@@ -1077,9 +1077,11 @@ fn file_names_links_and_copies_match_gnu() {
     let mut failures = Vec::new();
     for expression in cases {
         let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
-        fixture();
+        // The untouched tree, read from a fixture of its own: reading moves
+        // access times, so the fixture is made again before each run.
         let mut untouched = vec![];
-        snapshot(&dir, &dir, &mut untouched);
+        if keeps_source.contains(&expression) { fixture(); snapshot(&dir, &dir, &mut untouched); }
+        fixture();
         let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
