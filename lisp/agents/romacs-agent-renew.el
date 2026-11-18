@@ -374,10 +374,12 @@ else none.  The turn failing, or its harness ending, gives none."
       ;; Written now, through its hold, or not at all.
       (let ((item (romacs-agent-item romacs-agent-renew--note-prompt :own "renew-note" :token token)))
         (condition-case nil
-            (progn (romacs-agent--admit session item t)
-                   (when (memq item (romacs-agent-queue session))
-                     (romacs-agent--dequeue session item)
-                     (error "Not written")))
+            ;; Never left queued, however this ends (a quit too): at the
+            ;; queue's head it would hold everything behind it.
+            (unwind-protect
+                (progn (romacs-agent--admit session item t)
+                       (when (memq item (romacs-agent-queue session)) (error "Not written")))
+              (romacs-agent--dequeue session item))
           (error (remove-hook 'romacs-agent-event-functions waiter)
                  (funcall then nil "selection"))))))))
 
