@@ -329,7 +329,9 @@ impl romacs_vm::DisplayHost for Display {
         std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_owned())
     }
     fn list_fonts(&mut self, query: &FontQuery) -> Vec<FontEntity> {
-        entity::list(query.family.as_deref()).into_iter().map(font_entity).filter(|entity| matches(query, entity)).collect()
+        // The family's fonts as listed once, until the font cache is cleared:
+        // `font-info' on a face's font name asks at every call.
+        romacs_vm::DisplayHost::family_fonts(self, query.family.as_deref()).iter().filter(|entity| matches(query, entity)).cloned().collect()
     }
     fn family_fonts(&mut self, family: Option<&str>) -> std::rc::Rc<Vec<FontEntity>> {
         let key = family.map(str::to_owned);
@@ -360,6 +362,7 @@ impl romacs_vm::DisplayHost for Display {
     }
     fn clear_font_cache(&mut self) {
         self.resolver.clear_fonts();
+        self.families.clear();
         self.opened.clear();
         self.chars.clear();
     }
