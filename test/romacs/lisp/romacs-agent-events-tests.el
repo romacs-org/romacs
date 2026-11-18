@@ -416,9 +416,17 @@ moment more under load."
          (should (sqlite-select (romacs-agent-events--db) "select 1 from staged where session = ?" (list id)))
          ;; Again, before an editor starts: staged as it is, passed over.
          (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil)))
-         ;; The next editor's start makes them its own.
-         (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
-           (romacs-agent-events--flip-soon (list id)))
+         ;; A chat opened in the next editor before its start's flip: made
+         ;; its own by that flip, never written again.
+         (let ((romacs-agent-fold-bytes 10) (romacs-agent-events-store t) (moved nil) (drawn nil))
+           (puthash id session romacs-agent--sessions)
+           (cl-letf (((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args)))
+                     ((symbol-function 'isolate-main-p) (lambda () t))
+                     ((symbol-function 'romacs-agent-events--migrate-job) (lambda (&rest _) (setq moved t) nil)))
+             (romacs-agent-events-then session (lambda () (setq drawn t))))
+           (remhash id romacs-agent--sessions)
+           (should drawn)
+           (should-not moved))
          (should (romacs-agent-events-p session))
          ;; Again: nothing to do.
          (should (equal (romacs-agent-events-migrate) (list :migrated 0 :skipped nil :failed nil))))))))

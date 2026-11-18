@@ -1029,9 +1029,14 @@ order given."
         ;; A job moving it already: it is flipped as that job ends; the
         ;; writer importing it: it is done as that import is; moved, its
         ;; waiters are let go behind the writes before them.
-        (unless (or (gethash id romacs-agent-events--migrating) (gethash id romacs-agent-events--importing)
-                    (romacs-agent-events-p session))
-          (setq romacs-agent-events--migrate-queue (cons dir (delete dir romacs-agent-events--migrate-queue)))))
+        (cond ((or (gethash id romacs-agent-events--migrating) (gethash id romacs-agent-events--importing)
+                   (romacs-agent-events-p session)))
+              ;; Staged as its journal is now (by the installer, or a worker
+              ;; before this start): made its own, not written again.
+              ((eql (caar (sqlite-select (romacs-agent-events--db) "select size from staged where session = ?" (list id)))
+                    (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir))))
+               (romacs-agent-events--flip-soon (list id)))
+              (t (setq romacs-agent-events--migrate-queue (cons dir (delete dir romacs-agent-events--migrate-queue))))))
       (romacs-agent-events--migrate-next)))))
 
 (defun romacs-agent-events--store-pending-p (session)
