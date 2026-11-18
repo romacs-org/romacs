@@ -1268,6 +1268,27 @@ fn allocate(layout: Layout) -> (usize, usize) {
     (at, zero)
 }
 
+/// Whether ARENA is the image this process adopted. From then on `alloc`
+/// serves the platform's allocator, so no block of the image is handed out
+/// again: a free that linked one into a free list would write an image page
+/// for nothing, a copy of the file's page each owner of it pays.
+#[inline]
+fn adopted_image(arena: Published) -> bool {
+    ADOPTED.load(Ordering::Acquire) && IMAGE_ARENA.published().is_some_and(|image| image.base == arena.base)
+}
+
+/// The whole pages within the LEN bytes at AT, of the adopted image ARENA,
+/// given back: each reads the file's page again, and costs no private
+/// memory. The rest of the block stays as it is: nothing reads it, and no
+/// free list holds it.
+fn release_within(arena: Published, at: usize, len: usize) {
+    let (start, end) = (at.next_multiple_of(PAGE), (at + len) / PAGE * PAGE);
+    if end > start {
+        let mut locked = Locked::take();
+        release(&locked.view(arena), start, end - start);
+    }
+}
+
 /// Give the block at AT, of LAYOUT, back to ARENA, the arena it lies in.
 #[inline(always)]
 #[expect(clippy::inline_always, reason = "every allocation runs it: plain #[inline] cost 0.95% more instructions:u on a boot from source, 17.65 G against 17.49 G")]
@@ -1365,6 +1386,10 @@ unsafe impl GlobalAlloc for Arena {
             // SAFETY: by dealloc's contract, AT holds LAYOUT.size() bytes the caller gives up.
             unsafe { std::ptr::write_bytes(at, 0, layout.size()) };
         }
+        if adopted_image(arena) {
+            release_within(arena, at as usize, layout.size());
+            return;
+        }
         free(arena, at as usize, layout);
     }
 
@@ -1384,6 +1409,11 @@ unsafe impl GlobalAlloc for Arena {
             // SAFETY: by realloc's contract, AT holds LAYOUT.size() bytes,
             // and the bytes past NEW_SIZE are given up.
             unsafe { std::ptr::write_bytes(at.add(new_size), 0, layout.size() - new_size) };
+        }
+        // An adopted image's block shrinks in place: its tail is never
+        // handed out again (`adopted_image`).
+        if new_size <= layout.size() && adopted_image(arena) {
+            return at;
         }
         match (class_of(layout.size(), align), class_of(new_size, align)) {
             (Some(old), Some(new)) if old == new => return at,
