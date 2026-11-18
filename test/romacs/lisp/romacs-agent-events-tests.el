@@ -800,3 +800,26 @@ turns, and its journal's file; a state root of its own."
                   (should (gethash dir (romacs-agent-events--held (list dir)))))
               (delete-process locker))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-events-an-import-that-fails-says-how ()
+  ;; The host's program killed by a signal reads as that signal, negated;
+  ;; an import that fails says how its stage ended and what it said last.
+  (cl-letf (((symbol-function 'romacs-agent-events--host-program) (lambda () "sh")))
+    (should (equal (romacs-agent-events--host "-c" "kill -KILL $$") '(-9 . "")))
+    (should (equal (romacs-agent-events--host "-c" "echo boom; exit 3") '(3 . "boom\n")))
+    ;; What it wrote just before it ended, all of it.
+    (should (equal (cdr (romacs-agent-events--host "-c" "head -c 200000 /dev/zero | tr '\\0' x; echo"))
+                   (concat (make-string 200000 ?x) "\n"))))
+  (cl-letf (((symbol-function 'romacs-agent-events--host-program) (lambda () "/nonexistent/romacs-agent-host")))
+    (should-not (car (romacs-agent-events--host "--stage"))))
+  (let ((session (romacs-agent--make :id "f0f0f0f0-1111-4222-8333-444455556666" :dir "/nonexistent")))
+    (cl-letf (((symbol-function 'romacs-agent-store--file) (lambda () "/nonexistent/sessions.sqlite")))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(-9 . ""))))
+        (should (string-match-p "killed by signal 9, saying nothing"
+                                (error-message-string (should-error (romacs-agent-events--stage session))))))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(nil . "Searching for program: No such file"))))
+        (should (string-match-p "did not run: Searching for program"
+                                (error-message-string (should-error (romacs-agent-events--stage session))))))
+      (cl-letf (((symbol-function 'romacs-agent-events--host) (lambda (&rest _) '(2 . "the store is locked\n"))))
+        (should (string-match-p "exited 2: the store is locked\\'"
+                                (error-message-string (should-error (romacs-agent-events--stage session)))))))))

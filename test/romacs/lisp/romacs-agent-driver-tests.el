@@ -210,5 +210,55 @@ line's `env' sets only its own configuration variable."
          (should (eq (romacs-agent-state session) 'idle))
          (should (equal (romacs-agent-answering session) "earlier")))))))
 
+(ert-deftest romacs-agent-ready-with-a-prompt-waiting-is-never-idle ()
+  ;; Ready with its first prompt waiting: the prompt goes, and the session
+  ;; never reads idle before its turn starts (a prompt in hand is no
+  ;; finished turn).  Ready with none, one no longer wanted, or one held
+  ;; for a selection to confirm: idle, the held one sent as the hold ends.
+  (romacs-agent-driver-test--registry
+   (load romacs-agent-driver-test--fakerpc nil t)
+   (dolist (case '(prompt none unwanted held))
+     (let ((romacs-agent--sessions (make-hash-table :test #'equal))
+           (written nil) (states nil))
+       (let ((session (romacs-agent--make :id "rpc-ready" :harness 'fakerpc :cwd "/tmp" :state 'starting)))
+         (puthash "rpc-ready" session romacs-agent--sessions)
+         (pcase case
+           ('prompt (romacs-agent--enqueue session (list "hello" nil nil nil nil)))
+           ('unwanted (romacs-agent--enqueue session (list "hello" nil #'ignore nil nil)))
+           ('held (romacs-agent--enqueue session (list "hello" nil nil nil nil))
+                  (setf (romacs-agent-pending-selection session) '(:model "m"))))
+         (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
+                   ((symbol-function 'romacs-agent--fold-now) #'ignore)
+                   ((symbol-function 'romacs-agent--changed)
+                    (lambda (s &rest _) (push (romacs-agent-state s) states)))
+                   ((symbol-function 'process-live-p) (lambda (_) t)))
+           (setf (romacs-agent-caught-up session) t)
+           (romacs-agent--step session)
+           (let ((initialize (car written)))
+             (romacs-agent-driver-test--feed session 1 "in" initialize)
+             (romacs-agent-driver-test--feed session 2 "out" (romacs-mcp--object "jsonrpc" "2.0" "id" (gethash "id" initialize)
+                                                                                  "result" (romacs-mcp--object))))
+           (let ((new (car written)))
+             (romacs-agent-driver-test--feed session 3 "in" new)
+             (romacs-agent-driver-test--feed session 4 "out" (romacs-mcp--object "jsonrpc" "2.0" "id" (gethash "id" new)
+                                                                                  "result" (romacs-mcp--object "sessionId" "rpc-y"))))
+           (should (romacs-agent--ready-p session))
+           (pcase case
+             ('prompt
+              ;; Written after its two startup lines.
+              (should (= (length written) 3))
+              (should (= (romacs-agent-queue-length session) 0))
+              (should-not (memq 'idle states))
+              (should-not (eq (romacs-agent-state session) 'idle)))
+             ('held
+              (should (eq (romacs-agent-state session) 'idle))
+              (should (= (romacs-agent-queue-length session) 1))
+              ;; The hold ended: the waiting prompt goes.
+              (setf (romacs-agent-pending-selection session) nil)
+              (romacs-agent--send-next session)
+              (should (= (length written) 3))
+              (should (= (romacs-agent-queue-length session) 0)))
+             (_ (should (eq (romacs-agent-state session) 'idle))))))))))
+
 (provide 'romacs-agent-driver-tests)
 ;;; romacs-agent-driver-tests.el ends here
