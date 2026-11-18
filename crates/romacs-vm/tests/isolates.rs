@@ -172,13 +172,28 @@ fn a_worker_that_is_not_this_executable_is_refused_and_a_dead_one_reported() {
     // spawn) or its death arrives at the await; either way the death is
     // reported once and the worker forgotten.
     assert_eq!(eval(&mut vm, "(let ((isolate-worker-program \"/bin/true\") (events nil)) (push (lambda (_iso event _data) (push event events)) isolate-error-functions) (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5) (isolate-error (car e))) (progn (romacs--isolate-pump 0.5) events) (isolate-list)))"), "(isolate-died (isolate-died) nil)");
-    // A worker always starts: with no world to adopt it boots from source,
-    // never refused while its callers wait.
+    // With no world to adopt, a worker boots from source.
     assert_eq!(eval(&mut vm, "(let ((isolate-boot 'world) (isolate-world nil)) (romacs--isolate-boot-arguments))"), "(\"--source\")");
     assert_eq!(eval(&mut vm, "(let ((isolate-boot 'source)) (romacs--isolate-boot-arguments))"), "(\"--source\")");
     // A worker killed from outside resolves its futures as died.
     let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (while t)))) (iso (isolate-future-isolate f))) (romacs--isolate-wait 0.2) (romacs--isolate-signal (romacs--isolate-id iso) 9) (list (condition-case e (isolate-await f 5) (isolate-died 'died)) (isolate-list)))");
     assert_eq!(out, "(died nil)");
+}
+
+/// A worker given a world it cannot adopt refuses it in its hello: its job
+/// settles with `isolate-world-unavailable` (the worker's reason and the
+/// world), the hooks hear of it once, and the world is forgotten, so later
+/// workers boot from source. The bare worker adopts no world, and boots
+/// from no source either: no zygote, so the job's own worker refuses.
+#[test]
+fn a_worker_refused_its_world_settles_its_jobs_and_the_world_is_forgotten() {
+    let mut vm = vm();
+    assert_eq!(eval(&mut vm, "(let ((isolate-boot 'world) (isolate-world (cons \"/nowhere\" \"00\")) (isolate-zygotes nil) (events nil))
+                                (push (lambda (_iso event _data) (push event events)) isolate-error-functions)
+                                (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 5) (isolate-error (list (car e) (nth 2 e))))
+                                      isolate-world (progn (romacs--isolate-pump 0.5) events) (isolate-list)
+                                      (romacs--isolate-boot-arguments)))"),
+               "((isolate-world-unavailable (\"isolate world unavailable: a bare worker adopts no world\" (\"/nowhere\" . \"00\"))) nil (isolate-world-unavailable) nil (\"--source\"))");
 }
 
 #[test]

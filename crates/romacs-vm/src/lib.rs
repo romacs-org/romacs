@@ -138,6 +138,7 @@ mod frozen;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
+pub use isolate::refuse as isolate_refuse;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};

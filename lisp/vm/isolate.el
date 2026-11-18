@@ -31,7 +31,9 @@ The launcher sets it; a VM made by `Vm::new' is bare.")
 
 (defvar isolate-world nil
   "The world this VM restored from, as (STORE . KEY), or nil.
-A worker of a `world' VM adopts exactly this world.")
+A worker of a `world' VM adopts exactly this world.  One that cannot
+refuses it: its jobs settle with `isolate-world-unavailable' and this is
+set to nil, so later workers boot from source.")
 
 (defvar isolate-compiled-store nil
   "The compiled-Lisp store this VM loads from, or nil.
@@ -231,8 +233,8 @@ spawner to run on a worker with the features they were queued for.")
 (defun romacs--isolate-boot-arguments ()
   "The worker's boot arguments for this VM's boot: the world it adopts,
 else the chain from source (a VM that booted from source, or whose world
-is gone), else a bare VM.  A worker always starts: one with no world boots
-slower, never refused while its callers wait."
+is gone), else a bare VM.  A worker with no world boots slower; one that
+cannot adopt the world refuses it once (`romacs--isolate-world-refused')."
   (cond ((and (eq isolate-boot 'world) isolate-world)
          (append (list "--world" (car isolate-world) (cdr isolate-world))
                  (and isolate-compiled-store (list "--compiled-store" isolate-compiled-store))))
@@ -787,6 +789,18 @@ have sent), its futures settle, the event is reported, and it is forgotten."
       (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
         (run-hook-with-args 'isolate-error-functions isolate event (list data children))))))
 
+(defun romacs--isolate-world-refused (isolate reason)
+  "ISOLATE's worker could not adopt `isolate-world', for REASON, and exits.
+Its jobs settle with `isolate-world-unavailable', whose data is REASON
+and the world, and the world is forgotten: later workers boot from source
+\(`romacs--isolate-boot-arguments'), none of them refused again."
+  (let ((id (romacs--isolate-id isolate))
+        (world isolate-world))
+    (setq isolate-world nil)
+    (romacs--isolate-signal id 9)
+    (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
+    (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))))
+
 (defun romacs--isolate-memory-error (budget)
   "A job's reply when its child ended for growing past BUDGET bytes."
   (list 'isolate-memory-exhausted (list budget) nil
@@ -807,10 +821,13 @@ have sent), its futures settle, the event is reported, and it is forgotten."
           (cond
            ((eq kind 'hello)
             (aset isolate 9 t)
-            (unless (romacs--isolate-hello-ok-p value (aref isolate 8))
+            (cond
+             ((not (romacs--isolate-hello-ok-p value (aref isolate 8)))
               (romacs--isolate-signal id 9)
               (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
-              (romacs--isolate-dead isolate 'isolate-refused (list "worker is not this executable" value))))
+              (romacs--isolate-dead isolate 'isolate-refused (list "worker is not this executable" value)))
+             ((romacs--isolate-hello-refusal value)
+              (romacs--isolate-world-refused isolate (romacs--isolate-hello-refusal value)))))
            ((memq kind '(result error))
             ;; A forked child exits after its one job: its end is no news.
             (when (eq (aref isolate 10) 'job) (aset isolate 3 'retired))

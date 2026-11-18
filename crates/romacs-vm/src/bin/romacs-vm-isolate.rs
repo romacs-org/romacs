@@ -13,16 +13,29 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let (mut fd, mut parent) = (None, None);
+    let (mut fd, mut parent, mut world) = (None, None, false);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--isolate" => fd = Some(args.next().ok_or("missing descriptor")?.parse::<i32>().map_err(|e| e.to_string())?),
             "--parent" => parent = Some(args.next().ok_or("missing parent pid")?.parse::<i32>().map_err(|e| e.to_string())?),
             "--bare" => {}
+            "--world" => {
+                // STORE and KEY: a bare worker has no use for them.
+                args.next().zip(args.next()).ok_or("--world needs STORE and KEY")?;
+                world = true;
+            }
+            "--compiled-store" => { args.next().ok_or("missing compiled store")?; }
             other => return Err(format!("unsupported worker argument {other}")),
         }
     }
     let socket = romacs_vm::isolate_worker_socket(fd.ok_or("--isolate FD required")?, parent)?;
+    if world {
+        // A bare worker adopts no world: it says so, as a worker refused
+        // its spawner's world does.
+        let reason = "isolate world unavailable: a bare worker adopts no world";
+        romacs_vm::isolate_refuse(socket, reason)?;
+        return Err(reason.into());
+    }
     let mut vm = Vm::new();
     vm.install_lisp_prelude()?;
     vm.serve_isolate(socket, "bare")?;

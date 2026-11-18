@@ -938,6 +938,31 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// A worker that cannot boot as its spawner asked, for REASON: its hello
+/// over SOCKET says `unavailable` and why, in place of a boot, and the
+/// worker then exits. The spawner settles the worker's jobs with that
+/// (`romacs--isolate-world-refused` in `lisp/vm/isolate.el`) rather than
+/// starting it again.
+///
+/// # Errors
+///
+/// When the hello cannot be sent: the spawner is gone.
+pub fn refuse(socket: OwnedFd, reason: &str) -> std::result::Result<(), String> {
+    let _ = crate::host::set_nonblocking(socket.as_fd());
+    let text = hello(&format!("{REFUSED}\n{}", reason.replace('\n', " ")));
+    Peer::new(socket).send(Kind::Hello, 0, &Payload::Text(text), true).map_err(|e| e.to_string())
+}
+
+/// The boot a refusing worker's hello names (`refuse`).
+const REFUSED: &str = "unavailable";
+
+/// The reason a worker's hello TEXT gives for refusing to boot as asked
+/// (`refuse`), or None for a worker that booted.
+pub(crate) fn refusal(text: &str) -> Option<&str> {
+    let mut lines = text.splitn(5, '\n').skip(3);
+    (lines.next() == Some(REFUSED)).then(|| lines.next().unwrap_or(""))
+}
+
 impl Vm {
     /// Serve a spawner over SOCKET as a worker that booted as BOOT says:
     /// the hello, then the Lisp loop until the spawner's bye or a
