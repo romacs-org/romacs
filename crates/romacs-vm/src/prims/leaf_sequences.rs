@@ -109,20 +109,24 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         matches!(cx.kind(k), leaf::Kind::String | leaf::Kind::Bytes)
             || symbols && matches!(cx.kind(k), leaf::Kind::Symbol)
     });
-    let by_string = match name {
-        Some("string-lessp") if strings(true) => true,
-        Some("value<") if strings(false) => true,
-        Some("<" | "value<") if fixnums() => false,
+    enum Native { Strings, Ascending, Descending }
+    let native = match name {
+        Some("string-lessp") if strings(true) => Native::Strings,
+        Some("value<") if strings(false) => Native::Strings,
+        Some("<" | "value<") if fixnums() => Native::Ascending,
+        Some(">") if fixnums() => Native::Descending,
         _ => return Ok(false),
     };
     let mut order: Vec<usize> = (0..keys.len()).collect();
-    if by_string {
+    // Fixnum keys read once, not at each comparison.
+    let ints = || -> Vec<i64> { keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect() };
+    // Each a stable sort: keys neither before the other keep their order,
+    // as GNU's stable sort keeps them for any predicate.
+    match native {
         // Validated above, so the comparison cannot fail.
-        order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal));
-    } else {
-        // Fixnum keys read once, not at each comparison.
-        let ints: Vec<i64> = keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect();
-        order.sort_by_key(|&i| ints[i]);
+        Native::Strings => order.sort_by(|&a, &b| cx.string_order(keys[a], keys[b]).unwrap_or(std::cmp::Ordering::Equal)),
+        Native::Ascending => { let ints = ints(); order.sort_by_key(|&i| ints[i]); }
+        Native::Descending => { let ints = ints(); order.sort_by(|&a, &b| ints[b].cmp(&ints[a])); }
     }
     let items = cx.vector_values(state[5])?;
     for (to, &from) in order.iter().enumerate() {
