@@ -108,6 +108,11 @@ fn now() -> f64 {
 }
 
 /// One journal record of LINE under KEY, kept as JSON when it is JSON.
+/// The bytes of a harness's output read at a time, and the most of its
+/// lines journaled and sent in one write.
+const OUTPUT_READ: usize = 1 << 16;
+const OUTPUT_BATCH: usize = 4096;
+
 fn record(seq: u64, key: &str, line: &str) -> String {
     let value = serde_json::from_str::<Json>(line).unwrap_or_else(|_| Json::String(line.to_owned()));
     json!({"seq": seq, "t": now(), key: value}).to_string()
@@ -135,18 +140,27 @@ const EVENTS_SCHEMA: &str = "create table if not exists events (
 /// table of the agents' SQLite database once Romacs has imported it.
 enum Store {
     /// CUT, when set, is where a failed write's line began, not yet cut
-    /// back to: nothing is appended before it is.
-    Journal { file: File, path: PathBuf, cut: Option<u64> },
+    /// back to: nothing is appended before it is.  LEN is where the next
+    /// line begins: the file's length, kept here, not asked of the file a
+    /// line at a time (a flood's lines are many).
+    Journal { file: File, path: PathBuf, cut: Option<u64>, len: u64 },
     Sqlite { db: rusqlite::Connection, session: String },
 }
 
 impl Store {
+    /// The journal FILE at PATH, appended to from its end: its length
+    /// known, or none (a failed write is cut back to where it began).
+    fn journal(file: File, path: PathBuf) -> Result<Store, String> {
+        let len = file.metadata().map_err(|e| format!("{}: {e}", path.display()))?.len();
+        Ok(Store::Journal { file, path, cut: None, len })
+    }
+
     fn open(dir: &Path, database: Option<&Path>) -> Result<Store, String> {
         match database {
             None => {
                 let path = dir.join("journal.jsonl");
                 let file = OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                Ok(Store::Journal { file, path, cut: None })
+                Store::journal(file, path)
             }
             Some(database) => {
                 let session = dir.file_name().and_then(|n| n.to_str()).ok_or("--dir names no session")?.to_owned();
@@ -179,37 +193,51 @@ impl Store {
         Ok(db)
     }
 
-    /// Keep record TEXT, its seq SEQ; on disk before this returns when SYNC.
-    fn keep(&mut self, seq: u64, text: &str, sync: bool) -> Result<(), String> {
+    /// Keep RECORDS, each (SEQ, TEXT), in order, all or none: one write of
+    /// the journal, one transaction of the database; on disk before this
+    /// returns when SYNC.
+    fn keep(&mut self, records: &[(u64, String)], sync: bool) -> Result<(), String> {
         match self {
-            Store::Journal { file, cut, .. } => {
+            Store::Journal { file, cut, len, .. } => {
                 // A write that fails part way (a full disk) is undone, so its
                 // retry appends a whole line, never one after a fragment; a
                 // cut that failed too is made before anything more is written.
                 if let Some(start) = *cut {
                     file.set_len(start).map_err(|e| e.to_string())?;
                     *cut = None;
+                    *len = start;
                 }
-                let start = file.metadata().map_err(|e| e.to_string())?.len();
-                let written = file.write_all(format!("{text}\n").as_bytes());
-                if let Err(error) = written {
+                let start = *len;
+                let lines: String = records.iter().map(|(_, text)| format!("{text}\n")).collect();
+                if let Err(error) = file.write_all(lines.as_bytes()) {
                     if file.set_len(start).is_err() { *cut = Some(start); }
                     return Err(error.to_string());
                 }
+                *len = start + lines.len() as u64;
                 if sync { let _ = file.sync_data(); }
                 Ok(())
             }
             Store::Sqlite { db, session } => {
-                let kind = serde_json::from_str::<Json>(text).ok().and_then(|record| {
-                    record.as_object()?.keys().find(|k| *k != "seq" && *k != "t").cloned()
-                });
-                let time = serde_json::from_str::<Json>(text).ok().and_then(|r| r.get("t")?.as_f64());
                 // A turn's end, an exit, a note: as durable as the journal's sync.
                 if sync { db.pragma_update(None, "synchronous", "FULL").map_err(|e| e.to_string())?; }
-                let kept = db.execute("insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)",
-                                      rusqlite::params![&*session, seq as i64, time, kind, text]);
+                let kept = (|| {
+                    let transaction = db.transaction()?;
+                    {
+                        let mut insert = transaction.prepare_cached(
+                            "insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)")?;
+                        for (seq, text) in records {
+                            let parsed = serde_json::from_str::<Json>(text).ok();
+                            let kind = parsed.as_ref().and_then(|record| {
+                                record.as_object()?.keys().find(|k| *k != "seq" && *k != "t").cloned()
+                            });
+                            let time = parsed.as_ref().and_then(|r| r.get("t")?.as_f64());
+                            insert.execute(rusqlite::params![&*session, *seq as i64, time, kind, text])?;
+                        }
+                    }
+                    transaction.commit()
+                })();
                 if sync { let _ = db.pragma_update(None, "synchronous", "NORMAL"); }
-                kept.map(|_| ()).map_err(|e| e.to_string())
+                kept.map_err(|e| e.to_string())
             }
         }
     }
@@ -267,15 +295,21 @@ impl Shared {
     /// the attached server: kept first (on disk when SYNC), so whatever is
     /// sent can be replayed.
     fn append(&mut self, text: &str, sync: bool) {
+        self.append_all(&[(self.seq, text.to_owned())], sync);
+    }
+
+    /// Keep RECORDS, each (SEQ, TEXT), then send them to the attached server
+    /// in one write: kept first, as `append' keeps one.
+    fn append_all(&mut self, records: &[(u64, String)], sync: bool) {
+        if records.is_empty() { return; }
         {
-            let seq = self.seq;
             let mut waited = std::time::Duration::ZERO;
             let mut told = false;
             // Kept before it is sent, whatever fails: a busy database, a full
             // disk or an I/O error holds up the harness's output (its pipe
             // fills) until the record is kept, never sends one it could not
             // replay.
-            while let Err(error) = self.store.keep(seq, text, sync) {
+            while let Err(error) = self.store.keep(records, sync) {
                 if waited.is_zero() { eprintln!("romacs-agent-host: store: {error}"); }
                 std::thread::sleep(STORE_RETRY);
                 waited += STORE_RETRY;
@@ -285,12 +319,16 @@ impl Shared {
                 }
             }
         }
-        self.send(text);
+        self.send_lines(&records.iter().map(|(_, text)| format!("{text}\n")).collect::<String>());
     }
 
     /// Send TEXT, a line, to the attached server.
     fn send(&mut self, text: &str) {
-        let line = format!("{text}\n");
+        self.send_lines(&format!("{text}\n"));
+    }
+
+    /// Send LINE, whole lines, to the attached server.
+    fn send_lines(&mut self, line: &str) {
         if let Some((_, stream)) = &mut self.attached
             && stream.write_all(line.as_bytes()).is_err() {
             // Closed, so the server sees its attachment end and attaches again.
@@ -310,14 +348,21 @@ impl Shared {
         true
     }
 
-    fn output(&mut self, line: &str) {
-        // A session kept in SQLite drops its thinking-token counters, which
-        // no reader folds: numbered, they would leave a seq kept nowhere,
-        // which a resumed host would number again.
-        if matches!(self.store, Store::Sqlite { .. }) && counter(line) { return; }
-        self.seq += 1;
-        let sync = line.contains("\"type\":\"result\"") || line.contains("\"method\":\"turn/completed\"");
-        self.append(&record(self.seq, "out", line), sync);
+    /// Journal and send the harness's output LINES, as they came: in one
+    /// write, a flood's lines that were there together.
+    fn output(&mut self, lines: &[String]) {
+        let mut records = Vec::with_capacity(lines.len());
+        let mut sync = false;
+        for line in lines {
+            // A session kept in SQLite drops its thinking-token counters, which
+            // no reader folds: numbered, they would leave a seq kept nowhere,
+            // which a resumed host would number again.
+            if matches!(self.store, Store::Sqlite { .. }) && counter(line) { continue; }
+            self.seq += 1;
+            sync |= line.contains("\"type\":\"result\"") || line.contains("\"method\":\"turn/completed\"");
+            records.push((self.seq, record(self.seq, "out", line)));
+        }
+        self.append_all(&records, sync);
     }
 }
 
@@ -518,18 +563,24 @@ fn run(config: Config) -> Result<i32, String> {
     let (drained_tx, drained) = std::sync::mpsc::channel();
     let reading = shared.clone();
     std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
+        let mut reader = BufReader::with_capacity(OUTPUT_READ, stdout);
         let mut line = Vec::new();
-        loop {
-            line.clear();
-            match reader.read_until(b'\n', &mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let text = String::from_utf8_lossy(&line);
-                    reading.lock().unwrap_or_else(|e| e.into_inner()).output(text.trim_end_matches(['\n', '\r']));
+        let mut batch: Vec<String> = Vec::new();
+        'reading: loop {
+            // A line, then those already read in behind it, whole: kept and
+            // sent together, a flood in few writes; a line alone at once.
+            loop {
+                line.clear();
+                match reader.read_until(b'\n', &mut line) {
+                    Ok(0) | Err(_) => break 'reading,
+                    Ok(_) => batch.push(String::from_utf8_lossy(&line).trim_end_matches(['\n', '\r']).to_owned()),
                 }
+                if batch.len() >= OUTPUT_BATCH || !reader.buffer().contains(&b'\n') { break; }
             }
+            reading.lock().unwrap_or_else(|e| e.into_inner()).output(&batch);
+            batch.clear();
         }
+        if !batch.is_empty() { reading.lock().unwrap_or_else(|e| e.into_inner()).output(&batch); }
         let _ = drained_tx.send(());
     });
     let status = wait_while_kept(&mut child, &config.dir)?;
@@ -592,8 +643,161 @@ fn wait_while_kept(child: &mut std::process::Child, dir: &Path) -> Result<std::p
     }
 }
 
+/// Whether one holds the session in DIR: its host.lock, which a host takes
+/// first and holds its whole run, and a move of its records (`--stage',
+/// `--hold') holds while it runs.  Asked by `--supervised DIR...'.
+fn supervised(dir: &Path) -> bool {
+    match OpenOptions::new().write(true).open(dir.join("host.lock")) {
+        Ok(file) => match file.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) => true,
+            Ok(()) => { let _ = file.unlock(); false }
+            Err(std::fs::TryLockError::Error(_)) => false,
+        },
+        Err(_) => false,
+    }
+}
+
+/// The session in DIR's lock, taken now or not at all: a move of its
+/// records holds it, and never waits for a host that runs.
+fn take_lock(dir: &Path) -> Result<File, String> {
+    let path = dir.join("host.lock");
+    let file = OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(format!("{}: a host holds it", path.display())),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// The rows a stage commits a transaction: others' writes wait no longer.
+const STAGE_CHUNK: usize = 20_000;
+
+/// Write SESSION's JOURNAL into DATABASE as records not yet its own (no
+/// `imported' row: no reader reads them): every record with a seq, as its
+/// line, but thinking-token counters, up to the journal's size as this
+/// began; its last line too when whole and unended.  What an earlier stage
+/// wrote is removed first; one imported already is refused.  (SIZE,
+/// COUNT): the size read and the records written.  On an error, what it
+/// wrote is removed.  lisp/agents/romacs-agent-events.el moves a journal
+/// so, then makes the records the session's own.
+fn stage(journal: &Path, database: &Path, session: &str) -> Result<(u64, u64), String> {
+    // No host writes the journal while it is read: none starts meanwhile.
+    let _lock = take_lock(journal.parent().ok_or("a journal names no session")?)?;
+    let size = std::fs::metadata(journal).map(|m| m.len()).unwrap_or(0);
+    let mut db = rusqlite::Connection::open(database).map_err(|e| format!("{}: {e}", database.display()))?;
+    db.busy_timeout(std::time::Duration::from_secs(60)).map_err(|e| e.to_string())?;
+    db.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
+    db.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+    db.execute_batch(EVENTS_SCHEMA).map_err(|e| e.to_string())?;
+    {
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let imported: bool = tx.query_row("select exists (select 1 from imported where session = ?1)", [session], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if imported { return Err(format!("staging {session}: imported already")); }
+        tx.execute("delete from events where session = ?1", [session]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+    let written = stage_lines(&mut db, journal, size, session);
+    if written.is_err() {
+        let _ = db.execute("delete from events where session = ?1", [session]);
+    }
+    written.map(|count| (size, count))
+}
+
+/// A line as the supervisor writes it, `{"KIND":...,"seq":N,"t":F}': its
+/// (SEQ, T, KIND) read from its ends, nothing else parsed; None for any
+/// other, which is parsed whole.
+fn line_fields(text: &str) -> Option<(i64, Option<f64>, Option<String>)> {
+    let rest = text.strip_prefix("{\"")?;
+    let kind = &rest[..rest.find('"')?];
+    if kind.is_empty() || kind == "seq" || kind == "t" || !kind.bytes().all(|b| b.is_ascii_lowercase())
+        || !rest[kind.len()..].starts_with("\":") {
+        return None;
+    }
+    // From a character's start: a byte 80 from the end may be inside one.
+    let start = (text.len().saturating_sub(80)..text.len()).find(|&i| text.is_char_boundary(i))?;
+    let tail = &text[start..];
+    let at = tail.rfind(",\"seq\":")?;
+    let fields = tail[at + 7..].strip_suffix('}')?;
+    let (seq, time) = fields.split_once(",\"t\":")?;
+    Some((seq.parse().ok()?, Some(time.parse().ok()?), Some(kind.to_owned())))
+}
+
+fn stage_lines(db: &mut rusqlite::Connection, journal: &Path, size: u64, session: &str) -> Result<u64, String> {
+    use std::io::Read;
+    // None at all: nothing to write.
+    if size == 0 { return Ok(0); }
+    let file = File::open(journal).map_err(|e| format!("{}: {e}", journal.display()))?;
+    let mut reader = BufReader::with_capacity(1 << 20, file.take(size));
+    let mut line = Vec::new();
+    let (mut count, mut pending) = (0u64, 0usize);
+    let mut tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).map_err(|e| e.to_string())? == 0 { break; }
+        let ended = line.last() == Some(&b'\n');
+        let text = String::from_utf8_lossy(&line);
+        let text = text.trim_end_matches(['\n', '\r']);
+        if text.trim().is_empty() { continue; }
+        if text.contains("thinking_tokens") && counter(text) { continue; }
+        // As the supervisor writes a line (its kind first, its seq and time
+        // last): read from its ends; another, parsed.
+        let (seq, time, kind) = match (ended, line_fields(text)) {
+            (true, Some(fields)) => fields,
+            _ => {
+                let record = serde_json::from_str::<Json>(text);
+                // Its last line, unended: a whole record, or nothing written.
+                if !ended && !matches!(record, Ok(Json::Object(_))) {
+                    return Err(format!("staging {session}: its last line is cut short"));
+                }
+                let Ok(Json::Object(record)) = record else { continue };
+                let Some(seq) = record.get("seq").and_then(Json::as_i64) else { continue };
+                (seq, record.get("t").and_then(Json::as_f64),
+                 record.keys().find(|key| *key != "seq" && *key != "t").cloned())
+            }
+        };
+        tx.execute("insert into events (session, seq, t, kind, record) values (?1, ?2, ?3, ?4, ?5)",
+                   rusqlite::params![session, seq, time, kind, text]).map_err(|e| e.to_string())?;
+        count += 1;
+        pending += 1;
+        if pending >= STAGE_CHUNK {
+            tx.commit().map_err(|e| e.to_string())?;
+            tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+            pending = 0;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
 fn main() {
-    let code = parse(std::env::args().skip(1).collect()).and_then(run).unwrap_or_else(|error| {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some((flag, dirs)) = args.split_first() && flag == "--supervised" {
+        // Each held session's directory, a line each.
+        for dir in dirs.iter().filter(|dir| supervised(Path::new(dir))) { println!("{dir}"); }
+        std::process::exit(0);
+    }
+    if let [flag, dir] = args.as_slice() && flag == "--hold" {
+        // Held until stdin closes: what the caller does meanwhile no host
+        // starts under.
+        match take_lock(Path::new(dir)) {
+            Ok(_lock) => {
+                println!("held");
+                let _ = std::io::stdout().flush();
+                let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+                std::process::exit(0)
+            }
+            Err(error) => { eprintln!("romacs-agent-host: {error}"); std::process::exit(1) }
+        }
+    }
+    if let [flag, journal, store_flag, database, session_flag, session] = args.as_slice()
+        && flag == "--stage" && store_flag == "--store" && session_flag == "--session" {
+        match stage(Path::new(journal), Path::new(database), session) {
+            Ok((size, count)) => { println!("{size} {count}"); std::process::exit(0) }
+            Err(error) => { eprintln!("romacs-agent-host: {error}"); std::process::exit(1) }
+        }
+    }
+    let code = parse(args).and_then(run).unwrap_or_else(|error| {
         eprintln!("romacs-agent-host: {error}");
         1
     });
@@ -603,6 +807,116 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_read_from_its_ends_is_what_a_parse_reads() {
+        // Its kind, seq and time, exactly: a float as `str::parse' reads it.
+        for (line, want) in [
+            (r#"{"in":{"x":1},"seq":3,"t":1794678357.2928457}"#, Some((3, Some(1794678357.2928457), Some("in".to_owned())))),
+            (r#"{"out":{"t":2,"seq":9},"seq":12,"t":0.1}"#, Some((12, Some(0.1), Some("out".to_owned())))),
+            (r#"{"seq":3,"t":1.5,"note":{}}"#, None),
+            // A nested seq and time are not the line's.
+            (r#"{"t":4.0,"seq":11,"note":{"seq":1,"t":2}}"#, None),
+            (r#"{"in":{"seq":5,"t":1},"seq":7,"t":2.5}"#, Some((7, Some(2.5), Some("in".to_owned())))),
+        ] {
+            assert_eq!(line_fields(line), want);
+            if let Some((seq, time, kind)) = want {
+                let parsed: Json = serde_json::from_str(line).unwrap();
+                assert_eq!(parsed["seq"].as_i64(), Some(seq));
+                assert_eq!(parsed["t"].as_f64(), time);
+                assert_eq!(parsed.as_object().unwrap().keys().find(|k| *k != "seq" && *k != "t").cloned(), kind);
+            }
+        }
+    }
+
+    #[test]
+    fn every_line_the_supervisor_writes_reads_from_its_ends_as_a_parse() {
+        // Lines as the supervisor writes them (json!, its keys sorted, so
+        // the kind first and seq, t last), times of every size and
+        // precision: the fields read from the line's ends are a parse's.
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        for i in 0..200_000u64 {
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            let time = match i % 4 {
+                0 => 1.7e9 + (x % 1_000_000_000) as f64 / 1e7,
+                1 => f64::from_bits(0x3ff0_0000_0000_0000 | (x >> 12)) * 1e9,
+                2 => (x % 100_000) as f64,
+                _ => f64::from_bits(x >> 2).abs().min(1e15),
+            };
+            let kind = ["in", "out", "note", "exit"][(i % 4) as usize];
+            let line = json!({"seq": x % 10_000_000, "t": time, kind: {"seq": 1, "t": 2.5, "text": "x"}}).to_string();
+            let parsed: Json = serde_json::from_str(&line).unwrap();
+            assert_eq!(line_fields(&line),
+                       Some((parsed["seq"].as_i64().unwrap(), parsed["t"].as_f64(), Some(kind.to_owned()))),
+                       "{line}");
+        }
+    }
+
+    #[test]
+    fn a_line_of_megabytes_is_read_from_its_ends() {
+        let line = format!("{{\"out\":{{\"text\":\"{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(4_000_000));
+        assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))));
+    }
+
+    #[test]
+    fn a_character_across_the_tails_start_is_read_past() {
+        // Each offset of a three-byte character around 80 bytes from the end.
+        for pad in 0..4 {
+            let line = format!("{{\"out\":{{\"text\":\"{}€{}\"}},\"seq\":10,\"t\":3.0}}", "a".repeat(40), "b".repeat(56 + pad));
+            assert_eq!(line_fields(&line), Some((10, Some(3.0), Some("out".to_owned()))), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_stage_writes_every_record_and_holds_its_session() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-stage-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000005");
+        std::fs::create_dir_all(&session).unwrap();
+        let journal = session.join("journal.jsonl");
+        std::fs::write(&journal, concat!(
+            "{\"in\":{\"m\":1},\"seq\":1,\"t\":1.25}\n",
+            "{\"out\":{\"subtype\":\"thinking_tokens\",\"type\":\"system\"},\"seq\":2,\"t\":2.0}\n",
+            "{\"seq\":3,\"t\":3.5,\"note\":{\"type\":\"run\"}}\n",
+            "not json\n",
+            "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":5,\"t\":5.0}\n",
+            "{\"out\":{\"x\":true},\"seq\":6,\"t\":6.0}")).unwrap();
+        let database = dir.join("sessions.sqlite");
+        // A host holding it: refused, nothing written.
+        let held = lock_session(&session).unwrap();
+        assert!(stage(&journal, &database, "s").is_err());
+        drop(held);
+        let (size, count) = stage(&journal, &database, "s").unwrap();
+        assert_eq!(size, std::fs::metadata(&journal).unwrap().len());
+        // The counter and the line no record left out; a line mentioning
+        // thinking tokens, the parsed line and the unended last one in, each
+        // as it was written.
+        assert_eq!(count, 4);
+        let rows: Vec<(i64, f64, String)> = rusqlite::Connection::open(&database).unwrap()
+            .prepare("select seq, t, kind from events where session = 's' order by seq").unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap().map_while(Result::ok).collect();
+        assert_eq!(rows, [(1, 1.25, "in".to_owned()), (3, 3.5, "note".to_owned()), (5, 5.0, "out".to_owned()),
+                          (6, 6.0, "out".to_owned())]);
+        let kept: String = rusqlite::Connection::open(&database).unwrap()
+            .query_row("select record from events where seq = 5", [], |row| row.get(0)).unwrap();
+        assert_eq!(kept, "{\"out\":{\"type\":\"assistant\",\"text\":\"thinking_tokens are words\"},\"seq\":5,\"t\":5.0}");
+        // Not held once it ended.
+        assert!(!supervised(&session));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_session_is_supervised_while_its_lock_is_held() {
+        let dir = std::env::temp_dir().join(format!("romacs-host-supervised-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // None ever ran: no lock file.
+        assert!(!supervised(&dir));
+        let held = lock_session(&dir).unwrap();
+        assert!(supervised(&dir));
+        drop(held);
+        // Its host gone: the lock file left, held by none.
+        assert!(!supervised(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_harness_whose_session_directory_was_removed_is_ended() {
@@ -646,7 +960,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -671,7 +985,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let (server, mut ours) = UnixStream::pair().unwrap();
         let serving = std::thread::spawn(move || serve(shared, server, false));
@@ -709,7 +1023,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
@@ -737,7 +1051,7 @@ mod tests {
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: None, next_attachment: 0,
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                                   stdin: Arc::new(Mutex::new(None)) }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
@@ -787,7 +1101,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
-        let mut shared = Shared { seq: 4, store: Store::Journal { file: journal, path: path.clone(), cut: None }, attached: Some((1, server)), next_attachment: 1,
+        let mut shared = Shared { seq: 4, store: Store::journal(journal, path.clone()).unwrap(), attached: Some((1, server)), next_attachment: 1,
                                   stdin: Arc::new(Mutex::new(None)) };
         let note = json!({"type": "selection"});
         assert!(shared.note(1, &note));
@@ -807,9 +1121,9 @@ mod tests {
         let database = dir.join("sessions.sqlite");
         let mut shared = Shared { seq: 0, store: Store::open(&session, Some(&database)).unwrap(), attached: None,
                                   next_attachment: 0, stdin: Arc::new(Mutex::new(None)) };
-        shared.output(r#"{"type":"assistant","message":{"id":"m1"}}"#);
-        shared.output(r#"{"type":"system","subtype":"thinking_tokens","tokens":5}"#);
-        shared.output(r#"{"type":"result","result":"done"}"#);
+        shared.output(&[r#"{"type":"assistant","message":{"id":"m1"}}"#.to_owned()]);
+        shared.output(&[r#"{"type":"system","subtype":"thinking_tokens","tokens":5}"#.to_owned()]);
+        shared.output(&[r#"{"type":"result","result":"done"}"#.to_owned()]);
         // The counter is dropped: no seq is left kept nowhere.
         assert_eq!(shared.seq, 2);
         assert_eq!(shared.store.last_seq(), 2);
@@ -870,7 +1184,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(400));
             rusqlite::Connection::open(&database).unwrap().execute_batch(EVENTS_SCHEMA).unwrap();
         }) };
-        shared.output(r#"{"type":"assistant"}"#);
+        shared.output(&[r#"{"type":"assistant"}"#.to_owned()]);
         fixer.join().unwrap();
         // Sent only once kept.
         assert!(started.elapsed() >= std::time::Duration::from_millis(400));
@@ -883,6 +1197,34 @@ mod tests {
     }
 
     #[test]
+    fn lines_output_together_are_kept_and_sent_in_order_as_one() {
+        // In a journal and in SQLite: each its own record, numbered in turn,
+        // kept in order, then sent in order; a counter dropped from SQLite's.
+        let dir = std::env::temp_dir().join(format!("romacs-host-batch-{}", std::process::id()));
+        let session = dir.join("aaaaaaaa-0000-4000-8000-000000000003");
+        std::fs::create_dir_all(&session).unwrap();
+        let lines = [r#"{"type":"assistant","n":1}"#, r#"{"type":"system","subtype":"thinking_tokens","tokens":5}"#,
+                     r#"{"type":"assistant","n":2}"#, r#"{"type":"result","result":"done"}"#].map(String::from);
+        for (database, kept) in [(None, 4), (Some(dir.join("sessions.sqlite")), 3)] {
+            let store = Store::open(&session, database.as_deref()).unwrap();
+            let (server, client) = UnixStream::pair().unwrap();
+            let mut shared = Shared { seq: 0, store, attached: Some((1, server)), next_attachment: 1,
+                                      stdin: Arc::new(Mutex::new(None)) };
+            shared.output(&lines);
+            assert_eq!(shared.store.last_seq(), kept);
+            let mut replayed = Vec::new();
+            shared.store.replay(1, |line| { replayed.push(line.to_owned()); true });
+            client.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+            let sent: Vec<String> = BufReader::new(client).lines().take(kept as usize).map(Result::unwrap).collect();
+            assert_eq!(sent, replayed);
+            let seqs: Vec<u64> = sent.iter().map(|l| serde_json::from_str::<Json>(l).unwrap()["seq"].as_u64().unwrap()).collect();
+            assert_eq!(seqs, (1..=kept).collect::<Vec<_>>());
+            assert!(sent[0].contains(r#""n":1"#) && sent[kept as usize - 2].contains(r#""n":2"#));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_journal_line_cut_short_is_undone_before_the_next() {
         let path = std::env::temp_dir().join(format!("romacs-host-partial-{}.jsonl", std::process::id()));
         std::fs::write(&path, "{\"seq\":1}\n").unwrap();
@@ -890,8 +1232,8 @@ mod tests {
         // A write that took part of its line, its cut failing too: the cut is
         // pending, and the next keep makes it before it appends.
         std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{\"seq\":2,\"out").unwrap();
-        let mut store = Store::Journal { file, path: path.clone(), cut: Some(10) };
-        store.keep(2, r#"{"seq":2}"#, false).unwrap();
+        let mut store = Store::Journal { file, path: path.clone(), cut: Some(10), len: 0 };
+        store.keep(&[(2, r#"{"seq":2}"#.to_owned())], false).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"seq\":1}\n{\"seq\":2}\n");
         let _ = std::fs::remove_file(&path);
     }

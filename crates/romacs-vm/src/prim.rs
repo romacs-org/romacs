@@ -255,7 +255,7 @@ mod leaf {
         /// `memory-use-counts': (CONSES FLOATS VECTOR-CELLS SYMBOLS STRING-CHARS INTERVALS STRINGS).
         pub(crate) fn consed(&self) -> [u64; 7] {
             let c = &self.vm.allocation.consed;
-            let symbols = (self.vm.slots.len() - self.vm.local_binding_slots.len()) as u64 + c.reused_symbols;
+            let symbols = self.vm.slots.len() as u64 + c.reused_symbols;
             [c.conses, c.floats, c.vector_cells, symbols, c.string_chars, 0, c.strings]
         }
         /// `Vm::collection_share'.
@@ -1239,7 +1239,7 @@ mod leaf {
                 return Ok(false);
             }
             let slot = self.symbol_slot(v)?;
-            Ok(self.vm.local_table(slot).map_err(Fault::Error)?.is_some())
+            Ok(self.vm.localized(slot))
         }
         /// A live dynamic (`let`) binding of V, GNU's `specpdl` scan in
         /// `Fdefvaralias`. Bindings record the variable at the chain's end.
@@ -2073,6 +2073,13 @@ pub(crate) fn line_field_position(vm: &mut Vm, n: Value, end: bool) -> std::resu
 /// (Leaf::hosted_rows_end).
 pub(crate) fn hosted_rows_end(vm: &mut Vm, window: Value, start: i64, rows: i64) -> std::result::Result<i64, Fault> {
     Leaf::new(vm).hosted_rows_end(window, start, rows)
+}
+
+/// The first position from POS before END where redisplay calls
+/// `fontification-functions` in the current buffer as WINDOW shows it
+/// (`Leaf::fontify_next`).
+pub(crate) fn fontify_next(vm: &mut Vm, window: Value, pos: i64, end: i64) -> std::result::Result<Option<i64>, Fault> {
+    Leaf::new(vm).fontify_next(window, pos, end, false)
 }
 
 /// The effective `text-quoting-style' (Leaf::text_quoting_style).

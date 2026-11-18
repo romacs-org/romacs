@@ -305,8 +305,9 @@ once, ends the session failed, saying why: never `starting' for ever."
 
 (ert-deftest romacs-agent-launch-a-resume-with-no-run-ends-failed-at-its-deadline ()
   "romacs#271: a launch no run of its harness follows within
-`romacs-agent-start-deadline' of its launch ends the session failed,
-saying so; a run disarms it, and a move before the launch is not counted."
+`romacs-agent-start-deadline' of its launch, or whose run never comes
+up, ends the session failed, saying so; a run that comes up disarms it,
+and a move before the launch is not counted."
   (romacs-agent-launch-tests--resuming
    (lambda (session placed fire due)
      (let ((launched 0))
@@ -326,13 +327,31 @@ saying so; a run disarms it, and a move before the launch is not counted."
          (setf (romacs-agent-state session) 'detached)
          (funcall fire)
          (should (eq (romacs-agent-state session) 'unstarted))
-         ;; A run began: the deadline does nothing.
+         ;; A run began and came up: the deadline does nothing, whatever
+         ;; the run's state since.
+         (dolist (state '(idle detached))
+           (setf (romacs-agent-state session) 'ended)
+           (romacs-agent-resume session)
+           (funcall placed)
+           (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session))))
+           (setf (romacs-agent-state session) state)
+           (funcall fire)
+           (should (eq (romacs-agent-state session) state)))
+         ;; A run began and never came up (its startup unanswered): failed,
+         ;; saying so, its supervisor left running (no stop, no other host):
+         ;; stopped, the queue would resume it at once.
+         (setf (romacs-agent-state session) 'ended)
          (romacs-agent-resume session)
          (funcall placed)
          (romacs-agent--raise session (list :type 'run :seq (1+ (romacs-agent-seq session))))
          (setf (romacs-agent-state session) 'starting)
-         (funcall fire)
-         (should (eq (romacs-agent-state session) 'starting))
+         (let ((touched 0))
+           (cl-letf (((symbol-function 'romacs-agent-stop) (lambda (&rest _) (cl-incf touched)))
+                     ((symbol-function 'romacs-agent--no-supervisor) (lambda (&rest _) (cl-incf touched))))
+             (funcall fire))
+           (should (= touched 0)))
+         (should (eq (romacs-agent-state session) 'unstarted))
+         (should (string-match-p "did not come up" (romacs-agent-reply session)))
          ;; Its records still moving: no deadline runs until its launch.
          (setf (romacs-agent-state session) 'ended)
          (let ((armed (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car)))
@@ -340,7 +359,7 @@ saying so; a run disarms it, and a move before the launch is not counted."
            (should (= (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car) armed))
            (funcall placed)
            (should (= (cl-count 'romacs-agent--attempt-due (funcall due) :key #'car) (1+ armed))))
-         (should (= launched 4)))))))
+         (should (= launched 6)))))))
 
 (ert-deftest romacs-agent-launch-a-renewal-whose-resume-failed-waits-for-the-next ()
   "romacs#271: a renewal whose new run failed to launch is finished by the
@@ -359,3 +378,29 @@ next resume, and its session says so."
          (funcall placed))
        (should-not (gethash session romacs-agent-renew--finishing))
        (should (cl-some (lambda (text) (string-match-p "Renewal not finished" text)) said))))))
+
+(ert-deftest romacs-agent-launch-an-earlier-runs-exit-is-no-end-of-a-launch ()
+  "A launched supervisor not yet listening is waited for, though the
+records read on hold the exit of the run before it: only an exit after
+the launched run's own `run' note ends it."
+  (romacs-agent-launch-tests--resuming
+   (lambda (session _placed _fire _due)
+     (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session)))
+           (romacs-agent--launched (make-hash-table :test #'equal)))
+       (cl-flet ((write (&rest records)
+                   (dolist (record records)
+                     (write-region (concat (romacs-agent--json record) "\n") nil journal t 'silent))))
+         (write (romacs-mcp--object "seq" 1 "t" 1.0 "note" (romacs-mcp--object "type" "run"))
+                (romacs-mcp--object "seq" 2 "t" 2.0 "exit" 0))
+         (setf (romacs-agent-journal-start session) 0)
+         ;; No launch waits: its last run ended.
+         (should (romacs-agent--caught-up-p session))
+         ;; A launch waits: that exit was the run before it.
+         (puthash (romacs-agent-id session) (romacs-agent-seq session) romacs-agent--launched)
+         (should-not (romacs-agent--caught-up-p session))
+         ;; The launched run began, read by one try; it ended before the
+         ;; next one attached.
+         (write (romacs-mcp--object "seq" 3 "t" 3.0 "note" (romacs-mcp--object "type" "run")))
+         (should-not (romacs-agent--caught-up-p session))
+         (write (romacs-mcp--object "seq" 4 "t" 4.0 "exit" 0))
+         (should (romacs-agent--caught-up-p session)))))))

@@ -829,7 +829,7 @@ pub struct WindowEnd {
 /// line's start; GUTTER, the line number's width before the text; whether
 /// the row is TRUNCATED on the LEFT (scrolled) or RIGHT; and whether point
 /// is AT_EOL, on its line's newline or the text's end.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, romacs_snapshot::Snapshot)]
 pub struct PointPlace {
     pub x: f32,
     pub line_x: f32,

@@ -135,7 +135,17 @@ fn compiled_store(worlds: Option<&Path>, interactive: bool) -> Option<(PathBuf, 
     if let Some(worlds) = worlds { return made(worlds).then(|| (worlds.with_file_name("lisp"), true)); }
     let user = super::world::default_store(|name| std::env::var_os(name)).filter(|store| made(store));
     let installed = beside_executable("lisp")?;
-    let private = |dir: &Path| { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().mode(0o700).create(dir) };
+    // Made, or found made as a directory by a session starting beside this
+    // one: whoever comes first, both use the installation's store.
+    let private = |dir: &Path| {
+        use std::os::unix::fs::DirBuilderExt;
+        match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) { Ok(()) } else { Err(e) }
+            }
+            other => other,
+        }
+    };
     if installed.is_dir() || (user.is_some() && private(&installed).is_ok()) {
         return Some((installed, user.is_some()));
     }
@@ -171,6 +181,15 @@ pub fn configure_worker_compiled_lisp(store: PathBuf) {
 fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
+    // The tree the Lisp lies in, by its true name (DIR is canonical): the
+    // directory holding it as `lisp/` beside `etc/`, as every runtime tree
+    // does, however it was named (ROMACS_LISP_DIR, as tools/test-ert names
+    // it, or the executable's place). Artifacts and the compile identity name
+    // its files relative to it (`compiled_lisp::Config::root`). A Lisp tree
+    // with no such tree around it: every file by its path.
+    let root = dir.parent()
+        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
+        .map(Path::to_path_buf);
     let mut runtime = vec![dir.clone()];
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
@@ -188,14 +207,25 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         inherited: &COMPILE_INHERITS,
         defer_misses,
         store,
-        // The world is made once (its key hashes the executable and
-        // libraries); only whether its build was published is asked again.
+        // What an artifact is computed from, wherever this executable and
+        // its Lisp tree lie: this build's inputs (`ROMACS_BUILD_ID`, build.rs),
+        // the libraries it loaded, the compile world's geometry and the Lisp
+        // its build read, named relative to the tree. Not the executable's
+        // file: two builds of one commit differ there (romacs#277). The world
+        // is made once (its key still binds the executable); only whether its
+        // build was published is asked again.
         identity: Box::new({
             let world = std::sync::OnceLock::new();
-            move || world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?
-                .lisp_identity().map(|id| format!("compile world {id}"))
+            let roots: Vec<PathBuf> = root.iter().cloned().collect();
+            move || {
+                let lisp = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?
+                    .lisp_files_digest(&roots)?;
+                let libraries = romacs_vm::world::store::libraries_identity().ok()?;
+                Some(format!("compile build {} libraries {libraries} {GEOMETRY} lisp {lisp}", env!("ROMACS_BUILD_ID")))
+            }
         }),
         runtime,
+        root,
     });
 }
 
@@ -386,9 +416,13 @@ fn world(store: Option<PathBuf>, dir: &Path) -> Option<World> {
 /// executable's path (the family `prune` bounds). No environment: the
 /// chain up to the dump point reads none of the user's directories or
 /// locale, and what else of the environment it reads its records bind.
+/// The batch world's frame: GNU batch's initial terminal frame, 80 columns
+/// by 25 lines of 1x1 characters (ledger/divergences VM2-WIN5).
+const GEOMETRY: &str = "geometry 80 25 1 1";
+
 fn recipe(dir: &Path) -> Vec<String> {
     let exe = std::env::current_exe().map_or_else(|e| e.to_string(), |p| p.display().to_string());
-    vec!["consumer romacs-vm-gui".into(), "launch batch".into(), format!("exe {exe}"), "geometry 80 25 1 1".into(),
+    vec!["consumer romacs-vm-gui".into(), "launch batch".into(), format!("exe {exe}"), GEOMETRY.into(),
          format!("lisp {}", dir.display())]
 }
 

@@ -693,11 +693,17 @@ asked first: nil drops the message.  MESSAGES say whose it is
 \(`romacs-agent--input')."
   (let ((deliver (lambda () (when (or (null valid) (funcall valid))
                               (romacs-agent-send session text delivered valid nil messages)))))
-    (if (romacs-agent--per-turn-p session) (funcall deliver)
+    (cond
+     ;; A worker folds it still: delivered once it is folded, its attach's
+     ;; wait counted from then.
+     ((romacs-agent--folding-p session)
+      (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages))))
+     ((romacs-agent--per-turn-p session) (funcall deliver))
+     (t
       ;; A parent whose harness was stopped or ended is resumed to take it.
       (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
         (romacs-agent--continue session))
-      (romacs-agent--when-attached session deliver))))
+      (romacs-agent--when-attached session deliver)))))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")
@@ -1314,7 +1320,11 @@ says."
 (defun romacs-agent-tools--keep-resume (session time)
   "Record in SESSION's manifest that it resumes at TIME (nil: no longer):
 its own record, written as asked, so a restarted server arms it again."
-  (romacs-agent--manifest-put session "resumeAt" (or time :null)))
+  ;; Marked before it is kept, unmarked after: a stop between leaves a mark
+  ;; too many, never a resume unmarked.
+  (when time (romacs-agent-mark (romacs-agent-id session) 'resume t))
+  (romacs-agent--manifest-put session "resumeAt" (or time :null))
+  (unless time (romacs-agent-mark (romacs-agent-id session) 'resume nil)))
 
 (defun romacs-agent-tools--arm-resume (session time)
   (puthash session (cons time (run-at-time (max 1 (- time (float-time))) nil #'romacs-agent-tools--resume session time))
@@ -1646,10 +1656,12 @@ editor is between commands; tell the calling session its verdict."
      ;; tells it from the wake file.
      :before (and session (lambda ()
                             (setq romacs-restart-requester id)
+                            (romacs-agent-mark id 'wake t)
                             (write-region "verdict" nil (romacs-agent-tools--restart-wake-file session) nil 'silent)))
      :failed (and session (lambda (why)
                             (setq romacs-restart-requester nil)
                             (ignore-errors (delete-file (romacs-agent-tools--restart-wake-file session)))
+                            (romacs-agent-mark id 'wake nil)
                             (romacs-agent-tools--deliver session (format "Romacs restart did not start, this session goes on: %s" why)
                                                          #'ignore))))
     (romacs-mcp--object
@@ -1685,18 +1697,19 @@ wake file says `verdict' is told by the restart's supervisor instead
         (when (and (file-exists-p file)
                    (not (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "verdict")))
           (romacs-agent-tools--deliver session (or text (setq text (romacs-agent-tools--build-text)))
-                                       (lambda () (ignore-errors (delete-file file)))
+                                       (lambda () (ignore-errors (delete-file file))
+                                         (romacs-agent-mark (romacs-agent-id session) 'wake nil))
                                        (lambda () (file-exists-p file))))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-tools--restart-wakes)
 ;; A session that asked to be told of a restart is loaded as a restore
 ;; runs, so it is told: one left a row would never be.
-(add-hook 'romacs-agent-pending-functions
-          (lambda (dir _manifest) (file-exists-p (expand-file-name "restart-wake" dir))))
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'wake (lambda (dir _manifest) (file-exists-p (expand-file-name "restart-wake" dir)))))
 ;; A session due to resume when its limit resets is loaded as a restore
 ;; runs, so its resume is set again.
-(add-hook 'romacs-agent-pending-functions
-          (lambda (_dir manifest) (numberp (gethash "resumeAt" manifest))))
+(add-to-list 'romacs-agent-mark-kinds
+             (cons 'resume (lambda (_dir manifest) (numberp (gethash "resumeAt" manifest)))))
 
 ;;; Options
 
