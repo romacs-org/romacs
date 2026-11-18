@@ -4249,13 +4249,18 @@ query of its own inputs, in a journal by grep."
                                           (list (romacs-agent-id session) (funcall key id)))
                            t)
                     (error 'unsure))))))
+           ;; No directory: no records, none sent.
+           ((null (romacs-agent-dir session)) #'ignore)
            (t
             (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
               (lambda (id)
-                (and (file-exists-p journal)
-                     (let ((status (condition-case nil (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)
+                ;; Not there, in a directory it can read: never written.
+                (cond ((file-exists-p journal)
+                       (let ((status (condition-case nil (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)
                                      (error 2))))
-                       (cond ((eql status 0) t) ((eql status 1) nil) (t 'unsure)))))))))
+                         (cond ((eql status 0) t) ((eql status 1) nil) (t 'unsure))))
+                      ((file-accessible-directory-p (romacs-agent-dir session)) nil)
+                      (t 'unsure)))))))
         (sent nil) (unsure nil))
     (dolist (id ids)
       (let ((said (funcall look id)))
