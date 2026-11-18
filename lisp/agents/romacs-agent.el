@@ -1476,14 +1476,16 @@ another session in its envelope; a delegated task's results (each with
     (mapcar (lambda (m) (plist-put (plist-put (copy-sequence m) :text (or (plist-get m :text) text)) :time now))
             messages)))
 
-(defun romacs-agent--input (session text &optional images messages own)
+(defun romacs-agent--input (session text &optional images messages own queued)
   "Write TEXT to SESSION's persistent harness as the user's message, with
 the attached IMAGES; MESSAGES, when given, say it comes from other
 sessions (`romacs-agent-make-message'): the harness reads it as
 `romacs-agent--messages-text' says, and the journal keeps them as
 romacsMessages beside TEXT.  OWN, when given, names what Romacs asks of
 it itself \(a string kept as the record's romacsOwn): no one's message,
-and its turn's end no one's answer (`romacs-agent-own-turn').  The
+and its turn's end no one's answer (`romacs-agent-own-turn').  QUEUED,
+the id of the kept message it is (`romacs-agent--keep-item'), is kept as
+the record's romacsQueued: a restore sends it no second time.  The
 journal keeps the message as it would be without them, and their files:
 a replay reads every record, and no image's bytes.  Both are made with
 one request id: the journal's is the one written."
@@ -1499,6 +1501,7 @@ one request id: the journal's is the one written."
     ;; The journal's alone: the id names the message's turn.
     (puthash "romacsRequest" id record)
     (when own (puthash "romacsOwn" own record))
+    (when queued (puthash "romacsQueued" queued record))
     (when images (puthash "images" (vconcat images) record))
     (when messages (puthash "romacsMessages" (vconcat (mapcar #'romacs-agent--message-json messages)) record))
     (when brief (puthash "romacsBrief" t record))
@@ -3688,7 +3691,8 @@ first).  One timer for however many records come meanwhile."
       (romacs-agent--turn session (romacs-agent-item-text item) (romacs-agent-item-images item)
                           (romacs-agent-item-messages item))
     (romacs-agent--input session (romacs-agent-item-text item) (romacs-agent-item-images item)
-                         (romacs-agent-item-messages item) (romacs-agent-item-own item))))
+                         (romacs-agent-item-messages item) (romacs-agent-item-own item)
+                         (romacs-agent-item-id item))))
 
 (defun romacs-agent--open (session)
   "Start what lets SESSION's waiting messages go: a supervisor still
@@ -4218,6 +4222,19 @@ files the user attached to it.  MESSAGES: it comes from other sessions
     (cl-decf (romacs-agent-queue-length session))
     (romacs-agent--unkeep-item session item)
     t))
+
+(defun romacs-agent--sent-queued (session)
+  "The ids of kept messages SESSION's last turns' records say were sent
+\(romacsQueued): one written as an editor ended, its kept row not yet let
+go, is among them."
+  (let ((ids nil))
+    (romacs-agent--read-journal
+     session (lambda (record)
+               (when-let* ((in (gethash "in" record)) ((hash-table-p in))
+                           (id (gethash "romacsQueued" in)) ((stringp id)))
+                 (push id ids)))
+     (car (romacs-agent--journal-tail session 5)))
+    ids))
 
 (defun romacs-agent--clear-queue (session)
   "Take every message out of SESSION's queue, and every one kept for it,

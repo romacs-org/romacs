@@ -367,6 +367,40 @@ message is sent, `romacs-agent-send' by default.")
       (should-not (romacs-agent-store-queued id))
       (should-not (file-exists-p mark)))))
 
+(ert-deftest romacs-agent-a-kept-message-written-is-never-sent-twice ()
+  ;; Written to its harness, its id in the journal's input record, then
+  ;; the editor ends before its kept row is let go: the session made
+  ;; again sends it no second time, and its row goes.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "b1b1b1b1-0000-4000-8000-000000000000")
+           (dir (expand-file-name id (romacs-agent--state-root)))
+           (session (progn (make-directory dir t)
+                           (romacs-agent-test-attach
+                            (romacs-agent--make :id id :harness 'claude :state 'running :title "once" :dir dir)
+                            t)))
+           (journaled nil) (sent nil))
+      (romacs-agent-send-later session "once")
+      (setf (romacs-agent-state session) 'idle)
+      ;; Its write journals what the supervisor would; its row's delete
+      ;; never commits (the editor ends first).
+      (cl-letf (((symbol-function 'romacs-agent--line)
+                 (lambda (_ object &optional journal) (setq journaled (or journal object))))
+                ((symbol-function 'romacs-agent--fold-now) #'ignore)
+                ((symbol-function 'romacs-agent-store-queued-delete) #'ignore))
+        (romacs-agent--dispatch session))
+      (should (gethash "romacsQueued" journaled))
+      (write-region (concat (json-serialize (romacs-mcp--object "seq" 1 "t" 1.0 "in" journaled)) "\n")
+                    nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("once")))
+      (let ((again (romacs-agent-test-attach
+                    (romacs-agent--make :id id :harness 'claude :state 'idle :title "once" :dir dir) t)))
+        (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil))
+        (should-not sent)
+        (should-not (romacs-agent-queue again)))
+      (should-not (romacs-agent-store-queued id)))))
+
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):
   ;; still cut, until a real done; a journal replayed anew says the same.

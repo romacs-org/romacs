@@ -674,7 +674,13 @@ may take it.  A cancelled task's is let go."
     (let* ((waiting (romacs-agent-queue session))
            (ids (delq nil (mapcar #'romacs-agent-item-id waiting)))
            (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
-                               (romacs-agent-store-queued (romacs-agent-id session)))))
+                               (romacs-agent-store-queued (romacs-agent-id session))))
+           ;; Sent already (an editor that ended before its row went): let go.
+           (sent (and kept (romacs-agent--sent-queued session))))
+      (dolist (item kept)
+        (when (member (romacs-agent-item-id item) sent)
+          (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))))
+      (setq kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) sent)) kept))
       (when kept
         ;; What was sent as it loaded goes after what was kept, but what
         ;; was put first: placed by its order, not by the clock, and its
