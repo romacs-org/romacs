@@ -101,11 +101,15 @@ enum Native { Strings, Ascending, Descending }
 /// every key is of a type it compares without signaling. GNU sort.c marks
 /// this point as where keys would be checked for faster comparison.
 fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, Fault> {
+    // The predicate resolved as a call would: aliases followed; a macro
+    // (`(macro . F)`, rebuilt from the slot's flag) or an autoload ends the
+    // walk, and the general path calls it, signalling as GNU does.
     let mut f = state[1];
     let mut name = None;
     for _ in 0..64 {
         if let Some(found) = crate::prim::name(f) { name = Some(found); break; }
-        match cx.symbol_function(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
+        if !matches!(cx.kind(f), leaf::Kind::Symbol) { return Ok(false); }
+        match cx.symbol_definition(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
     }
     let keys = cx.vector_values(state[6])?;
     let fixnums = || keys.iter().all(|k| k.integer_value().is_some());
