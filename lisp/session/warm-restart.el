@@ -226,13 +226,14 @@ where it was."
 
 (defun warm-restart--holds-secret-p (object)
   "Whether OBJECT, data, holds a secret's text anywhere: a string with
-`romacs-secret' text, in a cons, a vector, a record, a hash table's key
-or value, or a string's property value.  Shared and circular structure is walked
-once, and a list's spine by a loop, however long."
+`romacs-secret' text, in a cons, a vector, a record, a char table, a
+hash table's key or value, or a string's property value.  Shared and
+circular structure is walked once, and a list's spine by a loop, however
+long."
   (let ((seen (make-hash-table :test #'eq)))
     (cl-labels
         ((walk (x)
-           (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x))) nil)
+           (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x) (char-table-p x))) nil)
                  ((gethash x seen) nil)
                  (t (puthash x t seen)
                     (cond ((stringp x)
@@ -246,6 +247,12 @@ once, and a list's spine by a loop, however long."
                                  (if (gethash tail seen) (setq tail nil) (puthash tail t seen))))
                              (or found (walk tail))))
                           ((or (vectorp x) (recordp x)) (cl-loop for i below (length x) thereis (walk (aref x i))))
+                          ((char-table-p x)
+                           (catch 'found
+                             (map-char-table (lambda (_c v) (when (walk v) (throw 'found t))) x)
+                             (or (walk (char-table-parent x))
+                                 (cl-loop for i below (or (get (char-table-subtype x) 'char-table-extra-slots) 0)
+                                          thereis (walk (char-table-extra-slot x i))))))
                           (t (catch 'found
                                (maphash (lambda (k v) (when (or (walk k) (walk v)) (throw 'found t))) x)
                                nil)))))))
@@ -256,15 +263,18 @@ once, and a list's spine by a loop, however long."
 secret (`warm-restart--holds-secret-p'); else a copy, its sharing and
 cycles kept, strings' included, in which each string with secret text
 is redacted (`warm-restart--redacted') and each other string whose
-properties hold one loses its properties.  A hash table's starred keys
-may then be equal, and one entry of each such key is kept."
+properties hold one loses its properties, and a char table that holds one
+is nil.  A hash table's starred keys may then be equal, and one entry of
+each such key is kept."
   (if (not (warm-restart--holds-secret-p object))
       object
     (let ((copies (make-hash-table :test #'eq)))
       (cl-labels
           ((copy (x)
-             (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x))) x)
+             (cond ((not (or (stringp x) (consp x) (vectorp x) (recordp x) (hash-table-p x) (char-table-p x))) x)
                    ((gethash x copies))
+                   ;; Not rebuilt: a char table holding a secret is not carried.
+                   ((char-table-p x) (and (not (warm-restart--holds-secret-p x)) x))
                    ((stringp x)
                     (puthash x (cond ((text-property-not-all 0 (length x) 'romacs-secret nil x) (warm-restart--redacted x))
                                      ((warm-restart--holds-secret-p (object-intervals x)) (substring-no-properties x))
@@ -502,14 +512,19 @@ Its text goes in the image when it is not the file's: a snapshot of it
 \(`warm-restart--snapshot'), taken with the rest of the record, is
 pushed onto BLOBS, a cell (COUNT . BUFFERS), and its index named; the
 record is `:starred' when the snapshot's secrets are."
-  (let* ((undo (warm-restart--portable-undo buffer-undo-list))
+  (let* ((tick (buffer-chars-modified-tick))
+         (undo (warm-restart--portable-undo buffer-undo-list))
+         (runs (warm-restart--property-runs))
          (carry (or (eq strategy 'text) (buffer-modified-p) (not (file-exists-p buffer-file-name))))
-         (snapshot (and carry (warm-restart--snapshot (current-buffer)))))
+         (snapshot (and carry (warm-restart--snapshot (current-buffer))))
+         ;; Code run meanwhile (a hook after a collection) changed the text.
+         (stale (/= tick (buffer-chars-modified-tick))))
     (append (warm-restart--common)
             (list :strategy strategy :hash (with-current-buffer (or (car snapshot) (current-buffer)) (buffer-hash))
-                  :size (buffer-size)
-                  :modified (and (buffer-modified-p) t) :undo (car undo) :undo-cut (cdr undo)
-                  :unibyte (not enable-multibyte-characters) :properties (warm-restart--property-runs))
+                  :size (with-current-buffer (or (car snapshot) (current-buffer)) (buffer-size))
+                  :modified (and (buffer-modified-p) t)
+                  :undo (if stale nil (car undo)) :undo-cut (or stale (cdr undo))
+                  :unibyte (not enable-multibyte-characters) :properties (and (not stale) runs))
             (and (cdr snapshot) (list :starred t))
             (and buffer-file-name
                  (list :file buffer-file-name :modtime (visited-file-modtime) :coding buffer-file-coding-system))
@@ -541,15 +556,25 @@ STARRED."
 \(BUFFERS STARRED . RENAMES), STARRED those records as strategy `starred',
 under \"NAME <starred>\" free of every record's name, with no file nor
 file locals, their header saying what they are; RENAMES the windows'
-\(OLD . NEW).  An image keeps STARRED out of `:buffers', so no reader
-that predates them restores them, nor lands their stars in a buffer
-visiting the file; this one restores each as a new buffer that visits
-no file (`warm-restart--restore-starred')."
-  (let ((taken (make-hash-table :test #'equal)) buffers starred renames)
+\(OLD . NEW).  An indirect record on one goes with it into STARRED, as it
+is.  An image keeps STARRED out of `:buffers', so no reader that
+predates them restores them, nor lands their stars in a buffer visiting
+the file, and `:buffers' names no base it lacks; this one restores each
+as a new buffer that visits no file (`warm-restart--restore-starred'),
+its clones on it."
+  (let ((taken (make-hash-table :test #'equal))
+        (apart (cl-loop for record in records
+                        when (and (plist-get record :starred) (plist-get record :file)) collect (plist-get record :id)))
+        buffers starred renames)
     (dolist (record records) (when (plist-get record :name) (puthash (plist-get record :name) t taken)))
     (dolist (record records)
-      (if (not (and (plist-get record :starred) (plist-get record :file)))
-          (push record buffers)
+      (cond
+       ;; Its clones go with it: `:buffers' never names a base it lacks.
+       ((and (eq (plist-get record :strategy) 'indirect) (member (plist-get record :base) apart))
+        (push record starred))
+       ((not (member (plist-get record :id) apart))
+        (push record buffers))
+       (t
         (let ((name (warm-restart--free-name (format "%s <starred>" (plist-get record :name)) (lambda (n) (gethash n taken))))
               (copy (copy-sequence record)))
           (puthash name t taken)
@@ -560,7 +585,7 @@ no file (`warm-restart--restore-starred')."
                                                                                   buffer-file-number header-line-format)))
                                                     (plist-get record :locals)))))
             (setq copy (plist-put copy (car pair) (cdr pair))))
-          (push copy starred))))
+          (push copy starred)))))
     (cons (nreverse buffers) (cons (nreverse starred) renames))))
 
 (defun warm-restart--restore-starred (record blobs)
