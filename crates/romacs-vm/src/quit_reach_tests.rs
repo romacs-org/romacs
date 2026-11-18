@@ -342,7 +342,7 @@ fn a_quit_scope_ends_at_lisp_entry() {
     // Inside a primitive's scope, as `Leaf::quittable` grants it.
     vm.native_quit = true;
     let count = vm.reader_call(predicate, &[]);
-    assert_eq!(count.ok().and_then(|v| v.integer_value()), Some(3000), "the Lisp ran to its end");
+    assert_eq!(count.ok().and_then(Value::integer_value), Some(3000), "the Lisp ran to its end");
     assert!(vm.native_quit, "the scope is the caller's again once the Lisp returns");
 }
 
