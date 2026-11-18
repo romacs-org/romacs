@@ -299,7 +299,9 @@ fn casing_two_letters_far_apart_shows_before_its_parse() {
         (insert \"INT a;\\n\") (dotimes (_ 1000) (insert \"INT X0123;\\n\")) (insert \"INT b;\\n\") \
         (setq treesit-test-parser (treesit-parser-create 'c)) \
         (treesit-parser-add-notifier treesit-test-parser 'treesit-test-parsed) \
-        (add-hook 'pre-redisplay-functions (lambda (_) (treesit-parser-root-node treesit-test-parser))))");
+        (add-hook 'pre-redisplay-functions (lambda (_) (treesit-parser-root-node treesit-test-parser))) \
+        (add-hook 'after-change-functions (lambda (beg end _) (put-text-property beg end 'fontified nil))) \
+        (setq fontification-functions (list (lambda (pos) (put-text-property pos (point-max) 'fontified t)))))");
     vm.eval_source(&setup).unwrap();
     vm.frame_snapshot(800, 600).unwrap();
     let parsed = |vm: &mut Vm| vm.eval_source("parsed").and_then(|v| v.display()).unwrap();
