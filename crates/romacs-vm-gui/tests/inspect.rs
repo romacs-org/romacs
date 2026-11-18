@@ -154,11 +154,16 @@ fn a_long_motion_is_inspected_and_finishes() {
     let (answer, _) = inspect_until(&session.dir, |answer| calls(answer, "vertical-motion") || moved.exists());
     assert_eq!(answer["status"], "ok", "{answer}");
     assert!(calls(&answer, "vertical-motion"), "{answer}");
-    while !session.dir.join("moved").exists() {
+    // `write-region' creates the file before it writes the text, so wait
+    // for the text, not for the file.
+    let text = loop {
+        if let Ok(text) = std::fs::read_to_string(&moved) && !text.is_empty() {
+            break text;
+        }
         assert!(start.elapsed() < Duration::from_secs(120), "the motion never ended");
         std::thread::sleep(Duration::from_millis(20));
-    }
-    assert_eq!(std::fs::read_to_string(session.dir.join("moved")).unwrap(), "5000000");
+    };
+    assert_eq!(text, "5000000");
 }
 
 #[test]
