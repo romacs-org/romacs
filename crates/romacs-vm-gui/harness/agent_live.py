@@ -306,7 +306,11 @@ class Agents(Server):
         return host['harness']
 
     def logged(self):
-        return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+        """The fake harnesses' log, its whole lines: one a fake writes this
+        moment has no newline yet, and is read next time."""
+        if not self.calls.exists():
+            return []
+        return [json.loads(line) for line in self.calls.read_text().split('\n')[:-1] if line]
 
     def restart(self):
         """A new server: what a user's next `romacs' starts."""
@@ -397,9 +401,11 @@ def survive(args, base):
         until(lambda: 'slow done' in a.results(sid), 30, 'the turn completed')
         a.idle(sid)
         harness_alive = Path(f'/proc/{pid_before}').exists()
+        answered = len(a.results(sid))
         a.send(sid, 'call romacs_eval {"instance": "?", "code": "(emacs-pid)"}')
         a.idle(sid)
-        new_pid = a.results(sid)[-1]
+        # Its own turn's result, not the one before (idle may be that turn's).
+        new_pid = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'eval answered')
         retries = [e for e in a.logged() if e.get('tool') == 'romacs_eval' and 'mismatch' in e.get('text', '')]
         chat = a.chat(sid)
         result = {'harness_pid_same': a.harness_pid(sid) == pid_before and harness_alive,
@@ -410,10 +416,12 @@ def survive(args, base):
         until(lambda: a.state(sid) in ('ended', 'detached'), 15, 'session ended')
         a.eval(f'(romacs-agent-resume {a.s(sid)})')
         until(lambda: a.eval(f'(and (process-live-p (romacs-agent-connection {a.s(sid)})) t)') == 't', 15, 'resumed')
+        answered = len(a.results(sid))
         a.send(sid, 'say resumed')
         a.idle(sid)
+        reply = until(lambda: (lambda r: len(r) > answered and r[-1])(a.results(sid)), 30, 'resumed answered')
         resumed = [e for e in a.logged() if 'started' in e][-1]
-        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and a.results(sid)[-1] == 'resumed'
+        result['resumed'] = '--resume' in resumed['argv'] and resumed['started'] == sid and reply == 'resumed'
         result['ok'] = result['harness_pid_same'] and new_pid == str(a.pid) and len(retries) <= 1 and result['resumed']
         return result
     finally:

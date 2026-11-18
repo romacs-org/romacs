@@ -50,23 +50,15 @@ libc.workspace = true
 
 romacs-display-protocol.workspace = true
 romacs-logo.workspace = true
-romacs-video-model.workspace = true
 romacs-renderer-wgpu.workspace = true
 romacs-scene.workspace = true
 kurbo.workspace = true
-romacs-video = { workspace = true, optional = true }
 
 [dev-dependencies]
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }
 romacs-infra.workspace = true
 png.workspace = true
 
-[features]
-# Cross-platform native GPU-resident video
-video = [
-    "dep:romacs-video",
-    "romacs-renderer-wgpu/video",
-]
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay-clipboard.workspace = true
 x11-dl.workspace = true

@@ -245,6 +245,32 @@ class Tests(unittest.TestCase):
         runs = {package: rule for package, _, rule in check.plan(answer(packages=['romacs-display-runtime']), ROOT)}
         self.assertIn('time_discipline_test', runs['romacs-display-runtime'])
 
+    def test_the_editors_tests_build_its_companions_first(self):
+        runs = check.plan(answer(packages=['romacs-vm-gui']), ROOT)
+        steps = check.commands(runs, 2)
+        self.assertEqual(steps[0][:3], ['cargo', 'build', '--profile'])
+        self.assertEqual(steps[0][3], 'gate', 'beside the gate build the tests run')
+        self.assertEqual([step[:3] for step in steps[1:]], [['cargo', 'nextest', 'run']] * len(runs))
+        for package, names in check.COMPANIONS.items():
+            self.assertIn(['-p', package], [steps[0][i:i + 2] for i in range(len(steps[0]))])
+            for name in names:
+                self.assertIn(['--bin', name], [steps[0][i:i + 2] for i in range(len(steps[0]))])
+
+    def test_a_run_without_the_editor_builds_no_companion(self):
+        runs = check.plan(answer(packages=['romacs-face']), ROOT)
+        self.assertNotIn(check.HOST, [package for package, _, _ in runs])
+        self.assertIsNone(check.companion_build(runs))
+        self.assertEqual([step[:3] for step in check.commands(runs, 2)], [['cargo', 'nextest', 'run']] * len(runs))
+
+    def test_each_companion_is_a_binary_of_its_package(self):
+        # The names the editor's Lisp runs beside it (romacs-keeper-program,
+        # romacs-agent.el's helpers) are binaries the workspace declares.
+        import tomllib
+        for package, names in check.COMPANIONS.items():
+            manifest = tomllib.loads((ROOT / 'crates' / package / 'Cargo.toml').read_text())
+            self.assertEqual(manifest['package']['name'], package)
+            self.assertTrue(set(names) <= {b['name'] for b in manifest.get('bin', [])}, (package, names))
+
     def test_a_change_that_reaches_everything_has_no_plan(self):
         self.assertIsNone(check.plan(answer(everything=True), ROOT))
 

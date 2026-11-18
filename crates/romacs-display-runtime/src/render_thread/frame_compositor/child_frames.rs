@@ -80,8 +80,6 @@ impl GuiFrameRenderState {
             "child_frame_lifecycle: compositor_remove"
         );
         if removed {
-            #[cfg(feature = "video")]
-            self.refresh_visible_videos();
             self.compositor.dirty = true;
             for presentation in removed_presentations {
                 if self.pointer_appearance.retire(presentation) {
@@ -183,8 +181,6 @@ impl GuiFrameRenderState {
         let next_presentation = frame.presentation_id;
         let changed = self.compositor.child_frames.update_frame(frame);
         if changed {
-            #[cfg(feature = "video")]
-            self.refresh_visible_videos();
             self.compositor.dirty = true;
             // A fresh install is the appearance trigger. It fires on the
             // install event, never on the content refreshes a completion

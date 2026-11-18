@@ -1441,6 +1441,10 @@ fn evaluate(
         if let Some(reason) = &store_problem && let Err(error) = vm.eval_source(&world::store_warning_form(reason)) {
             eprintln!("romacs: world store warning: {error}");
         }
+        // Romacs's own Lisp that failed to load, which the launch went on without.
+        if launch == startup::Launch::Loadup && let Err(error) = startup::report_lisp_errors(&mut vm) {
+            eprintln!("romacs: Lisp errors: {error}");
+        }
         let finished = match launch {
             startup::Launch::Loadup => startup::finish_loadup(&mut vm, &started),
             startup::Launch::Workspace => startup::finish_workspace(&mut vm, &started),
