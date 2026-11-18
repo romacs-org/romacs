@@ -1144,6 +1144,45 @@ mod tests {
 
     /// A sweep leaves its survivors old, what is allocated after it is young
     /// until the next, and an old entry no mark reaches dies like any other.
+    /// A minor's sweep of TABLE (`gc_mark::Marking::sweep`): the set cards
+    /// alone, LIVE claimed first.
+    fn minor_sweep(t: &mut Table<Value>, live: &[usize]) -> RangeSwept {
+        let runs = t.touched();
+        // SAFETY: the table is this thread's until the books are kept.
+        let raw = unsafe { t.raw(true) };
+        for &i in live { assert!(raw.claim(i), "{i} young and unclaimed"); }
+        let swept = runs.into_iter().fold(RangeSwept::default(), |all, run| {
+            // SAFETY: each run is whole cards, so starts on a multiple of 8.
+            all.and(unsafe { raw.sweep_range(run, false, |_, v| *v = Value::NIL) })
+        });
+        t.swept(swept, false);
+        swept
+    }
+
+    /// A minor meets only the cards an entry was handed out or stored into
+    /// in since the last collection: it reads the old one stored into, frees
+    /// the young dead, and leaves every card clear and every entry old.
+    #[test]
+    fn a_minor_meets_only_the_cards_changed_since_the_last_collection() {
+        let mut t: Table<Value> = Table::default();
+        t.extend((0..256).map(|_| Value::NIL));
+        assert_eq!(t.touched(), [0..256], "every entry was handed out");
+        let raw = raw_of(&mut t);
+        for i in 0..256 { if i != 130 { assert!(raw.claim(i)); } }
+        let swept = tests::sweep_whole(&raw, false, |_, v| *v = Value::NIL);
+        t.swept(swept, false);
+        assert!(t.settled() && t.touched().is_empty(), "a full leaves no card set");
+        t.set(70, Value::TRUE);
+        let (young, end) = (t.alloc(Value::NIL), t.alloc(Value::NIL));
+        assert_eq!((young, end), (130, 256), "the hole first, then the end");
+        assert_eq!(t.touched(), [64..192, 256..257]);
+        assert_eq!(t.read_again(), [70], "the old entry stored into, and no other");
+        assert_eq!(minor_sweep(&mut t, &[70, end]).freed, 1, "the young dead");
+        assert!(t.is_free(130) && t.old(70) && t.old(end) && t.settled());
+        assert!(t.touched().is_empty(), "a minor leaves no card set");
+        assert_eq!(t.alloc(Value::TRUE), 130, "allocation starts at the lowest entry freed");
+    }
+
     #[test]
     fn a_survivor_is_old_and_a_new_entry_young() {
         let mut t = table(20);
