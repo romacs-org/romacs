@@ -1717,7 +1717,7 @@ pub(super) fn execute_args(vm: &mut Vm, function: usize, args: &[Value]) -> Resu
             vm.propagated_eval_depth = Some(vm.eval_depth);
             Err("Lisp nesting exceeds `max-lisp-eval-depth'".into())
         } else {
-            execute_args_inner(vm, function, args)
+            vm.outside_quit_scope(|vm| execute_args_inner(vm, function, args))
         };
         vm.eval_depth = saved;
         result

@@ -1286,7 +1286,9 @@ pub struct Vm {
     /// A primitive Lisp called runs a native loop that stops consistently at
     /// its polls, so a poll may quit (`Vm::native_poll`, `Leaf::quittable`).
     /// Off in redisplay, which never unwinds half done, and wherever Rust
-    /// reaches the same loop without a caller that would unwind.
+    /// reaches the same loop without a caller that would unwind. Granted at
+    /// a primitive's own entry only, and off in any Lisp or primitive entered
+    /// below it (`Vm::outside_quit_scope`).
     native_quit: bool,
     // CELL(Plain)
     #[cfg(test)]

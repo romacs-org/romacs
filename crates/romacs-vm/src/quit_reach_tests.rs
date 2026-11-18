@@ -270,3 +270,25 @@ fn the_printer_and_delq_quit_in_their_walks() {
     reaches("prin1-to-string", "(setq l (make-list 20000 'a))", "(list l)", "t");
     reaches("delq", "(setq l (make-list 20000 'a))", "(list 'b l)", "(= (length l) 20000)");
 }
+
+/// A quit scope ends at any entry below the primitive that declared it.
+/// Lisp entered from inside one (a predicate, a filter, a watcher) runs
+/// outside it, so the primitives it calls start outside it too: a `puthash`
+/// that rehashes an `equal` table under them cannot quit halfway. Each
+/// generated primitive's entry asserts it starts outside a caller's scope;
+/// `make-list` is one. The scope is the caller's again on return.
+#[test]
+fn a_quit_scope_ends_at_lisp_entry() {
+    let (mut vm, _signal) = busy_vm();
+    let witness = eval(&mut vm, "(symbol-function 'make-list)");
+    assert!(generated(witness).is_some(), "make-list is a generated primitive");
+    let predicate = eval(&mut vm, "(lambda ()
+      (let ((h (make-hash-table :test 'equal)))
+        (dotimes (i 3000) (puthash (make-list 40 i) i h))
+        (hash-table-count h)))");
+    // Inside a primitive's scope, as `Leaf::quittable` grants it.
+    vm.native_quit = true;
+    let count = vm.reader_call(predicate, &[]);
+    assert_eq!(count.ok().and_then(|v| v.integer_value()), Some(3000), "the Lisp ran to its end");
+    assert!(vm.native_quit, "the scope is the caller's again once the Lisp returns");
+}

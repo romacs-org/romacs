@@ -195,6 +195,20 @@ impl Vm {
         self.quit_fault()
     }
 
+    /// BODY outside any quit scope, the caller's restored after. A scope is
+    /// granted only at a primitive's own entry (`Leaf::quittable`) and ends
+    /// at any entry below it: Lisp its native code runs (`execute_args`, the
+    /// one way native code enters Lisp) and a primitive it enters natively
+    /// (a subr watcher). A primitive Lisp calls so starts outside one, and a
+    /// predicate's `puthash` never quits inside the caller's scope. Lisp a
+    /// primitive calls by `Step::Call` runs after the scope has closed.
+    pub(crate) fn outside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = std::mem::replace(&mut self.native_quit, false);
+        let result = body(self);
+        self.native_quit = outer;
+        result
+    }
+
     /// `maybe_quit` inside a primitive: its escape as the primitive's
     /// fault, a `throw-on-input` throw left in `propagated_escape`.
     pub(crate) fn quit_fault(&mut self) -> std::result::Result<(), crate::prim::Fault> {
