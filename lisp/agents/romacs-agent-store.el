@@ -429,6 +429,7 @@ left to the next fill, the rows being a cache of records."
 (defvar romacs-agent-events-store)
 
 (declare-function romacs-agent--marks-reconcile "romacs-agent" ())
+(declare-function romacs-agent--marked "romacs-agent" ())
 
 (defun romacs-agent-store-fill-batch ()
   "`romacs-agent-store-fill' in a batch process, its count printed, and
@@ -478,12 +479,16 @@ no fill runs; `romacs-agent-store-filled-hook' runs once it ends."
   "A fill ended with STATUS (0 by default), saying OUTPUT: the sessions it
 left with no row and those it newly marked as waited on are loaded, none
 of the rows asked here, when it ended well and its report is whole;
-else every session with no row, asked here."
+else every session with no row and every marked one, asked here."
   (setq romacs-agent-store--filled t)
   (if (and output (eql (or status 0) 0) (string-match-p "^romacs-agent-store: done$" output))
       (romacs-agent-store--load-missing (romacs-agent-store--said-ids "missing\\|marked" output) t)
-    ;; What it said lost: asked here.
-    (romacs-agent-store--load-missing)))
+    ;; What it said lost or cut short: asked here, the rows missing and
+    ;; every marked session, one it marked before it stopped among them.
+    (romacs-agent-store--load-missing
+     (append (mapcar #'file-name-nondirectory (romacs-agent-store--missing))
+             (when-let* ((marked (romacs-agent--marked))) (hash-table-keys marked)))
+     t)))
 
 (defun romacs-agent-store--said-ids (what output)
   "The ids a fill's OUTPUT names on its lines of WHAT (a regexp)."

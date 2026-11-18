@@ -5184,8 +5184,14 @@ those sockets."
                                         (funcall romacs-agent-prefixed-ids (substring key 0 -9))))))
             (if found (setq ids (append found ids)) (push key unmatched))))))
     (when (and unmatched (file-directory-p (romacs-agent--state-root)))
-      (dolist (name (directory-files (romacs-agent--state-root) nil "\\`[0-9a-f]\\{8\\}-"))
-        (when (member (romacs-agent--key name) unmatched) (push name ids))))
+      (let ((keys (make-hash-table :test #'equal)) (shorts (make-hash-table :test #'equal)))
+        (dolist (key unmatched)
+          (puthash key t keys)
+          (puthash (substring key 0 -9) t shorts))
+        ;; A name's digest only when its short form is one of theirs.
+        (dolist (name (directory-files (romacs-agent--state-root) nil "\\`[0-9a-f]\\{8\\}-"))
+          (when (and (gethash (romacs-agent--short name) shorts) (gethash (romacs-agent--key name) keys))
+            (push name ids)))))
     ids))
 
 (defvar romacs-agent--rows-seen nil
