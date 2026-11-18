@@ -378,7 +378,7 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
 /// subsystem directories, in lisp/bundled.json's order, then each package
 /// in lisp/packages/. No name in them is another library's, so they follow GNU's load-path without shadowing it.
 pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let layout = lisp_layout::layout(&runtime_lisp(dir, ""))?;
+    let layout = lisp_layout::layout(dir)?;
     let mut path: Vec<_> = layout.directories.iter().map(|name| dir.join(name)).filter(|p| p.is_dir()).collect();
     let packages = dir.join(&layout.packages);
     if packages.is_dir() {
@@ -390,7 +390,7 @@ pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
 /// The library that defines the bundled packages' autoloads as it loads, by
 /// scanning their directories, beside the GNU Lisp directory `dir`, when present.
 pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
-    let file = lisp_layout::bundled_layout(&runtime_lisp(dir, ""))?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
+    let file = lisp_layout::bundled_layout(dir)?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
     Ok(runtime_of(dir).map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
 }
 
@@ -398,7 +398,7 @@ pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::Path
 /// `term/` among them), then [`bundled_load_path`]. The VM's own Lisp
 /// (lisp/vm/), which the VM reads itself, stays off it.
 pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let own = lisp_layout::own_directories(&runtime_lisp(dir, ""))?;
+    let own = lisp_layout::own_directories(dir)?;
     let mut path = vec![dir.to_path_buf()];
     path.extend(sorted_subdirectories(dir)?.into_iter()
         .filter(|p| !own.iter().any(|name| p.file_name() == Some(std::ffi::OsStr::new(name)))));
@@ -660,12 +660,8 @@ fn launch_lisp() -> impl Iterator<Item = &'static str> {
         .chain(EDITING_LISP)
 }
 
-/// The runtime tree's lisp/PATH, around GNU's Lisp in DIR.
-fn runtime_lisp(dir: &std::path::Path, path: &str) -> std::path::PathBuf {
-    runtime_of(dir).unwrap_or(dir).join("lisp").join(path)
-}
-
-/// Load the runtime tree's lisp/PATH, as `load' does: a world build records
+/// Load PATH of the Lisp tree DIR (GNU's Lisp and Romacs's, one tree), as
+/// `load' does: a world build records
 /// what it read, so an edited file builds the world again, a source boot
 /// reads the file as it is now, and `load-history' names it, as GNU's
 /// preloaded files are named. A launch never runs a copy of the tree
@@ -674,7 +670,7 @@ fn runtime_lisp(dir: &std::path::Path, path: &str) -> std::path::PathBuf {
 /// past a GNU file that signals: its error, naming the file and line, is
 /// noted for [`report_lisp_errors`].
 fn load_lisp(vm: &mut Vm, dir: &std::path::Path, path: &str) -> Result<(), String> {
-    match vm.load_file(&runtime_lisp(dir, path)) {
+    match vm.load_file(&dir.join(path)) {
         Ok(_) => Ok(()),
         Err(error) => note_lisp_error(vm, &error),
     }
@@ -957,23 +953,22 @@ fn define_gnu_editing(vm: &mut Vm, dir: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 
-/// The GNU file FILE of the Lisp tree DIR, with its top-level forms' spans
-/// (`crate::loadup::form_spans`): read and scanned once a thread while the
-/// file keeps its length and modification time, as editing and coding take
-/// forms from the same large files (subr.el, files.el) for every workspace.
+/// The GNU file FILE of the Lisp tree DIR as it holds it now, read through
+/// the host (a world built with it goes stale when it changes), with its
+/// top-level forms' spans (`crate::loadup::form_spans`): scanned again only
+/// when its text differs from the last scan's on this thread, as editing
+/// and coding take forms from the same large files (subr.el, files.el) for
+/// every workspace.
 fn gnu_source(dir: &std::path::Path, file: &str) -> Result<(std::rc::Rc<String>, Spans), String> {
-    type Seen = Option<(u64, std::time::SystemTime)>;
-    type Scans = std::collections::HashMap<std::path::PathBuf, (Seen, std::rc::Rc<String>, Spans)>;
+    type Scans = std::collections::HashMap<std::path::PathBuf, (std::rc::Rc<String>, Spans)>;
     thread_local! { static SCANS: std::cell::RefCell<Scans> = Default::default(); }
     let path = dir.join(file);
-    let seen: Seen = std::fs::metadata(&path).ok().and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
-    let cached = SCANS.with(|scans| scans.borrow().get(&path)
-        .filter(|(stamp, ..)| stamp.is_some() && *stamp == seen).map(|(_, source, spans)| (source.clone(), spans.clone())));
-    if let Some(scanned) = cached { return Ok(scanned); }
-    // Read through the host, so a world built with it goes stale when it changes.
-    let source = std::rc::Rc::new(romacs_vm::host::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?);
+    let source = romacs_vm::host::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let scanned = SCANS.with(|scans| scans.borrow().get(&path).filter(|(text, _)| **text == source).cloned());
+    if let Some(scanned) = scanned { return Ok(scanned); }
+    let source = std::rc::Rc::new(source);
     let spans = std::rc::Rc::new(crate::loadup::form_spans(&source)?);
-    SCANS.with(|scans| scans.borrow_mut().insert(path, (seen, source.clone(), spans.clone())));
+    SCANS.with(|scans| scans.borrow_mut().insert(path, (source.clone(), spans.clone())));
     Ok((source, spans))
 }
 
@@ -2263,13 +2258,13 @@ mod tests {
             resume_loadup(&mut vm, Launch::Loadup, loadup).unwrap();
             let failed = printed(&mut vm, &format!("(and (boundp '{LISP_ERRORS}) {LISP_ERRORS})"));
             let unloaded = launch_lisp().filter(|path| {
-                let file = lisp_string(&runtime_lisp(&dir, path).to_string_lossy());
+                let file = lisp_string(&dir.join(path).to_string_lossy());
                 printed(&mut vm, &format!("(and (assoc {file} load-history) t)")) != "t"
             }).collect::<Vec<_>>();
             // Nothing of GNU's editing is missing after the chain: no GNU file
             // is read, so a tree with none of them serves.
             define_gnu_editing(&mut vm, std::path::Path::new("/nonexistent-romacs-tree")).unwrap();
-            let simple = lisp_string(&runtime_lisp(&dir, "simple.el").to_string_lossy());
+            let simple = lisp_string(&dir.join("simple.el").to_string_lossy());
             let kill_ring = printed(&mut vm, &format!("(mapcar (lambda (f) (and (not (subrp (symbol-function f)))
                                                                                (equal (symbol-file f) {simple})))
                                                                '(kill-new current-kill))"));
@@ -2299,6 +2294,54 @@ mod tests {
             });
             assert_eq!(ran, format!("{path:?}"), "the launch ran another {path} than its tree's");
         }
+    }
+
+    /// GNU's source is read as the file holds it now, though an edit kept
+    /// its length and its modification time; the same text is not scanned
+    /// again.
+    #[test]
+    fn gnu_source_reads_a_file_as_it_is_now() {
+        let dir = scratch_lisp("gnu-source", &[("x.el", "(defun a () 1)\n")]);
+        let (first, _) = gnu_source(&dir, "x.el").unwrap();
+        let modified = std::fs::metadata(dir.join("x.el")).unwrap().modified().unwrap();
+        std::fs::write(dir.join("x.el"), "(defun b () 2)\n").unwrap();
+        std::fs::File::options().write(true).open(dir.join("x.el")).unwrap().set_modified(modified).unwrap();
+        let (second, scanned) = gnu_source(&dir, "x.el").unwrap();
+        let (_, again) = gnu_source(&dir, "x.el").unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!((first.as_str(), second.as_str()), ("(defun a () 1)\n", "(defun b () 2)\n"));
+        assert!(std::rc::Rc::ptr_eq(&scanned, &again), "the same text keeps its scan");
+    }
+
+    /// A workspace set up from a Lisp tree runs that tree's own files,
+    /// whatever its directory is named (`--batch DIR`): a lisp/ beside it is
+    /// no part of it.
+    #[test]
+    fn a_workspace_runs_the_lisp_of_the_tree_it_was_given() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let root = std::env::temp_dir().join(format!("romacs-startup-given-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (name, mark) in [("sources", "given"), ("lisp", "beside")] {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            for entry in std::fs::read_dir(&source).unwrap() {
+                let entry = entry.unwrap();
+                std::os::unix::fs::symlink(entry.path(), dir.join(entry.file_name())).unwrap();
+            }
+            let dired = std::fs::read_to_string(source.join("romacs-dired.el")).unwrap() + &format!("\n(defvar romacs-test-tree {mark:?})\n");
+            std::fs::remove_file(dir.join("romacs-dired.el")).unwrap();
+            std::fs::write(dir.join("romacs-dired.el"), dired).unwrap();
+        }
+        std::os::unix::fs::symlink(source.join("../etc"), root.join("etc")).unwrap();
+        let dir = root.join("sources");
+        let ran = on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_files_from_sources(&mut vm, &[], &dir).unwrap();
+            printed(&mut vm, &format!("(list romacs-test-tree (and (boundp '{LISP_ERRORS}) {LISP_ERRORS}))"))
+        });
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(ran, "(\"given\" nil)");
     }
 
     /// A chain that stopped before `simple.el`: the launch takes the GNU
