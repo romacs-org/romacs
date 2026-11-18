@@ -554,8 +554,8 @@ connection of its own, as the writer's process has."
             (serve)
             (should (equal ran '(t)))
             (should (equal (caar (sqlite-select (romacs-agent-store--open) "select count(*) from events where session = ?" (list id))) 1))
-            ;; Its journal backed up here, once imported.
-            (should-not (file-exists-p (expand-file-name "journal.jsonl" dir)))))
+            ;; Its journal left where it is, a backup no reader reads.
+            (should (file-exists-p (expand-file-name "journal.jsonl" dir)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 

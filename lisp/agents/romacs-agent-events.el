@@ -341,9 +341,10 @@ known imported at once, and only marked so (`romacs-agent-events--mark'):
 nothing of it is read meanwhile, and the mark clears nothing a host
 writes.  While the store cannot be read here yet (the writer has still
 to make it, early in a fresh start) it is `queued' until marked, the
-store then made: nothing reads its records here before it can.  Its
-journal goes to the backup directory here, once imported, so no reader
-here finds it gone before it reads SQLite."
+store then made: nothing reads its records here before it can.  One
+staged as its journal now is (by the installer, or a worker before this
+start) is made its own by the flip, not written again.  Its journal
+stays where it is, a backup no reader reads."
   (let ((id (romacs-agent-id session)) (dir (romacs-agent-dir session)))
     (cond
      ((and (not (file-exists-p (expand-file-name "journal.jsonl" dir))) (romacs-agent-events--db))
@@ -359,6 +360,9 @@ here finds it gone before it reads SQLite."
                               (when (eq (car-safe answer) 'ok) (puthash id t romacs-agent-events--imported))
                               (romacs-agent-events--waited id))))
       'queued)
+     ((romacs-agent-events--staged-p id dir)
+      (romacs-agent-events--flip-soon (list id))
+      'queued)
      (t
       (unless (gethash id romacs-agent-events--importing)
         (puthash id t romacs-agent-events--importing)
@@ -366,11 +370,15 @@ here finds it gone before it reads SQLite."
          'romacs-agent-events--import-dir (list id dir)
          (lambda (answer)
            (remhash id romacs-agent-events--importing)
-           (when (equal answer '(ok t))
-             (puthash id t romacs-agent-events--imported)
-             (with-demoted-errors "romacs-agent-events: backing up: %S" (romacs-agent-events--back-up session)))
+           (when (equal answer '(ok t)) (puthash id t romacs-agent-events--imported))
            (romacs-agent-events--waited id))))
       'queued))))
+
+(defun romacs-agent-events--staged-p (id dir)
+  "Whether the session ID names, recorded in DIR, is staged as its journal
+now is: its size at staging its journal's size."
+  (eql (caar (sqlite-select (romacs-agent-events--db) "select size from staged where session = ?" (list id)))
+       (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir)))))
 
 (defun romacs-agent-events--mark (id)
   "The writer's: mark the session ID, which has no journal, imported: its
@@ -1033,9 +1041,7 @@ order given."
                    (romacs-agent-events-p session)))
               ;; Staged as its journal is now (by the installer, or a worker
               ;; before this start): made its own, not written again.
-              ((eql (caar (sqlite-select (romacs-agent-events--db) "select size from staged where session = ?" (list id)))
-                    (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir))))
-               (romacs-agent-events--flip-soon (list id)))
+              ((romacs-agent-events--staged-p id dir) (romacs-agent-events--flip-soon (list id)))
               (t (setq romacs-agent-events--migrate-queue (cons dir (delete dir romacs-agent-events--migrate-queue))))))
       (romacs-agent-events--migrate-next)))))
 
