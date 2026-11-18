@@ -938,6 +938,45 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// A worker that cannot boot as its spawner asked, for REASON: its hello
+/// over SOCKET says `unavailable` and why, in place of a boot. The spawner
+/// settles the worker's jobs with that (`romacs--isolate-world-refused` in
+/// `lisp/vm/isolate.el`) and ends the worker, rather than starting it
+/// again. Until then the socket stays open, however long the spawner
+/// takes, so a job it writes meanwhile finds a worker, not a closed
+/// socket, and is settled by the refusal; and a zygote's unforked children
+/// die only after it. What arrives meanwhile is read and dropped, but for
+/// the sockets of children a zygote is asked to fork: those stay open with
+/// the worker, so a job posted to such a child finds it until the refusal
+/// is handled. A spawner gone closes the socket, or its death signal ends
+/// the worker.
+///
+/// # Errors
+///
+/// When the hello cannot be sent or the socket read.
+pub fn refuse(socket: OwnedFd, reason: &str) -> std::result::Result<(), String> {
+    let _ = crate::host::set_nonblocking(socket.as_fd());
+    let text = hello(&format!("{REFUSED}\n{}", reason.replace('\n', " ")));
+    let mut peer = Peer::new(socket);
+    peer.send(Kind::Hello, 0, &Payload::Text(text), true).map_err(|e| e.to_string())?;
+    while !peer.closed {
+        crate::subprocess::poll(&[(peer.socket.as_raw_fd(), libc::POLLIN)], None).map_err(|e| e.to_string())?;
+        peer.receive(&mut |_| {}).map_err(|e| e.to_string())?;
+        peer.inbox.retain(|frame| matches!(frame.payload, Payload::Socket(_)));
+    }
+    Ok(())
+}
+
+/// The boot a refusing worker's hello names (`refuse`).
+const REFUSED: &str = "unavailable";
+
+/// The reason a worker's hello TEXT gives for refusing to boot as asked
+/// (`refuse`), or None for a worker that booted.
+pub(crate) fn refusal(text: &str) -> Option<&str> {
+    let mut lines = text.splitn(5, '\n').skip(3);
+    (lines.next() == Some(REFUSED)).then(|| lines.next().unwrap_or(""))
+}
+
 impl Vm {
     /// Serve a spawner over SOCKET as a worker that booted as BOOT says:
     /// the hello, then the Lisp loop until the spawner's bye or a

@@ -76,7 +76,7 @@ const ALIGN: usize = 1 << 30;
 /// as a process may hold two (`adopt`).
 const RESERVE: usize = 1 << 37;
 const PAGE: usize = 4096;
-const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA4");
+const MAGIC: u64 = u64::from_le_bytes(*b"RWARENA5");
 /// 16..=1024 by 16, then four steps per doubling to 32 KiB.
 const CLASSES: usize = 64 + 20;
 const SMALL_MAX: usize = 32768;
@@ -129,7 +129,16 @@ pub struct ImageFields {
     pub executable: usize,
     /// The world's key.
     pub key: [u8; 32],
+    /// The type of the carry beside the VM (`image::carry_tag`): a restore
+    /// as another type is refused, as one for another key is.
+    pub carry: u64,
+    /// That type's name, cut to fit (zero padded): the refusal says it, and
+    /// a restore requires it as well as the tag.
+    pub carry_name: [u8; CARRY_NAME],
 }
+
+/// The bytes of a carry's type name an image keeps (`ImageFields`).
+pub const CARRY_NAME: usize = 96;
 
 /// The state of the process's arena.
 const UNSET: u8 = 0;
