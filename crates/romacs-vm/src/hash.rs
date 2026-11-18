@@ -378,6 +378,8 @@ pub(super) enum HashFault {
     Wrong(&'static str, Value),
     Arity(Primitive, usize),
     Internal(String),
+    /// A polled `equal' walk its quit probe stopped (`Walk::polled`).
+    Stopped,
 }
 type Hashed<T> = std::result::Result<T, HashFault>;
 
@@ -407,8 +409,29 @@ pub(super) fn is_hash_primitive(p: Primitive) -> bool {
     (Primitive::MakeHashTable as usize..=Primitive::HashValueAt as usize).contains(&(p as usize))
 }
 
-/// The pairs `equal' has met past GNU's depth limit, made when first needed.
-type Seen = Option<HashMap<u64, Vec<u64>>>;
+/// What one `equal' walk carries: the pairs it has met past GNU's depth
+/// limit, made when first needed, and whether its own primitive asked it to
+/// poll. Only `equal' called as itself does (`Walk::polled`); a hash lookup,
+/// `member' and every other caller walk unpolled, so none of them stops
+/// halfway whatever scope it runs in.
+#[derive(Default)]
+struct Walk {
+    seen: Option<HashMap<u64, Vec<u64>>>,
+    polled: bool,
+    steps: crate::quit::Steps,
+}
+
+impl Walk {
+    fn polled() -> Self {
+        Self { polled: true, ..Self::default() }
+    }
+    /// Whether the walk stops here: polled, every `POLL_STEPS` steps, the
+    /// quit probe due.
+    #[inline]
+    fn stopped(&mut self, vm: &Vm) -> bool {
+        self.polled && self.steps.tick() && vm.own_stop_due()
+    }
+}
 
 impl Vm {
     fn moving_reference(v: Value) -> bool {
@@ -614,7 +637,7 @@ impl Vm {
     }
     /// GNU `internal_equal` (plain `equal`): cycle-aware and depth-limited.
     pub(super) fn equal(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut None, false)
+        self.equal_at(a, b, 0, &mut Walk::default(), false)
     }
     /// `equal' for a primitive whose faults travel as text
     /// (`primitive_condition').
@@ -624,6 +647,31 @@ impl Vm {
             HashFault::Internal(text) => text,
             _ => "equal failed".to_owned(),
         })
+    }
+    /// `equal' called as itself, at its engine site: the walk polled
+    /// (`Walk::polled`), UNBOUND on a fault or a stop, which the primitive's
+    /// full call raises or polls (`equal_primitive`).
+    #[inline(never)]
+    pub(super) fn equal_site_kernel(&self, a: Value, b: Value) -> Value {
+        match self.equal_at(a, b, 0, &mut Walk::polled(), false) {
+            Ok(true) => Value::TRUE,
+            Ok(false) => Value::NIL,
+            Err(_) => Value::UNBOUND,
+        }
+    }
+    /// `equal' called as itself, inside the scope its call target grants:
+    /// the walk polled; stopped, the poll quits (`native_poll_text`), or,
+    /// with nothing to quit for after all, the walk runs again unpolled.
+    /// Nothing is made, so a stop anywhere is consistent.
+    pub(super) fn equal_primitive(&mut self, a: Value, b: Value) -> Result<bool> {
+        match self.equal_at(a, b, 0, &mut Walk::polled(), false) {
+            Err(HashFault::Stopped) => {
+                self.native_poll_text()?;
+                self.equal_text(a, b)
+            }
+            Ok(equal) => Ok(equal),
+            Err(_) => self.equal_text(a, b),
+        }
     }
     /// `equal' for a kernel: UNBOUND on a fault, which the primitive raises.
     #[inline(never)]
@@ -637,14 +685,14 @@ impl Vm {
     /// internal_equal with EQUAL_INCLUDING_PROPERTIES: strings must also
     /// carry equal text properties at every position.
     pub(crate) fn equal_including_properties(&self, a: Value, b: Value) -> Hashed<bool> {
-        self.equal_at(a, b, 0, &mut None, true)
+        self.equal_at(a, b, 0, &mut Walk::default(), true)
     }
     fn equal_at(
         &self,
         mut a: Value,
         mut b: Value,
         mut depth: usize,
-        seen: &mut Seen,
+        walk: &mut Walk,
         props: bool,
     ) -> Hashed<bool> {
         loop {
@@ -662,7 +710,7 @@ impl Vm {
                         | Shape::Overlay(..)
                         | Shape::Opaque
                 ) {
-                    let pairs = seen.get_or_insert_default().entry(a.0).or_default();
+                    let pairs = walk.seen.get_or_insert_default().entry(a.0).or_default();
                     if pairs.contains(&b.0) {
                         return Ok(true);
                     }
@@ -676,7 +724,7 @@ impl Vm {
             // the tag says so without classifying either operand.
             match (a.tag(), b.tag()) {
                 (3, 3) => {
-                    let (tail, other, verdict) = self.equal_spine(a, b, depth, seen, false, props)?;
+                    let (tail, other, verdict) = self.equal_spine(a, b, depth, walk, false, props)?;
                     if let Some(verdict) = verdict {
                         return Ok(verdict);
                     }
@@ -696,7 +744,7 @@ impl Vm {
                     return Ok(m == n && x == y && (!props || self.string_intervals_equal(a, b)?));
                 }
                 (Shape::Vector(x), Shape::Vector(y))
-                | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, seen, props),
+                | (Shape::Record(x), Shape::Record(y)) => return self.equal_items(x, y, depth, walk, props),
                 (Shape::Closure(f, x, doc_x, slots_x), Shape::Closure(g, y, doc_y, slots_y)) => {
                     // Closures that keep their slots (make-interpreted-closure)
                     // are compared by what those slots hold now, as GNU's
@@ -709,7 +757,7 @@ impl Vm {
                     if !slots_x.is_empty() && !slots_y.is_empty() {
                         if slots_x.len() != slots_y.len() { return Ok(false); }
                         for (i, (&a, &b)) in slots_x.iter().zip(slots_y).enumerate() {
-                            let same = if i == 2 { self.same_environment_shape(a, b) } else { self.equal_at(a, b, depth + 1, seen, props)? };
+                            let same = if i == 2 { self.same_environment_shape(a, b) } else { self.equal_at(a, b, depth + 1, walk, props)? };
                             if !same { return Ok(false); }
                         }
                     } else if slots_x.is_empty() && slots_y.is_empty() {
@@ -730,7 +778,7 @@ impl Vm {
                     // holds now for a closure that keeps its slots (a caller
                     // may have replaced a binding), else what the captures'
                     // cells hold.
-                    if !self.equal_at(doc_x, doc_y, depth + 1, seen, props)? { return Ok(false); }
+                    if !self.equal_at(doc_x, doc_y, depth + 1, walk, props)? { return Ok(false); }
                     let values = |slots: &[Value], captures: &[Value]| match slots.get(2) {
                         Some(&env) => crate::closure_key::environment_values(self, env),
                         None => Some(captures.iter().map(|&c| self.captured(c)).collect()),
@@ -738,7 +786,7 @@ impl Vm {
                     let (Some(x), Some(y)) = (values(slots_x, x), values(slots_y, y)) else { return Ok(false) };
                     if x.len() != y.len() { return Ok(false); }
                     for (&x, &y) in x.iter().zip(&y) {
-                        if !self.equal_at(x, y, depth + 1, seen, props)? { return Ok(false); }
+                        if !self.equal_at(x, y, depth + 1, walk, props)? { return Ok(false); }
                     }
                     return Ok(true);
                 }
@@ -747,14 +795,14 @@ impl Vm {
                 }
                 // fns.c internal_equal: treesit_node_eq.
                 (Shape::TreesitNode(x), Shape::TreesitNode(y)) => return Ok(x == y),
-                (Shape::CharTable(x), Shape::CharTable(y)) => return self.char_tables_equal((a, x), (b, y), depth, seen, props),
+                (Shape::CharTable(x), Shape::CharTable(y)) => return self.char_tables_equal((a, x), (b, y), depth, walk, props),
                 (Shape::Overlay(x, r, p), Shape::Overlay(y, s, q)) => {
                     if x != y || r != s || p.len() != q.len() {
                         return Ok(false);
                     }
                     for (&(k, v), &(l, w)) in p.iter().zip(q) {
-                        if !self.equal_at(k, l, depth + 1, seen, props)?
-                            || !self.equal_at(v, w, depth + 1, seen, props)?
+                        if !self.equal_at(k, l, depth + 1, walk, props)?
+                            || !self.equal_at(v, w, depth + 1, walk, props)?
                         {
                             return Ok(false);
                         }
@@ -774,17 +822,17 @@ impl Vm {
     /// pair past its depth limit, so a table that holds itself is no
     /// exponential walk.
     fn char_tables_equal(&self, (a, x): (Value, &crate::char_table::CharTable), (b, y): (Value, &crate::char_table::CharTable),
-                         depth: usize, seen: &mut Seen, props: bool) -> Hashed<bool> {
-        let pairs = seen.get_or_insert_default().entry(a.0).or_default();
+                         depth: usize, walk: &mut Walk, props: bool) -> Hashed<bool> {
+        let pairs = walk.seen.get_or_insert_default().entry(a.0).or_default();
         if pairs.contains(&b.0) { return Ok(true); }
         pairs.push(b.0);
-        let same = |a: Value, b: Value, seen: &mut Seen| self.equal_at(a, b, depth + 1, seen, props);
-        if !same(x.purpose(), y.purpose(), seen)? || !same(x.default(), y.default(), seen)?
-            || !same(x.parent(), y.parent(), seen)? || x.extras().len() != y.extras().len() {
+        let same = |a: Value, b: Value, walk: &mut Walk| self.equal_at(a, b, depth + 1, walk, props);
+        if !same(x.purpose(), y.purpose(), walk)? || !same(x.default(), y.default(), walk)?
+            || !same(x.parent(), y.parent(), walk)? || x.extras().len() != y.extras().len() {
             return Ok(false);
         }
         for (&a, &b) in x.extras().iter().zip(y.extras()) {
-            if !same(a, b, seen)? { return Ok(false); }
+            if !same(a, b, walk)? { return Ok(false); }
         }
         let internal = |e: String| HashFault::Internal(e);
         // A compressed block's 128 values, its nil ones the default
@@ -800,10 +848,10 @@ impl Vm {
             let ((u, _, to_a), (v, _, to_b)) = (x.span(at).map_err(internal)?, y.span(at).map_err(internal)?);
             let to = to_a.min(to_b);
             match (block(x, u)?, block(y, v)?) {
-                (None, None) => if !same(u, v, seen)? { return Ok(false); },
+                (None, None) => if !same(u, v, walk)? { return Ok(false); },
                 (p, q) => for c in at..=to {
                     let one = |values: &Option<Vec<Value>>, plain: Value| values.as_ref().map_or(plain, |values| values[c % 128]);
-                    if !same(one(&p, u), one(&q, v), seen)? { return Ok(false); }
+                    if !same(one(&p, u), one(&q, v), walk)? { return Ok(false); }
                 },
             }
             at = to + 1;
@@ -835,14 +883,15 @@ impl Vm {
         x: &[Value],
         y: &[Value],
         depth: usize,
-        seen: &mut Seen,
+        walk: &mut Walk,
         props: bool,
     ) -> Hashed<bool> {
         if x.len() != y.len() {
             return Ok(false);
         }
         for (&x, &y) in x.iter().zip(y) {
-            if !self.equal_at(x, y, depth + 1, seen, props)? {
+            if walk.stopped(self) { return Err(HashFault::Stopped); }
+            if !self.equal_at(x, y, depth + 1, walk, props)? {
                 return Ok(false);
             }
         }
@@ -856,7 +905,7 @@ impl Vm {
         mut a: Value,
         mut b: Value,
         depth: usize,
-        seen: &mut Seen,
+        walk: &mut Walk,
         b_circular: bool,
         props: bool,
     ) -> Hashed<(Value, Value, Option<bool>)> {
@@ -868,9 +917,10 @@ impl Vm {
             if b.tag() != 3 {
                 return Ok((a, b, Some(false)));
             }
+            if walk.stopped(self) { return Err(HashFault::Stopped); }
             let (x, a_next) = self.cons_pair(a).map_err(HashFault::Internal)?;
             let (y, b_next) = self.cons_pair(b).map_err(HashFault::Internal)?;
-            if !self.equal_at(x, y, depth + 1, seen, props)? {
+            if !self.equal_at(x, y, depth + 1, walk, props)? {
                 return Ok((a, b, Some(false)));
             }
             b = b_next;
@@ -883,7 +933,7 @@ impl Vm {
                 let verdict = if b_circular {
                     true
                 } else {
-                    b.tag() == 3 && self.equal_spine(b, a, depth, seen, true, props)?.2 == Some(true)
+                    b.tag() == 3 && self.equal_spine(b, a, depth, walk, true, props)?.2 == Some(true)
                 };
                 return Ok((a, b, Some(verdict)));
             }
@@ -1042,7 +1092,7 @@ impl Vm {
                 _ => prim::Fault::Error(message.into()),
             },
             HashFault::Internal(message) => prim::Fault::Error(message),
-            HashFault::Arity(_, _) => unreachable!(),
+            HashFault::Arity(_, _) | HashFault::Stopped => unreachable!(),
         })?;
         Ok(found.and_then(|slot| self.table(table).ok()?.entry(slot)))
     }
@@ -1276,6 +1326,7 @@ impl Vm {
                 ("error", values)
             }
             HashFault::Internal(message) => return Err(message),
+            HashFault::Stopped => unreachable!("only `equal' called as itself polls"),
         };
         let symbol = self.intern(condition);
         let data = self.list_value(&data);

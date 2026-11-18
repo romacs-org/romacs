@@ -16,7 +16,10 @@ impl Vm {
                 if n != 2 {
                     return Err("wrong primitive arity".into());
                 }
-                Ok(if self.equal_text(self.stack[start], self.stack[start + 1])? { Value::TRUE } else { Value::NIL })
+                // Polled only inside its own call target's scope.
+                let (a, b) = (self.stack[start], self.stack[start + 1]);
+                let equal = if self.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
+                Ok(if equal { Value::TRUE } else { Value::NIL })
             }
             Min => {
                 if n == 0 {

@@ -355,7 +355,7 @@ fn a_quit_scope_ends_at_lisp_entry() {
 /// the source cache's direct tier, which has no escape channel, calls it.
 #[test]
 fn kernels_the_engine_runs_quit_per_chunk() {
-    use crate::Primitive::{Append, Format, Min};
+    use crate::Primitive::{Append, DeepEqual, Format, Min};
     fn call(vm: &mut Vm, p: crate::Primitive, args: &[Value], scoped: bool) -> crate::Result<Value> {
         let start = vm.stack.len();
         vm.stack.extend_from_slice(args);
@@ -363,7 +363,8 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         vm.stack.truncate(start);
         outcome
     }
-    for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))")] {
+    for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Min, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
+                      (DeepEqual, "(list (make-list 50000 1) (make-list 50000 1))")] {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, args);
         let mut values = Vec::new();
@@ -456,4 +457,42 @@ fn call_process_s_reap_hands_a_live_child_on_at_its_deadline() {
     }
     assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists(), "the child was reaped, its death noticed");
     drop(child);
+}
+
+/// `equal`'s walk polls only for `equal` itself: at its engine site it
+/// stops with a press pending (the full call then polls and quits), while a
+/// hash table's `equal` lookups, run inside a primitive's quit scope with a
+/// press pending, walk to their end, so an insert that rehashes never stops
+/// halfway.
+#[test]
+fn equal_polls_for_itself_and_never_inside_a_hash_lookup() {
+    use crate::Primitive::Puthash;
+    let (mut vm, signal) = busy_vm();
+    // Keys that differ only at their end and hash alike: each insert walks
+    // the bucket's keys with `equal`, and the table grows and rehashes.
+    // Rooted in variables, read back once nothing more is evaluated.
+    eval(&mut vm, "(setq table (make-hash-table :test 'equal) \
+                         keys (let (keys) (dotimes (i 120) (push (append (make-list 2000 0) (list i)) keys)) keys) \
+                         a (make-list 50000 1) b (make-list 50000 1))");
+    let [table, keys, a, b] = ["table", "keys", "a", "b"].map(|name| eval(&mut vm, name));
+    assert_eq!(vm.equal_site_kernel(a, b), Value::TRUE, "with no press the walk ends");
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    assert_eq!(vm.equal_site_kernel(a, b), Value::UNBOUND, "equal's site stops at its poll");
+    let mut tail = keys;
+    let mut entries = 0;
+    while let Some((key, rest)) = Leaf::new(&mut vm).pair(tail) {
+        let start = vm.stack.len();
+        vm.stack.extend_from_slice(&[key, Value::TRUE, table]);
+        let put = vm.inside_quit_scope(|vm| vm.primitive(Puthash, start, 3));
+        vm.stack.truncate(start);
+        assert!(put.is_ok(), "an insert inside a quit scope ran to its end");
+        entries += 1;
+        tail = rest;
+    }
+    assert!(signal.due(), "the hash lookups left the press pending");
+    let start = vm.stack.len();
+    vm.stack.push(table);
+    let count = vm.primitive(crate::Primitive::HashTableCount, start, 1);
+    vm.stack.truncate(start);
+    assert_eq!(count.ok().and_then(Value::integer_value), Some(entries), "every key went in");
 }

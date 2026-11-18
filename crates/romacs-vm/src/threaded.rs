@@ -4314,9 +4314,8 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
             Vm::command_primitive
         }
         TempBuffer => Vm::eval_buffer_primitive,
-        DeepEqual => Vm::eval_data_primitive,
         // Their own entry, which raises a poll's escape (`primitive_value`).
-        Min | Append => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        DeepEqual | Min | Append => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
         Max => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.bootstrap_primitive(p, start, n)),
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
@@ -5204,7 +5203,7 @@ macro_rules! through {
         }
     };
 }
-through!(deep_equal, |vm, x, y| vm.equal_kernel(x, y));
+through!(deep_equal, |vm, x, y| vm.equal_site_kernel(x, y));
 through!(member, |vm, x, y| vm.member_kernel(x, y));
 through!(get, |vm, x, y| vm.get_kernel(x, y));
 through!(nthcdr, |vm, x, y| vm.nthcdr_kernel(x, y));

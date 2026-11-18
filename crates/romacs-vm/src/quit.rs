@@ -256,7 +256,15 @@ impl Vm {
     /// [`NativeStop::due`] for a loop that holds the VM borrowed: the same
     /// answer, with nothing taken from the VM to ask it.
     pub(crate) fn native_stop_due(&self) -> bool {
-        if !self.native_quit || !self.native_quit_reached() { return false; }
+        self.native_quit && self.own_stop_due()
+    }
+
+    /// [`Self::native_stop_due`] for a walk its own primitive asked to poll
+    /// (`equal`'s, `Walk::polled`): that primitive's entry is the scope,
+    /// whatever the flag says, and every other caller of the walk asks
+    /// nothing.
+    pub(crate) fn own_stop_due(&self) -> bool {
+        if !self.native_quit_reached() { return false; }
         crate::gap_probe::safepoint(None);
         let held = self.quit_variables()[1] != Value::NIL;
         (!held && (self.quit.pressed() || self.quit.deadline_current()))
