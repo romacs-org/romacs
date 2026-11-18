@@ -2604,17 +2604,18 @@ drawn once they are, or says it cannot be when they could not move."
          (propertize (concat (if (romacs-agent-events-migrating-p (romacs-agent-id session))
                                  "⋯ moving this chat's records to the store"
                                "⋯ waiting for this chat's records to move to the store")
-                             (if preview ": a preview of its last turns, from its journal, meanwhile\n" "\n"))
-                     'face 'romacs-agent-placeholder 'romacs-agent-moving t))))))
+                             (if preview " · its last turns meanwhile\n" "\n"))
+                     'face 'romacs-agent-placeholder 'romacs-agent-moving (if preview 'preview t)))))))
 
 (defvar romacs-agent-ui--previewing nil
   "Non-nil while a chat's preview is drawn (`romacs-agent-ui--preview'):
 what it draws loads no session.")
 
-(defconst romacs-agent-ui--preview-seconds 1.0
+(defconst romacs-agent-ui--preview-seconds 0.5
   "The most a chat waiting for its records' move spends drawing their
 journal's tail meanwhile (`romacs-agent-ui--preview'): past it, the row
-saying they move is all it shows.")
+saying they move is all it shows.  Half the one second a chat's whole
+open has: its fill, composer and first redisplay take the rest.")
 
 (defun romacs-agent-ui--preview (session)
   "Draw SESSION's last turns into the current chat from its journal's
@@ -2622,7 +2623,10 @@ tail (its last `romacs-agent-journal-tail-bytes' at most), while its
 records move to SQLite: never blank, and redrawn from SQLite once they
 are (`romacs-agent-ui--moved').  It holds no place in the journal, so
 nothing keeps them from moving.  Nil, nothing left drawn, when there is
-nothing to draw or it would take past `romacs-agent-ui--preview-seconds'."
+nothing to draw or it would take past `romacs-agent-ui--preview-seconds'.
+The tail's bytes are read whole before its time is looked at: a cold
+cache on a slow disk can take it past.  Its rows hold no seqs: what acts
+on one finds nothing kept for it."
   ;; A position, not a marker: what is drawn goes before every marker at
   ;; the transcript's end.
   (let ((start (marker-position romacs-agent-ui--end))
@@ -2652,11 +2656,13 @@ nothing to draw or it would take past `romacs-agent-ui--preview-seconds'."
   "Draw SESSION in the current chat, its records' move over: from them
 when they are in SQLite, else a row saying they could not move."
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
-    (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--not-moved-row))))
+    (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--not-moved-row nil))))
 
-(defun romacs-agent-ui--not-moved-row ()
-  "The row a chat whose records could not move to the store shows."
-  (propertize "! this chat's records could not move to the store: shown in full once they do\n"
+(defun romacs-agent-ui--not-moved-row (preview)
+  "The row a chat whose records could not move to the store shows, above
+the PREVIEW of its last turns it drew meanwhile, if any."
+  (propertize (concat "! this chat's records could not move to the store: shown in full once they do"
+                      (if preview " · its last turns, from its journal\n" "\n"))
               'face 'romacs-agent-error))
 
 (defun romacs-agent-ui--moved (session)
@@ -2682,9 +2688,10 @@ the row that said they were moving.  An edit to no undo."
            (goto-char (point-min))
            ;; Its waiting row, in its place, above the preview it heads;
            ;; none, another wait of this chat said it already.
-           (when-let* ((found (text-property-search-forward 'romacs-agent-moving t t)))
+           (when-let* ((found (text-property-search-forward 'romacs-agent-moving nil (lambda (_ v) v))))
              (delete-region (prop-match-beginning found) (prop-match-end found))
-             (romacs-agent-ui--insert-at (prop-match-beginning found) (romacs-agent-ui--not-moved-row)))))))))
+             (romacs-agent-ui--insert-at (prop-match-beginning found)
+                                         (romacs-agent-ui--not-moved-row (eq (prop-match-value found) 'preview))))))))))
 
 (defun romacs-agent-ui--replay-rows (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns as kept drawn, under
