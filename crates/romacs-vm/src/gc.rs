@@ -1899,7 +1899,7 @@ impl Vm {
         self.forwarded.collection_epoch = self.forwarded.collection_epoch.wrapping_add(1);
         self.resolved_buffer = None;
         // Patterns kept for a table name it by a Value this may move.
-        self.clear_regexp_cache(true);
+        self.forget_table_bound_patterns();
         // A view's rows are the Values of its table's entries.
         self.flat_tables.forget();
         // Finished nested runs' programs are caches: relowering what is used
