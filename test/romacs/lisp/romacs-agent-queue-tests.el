@@ -351,13 +351,16 @@ message is sent, `romacs-agent-send' by default.")
       (let ((again (romacs-agent--make :id id :harness 'claude :state 'running :title "kept")))
         (romacs-agent-test-attach again t)
         (romacs-agent-send-later again "meanwhile")
+        ;; Put first as it loads: ahead of what was kept too.
+        (romacs-agent-send-later again "urgent" t)
         (setf (romacs-agent-state again) 'idle)
         ;; Its harness ready: the first goes at once, let go.
         (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil))
-        (should (equal (gethash "content" (gethash "message" (car sent))) "first"))
-        (should (equal (mapcar #'car (romacs-agent-queue again)) '("a" "b" "meanwhile")))
+        (should (equal (gethash "content" (gethash "message" (car sent))) "urgent"))
+        (should (equal (mapcar #'car (romacs-agent-queue again)) '("first" "a" "b" "meanwhile")))
         (should (cl-every (lambda (item) (eq (romacs-agent-item-kind item) 'next)) (romacs-agent-queue again)))
-        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("a" "b" "meanwhile")))
+        ;; Their places kept for a restart after.
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("first" "a" "b" "meanwhile")))
         ;; Cleared (a task cancelled): its kept ones too, loaded or not.
         (let ((other (romacs-agent--make :id id :harness 'claude :state 'idle :title "kept")))
           (romacs-agent--clear-queue other)))

@@ -676,11 +676,19 @@ may take it.  A cancelled task's is let go."
            (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
                                (romacs-agent-store-queued (romacs-agent-id session)))))
       (when kept
-        (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
-              (romacs-agent-queue-length session) 0)
-        (dolist (item (sort (append kept waiting)
-                            (lambda (a b) (< (romacs-agent-item-position a) (romacs-agent-item-position b)))))
-          (romacs-agent--enqueue session item))
+        ;; What was sent as it loaded goes after what was kept, but what
+        ;; was put first: placed by its order, not by the clock, and its
+        ;; place kept for a restart after.
+        (let ((order (append (cl-remove-if-not #'romacs-agent-item-front waiting) kept
+                             (cl-remove-if #'romacs-agent-item-front waiting))))
+          (setf (romacs-agent-queue session) nil (romacs-agent-queue-tail session) nil
+                (romacs-agent-queue-length session) 0)
+          (when waiting
+            (let ((place (- (apply #'min (mapcar #'romacs-agent-item-position order)) 1e-3)))
+              (dolist (item order)
+                (setf (romacs-agent-item-position item) (setq place (+ place 1e-3)))
+                (when (romacs-agent-item-kept item) (romacs-agent-store-queued-put (romacs-agent-id session) item)))))
+          (dolist (item order) (romacs-agent--enqueue session item)))
         (romacs-agent--dispatch session)))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)

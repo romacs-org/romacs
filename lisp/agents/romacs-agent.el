@@ -3566,8 +3566,9 @@ TOKEN it carries.  VALID, when given, is asked as it would go: nil drops
 it.  DELIVERED is called once it is written.  IMAGES and MESSAGES as
 `romacs-agent--input' says.  One that is all data (no DELIVERED, no
 VALID, no TOKEN) is kept across a restart (`romacs-agent--keep-item'): ID names it,
-POSITION orders it, KEPT says its record is there."
-  text images messages delivered valid kind own token turn id position kept)
+POSITION orders it, KEPT says its record is there.  FRONT: put ahead of
+what waited (`romacs-agent--enqueue-first')."
+  text images messages delivered valid kind own token turn id position kept front)
 
 (defun romacs-agent--turn-under-way-p (session)
   "Whether SESSION's records, or the message written last, have a turn
@@ -4180,6 +4181,7 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 
 (defun romacs-agent--enqueue-first (session item)
   "Put ITEM ahead of what waits for SESSION's harness."
+  (setf (romacs-agent-item-front item) t)
   (unless (romacs-agent-item-position item)
     (setf (romacs-agent-item-position item)
           (if (romacs-agent-queue session) (- (romacs-agent-item-position (car (romacs-agent-queue session))) 1e-3)
