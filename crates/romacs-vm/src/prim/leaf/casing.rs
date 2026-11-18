@@ -288,7 +288,7 @@ impl Leaf<'_> {
         let (from, to) = (char_at(start)?.0, char_at(end)?.0);
         if !b.raw_in(from..to).is_empty() { return Ok(None); }
         let table = table.reader(self.vm);
-        let mut runs = CaseRuns { out: Vec::with_capacity(to - from), runs: Vec::new() };
+        let mut runs = CaseRuns::new(to - from, !b.body().treesit.is_empty());
         // Whether a character cases to several, asked of ICU once each.
         let mut several: std::collections::HashMap<u32, bool> = std::collections::HashMap::new();
         let mut nth = 0usize;
@@ -341,15 +341,16 @@ impl Leaf<'_> {
         // One overwrite from the first change to the last; in a buffer with
         // tree-sitter parsers, one per run of changed characters, so the
         // parser is told only what changed.
-        let runs = fast.or_else(|| if multibyte { same_length_runs(&codes, &cased) } else { None });
+        let runs = fast.or_else(|| match &self.vm.objects[index] {
+            data::Object::Buffer(b) if multibyte => same_length_runs(&codes, &cased, !b.body().treesit.is_empty()),
+            _ => None,
+        });
         if let Some(runs) = runs {
             let edited = match (runs.runs.first(), runs.runs.last()) {
                 (Some(first), Some(last)) => {
                     let (first_char, last_char) = (first.0.start, last.0.end);
                     let data::Object::Buffer(b) = self.vm.objects.entry_mut(index) else { unreachable!("multibyte is a text buffer") };
-                    let whole = [(first.0.start..last.0.end, first.1.start..last.1.end)];
-                    let spans = if b.body().treesit.is_empty() { &whole[..] } else { &runs.runs[..] };
-                    for (chars, bytes) in spans {
+                    for (chars, bytes) in &runs.runs {
                         let at = |c: usize| b.byte_of_char(crate::coordinates::CharOffset((start - 1) as usize + c)).map_err(Fault::Error);
                         let range = at(chars.start)?..at(chars.end)?;
                         b.overwrite(range, &runs.out[bytes.clone()]).map_err(Fault::Error)?;
@@ -408,31 +409,39 @@ impl Leaf<'_> {
 }
 
 /// A region's new text, as its casing writes it in place: OUT, the whole
-/// region's new bytes, and RUNS, each run of changed characters as its
-/// character range in the region and its bytes in OUT.
+/// region's new bytes, and RUNS, the spans to overwrite, each a character
+/// range in the region and its bytes in OUT. With SEPARATE (the buffer has
+/// tree-sitter parsers, told only what changed) one span per run of
+/// changed characters; else one span, the first change to the last.
 struct CaseRuns {
     out: Vec<u8>,
     runs: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)>,
+    separate: bool,
 }
 
 impl CaseRuns {
-    /// The NTH character changed, its new bytes BYTES in OUT: the last run
-    /// grown when it ends there, else a new run.
+    fn new(capacity: usize, separate: bool) -> Self {
+        CaseRuns { out: Vec::with_capacity(capacity), runs: Vec::new(), separate }
+    }
+
+    /// The NTH character changed, its new bytes BYTES in OUT: the last span
+    /// grown to it when it ends there, or always without SEPARATE; else a
+    /// new span.
     fn changed(&mut self, nth: usize, bytes: std::ops::Range<usize>) {
         match self.runs.last_mut() {
-            Some((chars, run)) if chars.end == nth => { chars.end = nth + 1; run.end = bytes.end; }
+            Some((chars, run)) if !self.separate || chars.end == nth => { chars.end = nth + 1; run.end = bytes.end; }
             _ => self.runs.push((nth..nth + 1, bytes)),
         }
     }
 }
 
-/// CODES as CASED cases them, as runs (`CaseRuns`), when every changed
-/// character becomes one of as many bytes that the buffer can hold: a
-/// Unicode scalar or a raw byte. None otherwise, for the edit loop.
-fn same_length_runs(codes: &[u32], cased: &[Vec<u32>]) -> Option<CaseRuns> {
+/// CODES as CASED cases them, as runs (`CaseRuns`, SEPARATE), when every
+/// changed character becomes one of as many bytes that the buffer can hold:
+/// a Unicode scalar or a raw byte. None otherwise, for the edit loop.
+fn same_length_runs(codes: &[u32], cased: &[Vec<u32>], separate: bool) -> Option<CaseRuns> {
     let width = |c: u32| crate::lstring::char_string(c, &mut [0; 5]);
     let storable = |c: u32| char::from_u32(c).is_some() || (0x3f_ff80..=0x3f_ffff).contains(&c);
-    let mut runs = CaseRuns { out: Vec::with_capacity(codes.len()), runs: Vec::new() };
+    let mut runs = CaseRuns::new(codes.len(), separate);
     for (nth, (&code, out)) in codes.iter().zip(cased).enumerate() {
         let at = runs.out.len();
         let mut encoded = [0; 5];
@@ -458,4 +467,26 @@ fn internal_bytes(codes: &[u32]) -> Vec<u8> {
         bytes.extend_from_slice(&encoded[..n]);
     }
     bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CaseRuns;
+
+    /// "a a a" upcased: changes at characters 0, 2 and 4.
+    fn spans(separate: bool) -> Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> {
+        let mut runs = CaseRuns::new(5, separate);
+        for nth in [0, 2, 4] { runs.changed(nth, nth..nth + 1); }
+        runs.runs
+    }
+
+    #[test]
+    fn without_a_parser_the_changes_are_one_span_from_first_to_last() {
+        assert_eq!(spans(false), vec![(0..5, 0..5)]);
+    }
+
+    #[test]
+    fn with_a_parser_each_run_of_changes_is_its_own_span() {
+        assert_eq!(spans(true), vec![(0..1, 0..1), (2..3, 2..3), (4..5, 4..5)]);
+    }
 }
