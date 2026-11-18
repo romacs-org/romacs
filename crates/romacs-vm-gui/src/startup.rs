@@ -772,7 +772,8 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 /// in *Messages*, in the usage log and in a warning the first frame shows,
 /// as an init's error is shown, in the order they happened.  The first,
 /// often the cause of the others, is said last again, so the echo area
-/// keeps it. The form calls only what is defined, since
+/// keeps it, and is [`first_noted_lisp_error`] from then on when none was
+/// noted here: a session restored from a world reports its build's. The form calls only what is defined, since
 /// the Lisp that failed may be what would show it, and a way of showing
 /// one that signals keeps none of the others from being shown.
 ///
@@ -780,7 +781,7 @@ fn note_lisp_error(vm: &mut Vm, error: &str) -> Result<(), String> {
 ///
 /// The VM's error when it cannot evaluate the report itself.
 pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
-    vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
+    let first = vm.eval_source(&format!("(when (boundp '{LISP_ERRORS})
        (let* ((errors (reverse {LISP_ERRORS})) (first errors))
          (setq {LISP_ERRORS} nil)
          (while errors
@@ -796,7 +797,13 @@ pub fn report_lisp_errors(vm: &mut Vm) -> Result<(), String> {
          (when (cdr first)
            (condition-case nil
                (message \"Romacs Lisp failed first: %s (%d more in *Warnings*)\" (car first) (1- (length first)))
-             (error nil)))))")).map(drop)
+             (error nil)))
+         (car first)))"))?;
+    if first != romacs_vm::Fixed::NIL {
+        let first = String::from_utf8_lossy(first.bytes()?).into_owned();
+        FIRST_NOTED.with(|noted| { noted.borrow_mut().get_or_insert(first); });
+    }
+    Ok(())
 }
 
 /// Romacs's layers after the chain that only define ([`SESSION_DEFINITIONS`]).

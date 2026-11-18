@@ -33,6 +33,9 @@ summariser, summarises them.
   lisp-error-first  romacs-startup.el's first form signals, which startup
               goes on past: the session's first frame shows that error
               (its file named) at once.
+  lisp-error-first-world  lisp-error-first restored from a world built
+              over the broken file, which keeps its build's errors: the
+              same, from the world's.
   lisp-error-first-failed  the same with the bootstrap gone too, so the
               start fails: its screen shows romacs-startup.el's error
               above what failed after it ("Then: ...").
@@ -121,12 +124,12 @@ def start(args, base, name):
     return engine, root / 'engine.log', root / 'usage.jsonl'
 
 
-def start_failed(args, base, name, serve=(), breaks=('bootstrap',)):
+def start_failed(args, base, name, serve=(), breaks=('bootstrap',), world=False):
     """A session for workflow NAME over this checkout's Lisp tree but for
     BREAKS: `bootstrap', the chain's bootstrap file gone, so its startup
     fails; `startup', romacs-startup.el's first form signalling, which
-    startup goes on past.  Launched with SERVE's arguments too.  Nothing
-    waits for an init."""
+    startup goes on past.  Launched with SERVE's arguments too, and from a
+    world it builds first when WORLD.  Nothing waits for an init."""
     root, _home, env = private_tree('romacs', base, args.tools, prefix=f'exit-{name}-')
     lisp = root / 'lisp'
     (lisp / 'session').mkdir(parents=True)
@@ -138,7 +141,9 @@ def start_failed(args, base, name, serve=(), breaks=('bootstrap',)):
             (lisp / 'session' / STARTUP).write_text(f'(error "{BROKEN}")\n' + entry.read_text())
         elif entry.name != BOOTSTRAP or 'bootstrap' not in breaks:
             (lisp / 'session' / entry.name).symlink_to(entry)
-    env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_WORLD='off', ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
+    env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
+    if not world:
+        env['ROMACS_WORLD'] = 'off'
     engine = Engine('romacs', [args.romacs, '--loadup', *serve], root, None, env, args.timeout)
     try:
         engine.spawn(args.tools)
@@ -254,10 +259,11 @@ def run_first_lisp_error(engine, stderr, usage):
     failed = bool(engine.startup_failed())
     # Read without whitespace: a long path wraps anywhere on the screen.
     compact = ''.join(screen.split())
-    first, then = compact.find(STARTUP), compact.lower().find('then:')
+    first, then, symptom = compact.find(STARTUP), compact.lower().find('then:'), compact.find('(void-')
     checks = {
         'the first error shown, its file named': first >= 0,
         'before what failed after it': then < 0 or first < then,
+        'no symptom shown without its cause': symptom < 0 or 0 <= then < symptom,
         'a failed start shows what failed after it': not failed or then >= 0,
     }
     return checks, {'failed': failed, 'screen': screen}
@@ -265,11 +271,12 @@ def run_first_lisp_error(engine, stderr, usage):
 
 WORKFLOWS = {'kill-emacs': run_kill_emacs, 'compositor': run_compositor, 'startup-failed': run_startup_failed,
              'startup-failed-server': run_startup_failed, 'lisp-error-first': run_first_lisp_error,
-             'lisp-error-first-failed': run_first_lisp_error}
+             'lisp-error-first-failed': run_first_lisp_error, 'lisp-error-first-world': run_first_lisp_error}
 STARTS = {'startup-failed': start_failed,
           'startup-failed-server': lambda args, base, name: start_failed(args, base, name, ('--serve', 'exit-live', '--serve-frame')),
           'lisp-error-first': lambda args, base, name: start_failed(args, base, name, breaks=('startup',)),
-          'lisp-error-first-failed': lambda args, base, name: start_failed(args, base, name, breaks=('startup', 'bootstrap'))}
+          'lisp-error-first-failed': lambda args, base, name: start_failed(args, base, name, breaks=('startup', 'bootstrap')),
+          'lisp-error-first-world': lambda args, base, name: start_failed(args, base, name, breaks=('startup',), world=True)}
 
 
 def main():
