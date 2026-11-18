@@ -2171,6 +2171,12 @@ signalled."
                    (unless (or scheduled failed) (funcall then (nreverse events))))))
     (funcall step)))
 
+;; The journal reader below (this pager, `romacs-agent--read-journal-file'
+;; and the `romacs-agent--journal-file-*' functions) is for sessions still
+;; in a journal: an earlier build's that an install found running.  The
+;; installer moves them (`romacs-agent-events-migrate'); once none is left
+;; the reader goes (romacs#317).  No feature grows on it.
+
 (defun romacs-agent--journal-pager (session)
   "SESSION's records a page at a time, as they are now: (FETCH . CLOSE),
 FETCH called with a place giving (LINES . NEXT) as
@@ -5118,13 +5124,6 @@ binds, is restored anew.")
 listing has it (romacs-agent-store): such a session with no kept state
 and no supervisor running is left unloaded, its journal unread, until it
 is asked for (`romacs-agent-get').")
-
-(defvar romacs-agent-store-background nil
-  "Whether the editor moves every session's journal to SQLite in the
-background, in worker VMs, once it is idle after a start.  Off: a
-journal moves only when something waits for it (a chat opened, a
-resume).  Those moves' long transactions held the store's lock against
-every session's supervisor.")
 
 (defvar romacs-agent-mark-kinds nil
   "What can wait on a session left unloaded, so a restore loads it: a list
