@@ -1506,6 +1506,11 @@ one request id: the journal's is the one written."
                         record)
     ;; Written: the next message carries no brief (a failed write keeps it).
     (when brief (setf (romacs-agent-brief session) nil))
+    ;; A turn under way from the write: never idle with a message in hand
+    ;; while its record comes back, which says the same.
+    (when (eq (romacs-agent-state session) 'idle)
+      (setf (romacs-agent-state session) 'running)
+      (romacs-agent--changed session))
     (run-hook-with-args 'romacs-agent-input-functions session id)))
 
 (defun romacs-agent--uuid-p (id)

@@ -148,5 +148,23 @@ line's `env' sets only its own configuration variable."
           (should (romacs-agent--ready-p session))
           (should (equal (romacs-agent-harness-session session) "rpc-x"))))))))
 
+(ert-deftest romacs-agent-a-message-sent-is-a-turn-under-way ()
+  ;; A message written to an idle harness's session: running at once, not
+  ;; idle until its record comes back (a caller waiting for the turn's end
+  ;; would take that idle for it).
+  (romacs-agent-driver-test--registry
+   (load romacs-agent-driver-test--fakerpc nil t)
+   (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (written nil))
+     (let ((session (romacs-agent--make :id "rpc-sent" :harness 'fakerpc :cwd "/tmp" :state 'idle)))
+       (puthash "rpc-sent" session romacs-agent--sessions)
+       (setf (romacs-agent-driver-state session) (list :ready t))
+       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
+                 ((symbol-function 'romacs-agent--fold-now) #'ignore)
+                 ((symbol-function 'romacs-agent--changed) #'ignore)
+                 ((symbol-function 'process-live-p) (lambda (_) t)))
+         (romacs-agent-send session "hello")
+         (should written)
+         (should (eq (romacs-agent-state session) 'running)))))))
+
 (provide 'romacs-agent-driver-tests)
 ;;; romacs-agent-driver-tests.el ends here

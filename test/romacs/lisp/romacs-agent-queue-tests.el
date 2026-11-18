@@ -34,6 +34,9 @@
     (let ((sent nil))
       (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &optional _journal) (push object sent))))
         (romacs-agent--send-next session)
+        ;; Each at a turn's end: the first's turn runs till then.
+        (should (eq (romacs-agent-state session) 'running))
+        (setf (romacs-agent-state session) 'idle)
         (romacs-agent--send-next session))
       (should (= (length sent) 2))
       (should (equal (mapcar #'car (romacs-agent-queue session)) '("second")))
