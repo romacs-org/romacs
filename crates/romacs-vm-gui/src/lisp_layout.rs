@@ -14,6 +14,15 @@ pub struct Layout {
     pub off_path: Vec<String>,
 }
 
+/// Romacs's Lisp tree for GNU's Lisp in DIR: the runtime tree's lisp/,
+/// DIR's parent's, where Romacs's own files, its layout (`bundled.json`)
+/// and the chain's bootstrap are.  In every runtime the two are one tree,
+/// but `ROMACS_LISP_DIR` may name GNU's apart.
+#[must_use]
+pub fn own_lisp(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.parent().unwrap_or(dir).join("lisp")
+}
+
 /// `bundled.json` of the Lisp tree LISP (a runtime tree's `lisp/`) as JSON,
 /// as the tree holds it now: never a copy compiled in.  Read through the
 /// host, so a world built with it goes stale when it changes.

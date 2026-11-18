@@ -4,6 +4,7 @@
 //! `--gnu-lisp` runs GNU's loadup.el alone. All visible results come from this VM.
 use romacs_vm::Vm;
 use crate::lisp_layout;
+use crate::lisp_layout::own_lisp;
 
 /// How the GUI starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -378,7 +379,7 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
 /// subsystem directories, in lisp/bundled.json's order, then each package
 /// in lisp/packages/. No name in them is another library's, so they follow GNU's load-path without shadowing it.
 pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let layout = lisp_layout::layout(dir)?;
+    let layout = lisp_layout::layout(&own_lisp(dir))?;
     let mut path: Vec<_> = layout.directories.iter().map(|name| dir.join(name)).filter(|p| p.is_dir()).collect();
     let packages = dir.join(&layout.packages);
     if packages.is_dir() {
@@ -390,7 +391,7 @@ pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf
 /// The library that defines the bundled packages' autoloads as it loads, by
 /// scanning their directories, beside the GNU Lisp directory `dir`, when present.
 pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::PathBuf>, String> {
-    let file = lisp_layout::bundled_layout(dir)?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
+    let file = lisp_layout::bundled_layout(&own_lisp(dir))?["autoloads"].as_str().ok_or("lisp/bundled.json: no autoloads path")?.to_owned();
     Ok(runtime_of(dir).map(|runtime| runtime.join(file)).filter(|path| path.is_file()))
 }
 
@@ -398,7 +399,7 @@ pub fn bundled_autoloads(dir: &std::path::Path) -> Result<Option<std::path::Path
 /// `term/` among them), then [`bundled_load_path`]. The VM's own Lisp
 /// (lisp/vm/), which the VM reads itself, stays off it.
 pub fn runtime_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let own = lisp_layout::own_directories(dir)?;
+    let own = lisp_layout::own_directories(&own_lisp(dir))?;
     let mut path = vec![dir.to_path_buf()];
     path.extend(sorted_subdirectories(dir)?.into_iter()
         .filter(|p| !own.iter().any(|name| p.file_name() == Some(std::ffi::OsStr::new(name)))));
@@ -470,7 +471,7 @@ fn bind_journey_keys(vm: &mut Vm, after_loadup: bool) -> Result<Vec<Binding>, St
 /// `Started::files` for [`finish_workspace`], after the user's init.
 pub fn initialize(vm: &mut Vm) -> Result<Started, String> {
     let args = take_queued();
-    let started = set_up_workspace(vm, &lisp_root(&lisp_dir())?, args.is_empty())?;
+    let started = set_up_workspace(vm, &own_lisp(&lisp_root(&lisp_dir())?), args.is_empty())?;
     Ok(Started { files: args, ..started })
 }
 
@@ -482,10 +483,11 @@ pub fn finish_workspace(vm: &mut Vm, started: &Started) -> Result<(), String> {
 
 /// [`initialize`] visiting FILES (`romacs FILE...`) instead of the queue.
 pub fn initialize_files(vm: &mut Vm, files: &[std::path::PathBuf]) -> Result<Started, String> {
-    initialize_files_from_sources(vm, files, &lisp_root(&lisp_dir())?)
+    initialize_files_from_sources(vm, files, &own_lisp(&lisp_root(&lisp_dir())?))
 }
 
-/// [`initialize_files`] with the Lisp tree ROOT (a runtime tree's `lisp/`).
+/// [`initialize_files`] with Romacs's Lisp tree ROOT, whatever it is named
+/// (`--batch DIR`): Romacs's files and GNU's forms both come from it.
 pub fn initialize_files_from_sources(vm: &mut Vm, files: &[std::path::PathBuf], root: &std::path::Path) -> Result<Started, String> {
     let started = set_up_workspace(vm, root, files.is_empty())?;
     visit_files(vm, files)?;
@@ -561,7 +563,7 @@ pub fn initialize_chain(vm: &mut Vm, launch: Launch, font: Option<&str>, dir: &s
     // byte-run.el replaces it; the host's paint and quit checks read them.
     vm.eval_source(GUI_SUPPORT)?;
     if launch == Launch::Loadup {
-        for path in CHAIN_LISP { load_lisp(vm, dir, path)?; }
+        for path in CHAIN_LISP { load_lisp(vm, &own_lisp(dir), path)?; }
         crate::eval_last_sexp::define(vm)?;
     }
     if let Some(font) = font { vm.eval_source(font)?; }
@@ -660,7 +662,8 @@ fn launch_lisp() -> impl Iterator<Item = &'static str> {
         .chain(EDITING_LISP)
 }
 
-/// Load PATH of the Lisp tree DIR (GNU's Lisp and Romacs's, one tree), as
+/// Load PATH of Romacs's Lisp tree DIR ([`own_lisp`] for a launch of GNU's
+/// Lisp; the tree it was given for a workspace, `--batch DIR`), as
 /// `load' does: a world build records
 /// what it read, so an edited file builds the world again, a source boot
 /// reads the file as it is now, and `load-history' names it, as GNU's
@@ -763,7 +766,7 @@ pub fn install_session_definitions(vm: &mut Vm, launch: Launch, dir: &std::path:
     for (test, paths) in SESSION_DEFINITIONS {
         let held = match test { None => true, Some(test) => vm.eval_source(test)? != romacs_vm::Fixed::NIL };
         if held {
-            for path in paths { load_lisp(vm, dir, path)?; }
+            for path in paths { load_lisp(vm, &own_lisp(dir), path)?; }
         }
     }
     mark_phase("session-definitions");
@@ -787,7 +790,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
         vm.open_display();
         for path in ["session/romacs-gui-loadup.el", "completion/romacs-completion-defaults.el"] {
             let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
-            load_lisp(vm, dir, path)?;
+            load_lisp(vm, &own_lisp(dir), path)?;
             mark_phase(name);
         }
     }
@@ -796,7 +799,7 @@ pub fn start_session(vm: &mut Vm, launch: Launch, loadup: crate::loadup::Loadup,
     if launch == Launch::GnuOnly {
         return Ok(Started { launch, loadup: Some(loadup), bindings: vec![], gnu_mode_line, files: vec![] });
     }
-    for path in EDITING_LISP { load_lisp(vm, dir, path)?; }
+    for path in EDITING_LISP { load_lisp(vm, &own_lisp(dir), path)?; }
     // A chain that stopped short leaves GNU editing functions romacs-editing.el
     // calls undefined: each comes from the GNU file in the tree that defines it.
     define_gnu_editing(vm, dir)?;
@@ -2311,6 +2314,30 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!((first.as_str(), second.as_str()), ("(defun a () 1)\n", "(defun b () 2)\n"));
         assert!(std::rc::Rc::ptr_eq(&scanned, &again), "the same text keeps its scan");
+    }
+
+    /// `ROMACS_LISP_DIR` may name GNU's Lisp apart from the runtime tree's
+    /// lisp/: a --loadup launch then takes Romacs's files, its layout and
+    /// its bootstrap from that lisp/, never from GNU's directory, whose own
+    /// bundled.json (here not even JSON) it does not read.
+    #[test]
+    fn loadup_takes_romacs_lisp_from_the_runtime_tree_beside_gnu_lisp() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp");
+        let edited = std::fs::read_to_string(source.join("romacs-editing.el")).unwrap() + "\n(defvar romacs-test-runtime-tree t)\n";
+        let lisp = scratch_runtime("gnu-apart", "", &[("romacs-editing.el", &edited)]);
+        let root = lisp.parent().unwrap().to_path_buf();
+        let gnu = root.join("gnu");
+        std::fs::create_dir_all(&gnu).unwrap();
+        for (file, _) in GNU_EDITING { std::os::unix::fs::symlink(source.join(file), gnu.join(file)).unwrap(); }
+        std::fs::write(gnu.join("bundled.json"), "not json").unwrap();
+        let ran = on_evaluator(move || {
+            let mut vm = Vm::new();
+            vm.set_frame_geometry(1200, 800, 20, 10).unwrap();
+            initialize_loadup_from(&mut vm, Launch::Loadup, None, &gnu).unwrap();
+            printed(&mut vm, &format!("(list (boundp 'romacs-test-runtime-tree) (and (boundp '{LISP_ERRORS}) {LISP_ERRORS}))"))
+        });
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(ran, "(t nil)");
     }
 
     /// A workspace set up from a Lisp tree runs that tree's own files,
