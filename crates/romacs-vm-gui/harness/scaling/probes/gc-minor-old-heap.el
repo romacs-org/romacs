@@ -11,8 +11,12 @@
 ;; the young, what was stored into since the last collection and the
 ;; roots, so the old heap's size costs it nothing.  Held by its slope,
 ;; instructions per old item over the eight minors: a pass over every
-;; table entry or colour shows here, however small its cost an entry.
-(scaling-probe gc-minor-old-heap :n 50000 :slope 1
+;; table entry or colour shows here, however small its cost an entry
+;; (608 when a minor swept and scanned whole tables).  What is left, 29,
+;; is spent (perf, instructions:u at a fixed period) in the allocation's
+;; search for a free entry and in sweeping the cards the young share with
+;; old entries, which depend on how the old are spread among free ones.
+(scaling-probe gc-minor-old-heap :n 50000 :slope 40
   :setup (let ((all nil))
            (dotimes (i (* 4 n))
              (let* ((x i) (item (list x (vector x x) (make-string 8 ?x) (lambda () (setq x (1+ x))))))
