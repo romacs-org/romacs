@@ -117,7 +117,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("permanent_symbol_names", Root),
     // What that map took since the last collection: a minor's roots for it,
     // a full reading the map; emptied at every collection.
-    ("permanent_names_added", Root),
+    ("names_added", Root),
     // Object indices and call-cache ids, as a minor reads them (gc.rs).
     ("shared_holders", Free), ("caches_filled", Free), ("payload_settled", Free),
     // Weak references to nodes the case tables own.
