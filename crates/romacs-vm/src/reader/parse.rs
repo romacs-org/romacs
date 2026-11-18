@@ -344,9 +344,11 @@ impl Reader<'_, '_, '_, '_, '_> {
     }
     /// GNU's `maybe_quit` between a list's or a vector's elements, for a read
     /// under the permission (Lisp's `read` and the loader): a quit fails the
-    /// read with its escape, and what was read of the form is dropped. A
-    /// stream read so far stays read, as it would at any other failure. A
-    /// read of Romacs's own text, without the permission, never stops.
+    /// read with its escape, and what was read of the form is dropped. It
+    /// leaves the symbols already interned, as a GNU read that fails partway
+    /// does, and publishes nothing else; a stream read so far stays read, as
+    /// at any other failure. A read of Romacs's own text, without the
+    /// permission, never stops.
     fn poll(&mut self) -> Result<()> {
         if self.gc.is_none() || !self.m.leaf((), |vm, ()| vm.inside_quit_scope(Vm::native_poll_text).is_err()) { return Ok(()); }
         self.signal = self.m.leaf((), build::pending_signal);
