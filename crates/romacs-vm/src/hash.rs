@@ -418,19 +418,28 @@ pub(super) fn is_hash_primitive(p: Primitive) -> bool {
 struct Walk {
     seen: Option<HashMap<u64, Vec<u64>>>,
     polled: bool,
-    steps: crate::quit::Steps,
 }
 
 impl Walk {
     fn polled() -> Self {
         Self { polled: true, ..Self::default() }
     }
-    /// Whether the walk stops here: polled, every `POLL_STEPS` steps, the
-    /// quit probe due.
+    /// Whether the walk stops here, asked only where a spine or vector has
+    /// taken another `WALK_CHUNK` steps: polled, and the quit probe due.
     #[inline]
-    fn stopped(&mut self, vm: &Vm) -> bool {
-        self.polled && self.steps.tick() && vm.own_stop_due()
+    fn stopped(&self, vm: &Vm) -> bool {
+        self.polled && probe_due(vm)
     }
+}
+
+/// Steps of a spine or vector between two asks of a polled walk.
+const WALK_CHUNK: usize = 4096;
+
+/// `Vm::own_stop_due`, kept out of the walk's loops.
+#[cold]
+#[inline(never)]
+fn probe_due(vm: &Vm) -> bool {
+    vm.own_stop_due()
 }
 
 impl Vm {
@@ -889,11 +898,14 @@ impl Vm {
         if x.len() != y.len() {
             return Ok(false);
         }
-        for (&x, &y) in x.iter().zip(y) {
-            if walk.stopped(self) { return Err(HashFault::Stopped); }
-            if !self.equal_at(x, y, depth + 1, walk, props)? {
-                return Ok(false);
+        // A chunk at a time, a polled walk asked between.
+        for (x, y) in x.chunks(WALK_CHUNK).zip(y.chunks(WALK_CHUNK)) {
+            for (&x, &y) in x.iter().zip(y) {
+                if !self.equal_at(x, y, depth + 1, walk, props)? {
+                    return Ok(false);
+                }
             }
+            if x.len() == WALK_CHUNK && walk.stopped(self) { return Err(HashFault::Stopped); }
         }
         Ok(true)
     }
@@ -917,7 +929,6 @@ impl Vm {
             if b.tag() != 3 {
                 return Ok((a, b, Some(false)));
             }
-            if walk.stopped(self) { return Err(HashFault::Stopped); }
             let (x, a_next) = self.cons_pair(a).map_err(HashFault::Internal)?;
             let (y, b_next) = self.cons_pair(b).map_err(HashFault::Internal)?;
             if !self.equal_at(x, y, depth + 1, walk, props)? {
@@ -938,8 +949,10 @@ impl Vm {
                 return Ok((a, b, Some(verdict)));
             }
             steps += 1;
-            if steps.is_multiple_of(4096) && steps.is_power_of_two() {
-                tortoise = a;
+            // The tortoise's own count paces a polled walk's asks.
+            if steps.is_multiple_of(WALK_CHUNK as u64) {
+                if steps.is_power_of_two() { tortoise = a; }
+                if walk.stopped(self) { return Err(HashFault::Stopped); }
             }
         }
         if b_circular {

@@ -626,12 +626,18 @@ impl Vm {
     /// yet made from the elements.
     pub(super) fn list_values_polled(&mut self, mut value: Value) -> Result<Vec<Value>> {
         let mut values = Vec::new();
+        // One compare a step, for the circularity bound and the poll both.
+        let limit = self.list_limit();
+        let mut check = crate::quit::KERNEL_CHUNK.min(limit + 1);
         while value != Value::NIL {
             let (car, cdr) = self.cons_pair(value)?;
             values.push(car);
             value = cdr;
-            if values.len() > self.list_limit() { return Err("circular list".into()); }
-            if values.len().is_multiple_of(crate::quit::KERNEL_CHUNK) { self.native_poll_text()?; }
+            if values.len() >= check {
+                if values.len() > limit { return Err("circular list".into()); }
+                self.native_poll_text()?;
+                check = (check + crate::quit::KERNEL_CHUNK).min(limit + 1);
+            }
         }
         Ok(values)
     }

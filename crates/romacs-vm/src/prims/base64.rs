@@ -55,10 +55,12 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::Nat
     };
     let mut out = Vec::with_capacity(input.len() / 4 * 3 + 3);
     let short = |out: Vec<u8>| if url || ignore_invalid { Some(out) } else { None };
-    let mut check_at = CHECK;
+    // Groups before the next ask, counted down.
+    let mut budget = CHECK / 3;
     loop {
-        if out.len() >= check_at {
-            check_at += CHECK;
+        budget -= 1;
+        if budget == 0 {
+            budget = CHECK / 3;
             if stop.due() { *stopped = true; return None; }
         }
         let Some((_, v)) = next(&mut bytes) else { return Some(out) };

@@ -452,10 +452,10 @@ pub(crate) fn wait_status(pid: i32, options: rustix::process::WaitOptions) -> Op
 /// status (waitid's WNOWAIT): true too once it is no child of this host's.
 /// A waiter without a pidfd asks it between ticks.
 pub(crate) fn exited(pid: i32) -> bool {
-    use rustix::process::WaitIdOptions as W;
     let Some(child) = child(pid) else { return true };
+    let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOHANG | rustix::process::WaitIdOptions::NOWAIT;
     loop {
-        match rustix::process::waitid(rustix::process::WaitId::Pid(child), W::EXITED | W::NOHANG | W::NOWAIT) {
+        match rustix::process::waitid(rustix::process::WaitId::Pid(child), options) {
             Err(rustix::io::Errno::INTR) => {}
             Ok(found) => return found.is_some(),
             Err(_) => return true,
