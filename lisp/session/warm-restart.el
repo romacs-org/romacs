@@ -298,7 +298,7 @@ STRATEGY is `blocked', `file', `text', `indirect', `handler' or `dropped'."
      ((string-prefix-p " " (buffer-name)) nil)
      (base (cond ((memq (car (with-current-buffer base (warm-restart--classify))) '(file text))
                   (cons 'indirect (format "indirect buffer of %s" (buffer-name base))))
-                 ((warm-restart--text-at-risk-p)
+                 ((and (not (stringp (buffer-local-value 'warm-restart-left-out base))) (warm-restart--text-at-risk-p))
                   (cons 'text (format "indirect buffer of %s, which is not carried: its text is carried apart" (buffer-name base))))
                  (t (cons 'dropped (format "indirect buffer of %s, which is not carried" (buffer-name base))))))
      (buffer-file-name (cons 'file (if (buffer-modified-p) "unsaved text carried" "visits a file")))
@@ -431,12 +431,19 @@ secret's text starred (`warm-restart--strip')."
         :narrowing (and (buffer-narrowed-p) (cons (point-min) (point-max)))
         :minor-modes (warm-restart--minor-modes) :locals (warm-restart--locals)))
 
+(define-error 'warm-restart-secret "its text holds a secret")
+
 (defun warm-restart--text-record (strategy blobs)
   "The record of the current buffer, carried by STRATEGY `file' or `text'.
 Its text goes in the image when it is not the file's: push the buffer
 onto BLOBS, a cell (COUNT . BUFFERS), and name its index."
   (let* ((undo (warm-restart--portable-undo buffer-undo-list))
          (carry (or (eq strategy 'text) (buffer-modified-p) (not (file-exists-p buffer-file-name)))))
+    ;; Its text would go as it is, a secret's too, and its stars, would it
+    ;; go starred, could come back in its file's buffer: a companion takes
+    ;; it (`warm-restart--record-or-companion').
+    (when (and carry (save-restriction (widen) (text-property-not-all (point-min) (point-max) 'romacs-secret nil)))
+      (signal 'warm-restart-secret nil))
     (append (warm-restart--common)
             (list :strategy strategy :hash (buffer-hash) :size (buffer-size)
                   :modified (and (buffer-modified-p) t) :undo (car undo) :undo-cut (cdr undo)
@@ -517,19 +524,14 @@ otherwise.  The blob is taken in BLOBS once the record is whole."
 (defun warm-restart--companion-why (strategy)
   "Why the current buffer, planned as STRATEGY, goes as a companion
 \(`warm-restart--companion'), as (LABEL . HEADER), or nil: a shell's
-transcript, whose input boundary no restored buffer knows; an indirect
-buffer whose base is not carried; text holding a secret, whose stars
-must never come back in its file's buffer."
+transcript, whose input boundary no restored buffer knows, or an
+indirect buffer whose base is not carried."
   (when (memq strategy '(file text))
     (cond ((warm-restart--shell-mode-p major-mode)
            (cons "transcript" (warm-restart--transcript-header major-mode)))
           ((buffer-base-buffer)
            (cons "carried text" (format "Text of %s, whose base buffer %s is not carried"
-                                        (buffer-name) (buffer-name (buffer-base-buffer)))))
-          ((and (save-restriction (widen) (text-property-not-all (point-min) (point-max) 'romacs-secret nil))
-                (or (eq strategy 'text) (buffer-modified-p)
-                    (condition-case nil (not (file-exists-p buffer-file-name)) (error t))))
-           (cons "carried text" (format "Text of %s, its secrets starred" (buffer-name)))))))
+                                        (buffer-name) (buffer-name (buffer-base-buffer))))))))
 
 (defun warm-restart--record-or-companion (entry blobs)
   "ENTRY's record, or a companion carrying its buffer's whole text
@@ -581,10 +583,11 @@ risk, and it shares that text."
 
 (defun warm-restart--name-companions (records)
   "RECORDS with each companion's (`warm-restart--companion') name made
-free of every other record's, and the renames of the windows that showed
-the buffers they carry, as (RECORDS . RENAMES)."
+free of every other record's and of every buffer's a companion carries,
+and the renames of the windows that showed those buffers, as (RECORDS
+. RENAMES)."
   (let ((taken (make-hash-table :test #'equal)) renames)
-    (dolist (record records) (unless (plist-get record :companion) (puthash (plist-get record :name) t taken)))
+    (dolist (record records) (puthash (or (plist-get record :companion) (plist-get record :name)) t taken))
     (cons (mapcar (lambda (record)
                     (if (not (plist-get record :companion))
                         record
@@ -623,12 +626,18 @@ nil when it cannot be carried, or is a secret."
                           (marker-position value))))))
         (t (let ((value (warm-restart--strip value))) (and (warm-restart--portable-p value) value)))))
 
+(defconst warm-restart--credentials
+  '(password-data auth-source-netrc-cache auth-source--session-nonce epa-file-passphrase-alist
+    plstore-passphrase-alist url-http-real-basic-auth-storage url-digest-auth-storage romacs-pass--copies)
+  "Caches of credentials: never in an image, whoever lists them.")
+
 (defun warm-restart--variables (variables)
   "(VAR . VALUE) for each bound VARIABLES whose value is data, and the
-names of those that are not."
+names of those that are not.  A cache of credentials is neither
+\(`warm-restart--credentials')."
   (let (carried lost)
     (dolist (var (delete-dups (copy-sequence variables)))
-      (when (and (symbolp var) (boundp var))
+      (when (and (symbolp var) (boundp var) (not (memq var warm-restart--credentials)))
         (let ((value (warm-restart--strip (symbol-value var))))
           (if (warm-restart--portable-p value) (push (cons var value) carried) (push var lost)))))
     (cons (nreverse carried) (nreverse lost))))
@@ -1442,8 +1451,10 @@ A file changed on disk since it was read is named: saving asks."
 (defun warm-restart--fold-starred (form)
   "FORM, an image's, with the copies a build before this one set apart
 \(`:starred': a file's text, its secrets starred) among its buffers, each
-a text record headed as a companion is, and the lost entries that named
-them for older readers gone."
+an inert text record headed as a companion is, offered to be saved at
+exit, and the lost entries that named them for older readers gone.
+Delete this once no installed image has a `:starred' list: one install
+after the build that stopped writing them."
   (let ((starred (plist-get form :starred)))
     (if (not (and (consp starred) (proper-list-p starred) (proper-list-p (plist-get form :buffers))))
         form
@@ -1455,10 +1466,13 @@ them for older readers gone."
                                                      r
                                                    (thread-first (copy-sequence r)
                                                                  (plist-put :strategy 'text) (plist-put :companion (plist-get r :copy-of))
-                                                                 (plist-put :locals (cons (cons 'header-line-format
-                                                                                                (format "Text of %s, its secrets starred"
-                                                                                                        (plist-get r :copy-of)))
-                                                                                          (plist-get r :locals))))))
+                                                                 (plist-put :mode 'fundamental-mode) (plist-put :library nil)
+                                                                 (plist-put :minor-modes nil)
+                                                                 (plist-put :locals (append (list (cons 'header-line-format
+                                                                                                        (format "Text of %s, its secrets starred"
+                                                                                                                (plist-get r :copy-of)))
+                                                                                                  (cons 'buffer-offer-save t))
+                                                                                            (plist-get r :locals))))))
                                                starred)))
                     (plist-put :starred nil)
                     (plist-put :lost (cl-remove-if (lambda (e) (plist-get e :starred)) (plist-get form :lost)))))))

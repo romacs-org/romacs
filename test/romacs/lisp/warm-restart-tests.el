@@ -1263,7 +1263,7 @@ and wait for it to end."
           (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
           (with-current-buffer "wr-secret-draft (carried text)"
             (should (equal (buffer-string) "pasted ******* typed"))
-            (should (string-search "starred" header-line-format)))
+            (should (string-search "secret" header-line-format)))
           (with-current-buffer "wr-secret-undone"
             (should (equal (buffer-string) "kept "))
             (should (equal warm-restart-tests--secret-local '("a" "*******"))))
@@ -1288,50 +1288,61 @@ and wait for it to end."
   "The record of RECORDS named NAME."
   (seq-find (lambda (r) (equal (plist-get r :name) name)) records))
 
-(ert-deftest warm-restart-a-clone-whose-base-is-left-out-carries-its-typed-text ()
-  ;; Its base left out of images, a clone with typed text goes as a
-  ;; companion of the whole text under its own id, the clone the blob.
+(ert-deftest warm-restart-a-clone-whose-base-is-not-carried-carries-its-typed-text ()
+  ;; A view its package filled is not carried; a writable view of its text
+  ;; with typed text goes as a companion of the whole text under its own
+  ;; id, the view the blob.  A view of a memory-only file's text never goes.
   (let ((warm-restart-directory (make-temp-file "romacs-wr-clones-" t)) base clone image)
     (unwind-protect
         (progn
           (setq base (get-buffer-create "wr-obase"))
-          (with-current-buffer base (insert "typed through the clone"))
+          (with-current-buffer base (special-mode) (let ((inhibit-read-only t)) (insert "filled by its package")))
           (setq clone (make-indirect-buffer base "wr-oclone"))
-          (with-current-buffer clone (narrow-to-region 1 6))
-          (with-current-buffer base (setq-local warm-restart-left-out "kept off the disk"))
+          (with-current-buffer clone (goto-char (point-max)) (insert ", typed") (narrow-to-region 1 6))
           (setq image (warm-restart-write))
           (let ((carried (seq-find (lambda (r) (equal (plist-get r :companion) "wr-oclone"))
                                    (plist-get (car (warm-restart--read image)) :buffers))))
             (should (equal (plist-get carried :id) (with-current-buffer clone (warm-restart--buffer-id)))))
+          ;; Left out by the user, the base keeps every view of its text out.
+          (with-current-buffer base (setq-local warm-restart-left-out "kept off the disk"))
+          (let ((form (car (warm-restart--read (warm-restart-write nil (expand-file-name "left-out.image" warm-restart-directory))))))
+            (should-not (seq-find (lambda (r) (equal (plist-get r :companion) "wr-oclone")) (plist-get form :buffers)))
+            (should (seq-find (lambda (e) (equal (plist-get e :buffer) "wr-oclone")) (plist-get form :lost))))
           (warm-restart-tests--kill "wr-oclone" "wr-obase")
           (let ((romacs-progress-state nil)) (should-not (plist-get (warm-restart-restore-image image) :problems)))
           (with-current-buffer "wr-oclone (carried text)"
             (should-not (buffer-base-buffer))
-            (should (equal (buffer-string) "typed through the clone"))))
+            (should (equal (buffer-string) "filled by its package, typed"))))
       (warm-restart-tests--kill "wr-oclone" "wr-obase" "wr-oclone (carried text)")
       (delete-directory warm-restart-directory t))))
 
 (ert-deftest warm-restart-a-companion-s-clone-goes-with-it ()
-  ;; A modified file holding a secret goes as a companion; its clone is
-  ;; left out, its text in the companion, never indirect on it.
-  (let* ((warm-restart-directory (make-temp-file "romacs-wr-clones-" t))
-         (file (expand-file-name "sclone.txt" warm-restart-directory))
-         base clone)
+  ;; A shell goes as its transcript; its clone is left out, its text in
+  ;; the transcript, never indirect on it.
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-clones-" t)) base clone)
     (unwind-protect
         (progn
-          (write-region "on the disk\n" nil file nil 'silent)
-          (setq base (find-file-noselect file))
-          (with-current-buffer base (goto-char (point-max)) (insert (warm-restart-tests--secret "hunter8")))
+          (setq base (get-buffer-create "wr-sbase"))
+          (with-current-buffer base (warm-restart-tests--plain-shell-mode) (insert "$ typed"))
           (setq clone (with-current-buffer base (clone-indirect-buffer "wr-sclone" nil)))
           (let ((form (car (warm-restart--read (warm-restart-write)))))
-            (should (seq-find (lambda (r) (equal (plist-get r :companion) "sclone.txt")) (plist-get form :buffers)))
+            (should (seq-find (lambda (r) (equal (plist-get r :companion) "wr-sbase")) (plist-get form :buffers)))
             (should-not (seq-find (lambda (r) (eq (plist-get r :strategy) 'indirect)) (plist-get form :buffers)))
-            (should (string-search "sclone.txt" (plist-get (seq-find (lambda (e) (equal (plist-get e :buffer) "wr-sclone"))
-                                                                     (plist-get form :lost))
-                                                           :reason)))))
-      (when (buffer-live-p clone) (kill-buffer clone))
-      (when (buffer-live-p base) (with-current-buffer base (set-buffer-modified-p nil)) (kill-buffer base))
+            (should (string-search "wr-sbase" (plist-get (seq-find (lambda (e) (equal (plist-get e :buffer) "wr-sclone"))
+                                                                   (plist-get form :lost))
+                                                         :reason)))))
+      (warm-restart-tests--kill "wr-sclone" "wr-sbase")
       (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-companion-takes-no-carried-buffer-s-name ()
+  ;; Shells A and "A (transcript)": A's transcript takes neither name, so
+  ;; a shell reopened under either never lands in a transcript.
+  (let ((named (car (warm-restart--name-companions
+                     (list (list :id "1" :name "A (transcript)" :companion "A")
+                           (list :id "2" :name "A (transcript) (transcript)" :companion "A (transcript)")
+                           (list :id "3" :name "notes"))))))
+    (should (equal (mapcar (lambda (r) (plist-get r :name)) named)
+                   '("A (transcript)<2>" "A (transcript) (transcript)" "notes")))))
 
 (ert-deftest warm-restart-a-failed-base-keeps-its-clone-on-its-companion ()
   ;; A base whose record fails, its text typed, and a clone of it: the
@@ -1392,20 +1403,40 @@ and wait for it to end."
            (warm-restart--print
             (list :schema warm-restart--schema :transcripts t :buffers nil
                   :starred (list (list :id "s1" :name "notes.txt <starred>" :strategy 'starred :copy-of "/x/notes.txt"
-                                       :mode 'fundamental-mode :directory "/" :point 1 :modified t :blob 0
+                                       :mode 'text-mode :minor-modes '(auto-fill-mode) :directory "/" :point 1 :modified t :blob 0
                                        :hash (with-current-buffer stage (buffer-hash)) :size (buffer-size stage)))
                   :lost (list (list :buffer "notes.txt <starred>" :unsaved t :starred t :reason "set apart"))))
            (list stage))
           (let* ((romacs-progress-state nil) (report (warm-restart-restore-image image)))
             (should-not (plist-get report :lost))
             (should-not (plist-get report :problems)))
+          ;; Inert, as its own reader made it, and offered at exit.
           (with-current-buffer "notes.txt <starred>"
             (should-not buffer-file-name)
+            (should (eq major-mode 'fundamental-mode))
+            (should-not auto-fill-function)
+            (should buffer-offer-save)
             (should (equal (buffer-string) "on the disk\ntoken *******"))
             (should (string-search "starred" header-line-format))))
       (warm-restart-tests--kill " wr-stage" "notes.txt <starred>")
       (delete-directory warm-restart-directory t))))
 
+
+(ert-deftest warm-restart-a-cached-credential-is-in-no-image ()
+  ;; A cache of credentials listed as a saved global or a history is never
+  ;; written: a secret auth-source remembered is in no image.
+  (require 'auth-source)
+  (let ((warm-restart-directory (make-temp-file "romacs-wr-secrets-" t))
+        (warm-restart-globals (append '(password-data auth-source-netrc-cache) warm-restart-globals))
+        (warm-restart-history-variables (cons 'password-data warm-restart-history-variables))
+        (password-cache t) (auth-source-do-cache t))
+    (unwind-protect
+        (progn
+          (auth-source-remember '(:host "wr.example" :user "me") '((:secret "hunter22")))
+          (should (password-in-cache-p (auth-source-format-cache-entry '(:host "wr.example" :user "me"))))
+          (should-not (warm-restart-tests--image-has (warm-restart-write) "hunter22")))
+      (auth-source-forget '(:host "wr.example" :user "me"))
+      (delete-directory warm-restart-directory t))))
 
 (ert-deftest warm-restart-a-long-undo-with-a-secret-is-written ()
   ;; A buffer's undo 5000 entries long, one of them a secret's deletion:
