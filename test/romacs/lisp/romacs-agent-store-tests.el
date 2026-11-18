@@ -879,4 +879,12 @@ has it: in a transaction of its own, after the statement FIRST when given."
                     ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
             (romacs-agent-store--filled "romacs-agent-store: filled 0\n"))
           (should (romacs-agent-loaded first))
-          (should-not romacs-agent--restore-pending))))))
+          (should-not romacs-agent--restore-pending))
+        ;; An orphan mark alone: nothing queued, no restore scheduled.
+        (let ((timers 0))
+          (setq romacs-agent--late-loads nil)
+          (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf timers))))
+            (romacs-agent-store--filled "romacs-agent-store: filled 0\n"))
+          (should-not romacs-agent--restore-pending)
+          (should-not romacs-agent--late-loads)
+          (should (= timers 0)))))))
