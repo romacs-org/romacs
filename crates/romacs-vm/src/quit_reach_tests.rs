@@ -263,8 +263,8 @@ fn a_quit_in_call_process_leaves_no_child_running() {
     }
 }
 
-/// The printer stops between objects, as GNU's print_object polls at each,
-/// before any text is made; `delq' polls as GNU's FOR_EACH_TAIL does.
+/// The printer stops between objects, as GNU's `print_object` polls at
+/// each, before any text is made; `delq` polls as GNU's `FOR_EACH_TAIL` does.
 #[test]
 fn the_printer_and_delq_quit_in_their_walks() {
     reaches("prin1-to-string", "(setq l (make-list 20000 'a))", "(list l)", "t");

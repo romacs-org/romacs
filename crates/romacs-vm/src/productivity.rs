@@ -46,7 +46,7 @@ impl Vm {
         }
         Ok(self.list_value(&lines))
     }
-    /// The `format` primitive: its `%S` prints poll as GNU's print_object
+    /// The `format` primitive: its `%S` prints poll as GNU's `print_object`
     /// does, before any text is made, so a quit leaves nothing behind. Only
     /// the primitive: `message` and `error` format with `format_string`.
     pub(super) fn format_polled(&mut self, start: usize, n: usize) -> Result<Value> {

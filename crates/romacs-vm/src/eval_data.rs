@@ -714,8 +714,8 @@ pub(crate) const PRINT_STOPPED: &str = "print stopped for a quit poll";
 /// are text (`Vm::primitive_condition` makes it `quit`).
 pub(crate) const PRINT_QUIT: &str = "quit at a print's poll";
 
-/// Objects printed between two looks at the quit probe; GNU's print_object
-/// looks at each (maybe_quit at print_obj).
+/// Objects printed between two looks at the quit probe; GNU's
+/// `print_object` looks at each (`maybe_quit` at `print_obj`).
 const PRINT_POLL: u32 = 4096;
 impl PrintOptions {
     fn set(&mut self, key: &str, value: Value) -> bool {
