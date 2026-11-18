@@ -70,4 +70,3 @@ impl<T, F: FnMut(usize, &mut T)> Sweep<'_, T, F> {
         end
     }
 }
-
