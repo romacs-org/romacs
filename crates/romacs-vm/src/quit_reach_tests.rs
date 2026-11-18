@@ -521,3 +521,14 @@ fn list_walks_quit_inside_their_own_scope() {
         assert_eq!(eval(&mut vm, "(length l)").integer_value(), Some(50000), "{p:?}: the list is whole");
     }
 }
+
+/// Step 7's rows: each polls per chunk inside its own scope, before it
+/// makes anything, and ends in `quit` with a press counted.
+#[test]
+fn chunked_rows_quit_before_they_make_anything() {
+    reaches("base64-decode-string", "(setq s (base64-encode-string (make-string 100000 ?a) t))", "(list s)", "t");
+    reaches("current-column", "(progn (insert (make-string 50000 ?a)) (goto-char (point-max)))", "nil", "(= (point) (point-max))");
+    reaches("make-string", "nil", "(list 50000 ?a)", "t");
+    reaches("string-to-multibyte", "(setq s (string-to-unibyte (make-string 50000 ?a)))", "(list s)", "(not (multibyte-string-p s))");
+    reaches("find-coding-systems-region-internal", "(setq s (make-string 50000 ?é))", "(list s nil)", "t");
+}

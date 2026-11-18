@@ -32,8 +32,16 @@ fn encode_chars(chars: impl IntoIterator<Item = u32>, multibyte: bool) -> Vec<u8
 fn widen_string(cx: &mut Leaf<'_>, value: Value) -> Out {
     let string = cx.string_view(value)?;
     if string.is_multibyte() { return Ok(value); }
-    let chars = string.chars().map(|c| if c >= 128 { c + BYTE8_OFFSET } else { c });
-    let bytes = encode_chars(chars, true);
+    // A part of about 16 KB at a time, polled between (inside its caller's
+    // own scope): the string is made after.
+    let bytes = cx.quittable(|cx| {
+        let mut bytes = Vec::with_capacity(string.bytes.len());
+        for part in string.view().char_parts(1 << 14) {
+            bytes.extend(encode_chars(part.map(|c| if c >= 128 { c + BYTE8_OFFSET } else { c }), true));
+            cx.native_poll()?;
+        }
+        Ok(bytes)
+    })?;
     Ok(cx.make_string(bytes, true))
 }
 
@@ -115,7 +123,17 @@ fn make_string(cx, length: Value, initial: Value; optional multibyte: Value) {
         .ok_or_else(|| Fault::Error("String overflow".into()))?;
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(size).map_err(|_| Fault::Error("String overflow".into()))?;
-    for _ in 0..count { bytes.extend_from_slice(&unit); }
+    // Filled a chunk at a time, polled between: the string is made after.
+    cx.quittable(|cx| {
+        let mut left = count;
+        while left > 0 {
+            let part = left.min(1 << 14);
+            for _ in 0..part { bytes.extend_from_slice(&unit); }
+            left -= part;
+            if left > 0 { cx.native_poll()?; }
+        }
+        Ok(())
+    })?;
     Ok(cx.make_string(bytes, multibyte))
 }}
 

@@ -3,7 +3,7 @@
 use super::*;
 
 defsubr! { name = "current-column", gnu = "indent.c:298", effect = Reads,
-fn current_column(cx) { cx.native_current_column() }}
+fn current_column(cx) { cx.quittable(Leaf::native_current_column) }}
 
 defsubr! { name = "constrain-to-field", gnu = "editfns.c:551", effect = Reads,
 fn constrain_to_field(cx, new: Value, old: Value; optional escape: Value, only_in_line: Value, capture: Value) {

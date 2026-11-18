@@ -42,8 +42,9 @@ fn encode(octets: &[u8], line_break: bool, pad: bool, url: bool) -> Vec<u8> {
     out
 }
 
-/// fns.c base64_decode_1 (unibyte result), None for invalid data.
-fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
+/// fns.c base64_decode_1 (unibyte result), None for invalid data, or for
+/// a stop: STOP is asked once each 16 KB decoded, and a stop sets STOPPED.
+fn decode(input: &[u8], url: bool, ignore_invalid: bool, stop: &crate::quit::NativeStop, stopped: &mut bool) -> Option<Vec<u8>> {
     let mut bytes = input.iter().copied();
     // The next significant byte: whitespace, and with IGNORE-INVALID any
     // invalid byte, is skipped.
@@ -54,7 +55,12 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
     };
     let mut out = Vec::with_capacity(input.len() / 4 * 3 + 3);
     let short = |out: Vec<u8>| if url || ignore_invalid { Some(out) } else { None };
+    let mut check_at = CHECK;
     loop {
+        if out.len() >= check_at {
+            check_at += CHECK;
+            if stop.due() { *stopped = true; return None; }
+        }
         let Some((_, v)) = next(&mut bytes) else { return Some(out) };
         if v == 0 { return None; }
         let mut value = ((v - 1) as u32) << 18;
@@ -80,6 +86,24 @@ fn decode(input: &[u8], url: bool, ignore_invalid: bool) -> Option<Vec<u8>> {
         value += (v - 1) as u32;
         out.push(value as u8);
     }
+}
+
+/// Octets decoded between two asks of the quit probe.
+const CHECK: usize = 1 << 14;
+
+/// BYTES decoded, inside the caller's own scope: the decode stops for the
+/// quit probe, and the poll quits or, nothing to quit for after all, the
+/// bytes are decoded again unpolled. Nothing is made before it ends.
+fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
+    cx.quittable(|cx| {
+        let (stop, mut stopped) = (cx.native_stop(), false);
+        let mut result = decode(bytes, url, ignore_invalid, &stop, &mut stopped);
+        if stopped {
+            cx.native_poll()?;
+            result = decode(bytes, url, ignore_invalid, &crate::quit::NativeStop::never(), &mut stopped);
+        }
+        result.ok_or_else(|| Fault::Error("Invalid base64 data".into()))
+    })
 }
 
 /// The octets of STRING: raw bytes as themselves, a multibyte non-ASCII
@@ -109,8 +133,7 @@ fn base64url_encode_string(cx, string: Value; optional no_pad: Value) {
 defsubr! { name = "base64-decode-string", gnu = "fns.c:4409", effect = Pure,
 fn base64_decode_string(cx, string: Value; optional base64url: Value, ignore_invalid: Value) {
     let bytes = cx.string_view(string)?.bytes().to_vec();
-    let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
-        .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
+    let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     Ok(cx.make_string(decoded, false))
 }}
 
@@ -182,8 +205,8 @@ fn base64_decode_region(cx, beg: Value, end: Value; optional base64url: Value, i
     let (from, to) = cx.validate_region(beg, end)?;
     let text = cx.region_text(from, to)?;
     let bytes = cx.string_view(text)?.bytes().to_vec();
-    let decoded = decode(&bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)
-        .ok_or_else(|| Fault::Error("Invalid base64 data".into()))?;
+    // Decoded before the region changes.
+    let decoded = decoded(cx, &bytes, base64url != Value::NIL, ignore_invalid != Value::NIL)?;
     let length = decoded.len() as i64;
     let text = cx.make_string(decoded, false);
     replace_region(cx, from, to, text, length, true)

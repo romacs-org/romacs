@@ -104,7 +104,16 @@ impl Leaf<'_> {
     pub fn native_current_column(&mut self) -> super::super::Out {
         let rule = self.vm.width_rule().map_err(Fault::Error)?;
         let (line, point, ..) = self.line_text()?;
-        let column = line[..point].chars().fold(0, |column, c| column + rule.columns(c as u32, column));
+        // A part of about 16 KB at a time, polled between: it reads only.
+        let text = &line[..point];
+        let (mut column, mut at) = (0, 0);
+        while at < text.len() {
+            let mut end = (at + (1 << 14)).min(text.len());
+            while !text.is_char_boundary(end) { end += 1; }
+            column = text[at..end].chars().fold(column, |column, c| column + rule.columns(c as u32, column));
+            at = end;
+            if at < text.len() { self.native_poll()?; }
+        }
         Value::integer(column as i64).map_err(Fault::Error)
     }
 

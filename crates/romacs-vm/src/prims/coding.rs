@@ -351,7 +351,8 @@ fn keyboard_coding_system(cx; optional terminal: Value) {
 
 defsubr! { name = "find-coding-systems-region-internal", gnu = "coding.c:9087", effect = Reads,
 fn find_coding_systems_region_internal(cx, start: Value, end: Value; optional exclude: Value) {
-    cx.find_coding_systems_region(start, end, exclude)
+    // It reads only: its scans quit.
+    cx.quittable(|cx| cx.find_coding_systems_region(start, end, exclude))
 }}
 
 // Ffind_operation_coding_system: the coding pair the alist for OPERATION
