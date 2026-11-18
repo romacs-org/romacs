@@ -143,8 +143,9 @@ impl Vm {
 /// Capture VM, and CARRY, what the embedder keeps beside it, into FILE as an
 /// image keyed KEY: none unless the VM is at rest. The arena is this
 /// process's heap; nothing else allocates while the image is written, and
-/// the process exits after it. CARRY travels as it is, unencoded: the key
-/// binds the embedder, so its restorer knows CARRY's type.
+/// the process exits after it. CARRY travels as it is, unencoded: the image
+/// records its type's tag and name, and `restore` checks both beside the
+/// key.
 pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     let mut vm = vm.at_rest_for_image()?;
     // A restore makes the image's entries the indices below each table's
