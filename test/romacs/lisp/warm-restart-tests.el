@@ -1159,6 +1159,61 @@ and wait for it to end."
       (warm-restart-tests--kill "wr-rejecting")
       (delete-directory warm-restart-directory t))))
 
+(ert-deftest warm-restart-a-view-whose-data-is-not-portable-is-named-at-restore ()
+  ;; A read-only view, nothing typed, whose handler's data is not data:
+  ;; lost, and the restore says so by name.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (view (get-buffer-create "wr-view"))
+         image said)
+    (unwind-protect
+        (let ((desktop-buffer-mode-handlers (cons (cons 'warm-restart-tests--drafting-mode #'ignore) desktop-buffer-mode-handlers)))
+          (with-current-buffer view
+            (warm-restart-tests--drafting-mode)
+            (insert "generated")
+            (set-buffer-modified-p nil)
+            (setq buffer-read-only t)
+            (setq-local desktop-save-buffer (lambda (_dir) (list (point-marker)))))
+          (setq image (warm-restart-write))
+          (should (plist-get (seq-find (lambda (e) (equal (plist-get e :buffer) "wr-view"))
+                                       (plist-get (car (warm-restart--read image)) :lost))
+                             :failed))
+          (kill-buffer view)
+          (cl-letf (((symbol-function 'message) (lambda (&rest args) (when (car args) (push (apply #'format args) said))))
+                    ((symbol-function 'display-warning) (lambda (_type text &rest _) (push text said))))
+            (let ((romacs-progress-state nil)) (warm-restart-restore-image image)))
+          (should (seq-find (lambda (m) (string-search "could not be saved: wr-view" m)) said)))
+      (warm-restart-tests--kill "wr-view")
+      (delete-directory warm-restart-directory t))))
+
+(ert-deftest warm-restart-a-register-in-a-file-goes-to-its-companion ()
+  ;; A file buffer's record fails while its text is typed: a register in
+  ;; it goes to the companion that holds that text, not to the file.
+  (let* ((warm-restart-directory (make-temp-file "romacs-wr-companion-" t))
+         (file (expand-file-name "notes.txt" warm-restart-directory))
+         (register-alist nil)
+         buffer image)
+    (unwind-protect
+        (save-window-excursion
+          (write-region "on the disk\n" nil file nil 'silent)
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (goto-char (point-max))
+            (point-to-register ?c)
+            (insert "typed"))
+          (set-window-buffer nil (get-buffer-create "*scratch*"))
+          (warm-restart-tests--failing-record '("notes.txt")
+            (setq image (warm-restart-write)))
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)
+          (setq register-alist nil)
+          (let ((romacs-progress-state nil)) (warm-restart-restore-image image))
+          (jump-to-register ?c)
+          (should (equal (buffer-name) "notes.txt <carried text>"))
+          (should-not buffer-file-name)
+          (should (looking-at-p "typed")))
+      (warm-restart-tests--kill "notes.txt <carried text>" "notes.txt")
+      (delete-directory warm-restart-directory t))))
+
 (ert-deftest warm-restart-a-companion-takes-no-later-record-s-name ()
   ;; A buffer made here first has the companion's name, and a later
   ;; record the next free one: each record gets a buffer of its own.

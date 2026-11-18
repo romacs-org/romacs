@@ -520,8 +520,11 @@ otherwise, and text at risk is never lost quietly."
                           (setcar blobs count) (setcdr blobs taken)
                           nil))))
     (cond ((and record (not (plist-member record :lost))) record)
+          ;; A failed capture, signalled or its data not portable, is
+          ;; marked so the restore names it.
           ((not (with-current-buffer buffer (warm-restart--text-at-risk-p)))
-           (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed) :failed t)))
+           (append (or record (list :lost (plist-get entry :name) :reason (format "cannot be saved: %s" failed)))
+                   (list :failed t)))
           (t (condition-case err
                  (warm-restart--companion buffer (or failed (plist-get record :reason)) blobs staging)
                (error (signal 'warm-restart-blocked
