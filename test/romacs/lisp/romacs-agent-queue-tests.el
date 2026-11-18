@@ -407,6 +407,29 @@ message is sent, `romacs-agent-send' by default.")
           (should-not (romacs-agent-queue again)))
         (should-not (romacs-agent-store-queued id))))))
 
+(ert-deftest romacs-agent-a-kept-message-unsure-waits ()
+  ;; Its lookup failed (grep unable to read its journal): not sent now,
+  ;; its row kept for the next load.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "b3b3b3b3-0000-4000-8000-000000000000")
+           (dir (expand-file-name id (romacs-agent--state-root)))
+           (session (progn (make-directory dir t)
+                           (write-region "" nil (expand-file-name "journal.jsonl" dir) nil 'silent)
+                           (romacs-agent-test-attach
+                            (romacs-agent--make :id id :harness 'claude :state 'running :title "unsure" :dir dir)
+                            t)))
+           (sent nil))
+      (romacs-agent-send-later session "maybe")
+      (let ((again (romacs-agent-test-attach
+                    (romacs-agent--make :id id :harness 'claude :state 'idle :title "unsure" :dir dir) t)))
+        (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 2)))
+          (romacs-agent-queue-tests--writing sent (romacs-agent-store--requeue again nil)))
+        (should-not sent)
+        (should-not (romacs-agent-queue again)))
+      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("maybe"))))))
+
 (ert-deftest romacs-agent-cut-turn-stays-cut-across-runs ()
   ;; A cut turn, resumed, cut again (its resumption journals no prompt):
   ;; still cut, until a real done; a journal replayed anew says the same.

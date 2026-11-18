@@ -4227,23 +4227,36 @@ files the user attached to it.  MESSAGES: it comes from other sessions
 (declare-function romacs-agent-events--db "romacs-agent-events" ())
 
 (defun romacs-agent--sent-queued (session ids)
-  "Those of IDS, kept messages of SESSION's, its records say were sent
-\(an input record's romacsQueued): one written as an editor ended, its
-kept row not yet let go.  Looked for as they are written, never by
-reading its records here: in SQLite by a query of its own inputs, in a
-journal by grep."
-  (let ((key (lambda (id) (format "\"romacsQueued\":%s" (json-serialize id)))))
-    (if (romacs-agent-events-p session)
-        (when-let* ((db (romacs-agent-events--db)))
-          (cl-remove-if-not
-           (lambda (id)
-             (sqlite-select db "select 1 from events where session = ? and kind = 'in' and instr(record, ?) > 0 limit 1"
-                            (list (romacs-agent-id session) (funcall key id))))
-           ids))
-      (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
-        (when (file-readable-p journal)
-          (cl-remove-if-not (lambda (id) (eql 0 (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)))
-                            ids))))))
+  "What SESSION's records say of IDS, kept messages of its: (SENT . UNSURE),
+those an input record names (romacsQueued; written as an editor ended,
+its kept row not yet let go) and those whose lookup failed.  Looked for
+as they are written, never by reading its records here: in SQLite by a
+query of its own inputs, in a journal by grep."
+  ;; Its id a UUID: as JSON, itself in quotes.
+  (let* ((key (lambda (id) (format "\"romacsQueued\":\"%s\"" id)))
+         ;; Each: t sent, nil not, `unsure' its lookup failed.
+        (look
+         (if (romacs-agent-events-p session)
+             (let ((db (romacs-agent-events--db)))
+               (lambda (id)
+                 (if (null db) 'unsure
+                   (condition-case nil
+                       (and (sqlite-select db "select 1 from events where session = ? and kind = 'in' and instr(record, ?) > 0 limit 1"
+                                           (list (romacs-agent-id session) (funcall key id)))
+                            t)
+                     (error 'unsure)))))
+           (let ((journal (expand-file-name "journal.jsonl" (romacs-agent-dir session))))
+             (lambda (id)
+               (and (file-exists-p journal)
+                    (let ((status (condition-case nil (call-process "grep" nil nil nil "-qF" "-e" (funcall key id) journal)
+                                    (error 2))))
+                      (cond ((eql status 0) t) ((eql status 1) nil) (t 'unsure))))))))
+        (sent nil) (unsure nil))
+    (dolist (id ids)
+      (let ((said (funcall look id)))
+        (cond ((eq said t) (push id sent))
+              ((eq said 'unsure) (push id unsure)))))
+    (cons sent unsure)))
 
 (defun romacs-agent--clear-queue (session)
   "Take every message out of SESSION's queue, and every one kept for it,
