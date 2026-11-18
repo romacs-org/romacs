@@ -8,6 +8,7 @@ use crate::coordinates::{ByteOffset, CharOffset};
 use crate::treesit::{self as ts, native, Linecol};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 type R<T> = std::result::Result<T, Fault>;
 type Out = super::super::Out;
@@ -1151,24 +1152,21 @@ impl Leaf<'_> {
 
     /// SOURCE (a string, or a sexp expanded) compiled for LANGUAGE, or the
     /// `treesit-query-error' it signals.
-    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
-        let (text, source) = if self.pair(source).is_some() {
-            let expanded = self.ts_query_expand_bytes(source)?;
-            let bytes = expanded.bytes.clone();
-            (bytes, self.ts_expanded_value(expanded))
-        } else {
-            (self.string_bytes(source)?, source)
-        };
-        match native::Query::new(&language, &text) {
-            Ok(query) => Ok(Rc::new(ts::Compiled::new(query))),
+    fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Arc<ts::Compiled>> {
+        let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
+        let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
+        match ts::query_memo::compile(&language, &text) {
+            Ok(compiled) => Ok(compiled),
             Err((offset, message)) => {
+                // The signal names the text compiled: a sexp's expansion.
+                let source = expanded.map_or(source, |e| self.ts_expanded_value(e));
                 let data = [self.string(message), fixnum(i64::from(offset) + 1), source, self.string("Debug the query with `treesit-query-validate'")];
                 Err(self.ts_signal("treesit-query-error", &data))
             }
         }
     }
     /// treesit_ensure_query_compiled for the compiled query QUERY.
-    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Rc<ts::Compiled>> {
+    pub(crate) fn ts_ensure_compiled(&mut self, query: Value) -> R<Arc<ts::Compiled>> {
         let q = self.ts_query(query)?;
         if let Some(compiled) = &q.compiled {
             return Ok(compiled.clone());

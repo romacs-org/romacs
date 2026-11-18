@@ -7,6 +7,7 @@
 //! 1-based ones; `TextBody` offsets are 0-based.
 pub(crate) mod ahead;
 pub(crate) mod native;
+pub(crate) mod query_memo;
 
 use crate::text::{FrozenText, TextBody};
 use std::sync::OnceLock;
@@ -15,6 +16,7 @@ use native::{TSInputEdit, TSPoint, Tree};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
@@ -485,13 +487,15 @@ pub(crate) struct Node {
 pub(crate) struct Query {
     pub language: Value,
     pub source: Value,
-    pub compiled: Option<Rc<Compiled>>,
+    pub compiled: Option<Arc<Compiled>>,
 }
 
 /// A compiled query and each pattern's predicates
-/// (`treesit_predicates_for_pattern`).
+/// (`treesit_predicates_for_pattern`). Immutable once made, and shared by
+/// every query object compiled from the same text for the same grammar
+/// (`query_memo`).
 pub(crate) struct Compiled {
-    pub query: Rc<native::Query>,
+    pub query: native::Query,
     pub predicates: Vec<Vec<Predicate>>,
 }
 
@@ -508,7 +512,7 @@ pub(crate) enum Arg {
 }
 
 impl Compiled {
-    pub(crate) fn new(query: Rc<native::Query>) -> Self {
+    pub(crate) fn new(query: native::Query) -> Self {
         let predicates = (0..query.pattern_count()).map(|p| {
             let mut out = Vec::new();
             let mut current: Vec<Arg> = Vec::new();
@@ -554,7 +558,7 @@ pub(crate) enum TaskState {
 /// holds, from index 0: the parser, then per match its capture names and
 /// nodes in pairs, as MATCHES's ranges index them.
 pub(crate) struct Capture {
-    pub compiled: Rc<Compiled>,
+    pub compiled: Arc<Compiled>,
     /// (pattern, start in `values`, capture count) per match.
     pub matches: Vec<(u32, usize, usize)>,
     pub at: usize,

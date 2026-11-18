@@ -86,6 +86,13 @@ impl Language {
     pub(crate) fn abi_version(&self) -> u32 {
         self.0.abi_version() as u32
     }
+    /// The loaded grammar's `TSLanguage` address: its identity for the
+    /// session, since no grammar library is ever closed (`Library`), so no
+    /// other grammar can come to occupy it.
+    pub(crate) fn address(&self) -> usize {
+        // A static grammar's copy is itself: no count is kept for it.
+        self.0.clone().into_raw() as usize
+    }
     /// Whether this runtime can parse with it (GNU's throwaway parser check).
     pub(crate) fn compatible(&self) -> bool {
         Parser::new().set_language(self)
@@ -330,7 +337,10 @@ impl Cursor {
     }
 }
 
-/// A compiled query, deleted when dropped.
+/// A compiled query, deleted when dropped. Nothing changes it once
+/// compiled: every method takes `&self` and only reads it, and a match
+/// runs on a cursor of its own (`matches`), so one query serves any
+/// number of threads at once (`query_memo` shares it).
 pub(crate) struct Query(*mut ffi::TSQuery);
 impl Drop for Query {
     fn drop(&mut self) {
@@ -338,6 +348,15 @@ impl Drop for Query {
         unsafe { ffi::ts_query_delete(self.0) };
     }
 }
+// UNSAFE(a raw TSQuery has no safe owner: the crate's own Query evaluates predicates itself, see the module doc)
+// SAFETY: the runtime never writes a TSQuery after ts_query_new except
+// through ts_query_disable_capture and ts_query_disable_pattern, which this
+// type never calls; readers and cursors take it `const`. The tree-sitter
+// crate declares its own `Query` Send and Sync on the same ground.
+unsafe impl Send for Query {}
+// UNSAFE(a raw TSQuery has no safe owner: the crate's own Query evaluates predicates itself, see the module doc)
+// SAFETY: as for Send: every access through `&Query` reads only.
+unsafe impl Sync for Query {}
 
 /// One step of a pattern's predicates.
 pub(crate) enum PredicateStep<'a> {
@@ -369,14 +388,14 @@ unsafe fn raw_slice<'a, T>(pointer: *const T, length: u32) -> &'a [T] {
 impl Query {
     /// ts_query_new of SOURCE for LANGUAGE, or the error's offset and
     /// GNU's description of its type.
-    pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Rc<Self>, (u32, &'static str)> {
+    pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Self, (u32, &'static str)> {
         let (mut offset, mut kind) = (0, 0);
         // A static grammar's copy is itself: no count is kept for it.
         let language = language.0.clone().into_raw();
         // SAFETY: SOURCE is read for its length; the language is loaded.
         let query = unsafe { ffi::ts_query_new(language, source.as_ptr().cast(), source.len() as u32, &mut offset, &mut kind) };
         if !query.is_null() {
-            return Ok(Rc::new(Self(query)));
+            return Ok(Self(query));
         }
         let message = match kind {
             ffi::TSQueryErrorNone => "None",
