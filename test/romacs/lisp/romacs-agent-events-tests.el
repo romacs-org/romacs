@@ -74,10 +74,20 @@ turns, and its journal's file; a state root of its own."
   "A process holding the lock of the session ID, as its host does, once held."
   (let* ((lock (expand-file-name "host.lock" (expand-file-name id (romacs-agent--state-root))))
          (process (start-process "romacs-test-host-lock" nil "flock" "-o" lock "sleep" "60")))
+    (process-put process 'lock lock)
     (with-timeout (10 (error "The lock was never taken"))
       (while (eql 0 (call-process "flock" nil nil nil "-n" lock "true"))
         (accept-process-output nil 0.05)))
     process))
+
+(defun romacs-agent-events-tests--let-go (host)
+  "End HOST, a process holding a session's lock (`romacs-agent-events-tests--hold'),
+and wait until the lock is free: its process killed, it may hold it a
+moment more under load."
+  (delete-process host)
+  (with-timeout (10 (error "The lock was never let go"))
+    (while (not (eql 0 (call-process "flock" nil nil nil "-n" (process-get host 'lock) "true")))
+      (accept-process-output nil 0.05))))
 
 (ert-deftest romacs-agent-events-read-as-the-journal-was ()
   ;; Imported: the same records, the same tail, notes and places, read
@@ -357,7 +367,7 @@ turns, and its journal's file; a state root of its own."
          (let ((host (romacs-agent-events-tests--hold id)))
            (should-not (member dir (romacs-agent-events--journaled)))
            (should-not (romacs-agent-events--migrate-job (list dir)))
-           (delete-process host))
+           (romacs-agent-events-tests--let-go host))
          (should (equal (romacs-agent-events--migrate-job (list dir)) (list id)))
          ;; Written, not its own: read from its journal still, not queued again.
          (should-not (romacs-agent-events-p session))
@@ -471,7 +481,7 @@ turns, and its journal's file; a state root of its own."
                  (should (romacs-agent-events-waiting-p id))
                  ;; Its job moves it: not queued again.
                  (should-not romacs-agent-events--migrate-queue))
-             (delete-process host))))))))
+             (romacs-agent-events-tests--let-go host))))))))
 
 ;; Sent to twice while its move waits: one resume, one launch.
 (ert-deftest romacs-agent-events-a-resume-waiting-for-its-move-is-one ()
@@ -577,7 +587,7 @@ turns, and its journal's file; a state root of its own."
            (pcase-let ((`(,size . ,count) (romacs-agent-events--stage session))
                        (host (romacs-agent-events-tests--hold id)))
              (should-not (romacs-agent-events--flip id size count))
-             (delete-process host))
+             (romacs-agent-events-tests--let-go host))
            (should (= (events) 0))
            ;; Its last line cut short: nothing written.
            (write-region "{\"note\":{\"type\":\"cut\"" nil journal t 'silent)
@@ -616,7 +626,7 @@ turns, and its journal's file; a state root of its own."
        (let ((host (romacs-agent-events-tests--hold (romacs-agent-id session))))
          (should-error (romacs-agent-events-compact (romacs-agent-id session)))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 3)))
-         (delete-process host))))))
+         (romacs-agent-events-tests--let-go host))))))
 
 (ert-deftest romacs-agent-events-a-large-database-is-compacted-as-it-is ()
   ;; Too large to be made to give pages back: compacted all the same, its
