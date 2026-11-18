@@ -16,6 +16,7 @@ fn a_font_installed_in_a_font_directory_reloads_the_catalog() {
     std::fs::write(&config, format!("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
         <fontconfig><dir>{}</dir><cachedir>{}</cachedir><config><rescan><int>1</int></rescan></config></fontconfig>\n",
         fonts.display(), root.join("cache").display())).unwrap();
+    // UNSAFE(Fontconfig takes a configuration file before it starts only from FONTCONFIG_FILE, and std's set_var is unsafe)
     // SAFETY: the binary's only test, before anything reads the environment
     // on another thread.
     unsafe { std::env::set_var("FONTCONFIG_FILE", &config) };
