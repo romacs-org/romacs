@@ -2589,14 +2589,17 @@ drawn once they are, or says it cannot be when they could not move."
                    (with-current-buffer buffer (romacs-agent-ui--moved session))))))
     (if (eq now 'moved) (romacs-agent-ui--moved-here session)
       (setq now nil)
-      (romacs-agent-ui--insert-at
-       romacs-agent-ui--end
-       (propertize (if (romacs-agent-events-migrating-p (romacs-agent-id session))
-                       "⋯ moving this chat's records to the store\n"
-                     "⋯ waiting for this chat's records to move to the store\n")
-                   'face 'romacs-agent-placeholder 'romacs-agent-moving t))
-      ;; Its last turns meanwhile, read from its journal.
-      (romacs-agent-ui--preview session))))
+      ;; Its last turns meanwhile, read from its journal, under a row
+      ;; saying what they are.
+      (let* ((start (copy-marker romacs-agent-ui--end))
+             (preview (romacs-agent-ui--preview session)))
+        (romacs-agent-ui--insert-at
+         start
+         (propertize (concat (if (romacs-agent-events-migrating-p (romacs-agent-id session))
+                                 "⋯ moving this chat's records to the store"
+                               "⋯ waiting for this chat's records to move to the store")
+                             (if preview ": a preview of its last turns, from its journal, meanwhile\n" "\n"))
+                     'face 'romacs-agent-placeholder 'romacs-agent-moving t))))))
 
 (defconst romacs-agent-ui--preview-seconds 1.0
   "The most a chat waiting for its records' move spends drawing their
@@ -2635,16 +2638,17 @@ when they are in SQLite, else a row saying they could not move."
 is drawn again from them; one they could not move says so in place of
 the row that said they were moving.  An edit to no undo."
   (if (romacs-agent-events-p session)
-      ;; What its windows show of the composer stays shown: the transcript
-      ;; above it is all that changes.
-      (let ((at (and (>= (point) romacs-agent-ui--end) (- (point-max) (point))))
-            (windows (seq-filter (lambda (window) (>= (window-point window) romacs-agent-ui--end))
-                                 (get-buffer-window-list nil nil t))))
+      ;; Where point and each window were, kept as far from the buffer's
+      ;; end as they were: the transcript above the composer is what changes.
+      (let ((at (- (point-max) (point)))
+            (windows (mapcar (lambda (window) (list window (- (point-max) (window-point window))
+                                                    (- (point-max) (window-start window))))
+                             (get-buffer-window-list nil nil t))))
         (romacs-agent-ui--redraw)
-        (when at (goto-char (max romacs-agent-ui--end (- (point-max) at))))
-        (dolist (window windows)
-          (set-window-point window (max romacs-agent-ui--end (- (point-max) (or at 0))))
-          (with-selected-window window (recenter -1))))
+        (goto-char (max (point-min) (- (point-max) at)))
+        (pcase-dolist (`(,window ,from-end ,start-from-end) windows)
+          (set-window-start window (max (point-min) (- (point-max) start-from-end)) t)
+          (set-window-point window (max (point-min) (- (point-max) from-end)))))
     (romacs-agent-ui--unrecorded
      (lambda ()
        (let ((inhibit-read-only t))

@@ -64,6 +64,9 @@ in a store of its own."
           (should (equal (mapcar #'car waits) (list id)))
           (should (string-search "move to the store" (with-current-buffer buffer (buffer-string))))
           (should (string-search "say 2" (with-current-buffer buffer (buffer-string))))
+          ;; Said to be a preview, above it.
+          (should (< (with-current-buffer buffer (string-search "a preview of its last turns" (buffer-string)))
+                     (with-current-buffer buffer (string-search "say 2" (buffer-string)))))
           ;; Drawn, and nothing of the session's own state changed by it.
           (should (= (romacs-agent-seq session) 0))
           (funcall (cdr (pop waits)))
