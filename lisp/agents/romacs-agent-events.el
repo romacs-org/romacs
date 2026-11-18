@@ -704,8 +704,8 @@ job moves; a journal past the bytes goes alone.")
 (defun romacs-agent-events-migrate-soon ()
   "Move every session still in a journal to SQLite, in worker VMs, once the
 editor is idle: with the store on, in an editor whose worker VMs run."
-  (when (and romacs-agent-store-background romacs-agent-events-store (not noninteractive)
-             (fboundp 'isolate-spawn) (isolate-main-p) (romacs-agent-events--db))
+  (when (and romacs-agent-events-store (not noninteractive) (fboundp 'isolate-spawn) (isolate-main-p)
+             (romacs-agent-events--db))
     (run-with-idle-timer 5 nil #'romacs-agent-events--migrate-start)))
 
 (defun romacs-agent-events--journaled ()
@@ -745,16 +745,19 @@ no reader has them.  A loaded one's goes at a later start."
           (romacs-agent-events--back-up (romacs-agent--make :id (file-name-nondirectory dir) :dir dir)))))))
 
 (defun romacs-agent-events--migrate-start ()
-  "Back up the journals of sessions moved before, queue every session
-still in a journal, and start the jobs."
+  "Back up the journals of sessions moved before, make the moves an
+earlier start's workers staged the sessions' own, and, moving in the
+background (`romacs-agent-store-background'), queue every session still
+in a journal and start the jobs."
   (romacs-agent-events--back-up-moved
    (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from imported")))
   ;; Written by an earlier start's workers: made theirs first.
   (romacs-agent-events--flip-soon (mapcar #'car (sqlite-select (romacs-agent-events--db) "select session from staged")))
-  (setq romacs-agent-events--migrate-queue
-        (append romacs-agent-events--migrate-queue
-                (cl-remove-if (lambda (dir) (member dir romacs-agent-events--migrate-queue)) (romacs-agent-events--journaled))))
-  (romacs-agent-events--migrate-next))
+  (when romacs-agent-store-background
+    (setq romacs-agent-events--migrate-queue
+          (append romacs-agent-events--migrate-queue
+                  (cl-remove-if (lambda (dir) (member dir romacs-agent-events--migrate-queue)) (romacs-agent-events--journaled))))
+    (romacs-agent-events--migrate-next)))
 
 (defun romacs-agent-events-migrate-first (id)
   "Move the session ID names to SQLite before the others waiting: a chat

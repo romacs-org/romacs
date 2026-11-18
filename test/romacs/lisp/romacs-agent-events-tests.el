@@ -397,16 +397,22 @@ moment more under load."
      ,@body))
 
 (ert-deftest romacs-agent-events-no-background-move ()
-  ;; Off (the default), a start moves no journal in the background; on,
-  ;; one is set for when the editor is idle.
-  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p) (fboundp 'isolate-spawn)))
+  ;; Off (the default), a start moves no journal in the background; what
+  ;; an earlier start's workers staged is still made the sessions' own.
+  ;; On, every journal is queued to move.
   (dolist (background '(nil t))
-    (let ((romacs-agent-store-background background) (romacs-agent-events-store t) (timers nil))
-      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest args) (push args timers)))
-                ((symbol-function 'romacs-agent-events--db) (lambda () t))
-                ((symbol-function 'isolate-main-p) (lambda () t)))
-        (let ((noninteractive nil)) (romacs-agent-events-migrate-soon)))
-      (should (eq (and timers t) background)))))
+    (let ((romacs-agent-store-background background) (romacs-agent-events--migrate-queue nil)
+          (flipped nil) (started nil))
+      (cl-letf (((symbol-function 'romacs-agent-events--db) #'ignore)
+                ((symbol-function 'sqlite-select) (lambda (&rest _) '(("staged-one"))))
+                ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
+                ((symbol-function 'romacs-agent-events--flip-soon) (lambda (ids) (setq flipped ids)))
+                ((symbol-function 'romacs-agent-events--journaled) (lambda () '("/journal")))
+                ((symbol-function 'romacs-agent-events--migrate-next) (lambda () (setq started t))))
+        (romacs-agent-events--migrate-start))
+      (should (equal flipped '("staged-one")))
+      (should (eq started background))
+      (should (equal romacs-agent-events--migrate-queue (and background '("/journal")))))))
 
 (ert-deftest romacs-agent-events-a-loaded-session-waits-for-its-move ()
   ;; A launch or a note on a loaded session too long to move here waits

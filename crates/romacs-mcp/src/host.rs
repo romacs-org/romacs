@@ -1282,22 +1282,24 @@ mod tests {
         let file = dir.join("store.sqlite");
         let sessions: Vec<PathBuf> = ["a", "b"].iter().map(|name| dir.join(name)).collect();
         for session in &sessions { create_private(session).unwrap(); }
-        drop(Store::open(&sessions[0], Some(&file)).unwrap());
+        // Each writer's first record goes once the holder has the lock.
+        let stores: Vec<Store> = sessions.iter().map(|session| Store::open(session, Some(&file)).unwrap()).collect();
+        let locked = std::sync::Arc::new(std::sync::Barrier::new(3));
         let holder = {
-            let file = file.clone();
+            let (file, locked) = (file.clone(), locked.clone());
             std::thread::spawn(move || {
                 let mut db = rusqlite::Connection::open(&file).unwrap();
                 let transaction = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
                 transaction.execute("insert into events (session, seq, t, kind, record) values ('held', 1, 0, 'note', '{}')", []).unwrap();
+                locked.wait();
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 transaction.commit().unwrap();
             })
         };
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let writers: Vec<_> = sessions.iter().cloned().map(|session| {
-            let file = file.clone();
+        let writers: Vec<_> = stores.into_iter().map(|mut store| {
+            let locked = locked.clone();
             std::thread::spawn(move || {
-                let mut store = Store::open(&session, Some(&file)).unwrap();
+                locked.wait();
                 (1..=50u64).map(|seq| store.keep(&[(seq, format!("{{\"seq\":{seq},\"note\":{{}}}}"))], false))
                     .filter(|kept| kept.is_err()).count()
             })
