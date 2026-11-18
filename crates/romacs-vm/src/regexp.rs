@@ -396,17 +396,14 @@ impl Vm {
         Ok(compiled)
     }
 
-    /// After `modify-syntax-entry`: drop the patterns whose compilation read
-    /// a syntax table's content (`used_syntax`), as GNU's
-    /// `clear_regexp_cache` (search.c) does. Every other pattern reads the
-    /// syntax table only while it matches, from the table current then, so
-    /// it stays valid. Any table may have changed: an edit to a parent shows
-    /// in the tables that inherit from it.
-    pub(crate) fn forget_syntax_bound_patterns(&mut self) {
-        self.regexp_cache.retain(|e| e.syntax.is_none());
-    }
-    /// After a collection, which may move tables: drop the patterns a table
-    /// names, by syntax table or by completion translation.
+    /// Drop the patterns whose compilation read a table's content: a
+    /// syntax table's (`used_syntax`) or a case table's (a completion
+    /// translation, which folds by the canon table's effective ranges, its
+    /// parents' included, and a syntax table may be one of those parents).
+    /// Every other pattern reads the syntax table only while it matches,
+    /// from the table current then. After `modify-syntax-entry`, as GNU's
+    /// `clear_regexp_cache` (search.c) does for the syntax-bound ones, and
+    /// after a collection, which may move the tables.
     pub(crate) fn forget_table_bound_patterns(&mut self) {
         self.regexp_cache.retain(|e| e.syntax.is_none() && !matches!(e.translation, Translation::Completion(_)));
     }

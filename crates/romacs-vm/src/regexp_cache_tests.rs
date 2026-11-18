@@ -1,13 +1,20 @@
 //! The compiled-pattern cache across `modify-syntax-entry`: a pattern whose
-//! compilation read no syntax table keeps its compilation, and one whose
-//! compilation read a table's content (`used_syntax`) is compiled again,
-//! against the table as it is now.
+//! compilation read no table keeps its compilation; one whose compilation
+//! read a table's content, a syntax table's (`used_syntax`) or a case
+//! table's through a completion translation, is compiled again, against the
+//! tables as they are now.
 use crate::Vm;
 use romacs_regex as regex;
+use std::{cell::RefCell, rc::Rc};
 
-/// The compilation the cache holds for SOURCE, by identity.
-fn compiled(vm: &Vm, source: &str) -> Option<*const std::cell::RefCell<regex::CompiledPattern>> {
-    vm.regexp_cache.patterns.get(source.as_bytes()).and_then(|v| v.first()).map(|e| std::rc::Rc::as_ptr(&e.compiled))
+/// The compilation the cache holds for SOURCE, kept alive so its identity
+/// can be compared after an edit.
+fn compiled(vm: &Vm, source: &str) -> Option<Rc<RefCell<regex::CompiledPattern>>> {
+    vm.regexp_cache.patterns.get(source.as_bytes()).and_then(|v| v.first()).map(|e| e.compiled.clone())
+}
+
+fn same(a: Option<&Rc<RefCell<regex::CompiledPattern>>>, b: &Rc<RefCell<regex::CompiledPattern>>) -> bool {
+    a.is_some_and(|a| Rc::ptr_eq(a, b))
 }
 
 /// A fresh syntax table inheriting the standard one, as `make-syntax-table` (Lisp) makes it.
@@ -28,9 +35,9 @@ fn an_unrelated_modify_syntax_entry_keeps_patterns_that_read_no_syntax_table() {
 
     eval(&mut vm, &format!(r#"(modify-syntax-entry ?_ "w" {NEW_TABLE})"#));
 
-    assert_eq!(compiled(&vm, "foo[0-9]+"), Some(plain), "a pattern that read no syntax table keeps its compilation");
-    assert_eq!(compiled(&vm, "\\sw+"), Some(syntax_at_match), "`\\sw' reads the table only while it matches");
-    assert_eq!(compiled(&vm, "[[:word:]]+x"), None, "a pattern whose fastmap read the table is dropped");
+    assert!(same(compiled(&vm, "foo[0-9]+").as_ref(), &plain), "a pattern that read no syntax table keeps its compilation");
+    assert!(same(compiled(&vm, "\\sw+").as_ref(), &syntax_at_match), "`\\sw' reads the table only while it matches");
+    assert!(compiled(&vm, "[[:word:]]+x").is_none(), "a pattern whose fastmap read the table is dropped");
     assert_eq!(eval(&mut vm, r#"(string-match "foo[0-9]+" "x foo12")"#), "2");
 }
 
@@ -45,5 +52,33 @@ fn kept_and_recompiled_patterns_match_by_the_table_as_modified() {
     eval(&mut vm, r#"(modify-syntax-entry ?_ "w")"#);
 
     assert_eq!(eval(&mut vm, ends), "(3 3)", "`_' is word syntax now, for both");
-    assert_eq!(compiled(&vm, "\\sw+"), Some(kept), "the match-time pattern was not compiled again");
+    assert!(same(compiled(&vm, "\\sw+").as_ref(), &kept), "the match-time pattern was not compiled again");
+}
+
+/// A completion translation folds by the canon table's effective ranges, its
+/// parents' included, and a syntax table may be one of those parents: an edit
+/// to that syntax table changes how completion folds case.
+#[test]
+fn a_syntax_edit_under_the_case_canon_recompiles_completion_patterns() {
+    let mut vm = Vm::new();
+    eval(&mut vm, r"(progn
+  (setq probe-base (make-char-table 'case-table))
+  (aset probe-base ?A ?a)
+  (setq probe-syntax (make-char-table 'syntax-table))
+  (set-char-table-parent probe-syntax probe-base)
+  (aset probe-syntax ?A '(2))
+  (setq probe-canon (make-char-table 'case-table))
+  (set-char-table-parent probe-canon probe-syntax)
+  (setq probe-case (copy-sequence (standard-case-table)))
+  (set-char-table-extra-slot probe-case 1 probe-canon)
+  (set-case-table probe-case))");
+    let complete = r#"(let ((completion-ignore-case t) (completion-regexp-list '("A"))) (all-completions "" '("a")))"#;
+    let before = eval(&mut vm, complete);
+    eval(&mut vm, r#"(modify-syntax-entry ?A "@" probe-syntax)"#);
+    let after = eval(&mut vm, complete);
+    // What a pattern compiled afresh against the tables as they are now answers.
+    vm.regexp_cache.retain(|_| false);
+    let fresh = eval(&mut vm, complete);
+    assert_ne!(before, fresh, "the edit changes how completion folds ?A");
+    assert_eq!(after, fresh, "the kept completion pattern answers as a fresh one");
 }
