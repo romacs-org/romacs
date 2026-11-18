@@ -82,9 +82,9 @@ fn the_image_set_keeps_every_colour_at_the_restore_and_a_full() {
     assert!(t.permanent(3) && t.is_remembered(9) && !t.permanent(9));
     let raw = raw_of(&mut t);
     assert!(raw.claim(9), "a remembered entry is read");
-    let (freed, last) = sweep_whole(&raw, false, |_, _| {});
-    t.swept(freed, last, false);
-    assert_eq!((freed, t.colors()), (0, before), "every colour as it was: the mark cleared");
+    let swept = sweep_whole(&raw, false, |_, _| {});
+    t.swept(swept, false);
+    assert_eq!((swept.freed, t.colors()), (0, before), "every colour as it was: the mark cleared");
 }
 
 /// An image entry is an index below the image's length: a table made the
@@ -98,8 +98,8 @@ fn an_image_is_made_of_a_dense_table() {
     let raw = raw_of(&mut t);
     // Entry 1 dies between two that live: a hole below the end.
     for i in [0, 2] { raw.claim(i); }
-    let (freed, last) = sweep_whole(&raw, false, |_, _| {});
-    t.swept(freed, last, false);
+    let swept = sweep_whole(&raw, false, |_, _| {});
+    t.swept(swept, false);
     assert_eq!((t.len(), t.unused()), (3, 1));
     t.make_permanent(|_| false);
 }
