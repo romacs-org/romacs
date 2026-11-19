@@ -676,7 +676,7 @@ impl Vm {
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
     /// where it is) or `still' (motion is off: its still frame).  KIND is
-    /// (logo CELL-ASPECT EPOCH).
+    /// (logo CELL-ASPECT EPOCH) or (working WORK EPOCH FACE BEATS).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     /// The block's row in WINDOW is counted here, from the window start
@@ -721,9 +721,9 @@ impl Vm {
                     };
                     TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
                 }
-                // (working WORK EPOCH FACE): lisp/ui/romacs-working.el's thread,
-                // in FACE's foreground.
-                [head, work, epoch, face] if head == working => {
+                // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
+                // thread, in FACE's foreground.
+                [head, work, epoch, face, beats] if head == working => {
                     use romacs_logo::working::Work;
                     let work = match self.symbol_name_of(work).as_deref() {
                         Some("running") => Work::Running,
@@ -732,7 +732,8 @@ impl Vm {
                         _ => Work::Idle,
                     };
                     let face = self.symbol_name_of(face).ok_or("face symbol required")?;
-                    TextAnimationKind::Working { work, epoch: natural(epoch)?, colour: self.display_face(&face)?.foreground }
+                    TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
+                                                 colour: self.display_face(&face)?.foreground }
                 }
                 _ => return Err("bad text animation kind".into()),
             };
@@ -754,6 +755,7 @@ impl Vm {
         let w = self.window(window)?;
         let (buffer, marker) = (w.buffer, w.start);
         let window_rows = w.height / self.window_state.line.max(1);
+        let width = w.width;
         let window_start = self.marker_position_value(marker)?.integer_value().unwrap_or(1);
         let Ok(b) = self.shown_text(buffer) else { return Err("buffer required".into()) };
         let byte = |pos: i64| -> Result<usize> {
@@ -762,7 +764,17 @@ impl Vm {
         };
         let (from, to) = (byte(start.min(window_start))?, byte(start.max(window_start))?);
         let limit = rows.max(window_rows) as usize;
-        let lines = text_animation_lines(&b.as_str().as_bytes()[from..to], limit) as i32;
+        let lines = text_animation_lines(&b.as_str().as_bytes()[from..to], limit);
+        // Within view, its visual rows: wrapped lines take as many as the
+        // window wraps them into, by the rules the echo area's rows use.
+        let lines = if lines >= limit { lines } else {
+            let text = b.as_str()[from..to].to_owned();
+            let column = self.window_state.column.max(1);
+            let [left, right] = self.window_fringe_widths(window)?;
+            let (wrap, rule) = (self.window_line_wrap(window, buffer)?, self.buffer_width_rule(buffer)?);
+            let columns = (width.saturating_sub(left + right) / column).max(1) as usize;
+            mini_window::row_starts(&text, columns, wrap, &rule).len() - 1
+        } as i32;
         let top = if start <= window_start { -lines } else { lines };
         Ok((top, -top < rows as i32 && top < window_rows as i32))
     }

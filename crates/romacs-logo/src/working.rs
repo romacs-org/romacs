@@ -3,9 +3,10 @@
 //! thread while the evaluator may be busy (lisp/ui/romacs-working.el).
 //!
 //! Idle, the thread lies slack and still; running, a wave travels along
-//! it with a bright bead riding it; waiting on its user, it is taut and
-//! pulses; failed, it is cut.  A frame is a pure function of the work's
-//! state, the thread's colour and the seconds of motion.
+//! it, and a bright bead rides it, a step for each piece of progress the
+//! work reports (its beats); waiting on its user, it is
+//! taut and pulses; failed, it is cut.  A frame is a pure function of the
+//! work's state, its beats, the thread's colour and the seconds of motion.
 use crate::Cell;
 
 /// How the work goes.
@@ -23,22 +24,25 @@ const DOTS: [[u8; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
 /// Dots of the wave's length, and waves a second.
 const WAVE: f64 = 12.0;
 const SPEED: f64 = 1.2;
-/// Cells a second the bead runs.
-const BEAD: f64 = 6.0;
+/// Cells the bead steps for each beat.
+const STEP: usize = 2;
 
-/// COLS cells of the thread for WORK in COLOUR (RGB) after MOVED seconds.
-pub fn thread(cols: usize, work: Work, colour: u32, moved: f64) -> Vec<Cell> {
+/// COLS cells of the thread for WORK in COLOUR (RGB), BEATS of progress
+/// reported, after MOVED seconds.
+pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, moved: f64) -> Vec<Cell> {
     let tau = std::f64::consts::TAU;
     let (amplitude, centre) = match work {
         Work::Running => (1.4, 1.5),
         Work::Idle | Work::Failed => (0.0, 2.0),
         Work::Waiting => (0.0, 1.0),
     };
-    let bead = (moved * BEAD).rem_euclid(cols.max(1) as f64) as usize;
+    let bead = (beats as usize).wrapping_mul(STEP) % cols.max(1);
     let pulse = 0.55 + 0.45 * (0.5 + 0.5 * (tau * moved).sin());
     (0..cols).map(|cell| {
-        // Failed: cut in its middle.
-        if work == Work::Failed && (cols / 2 - cols.min(4) / 4..=cols / 2).contains(&cell) {
+        // Failed: cut in its middle, when it has room for a cut (as
+        // romacs-working-still cuts its still frame).
+        let gap = (cols / 6).max(1);
+        if work == Work::Failed && cols >= 3 && (cols / 2 - gap..cols / 2).contains(&cell) {
             return (' ', None);
         }
         let mut bits = 0u8;
@@ -74,20 +78,36 @@ mod tests {
 
     #[test]
     fn running_moves_and_idle_does_not() {
-        assert_ne!(thread(12, Work::Running, 0xd48a20, 0.0), thread(12, Work::Running, 0xd48a20, 0.3));
-        assert_eq!(thread(12, Work::Idle, 0xd48a20, 0.0), thread(12, Work::Idle, 0xd48a20, 5.0));
+        assert_ne!(thread(12, Work::Running, 0, 0xd48a20, 0.0), thread(12, Work::Running, 0, 0xd48a20, 0.3));
+        assert_eq!(thread(12, Work::Idle, 0, 0xd48a20, 0.0), thread(12, Work::Idle, 0, 0xd48a20, 5.0));
     }
 
     #[test]
     fn waiting_pulses_in_place() {
-        let (a, b) = (thread(8, Work::Waiting, 0xd48a20, 0.0), thread(8, Work::Waiting, 0xd48a20, 0.25));
+        let (a, b) = (thread(8, Work::Waiting, 0, 0xd48a20, 0.0), thread(8, Work::Waiting, 0, 0xd48a20, 0.25));
         assert_eq!(a.iter().map(|c| c.0).collect::<Vec<_>>(), b.iter().map(|c| c.0).collect::<Vec<_>>());
         assert_ne!(a[0].1, b[0].1);
     }
 
     #[test]
+    fn progress_steps_the_bead_and_time_alone_does_not() {
+        let bright = |cells: Vec<Cell>| cells.iter().position(|c| c.1 == Some(scale(0x808080, 1.6)));
+        let at = bright(thread(12, Work::Running, 3, 0x808080, 0.0));
+        assert_eq!(at, Some(6));
+        assert_eq!(bright(thread(12, Work::Running, 3, 0x808080, 2.5)), at, "the bead waits for progress");
+        assert_eq!(bright(thread(12, Work::Running, 4, 0x808080, 0.0)), Some(8));
+    }
+
+    #[test]
+    fn narrow_threads_are_drawn() {
+        for cols in 1..4 {
+            assert!(thread(cols, Work::Failed, 0, 0x808080, 0.0).iter().any(|c| c.0 != ' '), "{cols} cells");
+        }
+    }
+
+    #[test]
     fn failed_is_cut() {
-        let cells = thread(12, Work::Failed, 0xff0000, 0.0);
+        let cells = thread(12, Work::Failed, 0, 0xff0000, 0.0);
         assert!(cells.iter().any(|c| c.0 == ' '));
         assert!(cells.iter().any(|c| c.0 != ' '));
     }
@@ -95,7 +115,7 @@ mod tests {
     #[test]
     fn every_cell_is_a_braille_dot_pattern() {
         for work in [Work::Idle, Work::Running, Work::Waiting, Work::Failed] {
-            for cell in thread(10, work, 0x808080, 1.7) {
+            for cell in thread(10, work, 0, 0x808080, 1.7) {
                 assert!(cell.0 == ' ' || ('\u{2800}'..='\u{28ff}').contains(&cell.0));
             }
         }

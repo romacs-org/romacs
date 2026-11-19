@@ -5,86 +5,180 @@
 ;;; Commentary:
 ;; The working thread: a row of cells in a buffer's text that the render
 ;; thread animates by itself (romacs-animate.el), so it moves while the
-;; evaluator is busy, and so tells "alive, working" from "frozen".  Its
-;; motion says how a piece of work goes:
+;; evaluator is busy, and tells "alive, working" from "frozen".  It says
+;; how a piece of work goes:
 ;;
 ;;   idle     slack and still
-;;   running  a wave travels along it, a bead riding it
+;;   running  a wave travels along it; a bead rides it, one step for
+;;            each piece of progress the work reports
 ;;   waiting  taut, pulsing: the work waits on its user
 ;;   failed   cut, still
 ;;
-;; Any module shows one over text of its own (a long command, a mail
-;; send, a build, an agent's turn):
+;; Any module shows one over COLS characters of its own text (a long
+;; command, a mail send, a build, an agent's turn):
 ;;
 ;;   (romacs-working-show ID BUFFER START COLS &optional WORK)
 ;;   (romacs-working-set ID WORK)
+;;   (romacs-working-advance ID)      ; progress: the bead steps on
 ;;   (romacs-working-stop ID)
 ;;
-;; START is where a line of BUFFER begins whose first COLS characters the
-;; thread is drawn over, a position or a marker of the caller's that it
-;; follows; `romacs-working-still' gives text for them, the frame shown
-;; where nothing animates.  Each state's colour is a face's.
+;; START is where a line of BUFFER begins: a position, or a marker of the
+;; caller's that the thread follows as text before it changes.  The
+;; caller puts `romacs-working-still' there, COLS braille characters; the
+;; thread then owns their look: it rewrites its still frame in place (no
+;; marker moves, nothing is recorded to undo), and the display draws its
+;; motion over them.  Each state's colour is a
+;; face's.  At rest (idle, failed) the display draws nothing for it.
+;;
+;; Running is a colour of the theme's own that cannot read as an error:
+;; its accent, else its blue or cyan, else what links are drawn in, the
+;; first far enough from what `error' and `warning' are drawn in
+;; (`romacs-working--derive', on every theme change).  So whatever the
+;; theme's syntax faces are, running never looks failed.
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'romacs-animate)
 
 (defface romacs-working-idle '((t :inherit shadow)) "The working thread, idle.")
-(defface romacs-working-running '((t :inherit font-lock-function-name-face)) "The working thread, running.")
+(defface romacs-working-running '((t :inherit link :underline nil))
+  "Work that runs: the working thread, and every view's running mark.
+Its colour is derived from the theme (`romacs-working--derive').")
 (defface romacs-working-waiting '((t :inherit warning)) "The working thread, waiting on its user.")
 (defface romacs-working-failed '((t :inherit error)) "The working thread, failed.")
 
 (defconst romacs-working-fps 30 "Frames a second of a moving thread.")
 
+(declare-function romacs-theme-color "romacs-theme" (slot &optional theme))
+(declare-function color-name-to-rgb "color" (color &optional frame))
+
+(defun romacs-working--rgb (colour)
+  "COLOUR as (R G B) in [0, 1]: a #rrggbb's own channels, else as the
+frame resolves its name; nil when it cannot."
+  (if (and (stringp colour) (string-match "\\`#\\([[:xdigit:]]\\{2\\}\\)\\([[:xdigit:]]\\{2\\}\\)\\([[:xdigit:]]\\{2\\}\\)\\'" colour))
+      (mapcar (lambda (i) (/ (string-to-number (match-string i colour) 16) 255.0)) '(1 2 3))
+    (ignore-errors (color-name-to-rgb colour))))
+
+(defun romacs-working--far-p (colour others)
+  "Whether COLOUR is far from each of OTHERS, colours: their RGB distance
+over a third of the widest."
+  (when-let* ((rgb (romacs-working--rgb colour)))
+    (cl-every (lambda (other)
+                (let ((o (and other (romacs-working--rgb other))))
+                  (or (null o) (> (sqrt (apply #'+ (cl-mapcar (lambda (a b) (expt (- a b) 2)) rgb o))) 0.35))))
+              others)))
+
+(defun romacs-working--running-colour ()
+  "The theme's colour for running work: the first of its accent, blue,
+cyan and link colours far from its error and warning colours."
+  (let ((avoid (list (face-foreground 'error nil t) (face-foreground 'warning nil t)))
+        (palette (lambda (slot) (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))))
+    (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid)))
+                (list (funcall palette 'accent) (funcall palette 'blue) (funcall palette 'cyan)
+                      (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))))
+
+(defun romacs-working--derive (&rest _)
+  "Make `romacs-working-running' the theme's running colour, as its
+default spec: a theme's or the user's own spec still wins."
+  (when-let* ((colour (romacs-working--running-colour)))
+    (face-spec-set 'romacs-working-running `((t :foreground ,colour)) 'face-defface-spec)))
+
+(add-hook 'enable-theme-functions #'romacs-working--derive)
+(add-hook 'disable-theme-functions #'romacs-working--derive)
+(romacs-working--derive)
+
 (defvar romacs-working--threads (make-hash-table :test #'equal)
-  "Each thread shown, by id: a plist of :start (a marker), :own (whether
-it made the marker), :cols, :work and :epoch.")
+  "Each thread shown, by id: a plist of :buffer, :start (a marker), :own
+\(whether the thread made the marker), :cols, :work, :beats and
+:animated (whether the display draws its motion).")
 
 (defun romacs-working--face (work)
   (intern (format "romacs-working-%s" work)))
 
+(defun romacs-working--moving-p (work)
+  (memq work '(running waiting)))
+
 (defun romacs-working-still (cols work)
   "COLS characters of the thread for WORK at rest, in its face."
-  (propertize (if (eq work 'failed)
-                  (let ((gap (max 1 (/ cols 6))))
-                    (concat (make-string (- (/ cols 2) gap) ?⠤) (make-string gap ?\s)
-                            (make-string (- cols (- (/ cols 2) gap) gap) ?⠤)))
-                (make-string cols (if (eq work 'waiting) ?⠒ ?⠤)))
-              'face (romacs-working--face work)))
+  (let ((line (if (eq work 'waiting) ?⠒ ?⠤)))
+    (propertize (if (and (eq work 'failed) (>= cols 3))
+                    (let* ((gap (max 1 (/ cols 6))) (left (- (/ cols 2) gap)))
+                      (concat (make-string left line) (make-string gap ?⠀)
+                              (make-string (- cols left gap) line)))
+                  (make-string cols line))
+                'face (romacs-working--face work))))
+
+(defun romacs-working--paint (thread)
+  "Write THREAD's still frame over its cells, in place: every braille
+character replaced where it stands, so no marker moves and the text
+keeps its other properties.  A character that is no braille is not
+the thread's, and is left."
+  (let* ((buffer (plist-get thread :buffer))
+         (start (marker-position (plist-get thread :start)))
+         (still (romacs-working-still (plist-get thread :cols) (plist-get thread :work))))
+    (when (and start (buffer-live-p buffer))
+      (with-current-buffer buffer
+        (with-silent-modifications
+          (let ((inhibit-read-only t))
+            (dotimes (i (min (length still) (- (save-excursion (goto-char start) (line-end-position)) start)))
+              (let* ((at (+ start i)) (old (char-after at)) (new (aref still i)))
+                (when (and old (<= #x2800 old #x28ff))
+                  (unless (eq old new) (subst-char-in-region at (1+ at) old new t))
+                  (put-text-property at (1+ at) 'face (get-text-property i 'face still)))))))))))
 
 (defun romacs-working--element (id)
-  "What the display draws of thread ID: its cells, its state and colour."
+  "What the display draws of thread ID: its cells from its marker, which
+the display reads as it freezes each frame, its state, colour and beats."
   (when-let* ((thread (gethash id romacs-working--threads))
-              (start (marker-position (plist-get thread :start))))
-    (list :start start :cols (plist-get thread :cols) :rows 1
-          :kind (list 'working (plist-get thread :work) (plist-get thread :epoch)
-                      (romacs-working--face (plist-get thread :work))))))
+              ((marker-position (plist-get thread :start))))
+    (list :start (plist-get thread :start) :cols (plist-get thread :cols) :rows 1
+          :kind (list 'working (plist-get thread :work) 0
+                      (romacs-working--face (plist-get thread :work)) (plist-get thread :beats)))))
 
-(defun romacs-working--motion (id)
-  "Let thread ID move only while its work runs or waits."
-  (if (memq (plist-get (gethash id romacs-working--threads) :work) '(running waiting))
-      (romacs-animate-resume id)
-    (romacs-animate-pause id)))
+(defun romacs-working--animate (id thread)
+  "Let the display draw THREAD's motion while its work moves, its motion
+going on from one moving state to the other; at rest, nothing is
+registered for it."
+  (cond ((not (romacs-working--moving-p (plist-get thread :work)))
+         (plist-put thread :animated nil)
+         (romacs-animate-stop id))
+        ((plist-get thread :animated) (romacs-animate-redraw id))
+        (t (plist-put thread :animated t)
+           (romacs-animate-start id (plist-get thread :buffer) romacs-working-fps
+                                 (lambda (_dt) (romacs-working--paint thread))
+                                 (lambda (_window) (romacs-working--element id))))))
 
 (defun romacs-working-show (id buffer start cols &optional work)
   "Show thread ID over the COLS characters from START, a line's start in
 BUFFER (a marker, followed as it moves), its work WORK (`idle' by
 default).  A thread ID shown already moves there."
   (romacs-working-stop id)
-  (puthash id (list :start (if (markerp start) start (with-current-buffer buffer (copy-marker start)))
-                    :own (not (markerp start)) :cols cols :work (or work 'idle) :epoch 0)
-           romacs-working--threads)
-  (romacs-animate-start id buffer romacs-working-fps #'ignore
-                        (lambda (_window) (romacs-working--element id)))
-  (romacs-working--motion id)
+  (let ((thread (list :buffer buffer
+                      :start (if (markerp start) start (with-current-buffer buffer (copy-marker start)))
+                      :own (not (markerp start)) :cols cols :work (or work 'idle) :beats 0)))
+    (puthash id thread romacs-working--threads)
+    (with-current-buffer buffer
+      (add-hook 'kill-buffer-hook
+                (lambda () (when (eq (gethash id romacs-working--threads) thread) (romacs-working-stop id)))
+                nil t))
+    (romacs-working--paint thread)
+    (romacs-working--animate id thread))
   id)
 
 (defun romacs-working-set (id work)
   "Thread ID's work goes as WORK now: `idle', `running', `waiting' or `failed'."
   (when-let* ((thread (gethash id romacs-working--threads))
               ((not (eq (plist-get thread :work) work))))
-    (puthash id (plist-put thread :work work) romacs-working--threads)
-    (romacs-working--motion id)
+    (plist-put thread :work work)
+    (romacs-working--paint thread)
+    (romacs-working--animate id thread)))
+
+(defun romacs-working-advance (id)
+  "Thread ID's work made progress: its bead steps on."
+  (when-let* ((thread (gethash id romacs-working--threads))
+              ((eq (plist-get thread :work) 'running)))
+    (plist-put thread :beats (1+ (plist-get thread :beats)))
     (romacs-animate-redraw id)))
 
 (defun romacs-working-stop (id)

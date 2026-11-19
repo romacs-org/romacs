@@ -2984,6 +2984,70 @@ def chat_log(args, base):
         a.close()
 
 
+UI_THEMES = ('omarchy-matte-black', 'catppuccin-latte', 'flatwhite', 'nord', 'leet', 'rum')
+
+
+def ui_review(args, base):
+    """Shots for a blind UI review of the chat (romacs-ui-review): a real
+    Claude Code (--claude-model) session, the chat in each of UI_THEMES
+    while a turn runs, while it waits on the user (a question), and at
+    rest, plus a strip of frames of the working thread while it runs.
+    Costs money: not a default workflow."""
+    a = Agents(args, base, 'ur')
+    try:
+        a.up()
+        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model])])
+        a.work.mkdir(parents=True, exist_ok=True)
+        (a.work / 'notes.txt').write_text('hello\nworld\n')
+        shots = []
+
+        def shot(name):
+            a.eval('(progn (redisplay t) t)')
+            time.sleep(.4)
+            path = base / f'{name}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            shots.append(str(path))
+            return path
+
+        def themed(state):
+            for theme in UI_THEMES:
+                a.eval(f'(progn (mapc (function disable-theme) custom-enabled-themes) (load-theme (quote {theme}) t) '
+                       '(with-selected-window (selected-window) (set-buffer (window-buffer)) (goto-char (point-max)) (recenter -1)) t)')
+                shot(f'{theme}-{state}')
+
+        def pending(sid):
+            return int(a.eval(f'(hash-table-count (romacs-agent-approvals {a.s(sid)}))'))
+
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+                     '(delete-other-windows) (romacs-agent-id session))').strip('"')
+        a.keyboard_ready()
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(TURN_PROMPT)}) t)')
+        a.idle(sid, 600)
+        # Running: a command long enough for every theme's shot.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(UI_RUN_PROMPT)}) t)')
+        a.until(sid, lambda: a.eval(f'(with-current-buffer (romacs-agent-log-chat {a.s(sid)}) '
+                                    '(and romacs-agent-log--current t))') == 't',
+                300, 'a running command')
+        for i in range(10):
+            path = base / f'motion-{i:02d}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            time.sleep(.12)
+        themed('running')
+        a.idle(sid, 300)
+        # Waiting on the user.
+        a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
+        a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
+        themed('waiting')
+        a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s))))) '
+               '(romacs-agent-respond s id nil "no answer, review shot" (quote user)) t)')
+        a.idle(sid, 300)
+        themed('idle')
+        return {'ok': True, 'shots': shots}
+    finally:
+        a.close()
+
+
+UI_RUN_PROMPT = 'Run this shell command and wait for it: for i in $(seq 1 60); do echo step $i; sleep 0.5; done. Then say done.'
 CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
                 'for i in $(seq 1 40); do echo line $i; sleep 0.25; done. Then say how many lines it printed.')
 ASK_PROMPT = 'Use the AskUserQuestion tool to ask me "Which colour do you prefer?" with the options Red and Blue. Then say what I chose.'
@@ -3815,7 +3879,7 @@ WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadlin
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'chat_log': chat_log, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

@@ -722,6 +722,8 @@ unless a note said who gave it, that it was answered."
      (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
                         (format "running %s" (plist-get (cdr block) :name))
                       "working")))
+    ;; A turn that failed and is not yet seen: said so, until the next.
+    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 12
@@ -729,12 +731,13 @@ unless a note said who gave it, that it was answered."
 
 (defun romacs-agent-log--work (doing)
   "The working thread's work for DOING (`romacs-working')."
-  (pcase (car doing) ('waiting 'waiting) ('working 'running) (_ 'idle)))
+  (pcase (car doing) ('waiting 'waiting) ('working 'running) ('failed 'failed) (_ 'idle)))
 
 (defun romacs-agent-log--separator-text (doing)
   "The separator for DOING, (STATE . WORDS): the working thread, what the
 session does, then the composer's prompt."
-  (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-agent-log-tool) (_ 'romacs-agent-log-rule))))
+  (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
+                ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
     (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
             " " (propertize (cdr doing) 'face face)
             "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
@@ -814,12 +817,20 @@ how long the turn has run."
             (setq romacs-agent-log--title (romacs-agent-title session))
             (romacs-agent-log--set-session session))
           (romacs-agent-log-draw session event)
+          (romacs-agent-log--progress event)
           (when (and seq (plist-get event :last)) (setq romacs-agent-log--seq seq))
           (romacs-agent-log--separator)
           (when (eq (car romacs-agent-log--state) 'working) (romacs-agent-log--tick-start))
           (romacs-agent-log--header-show))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
+
+(defun romacs-agent-log--progress (event)
+  "Step the working thread on for EVENT when it is progress: a call begun
+or ended, a line of its output, a message ended."
+  (when (or (memq (plist-get event :type) '(tool message-end))
+            (and (eq (plist-get event :type) 'tool-output) (string-search "\n" (or (plist-get event :text) ""))))
+    (romacs-working-advance (current-buffer))))
 
 ;;; Replay
 
@@ -952,7 +963,6 @@ records now, or with LATER when a window first shows it."
         (romacs-agent-log--separator t)
         (romacs-working-show buffer buffer romacs-agent-log--end romacs-agent-log--thread-cols
                              (romacs-agent-log--work romacs-agent-log--state))
-        (add-hook 'kill-buffer-hook (lambda () (romacs-working-stop (current-buffer))) nil t)
         (puthash (romacs-agent-id session) buffer romacs-agent-log--chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))

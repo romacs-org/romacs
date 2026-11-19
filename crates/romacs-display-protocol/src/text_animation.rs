@@ -39,10 +39,11 @@ pub enum TextAnimationKind {
         colours: LogoColours,
     },
     /// A thread in one row whose motion says how a piece of work goes
-    /// (romacs_logo::working), in COLOUR.  A new EPOCH starts it over; a
-    /// new WORK goes on from where it was.
+    /// (romacs_logo::working), BEATS its progress, in COLOUR.  A new EPOCH
+    /// starts it over; a new WORK or more BEATS go on from where it was.
     Working {
         work: romacs_logo::working::Work,
+        beats: u64,
         epoch: u64,
         colour: [u8; 3],
     },
@@ -65,6 +66,14 @@ impl Default for LogoColours {
             mark: [0xd4, 0x8a, 0x20],
             word: [(word >> 16) as u8, (word >> 8) as u8, word as u8],
         }
+    }
+}
+
+impl TextAnimationKind {
+    /// Whether the display draws it as a page scene on a GPU: the logo
+    /// alone; any other kind is its cells.
+    pub fn scened(&self) -> bool {
+        matches!(self, Self::Logo { .. })
     }
 }
 
@@ -100,9 +109,9 @@ impl TextAnimation {
                     vec![]
                 }
             }
-            TextAnimationKind::Working { work, colour: [r, g, b], .. } => {
+            TextAnimationKind::Working { work, beats, colour: [r, g, b], .. } => {
                 let colour = (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
-                romacs_logo::working::thread(self.cols as usize, work, colour, moved)
+                romacs_logo::working::thread(self.cols as usize, work, beats, colour, moved)
             }
         }
     }

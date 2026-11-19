@@ -58,7 +58,7 @@ fn an_animated_frame_promises_no_layout_identity() {
 
 fn thread(work: romacs_logo::working::Work, epoch: u64) -> TextAnimation {
     TextAnimation { window: 1, top: 0, cols: 12, rows: 1, fps: 30, moving: true, still: false,
-                    kind: TextAnimationKind::Working { work, epoch, colour: [0xd4, 0x8a, 0x20] } }
+                    kind: TextAnimationKind::Working { work, beats: 0, epoch, colour: [0xd4, 0x8a, 0x20] } }
 }
 
 #[test]
@@ -77,6 +77,7 @@ fn a_working_thread_moves_by_itself_and_keeps_its_motion_across_states() {
     assert!((animations.running[&1].moved - moved).abs() < 1e-9);
     animations.replace(vec![(1, thread(Work::Waiting, 1))]);
     assert_eq!(animations.running[&1].moved, 0.0);
-    // A thread is never a logo's scene.
-    assert!(!animations.running[&1].drawn_as_scene());
+    // A thread is drawn as its cells, never a scene; the logo is a scene.
+    assert!(!animations.running[&1].animation.kind.scened());
+    assert!(logo(true, 0).kind.scened());
 }

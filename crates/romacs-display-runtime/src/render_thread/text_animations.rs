@@ -105,9 +105,7 @@ impl TextAnimations {
     /// GPU allows it; the others are drawn as cells.
     pub(crate) fn prepare_scenes(&mut self, frame: &FrameGlyphBuffer, gpu: bool, renderer: &mut WgpuRenderer) {
         for running in self.running.values_mut() {
-            // Only the logo draws as a scene; other kinds are their cells.
-            let scened = matches!(running.animation.kind, romacs_display_protocol::text_animation::TextAnimationKind::Logo { .. });
-            if !gpu || !scened {
+            if !gpu || !running.animation.kind.scened() {
                 if let Some(scene) = running.scene.take() { self.retired.push(scene); }
                 continue;
             }
