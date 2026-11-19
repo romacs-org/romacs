@@ -148,7 +148,8 @@ pub fn gl33_limits(allowed: wgpu::Limits) -> wgpu::Limits {
 }
 
 /// The renderer features a device with LIMITS cannot run, each with what
-/// it lacks. Each such feature refuses its work with the same words.
+/// it lacks: the display names them once when it takes the device, and each
+/// such feature refuses its work with the same words.
 #[must_use]
 pub fn disabled_features(limits: &wgpu::Limits) -> Vec<String> {
     crate::model::gpu::unsupported(limits).into_iter().collect()
@@ -175,11 +176,6 @@ async fn request_device_within(
 ) -> Result<(wgpu::Device, wgpu::Queue), String> {
     tracing::warn!(adapter = ?adapter.get_info(), "renderer adapter backend fingerprint");
     let required_limits = renderer_limits(allowed);
-    let off = disabled_features(&required_limits);
-    if !off.is_empty() {
-        let info = adapter.get_info();
-        tracing::warn!("GPU {} ({:?}) is below WebGPU's default limits; off: {}", info.name, info.backend, off.join("; "));
-    }
     let descriptor = wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: requested_features(adapter),
@@ -403,6 +399,16 @@ mod tests {
         let off = disabled_features(&asked);
         assert_eq!(off.len(), 1, "{off:?}");
         assert!(off[0].starts_with("3D models"), "{off:?}");
+    }
+
+    /// On this machine's GPU, when it meets the defaults, the device
+    /// descriptor is the one the renderer asked for before.
+    #[test]
+    fn a_capable_gpu_is_asked_for_exactly_the_defaults() {
+        let Some(adapter) = test_gpu::adapter() else { return };
+        if wgpu::Limits::default().check_limits(&adapter.limits()) {
+            assert_eq!(renderer_limits(&adapter.limits()), wgpu::Limits::default());
+        }
     }
 
     #[test]

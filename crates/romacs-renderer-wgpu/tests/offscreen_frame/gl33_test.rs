@@ -17,10 +17,11 @@ fn gl33_harness() -> Option<(Harness, Arc<Mutex<Vec<String>>>)> {
 
 #[test]
 fn a_gl33_device_draws_frames_without_a_validation_error() {
-    if romacs_renderer_wgpu::gpu_policy::test_gpu::adapter().is_none() {
+    let Some(adapter) = romacs_renderer_wgpu::gpu_policy::test_gpu::adapter() else {
         eprintln!("SKIP: no GPU adapter");
         return;
-    }
+    };
+    eprintln!("GL 3.3 limits on {:?}", adapter.get_info());
     let (mut h, errors) = gl33_harness().expect("a device within GL 3.3 limits");
     assert_eq!(h.renderer.device().limits().max_compute_workgroups_per_dimension, 0);
     assert_eq!(h.renderer.device().limits().max_storage_buffers_per_shader_stage, 0);

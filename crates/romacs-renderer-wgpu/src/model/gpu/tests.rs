@@ -247,11 +247,12 @@ fn drawing_after_device_loss_does_not_unwind() {
     assert!(outcome.is_ok(), "device loss unwound");
 }
 
-/// An adapter without vertex-stage storage buffers rejects the mesh pass as
-/// an error from inside the GPU error scope (not the size preflight: the
-/// binding size limit stays nonzero), and the device stays usable.
+/// A device without storage buffers (OpenGL 3.3) refuses a model with the
+/// words the display logs for it, before any GPU work, and stays usable.
+/// What limits cannot say (an adapter without `DownlevelFlags::VERTEX_STORAGE`)
+/// the GPU error scope still turns into an error.
 #[test]
-fn missing_vertex_storage_is_a_scoped_error_and_the_device_survives() {
+fn missing_storage_buffers_refuse_the_model_and_the_device_survives() {
     let limits = wgpu::Limits {
         max_storage_buffers_per_shader_stage: 0,
         ..wgpu::Limits::default()
@@ -276,9 +277,9 @@ fn missing_vertex_storage_is_a_scoped_error_and_the_device_survives() {
         ModelGpu::new(&device, &queue, &scene, (16, 16)).map(|_| ())
     }));
     match outcome {
-        Ok(Err(error)) => assert!(
-            error.starts_with("model GPU resources rejected"),
-            "rejected by the scope, not the preflight: {error}"
+        Ok(Err(error)) => assert_eq!(
+            Some(error),
+            unsupported(&device.limits()).map(|lacking| format!("off on this GPU: {lacking}"))
         ),
         Ok(Ok(())) => panic!("no vertex storage must be Err"),
         Err(_) => panic!("no vertex storage unwound"),
