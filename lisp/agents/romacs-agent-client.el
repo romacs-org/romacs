@@ -219,7 +219,7 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 ;;; Sessions
 
 ;; Each session opened is, by id, the state of its open: (opening) while
-;; it is asked, then [REVISION EPOCH ADAPTER] once it is answered.  A reply
+;; it is asked, then [REVISION] once it is answered.  A reply
 ;; is applied only while the state it was asked with is still the
 ;; session's; a notice before it is an earlier subscription's, as the
 ;; service answers an open before it sends anything of it, and is dropped.
@@ -236,9 +236,7 @@ reach `romacs-agent-client-session-functions'."
          (if error
              (progn (remhash id (romacs-agent-client-sessions client))
                     (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'failed error)))
-           (let ((cursor (gethash "cursor" result)))
-             (puthash id (vector (gethash "revision" result) (gethash "epoch" cursor) (gethash "adapter" cursor))
-                      (romacs-agent-client-sessions client)))
+           (puthash id (vector (gethash "revision" result)) (romacs-agent-client-sessions client))
            (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))))))))
 
 (defun romacs-agent-client-close-session (client id)
@@ -249,19 +247,17 @@ reach `romacs-agent-client-session-functions'."
 (defun romacs-agent-client--session-notice (client method params)
   "Apply METHOD's PARAMS to their session: dropped while it opens, the next
 revision passed on (an event's `gap', records it was never sent live,
-for its reader to pull as history), an earlier one ignored; a missed
-revision, or an event of another epoch or adapter than the open's,
-answered by opening it again."
+for its reader to pull as history), an earlier one ignored, a missed one
+answered by opening it again.  Its history's epoch is checked where
+history is read, against the open's."
   (let* ((id (gethash "session" params)) (state (gethash id (romacs-agent-client-sessions client)))
-         (revision (gethash "revision" params)) (cursor (gethash "cursor" params)))
+         (revision (gethash "revision" params)))
     (cond
      ((null state))
      ((eq (car-safe state) 'opening))
      ((not (integerp revision)))
      ((<= revision (aref state 0)))
-     ((or (/= revision (1+ (aref state 0)))
-          (and cursor (not (and (equal (gethash "epoch" cursor) (aref state 1))
-                                (equal (gethash "adapter" cursor) (aref state 2))))))
+     ((/= revision (1+ (aref state 0)))
       (romacs-agent-client-open client id))
      (t
       (aset state 0 revision)

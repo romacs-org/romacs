@@ -403,8 +403,10 @@ LIST serves that no session has."
     updates))
 
 (defun romacs-agent-service--refresh (&optional whole)
-  "Make the rows that may have changed again (every row when WHOLE), and
-tell the watchers what changed, and each session's subscribers its row."
+  "Make the rows that may have changed again (every row when WHOLE, which
+does what a refresh due would), and tell the watchers what changed, and
+each session's subscribers its row."
+  (when (timerp romacs-agent-service--refresh-timer) (cancel-timer romacs-agent-service--refresh-timer))
   (setq romacs-agent-service--refresh-timer nil)
   (when romacs-agent-service--list
     (let* ((list romacs-agent-service--list)
@@ -542,11 +544,12 @@ holds too many."
 
 ;;; One session
 
-;; Each connection's subscription to a session is its own: the cursor its
+;; Each connection's subscription to a session is its own: the seq its
 ;; live events follow from (CUTOFF: a unit at or below it, a replay's, is
-;; never sent it), the REVISION its notices are numbered by, and the
-;; session's EPOCH as last read (at its open and at the session's load),
-;; which a live unit's cursor carries: sending reads nothing.
+;; never sent it) and the REVISION its notices are numbered by.  A live
+;; unit carries its seq alone: it is a record past the open's cursor,
+;; which no compaction or flip touches; the epoch and adapter that history
+;; is read under come with the open and each page.  Sending reads nothing.
 
 (defconst romacs-agent-service--string-limit (* 64 1024)
   "The most bytes of one string in an event as sent: the rest is cut, the
@@ -557,9 +560,8 @@ event saying how long it was (Framing).")
 
 (cl-defstruct (romacs-agent-service--subscription (:constructor romacs-agent-service--subscription-make)
                                                   (:copier nil))
-  "A connection's subscription to a session: its CUTOFF seq, REVISION and
-EPOCH."
-  cutoff (revision 0) epoch)
+  "A connection's subscription to a session: its CUTOFF seq and REVISION."
+  cutoff (revision 0))
 
 (defun romacs-agent-service--subscriptions (id)
   "Each (RPC . SUBSCRIPTION) to session ID."
@@ -663,15 +665,10 @@ with the length it had.  A unit still over, or not encodable, is
                    return bounded)))
       'oversize))
 
-(defun romacs-agent-service--live-cursor (session subscription seq)
-  "The cursor at SEQ of SESSION's records, its epoch SUBSCRIPTION's."
-  (romacs-agent-rpc-object "seq" seq "epoch" (romacs-agent-service--subscription-epoch subscription)
-                           "adapter" (romacs-agent-service--adapter (romacs-agent-harness session))))
-
-(defun romacs-agent-service--send-unit (rpc subscription id session seq sent &optional gap)
+(defun romacs-agent-service--send-unit (rpc subscription id seq sent &optional gap)
   "Send RPC SENT (`romacs-agent-service--bounded''s) as session ID's record
 unit at SEQ, with GAP, (AFTER . UPTO), when given; its cutoff moves to SEQ."
-  (let ((params (romacs-agent-rpc-object "cursor" (romacs-agent-service--live-cursor session subscription seq))))
+  (let ((params (romacs-agent-rpc-object "seq" seq)))
     (setf (romacs-agent-service--subscription-cutoff subscription) seq)
     (when gap (puthash "gap" (romacs-agent-rpc-object "after" (car gap) "upto" (cdr gap)) params))
     (if (eq sent 'oversize)
@@ -695,23 +692,19 @@ event."
           (unless (equal sent [])
             (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
               (when (> seq (romacs-agent-service--subscription-cutoff subscription))
-                (romacs-agent-service--send-unit rpc subscription id session seq sent)))))))))
+                (romacs-agent-service--send-unit rpc subscription id seq sent)))))))))
 
 (defun romacs-agent-service--loaded (session _manifest)
   "SESSION is loaded, its records folded to its seq with no events raised
-\(a worker's fold, a journal read with no supervisor), and its epoch may
-have moved (a flip): each subscription reads its epoch again, and one
-whose cutoff is behind is sent that gap at once, an event of no events."
-  (condition-case err
-      (let ((id (romacs-agent-id session)) (seq (romacs-agent-seq session)))
-        (when-let* ((subscriptions (romacs-agent-service--subscriptions id)))
-          (let ((epoch (romacs-agent-events-epoch id)))
-            (pcase-dolist (`(,rpc . ,subscription) subscriptions)
-              (setf (romacs-agent-service--subscription-epoch subscription) epoch)
-              (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
-                (when (and (integerp seq) (> seq cutoff))
-                  (romacs-agent-service--send-unit rpc subscription id session seq [] (cons cutoff seq))))))))
-    (error (message "romacs-agent-service: %s" (error-message-string err)))))
+\(a worker's fold, a journal read with no supervisor): each subscription
+whose cutoff is behind is sent that gap at once, an event of no events.
+It reads nothing."
+  (let ((id (romacs-agent-id session)) (seq (romacs-agent-seq session)))
+    (when (integerp seq)
+      (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
+        (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
+          (when (> seq cutoff)
+            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq))))))))
 
 (defun romacs-agent-service--row-changed (row)
   "Tell the subscribers of ROW's session its row."
@@ -734,7 +727,7 @@ a session not loaded stays so."
                    "row" (or (gethash id (romacs-agent-service--list-rows romacs-agent-service--list)) :null)
                    "pending" [] "answering" [] "queue" [] "undelivered" [] "more" :null)))
       ;; Made only once its reply is: a reply that fails subscribes nothing.
-      (puthash id (romacs-agent-service--subscription-make :cutoff seq :epoch (gethash "epoch" cursor))
+      (puthash id (romacs-agent-service--subscription-make :cutoff seq)
                (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))
       reply)))
 

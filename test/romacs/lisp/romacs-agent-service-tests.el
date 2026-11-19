@@ -316,7 +316,7 @@ and `wait' waiting until its form holds (5 s at most)."
         (let* ((notices (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log)))
                (params (nth 2 (car notices))))
           (should (= (length notices) 1))
-          (should (equal (gethash "seq" (gethash "cursor" params)) 8))
+          (should (equal (gethash "seq" params) 8))
           (should (equal (mapcar (lambda (event) (gethash "text" event)) (gethash "events" params)) '("Hel" "lo"))))
         (advice-remove 'romacs-agent-service--last-seq 'rsv-kept)))))
 
@@ -330,26 +330,22 @@ and `wait' waiting until its form holds (5 s at most)."
     (should (= (string-bytes (gethash "output" event)) (* 64 1024)))
     (should (equal (gethash "/output" (gethash "truncated" event)) 100000))))
 
-(ert-deftest romacs-agent-client-reopens-on-another-epoch ()
-  ;; A live event of another epoch than the open's (read again at the
-  ;; session's load): the session is opened again, the event not applied.
+(ert-deftest romacs-agent-client-reopens-on-a-missed-revision ()
+  ;; A notice past the next revision: something was missed, and the
+  ;; session is opened again, the notice not applied.
   (romacs-agent-service-tests--with
-    (let ((busy (mk "busy" 'running)))
-      (romacs-agent-service-start socket)
-      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)) (opened 0))
-        (add-hook 'romacs-agent-client-session-functions (lambda (_ _ notice) (when (eq (car notice) 'opened) (cl-incf opened))))
-        (should (wait (romacs-agent-client-revision client)))
-        (romacs-agent-client-open client "busy")
-        (should (wait (= opened 1)))
-        (advice-add 'romacs-agent-events-epoch :override (lambda (_) 9) '((name . rsv-epoch)))
-        (unwind-protect
-            (progn
-              ;; Read again as the session loads (a flip moves it then).
-              (romacs-agent-service--loaded busy nil)
-              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 1 :message "m" :text "x" :last t))
-              (should (wait (= opened 2)))
-              (should-not (cl-find 'event (car log) :key #'cadr)))
-          (advice-remove 'romacs-agent-events-epoch 'rsv-epoch))))))
+    (mk "busy" 'running)
+    (romacs-agent-service-start socket)
+    (let* ((client (romacs-agent-client-connect socket)) (opened 0) (events 0))
+      (add-hook 'romacs-agent-client-session-functions
+                (lambda (_ _ notice) (pcase (car notice) ('opened (cl-incf opened)) ('event (cl-incf events)))))
+      (should (wait (romacs-agent-client-revision client)))
+      (romacs-agent-client-open client "busy")
+      (should (wait (= opened 1)))
+      (romacs-agent-client--session-notice client "agents/event"
+                                           (romacs-agent-rpc-object "session" "busy" "revision" 3 "seq" 9 "events" []))
+      (should (wait (= opened 2)))
+      (should (= events 0)))))
 
 (ert-deftest romacs-agent-client-applies-only-its-own-open ()
   ;; Open, close and open again before the first reply: the first reply
