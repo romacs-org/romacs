@@ -2871,7 +2871,9 @@ def chat_log(args, base):
     a = Agents(args, base, 'cl')
     try:
         a.up()
-        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model])])
+        a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model]),
+                     ('codex', args.codex_home, args.codex_program or real_program('codex'),
+                      ['-c', f'model="{args.codex_model}"', '-c', f'model_reasoning_effort="{args.codex_effort}"'])])
         a.work.mkdir(parents=True, exist_ok=True)
         (a.work / 'notes.txt').write_text('hello\nworld\n')
         result, shots = {}, []
@@ -2937,6 +2939,23 @@ def chat_log(args, base):
             shot('plan-answered')
         a.idle(sid, 300)
         text = a.chat(sid)
+
+        # A Codex session: a command's output shows as it runs.
+        codex = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)} nil "codex"))) (romacs-agent-show session) '
+                       '(delete-other-windows) (romacs-agent-id session))').strip('"')
+        a.eval(f'(progn (romacs-agent-send {a.s(codex)} {lisp_text(CODEX_PROMPT)}) t)')
+        try:
+            a.until(codex, lambda: a.eval('(and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t)') == 't',
+                    300, 'a Codex command drawn')
+            time.sleep(3)
+            at_end()
+            shot('codex-running')
+            a.idle(codex, 300)
+            at_end()
+            shot('codex-done')
+            result['codex'] = True
+        except RuntimeError as error:
+            result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
                        'shows': {word: word in text for word in ('seq 1', 'notes.txt', '∴', '⎿', 'allowed by you', '✻')}})
         result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked']
@@ -2946,6 +2965,8 @@ def chat_log(args, base):
         a.close()
 
 
+CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
+                'for i in $(seq 1 40); do echo line $i; sleep 0.25; done. Then say how many lines it printed.')
 ASK_PROMPT = 'Use the AskUserQuestion tool to ask me "Which colour do you prefer?" with the options Red and Blue. Then say what I chose.'
 TURN_PROMPT = ('Think briefly first. Then, one step at a time: run the shell command `seq 1 30` with Bash; '
                'read notes.txt; use a subagent (the Agent tool) to count the words in notes.txt. '
@@ -3327,7 +3348,7 @@ def children(args, base):
         def header():
             return parity_live.read_sexp(a.eval(
                 f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties header-line-format))'))
+                '(substring-no-properties (format-mode-line header-line-format)))'))
 
         def menu():
             return parity_live.read_sexp(a.eval(
@@ -3487,7 +3508,7 @@ def select(args, base):
         selected(one, 'claude-opus-5-5', 'high')
         a.send(one, 'say after')
         header = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties header-line-format))'))
+            f'(with-current-buffer (romacs-agent-show {a.s(one)}) (substring-no-properties (format-mode-line header-line-format)))'))
         armed = a.eval(f'(and (romacs-agent-pending-selection {a.s(one)}) t)')
         gate.touch()
         a.until(one, lambda: 'after' in (a.results(one) or [''])[-1], 30, 'queued message answered')
@@ -3496,7 +3517,7 @@ def select(args, base):
                            'busy': [e['busy'] for e in a.logged() if e.get('control') in ('set_model', 'apply_flag_settings')]}
 
         # The divider, again after a server restart, between the same turns.
-        divider = '  · claude-sonnet-5-5 · low → claude-opus-5-5 · high'
+        divider = '· claude-sonnet-5-5 · low → claude-opus-5-5 · high'
         before = a.chat(one)
         a.restart()
         until(lambda: a.eval(f'(and (romacs-agent-get {lisp_text(one)}) t)') == 't', 15, 'session restored')

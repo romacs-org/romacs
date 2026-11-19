@@ -57,6 +57,8 @@
 (ert-deftest romacs-agent-log-streams-without-blank-trails ()
   (romacs-agent-log-tests--with
     (draw :type 'thinking :text "I think.")
+    ;; The separator is on a line of its own while text streams.
+    (should (eq (char-before romacs-agent-log--end) ?\n))
     (draw :type 'thinking :text "\n\n")
     (draw :type 'thinking :text "\n\n")
     (draw :type 'delta :text "Para one.\n\n\n\nPara")

@@ -111,9 +111,10 @@ gives it), or nil when they begin at the session's start.")
 under the call goes; :depth; :input, its input; :live, a marker
 where its output streaming as it runs begins, and :streamed, that output.")
 (defvar-local romacs-agent-log--stream nil
-  "What streams at the transcript's end: (KIND START NEWLINES), KIND `text'
-or `thinking', START a marker where its text began, NEWLINES the line
-breaks it ended in so far, held until more text follows them.")
+  "What streams at the transcript's end: (KIND START AT NEWLINES), KIND
+`text' or `thinking', START a marker where its text began, AT one where
+the next text goes, before the newline that ends its line so far, and
+NEWLINES the line breaks it ended in so far, held until text follows.")
 (defvar-local romacs-agent-log--asks nil
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
@@ -188,13 +189,13 @@ else (nil . 0), at the end."
 (defun romacs-agent-log--close-stream ()
   "End what streams: a message gets its Markdown faces."
   (when romacs-agent-log--stream
-    (pcase-let ((`(,kind ,start ,_) romacs-agent-log--stream))
+    (pcase-let ((`(,kind ,start ,at ,_) romacs-agent-log--stream))
       (setq romacs-agent-log--stream nil)
-      (romacs-agent-log--put "\n")
       (when (and (eq kind 'text) (fboundp 'romacs-markdown-fontify-region))
         (romacs-agent-log--writing
           (ignore-errors (romacs-markdown-fontify-region start romacs-agent-log--end))))
-      (set-marker start nil))))
+      (set-marker start nil)
+      (set-marker at nil))))
 
 (defun romacs-agent-log--entry (text kind event)
   "TEXT as one entry of KIND for EVENT: a line or more, ending in a newline,
@@ -228,12 +229,16 @@ parent call."
              ;; one blank line parts its paragraphs.
              (body (string-trim text "\n+" "\n+"))
              (lead (if (string-empty-p body) (length text) (string-match-p "[^\n]" text)))
-             (held (+ (if new 0 (nth 2 romacs-agent-log--stream)) lead)))
+             (held (+ (if new 0 (nth 3 romacs-agent-log--stream)) lead)))
         (when new
           (romacs-agent-log--close-stream)
-          (setq romacs-agent-log--stream (list kind (copy-marker romacs-agent-log--end) 0)))
+          ;; Its line ended at once, its text put before that newline: the
+          ;; separator is never on its line.
+          (let ((start (copy-marker romacs-agent-log--end)))
+            (romacs-agent-log--put "\n")
+            (setq romacs-agent-log--stream (list kind start (copy-marker start t) 0))))
         (if (string-empty-p body)
-            (setcar (nthcdr 2 romacs-agent-log--stream) held)
+            (setcar (nthcdr 3 romacs-agent-log--stream) held)
           (let* ((trail (- (length text) lead (length body)))
                  (body (replace-regexp-in-string "\n\n\n+" "\n\n" body))
                  (chunk (concat (if new (if (eq kind 'thinking) (propertize "∴ " 'face 'romacs-agent-log-thinking) "")
@@ -241,8 +246,11 @@ parent call."
                                 (if (eq kind 'thinking) (propertize body 'face 'romacs-agent-log-thinking) body))))
             ;; Its first character starts the entry.
             (when new (put-text-property 0 1 'romacs-agent-log-entry kind chunk))
-            (romacs-agent-log--put chunk)
-            (setcar (nthcdr 2 romacs-agent-log--stream) trail)))))))
+            (romacs-agent-log--writing
+              (save-excursion
+                (goto-char (nth 2 romacs-agent-log--stream))
+                (insert (romacs-agent-log--sealed chunk))))
+            (setcar (nthcdr 3 romacs-agent-log--stream) trail)))))))
 
 (defun romacs-agent-log--lines (text limit)
   "TEXT's first LIMIT lines and how many it has: (SHOWN . COUNT)."
@@ -282,7 +290,10 @@ the brief of its input."
          (row (and renderer (ignore-errors (funcall (plist-get renderer :row) input)))))
     (concat (propertize "● " 'face 'romacs-agent-log-tool)
             (or row (concat (propertize name 'face 'romacs-agent-log-tool)
-                            (let ((brief (romacs-agent-rows--brief input)))
+                            ;; One line of it: RET shows all of it.
+                            (let ((brief (truncate-string-to-width
+                                          (car (split-string (romacs-agent-rows--brief input) "\n"))
+                                          100 nil nil (truncate-string-ellipsis))))
                               (if (string-empty-p brief) "" (concat "(" brief ")"))))))))
 
 (defun romacs-agent-log--live (block text)
@@ -500,7 +511,11 @@ unless a note said who gave it, that it was answered."
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
     ('rolled-back (romacs-agent-log--note event (format "rolled back %s turn(s)" (or (plist-get event :turns) "?"))))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
-    ('selection (romacs-agent-log--note event "model or effort changed"))
+    ('selection (cl-flet ((label (selection)
+                            (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
+                                                      '("harness's own"))
+                                       " · ")))
+                  (romacs-agent-log--note event (format "%s → %s" (label (plist-get event :from)) (label (plist-get event :to))))))
     ('unknown (romacs-agent-log--note event (format "%s" (plist-get event :raw))))
     ;; State, not content: the header and separator say it.
     (_ nil)))
