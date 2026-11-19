@@ -317,7 +317,9 @@ and its usage after it).  RET still shows all of it."
       (let ((open nil) (from 0))
         (while (setq from (string-search "<usage>" report from))
           (setq open from from (1+ from)))
-        (when open (setq report (string-trim-right (substring report 0 open))))))
+        ;; A block, closed by the report's last tag: none quoted inside it.
+        (when (and open (= (string-search "</usage>" report open) (- (length report) (length "</usage>"))))
+          (setq report (string-trim-right (substring report 0 open))))))
     (when (string-match "\n[ \t]*agentId: [^\n]*\\'" report)
       (setq report (substring report 0 (match-beginning 0))))
     (string-trim report)))

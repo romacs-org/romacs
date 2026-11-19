@@ -425,7 +425,9 @@
   (should (equal (romacs-agent-log--report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
                  "body"))
   (should (equal (romacs-agent-log--report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
-                 "see <usage>x</usage> here")))
+                 "see <usage>x</usage> here"))
+  (should (equal (romacs-agent-log--report "Example: <usage>x</usage>\nThe closing tag is </usage>")
+                 "Example: <usage>x</usage>\nThe closing tag is </usage>")))
 
 (ert-deftest romacs-agent-log-output-before-its-call-is-kept ()
   (romacs-agent-log-tests--with
