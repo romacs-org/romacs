@@ -112,6 +112,7 @@ fn act_in_role() -> bool {
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         Ok("census") => census(&store.unwrap()),
+        Ok("other-carry") => other_carry(&store.unwrap()),
         Ok("guard") => guard(&store.unwrap()),
         #[cfg(target_arch = "x86_64")]
         Ok("stray") => stray(&store.unwrap()),
@@ -372,6 +373,9 @@ fn stray(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
     std::io::stdout().flush().unwrap();
     if guard == arena::Guard::Reserved {
+        // The fault is the test's: no core for it. Every run otherwise
+        // hands the system's core dumper this process whole.
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable).unwrap();
         // SAFETY: a load, in assembly, from a page this process reserved
         // inaccessible: it faults, which is what the parent expects. Rust
         // code never reads the address, and the instruction writes nothing.
@@ -507,6 +511,32 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // it is adopted, and what became of the first stays said.
     assert_eq!(outcome(child("probe-race", &store).env("ROMACS_WORLD_IMAGE_TEST_FILE", &whole)),
                r#"{"kept":true,"outcomes":["Map","Mapped"],"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// A worker's restore of the world in STORE (`World::restore_only`) as
+/// another carry than the u64 it was made with: what it said. An i64, so a
+/// restore that let it through reads a number, not an owner of nothing.
+fn other_carry(store: &Path) {
+    let refused = world(store).restore_only::<i64>().map(|(_, carry)| carry);
+    println!("WORLD-IMAGE {}", refused.unwrap_err());
+}
+
+const OTHER_CARRY: &str = "a_world_restored_as_another_carry_is_refused";
+
+/// A world restored as another carry than its builder's is refused, as one
+/// for another key is: read as another type, the carry is garbage its
+/// restorer would drop. A worker isolate restores its spawner's world as the
+/// carry it knows; it once read a batch world's `()` as the GUI's carry.
+#[test]
+fn a_world_restored_as_another_carry_is_refused() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(OTHER_CARRY);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for the carry u64; this process needs i64"}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -839,7 +869,8 @@ fn pages(scratch: &Path) {
     unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
     block[PAGE..2 * PAGE].fill(0xab);
     let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
-    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32] };
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0,
+                                      carry_name: [0; arena::CARRY_NAME] };
     let len = unsafe { arena::write_image(&out, fields) }.unwrap();
     let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
     assert_eq!(bytes.len(), len);

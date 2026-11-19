@@ -151,14 +151,14 @@ connection of its own, as the writer's process has."
 (defun romacs-agent-writer-tests--broken (_x) (error "Disk full"))
 
 (ert-deftest romacs-agent-writer-no-writer-waits-then-the-end-writes-here ()
-  ;; No writer can be started (its world gone stale under the editor):
+  ;; No writer can be started (its worker fails to start):
   ;; the editor commits nothing, the writes wait and a writer is tried
   ;; again; an ending editor makes them itself, each tried again while it
   ;; fails, one that never succeeds kept and said.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil)
         (romacs-agent-writer--retry-timer nil) (romacs-agent-writer-tests--flaky 2) (said nil) (retried nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) (setq retried t) 'timer))
                 ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
                 ((symbol-function 'sleep-for) #'ignore)
@@ -211,7 +211,7 @@ connection of its own, as the writer's process has."
               (let ((romacs-agent-writer-queued nil))
                 (should-error (romacs-agent-turns-fold-put "s" "(:a 1)")))
               (romacs-agent-writer-tests--with
-                (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+                (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                           ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                           ((symbol-function 'sleep-for) #'ignore)
                           ((symbol-function 'redisplay) #'ignore)
@@ -228,7 +228,7 @@ connection of its own, as the writer's process has."
   ;; and says it was not saved.
   (let ((romacs-agent-writer-start-functions nil) (said nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'romacs-agent-events--db) #'ignore)
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) #'ignore)
@@ -347,7 +347,7 @@ connection of its own, as the writer's process has."
     (romacs-agent-writer-tests--with
       (cl-letf* ((spawn (symbol-function 'isolate-spawn))
                  ((symbol-function 'isolate-spawn)
-                  (lambda (&rest args) (if available (apply spawn args) (signal 'isolate-world-unavailable '("stale")))))
+                  (lambda (&rest args) (if available (apply spawn args) (signal 'isolate-error '("Cannot start isolate worker")))))
                  ((symbol-function 'run-with-timer) (lambda (_time _repeat f &rest args) (push (cons f args) soon) 'timer))
                  ((symbol-function 'timerp) (lambda (x) (eq x 'timer)))
                  ((symbol-function 'romacs-agent-writer-tests--flaky) (lambda (&rest _) (error "Locked")))
@@ -373,7 +373,7 @@ connection of its own, as the writer's process has."
   ;; pauses as one.
   (let ((romacs-agent-writer-start-functions nil) (pauses 0) (said nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) (lambda (&rest _) (cl-incf pauses)))
                 ((symbol-function 'redisplay) #'ignore)
@@ -478,7 +478,7 @@ connection of its own, as the writer's process has."
   ;; that one is made too, by the next round.
   (let ((romacs-agent-writer-start-functions nil) (romacs-agent-writer-tests--made nil))
     (romacs-agent-writer-tests--with
-      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-world-unavailable '("stale"))))
+      (cl-letf (((symbol-function 'isolate-spawn) (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'run-with-timer) (lambda (&rest _) nil))
                 ((symbol-function 'sleep-for) #'ignore)
                 ((symbol-function 'redisplay) #'ignore)
@@ -499,18 +499,15 @@ connection of its own, as the writer's process has."
 
 (ert-deftest romacs-agent-writer-a-flip-made-before-a-writer-ended-is-moved ()
   ;; A flip the writer made before it ended, sent again, answers nil: the
-  ;; store says imported, so the editor does what a move does.
-  (let ((romacs-agent-events--flip-queue nil) (waited nil) (told nil)
+  ;; store says imported, so what waits for it goes on.
+  (let ((romacs-agent-events--flip-queue nil) (waited nil)
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
-              ((symbol-function 'romacs-agent-events--back-up-moved) #'ignore)
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
-      (let ((romacs-agent-events-migrated-functions (list (lambda (ids) (setq told ids)))))
-        (romacs-agent-events--flip-soon '("s")))
-      (should (equal told '("s")))
+      (romacs-agent-events--flip-soon '("s"))
       (should (equal waited '("s"))))))
 
 (ert-deftest romacs-agent-writer-the-editor-reads-and-an-import-waits ()
@@ -555,8 +552,8 @@ connection of its own, as the writer's process has."
             (serve)
             (should (equal ran '(t)))
             (should (equal (caar (sqlite-select (romacs-agent-store--open) "select count(*) from events where session = ?" (list id))) 1))
-            ;; Its journal backed up here, once imported.
-            (should-not (file-exists-p (expand-file-name "journal.jsonl" dir)))))
+            ;; Its journal left where it is, a backup no reader reads.
+            (should (file-exists-p (expand-file-name "journal.jsonl" dir)))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 

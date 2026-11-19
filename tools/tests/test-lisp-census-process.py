@@ -31,7 +31,11 @@ class ProcessControls(unittest.TestCase):
         # Python; one that sleeps (10 s) is cut off well before it wakes.
         timeout = 3 if 'sleep' in action else 30
         control = self.directory / 'control.py'
-        source = '#!/usr/bin/env python3\nimport os, signal, resource, time\nresource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n'
+        # A control's deaths are the test's: undumpable (PR_SET_DUMPABLE 0),
+        # so the system's core dumper is never called for one (a core limit
+        # of 0 still has it record each death).
+        source = ('#!/usr/bin/env python3\nimport ctypes, os, signal, resource, time\n'
+                  'resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\nctypes.CDLL(None).prctl(4, 0)\n')
         if report is not None:
             source += f'print({json.dumps(report)!r}, flush=True)\n'
         control.write_text(source + action + '\n')

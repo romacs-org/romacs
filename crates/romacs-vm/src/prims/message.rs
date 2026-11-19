@@ -7,7 +7,6 @@
 use super::*;
 use std::io::Write;
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/message.el");
 const DOLOG: &str = "romacs--message-dolog";
 
 // GNU has no message catalog yet: MSGID when N is the fixnum 1, else
@@ -85,9 +84,7 @@ fn half_missing(cx: &mut Leaf<'_>) -> std::result::Result<bool, Fault> {
 
 /// Install the Lisp half, then continue with THEN and SAVED.
 fn install_half(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> Next {
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/message.el")?;
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then, saved })
 }
 
