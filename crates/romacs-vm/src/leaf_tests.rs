@@ -171,9 +171,36 @@ fn leaf_kind_covers_every_current_storage_variant() {
     vm.cells.push(Value::NIL);
     cases.push((Value::reference(vm.cells.len()-1, 5), Kind::Cell));
     cases.push((vm.allocate_object(data::Object::ByteBuffer(Box::new(bytes::ByteBuffer { state: Default::default(), case_tables: [Value::NIL; 4], local_keymap: Value::NIL, bytes: vec![], syntax_table: Value::NIL, category_table: Value::NIL, point: coordinates::ByteOffset(0), restriction: coordinates::ByteOffset(0)..coordinates::ByteOffset(0), anchors: crate::anchors::AnchorTree::new(0), properties: Default::default(), had_intervals: false, per_buffer: Default::default(), held: None, mirror: None }))), Kind::ByteBuffer));
+    cases.push((vm.eval_source_raw("(freeze \"x\")").unwrap(), Kind::String));
+    cases.push((vm.allocate_object(data::Object::Free), Kind::Invalid));
+    // An executable-image string, by its bits: `kind` reads no image for it.
+    cases.push((Value::reference(crate::image::IMAGE | 1, 0), Kind::String));
+    cases.push((Value::reference(usize::MAX >> 3, 0), Kind::Invalid));
     let cx = Leaf::new(&mut vm);
-    for (value, kind) in cases { assert_eq!(cx.kind(value), kind, "{value:?}"); }
-    assert_eq!(cx.kind(Value::reference(usize::MAX >> 3, 0)), Kind::Invalid);
+    for (value, kind) in cases {
+        assert_eq!(cx.kind(value), kind, "{value:?}");
+        // The predicates answer exactly as `kind` compared to a constant.
+        assert_eq!(cx.is_symbol(value), kind == Kind::Symbol, "is_symbol {value:?}");
+        assert_eq!(cx.is_string(value), matches!(kind, Kind::String | Kind::Bytes), "is_string {value:?}");
+    }
+}
+
+/// `tag_is(k)` is `tag() == k` for every tag, on a value of each kind.
+#[test]
+fn tag_is_answers_as_tag_compared() {
+    let mut vm = Vm::new();
+    let mut values = vec![Value::NIL, Value::TRUE, Value::UNBOUND, int(0), int(-1), int(Value::MAX_FIXNUM), int(Value::MIN_FIXNUM)];
+    for source in ["'(x)", "'x", "(lambda (x) x)", "\"s\"", "[1]", "1.5"] {
+        values.push(vm.eval_source_raw(source).unwrap_or_else(|e| panic!("{source}: {e}")));
+    }
+    values.push(Value::reference(Primitive::Car as usize, 6));
+    vm.cells.push(Value::NIL);
+    values.push(Value::reference(vm.cells.len() - 1, 5));
+    for v in values {
+        for k in 0..8 {
+            assert_eq!(v.tag_is(k), v.tag() == k, "{v:?} tag {k}");
+        }
+    }
 }
 
 /// A unibyte buffer's mirror follows every kind of edit without a rebuild,
