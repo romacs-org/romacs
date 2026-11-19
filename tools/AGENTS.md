@@ -27,6 +27,11 @@ and what the merge queue holds it to.
   `tools/dev-check` exits 2 for it, 1 for a failure.
 - A check holds a branch to its merge-base with the trunk, not to the trunk's
   tip.
+- `tools/test-elisp` refuses, before any host runs, a file with a top-level
+  `(ert-deftest`; a file that registers no `romacs-deftest` as it loads fails
+  the run by name. A file whose leading comments say
+  `;; romacs-test: editor (cause)` needs the editor's startup: `--core`'s
+  default set skips it, and naming it to `--core` is an error.
 - What `impact.py` cannot place runs everything, and it says which path did.
   Within a crate's sources it selects the whole crate and its dependents: a
   module-level guess can miss a test.
