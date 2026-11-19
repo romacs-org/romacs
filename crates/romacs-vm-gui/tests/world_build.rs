@@ -150,6 +150,17 @@ fn a_batch_world_starts_in_the_stock_theme() {
     // Restored, and as quiet as GNU's batch by default.
     let (said, err) = session("");
     assert!(said.contains("THEMES (default)") && !err.contains("romacs-world"), "{said}\n{err}");
+    // Asked, it says so, with the digest of the Lisp the restored image was
+    // built from, which compiled Lisp made in it is keyed by: its manifest's.
+    let (_, err) = session("1");
+    let restored = err.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["mode"] == "restored").unwrap_or_else(|| panic!("not restored: {err}"));
+    let manifest = std::fs::read_dir(&store).unwrap().filter_map(Result::ok).map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "json") && p.file_stem().is_some_and(|s| s.len() == 64)).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(manifest).unwrap()).unwrap();
+    let tree = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    assert_eq!(restored["lisp"], serde_json::json!(romacs_vm::world::store::lisp_digest(&manifest, &[tree])), "{restored}");
     let _ = std::fs::remove_dir_all(&home);
 }
 

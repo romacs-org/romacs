@@ -187,9 +187,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     // it, or the executable's place). Artifacts and the compile identity name
     // its files relative to it (`compiled_lisp::Config::root`). A Lisp tree
     // with no such tree around it: every file by its path.
-    let root = dir.parent()
-        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
-        .map(Path::to_path_buf);
+    let root = tree_root(&dir);
     let mut runtime = vec![dir.clone()];
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
     let environment = compile_environment(&store);
@@ -229,11 +227,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
             move || {
                 let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
-                let lisp = match RESTORED.get() {
-                    Some((store, key, manifest)) if *store == world.store && *key == world.key =>
-                        romacs_vm::world::store::lisp_digest(manifest, &roots)?,
-                    _ => world.lisp_files_digest(&roots)?,
-                };
+                let lisp = compile_lisp_digest(world, &roots, RESTORED.get())?;
                 let libraries = romacs_vm::world::store::libraries_identity().ok()?;
                 Some(format!("compile build {} libraries {libraries} {GEOMETRY} lisp {lisp}", env!("ROMACS_BUILD_ID")))
             }
@@ -318,6 +312,29 @@ fn restarted(mut vm: Vm) -> Result<Vm, String> {
     Ok(vm)
 }
 
+/// The tree the Lisp directory DIR lies in, by its true name (DIR is
+/// canonical): the directory holding it as `lisp/` beside `etc/`, as every
+/// runtime tree does. None for a Lisp tree with no such tree around it.
+fn tree_root(dir: &Path) -> Option<PathBuf> {
+    dir.parent()
+        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
+        .map(Path::to_path_buf)
+}
+
+/// The digest of the Lisp compiled code made against WORLD (the compile
+/// world) is keyed by, named relative to ROOTS: the manifest of the world
+/// this process RESTORED, when that is WORLD (a compile process), else
+/// WORLD's published manifest checked against the files now
+/// (`configure_store` says why).
+fn compile_lisp_digest(world: &World, roots: &[PathBuf], restored: Option<&(PathBuf, [u8; 32], serde_json::Value)>)
+    -> Option<String> {
+    match restored {
+        Some((store, key, manifest)) if *store == world.store && *key == world.key =>
+            romacs_vm::world::store::lisp_digest(manifest, roots),
+        _ => world.lisp_files_digest(roots),
+    }
+}
+
 /// The world this process restored, by its store and key, with the manifest
 /// of the image it runs: what compiled Lisp it makes is keyed by. A process
 /// static, as the compiled-Lisp configuration is: that configuration, with
@@ -344,7 +361,11 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
         Launch::Restored { vm, manifest, .. } => {
-            diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
+            // The digest of the Lisp the restored image was built from, as
+            // compiled code made in this process is keyed by it.
+            let lisp = romacs_vm::world::store::lisp_digest(&manifest, &tree_root(&dir).into_iter().collect::<Vec<_>>());
+            diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "lisp": lisp,
+                                         "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
             let _ = RESTORED.set((world.store.clone(), world.key, manifest));
             restarted(*vm)
         }
@@ -492,4 +513,37 @@ fn command_line_options(args: Vec<String>, mut quick: bool) -> (bool, Vec<String
         rest.next();
     }
     (quick, rest.collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A compile process keys by the manifest of the world it restored,
+    /// whatever was published since; any other process, or one that
+    /// restored another store's world, by the published manifest.
+    #[test]
+    fn a_compile_process_keys_by_the_world_it_restored() {
+        let store = std::env::temp_dir().join(format!("romacs-compile-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        std::fs::create_dir_all(&store).unwrap();
+        let key = [0x3c; 32];
+        let world = World { store: store.clone(), key, recipe: vec![] };
+        // Each manifest read a file that is not there: it holds as long as
+        // that stays so, and the two name different Lisp.
+        let manifest = |name: &str| serde_json::json!({"records": [{"kind": "file-read",
+            "path": store.join(name).to_str().unwrap(), "result": {"errno": libc::ENOENT}}]});
+        let (v1, v2) = (manifest("v1.el"), manifest("v2.el"));
+        let published = store.join(format!("{}.json", key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        std::fs::write(&published, v2.to_string()).unwrap();
+        let roots = [store.clone()];
+        let digest = |m| romacs_vm::world::store::lisp_digest(m, &roots);
+        assert_ne!(digest(&v1), digest(&v2));
+        let restored = (store.clone(), key, v1.clone());
+        assert_eq!(compile_lisp_digest(&world, &roots, Some(&restored)), digest(&v1), "the restored world");
+        assert_eq!(compile_lisp_digest(&world, &roots, None), digest(&v2), "the published world");
+        let elsewhere = (store.join("other"), key, v1.clone());
+        assert_eq!(compile_lisp_digest(&world, &roots, Some(&elsewhere)), digest(&v2), "another store's world");
+        let _ = std::fs::remove_dir_all(&store);
+    }
 }
