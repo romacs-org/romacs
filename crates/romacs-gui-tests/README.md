@@ -52,11 +52,11 @@ argument.
 
 `ROMACS_GNU_GUI_BINARY` selects the GNU GUI Emacs executable (default `emacs`).
 Toolkit selection matters: PGTK running on X11 can coalesce pending resize
-requests with a font change differently from a native X11 build. A failure of
-`gnu_overlapping_resize_and_font_change_preserve_latest_grid` must remain visible;
-do not add a wait between its overlapping requests or relax its final grid
-assertion to make a toolkit pass. A passing run with another GNU version/toolkit
-does not qualify the configured GNU reference executable.
+requests with a font change differently from a native X11 build. A passing run
+with another GNU version/toolkit does not qualify the configured GNU reference
+executable. Overlapping native resizes are not an oracle case: the configured
+build itself ends at either request (`desktop_font_updates.rs` records the
+runs).
 
 The workspace gate constructs its own `PATH` and isolated environment. Wrapping
 it in `nix shell` or exporting `FONTCONFIG_FILE` in the caller does not provision

@@ -18,7 +18,7 @@ fn use_global_map(cx, map: Value) {
 
 defsubr! { name = "make-symbol", gnu = "alloc.c:3708", effect = Pure,
 fn make_symbol(cx, name: Value) {
-    let key = cx.string_view(name).map_err(|_| Fault::Wrong("stringp", name)).map(|v| crate::obarray::symbol_key(v.bytes(), v.len()))?;
+    let key = cx.string_view(name).map_err(|_| Fault::Wrong("stringp", name)).map(|v| crate::obarray::symbol_key(v.bytes(), v.len()).map(std::borrow::Cow::into_owned))?;
     Ok(cx.make_symbol(&key.ok_or(Fault::NotUnicode(name))?))
 }}
 
