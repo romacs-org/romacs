@@ -25,6 +25,19 @@ const SAMPLES: u32 = 4;
 /// One identity texel copy at a 256-byte aligned row.
 const PICK_STAGING_BYTES: u64 = 256;
 
+/// Storage buffers the model shader reads in its vertex stage
+/// (`model.wgsl`'s group 0).
+const STORAGE_BUFFERS: u32 = 4;
+
+/// Why a device with LIMITS cannot draw models, None when it can: models
+/// pull their vertices from storage buffers, which OpenGL 3.3 lacks.
+pub(crate) fn unsupported(limits: &wgpu::Limits) -> Option<String> {
+    let has = limits.max_storage_buffers_per_shader_stage;
+    (has < STORAGE_BUFFERS).then(|| {
+        format!("3D models (need {STORAGE_BUFFERS} storage buffers per shader stage, the GPU has {has})")
+    })
+}
+
 /// canvas-3d colours (`render.py`).
 const BONE: [f32; 3] = [0.92, 0.77, 0.59];
 const HIGHLIGHT: [f32; 3] = [1.0, 0.82, 0.2];
@@ -432,6 +445,9 @@ impl ModelGpu {
         scene: &ModelScene,
         size_px: (u32, u32),
     ) -> Result<Self, String> {
+        if let Some(lacking) = unsupported(&device.limits()) {
+            return Err(format!("off on this GPU: {lacking}"));
+        }
         let mut positions: Vec<[f32; 4]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
         let mut faces: Vec<[f32; 4]> = Vec::new();
