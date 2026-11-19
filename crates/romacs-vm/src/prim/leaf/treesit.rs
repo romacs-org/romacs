@@ -249,7 +249,7 @@ impl Leaf<'_> {
         let suffixes = self.ts_value("dynamic-library-suffixes")?;
         let suffixes: Vec<Vec<u8>> = self.ts_list_values(suffixes).into_iter().filter_map(|s| self.string_bytes(s).ok()).collect();
         let mut errors = Vec::new();
-        let mut opened = Self::ts_open_first(&stems, &suffixes, &mut errors);
+        let mut opened = native::open_first(&stems, &suffixes, &mut errors);
         // VM2-TREESIT-BUNDLED: after the user's directories, before the
         // system's, the grammar linked into the executable, unless the
         // override list names another library for the language.
@@ -264,7 +264,7 @@ impl Leaf<'_> {
             }
         }
         if opened.is_none() {
-            opened = Self::ts_open_first(std::slice::from_ref(&base), &suffixes, &mut errors);
+            opened = native::open_first(std::slice::from_ref(&base), &suffixes, &mut errors);
         }
         let Some((handle, library)) = opened else {
             let mut data = vec![self.intern("not-found")];
@@ -288,31 +288,6 @@ impl Leaf<'_> {
         }
         LANGUAGES.lock().unwrap().push((name, lang.clone(), file.clone()));
         Ok(Ok((lang, file)))
-    }
-    /// dynlib_open of each name GNU tries for STEMS, in its order: the
-    /// first library that opens and its file name, else None with every
-    /// attempt's message in ERRORS.
-    fn ts_open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(native::Library, Vec<u8>)> {
-        for stem in stems {
-            // GNU conses each suffix's names before the last's.
-            for suffix in suffixes.iter().rev() {
-                let mut plain = stem.clone();
-                plain.extend_from_slice(suffix);
-                let mut candidates = vec![plain.clone()];
-                for version in (native::MIN_ABI_VERSION..=native::ABI_VERSION).rev() {
-                    candidates.push([&plain[..], format!(".{version}.0").as_bytes()].concat());
-                }
-                candidates.push([&plain[..], b".0"].concat());
-                candidates.push([&plain[..], b".0.0"].concat());
-                for candidate in candidates {
-                    match native::open_library(&candidate) {
-                        Ok(handle) => return Some((handle, candidate)),
-                        Err(message) => errors.push(message),
-                    }
-                }
-            }
-        }
-        None
     }
     fn ts_string_bytes(&self, v: Value) -> R<Vec<u8>> {
         if !self.ts_is_string(v) { return Err(Fault::Wrong("stringp", v)); }
@@ -1152,16 +1127,13 @@ impl Leaf<'_> {
     /// SOURCE (a string, or a sexp expanded) compiled for LANGUAGE, or the
     /// `treesit-query-error' it signals.
     fn ts_compile(&mut self, language: native::Language, source: Value) -> R<Rc<ts::Compiled>> {
-        let (text, source) = if self.pair(source).is_some() {
-            let expanded = self.ts_query_expand_bytes(source)?;
-            let bytes = expanded.bytes.clone();
-            (bytes, self.ts_expanded_value(expanded))
-        } else {
-            (self.string_bytes(source)?, source)
-        };
-        match native::Query::new(&language, &text) {
-            Ok(query) => Ok(Rc::new(ts::Compiled::new(query))),
+        let expanded = if self.pair(source).is_some() { Some(self.ts_query_expand_bytes(source)?) } else { None };
+        let text = match &expanded { Some(e) => std::borrow::Cow::Borrowed(&e.bytes[..]), None => self.string_bytes(source)?.into() };
+        match self.vm.treesit_queries.compiled(&language, &text) {
+            Ok(compiled) => Ok(compiled),
             Err((offset, message)) => {
+                // The signal names the text compiled: a sexp's expansion.
+                let source = expanded.map_or(source, |e| self.ts_expanded_value(e));
                 let data = [self.string(message), fixnum(i64::from(offset) + 1), source, self.string("Debug the query with `treesit-query-validate'")];
                 Err(self.ts_signal("treesit-query-error", &data))
             }
@@ -1316,9 +1288,7 @@ impl Leaf<'_> {
         let mut first = 0u32;
         for (&query, &overriding) in queries.iter().zip(overrides) {
             let compiled = self.ts_ensure_compiled(query)?;
-            let source = self.ts_query(query)?.source;
-            let bytes = if self.pair(source).is_some() { self.ts_query_expand_bytes(source)?.bytes } else { self.string_bytes(source)? };
-            text.extend_from_slice(&bytes);
+            text.extend_from_slice(&compiled.text);
             text.push(b'\n');
             spans.push(self.cons(fixnum(i64::from(first)), overriding));
             first += compiled.query.pattern_count();

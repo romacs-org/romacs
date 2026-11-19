@@ -41,7 +41,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 46] = [
+        let checks: [(&str, bool); 47] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -75,6 +75,7 @@ impl Vm {
             ("execution", self.execution.holds_nothing()),
             ("spare_programs", self.spare_programs.is_empty()),
             ("regexp_cache", self.regexp_cache.is_empty()),
+            ("treesit_queries", self.treesit_queries.is_empty()),
             ("flat_tables", self.flat_tables.is_empty()),
             ("mode_line_forms", self.mode_line_forms.is_empty()),
             ("lambda_lists", self.lambda_lists.is_empty()),
