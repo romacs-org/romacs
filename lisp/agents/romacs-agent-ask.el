@@ -350,7 +350,7 @@ them.")
         (session romacs-agent-ask--session) (id romacs-agent-ask--id))
     (unless chosen (user-error "Answer each question first"))
     (run-hook-with-args 'romacs-agent-ask-sent-functions session id chosen)
-    (romacs-agent-respond session id (list :answers (romacs-agent-ask-answers chosen)))
+    (romacs-agent-respond session id (list :answers (romacs-agent-ask-answers chosen)) nil 'user)
     (romacs-agent-ask-close session id)))
 
 (defun romacs-agent-ask--choose (index label)

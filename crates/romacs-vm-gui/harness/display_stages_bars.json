@@ -26,9 +26,9 @@
   "display_instructions_p90": 352000
  },
  "chat-idle": {
-  "step_instructions": 558000,
+  "step_instructions": 516000,
   "cycles": 1,
-  "display_instructions": 553000,
+  "display_instructions": 511000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -36,12 +36,12 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 560000
+  "display_instructions_p90": 514000
  },
  "chat-tick": {
-  "step_instructions": 840000,
+  "step_instructions": 578000,
   "cycles": 1,
-  "display_instructions": 553000,
+  "display_instructions": 511000,
   "display_conses": 0,
   "windows_rebuilt": 0,
   "band_expansions": 1,
@@ -49,46 +49,46 @@
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 563000
+  "display_instructions_p90": 514000
  },
  "chat-tick-second": {
-  "step_instructions": 19100000,
+  "step_instructions": 5520000,
   "cycles": 1,
-  "display_instructions": 20100000,
+  "display_instructions": 4750000,
   "display_conses": 0,
-  "windows_rebuilt": 1,
-  "band_expansions": 1,
+  "windows_rebuilt": 2,
+  "band_expansions": 2,
   "layouts": 1,
   "frames_submitted": 1,
-  "lines_laid": 1,
-  "rows_wrapped": 1,
-  "display_instructions_p90": 20200000
+  "lines_laid": 0,
+  "rows_wrapped": 0,
+  "display_instructions_p90": 4850000
  },
  "chat-cursor": {
-  "step_instructions": 10300000,
+  "step_instructions": 2170000,
   "cycles": 1,
-  "display_instructions": 10900000,
+  "display_instructions": 2160000,
   "display_conses": 0,
-  "windows_rebuilt": 1,
+  "windows_rebuilt": 0,
   "band_expansions": 2,
   "layouts": 0,
   "frames_submitted": 1,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 10900000
+  "display_instructions_p90": 2180000
  },
  "chat-collected": {
-  "step_instructions": 164000000,
+  "step_instructions": 51700000,
   "cycles": 1,
-  "display_instructions": 24200000,
-  "display_conses": 174,
+  "display_instructions": 4160000,
+  "display_conses": 154,
   "windows_rebuilt": 2,
   "band_expansions": 2,
   "layouts": 2,
   "frames_submitted": 0,
   "lines_laid": 0,
   "rows_wrapped": 0,
-  "display_instructions_p90": 24300000
+  "display_instructions_p90": 4180000
  },
  "cursor-move": {
   "step_instructions": 1860000,
@@ -144,9 +144,9 @@
   "display_instructions_p90": 17200000
  },
  "chat-stream-1k": {
-  "step_instructions": 17600000,
+  "step_instructions": 5080000,
   "cycles": 1,
-  "display_instructions": 17400000,
+  "display_instructions": 4800000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 2,
@@ -154,12 +154,12 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 50000000
+  "display_instructions_p90": 7300000
  },
  "chat-stream-10k": {
-  "step_instructions": 41500000,
+  "step_instructions": 7020000,
   "cycles": 1,
-  "display_instructions": 41800000,
+  "display_instructions": 6740000,
   "display_conses": 0,
   "windows_rebuilt": 1,
   "band_expansions": 2,
@@ -167,7 +167,7 @@
   "frames_submitted": 1,
   "lines_laid": 1,
   "rows_wrapped": 1,
-  "display_instructions_p90": 251000000
+  "display_instructions_p90": 17600000
  },
  "fontify-open-org-folded": {
   "step_instructions": 890000000,
