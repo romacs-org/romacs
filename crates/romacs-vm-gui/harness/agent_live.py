@@ -2903,7 +2903,7 @@ def chat_log(args, base):
         until(lambda: a.eval('(and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t)') == 't',
               patient(300), 'a tool call drawn')
         at_end()
-        for _ in range(8):
+        for _ in range(3):
             a.keys(*ctrl('p'))
             time.sleep(.1)
         result['moved_up'] = a.eval('(< (point) (marker-position romacs-agent-log--end))') == 't'
@@ -2963,7 +2963,7 @@ def chat_log(args, base):
                     '(if found (buffer-substring-no-properties found (or (next-single-property-change (1+ found) '
                     '(quote romacs-agent-log-entry) nil romacs-agent-log--end) romacs-agent-log--end)) "")))')) or ''
             a.until(codex, lambda: a.state(codex) == 'running'
-                    and re.search(r'⋮ \d+ lines? so far\n\s+line \d+', command_block()) is not None,
+                    and re.search(r'⋮ running.*\n\s+line \d+', command_block()) is not None,
                     120, 'Codex output while it runs')
             at_end()
             shot('codex-running')

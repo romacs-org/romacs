@@ -590,7 +590,9 @@ an approval or questions for the user, anything else refused."
            "mcpServer/startupStatus/updated" "remoteControl/status/changed" "skills/changed"
            "item/fileChange/outputDelta" "item/fileChange/patchUpdated"
            "item/reasoning/textDelta" "item/plan/delta"
-           "hook/started" "hook/completed" "turn/diff/updated")
+           "hook/started" "hook/completed" "turn/diff/updated"
+           ;; Its own bookkeeping, nothing a person reads.
+           "turn/moderationMetadata" "thread/readState/changed")
        nil)
       ((pred (string-prefix-p "account/")) nil)
       (_ (list (list :type 'unknown :raw params :method method))))))

@@ -93,7 +93,7 @@
       (draw :type 'tool-output :id "c" :text "one\ntwo\n")
       (draw :type 'tool-output :id "c" :text "three\n")
       (let ((text (romacs-agent-log-tests--transcript)))
-        (should (string-match-p "make[^\n]*\n  ⋮ 3 lines so far\n    two\n    three\nafter" text)))
+        (should (string-match-p "make[^\n]*\n  ⋮ running: 3 lines so far, the last 2\n    two\n    three\nafter" text)))
       (draw :type 'tool :state 'completed :id "c" :output "one\ntwo\nthree")
       (let ((text (romacs-agent-log-tests--transcript)))
         (should-not (string-match-p "so far" text))
@@ -379,6 +379,40 @@
                 ((symbol-function 'timerp) (lambda (x) (eq x 'timer))))
         (romacs-agent-log--shown nil))
       (should started))))
+
+;; Screenshot reviews, round 1.
+
+(ert-deftest romacs-agent-log-a-subagent-reports-without-its-frame ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "count"))
+    (draw :type 'tool :state 'completed :id "a"
+          :output "[Subagent hand-back] The text below is the final report. The report follows:\n  2 words\nagentId: abc (use SendMessage)\n<usage>tokens: 5\ntool_uses: 1</usage>")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "⎿ 2 words\n" text))
+      (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
+    (romacs-agent-log--separator)
+    (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
+
+(ert-deftest romacs-agent-log-proceeding-with-a-plan-leaves-plan-mode ()
+  (romacs-agent-log-tests--with
+    (setf (romacs-agent-options session) '(:plan t))
+    (puthash "p" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "p" :tool "ExitPlanMode" :plan t :user t)
+    (let (answered planned)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (_s id allow &rest _) (push (list id allow) answered)))
+                ((symbol-function 'romacs-agent-set-plan) (lambda (_s on) (push on planned)))
+                ((symbol-function 'romacs-agent-log--loaded) (lambda () session)))
+        (goto-char (cadr (assoc "p" romacs-agent-log--asks)))
+        (romacs-agent-log-allow))
+      (should (equal answered '(("p" t))))
+      (should (equal planned '(nil))))))
+
+(ert-deftest romacs-agent-log-output-before-its-call-is-kept ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool-output :id "x" :text "line 1\n")
+    (draw :type 'tool :state 'started :id "x" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 2"))
+    (draw :type 'tool-output :id "x" :text "line 2\n")
+    (should (string-match-p "⋮ running\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
