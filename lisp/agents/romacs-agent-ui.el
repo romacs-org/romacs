@@ -492,10 +492,13 @@ chip of the task's results arriving."
 (defun romacs-agent-ui--parent-of (id)
   "The id of the session that delegated the one ID names, or nil, loading
 no session: from it loaded, its row, else its manifest (a row not filled
-yet, as an install draws turns before it fills rows)."
-  (if-let* ((child (or (romacs-agent-loaded id) (romacs-agent-store-row-session id))))
+yet, as an install draws turns before it fills rows).  A preview, held to
+its time, asks the loaded one alone."
+  (if-let* ((child (or (romacs-agent-loaded id)
+                       (and (not romacs-agent-ui--previewing) (romacs-agent-store-row-session id)))))
       (plist-get (romacs-agent-options child) :parent)
-    (when-let* ((manifest (romacs-agent--read-json
+    (when-let* (((not romacs-agent-ui--previewing))
+                (manifest (romacs-agent--read-json
                            (expand-file-name "manifest.json" (expand-file-name id (romacs-agent--state-root)))))
                 (options (gethash "options" manifest))
                 ((hash-table-p options)))
