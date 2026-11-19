@@ -28,10 +28,12 @@ slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
 filter = 'test(/(^|::)batch_probes_scale_within_their_budgets$/)'
 slow-timeout = { period = "3600s", terminate-after = 1, grace-period = "0s" }
 
-# The Lisp tree's compile (lisp_tree_compiles.rs) keeps its store under the
-# target: a run compiles what changed in seconds, but the first in a target
-# compiles every file of lisp/, four processes at a time, which took 7 min
-# at load 30. A wrong verdict is its failure, not time.
+# The Lisp tree's compile (lisp_tree_compiles.rs) runs four compile
+# processes: it takes four test threads. Its store under the target is reused,
+# but a new build's compile identity compiles every file of lisp/ again, which
+# took 2 to 7 min at load 30 and 19 min under heavier load. A wrong verdict is
+# its failure, not time. tools/gate writes the same override for its runs.
 [[profile.default.overrides]]
 filter = 'test(/(^|::)every_file_of_the_lisp_tree_compiles_but_the_known_failures$/)'
 slow-timeout = { period = "1800s", terminate-after = 1, grace-period = "0s" }
+threads-required = 4

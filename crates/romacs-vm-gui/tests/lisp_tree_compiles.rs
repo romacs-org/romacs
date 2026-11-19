@@ -2,8 +2,10 @@
 //! installer runs it), but those `lisp_tree_compile_failures.txt` lists.
 //! The installer and the world build let a file that fails to compile load
 //! as source, so a failure is otherwise silent; this check is where one
-//! fails. The list only shrinks: a listed file that compiles fails too, so
-//! the fix that makes it compile deletes its entry.
+//! fails. The list matches the tree both ways: a listed file that compiles
+//! fails too, so the fix that makes it compile deletes its entry, and an
+//! entry is added only by a change that shows it, with its reason, in the
+//! diff. A listed file that fails for another reason is not caught.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -100,10 +102,10 @@ fn every_file_of_the_lisp_tree_compiles_but_the_known_failures() {
     assert!(found.is_empty(), "{} of {} files:\n{}", found.len(), summary["files"], found.join("\n"));
 }
 
-/// The list only shrinks: a failure it does not name fails the check, and
-/// so does an entry whose file compiles.
+/// The findings name each failure the list does not, and each listed file
+/// that compiled; every entry says why.
 #[test]
-fn the_known_failures_list_only_shrinks() {
+fn findings_name_unlisted_failures_and_listed_files_that_compile() {
     let listed = BTreeMap::from([("lisp/a.el", "why"), ("lisp/b.el", "why")]);
     let errors = |files: &[&str]| files.iter().map(|f| ((*f).to_owned(), "(error \"x\")".to_owned())).collect();
     assert_eq!(findings(&errors(&["lisp/a.el", "lisp/b.el"]), &listed), Vec::<String>::new());
