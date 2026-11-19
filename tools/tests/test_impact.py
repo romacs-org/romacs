@@ -42,6 +42,7 @@ def workspace(root):
         'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt': '',
         'crates/romacs-vm/src/compiled_lisp/tree.rs': '',
         'crates/romacs-vm/src/request_code.rs': '',
+        'crates/romacs-vm/src/closure_key.rs': '',
         'crates/romacs-vm-gui/harness/live_oracle.py': '',
         'crates/romacs-vm-gui/harness/scaling_live.py': 'import live_oracle\n',
         'crates/romacs-vm-gui/harness/world_live.py': 'from live_oracle import stop\n',
@@ -158,6 +159,7 @@ class Select(unittest.TestCase):
                 gui = {package: terms for package, _, terms in impact.runs(found, self.root)}['romacs-vm-gui']
                 self.assertTrue(gui.endswith(f'& not ({impact.test_file(gated)})'), gui)
         for path in ('crates/romacs-vm/src/compiled_lisp/tree.rs', 'crates/romacs-vm/src/request_code.rs',
+                     'crates/romacs-vm/src/closure_key.rs',
                      'lisp/emacs-lisp/romacs-compile.el',
                      'lisp/emacs-lisp/macroexp.el', 'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt',
                      'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs'):

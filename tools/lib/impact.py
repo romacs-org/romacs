@@ -81,17 +81,20 @@ CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test
 # those, and in the full gate. The Lisp tree's compile (lisp_tree_compiles.rs,
 # 2 to 19 minutes cold, and cold for every new build) for the compiled-Lisp
 # store; the compiler's own modules, whose job is compiling Lisp to the VM's
-# code (request_code, expand, variable_definitions, capture, sealed); and the
-# Lisp a file's compile walks it with: romacs-compile.el, and the macro
-# expansion and closure conversion it calls (macroexp, byte-run, bytecomp,
-# cconv). A Lisp file that comes to fail to compile, the compiler's functions
-# that live in lib.rs (Vm::compile, build_function and the rest), and a change
-# to the compile pipeline outside these paths (world/, batch.rs) are caught by
-# the full gate the nightly runs.
+# code (request_code, expand, variable_definitions, capture, sealed) or
+# producing what an artifact holds of it (closure_key, a compiled function's
+# key); and the Lisp a file's compile walks it with: romacs-compile.el, and
+# the macro expansion and closure conversion it calls (macroexp, byte-run,
+# bytecomp, cconv). Left to the full gate the nightly runs: a Lisp file that
+# comes to fail to compile; the compiler's functions that live in lib.rs
+# (Vm::compile, build_function and the rest) and the reader (reader/, which
+# the compile walk reads each form through), both shared by every load and
+# read by every other test; and the compile pipeline outside these paths
+# (world/, batch.rs).
 PATH_GATED = {
     'romacs-vm-gui::lisp_tree_compiles': re.compile(
         r'^(?:crates/romacs-vm/src/compiled_lisp/'
-        r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed)\.rs$'
+        r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed|closure_key)\.rs$'
         r'|lisp/emacs-lisp/(?:romacs-compile|macroexp|byte-run|bytecomp|cconv)\.el$)'),
 }
 
