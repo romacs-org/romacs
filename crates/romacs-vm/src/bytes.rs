@@ -319,7 +319,7 @@ impl ByteBuffer {
 #[cfg(test)]
 mod tests {
     use super::{BufferState, ByteBuffer};
-    use crate::coordinates::ByteOffset;
+    use crate::{coordinates::ByteOffset, forwarded::PerBuffer};
     use std::{cell::RefCell, ops::Range};
 
     thread_local! {
@@ -343,21 +343,27 @@ mod tests {
 
     #[test]
     fn every_edit_of_the_bytes_is_reported() {
+        type Editor = fn(&mut ByteBuffer);
+        // Each editor, and exactly what it must report: (OLD, INSERTED).
+        let edits: [(Editor, (Range<usize>, &[u8])); 5] = [
+            // As `fileio_fill_raw` does: the markers grow to the bytes first.
+            (|b| { assert!(b.anchors.grow(7)); b.fill(b"abc\xffdef").unwrap(); }, (0..0, b"abc\xffdef")),
+            (|b| b.set_byte(1, 0x80).unwrap(), (1..2, b"\x80")),
+            (|b| b.replace(ByteOffset(2)..ByteOffset(5), b"\x00\x01").unwrap(), (2..5, b"\x00\x01")),
+            (|b| b.replace(ByteOffset(0)..ByteOffset(1), b"").unwrap(), (0..1, b"")),
+            (|b| { b.point = ByteOffset(2); b.insert_before_markers(b"zz").unwrap(); }, (2..2, b"zz")),
+        ];
         for mirrored in [false, true] {
-            let mut b = ByteBuffer::empty(BufferState::default(), Default::default());
+            let mut b = ByteBuffer::empty(BufferState::default(), PerBuffer::default());
             if mirrored { b.mirror_now().unwrap(); }
             REPORTS.with(|r| r.borrow_mut().clear());
-            let edit = |b: &mut ByteBuffer, f: &dyn Fn(&mut ByteBuffer)| {
+            for (edit, (old, inserted)) in &edits {
                 let before = b.bytes.clone();
-                f(b);
+                edit(&mut b);
+                let reports = REPORTS.with(|r| r.borrow().clone());
+                assert_eq!(reports, [(old.clone(), inserted.to_vec())], "mirrored: {mirrored}");
                 assert_eq!(replayed(&before), b.bytes, "mirrored: {mirrored}");
-            };
-            // As `fileio_fill_raw` does: the markers grow to the bytes first.
-            edit(&mut b, &|b| { assert!(b.anchors.grow(7)); b.fill(b"abc\xffdef").unwrap(); });
-            edit(&mut b, &|b| b.set_byte(1, 0x80).unwrap());
-            edit(&mut b, &|b| b.replace(ByteOffset(2)..ByteOffset(5), b"\x00\x01").unwrap());
-            edit(&mut b, &|b| b.replace(ByteOffset(0)..ByteOffset(1), b"").unwrap());
-            edit(&mut b, &|b| { b.point = ByteOffset(2); b.insert_before_markers(b"zz").unwrap(); });
+            }
             assert_eq!(b.bytes, b"\x80\x00zz\x01ef");
         }
     }
