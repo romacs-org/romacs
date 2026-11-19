@@ -87,6 +87,18 @@ chunks, its title on the first."
     (should (equal (romacs-grid-tests--text (car (car pages))) "Tall"))
     (should (equal (mapcar #'length pages) '(8 8 5)))))
 
+(ert-deftest romacs-grid-pages-use-the-width ()
+  "A paged menu's last page lays its groups out side by side where they
+fit, not down one column of a card sized for the first page."
+  ;; A and B fill page 1; D and E, stacked, would be half the room tall
+  ;; (the unpaged rule's limit) but go side by side.
+  (let* ((blocks (list (romacs-grid-tests--block "A" 20 10) (romacs-grid-tests--block "B" 20 10)
+                       (romacs-grid-tests--block "D" 4 10) (romacs-grid-tests--block "E" 4 10)))
+         (pages (romacs-grid-pages blocks 22 40)))
+    (should (= (length pages) 2))
+    ;; D and E share a row on the last page.
+    (should (string-match-p "D +E" (substring-no-properties (car (car (last pages))))))))
+
 (ert-deftest romacs-grid-cuts-at-a-word ()
   "A line wider than the room is cut at a word, with the ellipsis; a
 word longer than half the room is cut where it must be."

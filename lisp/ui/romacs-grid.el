@@ -129,14 +129,16 @@ each a list of blocks."
 
 (defun romacs-grid--flow-pages (blocks rows columns)
   "BLOCKS (each at most ROWS lines) in pages, each one band of a flow at
-most ROWS high: each page takes the most blocks whose flow fits."
+most ROWS high: each page takes the most blocks whose flow fits.  A
+paged menu fills its room, so each page's flow is its shortest (the
+most columns the width holds), not one kept to half the rows."
   (let (pages)
     (while blocks
       (let ((n 1))
         (while (and (< n (length blocks))
-                    (<= (romacs-grid--band-height (romacs-grid--flow (seq-take blocks (1+ n)) rows columns)) rows))
+                    (<= (romacs-grid--band-height (romacs-grid--flow (seq-take blocks (1+ n)) nil columns)) rows))
           (setq n (1+ n)))
-        (push (list (romacs-grid--flow (seq-take blocks n) rows columns)) pages)
+        (push (list (romacs-grid--flow (seq-take blocks n) nil columns)) pages)
         (setq blocks (nthcdr n blocks))))
     (nreverse pages)))
 
