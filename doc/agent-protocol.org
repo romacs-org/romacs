@@ -274,13 +274,10 @@ started by older builds keep working.
     whole units and at least one of them, since a unit is at most
     256 KiB, so every continuation (=more=) advances.  A reply that
     doesn't fit carries the first part and =more=;
-  - any notification still over 1 MiB after that keeps its scope and is
-    sent in its place, in order:
-    - ={"session","revision","oversize":R}= for a session's;
-    - ={"revision","oversize":R}= for the list's.
-
-    It is fetched whole through =agents/output=.  So every message, live
-    or replied, has a bounded form.
+  - any notification still over 1 MiB after that is sent as
+    ={"revision","stale":true}= (with =session= for a session's), in
+    its place: the client asks again from the revision it holds, a
+    reply that pages.  So every message has a bounded form.
 
 ** Handshake and versions
 - *Hello.* =agents/hello= must come first.  Its params:
@@ -388,6 +385,8 @@ JSON-RPC errors with numeric codes and =data.kind=:
   - with no =since= (or one from another generation), every row;
   - with one, the rows changed after it and the ids removed (tombstones,
     kept for the generation).
+  A row changes when its session raises an event, when the store's row
+  is written by another process, and on a whole pass each minute.
 - *More.*  When the reply is cut, =more= is a token.
   =agents/page {more}= continues any paged reply: the list's at the same
   revision, from the copy the service keeps for the token's life, a
@@ -398,13 +397,15 @@ JSON-RPC errors with numeric codes and =data.kind=:
   #+begin_src json
   {"id": "...", "title": "...", "cwd": "...", "project": "...", "parent": null,
    "harness": "claude", "provider": "claude", "model": "...", "effort": null,
-   "state": "starting|running|waiting|idle|detached|ended",
-   "attention": false, "pending": 0, "queued": 0, "settled": false,
+   "state": "starting|running|waiting-approval|idle|detached|ended",
+   "key": "working", "pending": 0, "queued": 0,
    "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
    "children": 0}
   #+end_src
-  Every field is present; =null= means unknown.  =pending= counts the
-  session's pending requests, so a list can put waiting sessions first.
+  Every field is present; =null= means unknown.  =key= is the session's
+  state as this machine's board shows it (=romacs-agent-board--key=),
+  made by the service alone: a client draws it, never derives it.
+  =pending= counts the session's pending requests.
 
 ** One session
 Live state and history are separate.  Live state is small, and is
