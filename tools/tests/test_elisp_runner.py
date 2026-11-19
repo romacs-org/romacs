@@ -44,6 +44,14 @@ class ElispRunner(unittest.TestCase):
             result = self.run_tests(option, selector)
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_core_runs_the_default_files_the_bare_vm_can_load(self):
+        result = subprocess.run([str(ROOT / 'tools/test-elisp'), '--core', '--binary', str(self.binary)],
+                                capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # The runner's own tests print nested summaries; the last is the run's.
+        summary = [line for line in result.stdout.splitlines() if line.startswith('SUMMARY ')][-1]
+        self.assertTrue(summary.endswith('failed=0 errors=0'), summary)
+
     def test_zero_exit_without_execution_is_not_green(self):
         fake = Path(self.temp.name) / 'fake-host'
         fake.write_text('#!/bin/sh\nexit 0\n')

@@ -17,7 +17,8 @@ fn readable_ir_is_reachable_for_source_submissions() {
         String::from_utf8_lossy(&output.stderr)
     );
     let ir = String::from_utf8(output.stdout).unwrap();
-    assert!(ir.starts_with("entry f0\n"));
+    // The entry's index follows the prelude's own functions.
+    assert!(ir.starts_with("entry f"), "{ir}");
     assert!(ir.contains("return r"));
 }
 
@@ -194,4 +195,19 @@ fn source_stream_is_a_real_agent_boundary() {
     assert!(output.status.success());
     let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(reply["value"], "3");
+}
+
+#[test]
+fn raw_source_cli_runs_on_the_lisp_prelude() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_romacs-vm"))
+        .arg("--source")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"(mapcar #'1+ '(1 2 3))").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "(2 3 4)");
 }
