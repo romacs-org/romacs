@@ -208,7 +208,8 @@ end before TEXT."
   "TEXT with every line indented for a subagent DEPTH deep."
   (if (zerop depth) text
     (let ((bar (propertize (concat (make-string (* 2 (1- depth)) ?\s) "│ ") 'face 'romacs-agent-log-rule)))
-      (replace-regexp-in-string "^\\(.\\)" (lambda (match) (concat bar match)) text t t))))
+      (propertize (replace-regexp-in-string "^\\(.\\)" (lambda (match) (concat bar match)) text t t)
+                  'wrap-prefix bar))))
 
 (defun romacs-agent-log--where (event)
   "Where EVENT is drawn: (BLOCK . DEPTH), under its parent's open call,
@@ -336,7 +337,7 @@ many more there are; FULL, (INPUT . OUTPUT), is what RET on it shows."
   (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines)))
     (let ((text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
                         (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
-                                    'face face)
+                                    'face face 'wrap-prefix "    ")
                         (if (> count romacs-agent-log-output-lines)
                             (propertize (format "\n    … %d more lines · %s shows all" (- count romacs-agent-log-output-lines)
                                                 (romacs-agent-log--key 'romacs-agent-log-open))
@@ -389,7 +390,7 @@ its call, in place of those shown before."
     (romacs-agent-log--put (romacs-agent-log--indent
                             (concat (propertize (if (> total (length shown))
                                                     (format "  ⋮ running: %d lines so far, the last %d\n" total (length shown))
-                                                  "  ⋮ running\n")
+                                                  (format "  ⋮ running: %d line%s so far\n" total (if (= total 1) "" "s")))
                                                 'face 'romacs-agent-log-note)
                                     (propertize (concat "    " (string-join shown "\n    ") "\n") 'face 'romacs-agent-log-output))
                             (plist-get props :depth))
@@ -479,15 +480,17 @@ when that changes, and how it ended; with its call gone, at the end."
   (let* ((block (romacs-agent-log--task-block event))
          (state (plist-get event :state))
          (text (pcase state
-                 ('started (and (plist-get event :background) "runs in the background"))
                  ('backgrounded "moved to the background")
                  ('progress (let ((activity (plist-get event :activity)))
                               (and activity (not (and block (equal activity (plist-get (cdr block) :activity))))
                                    (progn (when block (setcdr block (plist-put (cdr block) :activity activity)))
                                           (format "now: %s" activity)))))
+                 ;; Its summary, only where its call's output is not drawn.
                  ((or 'completed 'failed 'stopped)
                   (concat (symbol-name state)
-                          (if-let* ((summary (plist-get event :summary))) (concat ": " summary) ""))))))
+                          (if-let* ((summary (and (not (and block (plist-get (cdr block) :ended))) (plist-get event :summary))))
+                              (concat ": " summary)
+                            ""))))))
     (when (and block (eq state 'started) (plist-get event :task))
       (setcdr block (plist-put (cdr block) :task (plist-get event :task))))
     (when text
@@ -548,7 +551,7 @@ Live, in a chat no window shows, the echo area says so too."
                             shown)))))
          (why (plist-get event :description))
          (keys (cond (questions (romacs-agent-log--keys 'romacs-agent-log-allow "choose" 'romacs-agent-log-deny "decline"))
-                     (plan (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning"))
+                     (plan (romacs-agent-log--keys 'romacs-agent-log-allow "proceed" 'romacs-agent-log-deny "keep planning, saying why"))
                      (t (romacs-agent-log--keys 'romacs-agent-log-allow "allow" 'romacs-agent-log-allow-always "allow for this session"
                                                 'romacs-agent-log-deny "deny"))))
          (text (concat (propertize (concat "⚠ " head) 'face 'romacs-agent-log-ask)
@@ -711,7 +714,8 @@ unless a note said who gave it, that it was answered."
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
   (pcase (if (romacs-agent-log--pending) 'waiting-approval (romacs-agent-state session))
     ('waiting-approval (cons 'waiting (substitute-command-keys
-                                        "waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-next-ask] goes to it")))
+                                        (concat "waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] allow · "
+                                                "\\[romacs-agent-log-deny] deny · \\[romacs-agent-log-next-ask] goes to it"))))
     ((or 'starting 'running)
      (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
                         (format "running %s" (plist-get (cdr block) :name))
@@ -719,11 +723,13 @@ unless a note said who gave it, that it was answered."
     (state (cons 'idle (format "%s" state)))))
 
 (defun romacs-agent-log--separator-text (doing)
+  "The separator for DOING, (STATE . WORDS): what the session does, then
+the composer's prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-agent-log-tool) (_ 'romacs-agent-log-rule))))
     (concat (propertize (concat (pcase (car doing) ('waiting "⚠") ('working "◉") (_ "○")) " " (cdr doing) " ")
                         'face face)
             (propertize (make-string 40 ?─) 'face 'romacs-agent-log-rule)
-            "\n")))
+            "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does changed."
@@ -755,7 +761,7 @@ unless a note said who gave it, that it was answered."
 so a redisplay runs no Lisp for it; made only when what it reads changed."
   (let* ((session romacs-agent-log--session)
          (start (romacs-agent-turn-start session))
-         (running (memq (romacs-agent-state session) '(starting running waiting-approval)))
+         (running (and (null romacs-agent-log--asks) (memq (romacs-agent-state session) '(starting running))))
          (inputs (list (romacs-agent-ui--header-inputs session) (length romacs-agent-log--asks)
                        (and start running (round (- (float-time) start))))))
     (unless (equal inputs romacs-agent-log--header-made)
@@ -776,7 +782,7 @@ how long the turn has run."
                 (propertize (format "  ⚠ %d wait%s on you" pending (if (= pending 1) "s" ""))
                             'face 'romacs-agent-log-ask)
               "")
-            (if (and start (memq (romacs-agent-state session) '(starting running waiting-approval)))
+            (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
                 (propertize (format "  %ds · %s stops" (round (- (float-time) start))
                                     (substitute-command-keys "\\<romacs-agent-log-mode-map>\\[romacs-agent-log-interrupt]"))
                             'face 'romacs-agent-log-note)

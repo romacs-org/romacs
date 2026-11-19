@@ -235,7 +235,7 @@
     ;; A background subagent's later word goes under its call still.
     (draw :type 'task :id "a" :state 'completed :summary "counted")
     (draw :type 'delta :text "root text")
-    (should (string-match-p "│ · completed: counted\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "│ · completed\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
@@ -321,7 +321,7 @@
     ;; Known by its task alone, then ended: under its call still.
     (draw :type 'task :task "t1" :state 'backgrounded)
     (draw :type 'task :id "b" :state 'completed :summary "slept")
-    (should (string-match-p "│ · runs in the background\n  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\nroot goes on"
+    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed\nroot goes on"
                             (romacs-agent-log-tests--transcript)))
     (should-not (romacs-agent-log--block "b"))))
 
@@ -434,7 +434,7 @@
     (draw :type 'tool-output :id "x" :text "line 1\n")
     (draw :type 'tool :state 'started :id "x" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 2"))
     (draw :type 'tool-output :id "x" :text "line 2\n")
-    (should (string-match-p "⋮ running\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
