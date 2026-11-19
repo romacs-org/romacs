@@ -274,8 +274,8 @@ The other commands:
   too, `--binary` names the host; an installed host answers in about a second.
 - Romacs's own `romacs-test` files (`romacs-deftest`, in `test/romacs/romacs-test/`)
   on a prebuilt host: `python3 tools/test-elisp`. Its `--test`, `--match`, file
-  arguments, and `--core` (the bare VM, which skips a file declaring
-  `;; romacs-test: editor`) support smaller checks. ERT files run with `tools/test-ert`.
+  arguments, and `--core` (the bare VM) support smaller checks. ERT files run with
+  `tools/test-ert`.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
   `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
   (`make check-list` names the modules: a package like `gnosis`, or one library),

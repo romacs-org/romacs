@@ -1,5 +1,6 @@
 """Public-entry controls for the source-loaded Elisp test runner."""
 import hashlib
+import importlib.machinery
 import os
 from pathlib import Path
 import subprocess
@@ -66,12 +67,38 @@ class ElispRunner(unittest.TestCase):
         fake = Path(self.temp.name) / 'fake-host'
         fake.write_text(f'#!/bin/sh\ntouch {ran}\nexit 0\n')
         fake.chmod(0o700)
-        for text in ['(ert-deftest an-ert-test () (should t))\n', '(defun no-tests-here () nil)\n']:
+        for text in ['(ert-deftest an-ert-test () (should t))\n', '(defun no-tests-here () nil)\n',
+                     # The only test commented out leaves the file none.
+                     ';; (romacs-deftest fixture-pass () (romacs-should t))\n(defun no-tests-here () nil)\n']:
             self.fixture.write_text(text)
             result = self.run_tests(binary=fake)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('tools/test-ert', result.stderr)
             self.assertFalse(ran.exists(), 'the host ran for a file the runner should refuse')
+
+    def test_forms_inside_strings_comments_and_characters_are_not_read(self):
+        self.fixture.write_text('''(romacs-deftest fixture-pass ()
+  (romacs-should (equal (list ?\\" ?\\( ?;) (list 34 40 59)))
+  (romacs-should (stringp "a string that shows
+(ert-deftest not-a-test () t)
+in its text")))
+''')
+        result = self.run_tests('--test', 'fixture-pass')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('PASS fixture-pass', result.stdout)
+
+    def test_the_editor_header_selects_files_only_from_the_leading_comments(self):
+        runner = importlib.machinery.SourceFileLoader('test_elisp', str(ROOT / 'tools/test-elisp')).load_module()
+        plain = '(romacs-deftest a () (romacs-should t))\n'
+        marked = ';;; f.el --- x\n;; romacs-test: editor (needs the editor)\n' + plain
+        late = plain + ';; romacs-test: editor\n'
+        files, texts = ['plain', 'marked', 'late'], [plain, marked, late]
+        # The bare VM's default set skips the marked file; editor mode runs it.
+        self.assertEqual(runner.selection(files, texts, core=True, named=False), (['plain', 'late'], None))
+        self.assertEqual(runner.selection(files, texts, core=False, named=False), (files, None))
+        # Naming a marked file to the bare VM is an error, not a skip.
+        _, problem = runner.selection(['marked'], [marked], core=True, named=True)
+        self.assertIn('romacs-test: editor', problem)
 
     def test_core_refuses_a_file_that_declares_it_needs_the_editor(self):
         self.fixture.write_text(';; romacs-test: editor\n(romacs-deftest fixture-pass () (romacs-should t))\n')
