@@ -56,6 +56,28 @@ fn units_round_trip() {
     }
 }
 
+/// A char-table constant round-trips: its subtype, default, parent, extra
+/// slots and own values, the default not baked into them, so
+/// `map-char-table' sees what the original holds.
+#[test]
+fn char_tables_round_trip() {
+    let mut vm = Vm::new();
+    vm.eval_source("(put 'unit-test-ct 'char-table-extra-slots 2)").unwrap();
+    vm.eval_source("(setq unit-test-parent (make-char-table 'unit-test-ct 'from-parent))").unwrap();
+    vm.eval_source("(setq unit-test-table (let ((c (make-char-table 'unit-test-ct)))
+      (set-char-table-range c '(?a . ?z) 'low) (aset c ?é \"e\") (aset c #x1F600 '(face . 1))
+      (set-char-table-range c nil 'dflt) (set-char-table-extra-slot c 1 'extra)
+      (set-char-table-parent c unit-test-parent) c))").unwrap();
+    let probe = "(list (aref c ?b) (aref c ?é) (aref c #x1F600) (aref c ?A) (char-table-subtype c)
+                       (char-table-extra-slot c 0) (char-table-extra-slot c 1) (char-table-range c nil)
+                       (aref (char-table-parent c) ?A)
+                       (let ((n 0)) (map-char-table (lambda (_k _v) (setq n (1+ n))) c) n))";
+    let expected = vm.eval_source_raw(&format!("(let ((c unit-test-table)) {probe})")).unwrap();
+    let expected = vm.display(expected).unwrap();
+    assert_eq!(through_unit(&mut vm, &format!("`(let ((c ',unit-test-table)) {probe})")), expected);
+    assert!(expected.starts_with("(low \"e\" (face . 1) dflt unit-test-ct nil extra dflt from-parent "), "{expected}");
+}
+
 /// A closure constant materialized from a unit is charged its captures,
 /// which are filled in after the funnel made it empty: a constant closing
 /// over nine variables costs eight Values more than one closing over one.

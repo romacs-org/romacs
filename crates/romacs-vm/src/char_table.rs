@@ -1113,6 +1113,21 @@ impl CharTable {
     pub(crate) fn span(&self, index: usize) -> Result<(Value, usize, usize)> {
         span(&self.root, &self.ascii, self.default, index)
     }
+    /// The table's own values, the default not applied, as maximal runs
+    /// (FROM, TO, VALUE) over every character: what a copy built with
+    /// `set_range` from them holds.
+    pub(crate) fn own_runs(&self) -> Result<Vec<(u32, u32, Value)>> {
+        let (mut runs, mut at): (Vec<(u32, u32, Value)>, usize) = (Vec::new(), 0);
+        while at < Self::LEN {
+            let (value, _, to) = span(&self.root, &self.ascii, Value::NIL, at)?;
+            match runs.last_mut() {
+                Some(run) if run.2 == value => run.1 = to as u32,
+                _ => runs.push((at as u32, to as u32, value)),
+            }
+            at = to + 1;
+        }
+        Ok(runs)
+    }
     /// A read view of this table's own values that shares its nodes.
     pub(crate) fn view(&self) -> CharTableView {
         CharTableView { root: self.root.clone(), ascii: self.ascii.clone(), default: self.default }
@@ -1162,6 +1177,10 @@ impl CharTable {
     pub(super) fn set_default(&mut self, value: Value) {
         wrote(&CharTableSlot::Value(value));
         self.default = value;
+    }
+    pub(super) fn set_purpose(&mut self, value: Value) {
+        wrote(&CharTableSlot::Value(value));
+        self.purpose = value;
     }
     pub(super) fn set_parent(&mut self, value: Value) {
         wrote(&CharTableSlot::Value(value));

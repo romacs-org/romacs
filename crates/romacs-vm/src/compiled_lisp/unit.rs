@@ -55,6 +55,7 @@ const NODE_RECORD: u8 = 6;
 const NODE_BOOL_VECTOR: u8 = 7;
 const NODE_CLOSURE: u8 = 8;
 const NODE_CELL: u8 = 9;
+const NODE_CHAR_TABLE: u8 = 10;
 
 /// What one function's body names of its unit, each once, in order: the
 /// values (nodes and uninterned symbols), child functions and inline
@@ -317,6 +318,25 @@ impl<'a> Encoder<'a> {
                 out.n(b.len);
                 out.data(&b.bytes);
             }
+            // A char-table: its subtype, default, parent and extra slots,
+            // and its own values as runs. A Unicode property table, whose
+            // blocks decode through its extra slots, is left to source.
+            Object::CharTable(t) if !self.vm.is_uniprop_table(&t) => {
+                out.byte(NODE_CHAR_TABLE);
+                for field in [t.purpose(), t.default(), t.parent()] {
+                    let r = self.value(field)?;
+                    Self::write_ref(&mut out, r);
+                }
+                self.refs(&mut out, t.extras())?;
+                let runs = t.own_runs()?;
+                out.n(runs.len());
+                for (from, to, value) in runs {
+                    out.u(u64::from(from));
+                    out.u(u64::from(to));
+                    let r = self.value(value)?;
+                    Self::write_ref(&mut out, r);
+                }
+            }
             other => return Err(format!("a constant that cannot be serialised: {}", object_kind(&other))),
         }
         Ok(out.bytes)
@@ -538,6 +558,8 @@ enum Node {
     BoolVector(usize, Vec<u8>),
     Closure(usize, Vec<Ref>, Vec<Ref>, Ref),
     Cell(Ref),
+    /// Subtype, default, parent, extra slots, and own values as runs.
+    CharTable([Ref; 3], Vec<Ref>, Vec<(usize, usize, Ref)>),
 }
 
 fn read_ref(r: &mut Reader) -> Result<Ref> {
@@ -580,6 +602,13 @@ fn read_node(r: &mut Reader) -> Result<Node> {
         NODE_BOOL_VECTOR => Node::BoolVector(r.n()?, r.data()?.to_vec()),
         NODE_CLOSURE => Node::Closure(r.n()?, read_refs(r)?, read_refs(r)?, read_ref(r)?),
         NODE_CELL => Node::Cell(read_ref(r)?),
+        NODE_CHAR_TABLE => {
+            let fields = [read_ref(r)?, read_ref(r)?, read_ref(r)?];
+            let extras = read_refs(r)?;
+            let n = r.count()?;
+            let runs = (0..n).map(|_| Ok((r.n()?, r.n()?, read_ref(r)?))).collect::<Result<Vec<_>>>()?;
+            Node::CharTable(fields, extras, runs)
+        }
         _ => return Err("compiled Lisp artifact: bad node".into()),
     })
 }
@@ -905,6 +934,11 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
                 vm.allocate_object(Object::BoolVector(Box::new(data::BoolVector { len: *len, bytes: bytes.clone() })))
             }
             Node::Cell(_) => Value::reference(vm.alloc_cell(Value::NIL), 5),
+            Node::CharTable(_, extras, _) => {
+                let mut table = crate::char_table::CharTable::new(Value::NIL);
+                table.initialize(extras.len(), Value::NIL)?;
+                vm.allocate_object(Object::CharTable(Box::new(table)))
+            }
             Node::Closure(f, ..) => vm.alloc_closure(Closure { function: ids[*f], captures: vec![], metadata: vec![], document: Value::NIL }),
         });
     }
@@ -949,6 +983,27 @@ fn materialise(vm: &mut Vm, nodes: &[Node], ids: &[usize], names: &[usize], unin
             Node::Cell(content) => {
                 let content = resolve(content)?;
                 vm.cells.set(v.payload() as usize, content);
+            }
+            Node::CharTable([purpose, default, parent], extras, runs) => {
+                let (purpose, default, parent, extras) = (resolve(purpose)?, resolve(default)?, resolve(parent)?, all(extras)?);
+                let runs = runs.iter().map(|(from, to, value)| Ok((*from, *to, resolve(value)?))).collect::<Result<Vec<_>>>()?;
+                if parent != Value::NIL && !matches!(vm.object(parent), Ok(Object::CharTable(_))) {
+                    return Err("compiled Lisp artifact: bad char-table parent".into());
+                }
+                let Object::CharTable(table) = vm.object_mut(v)? else { unreachable!("allocated a char-table") };
+                let plain = table.storage_bytes(false);
+                table.set_purpose(purpose);
+                table.set_default(default);
+                table.set_parent(parent);
+                table.set_extras(&extras);
+                for (from, to, value) in runs {
+                    if value != Value::NIL {
+                        table.set_range(from, to, value).map_err(|_| "compiled Lisp artifact: bad char-table run")?;
+                    }
+                }
+                // The funnel charged the table empty; its values are charged here.
+                let filled = table.storage_bytes(false);
+                vm.allocation.allocated += filled.saturating_sub(plain) as u64;
             }
             Node::Closure(_, captures, metadata, document) => {
                 let (captures, metadata, document) = (all(captures)?, all(metadata)?, resolve(document)?);
