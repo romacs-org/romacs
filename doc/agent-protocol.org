@@ -291,8 +291,8 @@ started by older builds keep working.
   - ="capabilities":[...]=, =capabilities= being the intersection.
 - *Before the hello,* every other method is refused (=-32002=, not
   initialized).
-- *Majors.* A major mismatch is refused with both versions in the error
-  data.
+- *Majors.* A major mismatch is refused (=-32013=), with the version
+  served in =data.served=.
 - *Minors.* Within a major, a minor adds optional fields, events,
   methods and capabilities.  Never a changed meaning.
 - *Must-ignore.* A client ignores an unknown event type or field.  An

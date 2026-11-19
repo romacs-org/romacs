@@ -96,7 +96,9 @@ result and nil, or nil and the error, once its reply comes."
     (if (not (romacs-agent-client-live-p client))
         (funcall callback nil (romacs-agent-client--gone))
       (puthash id callback (romacs-agent-client-pending client))
-      (romacs-agent-rpc-send (romacs-agent-client-rpc client) (romacs-agent-rpc-request id method params)))
+      (condition-case err
+          (romacs-agent-rpc-send (romacs-agent-client-rpc client) (romacs-agent-rpc-request id method params))
+        (error (remhash id (romacs-agent-client-pending client)) (signal (car err) (cdr err)))))
     id))
 
 (defun romacs-agent-client--filter (process chunk)

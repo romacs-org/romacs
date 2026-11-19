@@ -276,9 +276,12 @@ the board; its children are counted where the rows are kept."
 board's own (`romacs-agent-board--key'), from the board's own sessions
 \(`romacs-agent-board--sessions'), whose view of the unloaded ones is kept
 for the rows made before the next whole pass."
-  (let* ((sessions (romacs-agent-board--sessions))
+  (let* ((sessions (let ((romacs-agent-board--unloaded nil))
+                     ;; The board's own view stays the board's: the rows it
+                     ;; shows hold its sessions.
+                     (prog1 (romacs-agent-board--sessions)
+                       (setq romacs-agent-service--unloaded romacs-agent-board--unloaded))))
          (rows (make-hash-table :test #'equal :size (length sessions))))
-    (setq romacs-agent-service--unloaded romacs-agent-board--unloaded)
     (dolist (session sessions)
       (let ((id (romacs-agent-id session)))
         (unless (gethash id rows)

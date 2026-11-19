@@ -229,6 +229,15 @@ and `wait' waiting until its form holds (5 s at most)."
         (let ((updates (romacs-agent-service--rows-of romacs-agent-service--list '("c" "p"))))
           (should (equal (gethash "key" (cdr (assoc "c" updates))) "completed")))))))
 
+(ert-deftest romacs-agent-service-leaves-the-board-its-own-view ()
+  ;; The service's whole pass makes its own view of the unloaded sessions:
+  ;; the board's, whose shown rows hold its sessions, stays as it was.
+  (romacs-agent-service-tests--with
+    (let ((romacs-agent-board--unloaded 'the-boards))
+      (romacs-agent-service-start socket)
+      (romacs-agent-service--refresh t)
+      (should (eq romacs-agent-board--unloaded 'the-boards)))))
+
 (ert-deftest romacs-agent-service-runs-its-whole-pass-when-quiet ()
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
