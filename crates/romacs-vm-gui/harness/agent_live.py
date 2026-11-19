@@ -3038,6 +3038,12 @@ def ui_review(args, base):
         # Waiting on the user.
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
         a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
+        # The question asked, with its Blue: anything else fails the capture.
+        asked = a.eval(f'(let* ((s {a.s(sid)}) (request (gethash (car (hash-table-keys (romacs-agent-approvals s))) '
+                       '(romacs-agent-approvals s)))) (and (equal (gethash "tool_name" request) "AskUserQuestion") '
+                       '(member "Blue" (plist-get (cdr (car (romacs-agent--claude-questions (gethash "input" request)))) :options)) t))')
+        if asked != 't':
+            raise RuntimeError('the agent asked something other than the colour question')
         themed('waiting')
         # Answered only as the question it is; anything else is denied, so
         # the capture never approves a plan or a tool.

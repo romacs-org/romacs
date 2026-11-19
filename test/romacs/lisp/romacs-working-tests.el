@@ -41,7 +41,7 @@
             (romacs-working-show 'paint (current-buffer) (point-min) 6 'failed)
             (should (string-prefix-p "⠤⠤⠀⠤⠤⠤ rest" (buffer-string)))
             (romacs-working-set 'paint 'waiting)
-            (should (string-prefix-p "⠶⠶⠶⠶⠶⠶ rest" (buffer-string)))
+            (should (string-prefix-p "⠿⠿⠿⠿⠿⠿ rest" (buffer-string)))
             ;; In place: no marker moved, its other properties kept, no undo.
             (should (= before 1))
             (should (= after 1))
@@ -79,14 +79,14 @@
   (dolist (work '(idle running waiting failed))
     (dolist (cols '(1 2 3 9))
       (should (= (length (romacs-working-still cols work)) cols))
-      (should (string-match-p "[⠤⠶⠄⠠]" (romacs-working-still cols work))))))
+      (should (string-match-p "[⠤⠿⣀]" (romacs-working-still cols work))))))
 
 (ert-deftest romacs-working-leaves-text-that-is-not-its-own ()
   (with-temp-buffer
     (insert "ab" (romacs-working-still 2 'idle) "\n")
     (unwind-protect
         (progn (romacs-working-show 'mixed (current-buffer) 1 4 'waiting)
-               (should (string-prefix-p "ab⠶⠶" (buffer-string))))
+               (should (string-prefix-p "ab⠿⠿" (buffer-string))))
       (romacs-working-stop 'mixed))))
 
 (defmacro romacs-working-tests--theme (palette faces &rest body)

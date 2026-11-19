@@ -749,7 +749,8 @@ impl Vm {
                     };
                     let face = self.symbol_name_of(face).ok_or("face symbol required")?;
                     TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
-                                                 colour: self.display_face(&face)?.foreground }
+                                                 colour: self.display_face(&face)?.foreground,
+                                                 bead: self.display_face("default")?.foreground }
                 }
                 _ => return Err("bad text animation kind".into()),
             };

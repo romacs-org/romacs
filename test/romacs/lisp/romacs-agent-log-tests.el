@@ -246,11 +246,14 @@
       (puthash "Colour?" "Blue" answers)
       (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
     ;; Said who answered, and what; still answerable until the harness has it.
-    (should (string-match-p "allowed by you\n  Colour\\? → Blue" (romacs-agent-log-tests--transcript)))
+    (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
+    (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
     (should (assoc "q" romacs-agent-log--asks))
     (remhash "q" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "q" :behavior "allow")
     (should-not romacs-agent-log--asks)
+    ;; Its keys answer nothing any more: gone.
+    (should-not (string-match-p "decline" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-ret-on-an-approval-only-shows-it ()

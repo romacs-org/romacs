@@ -54,6 +54,8 @@ pub enum TextAnimationKind {
         beats: u64,
         epoch: u64,
         colour: [u8; 3],
+        /// The bead's: the text's own colour.
+        bead: [u8; 3],
     },
 }
 
@@ -130,9 +132,9 @@ impl TextAnimation {
                     vec![]
                 }
             }
-            TextAnimationKind::Working { work, beats, colour: [r, g, b], .. } => {
-                let colour = (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
-                romacs_logo::working::thread(self.cols as usize, work, beats, colour, moved)
+            TextAnimationKind::Working { work, beats, colour, bead, .. } => {
+                let rgb = |[r, g, b]: [u8; 3]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+                romacs_logo::working::thread(self.cols as usize, work, beats, rgb(colour), rgb(bead), moved)
             }
         }
     }

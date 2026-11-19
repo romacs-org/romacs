@@ -564,7 +564,7 @@ Live, in a chat no window shows, the echo area says so too."
                        (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body)
                                                           'face (if questions 'default 'romacs-agent-log-output)))
                          "")
-                       "\n  " keys "\n")))
+                       "\n" (propertize (concat "  " keys "\n") 'romacs-agent-log-keys t))))
     (let ((start (copy-marker romacs-agent-log--end)))
       (romacs-agent-log--put (propertize (romacs-agent-log--entry text 'ask event)
                                          'romacs-agent-log-request id
@@ -578,6 +578,9 @@ Live, in a chat no window shows, the echo area says so too."
   (when-let* ((block (assoc id romacs-agent-log--asks)))
     (pcase-let ((`(,_ ,start . ,end) block))
       (romacs-agent-log--writing
+        ;; Its keys answer nothing any more: their row goes.
+        (when-let* ((keys (text-property-any start end 'romacs-agent-log-keys t)))
+          (delete-region keys (or (next-single-property-change keys 'romacs-agent-log-keys nil end) end)))
         (add-face-text-property start end 'romacs-agent-log-note)
         (remove-text-properties start end '(keymap nil))
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
@@ -585,7 +588,12 @@ Live, in a chat no window shows, the echo area says so too."
 
 (defun romacs-agent-log--answer-text (by decision scope reason &optional answers)
   "Who answered, and how: BY `user' or `policy', DECISION allow or deny;
-ANSWERS, a table of question to answer, what was answered."
+ANSWERS, a table of question to answer, what was answered: a question's
+answer says what was chosen, never that a tool was allowed."
+  (if (and (hash-table-p answers) (equal decision "allow"))
+      (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
+              (if (equal by "user") "answered: " "answered by Romacs: ")
+              (mapconcat (lambda (question) (format "%s" (gethash question answers))) (hash-table-keys answers) " · "))
   (let ((allowed (equal decision "allow")))
     (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
             (pcase by ("user" (if allowed "allowed by you" "denied by you"))
@@ -593,10 +601,7 @@ ANSWERS, a table of question to answer, what was answered."
                    (_ (if allowed "allowed" "denied")))
             (if (equal scope "session") " for this session" "")
             (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")
-            (if (hash-table-p answers)
-                (mapconcat (lambda (question) (format "\n  %s → %s" question (gethash question answers)))
-                           (hash-table-keys answers) "")
-              ""))))
+            ""))))
 
 (defun romacs-agent-log--answered (event)
   "Draw answer EVENT, from the harness's records: its block settled, and,
@@ -747,12 +752,16 @@ unless a note said who gave it, that it was answered."
 session does, then the composer's prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
-    (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
-            " " (propertize (cdr doing) 'face face) " "
-            ;; A dim rule after it fences the composer off the transcript.
-            (propertize (make-string (max 4 (- 56 romacs-agent-log--thread-cols (string-width (cdr doing)))) ?─)
-                        'face 'romacs-agent-log-rule)
-            "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
+    (let* ((label (concat " " (propertize (cdr doing) 'face (list face 'bold)) " "))
+           ;; A dim rule after it fences the composer off the transcript,
+           ;; as wide as the window leaves it, never wrapping; none when
+           ;; that is short.
+           (width (if-let* ((window (get-buffer-window (current-buffer) t))) (window-body-width window) 80))
+           (rule (- (min width 100) 1 romacs-agent-log--thread-cols (string-width label))))
+      (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
+              label
+              (if (>= rule 8) (propertize (make-string rule ?─) 'face 'romacs-agent-log-rule) "")
+              "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
 
 (defun romacs-agent-log--separator (&optional force)
   "Write the separator again when what the session does changed."
@@ -1356,6 +1365,8 @@ On the transcript's text:
   (setq-local scroll-conservatively 101)
   (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
+  ;; The separator's rule fits the window it is shown in.
+  (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator t))) nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 
 (provide 'romacs-agent-log)

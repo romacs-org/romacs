@@ -58,7 +58,7 @@ fn an_animated_frame_promises_no_layout_identity() {
 
 fn thread(work: romacs_logo::working::Work, epoch: u64) -> TextAnimation {
     TextAnimation { window: 1, top: 0, cols: 12, rows: 1, anchor: Some(0), rise: None, fps: 30, moving: true, still: false,
-                    kind: TextAnimationKind::Working { work, beats: 0, epoch, colour: [0xd4, 0x8a, 0x20] } }
+                    kind: TextAnimationKind::Working { work, beats: 0, epoch, colour: [0xd4, 0x8a, 0x20], bead: [0xff; 3] } }
 }
 
 #[test]

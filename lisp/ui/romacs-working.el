@@ -8,10 +8,10 @@
 ;; evaluator is busy, and tells "alive, working" from "frozen".  It says
 ;; how a piece of work goes:
 ;;
-;;   idle     slack and still: a sparse, sagging line
-;;   running  a wave travels along it; a bead rides it, one step for
-;;            each piece of progress the work reports
-;;   waiting  taut and solid, pulsing: the work waits on its user
+;;   idle     slack and still: a line sagging in its middle
+;;   running  a wave travels along it; a bead, its dots in the text's
+;;            colour, rides it a step for each piece of progress
+;;   waiting  a taut, solid bar, pulsing: the work waits on its user
 ;;   failed   cut, still
 ;;
 ;; Any module shows one over COLS characters of its own text (a long
@@ -126,12 +126,24 @@ its error's."
          (romacs-working--palette 'yellow 'orange 'bright-yellow 'accent 'green 'bright-green))
    (lambda (hue) (and hue (<= 30 hue 70)))))
 
+(declare-function romacs-color-floor "romacs-theme" (fg bg minimum))
+
+(defun romacs-working--readable (colour)
+  "COLOUR raised to WCAG's 4.5:1 on the theme's background, its hue kept."
+  (let ((background (face-background 'default nil t)))
+    (if (and (stringp colour) (stringp background) (fboundp 'romacs-color-floor)
+             (string-prefix-p "#" colour) (string-prefix-p "#" background))
+        (romacs-color-floor colour background 4.5)
+      colour)))
+
 (defun romacs-working--derive (&rest _)
-  "Make the running and waiting faces the theme's colours for them, as
-their default specs: a theme's or the user's own spec still wins."
+  "Make the running and waiting faces the theme's colours for them, each
+readable on its background, as their default specs: a theme's or the
+user's own spec still wins."
   (pcase-dolist (`(,face . ,colour) `((romacs-working-running . ,(romacs-working--running-colour))
                                      (romacs-working-waiting . ,(romacs-working--waiting-colour))))
-    (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit default))) 'face-defface-spec)))
+    (let ((colour (romacs-working--readable colour)))
+      (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit default))) 'face-defface-spec))))
 
 (add-hook 'enable-theme-functions #'romacs-working--derive)
 (add-hook 'disable-theme-functions #'romacs-working--derive)
@@ -150,14 +162,12 @@ their default specs: a theme's or the user's own spec still wins."
 
 (defun romacs-working-still (cols work)
   "COLS characters of the thread for WORK at rest, in its face: idle a
-sparse line sagging in its middle, waiting a taut solid one, failed cut
-in two, running a line the display sets moving."
+line sagging in its middle, waiting a taut solid bar, failed cut in
+two, running a line the display sets moving."
   (propertize (pcase work
-                ('idle (apply #'string (mapcar (lambda (i)
-                                                 (let ((middle (and (> i 0) (< i (1- cols)))))
-                                                   (if (cl-evenp i) (if middle ?⠠ ?⠄) ?⠀)))
-                                               (number-sequence 0 (1- cols)))))
-                ('waiting (make-string cols ?⠶))
+                ('idle (if (< cols 3) (make-string cols ?⠤)
+                         (concat "⠤" (make-string (- cols 2) ?⣀) "⠤")))
+                ('waiting (make-string cols ?⠿))
                 ('failed (if (< cols 3) (make-string cols ?⠤)
                            (let* ((gap (max 1 (/ cols 6))) (left (- (/ cols 2) gap)))
                              (concat (make-string left ?⠤) (make-string gap ?⠀)
