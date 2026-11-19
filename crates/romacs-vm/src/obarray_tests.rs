@@ -140,3 +140,24 @@ fn the_default_obarray_is_the_original_obarray_variable_even_uninterned() {
                                 (list (and (intern-soft \"s1-probe\" p) t) (intern-soft \"s1-probe\" o) (eq r s) (boundp r))))");
     assert_eq!(vm.display(got).unwrap(), "(t nil nil nil)");
 }
+
+/// The initial obarray tells names apart as GNU's `oblookup` does, by bytes
+/// and character count (romacs#326): unibyte C3 A9 (two raw-byte
+/// characters) is not the multibyte "é", while an ASCII name is one symbol
+/// either way; names with a raw byte or the key's escape U+FDD0 round-trip;
+/// and `make-symbol` of the unibyte name has its two characters. Pinned GNU:
+/// `(nil 2 1 t t t t t 2)`.
+#[test]
+fn initial_names_are_told_apart_by_bytes_and_characters_as_gnu() {
+    let mut vm = Vm::new();
+    let got = run(&mut vm, "(let* ((u (string-to-unibyte \"\\303\\251\")) (m (string 233)) \
+                                   (au (string-to-unibyte \"abc\")) (am (string-to-multibyte \"abc\")) \
+                                   (raw (string (unibyte-char-to-multibyte 233))) (nc (string #xfdd0 ?x)) \
+                                   (sr (intern raw)) (sn (intern nc))) \
+                              (list (eq (intern u) (intern m)) (length (symbol-name (intern u))) (length (symbol-name (intern m))) \
+                                    (eq (intern au) (intern am)) \
+                                    (eq (intern-soft (copy-sequence raw)) sr) (equal (symbol-name sr) raw) \
+                                    (eq (intern-soft (copy-sequence nc)) sn) (equal (symbol-name sn) nc) \
+                                    (length (symbol-name (make-symbol u)))))");
+    assert_eq!(vm.display(got).unwrap(), "(nil 2 1 t t t t t 2)");
+}

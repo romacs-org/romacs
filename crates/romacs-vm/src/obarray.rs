@@ -150,8 +150,12 @@ impl Vm {
     pub(super) fn obarray_lookup_value(&self, table: Value, bytes: &[u8], chars: usize) -> Option<Value> {
         let Object::Obarray(table) = self.object_if(table)? else { return None };
         if table.initial {
-            let name = symbol_key(bytes, chars)?;
-            match &*name { "nil" => Some(Value::NIL), "t" => Some(Value::TRUE), name => self.names.get(name).map(|&s| Value::reference(s + 1, 7)) }
+            // By the name's own bytes: no text is made for a lookup.
+            match &*crate::names::key_of(bytes, chars) {
+                b"nil" => Some(Value::NIL),
+                b"t" => Some(Value::TRUE),
+                key => self.names.get_bytes(key).map(|&s| Value::reference(s + 1, 7)),
+            }
         } else { table.lookup(bytes, chars) }
     }
     pub(super) fn obarray_intern(&mut self, table: Value, name: Value) -> std::result::Result<Value, prim::Fault> {
@@ -207,7 +211,7 @@ impl Vm {
             // Found before the names go (a code image's names were not made
             // through `Vm::slot`), so the variable keeps its obarray.
             self.obarray_slot();
-            let slots: Vec<usize> = self.names.drain().map(|(_, slot)| slot).collect();
+            let slots = self.names.take_slots();
             for slot in slots { self.set_initial_obarray(slot, false); }
             return Ok(());
         }
@@ -245,15 +249,16 @@ impl Vm {
     }
 }
 
-/// The symbol-table key of a name's BYTES (CHARS characters): multibyte
-/// internal text through symkey.rs; a unibyte name must be ASCII. The
-/// name's own bytes, borrowed, when they are their key: ASCII (the key's
-/// escape is not), or Unicode text without the escape.
+/// The key text (symkey.rs) of a name's BYTES (CHARS characters): the
+/// name's own bytes, borrowed, when they are their key text (ASCII, or
+/// multibyte Unicode text without the key's escape); escaped otherwise. A
+/// unibyte name's bytes above 127 are raw-byte characters.
 pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<std::borrow::Cow<'_, str>> {
     use std::borrow::Cow;
     if bytes.is_ascii() { return std::str::from_utf8(bytes).ok().map(Cow::Borrowed); }
+    // A unibyte name: its bytes above 127 name raw-byte characters, though
+    // they may read as UTF-8 (romacs#326).
+    if chars == bytes.len() { return Some(Cow::Owned(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes)))); }
     if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(Cow::Borrowed(text)); }
-    if chars < bytes.len() { return Some(Cow::Owned(crate::symkey::from_internal(bytes))); }
-    // A unibyte name: its bytes above 127 name raw-byte characters.
-    Some(Cow::Owned(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes))))
+    Some(Cow::Owned(crate::symkey::from_internal(bytes)))
 }

@@ -1630,9 +1630,9 @@ mod leaf {
             symbols.extend(
                 self.vm
                     .names
-                    .iter()
-                    .filter(|(name, _)| !matches!(name.as_str(), "nil" | "t"))
-                    .map(|(_, &i)| Value::reference(i + 1, 7)),
+                    .slots()
+                    .filter(|&i| !matches!(self.vm.symbol_names[i].as_str(), "nil" | "t"))
+                    .map(|i| Value::reference(i + 1, 7)),
             );
             symbols.sort_unstable_by_key(|v| v.0);
             symbols
