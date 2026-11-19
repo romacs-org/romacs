@@ -495,7 +495,9 @@ that saw an epoch other than this one starts again (doc/agent-protocol.org)."
 
 (defun romacs-agent-events-epoch (id)
   "Session ID's epoch: 0 when nothing ever raised it."
-  (or (when-let* ((db (romacs-agent-events--db)))
+  (or (when-let* ((db (romacs-agent-events--db))
+                  ;; A store no writer of this build has opened yet has none.
+                  ((sqlite-select db "select 1 from sqlite_master where type = 'table' and name = 'epochs'")))
         (caar (sqlite-select db "select epoch from epochs where session = ?" (list id))))
       0))
 
@@ -579,8 +581,18 @@ when SESSION is imported."
 ;; (`api_message_id'), the whole message an `assistant' record of that id;
 ;; Codex a delta with its item's id, the whole item `item/completed'.
 
+(defconst romacs-agent-events--delta-ids
+  '(("json_extract(record, '$.out.type') = 'stream_event'
+      and json_extract(record, '$.out.event.type') = 'content_block_delta'"
+     . "json_extract(record, '$.out.api_message_id')")
+    ("json_extract(record, '$.out.method') in ('item/agentMessage/delta', 'item/commandExecution/outputDelta',
+                                               'item/fileChange/outputDelta')"
+     . "json_extract(record, '$.out.params.itemId')"))
+  "Each kind of delta compaction removes, as (WHERE . ID): what an `out'
+record of that kind is, and the message it is of.")
+
 (defconst romacs-agent-events--compact-statements
-  '("create temp table if not exists whole (id text primary key, seq integer) without rowid"
+  `("create temp table if not exists whole (id text primary key, seq integer) without rowid"
     "delete from temp.whole"
     ;; Each message that came whole, and the last of its whole records.
     "insert or replace into temp.whole
@@ -593,15 +605,24 @@ when SESSION is imported."
        where session = ?1 and kind = 'out' and seq < ?2 and json_extract(record, '$.out.method') = 'item/completed'
          and json_extract(record, '$.out.params.item.id') is not null
        group by 1"
-    ;; The deltas of those messages, from before their whole record, of
-    ;; seqs ?3 to ?4 (`romacs-agent-events-compact' goes a window at a time).
-    "delete from events where session = ?1 and kind = 'out' and seq < ?2 and seq >= ?3 and seq < ?4
-       and ((json_extract(record, '$.out.type') = 'stream_event'
-             and json_extract(record, '$.out.event.type') = 'content_block_delta'
-             and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.api_message_id')))
-            or (json_extract(record, '$.out.method') in ('item/agentMessage/delta', 'item/commandExecution/outputDelta',
-                                                         'item/fileChange/outputDelta')
-                and seq < (select seq from temp.whole where id = json_extract(events.record, '$.out.params.itemId'))))")
+    ;; Each message's first delta: where a window's deltas begin.
+    "create temp table if not exists first (id text primary key, seq integer) without rowid"
+    "delete from temp.first"
+    ,@(mapcar (lambda (kind)
+                (format "insert or replace into temp.first select %s, min(seq) from events
+                           where session = ?1 and kind = 'out' and seq < ?2 and %s and %s is not null group by 1"
+                        (cdr kind) (car kind) (cdr kind)))
+              romacs-agent-events--delta-ids)
+    ;; A window, the messages whose whole record is at seqs ?3 to ?4: all
+    ;; their deltas, from before their whole record, from seq ?5, the
+    ;; first of them (`romacs-agent-events--compact-window-start').  A
+    ;; message's deltas go in one transaction, never some of them.
+    ,(concat "delete from events where session = ?1 and kind = 'out' and seq >= ?5 and seq < ?4 and ("
+             (mapconcat (lambda (kind)
+                          (format "(%s and seq < (select seq from temp.whole where id = %s and seq >= ?3 and seq < ?4))"
+                                  (car kind) (replace-regexp-in-string "record" "events.record" (cdr kind))))
+                        romacs-agent-events--delta-ids " or ")
+             ")"))
   "What compacting a session removes, its records before seq ?2: the
 deltas of each message whose whole message came after them, and the
 streamed output of each Codex command or file change whose completed item
@@ -627,10 +648,15 @@ given back as they free (auto_vacuum incremental, set once, one rewrite)."
   "The seqs compaction removes deltas of a transaction: other writers wait
 for no more than that.")
 
+(defconst romacs-agent-events--compact-window-start
+  "select min(first.seq) from temp.whole join temp.first using (id) where whole.seq >= ?1 and whole.seq < ?2"
+  "Where the deltas of the messages whole at seqs ?1 to ?2 begin, or null.")
+
 (defun romacs-agent-events-compact (id)
   "Compact the session ID names, its records up to its last: the whole
-messages found first, then their deltas removed a window of seqs a
-transaction (`romacs-agent-events--compact-window').  The number of
+messages found first, then their deltas removed, all of a message's at
+once, the messages whole in a window of seqs a transaction
+\(`romacs-agent-events--compact-window').  The number of
 records removed."
   (when-let* ((db (romacs-agent-events--db)))
     (romacs-agent-events--compact-schema db)
@@ -643,6 +669,9 @@ records removed."
       (dolist (statement (butlast statements))
         (sqlite-execute db statement (and (string-search "?" statement) (list id end))))
       (cl-loop for low from (or (car bounds) 0) below end by romacs-agent-events--compact-window
+               for high = (+ low romacs-agent-events--compact-window)
+               for start = (caar (sqlite-select db romacs-agent-events--compact-window-start (list low high)))
+               when start
                do (sqlite-execute db "begin immediate")
                (condition-case err
                    (progn
@@ -651,8 +680,7 @@ records removed."
                      ;; this removes is from before it.
                      (when (romacs-agent-events--supervised-p id)
                        (error "Its supervisor runs"))
-                     (let ((gone (sqlite-execute db (car (last statements))
-                                                 (list id end low (+ low romacs-agent-events--compact-window)))))
+                     (let ((gone (sqlite-execute db (car (last statements)) (list id end low high start))))
                        (when (> gone 0) (romacs-agent-events--raise-epoch db id))
                        (setq removed (+ removed gone)))
                      (sqlite-execute db "commit"))

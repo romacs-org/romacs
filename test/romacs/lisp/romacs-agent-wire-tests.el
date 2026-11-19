@@ -114,6 +114,9 @@ sent as expected."
                    (list :images '("a.png") :messages '((:from "s1" :text "hi")) :steer t :state 'started
                          :none nil :input (json-parse-string "{\"a\":[1,null,false]}"))))
                  "{\"images\":[\"a.png\"],\"messages\":[{\"from\":\"s1\",\"text\":\"hi\"}],\"steer\":true,\"state\":\"started\",\"none\":null,\"input\":{\"a\":[1,null,false]}}"))
+  ;; A plist is keywords each with its value; another list is an array.
+  (should (equal (json-serialize (romacs-agent-wire-value '(:a))) "[\"a\"]"))
+  (should (equal (json-serialize (romacs-agent-wire-value '(:a 1 "b" 2))) "[\"a\",1,\"b\",2]"))
   ;; What JSON has no form for is refused, never sent broken.
   (should-error (romacs-agent-wire-value '(1 . 2)) :type 'wrong-type-argument))
 

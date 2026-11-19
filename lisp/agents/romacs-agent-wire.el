@@ -31,21 +31,21 @@
   "Each event type the protocol sends, then its fields.  A field's JSON
 name is its keyword's, with `_' for `-'.")
 
+(defun romacs-agent-wire--plist-p (value)
+  "Whether VALUE is a plist: keywords, each with its value."
+  (and (proper-list-p value) value (cl-evenp (length value))
+       (cl-loop for key in value by #'cddr always (keywordp key))))
+
 (defun romacs-agent-wire-value (value)
   "VALUE as JSON: nil null, t true, a symbol its name, a plist an
-object, a list an array; numbers, strings, vectors and hash tables (a
-harness's JSON, as parsed) as they are, their elements made so too."
+object, another list an array; numbers, strings, and a harness's JSON
+as parsed (vectors, hash tables) as they are."
   (cond ((null value) :null)
         ((memq value '(t :null :false)) value)
         ((keywordp value) (substring (symbol-name value) 1))
         ((symbolp value) (symbol-name value))
-        ((or (numberp value) (stringp value)) value)
-        ((vectorp value) (vconcat (mapcar #'romacs-agent-wire-value value)))
-        ((hash-table-p value)
-         (let ((object (make-hash-table :test #'equal :size (hash-table-count value))))
-           (maphash (lambda (key item) (puthash key (romacs-agent-wire-value item) object)) value)
-           object))
-        ((and (proper-list-p value) (keywordp (car value)))
+        ((or (numberp value) (stringp value) (vectorp value) (hash-table-p value)) value)
+        ((romacs-agent-wire--plist-p value)
          (let ((object (make-hash-table :test #'equal)))
            (cl-loop for (key item) on value by #'cddr
                     do (puthash (romacs-agent-wire--name key) (romacs-agent-wire-value item) object))
