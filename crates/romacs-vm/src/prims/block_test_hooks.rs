@@ -2,13 +2,16 @@
 //! `source_gate`) and never shipped. Not in GNU.
 use super::*;
 
-// (romacs--test-block SECONDS): sleep SECONDS in Rust, polling nothing and
-// retrying a signal's EINTR. It exists only to give the termination-alarm
-// test (tests/isolate_zygotes.rs) a wait no signal can end: every real wait
-// in a worker now hears its interrupt and termination.
+// (romacs--test-block SECONDS READY): write the file READY, then sleep
+// SECONDS in Rust, polling nothing and retrying a signal's EINTR. It exists
+// only to give the termination-alarm test (tests/isolate_zygotes.rs) a wait
+// no signal can end, entered once READY exists: every real wait in a worker
+// hears its interrupt and termination.
 defsubr! { name = "romacs--test-block", gnu = "romacs:test", effect = Global,
-fn romacs_test_block(cx, seconds: Integer) {
-    let _ = &cx;
+fn romacs_test_block(cx, seconds: Integer, ready: Value) {
+    let ready = cx.string_text(ready)?;
+    // HOST(std::fs, std::thread::sleep): a test hook's handshake and its wait no signal ends; never shipped
+    std::fs::write(&ready, b"").map_err(|e| Fault::Error(format!("romacs--test-block: {ready}: {e}")))?;
     std::thread::sleep(std::time::Duration::from_secs(u64::try_from(seconds.0).unwrap_or(0)));
     Ok(Value::NIL)
 }}

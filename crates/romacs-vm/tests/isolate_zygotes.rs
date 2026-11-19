@@ -557,13 +557,18 @@ fn a_child_blocked_in_a_primitive_ends_within_seconds_of_sigterm() {
     // which polls nothing): no wait hears the termination and no safepoint
     // sees it, and no SIGKILL follows here. The alarm the handler armed
     // ends it.
-    let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (romacs--test-block 10))))
+    // The job writes READY from inside the primitive: the signal comes once
+    // it blocks there.
+    let ready = std::env::temp_dir().join(format!("romacs-blocked-{}", std::process::id()));
+    let _ = std::fs::remove_file(&ready);
+    let ready_lisp = serde_json::to_string(&ready).unwrap();
+    let out = eval(&mut vm, &format!("(let* ((f (isolate-spawn '(lambda () (romacs--test-block 10 {ready_lisp}))))
                                     (id (romacs--isolate-id (isolate-future-isolate f)))
                                     (end (+ (float-time) 10)))
-                               (while (and (null (romacs--isolate-pid id)) (< (float-time) end)) (romacs--isolate-wait 0.05))
-                               (let ((settle (+ (float-time) 0.3))) (while (< (float-time) settle) (romacs--isolate-wait 0.05)))
+                               (while (and (not (file-exists-p {ready_lisp})) (< (float-time) end)) (romacs--isolate-wait 0.05))
                                (romacs--isolate-signal id 15)
-                               (romacs--isolate-pid id))");
+                               (romacs--isolate-pid id))"));
+    let _ = std::fs::remove_file(&ready);
     let child: i64 = out.parse().unwrap_or_else(|_| panic!("{out}"));
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert!(process_exists(child), "the child ended on the flag, not the alarm");
