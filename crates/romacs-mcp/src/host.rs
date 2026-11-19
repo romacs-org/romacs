@@ -1194,6 +1194,37 @@ mod tests {
     }
 
     #[test]
+    fn a_write_after_the_exit_reaches_neither_journal_nor_harness() {
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-closed-write-{}", std::process::id()));
+        create_private(&dir).unwrap();
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, "").unwrap();
+        let received = dir.join("received");
+        let journal = OpenOptions::new().append(true).open(&path).unwrap();
+        // A descendant still holding the harness's stdin: what reaches it is kept.
+        let mut child = Command::new("cat").stdin(Stdio::piped()).stdout(File::create(&received).unwrap()).spawn().unwrap();
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None,
+                                                  next_attachment: 0, stdin: Arc::new(Mutex::new(child.stdin.take())), closed: false }));
+        let (server, mut ours) = UnixStream::pair().unwrap();
+        let serving = { let shared = shared.clone(); std::thread::spawn(move || serve(shared, server, true)) };
+        ours.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        writeln!(ours, r#"{{"attach":{{"from":1,"steal":false}}}}"#).unwrap();
+        let mut lines = BufReader::new(ours.try_clone().unwrap()).lines();
+        assert_eq!(serde_json::from_str::<Json>(&lines.next().unwrap().unwrap()).unwrap()["attached"], 1);
+        shared.lock().unwrap().exit(0);
+        let exit: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(exit["exit"], 0);
+        writeln!(ours, r#"{{"write":"late"}}"#).unwrap();
+        // Its server's connection ends with it: nothing more is taken.
+        serving.join().unwrap();
+        assert_eq!(last_seq(&path), 1);
+        shared.lock().unwrap().stdin.lock().unwrap().take();
+        child.wait().unwrap();
+        assert_eq!(std::fs::read_to_string(&received).unwrap(), "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn nothing_is_journaled_after_the_exit() {
         let dir = std::env::temp_dir().join(format!("romacs-agent-host-closed-{}", std::process::id()));
         create_private(&dir).unwrap();
