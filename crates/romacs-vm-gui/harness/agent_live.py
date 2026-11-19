@@ -2441,7 +2441,9 @@ def composer(args, base, real=False):
         release = a.root / 'release-hold'
         a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
         # Held until released: the call's output is the transcript's last text.
-        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(a.chat(sid).rsplit('● ', 1)[-1])
+        transcript = lambda: parity_live.read_sexp(a.eval(
+            f'(with-current-buffer {chat} (buffer-substring-no-properties (point-min) romacs-agent-log--end))')) or ''
+        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(transcript().rsplit('● ', 1)[-1])
         until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
         steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
         good.append(typed('while_output_last', 'typed while'))
