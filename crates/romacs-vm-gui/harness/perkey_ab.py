@@ -126,10 +126,13 @@ def arguments(argv=None):
     args, rest = parser.parse_known_args(argv)
     arms = {arm: pk.arguments(rest + ['--binary', str(binary.resolve()), '--output', str((args.output / arm).resolve())])
             for arm, binary in zip(ARMS, (args.base, args.binary))}
-    # Sentinels first: any later --sessions, --latency-sessions or --record,
-    # in any spelling and with any value, replaces them.
-    probe = pk.arguments(['--sessions', '-1', '--latency-sessions', '-1'] + rest + ['--binary', '/', '--output', '/'])
-    if (probe.sessions, probe.latency_sessions, probe.record) != (-1, -1, None):
+    # Two probes with different sentinels first: a --sessions or
+    # --latency-sessions given in any spelling, with any value, replaces both
+    # alike, so the probes agree on it only when it was given.
+    probes = [pk.arguments(['--sessions', s, '--latency-sessions', s] + rest + ['--binary', '/', '--output', '/'])
+              for s in ('1', '2')]
+    if probes[0].sessions == probes[1].sessions or probes[0].latency_sessions == probes[1].latency_sessions \
+            or probes[0].record is not None:
         parser.error('perkey_ab runs its own sessions (--pairs, --latency-pairs) and does not profile: '
                      'no --sessions, --latency-sessions or --record')
     return args, arms

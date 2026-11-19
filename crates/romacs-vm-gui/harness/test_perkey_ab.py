@@ -84,7 +84,8 @@ class Options(unittest.TestCase):
         self.assertNotEqual(arms['base'].output, arms['candidate'].output)
 
     def test_session_counts_and_profiling_are_refused_in_either_spelling(self):
-        for extra in (['--sessions', '3'], ['--sessions=3'], ['--sess=3'], ['--sessions', '5'], ['--latency-sessions=1'],
+        for extra in (['--sessions', '3'], ['--sessions=3'], ['--sess=3'], ['--sessions', '5'], ['--sessions', '-1'],
+                      ['--sessions', '1'], ['--latency-sessions=1'], ['--latency-s=-1'], ['--latency-sessions', '2'],
                       ['--latency-sessions=2'], ['--latency-s=2'],
                       ['--record', 'C-n'], ['--record=self-insert'], ['--rec', 'C-f']):
             with self.assertRaises(SystemExit, msg=extra):
