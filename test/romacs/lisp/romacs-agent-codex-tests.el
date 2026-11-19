@@ -95,17 +95,16 @@ journals what its harness writes."
 
 (ert-deftest romacs-agent-codex-resume-ends-a-cut-turn ()
   ;; Its last run ended mid-turn: Codex does not take that turn up, so its
-  ;; resume ends it, and what waited goes.
+  ;; resume ends it, and what waited goes as it is ready: its turn under way.
   (romacs-agent-codex-tests--with (:harness-session "01dd" :interrupted t :input-seq 3)
-    (romacs-agent--enqueue session (list "waited" nil nil))
+    (romacs-agent--enqueue session (romacs-agent-item "waited"))
     (let ((resume (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (echo)
       (out "id" (gethash "id" resume) "result" (romacs-mcp--object "thread" (romacs-mcp--object "id" "01dd"))))
     (should-not (romacs-agent-interrupted session))
     (should (romacs-agent-failed session))
-    (should (eq (romacs-agent-state session) 'idle))
-    ;; The queue goes at the turn's end, a moment later.
-    (romacs-agent--settle session)
+    (should (eq (romacs-agent-state session) 'running))
+    (should (= (romacs-agent-queue-length session) 0))
     (should (equal (gethash "text" (aref (gethash "input" (gethash "params" (last-written))) 0)) "waited"))))
 
 (defun romacs-agent-codex-tests--ready (session)

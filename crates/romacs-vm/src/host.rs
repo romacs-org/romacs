@@ -668,6 +668,17 @@ pub fn runtime_root() -> PathBuf {
     })
 }
 
+/// The runtime tree's lisp/PATH, or why this process has none: the VM's
+/// own Lisp (lisp/vm/) is read from its tree, never from a copy compiled
+/// into the executable.
+///
+/// # Errors
+///
+/// Why no runtime tree was found ([`runtime_root`]).
+pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
+    found_runtime().map(|root| root.join("lisp").join(path))
+}
+
 /// [`runtime_root`], or why there is none, for a lookup that has a
 /// fallback: a process with no runtime tree goes on.  Found once.
 fn found_runtime() -> Result<PathBuf, String> {
@@ -1977,6 +1988,12 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
     let result = crate::flight::checked("symlink", || bytes(link.as_ref()), || std::os::unix::fs::symlink(&target, &link), |r| crate::flight::outcome(r, |()| 0));
     changed(&result, link.as_ref(), true);
     result
+}
+
+/// ftruncate FILE to empty: `copy-file`'s replacement of an existing
+/// output, through the descriptor its caller checked (not the path).
+pub fn truncate(file: &File) -> io::Result<()> {
+    crate::flight::checked("ftruncate", String::new, || file.set_len(0), |r| crate::flight::outcome(r, |()| 0))
 }
 
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {

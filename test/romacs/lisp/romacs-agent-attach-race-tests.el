@@ -50,7 +50,7 @@
      (romacs-mcp--object "seq" 3 "t" 1.0 "out" (romacs-mcp--object "type" "turn.completed"))
      (romacs-mcp--object "seq" 4 "t" 1.0 "exit" 0))
     (let ((next nil))
-      (romacs-agent--enqueue session (list "next" nil nil))
+      (romacs-agent--enqueue session (romacs-agent-item "next"))
       (cl-letf (((symbol-function 'romacs-agent--turn) (lambda (_session text &rest _) (setq next text))))
         (romacs-agent--sentinel (romacs-agent-attach-race-tests--closed session) "finished\n"))
       (should (eq (romacs-agent-state session) 'idle))

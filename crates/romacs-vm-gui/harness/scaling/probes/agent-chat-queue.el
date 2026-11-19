@@ -2,8 +2,12 @@
 
 ;; Composer updates with N messages queued: the count is kept, not taken.
 (scaling-probe agent-chat-queue :n 2000
+  ;; Attached, as a running session is: a message to a harness nothing
+  ;; runs is refused (romacs#308).
   :setup (let ((session (progn (scaling--agent) (romacs-agent--make :id "scaling-queue-chat" :harness 'claude :title "queue"
-                                            :dir temporary-file-directory :state 'running))))
+                                            :dir temporary-file-directory :state 'running
+                                            :connection (make-pipe-process :name "scaling-queue-chat" :noquery t)
+                                            :caught-up t))))
            (romacs-agent-show session)
            (dotimes (i n) (romacs-agent-send-later session (format "message %d" i)))
            (romacs-agent-buffer session))

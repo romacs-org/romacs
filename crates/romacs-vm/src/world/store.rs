@@ -207,9 +207,35 @@ fn content_digest(file: &std::fs::File, len: u64) -> std::io::Result<[u8; 32]> {
 /// A directory DIR of the store's own, made 0700 if missing: private
 /// whatever the umask, as the store is.
 pub(super) fn store_subdir(dir: &Path) -> std::io::Result<()> {
-    match host::create_dir(dir, 0o700) {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        made => made,
+    subdir(dir, 0o700)
+}
+
+/// `BASE/p` and the pinned table's directories in it, `cwd`, `tmp` and
+/// `bin`, empty and read-only: each made, or found made by another process
+/// (two builders starting in one fresh store, or a trace runner beside
+/// one). `BASE/p`.
+///
+/// # Errors
+///
+/// When one cannot be made.
+pub fn pinned_dirs(base: &Path) -> std::io::Result<PathBuf> {
+    let p = base.join("p");
+    store_subdir(&p)?;
+    for name in ["cwd", "tmp", "bin"] {
+        subdir(&p.join(name), 0o500)?;
+    }
+    Ok(p)
+}
+
+/// DIR made with MODE, or there already as a directory: whoever makes it
+/// first, as two processes starting builders in one fresh store may both
+/// try. A file or a symlink there is refused.
+fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
+    match host::create_dir(dir, mode) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if host::symlink_metadata(dir).is_ok_and(|meta| meta.file_type().is_dir()) { Ok(()) } else { Err(e) }
+        }
+        other => other,
     }
 }
 
@@ -507,7 +533,7 @@ impl World {
         let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
-                .ok_or_else(|| json!({"image": "made for another key"})),
+                .map_err(|reason| json!({"image": reason})),
             failed => Err(arena_reason(failed)),
         }
     }
@@ -607,11 +633,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Launch::Restored { vm: Box::new(vm), carry, manifest }
                 }
-                None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+                Err(reason) => Launch::Chain { reason: json!({"image": reason}) },
             },
             failed => Launch::Chain { reason: arena_reason(failed) },
         }
@@ -684,7 +710,11 @@ impl World {
                 }
                 host::exit_at_once(i32::from(outcome.is_err()))
             }
-            Launch::Chain { .. } => None,
+            Launch::Chain { reason } => {
+                // Said, so a test that needs its world can tell why it has none.
+                eprintln!("test world: booting from source: {reason}");
+                None
+            }
         }
     }
 
@@ -700,11 +730,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Ok((Box::new(vm), carry))
                 }
-                None => Err(json!({"image": "made for another key"})),
+                Err(reason) => Err(json!({"image": reason})),
             },
             failed => Err(json!({"image": format!("{failed:?}")})),
         }
@@ -901,14 +931,7 @@ impl World {
     /// The pinned table's directories, `STORE/p/{cwd,tmp,bin}`, empty and
     /// read-only (§5 step 1). They persist, so a record naming them holds.
     fn pinned_dir(&self) -> std::io::Result<PathBuf> {
-        let p = self.store.join("p");
-        store_subdir(&p)?;
-        for name in ["cwd", "tmp", "bin"] {
-            if !host::probe(host::Probe::IsDir, p.join(name)) {
-                host::create_dir(p.join(name), 0o500)?;
-            }
-        }
-        Ok(p)
+        pinned_dirs(&self.store)
     }
 
     /// A builder, once it holds the lock: record in build mode. The builder
@@ -1053,10 +1076,8 @@ impl World {
         let mut manifest = self.manifest(trace, trace["uncaptured"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
+        // Dense, as `image::capture` requires.
         vm.collect_compacting();
-        if vm.conses.unused() + vm.closures.unused() + vm.cells.unused() + vm.objects.unused() != 0 {
-            return Err("world image: the tables did not compact".into());
-        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
             file.sync_all().map_err(|e| e.to_string())?;
@@ -1484,19 +1505,13 @@ mod tests {
     /// Load PATH and the library as this process mapped it.
     fn load(path: &Path) -> arena::Library {
         let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        // UNSAFE(loading a library runs its initializers: dlopen has no safe form)
+        // SAFETY: the library is one this test just built from a few lines of C
+        // with no initializers, and it is never unloaded.
         assert!(!unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) }.is_null(), "{}", path.display());
-        let mut found: Option<arena::Library> = None;
-        unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
-            let (want, found) = unsafe { &mut *data.cast::<(&std::ffi::CStr, &mut Option<arena::Library>)>() };
-            let info = unsafe { &*info };
-            if !info.dlpi_name.is_null() && unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) } == *want {
-                **found = Some(unsafe { arena::Library::at(info.dlpi_name, info.dlpi_addr as usize, info.dlpi_phdr as usize, info.dlpi_phnum as usize) });
-            }
-            0
-        }
-        let mut data = (name.as_c_str(), &mut found);
-        unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut data).cast()) };
-        found.expect("loaded")
+        // UNSAFE(a library's mapped headers are memory no type owns)
+        // SAFETY: nothing dlcloses it, so it stays loaded.
+        unsafe { arena::find_library(&name) }.expect("loaded")
     }
 
     /// The old identity of a library without a build-id: its executable
@@ -1571,6 +1586,33 @@ mod tests {
             let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// A store directory is made, or found made as a directory; a file or a
+    /// symlink in its place is refused, not taken for one.
+    #[test]
+    fn a_store_subdirectory_is_made_or_found_but_never_a_file_or_a_link() {
+        let root = std::env::temp_dir().join(format!("romacs-store-{}-subdir", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let made = root.join("made");
+        subdir(&made, 0o700).unwrap();
+        subdir(&made, 0o700).unwrap();
+        assert!(made.is_dir());
+        std::fs::write(root.join("file"), "").unwrap();
+        assert_eq!(subdir(&root.join("file"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::os::unix::fs::symlink(&made, root.join("link")).unwrap();
+        assert_eq!(subdir(&root.join("link"), 0o700).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        // The pinned directories, as a builder and the GNU trace runner make
+        // them: a regular file at `p/cwd` is an error, not a directory.
+        let base = root.join("base");
+        std::fs::create_dir_all(base.join("p")).unwrap();
+        std::fs::write(base.join("p/cwd"), "").unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        std::fs::remove_file(base.join("p/cwd")).unwrap();
+        assert_eq!(pinned_dirs(&base).unwrap(), base.join("p"));
+        assert!(["cwd", "tmp", "bin"].iter().all(|name| base.join("p").join(name).is_dir()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

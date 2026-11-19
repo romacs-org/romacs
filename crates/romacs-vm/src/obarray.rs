@@ -177,6 +177,7 @@ impl Vm {
             let slot = symbol.payload() as usize - 1;
             self.symbol_names[slot] = text.to_owned();
             self.obarray_symbol_names.insert(slot, name);
+            self.names_added.push(name);
             symbol
         };
         if Self::image_value(table) { return Err(self.read_only_fault(table)); }

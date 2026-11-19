@@ -441,7 +441,7 @@ and its resume reads none of the session's records."
       (should (equal (car (car (romacs-agent-queue session))) "meanwhile"))
       (should-not written)
       ;; Once released, what waited goes on as usual.
-      (cl-letf (((symbol-function 'romacs-agent--send-next) (lambda (s &rest _) (push s released))))
+      (cl-letf (((symbol-function 'romacs-agent--dispatch) (lambda (s &rest _) (push s released))))
         (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
       (should (equal outcome '(:done 1)))
       (should-not (plist-get (romacs-agent-driver-state session) :rolling-back))

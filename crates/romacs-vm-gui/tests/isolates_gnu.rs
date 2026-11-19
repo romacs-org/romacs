@@ -388,6 +388,59 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     assert_eq!(out.trim(), "(quick t live nil)", "{err}");
 }
 
+/// A worker handed the batch world, whose carry is not the GUI's, refuses
+/// it: once restored as the GUI's carry it read bytes past the VM as one.
+/// Its job settles with `isolate-world-unavailable` naming both carries and
+/// the world, `isolate-error-functions` hears the same, the world is
+/// forgotten, and the job's retry and the next worker boot from source and
+/// answer; with zygotes, the zygote refuses and its waiting job runs from
+/// source. The store is a linked copy of the installation's, so the worker
+/// takes the path of any store (`world::adopt`), not the installation's.
+#[test]
+fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
+    let exe = Path::new(installed::romacs());
+    let installed = exe.with_file_name("romacs-vm-gui.worlds");
+    // Beside the installation: a hard link stays on its filesystem.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("isolates-gnu-{}-batch-world", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("home")).unwrap();
+    // This build's batch world, by the key its preparation reports: the
+    // installation may keep an earlier build's beside it.
+    let prepared = Command::new(exe).arg("--world-store").arg(&installed).args(["--world-build", "--batch"])
+        .env("HOME", scratch.join("home")).env("XDG_CACHE_HOME", scratch.join("home/cache"))
+        .env("XDG_CONFIG_HOME", scratch.join("home/config")).env("XDG_STATE_HOME", scratch.join("home/state"))
+        .env_remove("ROMACS_WORLD").env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY")
+        .output().expect("world build");
+    let report = String::from_utf8_lossy(&prepared.stderr).into_owned();
+    let key = report.lines().filter_map(|l| l.strip_prefix("romacs-world: "))
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|e| e["mode"] == "prepared").and_then(|e| e["key"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("no prepared batch world: {report}"));
+    let store = scratch.join("worlds");
+    let linked = Command::new("cp").arg("-al").arg(&installed).arg(&store).status().expect("cp");
+    assert!(linked.success(), "linking {}", installed.display());
+    let want = r#"isolate world unavailable: {"image":"made for the carry (); this process needs romacs_vm_gui::world::Carry"}"#;
+    for zygotes in ["nil", "t"] {
+        let script = format!("(progn {PREAMBLE}
+          (let ((world (cons {store:?} {key:?})) (heard nil))
+            (push (lambda (_iso event data) (when (eq event 'isolate-world-unavailable) (push (car data) heard))) isolate-error-functions)
+            (setq isolate-boot 'world isolate-world world isolate-zygotes {zygotes})
+            (prin1 (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 60)
+                           (isolate-error (list (car e) (equal (nth 2 e) (list {want:?} world)))))
+                         isolate-world
+                         (progn (romacs--isolate-pump 0.5) (equal heard (list (list {want:?} world))))
+                         (isolate-await (isolate-spawn '+ 1 2) 120)))
+            (isolate-kill-all)))", store = store.display().to_string());
+        let (ok, out, err) = batch(&script, Path::new("/"));
+        assert!(ok, "batch failed (zygotes {zygotes}): {err}");
+        // Without zygotes the job's own worker refused; with them the zygote
+        // did, and the job waiting on its fork ran from source.
+        let first = if zygotes == "nil" { "(isolate-world-unavailable t)" } else { "3" };
+        assert_eq!(out.trim(), format!("({first} nil t 3)"), "zygotes {zygotes}: {err}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 #[test]
 fn results_wait_for_a_widened_buffer_and_a_changed_setup_refuses_them() {
     // Sol r1 S1-S3: a block delivered again while the owner is narrowed; a

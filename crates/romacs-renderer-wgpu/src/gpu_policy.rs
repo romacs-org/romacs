@@ -112,6 +112,49 @@ fn requested_features(adapter: &wgpu::Adapter) -> wgpu::Features {
     adapter.features() & requested
 }
 
+/// The limits the renderer asks of a device on an adapter that allows
+/// ADAPTER: WebGPU's defaults, each lowered to what the adapter allows. A
+/// GPU that meets the defaults gets exactly them; an older one (OpenGL 3.3
+/// without compute or storage buffers, as Intel's Sandy Bridge) gets its
+/// own, and the features that need more turn themselves off
+/// (`disabled_features`).
+#[must_use]
+pub fn renderer_limits(adapter: &wgpu::Limits) -> wgpu::Limits {
+    wgpu::Limits::default().or_worse_values_from(adapter)
+}
+
+/// What the adapter allows, as the renderer takes it. `ROMACS_GPU_LIMITS=gl33`
+/// pretends the adapter is an OpenGL 3.3 GPU (WebGL 2's limits at the
+/// adapter's resolution: no compute, no storage buffers), so a capable machine
+/// can run the path an old one takes.
+fn adapter_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let limits = adapter.limits();
+    match std::env::var("ROMACS_GPU_LIMITS").as_deref() {
+        Ok("gl33") => gl33_limits(limits),
+        Ok(other) => {
+            tracing::warn!("ROMACS_GPU_LIMITS={other}: unrecognized, using the adapter's limits");
+            limits
+        }
+        Err(_) => limits,
+    }
+}
+
+/// ALLOWED lowered to an OpenGL 3.3 GPU's: WebGL 2's limits (no compute, no
+/// storage buffers) at ALLOWED's texture resolution.
+#[must_use]
+pub fn gl33_limits(allowed: wgpu::Limits) -> wgpu::Limits {
+    let gl33 = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(allowed.clone());
+    allowed.or_worse_values_from(&gl33)
+}
+
+/// The renderer features a device with LIMITS on an adapter with DOWNLEVEL
+/// cannot run, each with what it lacks: the display names them once when it
+/// takes the device, and each such feature refuses its work.
+#[must_use]
+pub fn disabled_features(limits: &wgpu::Limits, downlevel: wgpu::DownlevelFlags) -> Vec<String> {
+    crate::model::gpu::unsupported(limits, downlevel).into_iter().collect()
+}
+
 /// Create the renderer's device and queue with platform interop enabled when
 /// the selected adapter can support it.
 ///
@@ -122,11 +165,21 @@ pub async fn request_renderer_device(
     adapter: &wgpu::Adapter,
     label: &'static str,
 ) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    request_device_within(adapter, label, &adapter_limits(adapter)).await
+}
+
+/// `request_renderer_device` on ADAPTER as though it allowed only ALLOWED.
+async fn request_device_within(
+    adapter: &wgpu::Adapter,
+    label: &'static str,
+    allowed: &wgpu::Limits,
+) -> Result<(wgpu::Device, wgpu::Queue), String> {
     tracing::warn!(adapter = ?adapter.get_info(), "renderer adapter backend fingerprint");
+    let required_limits = renderer_limits(allowed);
     let descriptor = wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: requested_features(adapter),
-        required_limits: wgpu::Limits::default(),
+        required_limits,
         memory_hints: Default::default(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         trace: wgpu::Trace::Off,
@@ -270,6 +323,29 @@ pub mod test_gpu {
             renderer_device("Romacs Test Device").ok_or("no usable GPU adapter for a test renderer")?;
         Ok(crate::WgpuRenderer::offscreen(std::sync::Arc::new(device), std::sync::Arc::new(queue), width, height))
     }
+
+    /// Whether the renderer's device on this adapter draws 3D models.
+    pub fn draws_models() -> bool {
+        adapter().is_some_and(|adapter| {
+            let limits = super::renderer_limits(&super::adapter_limits(adapter));
+            super::disabled_features(&limits, adapter.get_downlevel_capabilities().flags).is_empty()
+        })
+    }
+
+    /// A device of its own on the shared adapter, with an OpenGL 3.3 GPU's
+    /// limits (`gl33_limits`).
+    pub fn gl33_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let adapter = adapter()?;
+        let allowed = super::gl33_limits(adapter.limits());
+        pollster::block_on(super::request_device_within(adapter, "Romacs GL 3.3 Test Device", &allowed)).ok()
+    }
+
+    /// `renderer` on a device whose limits are an OpenGL 3.3 GPU's
+    /// (`gl33_limits`), as `ROMACS_GPU_LIMITS=gl33` asks of the program.
+    pub fn gl33_renderer(width: u32, height: u32) -> Result<crate::WgpuRenderer, String> {
+        let (device, queue) = gl33_device().ok_or("no usable GPU adapter for a test renderer")?;
+        Ok(crate::WgpuRenderer::offscreen(std::sync::Arc::new(device), std::sync::Arc::new(queue), width, height))
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +391,39 @@ mod tests {
             .collect();
         for thread in made {
             thread.join().expect("an instance was made");
+        }
+    }
+
+    /// A GPU that meets WebGPU's defaults is asked for exactly them, however
+    /// much more it allows; an OpenGL 3.3 one (Intel Sandy Bridge: no compute,
+    /// no storage buffers) for what it allows, with 3D models off.
+    #[test]
+    fn a_device_asks_only_what_its_adapter_allows() {
+        let generous = wgpu::Limits { max_texture_dimension_2d: 16384, max_storage_buffers_per_shader_stage: 64, ..wgpu::Limits::default() };
+        assert_eq!(renderer_limits(&generous), wgpu::Limits::default());
+        assert_eq!(renderer_limits(&wgpu::Limits::default()), wgpu::Limits::default());
+        let all = wgpu::DownlevelFlags::all();
+        assert!(disabled_features(&wgpu::Limits::default(), all).is_empty());
+        let no_vertex_storage = all - wgpu::DownlevelFlags::VERTEX_STORAGE;
+        assert_eq!(disabled_features(&wgpu::Limits::default(), no_vertex_storage).len(), 1, "a flag limits cannot say");
+
+        let gl33 = gl33_limits(wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::default() });
+        assert_eq!(gl33.max_compute_workgroups_per_dimension, 0);
+        assert_eq!(gl33.max_texture_dimension_2d, 8192, "the adapter's resolution stands");
+        let asked = renderer_limits(&gl33);
+        assert!(asked.check_limits(&gl33), "every limit within the adapter's");
+        let off = disabled_features(&asked, all);
+        assert_eq!(off.len(), 1, "{off:?}");
+        assert!(off[0].starts_with("3D models"), "{off:?}");
+    }
+
+    /// On this machine's GPU, when it meets the defaults, the device
+    /// descriptor is the one the renderer asked for before.
+    #[test]
+    fn a_capable_gpu_is_asked_for_exactly_the_defaults() {
+        let Some(adapter) = test_gpu::adapter() else { return };
+        if wgpu::Limits::default().check_limits(&adapter.limits()) {
+            assert_eq!(renderer_limits(&adapter.limits()), wgpu::Limits::default());
         }
     }
 
