@@ -164,7 +164,7 @@ start launched, its manifest written."
       (should (eql (gethash "turns" note) 1))
       ;; Its chat says so; what the source said after is not the fork's.
       (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                             (save-window-excursion (romacs-agent-show fork)))))
+                             (save-window-excursion (romacs-agent-ui--show-chat fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -217,7 +217,7 @@ LINES, objects with their own seqs."
       (romacs-agent-fork-tests--note-then
        fork (list (romacs-mcp--object "from" (romacs-agent-id source) "seq" 0 "title" "Plan" "turns" 0 "type" "fork")) nil)
       (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                           (save-window-excursion (romacs-agent-show fork)))))
+                           (save-window-excursion (romacs-agent-ui--show-chat fork)))))
         (unwind-protect
             (let ((text (with-current-buffer buffer (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
               (should-not (string-search "question" text))
@@ -279,7 +279,7 @@ session's own."
       (let* ((fork (romacs-agent-fork-tests--plain "F"))
              (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two"))))
         (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
             (unwind-protect
                 (with-current-buffer buffer
                   (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -301,7 +301,7 @@ session's own."
              (fork (romacs-agent-fork-tests--plain "F"))
              (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two" "taken three"))))
         (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
             (unwind-protect
                 (with-current-buffer buffer
                   (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -323,7 +323,7 @@ session's own."
              (romacs-agent-drawn-wanted-functions (list (lambda (session seqs) (push (cons session seqs) wanted))))
              (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two") '(2))))
         (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-show fork))))
+          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
             (unwind-protect
                 (with-current-buffer buffer
                   (should (assoc id wanted))
@@ -372,7 +372,7 @@ session's own."
       (romacs-agent-resume fork)
       (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
       (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                             (save-window-excursion (romacs-agent-show fork)))))
+                             (save-window-excursion (romacs-agent-ui--show-chat fork)))))
         (unwind-protect
             (with-current-buffer buffer
               (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))

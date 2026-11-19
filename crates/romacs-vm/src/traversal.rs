@@ -98,7 +98,7 @@ impl Vm {
                         if item == key {
                             return Ok(tail);
                         }
-                    } else if item.tag() == 3 && self.cons_pair(item)?.0 == key {
+                    } else if item.tag_is(3) && self.cons_pair(item)?.0 == key {
                         return Ok(item);
                     }
                     tail = next;
@@ -183,13 +183,12 @@ fn mapped_pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
 }
 #[inline(always)]
 pub(super) fn pair(vm: &Vm, value: Value) -> Option<(Value, Value)> {
-    if value.tag() != 3 {
-        return None;
-    }
-    if Vm::image_value(value) {
+    // A cons's index is its payload, so the image test is the index's bit.
+    let index = value.index_if(3)?;
+    if index & crate::image::IMAGE != 0 {
         return mapped_pair(vm, value);
     }
-    vm.conses.get(value.payload() as usize).copied()
+    vm.conses.get(index).copied()
 }
 #[inline(always)]
 fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
@@ -210,11 +209,8 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
             Some(if p == Car { car } else { cdr })
         }
         Setcar | Setcdr => {
-            if x.tag() != 3 || Vm::image_value(x) {
-                return None;
-            }
-            let i = x.payload() as usize;
-            if i >= vm.conses.len() {
+            let i = x.index_if(3)?;
+            if i & crate::image::IMAGE != 0 || i >= vm.conses.len() {
                 return None;
             }
             if p == Setcar {
@@ -250,7 +246,7 @@ fn kernel<const P: usize>(vm: &mut Vm, x: Value, y: Value) -> Option<Value> {
                     if item == key {
                         return Some(tail);
                     }
-                } else if item.tag() == 3 && pair(vm, item)?.0 == key {
+                } else if item.tag_is(3) && pair(vm, item)?.0 == key {
                     return Some(item);
                 }
                 tail = next;
@@ -345,9 +341,9 @@ pub(super) unsafe fn plist_get(e: Eng<'_, '_>, r: *mut Value, pc: *const Inst) -
 fn plist_get_eq(vm: &Vm, mut tail: Value, key: Value) -> Option<Value> {
     let limit = vm.list_limit();
     let mut steps = 0;
-    while tail.tag() == 3 {
+    while tail.tag_is(3) {
         let (item, next) = pair(vm, tail)?;
-        if next.tag() != 3 {
+        if !next.tag_is(3) {
             return Some(Value::NIL);
         }
         let (value, rest) = pair(vm, next)?;
