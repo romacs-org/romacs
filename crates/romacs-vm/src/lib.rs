@@ -395,6 +395,18 @@ impl Value {
     fn index(self, tag: u64) -> Result<usize> {
         self.index_if(tag).ok_or_else(|| wrong_tag(tag))
     }
+    /// Whether this value has logical tag TAG; every caller passes a
+    /// constant. A tag that is its own three bits is one mask and compare,
+    /// as in `index_if`. `tag() == TAG` also pays the fixnum test, which
+    /// LLVM does not fold away: a cons test is 8 instructions against 3.
+    #[inline(always)]
+    fn tag_is(self, tag: u64) -> bool {
+        match tag {
+            0 | 3 | 4 | 6 | 7 => self.0 & 7 == tag,
+            1 => self.0 & 3 == 1,
+            _ => self.tag() == tag,
+        }
+    }
     /// The object table entry this object reference names: its index less
     /// one. Nil shares the tag with index 0 and names no object; taking its
     /// entry is the caller's bug, which a debug build stops at and a release
