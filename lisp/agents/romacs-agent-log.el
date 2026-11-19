@@ -374,6 +374,9 @@ its call, in place of those shown before."
                                   'romacs-agent-log-full (list input)))
                 (start (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))))
            (romacs-agent-log--put (romacs-agent-log--indent text depth) at)
+           ;; Its row in place: what an earlier call puts after it, at the
+           ;; same place, goes before it.
+           (set-marker-insertion-type start t)
            (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
            ;; What comes under it goes here, in order, before what follows it.
            (puthash id (list id :under (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))
@@ -406,7 +409,8 @@ its call, in place of those shown before."
                                       block)
                ;; A call stays open while work its harness runs under it
                ;; (a subagent, a command in the background) goes on.
-               (if (or (member (plist-get props :name) '("Agent" "Task")) (plist-get props :task))
+               (if (and (or (member (plist-get props :name) '("Agent" "Task")) (plist-get props :task))
+                        (not (plist-get props :task-ended)))
                    (setcdr block (plist-put (cdr block) :ended t))
                  (romacs-agent-log--close-block block)))
            ;; Its call was never drawn (it ended after the turn, or before
@@ -437,8 +441,8 @@ when that changes, and how it ended; with its call gone, at the end."
                  ('started (and (plist-get event :background) "runs in the background"))
                  ('backgrounded "moved to the background")
                  ('progress (let ((activity (plist-get event :activity)))
-                              (and activity block (not (equal activity (plist-get (cdr block) :activity)))
-                                   (progn (setcdr block (plist-put (cdr block) :activity activity))
+                              (and activity (not (and block (equal activity (plist-get (cdr block) :activity))))
+                                   (progn (when block (setcdr block (plist-put (cdr block) :activity activity)))
                                           (format "now: %s" activity)))))
                  ((or 'completed 'failed 'stopped)
                   (concat (symbol-name state)
@@ -452,9 +456,12 @@ when that changes, and how it ended; with its call gone, at the end."
         (romacs-agent-log--put (romacs-agent-log--indent (propertize (concat "· " text "\n") 'face 'romacs-agent-log-note)
                                                          (1+ (plist-get (cdr block) :depth)))
                                block)))
-    ;; Its work over, a call already ended closes.
-    (when (and block (memq state '(completed failed stopped)) (plist-get (cdr block) :ended))
-      (romacs-agent-log--close-block block))))
+    ;; Its work over, a call already ended closes; one still running
+    ;; closes as it ends.
+    (when (and block (memq state '(completed failed stopped)))
+      (if (plist-get (cdr block) :ended)
+          (romacs-agent-log--close-block block)
+        (setcdr block (plist-put (cdr block) :task-ended t))))))
 
 (defun romacs-agent-log--key (command &optional map)
   "COMMAND's key in MAP (the transcript's), as `substitute-command-keys' says it."

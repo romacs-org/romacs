@@ -2953,8 +2953,13 @@ def chat_log(args, base):
             # it ends: the text from the command's row to the separator.
             def command_block():
                 text = a.chat(codex)
-                row = text.rfind('● $ for i')
-                return text[row:] if row >= 0 else ''
+                command = text.rfind('seq 1 40')
+                row = text.rfind('● ', 0, command) if command >= 0 else -1
+                if row < 0:
+                    return ''
+                # To the next entry: another call, a reply, a prompt, the separator.
+                ends = [i for i in (text.find(mark, row + 1) for mark in ('\n● ', '\n✻', '\n❯', '\n◉', '\n○', '\n⚠')) if i >= 0]
+                return text[row:min(ends)] if ends else text[row:]
             a.until(codex, lambda: a.state(codex) == 'running'
                     and re.search(r'⋮ \d+ lines? so far\n\s+line \d+', command_block()) is not None,
                     120, 'Codex output while it runs')

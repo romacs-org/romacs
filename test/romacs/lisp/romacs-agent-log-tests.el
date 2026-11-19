@@ -332,5 +332,32 @@
     (goto-char (point-min))
     (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "romacs"))))
 
+;; Sol review round 3.
+
+(ert-deftest romacs-agent-log-interleaved-calls-keep-their-own-rows ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "a" :name "WebSearch" :input (romacs-agent-log-tests--input))
+    (draw :type 'tool :state 'started :id "b" :name "WebSearch" :input (romacs-agent-log-tests--input))
+    (draw :type 'tool :state 'completed :id "a" :input (romacs-agent-log-tests--input "query" "one") :output "A")
+    (draw :type 'tool :state 'completed :id "b" :input (romacs-agent-log-tests--input "query" "two") :output "B")
+    (goto-char (point-min))
+    (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
+    (search-forward "⎿ A")
+    (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "one"))
+    (goto-char (point-min))
+    (romacs-agent-log-next 2)
+    (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "two"))))
+
+(ert-deftest romacs-agent-log-work-ended-first-closes-with-its-call ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "c" :name "Bash")
+    (draw :type 'task :id "c" :state 'started :task "t")
+    (draw :type 'task :id "c" :state 'completed)
+    (draw :type 'tool :state 'completed :id "c" :output "ok")
+    (should-not (romacs-agent-log--block "c"))
+    ;; Progress of a call this chat never drew is said all the same.
+    (draw :type 'task :id "gone" :state 'progress :activity "Read")
+    (should (string-match-p "task now: Read" (romacs-agent-log-tests--transcript)))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
