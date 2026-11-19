@@ -5,8 +5,7 @@ interface every client of those sessions uses: the editor on the machine
 that runs them, an editor on another machine, and a web page on a phone.
 It states the protocol as it is today, decides where the new one is
 served, specifies version 1, the relay that makes it reachable over a
-tailnet, the clients, and the order of the work.  Status: design, before
-any of it is built.
+tailnet, the clients, and the order of the work.  Status: slice 0 built.
 
 * Requirements
 
@@ -340,11 +339,16 @@ JSON-RPC errors with numeric codes and =data.kind=:
     delivered together, as one unit, so seq alone resumes without
     ambiguity.  Seq works for journal-backed sessions too, and no
     =VACUUM= changes it.
-  - =E= is the session's compaction epoch, 0 for none.  Every
-    transaction that deletes any of the session's records raises it in
-    that same transaction, so a cursor or a page read before a deletion
-    always carries an older epoch.  Slice 0 changes the compactor to do
-    so.
+  - =E= is the session's epoch, 0 for none (=epochs= in the store).  A
+    record's events depend on the records before it: a streamed
+    message's whole record raises no text, its deltas having raised it.
+    Compaction removes those deltas, and the whole record then raises the
+    text, so a client resuming after a delta would draw it twice
+    (=romacs-agent-events-compaction-changes-what-follows-a-seq=).  So
+    every transaction that deletes any of the session's records raises
+    the epoch in that same transaction, as does the flip that moves the
+    session's reader from its journal to SQLite.  A cursor or a page
+    read before either always carries an older epoch.
   - Each page is read in one read transaction that also reads the epoch.
     A page whose epoch differs from the open's ends the paging with
     =reset=.
@@ -499,7 +503,7 @@ paging ever holds live delivery back.
   #+end_src
   - =tool=, =questions= and =plan= are present as the kind needs, else
     =null=.
-  - =handle.run= is the seq of the harness run's =run= record, so a
+  - =handle.run= is the seq of the harness run's =run= note, so a
     request id reused by a later run is a different request.
     =handle.id= is the service's short id for the request; the harness's
     own request id, of any length, stays in the service.
@@ -565,7 +569,7 @@ paging ever holds live delivery back.
 - *Closing by the harness.*  A request the harness closes before any
   answer resolves with =how= =harness=.  Codex's adapter must emit that
   event whenever =serverRequest/resolved= comes for a request still
-  pending (slice 0).
+  pending (slice 1).
 - *Policy.*  It runs only in the service.  Every answer it gives is
   resolved with actor =policy= and drawn by every client.  Nothing is
   denied on the user's behalf.
@@ -687,34 +691,33 @@ paging ever holds live delivery back.
   version (=images.upload=).
 
 ** Events
-- *Batches.*  =agents/event= carries one record unit's events, in order.
-- *Event (normative):* every event has =type= and =seq= (its record's).
-  The core types and their required fields:
+- *Event (normative).*  =agents/event= carries one record unit's events,
+  in order.  The schema is =romacs-agent-wire-events=
+  (=lisp/agents/romacs-agent-wire.el=).  Every event has =type=, =seq=
+  (its record's) and =time=, then each field its type names, =null= when
+  it has none; a field's name is the driver's, =_= for =-=.  Other types
+  and fields are the editor's own and are not sent.  The types:
 
-| type | required fields |
-|------+-----------------|
+| type | fields |
+|------+--------|
 | =input= | =text images steer own messages request= |
-| =delta= | =id text= (an assistant message's id; text appended) |
-| =thinking= | =id text= |
-| =message-end= | =id text= (the whole message) |
-| =tool= | =id name state= (=started=/=finished=), =input parent output error= (=null= until known) |
-| =tool-output= | =id text= (appended to the tool's output) |
-| =attributed= | =request by decision scope reason login client= |
+| =delta= | =message text parent= (text appended to message =message=) |
+| =thinking= | =text parent= |
+| =message-end= | =message parent= (the message's deltas are all of it) |
+| =tool= | =id name state input output parent= (=state=: =started=, =completed=, =failed=) |
 | =status=, =error= | =text parent= |
-| =done= | =text error limit duration cost= |
+| =done= | =text error limit duration cost reason= |
 | =exit= | =status= |
+| =compacted=, =plan= | =text= |
+| =usage= | =context_used= |
 
-- *Must-ignore.*  Other types (=compacted=, =usage=, =rate-limit=,
-  =selection=, =incoming=, =replied=, =plan=, =suggestion=) are optional
-  to a client.  Pending requests and their resolution never travel only
-  as events: =approval= and =answered= events are also sent, for the
-  transcript, but the pending set follows =pending.added= and
-  =pending.resolved=.
-- *Today's gaps.*  Codex's adapter must emit =tool-output= (it drops
-  output deltas and MCP progress today), before slice 1.
-- *Schemas.*  The spec's JSON Schemas and its test vectors (real records
-  → events → messages) are slice 0's deliverable, built from the fields
-  above.
+- *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el= holds a turn
+  of each harness, record by record, with the events sent for each.  A
+  driver change that changes what is sent changes them, in review.
+- *Joining in slice 1:* =tool-output {id text}= (Codex command output
+  and MCP progress, from the chat rebuild's driver change), and the
+  transcript's =approval=, =answered= and =attributed=, whose request ids
+  are handles only the service can give.
 
 * The relay: =romacs-relay=
 A small Rust binary in a new crate, =crates/romacs-relay=, built on
@@ -862,20 +865,8 @@ Once the service runs on its own, an agent's editor tool needs an editor.
 Each slice is landable on its own:
 - *S0 — the specification.*  This document's v1 as a reference
   (=doc/agent-protocol.org=):
-  - v0 written down;
-  - JSON Schemas for every message, and test vectors (real records →
-    events → messages), including:
-    - a unit just over and just under 256 KiB, with the largest
-      permitted request =id= and token;
-    - a page whose =context= alone exceeds a reply;
-    - a catalog larger than a reply, with one provider over 256 KiB
-      followed by another entry;
-    - an editor tool result over the budget;
-    - an expired continuation;
-  - the Codex adapter's =tool-output=, and its =how= =harness= resolution
-    on =serverRequest/resolved= for a request still pending;
-  - the compactor raising the session's epoch in every deleting
-    transaction.
+  - the event schema and its vectors (Events);
+  - the epoch, raised by compaction and by the flip (Cursors).
 - *S1 — the service core*, inside the desktop process:
   - the host's v0.1 changes: the journaled =written= record, and
     =--input-tag= for per-turn prompts;
@@ -885,11 +876,18 @@ Each slice is landable on its own:
     commands with the command table, pending lifecycle, editor-less
     agent tools;
   - =romacs-agent-client.el=;
+  - row, request and message encoders beside the event schema, and
+    the Codex adapter's =harness= resolution on =serverRequest/resolved=
+    for a request still pending;
   - a conformance suite against a private editor with a scripted
     harness:
     - replay racing live output and a queue change;
     - a reconnect across compaction;
-    - an oversized event and a paged reply;
+    - an oversized event and a paged reply: a unit just over and just
+      under 256 KiB with the largest permitted request =id= and token, a
+      page whose =context= alone exceeds a reply, a catalog larger than a
+      reply, an editor tool result over the budget, an expired
+      continuation;
     - two clients answering one request;
     - a command repeated across a service restart;
     - the extra local hop measured.

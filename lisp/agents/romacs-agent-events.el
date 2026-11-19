@@ -41,7 +41,11 @@
     ;; A session's records the installer staged, not its records yet: the
     ;; journal's size and the count they were written from
     ;; (`romacs-agent-events--flip').
-    "create table if not exists staged (session text primary key, size integer, count integer) without rowid")
+    "create table if not exists staged (session text primary key, size integer, count integer) without rowid"
+    ;; A session's epoch: raised by every transaction that changes which
+    ;; of its records a reader reads other than by adding one
+    ;; (`romacs-agent-events--raise-epoch').
+    "create table if not exists epochs (session text primary key, epoch integer not null) without rowid")
   "The records' tables, made with the database: never dropped.")
 
 (defvar romacs-agent-events--made nil "The database the tables were made in.")
@@ -477,6 +481,24 @@ FUNCTION not called, when a host holds it."
       (delete-process process)
       (when (buffer-live-p (process-buffer process)) (kill-buffer (process-buffer process))))))
 
+(defun romacs-agent-events--raise-epoch (db id)
+  "Raise session ID's epoch in DB, in the caller's transaction.
+A session's events are not each a function of its record alone: a
+streamed message's whole record raises no text, since its deltas did
+\(`romacs-agent--claude-events').  So once records go (compaction), or
+its reader moves from journal to SQLite (a flip), what a reader holds
+up to a seq may no longer follow from the records after it: a reader
+that saw an epoch other than this one starts again (doc/agent-protocol.org)."
+  (sqlite-execute db (concat "insert into epochs values (?1, 1)"
+                             " on conflict (session) do update set epoch = epoch + 1")
+                  (list id)))
+
+(defun romacs-agent-events-epoch (id)
+  "Session ID's epoch: 0 when nothing ever raised it."
+  (or (when-let* ((db (romacs-agent-events--db)))
+        (caar (sqlite-select db "select epoch from epochs where session = ?" (list id))))
+      0))
+
 (defun romacs-agent-events--flip (id size count &optional dir)
   "Make the records written for session ID its own, holding its lock so
 no host starts on its journal meanwhile (`romacs-agent-events--holding'):
@@ -510,7 +532,8 @@ row, are removed."
                         free
                         (not (sqlite-select db "select 1 from imported where session = ?" (list id)))
                         (eql (caar (sqlite-select db "select count(*) from events where session = ?" (list id))) count)))
-          (if ok (sqlite-execute db "insert into imported values (?, ?)" (list id (float-time)))
+          (if ok (progn (sqlite-execute db "insert into imported values (?, ?)" (list id (float-time)))
+                        (romacs-agent-events--raise-epoch db id))
             (unless (sqlite-select db "select 1 from imported where session = ?" (list id))
               (sqlite-execute db "delete from events where session = ?" (list id))))
           (sqlite-execute db "delete from staged where session = ?" (list id))
@@ -628,8 +651,10 @@ records removed."
                      ;; this removes is from before it.
                      (when (romacs-agent-events--supervised-p id)
                        (error "Its supervisor runs"))
-                     (setq removed (+ removed (sqlite-execute db (car (last statements))
-                                                              (list id end low (+ low romacs-agent-events--compact-window)))))
+                     (let ((gone (sqlite-execute db (car (last statements))
+                                                 (list id end low (+ low romacs-agent-events--compact-window)))))
+                       (when (> gone 0) (romacs-agent-events--raise-epoch db id))
+                       (setq removed (+ removed gone)))
                      (sqlite-execute db "commit"))
                  (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err)))))
       (romacs-agent-events--write db "insert or replace into compacted values (?, ?)" (list (list id (1- end))))

@@ -302,8 +302,11 @@ moment more under load."
                              (romacs-agent-events-tests--delta 9 "m2" "ed"))
                      nil journal t 'silent)
        (romacs-agent-events-import session)
-       (let ((before (romacs-agent-events-tests--reply session)))
+       (let ((before (romacs-agent-events-tests--reply session))
+             (epoch (romacs-agent-events-epoch (romacs-agent-id session))))
          (should (= (romacs-agent-events-compact (romacs-agent-id session)) 2))
+         ;; One transaction removed records: the epoch rose once.
+         (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (1+ epoch)))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 5 6 7 8 9)))
          (should (equal (romacs-agent-events-tests--reply session) before))
          ;; Compacted to its last record: not compacted again until it has more.
@@ -332,8 +335,48 @@ moment more under load."
                                (codex 8 "item/commandExecution/outputDelta" (romacs-mcp--object "itemId" "c2" "delta" "cut")))
                        nil journal t 'silent))
        (romacs-agent-events-import session)
-       (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
-       (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))))))
+       (let ((epoch (romacs-agent-events-epoch (romacs-agent-id session))))
+         (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
+         (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))
+         ;; Two windows removed records (seqs 3-4, then 5), one did not.
+         (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (+ 2 epoch))))))))
+
+(ert-deftest romacs-agent-events-compaction-changes-what-follows-a-seq ()
+  ;; Why compacting raises the epoch: a reader that holds a streamed
+  ;; message's deltas up to seq 5 resumes with the events after it.  Its
+  ;; whole record raises no text while its deltas are there, and the whole
+  ;; text once they are gone: resumed across that, the text comes twice.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
+        (romacs-agent-events--imported (make-hash-table :test #'equal)))
+    (romacs-agent-events-tests--with-session
+     0
+     (lambda (session journal)
+       (write-region (concat (romacs-agent-events-tests--line 2 "in" (romacs-mcp--object "message" (romacs-mcp--object "content" "q" "role" "user")
+                                                                                          "romacsRequest" 1 "type" "user"))
+                             (romacs-agent-events-tests--line
+                              3 "out" (romacs-mcp--object "type" "stream_event"
+                                                          "event" (romacs-mcp--object "type" "message_start"
+                                                                                      "message" (romacs-mcp--object "id" "m1"))))
+                             (romacs-agent-events-tests--delta 4 "m1" "Hel")
+                             (romacs-agent-events-tests--delta 5 "m1" "lo")
+                             (romacs-agent-events-tests--line
+                              6 "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                          "message" (romacs-mcp--object "id" "m1" "content"
+                                                                                        (vector (romacs-mcp--object "type" "text" "text" "Hello")))))
+                             (romacs-agent-events-tests--line 7 "out" (romacs-mcp--object "type" "result" "result" "Hello")))
+                     nil journal t 'silent)
+       (romacs-agent-events-import session)
+       (cl-flet ((text-after (seq)
+                   (mapcar (lambda (event) (plist-get event :text))
+                           (cl-remove-if-not (lambda (event) (and (eq (plist-get event :type) 'delta) (> (plist-get event :seq) seq)))
+                                             (romacs-agent-events session)))))
+         (should (equal (text-after 0) '("Hel" "lo")))
+         (should (equal (text-after 5) nil))
+         (let ((epoch (romacs-agent-events-epoch (romacs-agent-id session))))
+           (should (= (romacs-agent-events-compact (romacs-agent-id session)) 2))
+           (should (equal (text-after 5) '("Hello")))
+           (should (> (romacs-agent-events-epoch (romacs-agent-id session)) epoch))))))))
 
 (ert-deftest romacs-agent-events-a-migration-job-writes-and-the-editor-makes-them-its-own ()
   ;; A job writes a session's records, compacted, and its turn rows, but
@@ -434,9 +477,10 @@ moment more under load."
     (romacs-agent-events-tests--with-session
      2
      (lambda (session journal)
-       (let ((id (romacs-agent-id session)) (imported nil))
+       (let ((id (romacs-agent-id session)) (imported nil) (epoch nil))
          (remhash id romacs-agent--sessions)
          (should (equal (romacs-agent-events-migrate) (list :migrated 1 :skipped nil :failed nil)))
+         (setq epoch (romacs-agent-events-epoch id))
          (cl-letf (((symbol-function 'romacs-agent-write)
                     (lambda (function args &optional done _key)
                       (let ((answer (list 'ok (apply function args)))) (when done (funcall done answer)) answer)))
@@ -445,6 +489,8 @@ moment more under load."
            (should (eq (romacs-agent-events--import-queued session) 'queued)))
          (should-not imported)
          (should (romacs-agent-events-p session))
+         ;; Its reader moves from journal to SQLite: a new epoch.
+         (should (= (romacs-agent-events-epoch id) (1+ epoch)))
          (should (file-exists-p journal))
          ;; No store readable yet (the writer still making it): not staged.
          (cl-letf (((symbol-function 'romacs-agent-events--db) #'ignore))
