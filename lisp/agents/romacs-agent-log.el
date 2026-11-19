@@ -306,14 +306,21 @@ parent call."
 
 (defun romacs-agent-log--report (output)
   "A subagent's OUTPUT as its report: without the frame Claude Code puts
-around it for its model (the hand-back notice, the agent's id, its
-usage).  RET still shows all of it."
-  (let ((report (if (string-match "\\`\\[Subagent hand-back\\]\\(?:.\\|\n\\)*?The report follows:[ \t]*\n" output)
-                    (substring output (match-end 0))
-                  output)))
-    ;; Its id and usage, after its words.
-    (string-trim (replace-regexp-in-string
-                  "\\(?:\n[ \t]*agentId: [^\n]*\\|\n?[ \t]*<usage>\\(?:.\\|\n\\)*?</usage>\\|[ \t\n]+\\)+\\'" "" report))))
+around it for its model (the hand-back notice before it, the agent's id
+and its usage after it).  RET still shows all of it."
+  (let ((report (string-trim-right
+                 (if (string-match "\\`\\[Subagent hand-back\\]\\(?:.\\|\n\\)*?The report follows:[ \t]*\n" output)
+                     (substring output (match-end 0))
+                   output))))
+    ;; Its last usage block, then its id line, at its end only.
+    (when (string-suffix-p "</usage>" report)
+      (let ((open nil) (from 0))
+        (while (setq from (string-search "<usage>" report from))
+          (setq open from from (1+ from)))
+        (when open (setq report (string-trim-right (substring report 0 open))))))
+    (when (string-match "\n[ \t]*agentId: [^\n]*\\'" report)
+      (setq report (substring report 0 (match-beginning 0))))
+    (string-trim report)))
 
 (defun romacs-agent-log--lines (text limit)
   "TEXT's first LIMIT lines and how many it has: (SHOWN . COUNT)."
@@ -369,7 +376,10 @@ its call, in place of those shown before."
          (count (+ (or (plist-get props :count) 0) (cl-count ?\n text)))
          ;; Lines whole and the one under way.
          (total (+ count (if (string-suffix-p "\n" streamed) 0 1)))
-         (shown (last (split-string (string-trim-right streamed) "\n") romacs-agent-log-output-lines))
+         (shown (last (let ((lines (split-string streamed "\n")))
+                        ;; The empty piece after a final newline is no line.
+                        (if (string-suffix-p "\n" streamed) (butlast lines) lines))
+                      romacs-agent-log-output-lines))
          (under (plist-get props :under))
          (live (or (plist-get props :live) (copy-marker under))))
     (setcdr block (plist-put (plist-put (plist-put props :streamed streamed) :live live) :count count))

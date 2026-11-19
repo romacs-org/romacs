@@ -423,7 +423,9 @@
   (should (equal (romacs-agent-log--report "Plain words. The report follows:\nmore <usage>inline</usage> text")
                  "Plain words. The report follows:\nmore <usage>inline</usage> text"))
   (should (equal (romacs-agent-log--report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
-                 "body")))
+                 "body"))
+  (should (equal (romacs-agent-log--report "[Subagent hand-back] f. The report follows:\nsee <usage>x</usage> here\nagentId: a\n<usage>t</usage>")
+                 "see <usage>x</usage> here")))
 
 (ert-deftest romacs-agent-log-output-before-its-call-is-kept ()
   (romacs-agent-log-tests--with

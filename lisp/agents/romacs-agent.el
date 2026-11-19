@@ -4337,8 +4337,10 @@ takes it, allows (t, or a plist of :answers or :always), else it is denied
 with MESSAGE.  BY, `user' or `policy', is who answered: a note says so in
 SESSION's records first, so every view shows who decided."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message))
-        (plan (member request-id (plist-get (romacs-agent-driver-state session) :plans))))
+  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
+         ;; A plan is proceeded with once: no rule for the session.
+         (allow (if (and plan allow) t allow))
+         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when by
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name by)
