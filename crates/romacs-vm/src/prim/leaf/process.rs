@@ -431,6 +431,10 @@ impl Leaf<'_> {
         let timeout = seconds.map(|s| std::time::Duration::from_secs_f64(s.clamp(0.0, 1e7)));
         let revents = self.vm.poll_quittable(&fds, timeout).map_err(|e| self.file_errno("Failed select", &e))?;
         if revents.iter().all(|&r| r == 0) {
+            // A worker's interrupt or termination ended the wait.
+            if let Some(quit) = self.vm.worker_quit() {
+                return Err(quit);
+            }
             return Ok(Value::NIL);
         }
         if keyboard.is_some() && revents.last().is_some_and(|&r| r != 0) {
