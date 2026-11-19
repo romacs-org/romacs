@@ -53,6 +53,10 @@ class ElispRunner(unittest.TestCase):
         # The runner's own tests print nested summaries; the last is the run's.
         summary = [line for line in result.stdout.splitlines() if line.startswith('SUMMARY ')][-1]
         self.assertTrue(summary.endswith('failed=0 errors=0'), summary)
+        # world-digest's tests need the Lisp prelude under --source.
+        for name in ('world-digest-compares-a-timer-but-for-its-due-time',
+                     'world-digest-compares-an-idle-timer-with-its-delay'):
+            self.assertIn(f'PASS {name}', result.stdout.splitlines())
 
     def test_zero_exit_without_execution_is_not_green(self):
         fake = Path(self.temp.name) / 'fake-host'
