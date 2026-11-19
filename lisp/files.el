@@ -3788,7 +3788,19 @@ Return nil if MODE could not be applied."
           (funcall modefun)
           (unless (or (eq mode major-mode) ;`set-auto-mode--last' is overkill.
                       ;; `modefun' is something like a minor mode.
-                      (local-variable-p 'set-auto-mode--last))
+                      (and (local-variable-p 'set-auto-mode--last)
+                           ;; Unless the record is a minor mode's, a local
+                           ;; `mode' its setup applied: that one guards the
+                           ;; minor mode within this setup, and gives way to
+                           ;; the major mode MODE stands for, so the next file
+                           ;; keeps it (LISP-SET-AUTO-MODE-LAST).  Only when
+                           ;; `modefun' is that major mode itself: a function
+                           ;; that picks one by the text, as `c-or-c++-mode'
+                           ;; does, must run again for the next file.
+                           (not (and (not (memq modefun minor-mode-list))
+                                     (memq (car set-auto-mode--last) minor-mode-list)
+                                     (eq (indirect-function modefun)
+                                         (indirect-function major-mode))))))
             (setq set-auto-mode--last (cons mode major-mode)))
           mode)))))
 
