@@ -102,6 +102,7 @@ fn act_in_role() -> bool {
             launch(&store.unwrap())
         }
         Ok("probe") => probe(),
+        Ok("probe-race") => probe_race(),
         Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
@@ -263,6 +264,25 @@ fn probe() {
     let first = format!("{:?}", arena::adopt(&file));
     let again = format!("{:?}", arena::adopt(&file));
     println!("WORLD-IMAGE {}", json!({"restore": first, "again": again, "failure": arena::map_failure(),
+                                       "kept": arena::mapped_image().is_some()}));
+}
+
+/// Adopt the file the parent named from two threads at once: one maps it,
+/// the other finds it adopted, and the image stays the process's.
+fn probe_race() {
+    let path = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_FILE").unwrap();
+    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let threads: Vec<_> = (0..2).map(|_| {
+        let (path, start) = (path.clone(), start.clone());
+        std::thread::spawn(move || {
+            let file = std::fs::File::open(path).unwrap();
+            start.wait();
+            format!("{:?}", arena::adopt(&file))
+        })
+    }).collect();
+    let mut outcomes: Vec<String> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    outcomes.sort();
+    println!("WORLD-IMAGE {}", json!({"outcomes": outcomes, "restore": format!("{:?}", arena::restore_outcome()),
                                        "kept": arena::mapped_image().is_some()}));
 }
 
@@ -485,6 +505,10 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // Adopted once per process: a second adoption is refused, says so, and
     // the first image stays the process's.
     assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0,false],"kept":true,"restore":"Mapped"}"#);
+    // Two threads adopting at once: one maps the image, the other is told
+    // it is adopted, and what became of the first stays said.
+    assert_eq!(outcome(child("probe-race", &store).env("ROMACS_WORLD_IMAGE_TEST_FILE", &whole)),
+               r#"{"kept":true,"outcomes":["Map","Mapped"],"restore":"Mapped"}"#);
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
