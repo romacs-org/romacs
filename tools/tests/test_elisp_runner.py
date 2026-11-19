@@ -61,6 +61,24 @@ class ElispRunner(unittest.TestCase):
         self.assertIn('FAIL fixture-pass', result.stdout)
         self.assertEqual(before, hashlib.sha256(self.binary.read_bytes()).digest())
 
+    def test_an_ert_file_is_refused_before_any_host_runs(self):
+        ran = Path(self.temp.name) / 'ran'
+        fake = Path(self.temp.name) / 'fake-host'
+        fake.write_text(f'#!/bin/sh\ntouch {ran}\nexit 0\n')
+        fake.chmod(0o700)
+        for text in ['(ert-deftest an-ert-test () (should t))\n', '(defun no-tests-here () nil)\n']:
+            self.fixture.write_text(text)
+            result = self.run_tests(binary=fake)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('tools/test-ert', result.stderr)
+            self.assertFalse(ran.exists(), 'the host ran for a file the runner should refuse')
+
+    def test_core_refuses_a_file_that_declares_it_needs_the_editor(self):
+        self.fixture.write_text(';; romacs-test: editor\n(romacs-deftest fixture-pass () (romacs-should t))\n')
+        result = self.run_tests('--test', 'fixture-pass')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('romacs-test: editor', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

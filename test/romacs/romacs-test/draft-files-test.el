@@ -1,5 +1,6 @@
 ;;; draft-files-test.el --- Disposable draft filesystem boundary -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs the coding systems, raw-text among them)
 ;; tools/test-elisp supplies a private HOME, removed after the run.
 
 (defun draft-files-test-path (name)

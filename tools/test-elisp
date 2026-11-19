@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,21 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPLETE = 'ROMACS-TEST-COMPLETE'
+
+
+def not_romacs_test(text):
+    """Why TEXT is no romacs-test file, or None when it is one."""
+    if re.search(r'^\s*\(ert-deftest\b', text, re.M):
+        return 'it defines ERT tests (ert-deftest)'
+    if not re.search(r'\(romacs-deftest\b', text):
+        return 'it defines no romacs-deftest'
+    return None
+
+
+def needs_editor(text):
+    """Whether TEXT declares it needs the editor's startup: a
+    `;; romacs-test: editor' line, which `--core' skips."""
+    return re.search(r'^;+\s*romacs-test:\s*editor\b', text, re.M) is not None
 
 
 def main():
@@ -26,12 +42,20 @@ def main():
     if args.timeout <= 0:
         parser.error('--timeout must be positive')
     files = args.files or sorted((ROOT / 'test/romacs/romacs-test').glob('*-test.el'))
-    if not files:
-        parser.error('No Elisp test files selected')
     files = [p.resolve() for p in files]
     for path in files:
         if not path.is_file():
             parser.error(f'Test file does not exist: {path}')
+        problem = not_romacs_test(path.read_text(errors='replace'))
+        if problem:
+            parser.error(f'{path}: {problem}; this runner runs romacs-test files (romacs-deftest), and ERT files run with tools/test-ert')
+    if args.core:
+        editor = [p for p in files if needs_editor(p.read_text(errors='replace'))]
+        if args.files and editor:
+            parser.error(f'{editor[0]}: declares "romacs-test: editor", which the bare VM (--core) cannot run')
+        files = [p for p in files if p not in editor]
+    if not files:
+        parser.error('No Elisp test files selected')
     binary = args.binary or os.environ.get('ROMACS_TEST_BINARY')
     if not binary:
         target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
