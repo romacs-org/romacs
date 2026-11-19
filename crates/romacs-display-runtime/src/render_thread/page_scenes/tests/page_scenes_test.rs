@@ -34,7 +34,7 @@ pub(super) fn frame(window: u64, rows: u32, cols: u16) -> FrameGlyphBuffer {
 }
 
 fn logo(window: u64, top: i32) -> TextAnimation {
-    TextAnimation { window, top, cols: 10, rows: 4, anchor: None, fps: 25, moving: true, still: false,
+    TextAnimation { window, top, cols: 10, rows: 4, anchor: None, rise: None, fps: 25, moving: true, still: false,
                     kind: TextAnimationKind::Logo { cell_aspect: 0.4, epoch: 0, colours: Default::default() } }
 }
 

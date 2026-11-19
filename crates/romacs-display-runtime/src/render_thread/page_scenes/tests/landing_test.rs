@@ -505,7 +505,7 @@ mod gpu {
         page_frame.background_alpha = ALPHA;
         page_frame.set_face(FaceId::new(3), romacs_display_protocol::Color::WHITE, Some(page),
                        400, false, 0, None, 0, None, 0, None);
-        let animation = TextAnimation { window: 1, top: 0, cols: cols.into(), rows, anchor: None, fps: 25, moving: false, still: true,
+        let animation = TextAnimation { window: 1, top: 0, cols: cols.into(), rows, anchor: None, rise: None, fps: 25, moving: false, still: true,
                                         kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0, colours: Default::default() } };
         let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
                                                      std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);
@@ -602,7 +602,7 @@ mod gpu {
         let (cols, rows) = (110_u16, 36_u32);
         let (w, h) = (10 + u32::from(cols) * 9, 40 + rows * 22);
         let frame = super::super::super::tests::frame(1, rows, cols);
-        let animation = |top: i32| TextAnimation { window: 1, top, cols: cols.into(), rows, anchor: None, fps: 25, moving: top > -(rows as i32),
+        let animation = |top: i32| TextAnimation { window: 1, top, cols: cols.into(), rows, anchor: None, rise: None, fps: 25, moving: top > -(rows as i32),
                                                    still: true, kind: TextAnimationKind::Logo { cell_aspect: 9.0 / 22.0, epoch: 0, colours: Default::default() } };
         let mut renderer = WgpuRenderer::with_device(std::sync::Arc::new(device.clone()),
                                                      std::sync::Arc::new(queue.clone()), w, h, FORMAT, 1.0);

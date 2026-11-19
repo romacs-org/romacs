@@ -1257,7 +1257,7 @@ fn placed_animations(animations: &[(u64, romacs_display_protocol::text_animation
     animations.iter().filter_map(|(id, animation)| {
         if animation.anchor.is_none() { return Some((*id, animation.clone())); }
         let end = ends.iter().find(|end| end.id == animation.window)?;
-        let rows: Vec<usize> = end.rows.iter().map(|row| row.start).collect();
+        let rows: Vec<(usize, f32)> = end.rows.iter().map(|row| (row.start, row.y)).collect();
         animation.placed(&rows, end.end).map(|placed| (*id, placed))
     }).collect()
 }

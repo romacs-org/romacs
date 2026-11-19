@@ -384,7 +384,9 @@ impl DisplayState {
     pub(super) fn published_byte(&self, id: u64, byte: usize) -> Option<usize> {
         match self.segments(id) {
             None => byte.checked_sub(self.base(id)),
-            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte <= s.buffer + s.len)
+            // Half open, as the echo area maps its text: a byte at a
+            // string's position is the text after the string.
+            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte < s.buffer + s.len)
                 .map(|s| s.display + (byte - s.buffer)),
         }
     }
@@ -767,7 +769,7 @@ impl Vm {
                 _ => None,
             };
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows, anchor,
+                window, top, cols: natural(cols)? as u32, rows, anchor, rise: None,
                 fps: natural(fps)? as u32, moving: (anchor.is_some() || in_view) && moving != Value::NIL && moving != still,
                 still: moving == still, kind,
             }));
