@@ -232,11 +232,19 @@ and `wait' waiting until its form holds (5 s at most)."
 (ert-deftest romacs-agent-service-leaves-the-board-its-own-view ()
   ;; The service's whole pass makes its own view of the unloaded sessions:
   ;; the board's, whose shown rows hold its sessions, stays as it was.
+  ;; Its keys read its own: an unloaded parent's finished child reads
+  ;; completed, as on the board.
   (romacs-agent-service-tests--with
-    (let ((romacs-agent-board--unloaded 'the-boards))
-      (romacs-agent-service-start socket)
-      (romacs-agent-service--refresh t)
-      (should (eq romacs-agent-board--unloaded 'the-boards)))))
+    (let ((romacs-agent-board--unloaded 'the-boards)
+          (stored (list (romacs-agent--make :id "p" :harness 'claude :state 'idle :cwd "/p/")
+                        (romacs-agent--make :id "c" :harness 'claude :state 'idle :cwd "/p/"
+                                            :done-seq 4 :options '(:parent "p")))))
+      (cl-letf (((symbol-function 'romacs-agent-store-unloaded) (lambda () stored)))
+        (romacs-agent-service-start socket)
+        (romacs-agent-service--refresh t))
+      (should (eq romacs-agent-board--unloaded 'the-boards))
+      (should (equal (gethash "key" (gethash "c" (romacs-agent-service--list-rows romacs-agent-service--list)))
+                     "completed")))))
 
 (ert-deftest romacs-agent-service-runs-its-whole-pass-when-quiet ()
   (romacs-agent-service-tests--with

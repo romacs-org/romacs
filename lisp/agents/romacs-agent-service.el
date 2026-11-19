@@ -274,19 +274,18 @@ the board; its children are counted where the rows are kept."
 (defun romacs-agent-service--whole-rows ()
   "Every session this machine's board shows, as rows by id, their keys the
 board's own (`romacs-agent-board--key'), from the board's own sessions
-\(`romacs-agent-board--sessions'), whose view of the unloaded ones is kept
-for the rows made before the next whole pass."
-  (let* ((sessions (let ((romacs-agent-board--unloaded nil))
-                     ;; The board's own view stays the board's: the rows it
-                     ;; shows hold its sessions.
-                     (prog1 (romacs-agent-board--sessions)
-                       (setq romacs-agent-service--unloaded romacs-agent-board--unloaded))))
-         (rows (make-hash-table :test #'equal :size (length sessions))))
-    (dolist (session sessions)
-      (let ((id (romacs-agent-id session)))
-        (unless (gethash id rows)
-          (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
-    rows))
+\(`romacs-agent-board--sessions').  Its view of the unloaded ones is the
+service's own, kept for the rows made before the next whole pass: the
+board's stays the board's, as the rows it shows hold its sessions."
+  (let ((romacs-agent-board--unloaded nil))
+    (let* ((sessions (romacs-agent-board--sessions))
+           (rows (make-hash-table :test #'equal :size (length sessions))))
+      (setq romacs-agent-service--unloaded romacs-agent-board--unloaded)
+      (dolist (session sessions)
+        (let ((id (romacs-agent-id session)))
+          (unless (gethash id rows)
+            (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
+      rows)))
 
 (defun romacs-agent-service--session (id)
   "Session ID as it is now, loaded or from its row, or nil when it is gone;
