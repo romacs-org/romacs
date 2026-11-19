@@ -1556,7 +1556,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
-            self.vm.permanent_names_added.push(value);
+            self.vm.names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.
