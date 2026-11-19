@@ -17,8 +17,7 @@ fn readable_ir_is_reachable_for_source_submissions() {
         String::from_utf8_lossy(&output.stderr)
     );
     let ir = String::from_utf8(output.stdout).unwrap();
-    // The entry's index follows the prelude's own functions.
-    assert!(ir.starts_with("entry f"), "{ir}");
+    assert!(ir.starts_with("entry f0\n"));
     assert!(ir.contains("return r"));
 }
 
