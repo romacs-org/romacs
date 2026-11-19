@@ -114,7 +114,7 @@ pub(super) fn display_face_runs(runs: &[FaceRun], segments: &[Segment], strings:
 /// the rows before it (continuation_lines_width; a TAB that does not fit
 /// counts its row as full); any other character its width by RULE
 /// (width_rule.rs).
-pub(super) fn row_starts(text: &str, width: usize, wrap: LineWrap, rule: &WidthRule) -> Vec<usize> {
+fn row_starts(text: &str, width: usize, wrap: LineWrap, rule: &WidthRule) -> Vec<usize> {
     let advance = |c: char, line_x: usize| rule.columns(c as u32, line_x);
     let mut starts = vec![0];
     // AT is the row's x, CONTINUED the line's rows before it; WRAP_AT the

@@ -2,7 +2,7 @@ use super::*;
 use romacs_display_protocol::text_animation::TextAnimationKind;
 
 fn logo(moving: bool, epoch: u64) -> TextAnimation {
-    TextAnimation { window: 1, top: 0, cols: 10, rows: 4, fps: 25, moving, still: false,
+    TextAnimation { window: 1, top: 0, cols: 10, rows: 4, anchor: None, fps: 25, moving, still: false,
                     kind: TextAnimationKind::Logo { cell_aspect: 0.5, epoch, colours: Default::default() } }
 }
 
@@ -57,7 +57,7 @@ fn an_animated_frame_promises_no_layout_identity() {
 }
 
 fn thread(work: romacs_logo::working::Work, epoch: u64) -> TextAnimation {
-    TextAnimation { window: 1, top: 0, cols: 12, rows: 1, fps: 30, moving: true, still: false,
+    TextAnimation { window: 1, top: 0, cols: 12, rows: 1, anchor: Some(0), fps: 30, moving: true, still: false,
                     kind: TextAnimationKind::Working { work, beats: 0, epoch, colour: [0xd4, 0x8a, 0x20] } }
 }
 
@@ -83,28 +83,38 @@ fn a_working_thread_moves_by_itself_and_keeps_its_motion_across_states() {
 }
 
 #[test]
-fn a_thread_is_placed_on_its_own_braille_row_and_never_over_other_text() {
+fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
     use romacs_display_protocol::face::BoxVerticalEdges;
     use romacs_display_protocol::frame_glyphs::GlyphRowRole;
     use romacs_display_protocol::text_animation::located;
     use romacs_display_protocol::types::{DisplayWindowId, FaceId};
     use romacs_logo::working::Work;
+    // A line that wrapped, then the thread's own row.
+    let text = ["a long reply line", "that wrapped once", "⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ running"];
     let mut frame = FrameGlyphBuffer::new();
     frame.char_width = 8.0;
     frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
-    for (r, text) in ["a long reply line", "that wrapped once", "⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ running"].into_iter().enumerate() {
-        for (c, ch) in text.chars().enumerate() {
+    for (r, line) in text.into_iter().enumerate() {
+        for (c, ch) in line.chars().enumerate() {
             frame.add_char_on_row(ch, (c as f32 * 8.0, r as f32 * 16.0, r as u32), (8.0, 16.0, 12.0),
                                   FaceId::new(0), BoxVerticalEdges::Both);
         }
     }
-    // The evaluator, counting lines, thought it was on row 1.
-    let at = |top: i32, still: bool| {
-        let mut animation = thread(Work::Running, 0);
-        (animation.top, animation.still) = (top, still);
-        located(&frame, &animation).map(|a| a.top)
-    };
-    assert_eq!(at(1, false), Some(2));
-    assert_eq!(at(9, false), None, "no braille row near: nothing painted");
-    assert_eq!(at(2, true), None, "motion off: the still frame shows alone");
+    // The layout's rows start at bytes 0, 17 and 35; the thread at 35.
+    let mut animation = thread(Work::Running, 0);
+    animation.anchor = Some(35);
+    let placed = animation.placed(&[0, 17, 35], 80).expect("on a laid row");
+    assert_eq!(placed.top, 2);
+    assert_eq!(located(&frame, &placed).map(|a| a.top), Some(2));
+    // Scrolled past: no laid row shows it.
+    animation.anchor = Some(3);
+    assert_eq!(animation.placed(&[10, 20], 40), None);
+    // A row that is not its braille is never painted over.
+    let mut wrong = placed.clone();
+    wrong.top = 1;
+    assert_eq!(located(&frame, &wrong), None);
+    // Motion off: the still frame shows alone.
+    let mut still = placed;
+    still.still = true;
+    assert_eq!(located(&frame, &still), None);
 }

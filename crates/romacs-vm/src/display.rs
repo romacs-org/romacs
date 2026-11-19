@@ -379,6 +379,15 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
+    /// The byte window ID's last published text shows buffer byte BYTE at,
+    /// or None where that text does not show it.
+    pub(super) fn published_byte(&self, id: u64, byte: usize) -> Option<usize> {
+        match self.segments(id) {
+            None => byte.checked_sub(self.base(id)),
+            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte <= s.buffer + s.len)
+                .map(|s| s.display + (byte - s.buffer)),
+        }
+    }
     /// Window END.id's last publication was painted as END reports, ending
     /// at buffer byte BYTE.
     pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
@@ -745,9 +754,22 @@ impl Vm {
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
+            // A working thread is placed by the host on the row its layout
+            // lays START on: START as a byte of the text it published.
+            let anchor = match kind {
+                TextAnimationKind::Working { .. } => {
+                    let byte = self.shown_text(buffer).ok().and_then(|b| {
+                        let pos = (start.max(1) as usize - 1).min(b.len_chars());
+                        b.byte_of_char(coordinates::CharOffset(pos)).ok().map(|o| o.0)
+                    });
+                    match byte.and_then(|byte| self.display_state.published_byte(window, byte)) { Some(a) => Some(a), None => continue }
+                }
+                _ => None,
+            };
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows,
-                fps: natural(fps)? as u32, moving: in_view && moving != Value::NIL && moving != still, still: moving == still, kind,
+                window, top, cols: natural(cols)? as u32, rows, anchor,
+                fps: natural(fps)? as u32, moving: (anchor.is_some() || in_view) && moving != Value::NIL && moving != still,
+                still: moving == still, kind,
             }));
         }
         Ok(animations)
@@ -760,7 +782,6 @@ impl Vm {
         let w = self.window(window)?;
         let (buffer, marker) = (w.buffer, w.start);
         let window_rows = w.height / self.window_state.line.max(1);
-        let width = w.width;
         let window_start = self.marker_position_value(marker)?.integer_value().unwrap_or(1);
         let Ok(b) = self.shown_text(buffer) else { return Err("buffer required".into()) };
         let byte = |pos: i64| -> Result<usize> {
@@ -769,17 +790,7 @@ impl Vm {
         };
         let (from, to) = (byte(start.min(window_start))?, byte(start.max(window_start))?);
         let limit = rows.max(window_rows) as usize;
-        let lines = text_animation_lines(&b.as_str().as_bytes()[from..to], limit);
-        // Within view, its visual rows: wrapped lines take as many as the
-        // window wraps them into, by the rules the echo area's rows use.
-        let lines = if lines >= limit { lines } else {
-            let text = b.as_str()[from..to].to_owned();
-            let column = self.window_state.column.max(1);
-            let [left, right] = self.window_fringe_widths(window)?;
-            let (wrap, rule) = (self.window_line_wrap(window, buffer)?, self.buffer_width_rule(buffer)?);
-            let columns = (width.saturating_sub(left + right) / column).max(1) as usize;
-            mini_window::row_starts(&text, columns, wrap, &rule).len() - 1
-        } as i32;
+        let lines = text_animation_lines(&b.as_str().as_bytes()[from..to], limit) as i32;
         let top = if start <= window_start { -lines } else { lines };
         Ok((top, -top < rows as i32 && top < window_rows as i32))
     }

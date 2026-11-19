@@ -1142,7 +1142,7 @@ fn paint(
     let status_bar = shown.snapshot.status_bar.as_ref().map(|bar| romacs_layout::status_bar_extents(&frame, bar)).unwrap_or_default();
     let submit_start = Instant::now();
     images.borrow_mut().publish(sender, std::iter::once(&frame).chain(&children))?;
-    sender.submit_scene(frame, children, shown.animations.clone())?;
+    sender.submit_scene(frame, children, placed_animations(&shown.animations, &ends))?;
     images.borrow_mut().retire_surfaces(sender)?;
     let submit_ns = submit_start.elapsed().as_nanos();
     let activation_start = Instant::now();
@@ -1249,6 +1249,19 @@ fn cursor_colour(snapshot: &romacs_layout_input::FrameSnapshot) -> romacs_displa
     romacs_display_protocol::Color::from_pixel(u32::from_be_bytes([0, r, g, b]))
 }
 
+/// ANIMATIONS on the rows ENDS laid their windows out in: an anchored one
+/// (a working thread) on the row its anchor is laid on, and dropped where
+/// no laid row shows it; any other as it is.
+fn placed_animations(animations: &[(u64, romacs_display_protocol::text_animation::TextAnimation)],
+                     ends: &[romacs_vm::WindowEnd]) -> Vec<(u64, romacs_display_protocol::text_animation::TextAnimation)> {
+    animations.iter().filter_map(|(id, animation)| {
+        if animation.anchor.is_none() { return Some((*id, animation.clone())); }
+        let end = ends.iter().find(|end| end.id == animation.window)?;
+        let rows: Vec<usize> = end.rows.iter().map(|row| row.start).collect();
+        animation.placed(&rows, end.end).map(|placed| (*id, placed))
+    }).collect()
+}
+
 fn paint_prompt(
     engine: &mut romacs_layout::LayoutEngine,
     sender: &PaintSender,
@@ -1273,7 +1286,7 @@ fn paint_prompt(
         }).collect::<Vec<_>>()
     });
     images.borrow_mut().publish(sender, std::iter::once(&glyphs).chain(&children))?;
-    sender.submit_scene(glyphs, children, frame.text_animations.clone())?;
+    sender.submit_scene(glyphs, children, placed_animations(&frame.text_animations, &ends))?;
     images.borrow_mut().retire_surfaces(sender)?;
     if let Some(observed) = observed {
         crate::diagnostic_line(&json!({"diagnostic":"submitted-scene","presentation":presentation,"glyphs":observed}));

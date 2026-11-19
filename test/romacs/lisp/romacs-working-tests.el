@@ -97,6 +97,11 @@
             ((symbol-function 'face-foreground)
              (lambda (face &rest _) (alist-get face '((error . "#d35f5f") (warning . "#d7af5f"))))))
     (should (equal (romacs-working--running-colour) "#5fafd7")))
+  ;; No colour far from error: the theme's foreground, never the last theme's.
+  (cl-letf (((symbol-function 'romacs-theme-color) (lambda (&rest _) "#d35f5f"))
+            ((symbol-function 'face-foreground)
+             (lambda (face &rest _) (alist-get face '((error . "#d35f5f") (link . "#d35f5f") (default . "#c0c0c0"))))))
+    (should (equal (romacs-working--running-colour) "#c0c0c0")))
   (should (romacs-working--far-p "#5fafd7" '("#d35f5f")))
   (should-not (romacs-working--far-p "#d4605e" '("#d35f5f"))))
 

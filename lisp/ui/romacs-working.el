@@ -75,16 +75,18 @@ cyan and link colours far from its error and warning colours, else its
 foreground."
   (let ((avoid (list (face-foreground 'error nil t) (face-foreground 'warning nil t)))
         (palette (lambda (slot) (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))))
-    (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid)))
-                (list (funcall palette 'accent) (funcall palette 'blue) (funcall palette 'cyan)
-                      (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)
-                      (face-foreground 'default nil t)))))
+    (or (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid)))
+                    (list (funcall palette 'accent) (funcall palette 'blue) (funcall palette 'cyan)
+                          (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))
+        (face-foreground 'default nil t))))
 
 (defun romacs-working--derive (&rest _)
   "Make `romacs-working-running' the theme's running colour, as its
 default spec: a theme's or the user's own spec still wins."
-  (when-let* ((colour (romacs-working--running-colour)))
-    (face-spec-set 'romacs-working-running `((t :foreground ,colour)) 'face-defface-spec)))
+  (let ((colour (romacs-working--running-colour)))
+    (face-spec-set 'romacs-working-running
+                   (if colour `((t :foreground ,colour)) '((t :inherit default)))
+                   'face-defface-spec)))
 
 (add-hook 'enable-theme-functions #'romacs-working--derive)
 (add-hook 'disable-theme-functions #'romacs-working--derive)

@@ -18,6 +18,10 @@ pub struct TextAnimation {
     pub top: i32,
     pub cols: u32,
     pub rows: u32,
+    /// Where its block starts, a byte of the text the window published,
+    /// for a kind the host places on the row its layout lays that byte on
+    /// (`Self::placed`); None for one placed by TOP as counted.
+    pub anchor: Option<usize>,
     pub fps: u32,
     /// Whether it moves; else it shows the frame it reached.
     pub moving: bool,
@@ -78,6 +82,17 @@ impl TextAnimationKind {
 }
 
 impl TextAnimation {
+    /// This animation placed on the window's laid-out rows, ROWS their
+    /// starts (bytes of its published text, in order) and END the byte
+    /// after its last shown character: its TOP the row ANCHOR is on.  None
+    /// when the rows do not show it; itself when it has no anchor.
+    pub fn placed(&self, rows: &[usize], end: usize) -> Option<Self> {
+        let Some(anchor) = self.anchor else { return Some(self.clone()) };
+        if anchor >= end && anchor != rows.last().copied().unwrap_or(usize::MAX) { return None; }
+        let row = rows.iter().rposition(|&start| start <= anchor)?;
+        Some(Self { top: i32::try_from(row).ok()?, ..self.clone() })
+    }
+
     /// Whether NEXT continues this one's motion rather than restarting it.
     pub fn continues(&self, next: &Self) -> bool {
         match (&self.kind, &next.kind) {
@@ -251,30 +266,25 @@ fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlo
 
 /// ANIMATION's window's first text row and column in FRAME, where its
 /// block is placed from.
-/// ANIMATION as FRAME shows it: a working thread's block confirmed on the
-/// frame's own rows, its first row the one, at or within two of the
-/// evaluator's estimate (which counts rows before layout), whose cells
-/// all hold braille, the thread's still frame; none when no row does, so
-/// it never paints over text not its own, and none while motion is off.
-/// Any other kind as it is.
+/// ANIMATION as FRAME shows it: a working thread only on its own row,
+/// the one the host placed it on (`TextAnimation::placed`), whose cells
+/// must all hold braille, the thread's still frame, so it never paints
+/// over text not its own; none while motion is off, the evaluator's
+/// still frame showing alone.  Any other kind as it is.
 pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<TextAnimation> {
     if !matches!(animation.kind, TextAnimationKind::Working { .. }) {
         return Some(animation.clone());
     }
-    // Motion off: the evaluator's still frame shows, nothing over it.
     if animation.still {
         return None;
     }
     let (first_row, first_col) = origin(frame, animation)?;
-    let braille: std::collections::HashSet<(i64, u16)> = frame.glyphs.iter().filter_map(|glyph| match glyph {
+    let row = i64::from(first_row) + i64::from(animation.top);
+    let braille = |col: u32| frame.glyphs.iter().any(|glyph| matches!(glyph,
         FrameGlyph::Char { slot_id, char, row_role: GlyphRowRole::Text, .. }
-            if slot_id.window_id.get() as u64 == animation.window && ('\u{2800}'..='\u{28ff}').contains(char) =>
-            Some((i64::from(slot_id.row) - i64::from(first_row), slot_id.col - first_col)),
-        _ => None,
-    }).collect();
-    [0, -1, 1, -2, 2].into_iter().map(|delta| animation.top + delta).find(|&top| {
-        (0..animation.cols).all(|col| u16::try_from(col).is_ok_and(|col| braille.contains(&(i64::from(top), col))))
-    }).map(|top| TextAnimation { top, ..animation.clone() })
+            if slot_id.window_id.get() as u64 == animation.window && i64::from(slot_id.row) == row
+               && u32::from(slot_id.col - first_col) == col && ('\u{2800}'..='\u{28ff}').contains(char)));
+    (0..animation.cols).all(braille).then(|| animation.clone())
 }
 
 fn origin(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<(u32, u16)> {
