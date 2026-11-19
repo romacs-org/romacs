@@ -79,15 +79,19 @@ CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test
 # Tests too costly for every change that reaches their package, each with
 # the paths that call for it beside its own file and fixtures: it runs for
 # those, and in the full gate. The Lisp tree's compile (lisp_tree_compiles.rs,
-# 2 to 19 minutes cold, and cold for every new build) for the compiler and the
+# 2 to 19 minutes cold, and cold for every new build) for the compiled-Lisp
+# store; the compiler's own modules, whose job is compiling Lisp to the VM's
+# code (request_code, expand, variable_definitions, capture, sealed); and the
 # Lisp a file's compile walks it with: romacs-compile.el, and the macro
 # expansion and closure conversion it calls (macroexp, byte-run, bytecomp,
-# cconv). A Lisp file that comes to fail to compile, and a change to the
-# compile pipeline outside these paths (world/, batch.rs), are caught by the
-# full gate the nightly runs.
+# cconv). A Lisp file that comes to fail to compile, the compiler's functions
+# that live in lib.rs (Vm::compile, build_function and the rest), and a change
+# to the compile pipeline outside these paths (world/, batch.rs) are caught by
+# the full gate the nightly runs.
 PATH_GATED = {
     'romacs-vm-gui::lisp_tree_compiles': re.compile(
         r'^(?:crates/romacs-vm/src/compiled_lisp/'
+        r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed)\.rs$'
         r'|lisp/emacs-lisp/(?:romacs-compile|macroexp|byte-run|bytecomp|cconv)\.el$)'),
 }
 
@@ -211,7 +215,8 @@ def select(paths, root, metadata):
         pattern = re.compile(rf'["/]{re.escape(tree)}/|join\("{re.escape(tree)}"\)')
         return sorted({owner(path)[0] for path, text in sources.items() if pattern.search(text)} - {None})
 
-    for path in sorted(set(paths)):
+    paths = sorted(set(paths))
+    for path in paths:
         if QUIET.search(path):
             continue
         for rx, name in HARNESS_RULES:

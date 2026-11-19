@@ -41,6 +41,7 @@ def workspace(root):
         'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs': 'const K: &str = include_str!("lisp_tree_compile_failures.txt");\n',
         'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt': '',
         'crates/romacs-vm/src/compiled_lisp/tree.rs': '',
+        'crates/romacs-vm/src/request_code.rs': '',
         'crates/romacs-vm-gui/harness/live_oracle.py': '',
         'crates/romacs-vm-gui/harness/scaling_live.py': 'import live_oracle\n',
         'crates/romacs-vm-gui/harness/world_live.py': 'from live_oracle import stop\n',
@@ -156,7 +157,8 @@ class Select(unittest.TestCase):
                 self.assertIn(f'not ({impact.test_file(gated)})', found['filter'])
                 gui = {package: terms for package, _, terms in impact.runs(found, self.root)}['romacs-vm-gui']
                 self.assertTrue(gui.endswith(f'& not ({impact.test_file(gated)})'), gui)
-        for path in ('crates/romacs-vm/src/compiled_lisp/tree.rs', 'lisp/emacs-lisp/romacs-compile.el',
+        for path in ('crates/romacs-vm/src/compiled_lisp/tree.rs', 'crates/romacs-vm/src/request_code.rs',
+                     'lisp/emacs-lisp/romacs-compile.el',
                      'lisp/emacs-lisp/macroexp.el', 'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt',
                      'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs'):
             with self.subTest(path):
@@ -164,6 +166,10 @@ class Select(unittest.TestCase):
                 self.assertEqual(found['leave'], [])
                 self.assertNotIn('not (', found['filter'])
         self.assertEqual(self.select('lisp/session/x.el', 'Cargo.lock')['leave'], [], 'everything runs it')
+        # The paths are read once: a generator of them gates as a list does.
+        once = impact.select((p for p in ['lisp/session/x.el', 'crates/romacs-vm/src/request_code.rs']), self.root, self.metadata)
+        self.assertEqual(once['leave'], [])
+        self.assertEqual(impact.select((p for p in ['lisp/session/x.el']), self.root, self.metadata)['leave'], [gated])
 
     def test_a_rule_adds_its_harness(self):
         self.assertIn('agent', self.select('crates/romacs-vm-gui/harness/agent_live.py')['harnesses'])
