@@ -366,7 +366,10 @@
     (draw :type 'unknown :method "thread/name/updated" :raw (romacs-agent-log-tests--input "name" "x"))
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "· thread/name/updated" text))
-      (should-not (string-match-p "hash-table" text)))))
+      (should-not (string-match-p "hash-table" text)))
+    ;; A Claude Code line, by its type.
+    (draw :type 'unknown :raw (romacs-agent-log-tests--input "type" "tool_progress"))
+    (should (string-match-p "· tool_progress" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-a-shown-running-chat-keeps-its-clock ()
   (romacs-agent-log-tests--with

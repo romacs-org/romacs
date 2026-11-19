@@ -647,6 +647,8 @@ unless a note said who gave it, that it was answered."
     ('unknown (let ((raw (plist-get event :raw)))
                 (romacs-agent-log--line event 'note
                                         (propertize (concat "· " (or (plist-get event :method)
+                                                                     (and (hash-table-p raw) (stringp (gethash "type" raw))
+                                                                          (gethash "type" raw))
                                                                      (and (stringp raw) (truncate-string-to-width
                                                                                          (car (split-string raw "\n")) 100
                                                                                          nil nil (truncate-string-ellipsis)))
