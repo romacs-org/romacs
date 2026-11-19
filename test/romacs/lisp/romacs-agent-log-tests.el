@@ -359,5 +359,23 @@
     (draw :type 'task :id "gone" :state 'progress :activity "Read")
     (should (string-match-p "task now: Read" (romacs-agent-log-tests--transcript)))))
 
+;; Sol review round 5.
+
+(ert-deftest romacs-agent-log-a-line-it-does-not-read-is-named ()
+  (romacs-agent-log-tests--with
+    (draw :type 'unknown :method "thread/name/updated" :raw (romacs-agent-log-tests--input "name" "x"))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "· thread/name/updated" text))
+      (should-not (string-match-p "hash-table" text)))))
+
+(ert-deftest romacs-agent-log-a-shown-running-chat-keeps-its-clock ()
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--ticker nil) started)
+      (setq romacs-agent-log--filled t)
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (setq started t) 'timer))
+                ((symbol-function 'timerp) (lambda (x) (eq x 'timer))))
+        (romacs-agent-log--shown nil))
+      (should started))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

@@ -46,6 +46,7 @@
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
+(defvar romacs-agent-ui-changed-hook)
 (declare-function romacs-agent-chat-model "romacs-agent-ui" (model effort))
 (declare-function romacs-agent-chat-effort "romacs-agent-ui" (effort))
 (declare-function romacs-agent-chat-plan "romacs-agent-ui" ())
@@ -642,7 +643,16 @@ unless a note said who gave it, that it was answered."
                                                       '("harness's own"))
                                        " · ")))
                   (romacs-agent-log--note event (format "%s → %s" (label (plist-get event :from)) (label (plist-get event :to))))))
-    ('unknown (romacs-agent-log--note event (format "%s" (plist-get event :raw))))
+    ;; What Romacs does not read of its harness: named, its whole on RET.
+    ('unknown (let ((raw (plist-get event :raw)))
+                (romacs-agent-log--line event 'note
+                                        (propertize (concat "· " (or (plist-get event :method)
+                                                                     (and (stringp raw) (truncate-string-to-width
+                                                                                         (car (split-string raw "\n")) 100
+                                                                                         nil nil (truncate-string-ellipsis)))
+                                                                     "a line Romacs does not read"))
+                                                    'romacs-agent-log-full (cons nil (if (stringp raw) raw (romacs-agent-log--json raw))))
+                                        'romacs-agent-log-note)))
     ;; State, not content: the header and separator say it.
     (_ nil)))
 
@@ -889,8 +899,21 @@ records now, or with LATER when a window first shows it."
     (romacs-agent-log--header-show)))
 
 (defun romacs-agent-log--shown (_window)
-  "A window shows this chat: drawn now, when it was not."
-  (romacs-agent-log--ensure-filled))
+  "A window shows this chat: drawn now, when it was not, its header made
+again, and its clock going while its turn runs."
+  (romacs-agent-log--ensure-filled)
+  (romacs-agent-log--header-show)
+  (when (memq (romacs-agent-state romacs-agent-log--session) '(starting running waiting-approval))
+    (romacs-agent-log--tick-start)))
+
+(defun romacs-agent-log--headers-refresh ()
+  "Make the header of every shown chat say what its session says now: run
+after a batch of events remade sessions' states (their workers')."
+  (dolist (window (window-list-1 nil 'nomini 'visible))
+    (with-current-buffer (window-buffer window)
+      (when (derived-mode-p 'romacs-agent-log-mode) (romacs-agent-log--header-show)))))
+
+(add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
 (defun romacs-agent-log-show (session &optional action)
   "Show SESSION's chat, as `pop-to-buffer' does with ACTION."

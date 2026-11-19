@@ -593,7 +593,7 @@ an approval or questions for the user, anything else refused."
            "hook/started" "hook/completed" "turn/diff/updated")
        nil)
       ((pred (string-prefix-p "account/")) nil)
-      (_ (list (list :type 'unknown :raw params))))))
+      (_ (list (list :type 'unknown :raw params :method method))))))
 
 ;;; `codex exec --json''s lines, as earlier sessions journaled them
 
