@@ -69,7 +69,7 @@ fn a_working_thread_moves_by_itself_and_keeps_its_motion_across_states() {
     animations.replace(vec![(1, thread(Work::Running, 0))]);
     animations.tick(start);
     let first = animations.running[&1].animation.cells(0.0);
-    animations.tick(start + Duration::from_millis(40));
+    for step in 1..=10 { animations.tick(start + Duration::from_millis(40 * step)); }
     let moved = animations.running[&1].moved;
     assert_ne!(animations.running[&1].animation.cells(moved), first, "the render thread alone moves it");
     // Its work changes: its motion goes on; a new epoch starts it over.
