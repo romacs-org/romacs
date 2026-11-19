@@ -1569,31 +1569,47 @@ containing it, until no links are left at any level.
 
   ;; A local name with no file name handler, on the outermost call, is
   ;; walked natively (LISP-NATIVE-TRUENAME); the walk returns nil to leave
-  ;; a long chain of links, or a loop, to the algorithm below.
+  ;; a name to the algorithm below, which also answers inside a handler's
+  ;; own call, where some operations' handlers are inhibited.
   (or (and (null counter) (null prev-dirs) (not (eq system-type 'windows-nt))
+           (null inhibit-file-name-operation) (null inhibit-file-name-handlers)
            (let ((name (file-truename--local-name filename)))
              (and name
                   (not (find-file-name-handler name 'file-truename))
-                  (let ((true-name (romacs--file-truename-local name)))
-                    ;; A link may lead into a name a handler claims.
-                    (and true-name
-                         (or (string= true-name name)
-                             (not (find-file-name-handler true-name 'file-truename)))
-                         true-name)))))
+                  (let ((walk (romacs--file-truename-local name)))
+                    ;; Through links, the walk also names what each one
+                    ;; spliced in: GNU's walk asks for a handler of each.
+                    (if (stringp walk)
+                        walk
+                      (let ((spliced (cdr walk)))
+                        (while (and spliced (not (find-file-name-handler (car spliced) 'file-truename)))
+                          (setq spliced (cdr spliced)))
+                        (and walk (null spliced) (car walk))))))))
       (file-truename--walk filename counter prev-dirs)))
 
 (defun file-truename--local-name (filename)
   "FILENAME made absolute for the native walk, or nil to leave it to GNU's.
 `default-directory' is read only for a relative name, as GNU's algorithm
-reads it, and expanded only when it does not already begin with a slash."
+reads it. Only its `~' or `~USER' prefix is expanded: `.' and `..' are
+the walk's to resolve after any link, as GNU resolves them."
   (cond ((file-name-absolute-p filename) filename)
-        (default-directory
-         ;; Not `file-name-as-directory': it asks for a file name handler
-         ;; too, which the caller asks once of the joined name.
-         (let ((dir (if (string-prefix-p "/" default-directory)
-                        default-directory
-                      (expand-file-name default-directory))))
-           (concat dir (unless (string-suffix-p "/" dir) "/") filename)))))
+        ((null default-directory) nil)
+        (t
+         ;; Joined without `file-name-as-directory', which asks for a file
+         ;; name handler too: the caller asks once, of the joined name.
+         (let ((dir (cond ((string-prefix-p "/" default-directory) default-directory)
+                          ;; `~' alone reads HOME, as `expand-file-name' does
+                          ;; when HOME names an absolute directory.
+                          ((and (or (string-prefix-p "~/" default-directory)
+                                    (equal default-directory "~"))
+                                (let ((home (getenv "HOME")))
+                                  (and home (string-prefix-p "/" home)
+                                       (concat (if (string-suffix-p "/" home) (substring home 0 -1) home)
+                                               (substring default-directory 1))))))
+                          ((string-match "\\`~[^/]*" default-directory)
+                           (concat (expand-file-name (match-string 0 default-directory))
+                                   (substring default-directory (match-end 0)))))))
+           (and dir (concat dir (unless (string-suffix-p "/" dir) "/") filename))))))
 
 (defun file-truename--walk (filename counter prev-dirs)
   "GNU's `file-truename' algorithm: FILENAME's true name, COUNTER and

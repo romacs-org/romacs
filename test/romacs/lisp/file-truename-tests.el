@@ -87,4 +87,81 @@
           (should (equal (file-truename (concat root "l/f") (list 100) (list nil)) (concat root "real/f"))))
       (delete-directory root t))))
 
+(defmacro file-truename-tests--with-fake-handler (&rest body)
+  "Run BODY with a handler claiming names that begin with /fake:.
+It answers `file-truename' with H before the name, and passes every
+other operation on."
+  (declare (indent 0))
+  `(let ((file-name-handler-alist
+          (cons (cons "\\`/fake:" #'file-truename-tests--fake) file-name-handler-alist)))
+     ,@body))
+
+(defun file-truename-tests--fake (op &rest args)
+  (if (eq op 'file-truename)
+      (concat "H" (car args))
+    (let ((inhibit-file-name-handlers (cons #'file-truename-tests--fake inhibit-file-name-handlers))
+          (inhibit-file-name-operation op))
+      (apply op args))))
+
+(defun file-truename-tests--both (name)
+  "NAME's true name natively and by GNU's walk, an error as its data."
+  (mapcar (lambda (walk) (condition-case e (funcall walk name) (error (list 'error (car e)))))
+          (list #'file-truename (lambda (name) (file-truename name (list 100))))))
+
+(ert-deftest file-truename-tests-what-gnu-might-answer-otherwise-is-gnus ()
+  (let ((root (file-truename-tests--tree)))
+    (unwind-protect
+        (progn
+          (make-symbolic-link "/fake:x/../plain" (concat root "via"))
+          (make-symbolic-link "real/" (concat root "slash"))
+          (make-symbolic-link (concat root "real/sub") (concat root "deep"))
+          (with-temp-file (concat root "real/λ"))
+          (cl-flet ((same (name)
+                      (let ((both (file-truename-tests--both name)))
+                        (should (equal (car both) (cadr both)))
+                        (car both))))
+            (file-truename-tests--with-fake-handler
+              ;; A link whose target a handler claims on the way; pinned
+              ;; GNU quotes the spliced name.
+              (should (equal (same (concat root "via")) "/:H/fake:x/../plain"))
+              ;; The same, with the handler inhibited for `file-truename'.
+              (let ((inhibit-file-name-handlers (list #'file-truename-tests--fake))
+                    (inhibit-file-name-operation 'file-truename))
+                (should (equal (same (concat root "via")) "/:/plain"))))
+            ;; Inside a handler's own call: a handler for a local directory,
+            ;; inhibited for `file-truename' but live for `file-symlink-p',
+            ;; where it answers a link the disk does not have.
+            (let* ((local (concat root "real/sub/"))
+                   (handler (lambda (op &rest args)
+                              (if (and (eq op 'file-symlink-p) (equal (car args) (concat local "x")))
+                                  "../f"
+                                (let ((inhibit-file-name-handlers (cons 'file-truename-tests--local inhibit-file-name-handlers))
+                                      (inhibit-file-name-operation op))
+                                  (apply op args))))))
+              (defalias 'file-truename-tests--local handler)
+              (let ((file-name-handler-alist (cons (cons (regexp-quote local) 'file-truename-tests--local)
+                                                   file-name-handler-alist))
+                    (inhibit-file-name-handlers (list 'file-truename-tests--local))
+                    (inhibit-file-name-operation 'file-truename))
+                (should (equal (same (concat local "x")) (concat root "real/f")))))
+            ;; `..' in an abbreviated `default-directory' climbs from the
+            ;; link's target, not from the link.
+            (let ((process-environment (cons (concat "HOME=" (directory-file-name root)) process-environment)))
+              (let ((default-directory "~/deep/../"))
+                (should (equal (same "f") (concat root "real/f")))))
+            ;; Slashes GNU keeps: a target ending in one, a leading `//'.
+            (same (concat root "slash/f"))
+            (same (concat "/" root "real/f"))
+            ;; A NUL in the name.
+            (same (concat root "real/a\0b"))
+            ;; A unibyte name with non-ASCII bytes, and a multibyte one,
+            ;; each answered in its own representation.
+            (let ((unibyte (encode-coding-string (concat root "real/λ") 'utf-8)))
+              (should (equal (multibyte-string-p (same unibyte))
+                             (multibyte-string-p (file-truename unibyte (list 100))))))
+            (let ((multibyte (concat root "l/λ")))
+              (should (equal (same multibyte) (concat root "real/λ")))
+              (should (multibyte-string-p (file-truename multibyte))))))
+      (delete-directory root t))))
+
 ;;; file-truename-tests.el ends here
