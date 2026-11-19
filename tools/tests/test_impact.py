@@ -42,6 +42,8 @@ def workspace(root):
         'crates/romacs-vm-gui/harness/scaling_live.py': 'import live_oracle\n',
         'crates/romacs-vm-gui/harness/world_live.py': 'from live_oracle import stop\n',
         'crates/romacs-vm-gui/harness/agent_live.py': '',
+        'crates/romacs-vm-gui/harness/exit_live.py': '',
+        'crates/romacs-vm-gui/harness/startup_failed_live.py': 'import exit_live\n',
         'crates/romacs-display-runtime/Cargo.toml': '[package]\nname = "romacs-display-runtime"\nversion = "0.0.0"\nedition = "2021"\n',
         'crates/romacs-display-runtime/src/lib.rs': '',
     }
@@ -144,6 +146,9 @@ class Select(unittest.TestCase):
 
     def test_a_rule_adds_its_harness(self):
         self.assertIn('agent', self.select('crates/romacs-vm-gui/harness/agent_live.py')['harnesses'])
+        self.assertIn('startup_failed', self.select('crates/romacs-vm-gui/src/loading.rs')['harnesses'])
+        self.assertIn('startup_failed', self.select('crates/romacs-vm-gui/harness/exit_live.py')['harnesses'])
+        self.assertNotIn('startup_failed', self.select('crates/romacs-vm-gui/src/fonts.rs')['harnesses'])
 
     def test_documentation_reaches_only_the_structural_rules(self):
         found = self.select('doc/x.org', 'AGENTS.md', 'tools/tests/test_x.py')

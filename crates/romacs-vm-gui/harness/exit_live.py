@@ -47,7 +47,7 @@ summariser, summarises them.
               window it asked for shows the same screen, and the same
               close ends it.
 
-usage: exit_live.py --romacs BIN --output DIR [--workflow NAME]...
+usage: exit_live.py --romacs BIN (or --binary BIN) --output DIR [--workflow NAME]...
                    [--launcher LAUNCHER --launcher-runtime REL --launcher-sessions REL [--sessions SUMMARISER]]
 """
 import argparse
@@ -147,6 +147,9 @@ def start_failed(args, base, name, serve=(), breaks=('bootstrap',), world=False)
         elif entry.name != BOOTSTRAP or 'bootstrap' not in breaks:
             (lisp / 'session' / entry.name).symlink_to(entry)
     env.update(ROMACS_LISP_DIR=str(lisp), ROMACS_GUI_FONT='Iosevka', ROMACS_GUI_FONT_SIZE='14')
+    # A binary copied out of its build (a check's) finds its tree by name.
+    if 'ROMACS_RUNTIME_ROOT' in os.environ:
+        env['ROMACS_RUNTIME_ROOT'] = os.environ['ROMACS_RUNTIME_ROOT']
     if not world:
         env['ROMACS_WORLD'] = 'off'
     engine = Engine('romacs', [args.romacs, '--loadup', *serve], root, None, env, args.timeout)
@@ -201,7 +204,8 @@ def run_kill_emacs(engine, stderr, usage):
             and not any(c == 'ul-ask' and m != 'lisp-interaction-mode' for c, m in counts),
         'prompt command timed from the read': [r['mode'] for r in slow if r['command'] == 'ul-ask'] == ['lisp-interaction-mode']
             and all(300 <= r['ms'] < 1300 for r in slow if r['command'] == 'ul-ask'),
-        'error with <file>': {'kind': 'error', 'command': 'ul-error', 'error': '(error . "<file>")'} in errors,
+        # A record says more of an error than this (its mode, its backtrace): these, at least.
+        'error with <file>': any(r.get('command') == 'ul-error' and r.get('error') == '(error . "<file>")' for r in errors),
         'no typed text or file name': SECRET_TEXT not in text and 'private-notes' not in text,
     }
     return checks, {'status': status, 'exit': exit_line(stderr), 'usage': lines}
@@ -313,9 +317,10 @@ STARTS = {'startup-failed': start_failed,
           'lisp-error-first-world-failed': start_world_failed}
 
 
-def main():
+def main(default=None):
+    """Run the workflows named, else DEFAULT's, else every one."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--romacs', required=True)
+    parser.add_argument('--romacs', '--binary', dest='romacs', required=True)
     parser.add_argument('--launcher', help='run each session through this launcher')
     parser.add_argument('--launcher-runtime', help="with --launcher: where, under HOME, it finds the build's runtime")
     parser.add_argument('--launcher-sessions', help='with --launcher: where, under HOME, it keeps per-session logs')
@@ -332,7 +337,7 @@ def main():
     output = Path(args.output)
     output.mkdir(parents=True)
     report = {'romacs': args.romacs, 'launcher': args.launcher, 'workflows': []}
-    for name in args.workflow or list(WORKFLOWS):
+    for name in args.workflow or default or list(WORKFLOWS):
         entry = {'workflow': name}
         report['workflows'].append(entry)
         engine = None

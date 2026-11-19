@@ -83,6 +83,9 @@ HARNESS_RULES = (
     # The agent client end to end (sessions, selections and restarts, relays, tools).
     (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
+    # A startup that fails holds its screen until the window is closed: the evaluator's end
+    # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
+    (re.compile(r'^crates/romacs-vm-gui/src/(?:main|exit|loading|startup)\.rs$'), 'startup_failed'),
 )
 EDITOR = 'romacs-vm-gui'
 HARNESS_DIR = 'crates/romacs-vm-gui/harness/'
