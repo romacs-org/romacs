@@ -136,7 +136,7 @@ goes on.")
 (defvar-local romacs-agent-log--current nil
   "The id of the call at the transcript's top level that runs now, or nil.")
 (defvar-local romacs-agent-log--early nil
-  "Output that came before its call, (ID . TEXT), the latest first.")
+  "Output that came before its call, an alist of ID to TEXT.")
 (defvar-local romacs-agent-log--stream nil
   "What streams at the transcript's end: (KIND START AT NEWLINES), KIND
 `text' or `thinking', START a marker where its text began, AT one where
@@ -308,8 +308,12 @@ parent call."
   "A subagent's OUTPUT as its report: without the frame Claude Code puts
 around it for its model (the hand-back notice, the agent's id, its
 usage).  RET still shows all of it."
-  (let ((report (if (string-match "The report follows:[ \t]*\n" output) (substring output (match-end 0)) output)))
-    (string-trim (replace-regexp-in-string "^[ \t]*agentId: .*\n?\\|<usage>\\(?:.\\|\n\\)*?</usage>" "" report))))
+  (let ((report (if (string-match "\\`\\[Subagent hand-back\\]\\(?:.\\|\n\\)*?The report follows:[ \t]*\n" output)
+                    (substring output (match-end 0))
+                  output)))
+    ;; Its id and usage, after its words.
+    (string-trim (replace-regexp-in-string
+                  "\\(?:\n[ \t]*agentId: [^\n]*\\|\n?[ \t]*<usage>\\(?:.\\|\n\\)*?</usage>\\|[ \t\n]+\\)+\\'" "" report))))
 
 (defun romacs-agent-log--lines (text limit)
   "TEXT's first LIMIT lines and how many it has: (SHOWN . COUNT)."
@@ -363,14 +367,16 @@ its call, in place of those shown before."
          (streamed (concat (plist-get props :streamed) text))
          (streamed (substring streamed (max 0 (- (length streamed) 65536))))
          (count (+ (or (plist-get props :count) 0) (cl-count ?\n text)))
+         ;; Lines whole and the one under way.
+         (total (+ count (if (string-suffix-p "\n" streamed) 0 1)))
          (shown (last (split-string (string-trim-right streamed) "\n") romacs-agent-log-output-lines))
          (under (plist-get props :under))
          (live (or (plist-get props :live) (copy-marker under))))
     (setcdr block (plist-put (plist-put (plist-put props :streamed streamed) :live live) :count count))
     (romacs-agent-log--writing (delete-region live under))
     (romacs-agent-log--put (romacs-agent-log--indent
-                            (concat (propertize (if (> count (length shown))
-                                                    (format "  ⋮ running: %d lines so far, the last %d\n" count (length shown))
+                            (concat (propertize (if (> total (length shown))
+                                                    (format "  ⋮ running: %d lines so far, the last %d\n" total (length shown))
                                                   "  ⋮ running\n")
                                                 'face 'romacs-agent-log-note)
                                     (propertize (concat "    " (string-join shown "\n    ") "\n") 'face 'romacs-agent-log-output))
@@ -399,9 +405,9 @@ its call, in place of those shown before."
                              :start start :depth depth :input input :parent (car at)
                              :name (romacs-agent-rows-name (plist-get event :name)))
                     romacs-agent-log--blocks)
-           (when-let* ((early (nreverse (cl-remove-if-not (lambda (e) (equal (car e) id)) romacs-agent-log--early))))
-             (setq romacs-agent-log--early (cl-remove-if (lambda (e) (equal (car e) id)) romacs-agent-log--early))
-             (romacs-agent-log--live (romacs-agent-log--block id) (mapconcat #'cdr early ""))))))
+           (when-let* ((early (alist-get id romacs-agent-log--early nil nil #'equal)))
+             (setf (alist-get id romacs-agent-log--early nil t #'equal) nil)
+             (romacs-agent-log--live (romacs-agent-log--block id) early)))))
       ((or 'completed 'failed)
        (let* ((block (romacs-agent-log--block id))
               (output (or (plist-get event :output) ""))
@@ -542,7 +548,6 @@ Live, in a chat no window shows, the echo area says so too."
                                          'romacs-agent-log-request id
                                          'romacs-agent-log-full (list input)
                                          'romacs-agent-log-questions questions
-                                         'romacs-agent-log-plan plan
                                          'keymap romacs-agent-log-ask-map))
       (push (cons id (cons start (copy-marker romacs-agent-log--end))) romacs-agent-log--asks))))
 
@@ -632,8 +637,12 @@ unless a note said who gave it, that it was answered."
     ('tool-output (when-let* ((text (plist-get event :text)))
                     (if-let* ((block (romacs-agent-log--block (plist-get event :id))))
                         (romacs-agent-log--live block text)
-                      ;; Before its call (Codex's first line can be): held for it.
-                      (push (cons (plist-get event :id) text) romacs-agent-log--early))))
+                      ;; Before its call (Codex's first line can be): held for
+                      ;; it, its last 64K, until its turn ends.
+                      (let* ((id (plist-get event :id))
+                             (held (concat (alist-get id romacs-agent-log--early nil nil #'equal) text)))
+                        (setf (alist-get id romacs-agent-log--early nil nil #'equal)
+                              (substring held (max 0 (- (length held) 65536))))))))
     ('approval (romacs-agent-log--ask session event))
     ;; Who answered: said, the block settled once its answer is written.
     ('attributed (push (plist-get event :request-id) romacs-agent-log--attributed)
@@ -644,7 +653,8 @@ unless a note said who gave it, that it was answered."
     ('answered (romacs-agent-log--answered event))
     ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
                                                        (plist-get event :text))))
-    ('done (romacs-agent-log--done event))
+    ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (romacs-agent-log--done event))
     ('error (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "error")) 'romacs-agent-log-denied))
     ('unstarted (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "never started"))
                                         'romacs-agent-log-denied))
@@ -655,7 +665,8 @@ unless a note said who gave it, that it was answered."
     ('compacted (romacs-agent-log--note event (concat "context compacted\n"
                                                       (car (romacs-agent-log--lines (plist-get event :text)
                                                                                     romacs-agent-log-output-lines)))))
-    ('exit (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
+    ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
              (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
@@ -1043,11 +1054,6 @@ the session.  Questions open their answering layer."
   (let* ((id (romacs-agent-log--ask-here))
          (questions (get-text-property (point) 'romacs-agent-log-questions)))
     (cond (questions (romacs-agent-ask-open (romacs-agent-log--loaded) id questions))
-          ((get-text-property (point) 'romacs-agent-log-plan)
-           ;; Proceeding with a plan leaves plan mode, as Claude Code's does.
-           (let ((session (romacs-agent-log--loaded)))
-             (romacs-agent-respond session id t nil 'user)
-             (when (plist-get (romacs-agent-options session) :plan) (romacs-agent-set-plan session nil))))
           (t (romacs-agent-respond (romacs-agent-log--loaded) id (if always (list :always t) t) nil 'user)))))
 
 (defun romacs-agent-log-allow-always ()

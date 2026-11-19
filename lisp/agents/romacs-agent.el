@@ -1672,7 +1672,11 @@ on whatever becomes of this server."
     ;; A plan presented: captured, its call told to stop (T3 Code's way);
     ;; the plan is the user's to take up.  A tool call the policy answers
     ;; waits on no one: its answer goes now, or on catching up.
-    ('approval (cond
+    ('approval (when (plist-get event :plan)
+                 (setf (romacs-agent-driver-state session)
+                       (plist-put (romacs-agent-driver-state session) :plans
+                                  (cons (plist-get event :request-id) (plist-get (romacs-agent-driver-state session) :plans)))))
+               (cond
                 ((romacs-agent--auto-answer-p session event)
                  (when (romacs-agent--live-p session)
                    (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
@@ -4333,7 +4337,8 @@ takes it, allows (t, or a plist of :answers or :always), else it is denied
 with MESSAGE.  BY, `user' or `policy', is who answered: a note says so in
 SESSION's records first, so every view shows who decided."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message))
+        (plan (member request-id (plist-get (romacs-agent-driver-state session) :plans))))
     (when by
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name by)
@@ -4344,7 +4349,11 @@ SESSION's records first, so every view shows who decided."
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)))
+    (romacs-agent--line session line)
+    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
+    ;; agent goes on to implement it.
+    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
+      (romacs-agent-set-plan session nil))))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))

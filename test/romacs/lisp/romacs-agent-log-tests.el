@@ -394,18 +394,36 @@
     (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
 
 (ert-deftest romacs-agent-log-proceeding-with-a-plan-leaves-plan-mode ()
-  (romacs-agent-log-tests--with
-    (setf (romacs-agent-options session) '(:plan t))
-    (puthash "p" t (romacs-agent-approvals session))
-    (draw :type 'approval :request-id "p" :tool "ExitPlanMode" :plan t :user t)
-    (let (answered planned)
-      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (_s id allow &rest _) (push (list id allow) answered)))
-                ((symbol-function 'romacs-agent-set-plan) (lambda (_s on) (push on planned)))
-                ((symbol-function 'romacs-agent-log--loaded) (lambda () session)))
-        (goto-char (cadr (assoc "p" romacs-agent-log--asks)))
-        (romacs-agent-log-allow))
-      (should (equal answered '(("p" t))))
+  (let ((session (romacs-agent--make :id "P" :harness 'claude :options '(:plan t)
+                                     :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+        (request (make-hash-table :test #'equal))
+        planned)
+    (puthash "tool_name" "ExitPlanMode" request)
+    (puthash "p" request (romacs-agent-approvals session))
+    (romacs-agent--raise session '(:type approval :request-id "p" :tool "ExitPlanMode" :plan t :user t))
+    (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
+              ((symbol-function 'romacs-agent--note) #'ignore)
+              ((symbol-function 'romacs-agent-set-plan) (lambda (_s on) (push on planned))))
+      ;; Kept planning: still in plan mode.
+      (romacs-agent-respond session "p" nil "more" 'user)
+      (should-not planned)
+      ;; Proceeding, however answered (here, the board's way): out of it.
+      (romacs-agent-respond session "p" t nil 'user)
       (should (equal planned '(nil))))))
+
+(ert-deftest romacs-agent-log-a-turn-end-ends-what-runs ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "b" :name "Bash")
+    (draw :type 'tool-output :id "gone" :text "x\n")
+    (draw :type 'exit :status 1)
+    (should-not romacs-agent-log--current)
+    (should-not romacs-agent-log--early)))
+
+(ert-deftest romacs-agent-log-a-report-keeps-its-words ()
+  (should (equal (romacs-agent-log--report "Plain words. The report follows:\nmore <usage>inline</usage> text")
+                 "Plain words. The report follows:\nmore <usage>inline</usage> text"))
+  (should (equal (romacs-agent-log--report "[Subagent hand-back] frame. The report follows:\nbody\nagentId: a1\n<usage>t: 1</usage>\n")
+                 "body")))
 
 (ert-deftest romacs-agent-log-output-before-its-call-is-kept ()
   (romacs-agent-log-tests--with
