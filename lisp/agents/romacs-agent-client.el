@@ -9,7 +9,9 @@
 ;; mirrors what the service serves.  It folds nothing and has no policy
 ;; and no timer that acts: it shows what the service says.
 ;;
-;; This part mirrors the session list: its rows by id and its revision.
+;; It mirrors the session list, and each session it opens.
+;;
+;; The list: its rows by id and its revision.
 ;; One watch at a time reads the list: its pages are staged apart and
 ;; the rows and revision published together once it is whole, then the
 ;; notifications that came meanwhile are applied.  A gap or a stale
@@ -24,6 +26,11 @@
 (defvar romacs-agent-client-rows-functions nil
   "Functions called with a client, the ids of the rows that changed and
 those removed, after its list changed.")
+
+(defvar romacs-agent-client-session-functions nil
+  "Functions called with a client, a session's id, and what came of it:
+\=(opened REPLY), (event PARAMS) or (changed PARAMS), each in the order
+its revisions give.")
 
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
@@ -40,7 +47,8 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (revision nil)
   (pending (make-hash-table :test #'eql))
   (next 0)
-  watch again)
+  watch again
+  (sessions (make-hash-table :test #'equal)))
 
 (defun romacs-agent-client--instance ()
   (or romacs-agent-client-instance
@@ -117,6 +125,8 @@ result and nil, or nil and the error, once its reply comes."
       (let ((callback (gethash id (romacs-agent-client-pending client))))
         (remhash id (romacs-agent-client-pending client))
         (funcall callback (gethash "result" message) (gethash "error" message))))
+     ((member method '("agents/event" "agents/session.changed"))
+      (romacs-agent-client--session-notice client method (gethash "params" message)))
      ((equal method "agents/sessions.changed")
       (let ((params (gethash "params" message)) (watch (romacs-agent-client-watch client)))
         (if watch
@@ -204,6 +214,51 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
           (push id removed))
         (setf (romacs-agent-client-revision client) revision)
         (run-hook-with-args 'romacs-agent-client-rows-functions client changed removed))))))
+
+;;; Sessions
+
+;; Each session opened: its revision once its open is answered, the
+;; notices that came before that held (opening), or `closed'.
+
+(defun romacs-agent-client-open (client id)
+  "Open session ID on CLIENT: its reply, then each event and change of it,
+reach `romacs-agent-client-session-functions'."
+  (puthash id (list 'opening) (romacs-agent-client-sessions client))
+  (romacs-agent-client-request
+   client "agents/session.open" (romacs-agent-rpc-object "id" id)
+   (lambda (result error)
+     (let ((held (gethash id (romacs-agent-client-sessions client))))
+       (cond
+        ((or error (not (eq (car-safe held) 'opening)))
+         (remhash id (romacs-agent-client-sessions client)))
+        (t
+         (puthash id (gethash "revision" result) (romacs-agent-client-sessions client))
+         (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))
+         (dolist (notice (reverse (cdr held)))
+           (romacs-agent-client--session-notice client (car notice) (cdr notice)))))))))
+
+(defun romacs-agent-client-close-session (client id)
+  "Close session ID on CLIENT."
+  (remhash id (romacs-agent-client-sessions client))
+  (romacs-agent-client-request client "agents/session.close" (romacs-agent-rpc-object "id" id) #'ignore))
+
+(defun romacs-agent-client--session-notice (client method params)
+  "Apply METHOD's PARAMS to their session: held while it opens, the next
+revision passed on, an earlier one ignored, a gap answered by opening it
+again."
+  (let* ((id (gethash "session" params)) (held (gethash id (romacs-agent-client-sessions client)))
+         (revision (gethash "revision" params)))
+    (cond
+     ((null held))
+     ((eq (car-safe held) 'opening)
+      (setcdr held (cons (cons method params) (cdr held))))
+     ((not (integerp revision)))
+     ((<= revision held))
+     ((/= revision (1+ held)) (romacs-agent-client-open client id))
+     (t
+      (puthash id revision (romacs-agent-client-sessions client))
+      (run-hook-with-args 'romacs-agent-client-session-functions client id
+                          (list (if (equal method "agents/event") 'event 'changed) params))))))
 
 (provide 'romacs-agent-client)
 ;;; romacs-agent-client.el ends here

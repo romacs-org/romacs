@@ -246,14 +246,16 @@ and `wait' waiting until its form holds (5 s at most)."
       (should (equal (gethash "key" (gethash "c" (romacs-agent-service--list-rows romacs-agent-service--list)))
                      "completed")))))
 
-(ert-deftest romacs-agent-service-runs-its-whole-pass-when-quiet ()
+(ert-deftest romacs-agent-service-runs-its-whole-pass-when-idle ()
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
     (setq romacs-agent-service--whole-at 0 romacs-agent-service--dirty nil)
     (when (timerp romacs-agent-service--refresh-timer) (cancel-timer romacs-agent-service--refresh-timer))
     (setq romacs-agent-service--refresh-timer nil)
     (romacs-agent-service--poll)
-    (should (timerp romacs-agent-service--refresh-timer))))
+    ;; Due: once the editor is idle, never while the user types.
+    (should (timerp romacs-agent-service--idle-timer))
+    (should-not romacs-agent-service--refresh-timer)))
 
 (ert-deftest romacs-agent-service-answers-a-long-request-in-bounds ()
   ;; A method name near a message's limit: answered, its error bounded.
@@ -281,5 +283,71 @@ and `wait' waiting until its form holds (5 s at most)."
           (should (file-exists-p (romacs-agent-service-socket))))
       (romacs-agent-service-stop)
       (delete-directory root t))))
+
+(defun romacs-agent-service-tests--log (client)
+  "What CLIENT hears of its sessions, oldest first, under its `log' property."
+  (let ((log (list nil)))
+    (add-hook 'romacs-agent-client-session-functions
+              (lambda (c id notice) (when (eq c client) (setcar log (append (car log) (list (cons id notice)))))))
+    log))
+
+(ert-deftest romacs-agent-service-sends-a-session-s-record-units ()
+  ;; Open: the row and the cursor live events follow from; then each
+  ;; record unit's events, once whole, in revision order; a replay's copy
+  ;; of the session sends nothing.
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running :seq 7)))
+      (romacs-agent-service-start socket)
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-open client "busy")
+        (should (wait (car log)))
+        (pcase-let ((`("busy" opened ,reply) (car (car log))))
+          (should (equal (gethash "seq" (gethash "cursor" reply)) 7))
+          (should (equal (gethash "id" (gethash "row" reply)) "busy")))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 8 :message "m" :text "Hel"))
+        (run-hook-with-args 'romacs-agent-event-functions (romacs-agent--scratch busy)
+                            '(:type delta :seq 3 :message "m" :text "old" :last t))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 8 :message "m" :text "lo" :last t))
+        (should (wait (cl-find 'event (car log) :key #'cadr)))
+        (let* ((notices (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log)))
+               (params (nth 2 (car notices))))
+          (should (= (length notices) 1))
+          (should (equal (gethash "seq" (gethash "cursor" params)) 8))
+          (should (equal (mapcar (lambda (event) (gethash "text" event)) (gethash "events" params)) '("Hel" "lo"))))))))
+
+(ert-deftest romacs-agent-service-cuts-a-long-string ()
+  ;; A tool's output over 64 KiB: its first 64 KiB, the event saying how
+  ;; long it was.
+  (let* ((sent (romacs-agent-service--bounded
+                (list (list :type 'tool :seq 4 :id "t" :name "Bash" :state 'completed
+                            :output (make-string 100000 ?o)))))
+         (event (aref sent 0)))
+    (should (= (string-bytes (gethash "output" event)) (* 64 1024)))
+    (should (equal (gethash "output" (gethash "truncated" event)) 100000))))
+
+(ert-deftest romacs-agent-service-refuses-an-unknown-session ()
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (cl-letf (((symbol-function 'romacs-agent-store-row-session) #'ignore))
+      (let ((client (romacs-agent-client-connect socket)) (answer nil))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-request client "agents/session.open" (romacs-agent-rpc-object "id" "nope")
+                                     (lambda (_ error) (setq answer error)))
+        (should (wait answer))
+        (should (equal (gethash "code" answer) -32010))))))
+
+(ert-deftest romacs-agent-service-tells-a-subscriber-its-row ()
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running)))
+      (romacs-agent-service-start socket)
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-open client "busy")
+        (should (wait (car log)))
+        (setf (romacs-agent-state busy) 'idle)
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type changed))
+        (should (wait (cl-find 'changed (car log) :key #'cadr)))
+        (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
 
 ;;; romacs-agent-service-tests.el ends here
