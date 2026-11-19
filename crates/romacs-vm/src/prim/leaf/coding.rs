@@ -80,6 +80,20 @@ impl Leaf<'_> {
             let precise = if unix { self.vector_get(eol, num(0))? } else { name };
             return self.coding_string_result(buffer, last, precise, source.bytes().to_vec(), true, Vec::new());
         }
+        // Text in the internal form encodes as UTF-8 and raw-text in one
+        // pass (encode_internal_plain), not a token a character.
+        if encode && source.is_multibyte() && [self.intern("utf-8"), self.intern("raw-text"), self.intern("undecided")].contains(&kind) {
+            for index in [6, 7, 9, 10] {
+                if self.vector_get(attrs, num(index))? != Value::NIL {
+                    return Err(Fault::Error("string coding translation tables and conversion hooks are not implemented".into()));
+                }
+            }
+            let mode = if inhibit { 0 } else if eol == self.intern("dos") { 1 } else if eol == self.intern("mac") { 2 } else { 0 };
+            let mut bytes = Vec::with_capacity(source.bytes().len() + 3);
+            if kind == self.intern("utf-8") && self.vector_get(attrs, num(24))? != Value::NIL { bytes.extend_from_slice(&[239, 187, 191]); }
+            encode_internal_plain(source.bytes(), mode, &mut bytes);
+            return self.coding_string_result(buffer, last, name, bytes, false, Vec::new());
+        }
         let tokens = if encode && kind == self.intern("utf-8") && !source.is_multibyte() {
             coding_encode_unibyte(source.bytes())
         } else { source.chars().map(|code| {
@@ -384,6 +398,26 @@ impl Leaf<'_> {
 
 #[derive(Clone, Copy)]
 pub(super) enum CodingToken { Byte(u8), Character(u32) }
+
+/// `encode_coding_utf_8` and `encode_coding_raw_text` over INTERNAL, text in
+/// GNU's internal form, appended to OUT: a raw-byte character (its lead C0
+/// or C1) is its byte, any other character its own bytes, and a line end
+/// is LF, CRLF (MODE 1) or CR (MODE 2), as `consume_chars` converts it.
+fn encode_internal_plain(internal: &[u8], mode: usize, out: &mut Vec<u8>) {
+    let mut rest = internal;
+    loop {
+        let next = if mode == 0 { memchr::memchr2(0xc0, 0xc1, rest) } else { memchr::memchr3(b'\n', 0xc0, 0xc1, rest) };
+        let Some(at) = next else { return out.extend_from_slice(rest) };
+        out.extend_from_slice(&rest[..at]);
+        if rest[at] == b'\n' {
+            out.extend_from_slice(if mode == 1 { b"\r\n" } else { b"\r" });
+            rest = &rest[at + 1..];
+        } else {
+            out.push(0x80 | (rest[at] & 1) << 6 | (rest[at + 1] & 0x3f));
+            rest = &rest[at + 2..];
+        }
+    }
+}
 
 fn coding_emit(code: u32, bytes: &mut Vec<u8>) {
     let mut encoded = [0; 5];

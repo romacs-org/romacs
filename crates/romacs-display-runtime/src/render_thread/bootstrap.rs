@@ -76,6 +76,13 @@ impl RenderApp {
             adapter_info.driver,
             adapter_info.driver_info
         );
+        let off = romacs_renderer_wgpu::gpu_policy::disabled_features(
+            &device.limits(),
+            adapter.get_downlevel_capabilities().flags,
+        );
+        if !off.is_empty() {
+            eprintln!("romacs: gpu lacks what some features need; off: {}", off.join("; "));
+        }
         if adapter_info.device_type == wgpu::DeviceType::Cpu {
             eprintln!(
                 "romacs: WARNING: software GPU adapter; rendering uses the CPU, not native GPU acceleration (intentional for headless oracles)"

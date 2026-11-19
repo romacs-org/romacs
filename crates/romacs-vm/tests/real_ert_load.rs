@@ -1069,14 +1069,37 @@ fn file_names_links_and_copies_match_gnu() {
     ];
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let directory = format!("{}/", dir.display());
+    // GNU truncates a copy's destination before finding it is the source,
+    // emptying the source; Romacs signals the same error with the source
+    // intact (ledger/divergences/VM2-COPY-FILE-SAME-FILE.md). For these the
+    // value is GNU's, and so is the directory but for a's times and contents,
+    // which are the fixture's; a's mode and link count stay GNU's.
+    let keeps_source = [r#"(copy-file "a" "a" t)"#];
     let mut failures = Vec::new();
     for expression in cases {
         let source = format!("(progn (setq default-directory {directory:?}) (string-to-list (prin1-to-string (condition-case err {expression} (error (list 'signal err))))))");
+        // The untouched tree, read from a fixture of its own: reading moves
+        // access times, so the fixture is made again before each run.
+        let mut untouched = vec![];
+        if keeps_source.contains(&expression) { fixture(); snapshot(&dir, &dir, &mut untouched); }
         fixture();
         let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         let mut expected = (String::from_utf8(output.stdout).unwrap(), vec![]);
         snapshot(&dir, &dir, &mut expected.1);
+        // An entry is "NAME MODE nLINKS TIMES... CONTENTS": a's name, mode and
+        // link count stay GNU's, its times and contents are the fixture's.
+        if keeps_source.contains(&expression) {
+            let kept = untouched.iter().find(|e| e.starts_with("a ")).and_then(|e| e.splitn(4, ' ').nth(3));
+            if let Some(kept) = kept {
+                for entry in &mut expected.1 {
+                    if entry.starts_with("a ") {
+                        let head: Vec<&str> = entry.splitn(4, ' ').take(3).collect();
+                        *entry = format!("{} {kept}", head.join(" "));
+                    }
+                }
+            }
+        }
         fixture();
         let mut actual = (vm.eval_source(&source).unwrap().display().unwrap(), vec![]);
         snapshot(&dir, &dir, &mut actual.1);

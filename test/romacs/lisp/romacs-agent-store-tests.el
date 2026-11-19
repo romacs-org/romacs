@@ -10,6 +10,12 @@
   (require 'romacs-agent)
   (require 'romacs-agent-store))
 
+(defun romacs-agent-store-tests--live (id)
+  "A socket where the supervisor of session ID listens, as one running has."
+  (let ((socket (romacs-agent--host-socket id)))
+    (make-directory (file-name-directory socket) t)
+    (write-region "" nil socket nil 'silent)))
+
 (defmacro romacs-agent-store-tests--with (&rest body)
   "BODY with a state root of its own (`root'), a registry of its own, and
 `record' recording a session there (ID TITLE &optional RUNNING), its
@@ -21,7 +27,7 @@ journal one turn long."
           (romacs-agent-event-functions nil)
           (romacs-agent-store--db nil))
      (cl-letf (((symbol-function 'romacs-agent--state-root) (lambda () root))
-               ((symbol-function 'romacs-agent--host-socket) (lambda (id) (expand-file-name (concat "run/" id ".sock") root))))
+               ((symbol-function 'romacs-agent--runtime-root) (lambda () (file-name-as-directory (expand-file-name "run" root)))))
        (cl-flet ((record (id title &optional running)
                    (let ((dir (expand-file-name id root)))
                      (make-directory dir t)
@@ -31,9 +37,7 @@ journal one turn long."
                        (insert (json-serialize (romacs-mcp--object "seq" 1 "t" 100.0 "in" (romacs-mcp--object "prompt" "hello"))) "\n"
                                (json-serialize (romacs-mcp--object "seq" 2 "t" 101.0 "ev" (romacs-mcp--object "type" "result" "result" "done it")))
                                "\n"))
-                     (when running
-                       (make-directory (expand-file-name "run" root) t)
-                       (write-region "" nil (romacs-agent--host-socket id) nil 'silent)))))
+                     (when running (romacs-agent-store-tests--live id)))))
          (unwind-protect (progn ,@body)
            (when (cdr romacs-agent-store--db) (sqlite-close (cdr romacs-agent-store--db)))
            (delete-directory root t))))))
@@ -75,6 +79,49 @@ journal one turn long."
       (romacs-agent--keep session 'idle)
       (should (equal (sqlite-select (romacs-agent-store--open) "select title, state from sessions")
                      '(("second" "idle")))))))
+
+(ert-deftest romacs-agent-store-a-rename-reaches-the-row ()
+  ;; A rename at a state already kept rewrites no row by its keep: its
+  ;; title alone is written to the row, the rest of it as it was.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (ignore #'record)
+    (let ((session (romacs-agent--make :id "bbbbbbbb-0000-4000-8000-000000000002" :harness 'claude
+                                       :title "first" :cwd "/p/two/" :dir (expand-file-name "b" root) :seq 3)))
+      (make-directory (romacs-agent-dir session))
+      (puthash (romacs-agent-id session) session romacs-agent--sessions)
+      (romacs-agent--keep session 'idle)
+      (setf (romacs-agent-title session) "renamed")
+      (let ((told 0))
+        (romacs-agent--update-manifest session (lambda () (cl-incf told)))
+        (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, cwd from sessions")
+                       '(("renamed" "idle" "/p/two/"))))
+        ;; Its views told once it is written, to read the row again.
+        (should (= told 1)))
+      ;; Queued: its views told only once it is written.  A write that
+      ;; failed is tried once more, unless a later rename came meanwhile.
+      (let ((writes nil) (told 0) (idle nil) (id (romacs-agent-id session)))
+        (cl-letf (((symbol-function 'romacs-agent-write)
+                   (lambda (_f args done _k) (push (cons (cadr args) done) writes) 'queued))
+                  ((symbol-function 'run-with-idle-timer)
+                   (lambda (_secs _repeat f &rest args) (push (cons f args) idle))))
+          (romacs-agent-store-title id "A" (lambda () (cl-incf told)))
+          (should (= told 0))
+          (funcall (cdr (pop writes)) '(error (sqlite-locked-error "locked")))
+          (should (= told 0))
+          ;; B asked for before A's retry: A's retry writes nothing.
+          (romacs-agent-store-title id "B")
+          (should (equal (mapcar #'car writes) '("B")))
+          (let ((retry (pop idle))) (apply (car retry) (cdr retry)))
+          (should (equal (mapcar #'car writes) '("B")))
+          ;; With none later, a retry writes, and tells once written.
+          (setq writes nil)
+          (romacs-agent-store-title id "C" (lambda () (cl-incf told)))
+          (funcall (cdr (pop writes)) '(error (sqlite-locked-error "locked")))
+          (let ((retry (pop idle))) (apply (car retry) (cdr retry)))
+          (should (equal (mapcar #'car writes) '("C")))
+          (funcall (cdr (pop writes)) '(ok t))
+          (should (= told 1)))))))
 
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()
   ;; Restored: a listed session with no kept state and no supervisor is
@@ -230,8 +277,7 @@ journal one turn long."
                             (list (if (eq name 'busy) "running" "idle") (if (eq name 'wanting) 1 0) id))))
         ;; Written while no editor was there: past its kept state.
         (append 'behind 3)
-        (make-directory (expand-file-name "run" root) t)
-        (pcase-dolist (`(,_ . ,id) ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+        (pcase-dolist (`(,_ . ,id) ids) (romacs-agent-store-tests--live id))
         (unwind-protect
             (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (session &rest _) (push (romacs-agent-id session) attached)))
                       ((symbol-function 'romacs-agent--endpoint) #'ignore)
@@ -273,7 +319,7 @@ journal one turn long."
       (dolist (id ids) (romacs-agent-events-import (romacs-agent--quiet-session (expand-file-name id root))))
       ;; Their supervisors running since.
       (make-directory (expand-file-name "run" root) t)
-      (dolist (id ids) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (dolist (id ids) (romacs-agent-store-tests--live id))
       (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
         (dolist (id ids)
           (let ((dir (expand-file-name id root)))
@@ -309,7 +355,7 @@ journal one turn long."
       (romacs-agent-store-fill)
       (sqlite-execute (romacs-agent-store--open) "update sessions set state = 'idle', attention = 0, seq = 2")
       (make-directory (expand-file-name "run" root) t)
-      (dolist (id (list late gone)) (write-region "" nil (romacs-agent--host-socket id) nil 'silent))
+      (dolist (id (list late gone)) (romacs-agent-store-tests--live id))
       (unwind-protect
           (cl-letf (((symbol-function 'romacs-agent-load-session) (lambda (id) (push id loaded))))
             (let ((marks (mapcar (lambda (id) (cons id (romacs-agent-store-quiet-p (expand-file-name id root)))) (list late gone))))
@@ -704,3 +750,184 @@ has it: in a transaction of its own, after the statement FIRST when given."
         (should (equal (sqlite-select db "select * from sessions order by id") rows))
         (should (sqlite-select db "select 1 from sqlite_master where type = 'index' and name = 'sessions_parent'"))
         (should-not (sqlite-select db "select 1 from sqlite_master where name = 'sessions_reformed'"))))))
+
+(ert-deftest romacs-agent-store-a-start-chooses-from-rows-as-from-files ()
+  ;; A start chooses the sessions to load from the rows, the marks and one
+  ;; listing of where sockets are: the same as asking each session's own
+  ;; files, whether the marks are known yet or not.  Known, no session's
+  ;; manifest is read; a mark made or ended changes what is loaded.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((ids (cl-loop for i from 1 to 7 collect (format "aaaaaaaa-0000-4000-8000-00000000030%d" i)))
+           (dirs (mapcar (lambda (id) (expand-file-name id root)) ids))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+           (romacs-agent--restoring nil))
+      (cl-flet ((id (n) (nth (1- n) ids)) (dir (n) (nth (1- n) dirs)))
+        (dotimes (i 7) (record (id (1+ i)) (format "s%d" (1+ i)) (memq (1+ i) '(3 4))))
+        (romacs-agent-store-fill)
+        ;; 1 quiet; 2 due to resume; 3 and 4 live; 5 watched; 6 told of a
+        ;; restart; 7 with no row.
+        (write-region (json-serialize (romacs-mcp--object "id" (id 2) "harness" "claude" "title" "s2" "cwd" "/p/one/"
+                                                          "resumeAt" 1e10))
+                      nil (expand-file-name "manifest.json" (dir 2)) nil 'silent)
+        (write-region "[]" nil (expand-file-name "watches.json" (dir 5)) nil 'silent)
+        (write-region "verdict" nil (expand-file-name "restart-wake" (dir 6)) nil 'silent)
+        (sqlite-execute (romacs-agent-store--open) "delete from sessions where id = ?" (list (id 7)))
+        (let ((oracle (seq-remove #'romacs-agent--unloaded-p dirs)))
+          (should (equal oracle (cdr dirs)))
+          (should-not (romacs-agent--marked))
+          ;; Not known: each session's files asked, as before.
+          (should (equal (romacs-agent--to-load dirs) oracle))
+          (should-not (romacs-agent--marked))
+          ;; A store's fill makes them known, saying which it marked.
+          (should (equal (sort (romacs-agent--marks-reconcile) #'string<) (list (id 2) (id 5) (id 6))))
+          (should (romacs-agent--marked))
+          ;; Known: from the marks, no manifest read.
+          (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read"))))
+            (should (equal (romacs-agent--to-load dirs) oracle))
+            (romacs-agent-mark (id 1) 'watches t)
+            (should (member (dir 1) (romacs-agent--to-load dirs)))
+            (romacs-agent-mark (id 1) 'watches nil)
+            (romacs-agent-mark (id 5) 'watches nil)
+            (should-not (member (dir 1) (romacs-agent--to-load dirs)))
+            (should-not (member (dir 5) (romacs-agent--to-load dirs)))))))))
+
+(ert-deftest romacs-agent-store-a-fill-makes-the-marks-what-the-files-say ()
+  ;; Known marks a fact went unmarked under (an older build wrote it, a
+  ;; stop cut its mark short): a store's fill marks it, and names the ones
+  ;; newly marked, which a start would have missed.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let ((one "aaaaaaaa-0000-4000-8000-000000000501") (two "aaaaaaaa-0000-4000-8000-000000000502"))
+      (record one "one")
+      (record two "two")
+      (romacs-agent--marks-known)
+      (romacs-agent-mark two 'watches t)
+      (write-region "[]" nil (expand-file-name "watches.json" (expand-file-name one root)) nil 'silent)
+      (should-not (gethash one (romacs-agent--marked)))
+      (should (equal (romacs-agent--marks-reconcile) (list one)))
+      (should (gethash one (romacs-agent--marked)))
+      ;; A mark too many stays: removing it could race a fact's writing.
+      (should (gethash two (romacs-agent--marked)))
+      (should-not (romacs-agent--marks-reconcile))
+      ;; What a fill printed of them, for the editor to load.
+      (should (equal (romacs-agent-store--marked-ids
+                      (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" one))
+                     (list one))))))
+
+(ert-deftest romacs-agent-store-a-start-asks-of-the-marked-and-the-live-alone ()
+  ;; Its marks known, an editor's start asks whether to load only the
+  ;; sessions something waits on and those whose supervisor's socket is
+  ;; there, a live one with no row yet too: no session's directory listed
+  ;; or read.  A view's later look finds a session by the row written
+  ;; for it since.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((ids (cl-loop for i from 1 to 7 collect (format "aaaaaaaa-0000-4000-8000-00000000060%d" i)))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil)
+           (romacs-agent--rows-seen nil) (noninteractive nil) (romacs-agent-writer-queued nil))
+      (cl-flet ((id (n) (nth (1- n) ids)) (dir (n) (expand-file-name (nth (1- n) ids) root)))
+        (dotimes (i 5) (record (id (1+ i)) (format "s%d" (1+ i)) (= i 2)))
+        (romacs-agent-store-fill)
+        (romacs-agent--marks-known)
+        (romacs-agent-mark (id 4) 'watches t)
+        ;; Live, its row not written yet.
+        (record (id 6) "s6" t)
+        (cl-letf (((symbol-function 'romacs-agent--read-json) (lambda (&rest _) (error "A manifest read")))
+                  ((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
+          (should (equal (sort (car (romacs-agent--start-choice)) #'string<) (list (dir 3) (dir 4) (dir 6)))))
+        ;; The start chose among every one recorded: a view's look finds
+        ;; one by the row written for it since, listing none.
+        (record (id 7) "s7")
+        (romacs-agent-store-fill)
+        (cl-letf (((symbol-function 'romacs-agent--new-session-dirs) (lambda () (error "Every session listed"))))
+          (should (member (dir 7) (car (romacs-agent--recorded-since))))
+          (should-not (member (dir 1) (car (romacs-agent--recorded-since)))))))))
+
+(ert-deftest romacs-agent-store-a-session-marked-late-is-known-as-restored ()
+  ;; A fill that finds no row missing but a session newly marked, after
+  ;; the start's restore ended: the session is loaded, and known as a
+  ;; restore knows one (its watches, a restart to tell), its hook run once.
+  ;; With no listing answering, a start asks of every session.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (romacs-agent-store-tests--with
+    (let* ((id "aaaaaaaa-0000-4000-8000-000000000701") (restored 0)
+           (romacs-agent--restore-pending nil) (romacs-agent--restoring nil) (romacs-agent--late-loads nil)
+           (romacs-agent-restored-hook (list (lambda () (cl-incf restored))))
+           (romacs-agent--quiet (make-hash-table :test #'equal)) (romacs-agent--quiet-timer nil))
+      (record id "late")
+      (romacs-agent-store-fill)
+      (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                ((symbol-function 'romacs-startup-progress) #'ignore)
+                ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+        ;; A fill that names none: nothing asked of the rows here.
+        (cl-letf (((symbol-function 'romacs-agent-store--missing) (lambda () (error "Every row asked"))))
+          (romacs-agent-store--filled "romacs-agent-store: filled 0\nromacs-agent-store: done\n")
+          (should (= restored 0))
+          (romacs-agent-store--filled (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\nromacs-agent-store: done\n" id)))
+        (should (romacs-agent-loaded id))
+        (should (= restored 1))
+        (should-not romacs-agent--late-loads)
+        ;; One a worker folds still: known once folded, not before.
+        (let ((late "aaaaaaaa-0000-4000-8000-000000000702"))
+          (record late "folding")
+          (puthash late t romacs-agent--folding)
+          (romacs-agent-store--filled (format "romacs-agent-store: missing %s\nromacs-agent-store: done\n" late))
+          (should (= restored 1))
+          (remhash late romacs-agent--folding)
+          (romacs-agent--restore-finish)
+          (should (= restored 2))
+          ;; A restore asked for meanwhile tells them itself, once.
+          (setq romacs-agent--late-loads t)
+          (cl-letf (((symbol-function 'romacs-agent--endpoint) #'ignore)
+                    ((symbol-function 'romacs-agent--sweep) #'ignore))
+            (romacs-agent-restore))
+          (should (= restored 3))
+          (should-not romacs-agent--late-loads)))
+      (let ((noninteractive nil) (listed nil))
+        (romacs-agent--marks-known)
+        (cl-letf (((symbol-function 'romacs-agent-store-rows-since) #'ignore)
+                  ((symbol-function 'romacs-agent--new-session-dirs) (lambda () (setq listed t) nil)))
+          (should-not (cdr (romacs-agent--start-choice)))
+          (should listed)))
+      ;; A fill cut short, or failed: its report not taken for all there
+      ;; is, every row asked here.
+      (let ((asked 0))
+        (cl-letf (((symbol-function 'romacs-agent-store--missing) (lambda () (cl-incf asked) nil)))
+          (romacs-agent-store--filled "romacs-agent-store: filled 2\n")
+          (romacs-agent-store--filled "romacs-agent-store: filled 0\nromacs-agent-store: done\n" 1)
+          (should (= asked 2))))
+      ;; One it marked before it stopped is loaded all the same.
+      (let ((marked "aaaaaaaa-0000-4000-8000-000000000703"))
+        (record marked "marked")
+        (romacs-agent-store-fill)
+        (romacs-agent-mark marked 'resume t)
+        (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                  ((symbol-function 'romacs-startup-progress) #'ignore)
+                  ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+          (romacs-agent-store--filled (format "romacs-agent-store: filled 0\nromacs-agent-store: marked %s\n" marked)))
+        (should (romacs-agent-loaded marked))
+        ;; Marked before its marks were known whole, by a fill that then
+        ;; stopped: loaded all the same.  A mark whose session is gone
+        ;; loads nothing and starts no restore.
+        (let ((first "aaaaaaaa-0000-4000-8000-000000000704"))
+          (record first "first")
+          (romacs-agent-store-fill)
+          (delete-file (expand-file-name ".complete" (romacs-agent--marks-dir)))
+          (romacs-agent-mark first 'watches t)
+          (romacs-agent-mark "aaaaaaaa-0000-4000-8000-000000000799" 'watches t)
+          (setq romacs-agent--late-loads nil)
+          (cl-letf (((symbol-function 'romacs-agent--attach) (lambda (&rest _) nil))
+                    ((symbol-function 'romacs-startup-progress) #'ignore)
+                    ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
+            (romacs-agent-store--filled "romacs-agent-store: filled 0\n"))
+          (should (romacs-agent-loaded first))
+          (should-not romacs-agent--restore-pending))
+        ;; An orphan mark alone: nothing queued, no restore scheduled.
+        (let ((timers 0))
+          (setq romacs-agent--late-loads nil)
+          (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) (cl-incf timers))))
+            (romacs-agent-store--filled "romacs-agent-store: filled 0\n"))
+          (should-not romacs-agent--restore-pending)
+          (should-not romacs-agent--late-loads)
+          (should (= timers 0)))))))
