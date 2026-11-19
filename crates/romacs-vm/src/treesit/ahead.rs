@@ -1,5 +1,7 @@
 //! A parser's reparse on a thread of its own, ahead of the frame that will
-//! ask for the tree.
+//! ask for the tree, and a parser's first parse when a frame shows its
+//! buffer before any tree was asked for (a buffer restored unseen, a mode
+//! set by Lisp): that parse starts from nothing.
 //!
 //! A key's frame shows the edit before its parse (`Vm::defer_parse`). The
 //! parse then runs here, from a copy of the parser's edited tree over a
@@ -50,11 +52,12 @@ type Landed = (native::Loose, Vec<(u32, u32)>);
 type Finished = (native::Tree, (i64, i64), bool, Option<Vec<(u32, u32)>>);
 
 /// What a parser needs of the thread: its language, its included ranges
-/// and its tree, edited up to the text the thread reads.
+/// and its tree, edited up to the text the thread reads; none for a first
+/// parse.
 pub(crate) struct Job {
     pub language: native::Language,
     pub ranges: Vec<(u32, u32)>,
-    pub old: native::Loose,
+    pub old: Option<native::Loose>,
     pub visible: (i64, i64),
 }
 
@@ -67,13 +70,14 @@ impl Ahead {
             // The slot outlives the text.
             let _slot = slot;
             let text = text;
-            let old = job.old.tree();
+            let old = job.old.map(native::Loose::tree);
             let mut parser = native::Parser::new();
             let tree = (parser.set_language(&job.language) && parser.set_included_ranges(&job.ranges)).then(|| {
                 let offset = |position: i64| usize::try_from(position - 1).unwrap_or(0);
                 let reader = Reader::new(Some(&text), (offset(visible.0), offset(visible.1)));
-                parser.parse(Some(&old), &reader).map(|new| {
-                    let changed = new.changed_since(&old);
+                parser.parse(old.as_ref(), &reader).map(|new| {
+                    // A first parse has no old tree to differ from.
+                    let changed = old.as_ref().map_or_else(Vec::new, |old| new.changed_since(old));
                     (new.loose(), changed)
                 })
             }).flatten();
@@ -87,11 +91,15 @@ impl Ahead {
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
+        self.wait(std::time::Duration::ZERO)
+    }
+    /// Whether the thread has sent its result, waiting at most SLICE for it.
+    pub(crate) fn wait(&mut self, slice: std::time::Duration) -> bool {
         if !self.done {
-            match self.result.try_recv() {
+            match self.result.recv_timeout(slice) {
                 Ok(landed) => (self.landed, self.done) = (landed, true),
-                Err(mpsc::TryRecvError::Disconnected) => self.done = true,
-                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => self.done = true,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
         self.done
@@ -142,12 +150,23 @@ impl Vm {
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
         Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready())))
     }
+    /// Whether a parser of BUFFER's text is waiting for its first tree from
+    /// a thread: the frame shows the text without it meanwhile.
+    pub(crate) fn treesit_first_running(&mut self, buffer: Value) -> crate::Result<bool> {
+        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
+            let mut c = core.borrow_mut();
+            c.tree.is_none() && c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+        }))
+    }
     /// Bring the reparses of BUFFER's text up to the frame about to be
     /// built: with START, one begins for each parser an edit left to
     /// reparse and that has none; one that landed behind the text begins
-    /// again from its tree.
+    /// again from its tree. A parser that has no tree, in a text whose visit
+    /// started no early parse, begins its first parse: the frame shows the
+    /// text, not the parse, and nothing parses before a frame shows it.
     pub(crate) fn treesit_run_ahead(&mut self, buffer: Value, start: bool) -> crate::Result<State> {
         let Some(wake) = self.process_jobs.wake() else { return Ok(State::None) };
+        let first = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.early.is_none());
         let cores = self.treesit_cores(buffer)?;
         let mut state = State::None;
         for (parser, core) in cores {
@@ -166,7 +185,7 @@ impl Vm {
                         continue;
                     }
                 }
-                None if start => 0,
+                None if start || (first && core.borrow().tree.is_none()) => 0,
                 None => continue,
             };
             if self.treesit_start_ahead(buffer, parser, &core, restarts, wake.clone())? {
@@ -178,9 +197,10 @@ impl Vm {
         Ok(state)
     }
     /// Start PARSER's reparse on a thread, from the tree of a reparse that
-    /// landed behind the text if CORE holds one, else from its own. False
-    /// when it has nothing to reparse, tracks lines and columns (an edit
-    /// replayed on the thread's tree has no points), or no thread is free.
+    /// landed behind the text if CORE holds one, else from its own, else
+    /// from nothing. False when it has nothing to reparse, tracks lines and
+    /// columns (an edit replayed on the thread's tree has no points), or no
+    /// thread is free.
     fn treesit_start_ahead(&mut self, buffer: Value, parser: Value, core: &Rc<std::cell::RefCell<Core>>, restarts: u8,
                            wake: crate::process_jobs::Wake) -> crate::Result<bool> {
         let (language, ranges) = match self.object(parser)? {
@@ -201,11 +221,8 @@ impl Vm {
             return Ok(false);
         }
         let old = match behind.and_then(|ahead| ahead.finish(text)) {
-            Some((tree, region, ..)) if region == c.visible => tree.loose(),
-            _ => match &c.tree {
-                Some(tree) => tree.share(),
-                None => return Ok(false),
-            },
+            Some((tree, region, ..)) if region == c.visible => Some(tree.loose()),
+            _ => c.tree.as_ref().map(|tree| tree.share()),
         };
         let Some(slot) = EarlySlot::take() else { return Ok(false) };
         let job = Job { language, ranges, old, visible: c.visible };

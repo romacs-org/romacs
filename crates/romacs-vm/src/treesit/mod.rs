@@ -187,8 +187,17 @@ impl Early {
     }
     /// Whether the thread has sent its result.
     pub(crate) fn ready(&mut self) -> bool {
+        self.wait(std::time::Duration::ZERO)
+    }
+    /// Whether the thread has sent its result (or ended without one),
+    /// waiting at most SLICE for it.
+    pub(crate) fn wait(&mut self, slice: std::time::Duration) -> bool {
         if self.landed.is_none() {
-            self.landed = self.result.try_recv().ok();
+            self.landed = match self.result.recv_timeout(slice) {
+                Ok(landed) => Some(landed),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Some(None),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+            };
         }
         self.landed.is_some()
     }

@@ -113,6 +113,7 @@ mod code_image;
 mod sqlite;
 mod treesit;
 pub use treesit::native::parses_on_this_thread as treesit_parses_on_this_thread;
+pub use treesit::native::parses_in_process as treesit_parses_in_process;
 pub use treesit::{BundledGrammar, register_bundled_grammars};
 mod random;
 mod digest;

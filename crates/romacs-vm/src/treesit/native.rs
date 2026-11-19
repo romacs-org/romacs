@@ -209,10 +209,17 @@ thread_local! {
     /// The parses this thread ran (`parses_on_this_thread`).
     static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
+/// The parses every thread of the process has run.
+static PARSES_IN_PROCESS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// How many parses the calling thread has run: what tells a parse the
 /// evaluator paid for from one a parse thread ran for it.
 pub fn parses_on_this_thread() -> usize {
     PARSES.with(std::cell::Cell::get)
+}
+/// How many parses the process has run on any thread: what tells that a
+/// buffer was not parsed at all.
+pub fn parses_in_process() -> usize {
+    PARSES_IN_PROCESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(crate) struct Parser(tree_sitter::Parser);
@@ -249,6 +256,7 @@ impl Parser {
     pub(crate) fn parse(&mut self, old: Option<&Tree>, source: &dyn Source) -> Option<Tree> {
         let old = old.map(|tree| tree.0.borrow());
         PARSES.with(|n| n.set(n.get() + 1));
+        PARSES_IN_PROCESS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tree = self.0.parse_with_options(&mut |offset, _| source.read(offset), old.as_deref(), None)?;
         Some(Tree(RefCell::new(tree), OnceCell::new()))
     }

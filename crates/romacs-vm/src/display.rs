@@ -2777,6 +2777,14 @@ impl Vm {
         let id = self.window(self.slots[root].value)?.id;
         let buffer = self.slots[buffer_slot].value;
         let limit = if self.treesit_deferred.is_some() { self.treesit_show_limit() } else { 0 };
+        // A first parse on its thread: the window takes stopgap faces until
+        // it lands, as for a visit's early parse.
+        if self.treesit_first_running(buffer)? {
+            if !self.treesit_plain.contains(&id) {
+                self.treesit_plain.push(id);
+            }
+            return Ok(Plain::First);
+        }
         // A reparse on its thread: the window keeps the faces it has, and
         // the landing wakes the frame that fontifies it (`land_treesit').
         if self.treesit_deferred.is_some() && self.treesit_ahead_running(buffer)? {
