@@ -321,7 +321,7 @@
     ;; Known by its task alone, then ended: under its call still.
     (draw :type 'task :task "t1" :state 'backgrounded)
     (draw :type 'task :id "b" :state 'completed :summary "slept")
-    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed\nroot goes on"
+    (should (string-match-p "  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\nroot goes on"
                             (romacs-agent-log-tests--transcript)))
     (should-not (romacs-agent-log--block "b"))))
 

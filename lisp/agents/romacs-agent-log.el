@@ -208,8 +208,7 @@ end before TEXT."
   "TEXT with every line indented for a subagent DEPTH deep."
   (if (zerop depth) text
     (let ((bar (propertize (concat (make-string (* 2 (1- depth)) ?\s) "│ ") 'face 'romacs-agent-log-rule)))
-      (propertize (replace-regexp-in-string "^\\(.\\)" (lambda (match) (concat bar match)) text t t)
-                  'wrap-prefix bar))))
+      (replace-regexp-in-string "^\\(.\\)" (lambda (match) (concat bar match)) text t t))))
 
 (defun romacs-agent-log--where (event)
   "Where EVENT is drawn: (BLOCK . DEPTH), under its parent's open call,
@@ -337,7 +336,7 @@ many more there are; FULL, (INPUT . OUTPUT), is what RET on it shows."
   (pcase-let ((`(,shown . ,count) (romacs-agent-log--lines output romacs-agent-log-output-lines)))
     (let ((text (concat (propertize "  ⎿ " 'face 'romacs-agent-log-rule)
                         (propertize (replace-regexp-in-string "\n" "\n    " (if (string-empty-p shown) "(no output)" shown) t t)
-                                    'face face 'wrap-prefix "    ")
+                                    'face face)
                         (if (> count romacs-agent-log-output-lines)
                             (propertize (format "\n    … %d more lines · %s shows all" (- count romacs-agent-log-output-lines)
                                                 (romacs-agent-log--key 'romacs-agent-log-open))
@@ -485,10 +484,12 @@ when that changes, and how it ended; with its call gone, at the end."
                               (and activity (not (and block (equal activity (plist-get (cdr block) :activity))))
                                    (progn (when block (setcdr block (plist-put (cdr block) :activity activity)))
                                           (format "now: %s" activity)))))
-                 ;; Its summary, only where its call's output is not drawn.
+                 ;; Its summary, but a subagent's: its call's output, drawn, is its report.
                  ((or 'completed 'failed 'stopped)
                   (concat (symbol-name state)
-                          (if-let* ((summary (and (not (and block (plist-get (cdr block) :ended))) (plist-get event :summary))))
+                          (if-let* ((summary (and (not (and block (plist-get (cdr block) :ended)
+                                                            (member (plist-get (cdr block) :name) '("Agent" "Task"))))
+                                                  (plist-get event :summary))))
                               (concat ": " summary)
                             ""))))))
     (when (and block (eq state 'started) (plist-get event :task))
