@@ -351,20 +351,27 @@ impl Leaf<'_> {
     }
     /// A completion walk's INPUT, read once for the walk: what each
     /// candidate's prefix is compared with.
-    pub(crate) fn completion_input(&self, input: Value) -> std::result::Result<CompletionInput, Fault> {
+    pub(crate) fn completion_input(&self, input: Value, compares: bool) -> std::result::Result<CompletionInput, Fault> {
         let view = self.vm.str_view(input).ok_or(Fault::Wrong("stringp", input))?;
+        let single = view.bytes.len() == view.chars;
+        // Only what the walk's comparison reads: the bytes of a one-byte-a-
+        // character input, else its codes; nothing when case folds.
         Ok(CompletionInput {
-            single: view.bytes.len() == view.chars,
-            bytes: view.bytes.to_vec(),
-            codes: view.chars().map(raw_byte_code(view.multibyte)).collect(),
+            chars: view.chars,
+            single,
+            multibyte: view.multibyte,
+            bytes: if compares && single { view.bytes.to_vec() } else { Vec::new() },
+            codes: if compares && !single { view.chars().map(raw_byte_code(view.multibyte)).collect() } else { Vec::new() },
         })
     }
     /// NAME as a completion candidate against INPUT's first LENGTH
     /// characters, from one read of NAME: None when NAME is no string,
     /// else its length in characters and whether it begins with them,
     /// compared in place up to the first difference, as
-    /// `string_compare::codes` reads them.
-    pub(crate) fn completion_candidate(&self, name: Value, input: &CompletionInput, length: usize)
+    /// `string_compare::codes` reads them.  With EXACT, a name of another
+    /// length is rejected before any comparison, so a test walk stays
+    /// linear in its names however long they are.
+    pub(crate) fn completion_candidate(&self, name: Value, input: &CompletionInput, length: usize, exact: bool)
         -> std::result::Result<Option<(usize, bool)>, Fault> {
         let Some(view) = self.vm.str_view(name) else {
             // A string kind without text to read is an error, as reading its length was.
@@ -373,16 +380,23 @@ impl Leaf<'_> {
                 _ => Ok(None),
             };
         };
-        if view.chars < length {
+        if view.chars < length || (exact && view.chars != input.chars) {
             return Ok(Some((view.chars, false)));
         }
         // One byte to a character in each (ASCII, or unibyte): a byte above
         // 127 is a raw byte in a unibyte string and in no ASCII one, so the
         // bytes agree exactly when the characters do.
-        let same = if view.bytes.len() == view.chars && input.single {
+        let same = if length == 0 {
+            true
+        } else if input.single && view.bytes.len() == view.chars {
             view.bytes[..length] == input.bytes[..length]
         } else {
-            view.chars().map(raw_byte_code(view.multibyte)).take(length).eq(input.codes[..length].iter().copied())
+            let name_codes = view.chars().map(raw_byte_code(view.multibyte)).take(length);
+            if input.single {
+                name_codes.eq(input.bytes[..length].iter().map(|&b| raw_byte_code(input.multibyte)(u32::from(b))))
+            } else {
+                name_codes.eq(input.codes[..length].iter().copied())
+            }
         };
         Ok(Some((view.chars, same)))
     }
@@ -433,7 +447,10 @@ impl Leaf<'_> {
 /// A completion walk's input, read once (`Leaf::completion_input`): its
 /// bytes, its character codes, and whether it has one byte to each character.
 pub(crate) struct CompletionInput {
+    /// Its length in characters.
+    pub(crate) chars: usize,
     single: bool,
+    multibyte: bool,
     bytes: Vec<u8>,
     codes: Vec<u32>,
 }

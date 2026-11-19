@@ -300,10 +300,10 @@ fn matches_regexps(cx: &mut Leaf<'_>, name: Value) -> std::result::Result<bool, 
 fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
     // No Lisp runs until the next predicate call, after which the walk
     // starts again: what the candidates are matched against holds till then.
-    let length = cx.string_view(state.input)?.chars;
     let fold = fold_case(cx)?;
     // Read once for the walk, not once a candidate.
-    let input = cx.completion_input(state.input)?;
+    let input = cx.completion_input(state.input, !fold)?;
+    let length = input.chars;
     let keyed = matches!(cx.kind(state.collection), Kind::HashTable | Kind::Obarray);
     let regexps = variable(cx, "completion-regexp-list")? != Value::NIL;
     // Compiled at the first candidate that reaches them, as GNU checks them.
@@ -316,7 +316,7 @@ fn walk(cx: &mut Leaf<'_>, mut state: State) -> Next {
         // One read of the name: whether it is a string, its length, and,
         // unless case folds, whether it begins with the input.
         let compared = if check && !fold { length } else { 0 };
-        let Some((name_len, same)) = cx.completion_candidate(name, &input, compared)? else {
+        let Some((name_len, same)) = cx.completion_candidate(name, &input, compared, state.mode == Mode::Test)? else {
             continue;
         };
         if check {
