@@ -5,8 +5,9 @@
 //! replaces the component and is resolved in turn. Whatever GNU's own Lisp
 //! might answer differently is declined, and that Lisp decides it, errors
 //! included (LISP-NATIVE-TRUENAME): many links, a walk that might spend
-//! GNU's budget of steps, a leading `//' or a target ending in a slash (it
-//! keeps them), a NUL, and a name or target that is not UTF-8 text.
+//! GNU's budget of steps, a leading `//' and a target beginning with `//'
+//! or ending in a slash (it keeps them), a NUL, and a name or target that
+//! is not UTF-8 text.
 use super::*;
 use std::os::unix::ffi::OsStrExt;
 
@@ -24,9 +25,14 @@ const GNU_STEPS: usize = 100;
 defsubr! { name = "romacs--file-truename-local", gnu = "files.el:1393", effect = Global,
 fn file_truename_local(cx, filename: Value) -> Step {
     // The Lisp caller made FILENAME absolute; anything else is its to walk.
+    // Text only: a unibyte name with non-ASCII bytes, or a multibyte one
+    // holding raw bytes or characters past Unicode, is GNU's to walk.
+    let text = {
+        let view = cx.string_view_from(filename, 0)?;
+        if view.multibyte { std::str::from_utf8(view.bytes).is_ok() } else { view.bytes.is_ascii() }
+    };
     let path = super::fileio::file_name_bytes(cx, filename)?;
-    let (_, multibyte) = cx.string_shape(filename)?;
-    if path.first() != Some(&b'/') || (!multibyte && !path.is_ascii()) {
+    if !text || path.first() != Some(&b'/') {
         return Ok(Step::Done(Value::NIL));
     }
     Ok(Step::Done(match truename(&path, |p| read_link(p)) {
@@ -84,6 +90,7 @@ fn truename(path: &[u8], link: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Option<Walk
                     Some(target) => {
                         if through.len() == MOST_LINKS
                             || target.last() == Some(&b'/')
+                            || target.starts_with(b"//")
                             || target.contains(&0)
                             || std::str::from_utf8(&target).is_err()
                         {
@@ -184,6 +191,8 @@ mod tests {
         assert_eq!(walk(&format!("/a{}", deep(40)), long), None);
         // A target ending in a slash, a leading `//', a NUL.
         assert_eq!(walk("/d/f", table), None);
+        let doubled: &[(&str, &str)] = &[("/l", "//tmp/missing")];
+        assert_eq!(walk("/l", doubled), None);
         assert_eq!(walk("//a/b", table), None);
         assert_eq!(truename(b"/a\0b", links(table)), None);
         assert_eq!(walk("/bad", table), None);

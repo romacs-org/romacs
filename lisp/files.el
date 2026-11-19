@@ -1573,6 +1573,7 @@ containing it, until no links are left at any level.
   ;; own call, where some operations' handlers are inhibited.
   (or (and (null counter) (null prev-dirs) (not (eq system-type 'windows-nt))
            (null inhibit-file-name-operation) (null inhibit-file-name-handlers)
+           (not (file-truename--links-virtualized-p))
            (let ((name (file-truename--local-name filename)))
              (and name
                   (not (find-file-name-handler name 'file-truename))
@@ -1587,6 +1588,21 @@ containing it, until no links are left at any level.
                         (and walk (null spliced) (car walk))))))))
       (file-truename--walk filename counter prev-dirs)))
 
+(defun file-truename--links-virtualized-p ()
+  "Whether a file name handler answers `file-symlink-p' but not `file-truename'.
+Such a handler (its `operations' property names the one, not the other)
+can make a link GNU's walk follows where the disk has none, which the
+native walk cannot see. A handler without the property is asked of
+every operation, so the native walk's `file-truename' checks find it."
+  (let ((handlers file-name-handler-alist) found)
+    (while (and handlers (not found))
+      (let* ((handler (cdr-safe (car handlers)))
+             (operations (and (symbolp handler) (get handler 'operations))))
+        (setq found (and (memq 'file-symlink-p operations)
+                         (not (memq 'file-truename operations)))
+              handlers (cdr handlers))))
+    found))
+
 (defun file-truename--local-name (filename)
   "FILENAME made absolute for the native walk, or nil to leave it to GNU's.
 `default-directory' is read only for a relative name, as GNU's algorithm
@@ -1599,11 +1615,12 @@ the walk's to resolve after any link, as GNU resolves them."
          ;; name handler too: the caller asks once, of the joined name.
          (let ((dir (cond ((string-prefix-p "/" default-directory) default-directory)
                           ;; `~' alone reads HOME, as `expand-file-name' does
-                          ;; when HOME names an absolute directory.
+                          ;; when HOME is an absolute name already normal.
                           ((and (or (string-prefix-p "~/" default-directory)
                                     (equal default-directory "~"))
                                 (let ((home (getenv "HOME")))
                                   (and home (string-prefix-p "/" home)
+                                       (not (string-match-p "//\\|/\\.\\.?\\(?:/\\|\\'\\)" home))
                                        (concat (if (string-suffix-p "/" home) (substring home 0 -1) home)
                                                (substring default-directory 1))))))
                           ((string-match "\\`~[^/]*" default-directory)

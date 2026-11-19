@@ -144,6 +144,24 @@ other operation on."
                     (inhibit-file-name-handlers (list 'file-truename-tests--local))
                     (inhibit-file-name-operation 'file-truename))
                 (should (equal (same (concat local "x")) (concat root "real/f")))))
+            ;; A handler that answers `file-symlink-p' but not
+            ;; `file-truename' for an exact leaf: a link only it knows.
+            (defalias 'file-truename-tests--virtual
+              (lambda (op &rest args)
+                (if (eq op 'file-symlink-p)
+                    "real"
+                  (let ((inhibit-file-name-handlers (cons 'file-truename-tests--virtual inhibit-file-name-handlers))
+                        (inhibit-file-name-operation op))
+                    (apply op args)))))
+            (put 'file-truename-tests--virtual 'operations '(file-symlink-p))
+            (let ((file-name-handler-alist
+                   (cons (cons (concat "\\`" (regexp-quote (concat root "virt")) "\\'") 'file-truename-tests--virtual)
+                         file-name-handler-alist)))
+              (should (equal (same (concat root "virt")) (concat root "real"))))
+            ;; A HOME that is not normal: GNU expands it, `..' and all.
+            (let ((process-environment (cons (concat "HOME=" root "deep/..") process-environment)))
+              (let ((default-directory "~/"))
+                (should (equal (same "f") (concat root "f")))))
             ;; `..' in an abbreviated `default-directory' climbs from the
             ;; link's target, not from the link.
             (let ((process-environment (cons (concat "HOME=" (directory-file-name root)) process-environment)))
@@ -152,6 +170,9 @@ other operation on."
             ;; Slashes GNU keeps: a target ending in one, a leading `//'.
             (same (concat root "slash/f"))
             (same (concat "/" root "real/f"))
+            ;; A link to a name beginning with `//'.
+            (make-symbolic-link "//tmp/missing" (concat root "dslash"))
+            (same (concat root "dslash"))
             ;; A NUL in the name.
             (same (concat root "real/a\0b"))
             ;; A unibyte name with non-ASCII bytes, and a multibyte one,
@@ -159,6 +180,10 @@ other operation on."
             (let ((unibyte (encode-coding-string (concat root "real/λ") 'utf-8)))
               (should (equal (multibyte-string-p (same unibyte))
                              (multibyte-string-p (file-truename unibyte (list 100))))))
+            ;; A multibyte name holding raw bytes.
+            (let ((raw (concat root "real/" (string-to-multibyte (unibyte-string #xc3 #xa9)))))
+              (should (equal (multibyte-string-p (same raw))
+                             (multibyte-string-p (file-truename raw (list 100))))))
             (let ((multibyte (concat root "l/λ")))
               (should (equal (same multibyte) (concat root "real/λ")))
               (should (multibyte-string-p (file-truename multibyte))))))
