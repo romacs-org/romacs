@@ -99,6 +99,74 @@ fn an_interrupt_quits_cpu_bound_lisp_and_the_worker_serves_on() {
     eval(&mut vm, "(isolate-kill-all)");
 }
 
+/// A worker's job connected to its own server, which never writes: BODY
+/// then waits on the client as `client'.
+fn silent_socket_job(body: &str) -> String {
+    format!("'(lambda () \
+       (let* ((server (make-network-process :name \"s\" :server t :host \"127.0.0.1\" :service t :noquery t)) \
+              (client (make-network-process :name \"c\" :host \"127.0.0.1\" :service (process-contact server :service) :noquery t))) \
+         {body}))")
+}
+
+/// A worker waiting for a socket that never answers takes an interrupt as
+/// a quit within the bound, not at its wait's timeout or the spawner's
+/// kill: the wait polls the wake pipe the signal writes. The worker serves
+/// on. The list's last element is the interrupt's milliseconds to quit.
+#[test]
+fn an_interrupt_ends_a_workers_wait_for_process_output() {
+    let mut vm = vm();
+    let job = silent_socket_job("(accept-process-output client 60) 'waited");
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        (romacs--isolate-wait 0.5) \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (< ms 500) (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))"));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("interrupt to quit: {ms} ms");
+    assert_eq!(head, "(interrupted t 2", "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// Under `inhibit-quit' the interrupt is held: the wait runs its full
+/// 0.5 s without spinning on the drained wake pipe, and the job quits once
+/// `inhibit-quit' ends. The worker keeps what the wait measured.
+#[test]
+fn an_interrupt_held_by_inhibit_quit_waits_out_the_wait_without_spinning() {
+    let mut vm = vm();
+    let job = silent_socket_job("(let ((inhibit-quit t) (t0 (float-time)) (c0 (float-time (get-internal-run-time)))) \
+         (accept-process-output client 0.5) \
+         (setq held (list (- (float-time) t0) (- (float-time (get-internal-run-time)) c0)))) \
+       (dotimes (_ 100000) nil) 'unquit");
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        (romacs--isolate-wait 0.2) (isolate-interrupt iso) \
+        (let* ((result (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e)))) \
+               (held (isolate-await (isolate-spawn '(lambda () held) :isolate iso)))) \
+          (list result (>= (car held) 0.45) (< (nth 1 held) 0.1) held)))"));
+    eprintln!("held wait (wall cpu): {out}");
+    assert!(out.starts_with("(interrupted t t "), "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// SIGTERM writes the same wake pipe: `isolate-kill' of a worker waiting
+/// on a silent socket ends it on the SIGTERM, before `isolate-kill-timeout'
+/// would send SIGKILL. The list's last element is the kill's milliseconds.
+#[test]
+fn a_kill_ends_a_workers_wait_before_the_kill_timeout() {
+    let mut vm = vm();
+    let job = silent_socket_job("(accept-process-output client 60) 'waited");
+    let out = eval(&mut vm, &format!("(let* ((isolate-kill-timeout 1.0) (iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        (romacs--isolate-wait 0.5) \
+        (let* ((start (float-time)) (_ (isolate-kill iso)) (ms (round (* 1000 (- (float-time) start))))) \
+          (list (condition-case e (isolate-await f 1) (error (car e))) (< ms 900) ms)))"));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("kill to end: {ms} ms");
+    assert_eq!(head, "(isolate-killed t", "{out}");
+}
+
 #[test]
 fn kill_leaves_no_zombie_and_settles_futures() {
     let mut vm = vm();
