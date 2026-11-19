@@ -301,27 +301,81 @@ mod tests {
         assert_eq!(vm.conses[i].0, young);
     }
 
-    /// An image function changed in place since the restore is read by
-    /// every full, and so is what it was given; an untouched one is not, but
-    /// the lowered code made for it since is: a callee a call site of an
-    /// image function entered, which nothing else names, is kept (verify's
-    /// walk reads lowered code).
-    #[test]
-    fn a_full_reads_the_image_functions_changed_and_lowered_since_the_restore() {
-        use crate::{Closure, Form, Op};
-        let mut vm = imaged("(progn (defun img-caller () (img-callee)) (defun img-callee () 1) (img-caller))");
-        let id = vm.compile(&Form::Int(0)).unwrap();
-        let index = vm.closures.len();
-        vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![], document: Value::NIL });
-        let mut roots = [Value::reference(index, 4)];
-        dense(&mut vm, &mut roots);
+    /// A VM whose heap is made the image's after SETUP, as `imaged`, the
+    /// closures it made named by nothing but image entries: no source-cache
+    /// entry, prepared or compiled handle, each of which pins its code on
+    /// its own.
+    fn imaged_bare(setup: &str) -> Vm {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        eval(&mut vm, setup);
+        vm.clear_source_cache();
+        dense(&mut vm, &mut []);
         vm.make_image_permanent();
+        vm
+    }
+    /// The function of the closure SOURCE evaluates to, which must be
+    /// request-owned code, retired once unmarked, and the closure's index.
+    fn request_function(vm: &mut Vm, source: &str) -> (usize, usize) {
+        let closure = eval(vm, source).index_if(4).expect("a closure");
+        let function = vm.closures[closure].function;
+        assert!(vm.request_code.live[function] && !vm.request_code.permanent[function], "{source}: request-owned, pinned by nothing");
+        (function, closure)
+    }
+    /// Whether request function ID is still installed with its code.
+    fn kept(vm: &Vm, id: usize) -> bool {
+        vm.request_code.live[id] && !vm.functions[id].code.is_empty()
+    }
+    /// Fulls with only the image naming what the test made.
+    fn fulls(vm: &mut Vm) {
+        vm.clear_source_cache();
+        for _ in 0..2 { vm.collect(&mut []); }
+    }
+
+    /// An image function untouched since the restore, which only a
+    /// permanent closure names, starts reached: a full neither retires it nor
+    /// reads it.
+    #[test]
+    fn a_full_keeps_an_untouched_image_function_only_a_permanent_closure_names() {
+        let mut vm = imaged_bare("(setq img-f (lambda (x) (list x 'body)))");
+        let (function, closure) = request_function(&mut vm, "img-f");
+        assert!(vm.closures.permanent(closure));
+        fulls(&mut vm);
+        assert!(kept(&vm, function), "the function lives");
+        assert!(is_true(&mut vm, "(equal (funcall img-f 1) '(1 body))"));
+    }
+
+    /// An image function changed since the restore (as a lazy body's
+    /// materialization replaces one), which only a permanent closure names,
+    /// is read by every full: what its new code names survives.
+    #[test]
+    fn a_full_reads_an_image_function_changed_since_the_restore() {
+        use crate::Op;
+        let mut vm = imaged_bare("(setq img-g (lambda () 'old))");
+        let (function, _) = request_function(&mut vm, "img-g");
         let young = vm.alloc_cons(Value::integer(7).unwrap(), Value::NIL);
-        std::sync::Arc::get_mut(vm.functions.change(id)).unwrap().code = vec![Op::Const(0, young)];
-        eval(&mut vm, "(progn (defun img-callee () (list 2)) (img-caller) (defun img-callee () 3) nil)");
-        for _ in 0..2 { vm.collect(&mut roots); }
-        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(7).unwrap(), "the changed function's constant survived");
-        assert!(is_true(&mut vm, "(equal (img-caller) 3)"));
+        std::sync::Arc::make_mut(vm.functions.change(function)).code = vec![Op::Const(0, young)];
+        fulls(&mut vm);
+        assert!(kept(&vm, function), "the function lives");
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(7).unwrap(), "its new constant survived");
+    }
+
+    /// Calling an untouched image function fills its lowered call site with
+    /// the callee made since the restore. With nothing else naming the
+    /// callee, a full keeps it through that lowered code.
+    #[test]
+    fn a_full_keeps_the_callee_an_untouched_image_functions_lowered_code_entered() {
+        let mut vm = imaged_bare("(progn (setq img-target nil) (setq img-caller (lambda () (funcall img-target))))");
+        let (caller, _) = request_function(&mut vm, "img-caller");
+        eval(&mut vm, "(setq img-target (lambda () (list 'new)))");
+        let (callee, _) = request_function(&mut vm, "img-target");
+        assert!(is_true(&mut vm, "(equal (funcall img-caller) '(new))"));
+        let mut entered = Vec::new();
+        vm.execution.lowered_values(caller, &mut |_| {}, &mut |f| entered.push(f));
+        assert!(entered.contains(&callee), "the caller's lowered site entered the callee: {entered:?}");
+        eval(&mut vm, "(setq img-target nil)");
+        fulls(&mut vm);
+        assert!(kept(&vm, callee), "the callee lives through the lowered entry alone");
     }
 
     /// An image char table's nodes written since the restore are read by a
