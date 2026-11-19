@@ -217,10 +217,11 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 
 ;;; Sessions
 
-;; Each session opened is, by id, the state of its open: (opening .
-;; NOTICES) while it is asked, the notices that came meanwhile held, then
-;; [REVISION EPOCH ADAPTER] once it is answered.  A reply is applied only
-;; while the state it was asked with is still the session's.
+;; Each session opened is, by id, the state of its open: (opening) while
+;; it is asked, then [REVISION EPOCH ADAPTER] once it is answered.  A reply
+;; is applied only while the state it was asked with is still the
+;; session's; a notice before it is an earlier subscription's, as the
+;; service answers an open before it sends anything of it, and is dropped.
 
 (defun romacs-agent-client-open (client id)
   "Open session ID on CLIENT: its reply, then each event and change of it,
@@ -236,9 +237,7 @@ reach `romacs-agent-client-session-functions'."
            (let ((cursor (gethash "cursor" result)))
              (puthash id (vector (gethash "revision" result) (gethash "epoch" cursor) (gethash "adapter" cursor))
                       (romacs-agent-client-sessions client)))
-           (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))
-           (dolist (notice (reverse (cdr asked)))
-             (romacs-agent-client--session-notice client (car notice) (cdr notice)))))))))
+           (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))))))))
 
 (defun romacs-agent-client-close-session (client id)
   "Close session ID on CLIENT."
@@ -246,15 +245,16 @@ reach `romacs-agent-client-session-functions'."
   (romacs-agent-client-request client "agents/session.close" (romacs-agent-rpc-object "id" id) #'ignore))
 
 (defun romacs-agent-client--session-notice (client method params)
-  "Apply METHOD's PARAMS to their session: held while it opens, the next
-revision passed on, an earlier one ignored; a gap, or an event of another
-epoch or adapter than the open's, answered by opening it again."
+  "Apply METHOD's PARAMS to their session: dropped while it opens, the next
+revision passed on (an event's `gap', records it was never sent live,
+for its reader to pull as history), an earlier one ignored; a missed
+revision, or an event of another epoch or adapter than the open's,
+answered by opening it again."
   (let* ((id (gethash "session" params)) (state (gethash id (romacs-agent-client-sessions client)))
          (revision (gethash "revision" params)) (cursor (gethash "cursor" params)))
     (cond
      ((null state))
-     ((eq (car-safe state) 'opening)
-      (setcdr state (cons (cons method params) (cdr state))))
+     ((eq (car-safe state) 'opening))
      ((not (integerp revision)))
      ((<= revision (aref state 0)))
      ((or (/= revision (1+ (aref state 0)))

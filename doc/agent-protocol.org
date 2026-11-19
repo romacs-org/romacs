@@ -237,7 +237,9 @@ started by older builds keep working.
     (={"/output": BYTES}=), as long as it was.  A record unit still over,
     or not encodable, is sent as ={"events": [], "oversize": true}=, its
     cursor kept.  A pending request, a queue entry and a catalog entry
-    are cut alike; their key fields (a handle, an id, a name) never are.  A row's strings
+    are cut alike, their key fields never; one still over is sent as
+    its key fields and ="oversize": true= (a request keeps its handle,
+    kind and choices: it is answered still).  A row's strings
     are cut to 1,024 characters.  Nothing is fetched whole: a chat needs
     no more of an output, and the files an agent writes are on its host;
   - an editor tool's result is bounded where it is made: each editor tool
@@ -309,10 +311,9 @@ JSON-RPC errors with numeric codes and =data.kind=:
   again.
 - *List revision.*  One counter per generation, raised by every change to
   any row.
-- *Session revision.*  One counter per session per generation, raised by
-  everything that changes what a client mirrors of the session: a
-  record's events, a pending request added or resolved, a row or queue
-  change.  It orders all of a session's notifications.
+- *Session revision.*  One counter per open of a session on a connection,
+  from 0 in its reply, raised by each notice of it: a record's events, a
+  pending request added or resolved, a row or queue change.
 - *Session cursor.*  A cursor is ={"seq":N,"epoch":E,"adapter":A}=.
   - =N= is the seq of the last record whose events were delivered.  All
     records sharing a seq (legacy staged journals have a few) are
@@ -409,8 +410,10 @@ paging ever holds live delivery back.
   An item under way at H (a tool, a message) is drawn from history.
 - *Notifications follow at once*, in revision order from V+1, whatever
   the client does next:
-  - =agents/event {session, revision, cursor, events}=: the events of one
-    record unit;
+  - =agents/event {session, revision, cursor, events, gap?}=: the events
+    of one record unit.  =gap= ={after, upto}= names records the editor
+    folded with no events (a worker's fold, a load): the client pulls
+    them as history before it applies these;
   - =agents/pending.added {session, revision, request}=;
   - =agents/pending.answering {session, revision, handle}=;
   - =agents/pending.taken {session, revision, handle}=;

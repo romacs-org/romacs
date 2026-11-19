@@ -128,6 +128,7 @@ of this user's that nothing answers at."
                 (and romacs-agent-rows-since (cdr (funcall romacs-agent-rows-since nil))))
           (romacs-agent-service--refresh t)
           (add-hook 'romacs-agent-event-functions #'romacs-agent-service--event)
+          (add-hook 'romacs-agent-loaded-functions #'romacs-agent-service--loaded)
           (setq romacs-agent-service--poll-timer (run-at-time 3 3 #'romacs-agent-service--poll))
           (add-hook 'kill-emacs-hook #'romacs-agent-service-stop))
       (error (romacs-agent-service-stop) (signal (car err) (cdr err))))
@@ -137,6 +138,7 @@ of this user's that nothing answers at."
   "Stop serving: close every connection, and the socket while it is ours."
   (interactive)
   (remove-hook 'romacs-agent-event-functions #'romacs-agent-service--event)
+  (remove-hook 'romacs-agent-loaded-functions #'romacs-agent-service--loaded)
   (remove-hook 'kill-emacs-hook #'romacs-agent-service-stop)
   (dolist (timer (list romacs-agent-service--refresh-timer romacs-agent-service--poll-timer
                        romacs-agent-service--idle-timer))
@@ -542,7 +544,10 @@ holds too many."
 
 ;; Each connection's subscription to a session is its own: the cursor its
 ;; live events follow from (CUTOFF: a unit at or below it, a replay's, is
-;; never sent it) and the REVISION its notices are numbered by.
+;; never sent it), the REVISION its notices are numbered by, and the GAP of
+;; records past the cutoff it was never sent live, (AFTER . UPTO), told
+;; with the next event it is sent (a fold the editor made with no events,
+;; a unit whose cursor could not be read).
 
 (defconst romacs-agent-service--string-limit (* 64 1024)
   "The most bytes of one string in an event as sent: the rest is cut, the
@@ -553,8 +558,9 @@ event saying how long it was (Framing).")
 
 (cl-defstruct (romacs-agent-service--subscription (:constructor romacs-agent-service--subscription-make)
                                                   (:copier nil))
-  "A connection's subscription to a session: its CUTOFF seq and REVISION."
-  cutoff (revision 0))
+  "A connection's subscription to a session: its CUTOFF seq, REVISION and
+GAP."
+  cutoff (revision 0) gap)
 
 (defun romacs-agent-service--subscriptions (id)
   "Each (RPC . SUBSCRIPTION) to session ID."
@@ -658,29 +664,68 @@ with the length it had.  A unit still over, or not encodable, is
                    return bounded)))
       'oversize))
 
+(defun romacs-agent-service--miss (subscription upto)
+  "Records of SUBSCRIPTION's session past its cutoff, up to seq UPTO, are
+not sent it live: its gap grows to them, its cutoff moves past them."
+  (let ((gap (romacs-agent-service--subscription-gap subscription)))
+    (setf (romacs-agent-service--subscription-gap subscription)
+          (cons (if gap (car gap) (romacs-agent-service--subscription-cutoff subscription)) upto)
+          (romacs-agent-service--subscription-cutoff subscription) upto)))
+
+(defun romacs-agent-service--deliver (id session seq sent &optional gapped)
+  "Send SENT (`romacs-agent-service--bounded''s) as the record unit at SEQ
+of SESSION to each subscription past its cutoff (only those with a gap,
+when GAPPED), with the gap each has.  The cursor is read first: when it
+cannot be, the unit is each one's gap, told with the next."
+  (let* ((subscriptions (seq-filter (lambda (entry)
+                                      (let ((subscription (cdr entry)))
+                                        (if gapped (romacs-agent-service--subscription-gap subscription)
+                                          (> seq (romacs-agent-service--subscription-cutoff subscription)))))
+                                    (romacs-agent-service--subscriptions id)))
+         (cursor (and subscriptions
+                      (condition-case err (romacs-agent-service--cursor session seq)
+                        (error (message "romacs-agent-service: %s" (error-message-string err)) nil)))))
+    (pcase-dolist (`(,rpc . ,subscription) subscriptions)
+      (if (null cursor)
+          (romacs-agent-service--miss subscription seq)
+        (let ((params (romacs-agent-rpc-object "cursor" cursor))
+              (gap (romacs-agent-service--subscription-gap subscription)))
+          (setf (romacs-agent-service--subscription-cutoff subscription)
+                (max seq (romacs-agent-service--subscription-cutoff subscription))
+                (romacs-agent-service--subscription-gap subscription) nil)
+          (when gap (puthash "gap" (romacs-agent-rpc-object "after" (car gap) "upto" (cdr gap)) params))
+          (if (eq sent 'oversize)
+              (progn (puthash "events" [] params) (puthash "oversize" t params))
+            (puthash "events" sent params))
+          (romacs-agent-service--notify rpc subscription id "agents/event" params))))))
+
 (defun romacs-agent-service--unit-event (id session event)
   "Keep SESSION's EVENT for its record unit, sent once whole (its last
-event) to each subscription it is past the cutoff of.  Only the session
-the editor has loaded: a replay's copy shares its id, and is no live
-event."
+event).  Only the session the editor has loaded: a replay's copy shares
+its id, and is no live event."
   (when (and (eq session (romacs-agent-loaded id)) (plist-get event :seq)
              (romacs-agent-service--subscriptions id))
     (push event (gethash id romacs-agent-service--units))
     (when (plist-get event :last)
-      (let ((events (nreverse (gethash id romacs-agent-service--units)))
-            (seq (plist-get event :seq)))
+      (let ((events (nreverse (gethash id romacs-agent-service--units))))
         ;; Taken before it is encoded: a failure never leaves it for the next.
         (remhash id romacs-agent-service--units)
         (let ((sent (romacs-agent-service--bounded events)))
           (unless (equal sent [])
-            (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
-              (when (> seq (romacs-agent-service--subscription-cutoff subscription))
-                (setf (romacs-agent-service--subscription-cutoff subscription) seq)
-                (let ((params (romacs-agent-rpc-object "cursor" (romacs-agent-service--cursor session seq))))
-                  (if (eq sent 'oversize)
-                      (progn (puthash "events" [] params) (puthash "oversize" t params))
-                    (puthash "events" sent params))
-                  (romacs-agent-service--notify rpc subscription id "agents/event" params))))))))))
+            (romacs-agent-service--deliver id session (plist-get event :seq) sent)))))))
+
+(defun romacs-agent-service--loaded (session _manifest)
+  "SESSION is loaded, its records folded to its seq with no events raised
+\(a worker's fold, a journal read with no supervisor): each subscription
+whose cutoff is behind is told that gap now."
+  (condition-case err
+      (let ((id (romacs-agent-id session)) (seq (romacs-agent-seq session)))
+        (when (integerp seq)
+          (pcase-dolist (`(,_ . ,subscription) (romacs-agent-service--subscriptions id))
+            (when (> seq (romacs-agent-service--subscription-cutoff subscription))
+              (romacs-agent-service--miss subscription seq)))
+          (romacs-agent-service--deliver id session seq [] t)))
+    (error (message "romacs-agent-service: %s" (error-message-string err)))))
 
 (defun romacs-agent-service--row-changed (row)
   "Tell the subscribers of ROW's session its row."

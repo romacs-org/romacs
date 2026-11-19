@@ -366,6 +366,36 @@ and `wait' waiting until its form holds (5 s at most)."
       (should (= opened 1))
       (should (vectorp (gethash "busy" (romacs-agent-client-sessions client)))))))
 
+(ert-deftest romacs-agent-service-tells-a-gap-it-never-sent ()
+  ;; A session loaded past a subscription's cutoff with no events (a
+  ;; worker's fold), and a unit whose cursor could not be read: each told
+  ;; as a gap, its bounds the records never sent live.
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running :seq 9)))
+      (romacs-agent-service-start socket)
+      (advice-add 'romacs-agent-service--last-seq :override (lambda (_) 7) '((name . rsv-kept)))
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+        (unwind-protect
+            (progn
+              (should (wait (romacs-agent-client-revision client)))
+              (romacs-agent-client-open client "busy")
+              (should (wait (car log)))
+              (romacs-agent-service--loaded busy nil)
+              (should (wait (cl-find 'event (car log) :key #'cadr)))
+              (let ((gap (gethash "gap" (nth 2 (cl-find 'event (car log) :key #'cadr)))))
+                (should (equal (list (gethash "after" gap) (gethash "upto" gap)) '(7 9))))
+              (advice-add 'romacs-agent-service--cursor :override (lambda (&rest _) (error "Busy store"))
+                          '((name . rsv-busy)))
+              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 10 :message "m" :text "x" :last t))
+              (advice-remove 'romacs-agent-service--cursor 'rsv-busy)
+              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 11 :message "m" :text "y" :last t))
+              (should (wait (= (cl-count 'event (car log) :key #'cadr) 2)))
+              (let ((last (nth 2 (car (last (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log)))))))
+                (should (equal (gethash "seq" (gethash "cursor" last)) 11))
+                (should (equal (list (gethash "after" (gethash "gap" last)) (gethash "upto" (gethash "gap" last))) '(9 10)))))
+          (advice-remove 'romacs-agent-service--cursor 'rsv-busy)
+          (advice-remove 'romacs-agent-service--last-seq 'rsv-kept))))))
+
 (ert-deftest romacs-agent-service-refuses-an-unknown-session ()
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
