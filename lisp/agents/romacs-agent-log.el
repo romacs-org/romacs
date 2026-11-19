@@ -825,7 +825,7 @@ end, replayed into a copy so the session is not touched."
                    (with-current-buffer buffer
                      (romacs-agent-log-draw session event)
                      (when-let* ((seq (plist-get event :seq))) (setq romacs-agent-log--seq (max romacs-agent-log--seq seq))))))))
-      (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from end))
+      (romacs-agent--read-journal session (lambda (record) (romacs-agent-replay-record scratch record)) from end))
     (romacs-agent-log--close-stream)))
 
 (defun romacs-agent-log--earlier-line (from)

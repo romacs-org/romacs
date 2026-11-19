@@ -315,11 +315,9 @@ JSON-RPC errors with numeric codes and =data.kind=:
   from 0 in its reply, raised by each notice of it: a record's events, a
   pending request added or resolved, a row or queue change.
 - *Session cursor.*  A cursor is ={"seq":N,"epoch":E,"adapter":A}=.
-  - =N= is the seq of the last record whose events were delivered.  All
-    records sharing a seq (legacy staged journals have a few) are
-    delivered together, as one unit, so seq alone resumes without
-    ambiguity.  Seq works for journal-backed sessions too, and no
-    =VACUUM= changes it.
+  - =N= is the seq of the last record whose events were delivered.  A
+    seq is one unit: of records sharing one (legacy staged journals have
+    a few), the first is folded, as the editor folds them.
   - =E= is the session's epoch, 0 for none (=epochs= in the store).  A
     record's events depend on the records before it: a streamed
     message's whole record raises no text, its deltas having raised it.
@@ -447,19 +445,23 @@ paging ever holds live delivery back.
 ** Pages
 - *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
   bounds =after < seq ≤ upto=:
-  - without =after=, the last =turns= turns (3 by default, 50 at most)
-    ending at =upto=; =upto= set to just before the first unit goes
-    further back;
-  - with =after=, every record unit in the range; a range over 4,000
-    records answers =reset=, and the client draws the session afresh.
+  - without =after=, about the last =turns= prompts (3 by default, 50
+    at most; a steer counts) ending at =upto=, at most 4,000 records;
+    =upto= set to just before the first unit goes further back;
+  - with =after=, every record unit in the range.  A range, with the
+    start of the turn it begins in, over 4,000 records answers =reset=:
+    the client draws the session afresh.
 - *Read as live.*  The service replays from the first record of the turn
   the range begins in, so each unit's events are those live delivery
   sent (a message's text never twice), between the editor's other work.
+  A reply's units can begin mid-turn, after units the client holds.
 - *Reply.*  ={"cursor": {seq, epoch, adapter}, "units": [{seq, events}],
-  "reset", "more"}=, paged by units.  The epoch is read before and after
-  the replay: moved, the reply is =reset=, as is one of another epoch or
-  adapter than the client's open.  A session still in a journal (one an
-  install found running) has none served (=unsupported=).
+  "reset", "more"}=, paged by units.  Past 8 MiB of units it stops, its
+  cursor's seq where: the client asks on from there.  The epoch is read
+  before and after the replay: moved, the reply is =reset=.  A client
+  compares a reply's epoch and adapter with those its history was read
+  under, and draws afresh on any other.  A session still in a journal
+  (one an install found running) has none served (=unsupported=).
 
 ** Pending requests
 - *Request (normative):*

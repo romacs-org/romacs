@@ -264,11 +264,13 @@ history is read, against the open's."
       (run-hook-with-args 'romacs-agent-client-session-functions client id
                           (list (if (equal method "agents/event") 'event 'changed) params))))))
 
-(defun romacs-agent-client-history (client id params callback)
+(defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
 with PARAMS: upto, after or turns), every page of it; CALLBACK is called
 with (UNITS CURSOR RESET), UNITS the record units in order, or with
-\=(error ERROR)."
+\=(error ERROR).  With EXPECT, the cursor (a table) the history already
+held was read under, a reply of another epoch or adapter is a reset: its
+units are not to be joined to that history."
   (let ((units nil))
     (cl-labels ((part (result error)
                   (if error (funcall callback (list 'error error))
@@ -276,7 +278,11 @@ with (UNITS CURSOR RESET), UNITS the record units in order, or with
                     (if (stringp (gethash "more" result))
                         (romacs-agent-client-request client "agents/page"
                                                      (romacs-agent-rpc-object "more" (gethash "more" result)) #'part)
-                      (funcall callback (list units (gethash "cursor" result) (eq (gethash "reset" result) t)))))))
+                      (let* ((cursor (gethash "cursor" result))
+                             (reset (or (eq (gethash "reset" result) t)
+                                        (and expect (not (and (equal (gethash "epoch" cursor) (gethash "epoch" expect))
+                                                              (equal (gethash "adapter" cursor) (gethash "adapter" expect))))))))
+                        (funcall callback (list (and (not reset) units) cursor reset)))))))
       (let ((request (copy-hash-table params)))
         (puthash "id" id request)
         (romacs-agent-client-request client "agents/session.history" request #'part)))))

@@ -2107,8 +2107,21 @@ session's.  Every reader of a session's history replays into one."
   (let ((scratch (romacs-agent--scratch session)))
     (setf (romacs-agent-driver-state scratch)
           (list :run (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
-                         (plist-get (romacs-agent-driver-state session) :run))))
+                         (plist-get (romacs-agent-driver-state session) :run)))
+          ;; No turn under way at FROM, a turn's start: its first prompt
+          ;; is no steer, whatever the live session is doing.
+          (romacs-agent-input-seq scratch) 0 (romacs-agent-completed-seq scratch) 0)
     scratch))
+
+(defvar romacs-agent--held-notes)
+
+(defun romacs-agent-replay-record (copy record)
+  "Fold RECORD into COPY (`romacs-agent-replay-copy'), as a view's replay
+does: nothing of the live session's is written (its manifest) or let go
+\(a held note waiting on its supervisor, whose id an old note may share)."
+  (let ((romacs-agent--manifest-frozen t)
+        (romacs-agent--held-notes (make-hash-table :test #'equal)))
+    (romacs-agent--record copy record)))
 
 (defconst romacs-agent--events-page 2000
   "The seqs of SQLite's records `romacs-agent-events' reads at a time: each

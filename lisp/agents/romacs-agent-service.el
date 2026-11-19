@@ -755,19 +755,23 @@ a session not loaded stays so."
 ;;; History
 
 (defconst romacs-agent-service--catch-up 4000
-  "The most records a history call after a place spans: a client further
-behind draws the session afresh (Cursors).")
+  "The most records a history replay folds: a read after a place further
+behind, or one whose turn began further back, is `reset'.")
+
+(defconst romacs-agent-service--history-bytes (* 8 1024 1024)
+  "The most bytes of units one history reply collects: past them, it stops
+where it is, its cursor saying so.")
 
 (defconst romacs-agent-service--replay-batch 200
   "The records a history replay folds between the editor's other work.")
 
 (defun romacs-agent-service--history (rpc params)
   "`agents/session.history': session ID's record units with AFTER < seq
-<= UPTO, or, with no AFTER, those of its last TURNS turns up to UPTO;
-replayed from the start of the turn the first is in, so each unit's
-events are as live they were, between the editor's other work.  Paged
-by units; `reset' when the session's epoch moves meanwhile, or AFTER is
-further behind than a catch-up spans."
+<= UPTO, or, with no AFTER, those of about its last TURNS prompts up to
+UPTO; replayed from the start of the turn the first is in, so each
+unit's events are as live they were, between the editor's other work.
+Bounded in records folded and bytes kept; `reset' when its epoch moves
+meanwhile, or a read after a place would fold too many."
   (let* ((id (gethash "id" params)) (upto (gethash "upto" params)) (after (gethash "after" params))
          (turns (let ((turns (gethash "turns" params))) (if (and (integerp turns) (> turns 0)) (min turns 50) 3)))
          (session (and (stringp id) (or (romacs-agent-loaded id) (romacs-agent-store-row-session id)))))
@@ -776,23 +780,28 @@ further behind than a catch-up spans."
       (romacs-agent-service--fail -32602 "bad-params" "upto, and after when given, are seqs, after <= upto"))
     (unless (romacs-agent-events-p session)
       (romacs-agent-service--fail -32013 "unsupported" "This session's records are in a journal: it has no history served"))
-    (let ((epoch (romacs-agent-events-epoch id)))
-      (if (and after (> (- upto after) romacs-agent-service--catch-up))
+    (let* ((epoch (romacs-agent-events-epoch id))
+           (start (or (car (if after (romacs-agent-events-tail session 1 (+ after 2))
+                             (romacs-agent-events-tail session turns (1+ upto))))
+                      0))
+           ;; A read from the start: no more than the bound, from its end
+           ;; when the turns are longer (nothing drawn before it to repeat).
+           (from (if after start (max start (- upto romacs-agent-service--catch-up)))))
+      (if (and after (> (- upto from) romacs-agent-service--catch-up))
           (romacs-agent-service--history-reply rpc session upto epoch nil t)
-        (let ((from (if after
-                        (car (romacs-agent-events-tail session 1 (+ after 2)))
-                      (car (romacs-agent-events-tail session turns (1+ upto))))))
-          (lambda (respond)
-            (romacs-agent-service--replay
-             session (or from 0) upto (or after (and from (1- from)) -1)
-             (lambda (units)
-               (funcall respond
-                        (romacs-agent-service--history-reply
-                         rpc session upto epoch units (not (eql (romacs-agent-events-epoch id) epoch)))))
-             (lambda (why) (funcall respond (list 'error -32603 "internal" why))))))))))
+        (lambda (respond)
+          (romacs-agent-service--replay
+           rpc session from upto (or after (1- from))
+           (lambda (units stopped)
+             (funcall respond
+                      (condition-case err
+                          (romacs-agent-service--history-reply
+                           rpc session stopped epoch units (not (eql (romacs-agent-events-epoch id) epoch)))
+                        (error (list 'error -32603 "internal" (error-message-string err))))))
+           (lambda (why) (funcall respond (list 'error -32603 "internal" why)))))))))
 
 (defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
-  "A history reply of UNITS (each (SEQ . SENT)) up to UPTO under EPOCH, or
+  "A history reply of UNITS (each (SEQ . SENT)) through UPTO under EPOCH, or
 of none and `reset' when RESET: paged as every collection is."
   (romacs-agent-service--units-page
    rpc (list :cursor (romacs-agent-rpc-object "seq" upto "epoch" epoch
@@ -823,44 +832,58 @@ units up to the budget, at least one, and a token continuing it."
                                                        :cursor (plist-get state :cursor) :units units))
               :null))))
 
-(defun romacs-agent-service--replay (session from upto after then fail)
+(defun romacs-agent-service--replay (rpc session from upto after then fail)
   "Replay SESSION's records with FROM <= seq <= UPTO into a copy of it
-\(`romacs-agent-replay-copy'), `romacs-agent-service--replay-batch'
-records between the editor's other work, then call THEN with the units
-of those past AFTER, each (SEQ . SENT); FAIL with why, should a step fail."
+\(`romacs-agent-replay-copy', `romacs-agent-replay-record'),
+`romacs-agent-service--replay-batch' records between the editor's other
+work, then call THEN with the units of those past AFTER, each (SEQ .
+SENT), and the seq it stopped at: UPTO, or the last unit's once their
+bytes reach `romacs-agent-service--history-bytes'.  FAIL with why, should
+the store not be read or a step fail.  It stops, answering nothing, once
+RPC's connection or the service is gone."
   (let* ((scratch (romacs-agent-replay-copy session from))
          (pager (romacs-agent-events-pager session))
          (place (cons (1- from) most-positive-fixnum)) (lines nil) (done nil)
-         (units nil) (unit nil) (step nil))
+         (units nil) (unit nil) (bytes 0) (stopped upto) (step nil))
     (setq step
           (lambda ()
             (let ((scheduled nil))
               (unwind-protect
                   (condition-case err
-                      (let ((romacs-agent--manifest-frozen t)
-                            (romacs-agent-event-functions
-                             (list (lambda (_ event)
-                                     (when-let* ((seq (plist-get event :seq)))
-                                       (when (> seq after) (push event unit))
-                                       (when (and (plist-get event :last) unit)
-                                         (push (cons seq (romacs-agent-service--bounded (nreverse unit))) units)
-                                         (setq unit nil)))))))
-                        (dotimes (_ romacs-agent-service--replay-batch)
-                          (when (and (null lines) place (not done))
-                            (pcase (funcall (car pager) place)
-                              (`(,read . ,next) (setq lines read place next))
-                              (_ (setq place nil))))
-                          (when-let* ((line (and (not done) (pop lines)))
-                                      (record (ignore-errors (json-parse-string line :object-type 'hash-table
-                                                                                :null-object :null :false-object :false))))
-                            (if (> (gethash "seq" record 0) upto) (setq done t)
-                              (romacs-agent--record scratch record))))
+                      (cond
+                       ((eq (car pager) #'ignore) (setq done "The agents' store could not be read"))
+                       ((not (and (romacs-agent-rpc-live-p rpc) (memq rpc romacs-agent-service--peers)))
+                        (setq done 'gone))
+                       (t
+                        (let ((romacs-agent-event-functions
+                               (list (lambda (_ event)
+                                       (when-let* ((seq (plist-get event :seq)))
+                                         (when (> seq after) (push event unit))
+                                         (when (and (plist-get event :last) unit)
+                                           (let ((sent (romacs-agent-service--bounded (nreverse unit))))
+                                             ;; A unit of no events sent is none.
+                                             (unless (equal sent [])
+                                               (setq bytes (+ bytes (if (vectorp sent) (string-bytes (json-serialize sent)) 0)))
+                                               (push (cons seq sent) units)
+                                               (when (>= bytes romacs-agent-service--history-bytes)
+                                                 (setq done t stopped seq))))
+                                           (setq unit nil)))))))
+                          (dotimes (_ romacs-agent-service--replay-batch)
+                            (when (and (null lines) place (not done))
+                              (pcase (funcall (car pager) place)
+                                (`(,read . ,next) (setq lines read place next))
+                                (_ (setq place nil))))
+                            (when-let* ((line (and (not done) (pop lines)))
+                                        (record (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                                                  :null-object :null :false-object :false))))
+                              (if (> (gethash "seq" record 0) upto) (setq done t)
+                                (romacs-agent-replay-record scratch record)))))
                         (if (and (not done) (or lines place))
                             (progn (run-at-time 0 nil step) (setq scheduled t))
-                          (setq done 'whole)))
+                          (setq done 'whole))))
                     (error (setq done (error-message-string err))))
                 (unless scheduled (funcall (cdr pager))))
-              (cond ((eq done 'whole) (funcall then (nreverse units)))
+              (cond ((memq done '(whole t)) (funcall then (nreverse units) stopped))
                     ((stringp done) (funcall fail done))))))
     (funcall step)))
 

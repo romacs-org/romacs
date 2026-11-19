@@ -528,4 +528,38 @@ a state root of its own, and a service of its own on `socket'."
       (let ((romacs-agent-service--catch-up 5))
         (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2))))))))
 
+(ert-deftest romacs-agent-service-history-stops-at-its-bound ()
+  ;; Past its bytes' bound a reply stops, its cursor where; the client asks
+  ;; on from there.  A reply under another epoch than the history held is
+  ;; a reset for it.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (let ((romacs-agent-service--history-bytes 1) (answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r)))
+        (should (wait answer))
+        (should (= (length (car answer)) 1))
+        (should (equal (gethash "seq" (nth 1 answer)) (car (car live))))
+        (should (equal (gethash "seq" (car (car answer))) (car (car live)))))
+      (let ((answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r))
+                                     (romacs-agent-rpc-object "epoch" 99 "adapter" "other"))
+        (should (wait answer))
+        (should (nth 2 answer))
+        (should-not (car answer))))))
+
+(ert-deftest romacs-agent-replay-copies-touch-nothing-live ()
+  ;; A replay's copy starts with no turn under way, whatever the session
+  ;; does; folding a note there never lets go of the live session's held
+  ;; note of the same id.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "live" :harness 'claude :input-seq 40 :completed-seq 30))
+         (copy (romacs-agent-replay-copy session nil))
+         (held (romacs-mcp--object "romacsNote" 1 "type" "selection")))
+    (should (equal (list (romacs-agent-input-seq copy) (romacs-agent-completed-seq copy)) '(0 0)))
+    (puthash "live" (list held) romacs-agent--held-notes)
+    (romacs-agent-replay-record copy (json-parse-string "{\"note\":{\"romacsNote\":1,\"type\":\"selection\"},\"seq\":3,\"t\":1.0}"))
+    (should (equal (gethash "live" romacs-agent--held-notes) (list held)))))
+
 ;;; romacs-agent-service-tests.el ends here
