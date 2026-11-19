@@ -1,0 +1,914 @@
+#+title: The agent session protocol: one interface, several clients
+
+Romacs runs coding agents as sessions.  This document designs the one
+interface every client of those sessions uses: the editor on the machine
+that runs them, an editor on another machine, and a web page on a phone.
+It states the protocol as it is today, decides where the new one is
+served, specifies version 1, the relay that makes it reachable over a
+tailnet, the clients, and the order of the work.  Status: design, before
+any of it is built.
+
+* Requirements
+
+- *One protocol.*  One explicit, versioned, documented protocol is spoken
+  by every client:
+  - the local Romacs UI, over a Unix socket;
+  - Romacs on another machine;
+  - a phone page.
+
+  There is no second agent system, and no per-client access path (no
+  store read over ssh, no Lisp evaluated in another editor).
+- *Reachable on the tailnet.*  A relay serves the protocol over
+  WebSocket, published only on the tailnet with =tailscale serve=, and
+  takes the caller's identity from Tailscale.
+- *Pending first.*  Pending approvals and questions are first-class
+  protocol state, shown prominently by every client.  Nothing is answered
+  on the user's behalf unseen.
+- *Transport-agnostic.*  The Romacs client is the same over a local socket
+  and over the relay.
+- *Never block.*  Nothing blocks an editor's main VM on the network (the
+  one-second rule).  Slow links get bounded transfers and resumable
+  streams.
+- *Full authority.*  Agents act with the user's authority: a remote client
+  gets no reduced tool set.
+
+* The protocol as it is (v0)
+
+** The supervisor: =romacs-agent-host=
+=crates/romacs-mcp/src/host.rs= (1,329 lines) runs one harness per
+session, owns its stdio, and keeps every line as a record:
+=events= rows in =sessions.sqlite= (=--store=), or =journal.jsonl= for a
+session not yet imported.
+
+- *Records:* ={"seq":N,"t":T,"out"|"in"|"note"|"exit":...}=.  A line that
+  parses as JSON is kept as JSON.  Thinking-token counter lines are
+  dropped in SQLite.  A record that ends a turn (Claude =result=, Codex
+  =turn/completed=), a note and an exit are synced.
+- *Socket:* =$XDG_RUNTIME_DIR/romacs/agents/KEY/host.sock=.
+  - The server's first line is ={"attach":{"from":N,"steal":B}}=.  The
+    host replays every record from seq N inclusive, then acknowledges
+    with ={"attached":ID}=, or ={"attached":ID,"notesOnly":true}= from a
+    notes-only host.  After that it sends each new record.
+  - ={"write":LINE[,"journal":LINE]}= is journaled as =in= and written to
+    the harness's stdin, journal first.
+  - ={"note":OBJ}= is journaled as =note=.
+  - The host may also say ={"refused":"attached"}= and
+    ={"storage":"failing"}=.
+- *One attachment at a time.*  Another is refused unless it steals, which
+  closes the first.
+- *Around it:* notes-only hosts, =--input= per-turn runs,
+  =--stage=/=--hold=/=--supervised=, and the session lock (=host.lock=).
+
+** The attached editor: where meaning lives
+The host knows no harness format.  The editor attached to a session gives
+its lines their meaning, in Lisp.
+
+- *Drivers.* =romacs-agent-claude.el= (799 lines) and
+  =romacs-agent-codex.el= (684):
+  - =:events= and =:input-events= turn records into normalized events:
+    =session=, =input=, =delta=, =message-end=, =thinking=, =tool=,
+    =approval=, =answered=, =plan=, =status=, =error=, =compacted=,
+    =usage=, =rate-limit=, =done=, =exit=, =suggestion=, ...;
+  - =:input=, =:respond=, =:interrupt= and =:select= compose the lines
+    written back.
+- *The fold.* =romacs-agent--record= and =romacs-agent--raise=
+  (=romacs-agent.el=, 6,022 lines) fold those events into a session
+  struct: state, approvals, asks, questions, model, effort, context, cost,
+  queue, turns.
+- *Automation.* The attached editor also:
+  - dispatches the queue;
+  - writes notes (selection, rename, renew, rollback, fork, resume
+    schedule);
+  - runs startup steps and keeps the folded state;
+  - answers requests nobody was asked about (=romacs-agent--answer-unasked=):
+    under =romacs-agent-approval-policy= =allow= it allows tool calls, and
+    it denied tool calls in plan mode and denied presented plans.
+
+  None of those answers was drawn.  That path plausibly explains approvals
+  reported rejected that the user never saw; the affected records would
+  confirm it.  The chat rebuild removes both deny arms and records who
+  answered each request.
+- *Store writes.* The host writes =events=.  The editor's writer worker VM
+  writes =sessions=, =turns=, =turn_drawn= and the folded state.
+- *Harness tools.* Each harness runs =romacs-mcp --reconnect= as its Romacs
+  MCP server.  Its route link (=route/ID.sock=) leads to the attached
+  editor.  The reconnect helper answers discovery and
+  =romacs_debug_inspect= itself in documented cases.
+
+  The tools fall into two groups:
+  - /Agent tools:/ =romacs_delegate_task=, =romacs_task_*=,
+    =romacs_limits=, =romacs_orchestrator_capabilities=,
+    =romacs_orchestration_issues=, =romacs_call_outcome=;
+  - /Editor tools/, which need a live editor:
+    - =romacs_eval=, =_observe=, =_buffer_*=, =_file_write=, =_visit=;
+    - =_send_keys=, =_wait_idle=, =_option_*=, =_restart*=;
+    - =_dev_check=, =_dev_guide=, =_companion_*=;
+    - =gnosis_*=.
+
+** What follows from it
+- *One client.*  A second editor is refused, or steals the session and
+  breaks the first editor's tools.
+- *No client without the drivers.*  A client of the v0 protocol must run
+  the drivers, the fold and the policy itself.  A phone cannot.
+
+Measured on 2026-11-19, each figure with how it was taken:
+- *Fold rate.*  Folding records into events (driver and fold) runs at
+  24,700 records/s: 14,633 records, 8 MB, in 0.59 s.  Gate build of beta
+  6c26b7d73, on a Ryzen 9 5950X.  The records were read from a copy of one
+  session's events and passed to =romacs-agent--record= on a scratch
+  session.
+- *Host to fold.*  A host's record reaches the attached editor's fold in
+  0.54 ms at the median and 9.5 ms at p95, over 18 live records of one
+  turn.  Taken on the 5950X, build d886623c, as =float-time= minus the
+  record's =t= in an advice on =romacs-agent--record=, in a private editor
+  attached to a private session.
+- *Store size.*  The store is 5.5 GB plus a 1.1 GB WAL, and one
+  session's records reach 319 MB.
+
+* Where the protocol is served
+
+Something on the machine that runs the sessions must run the drivers and
+speak a semantic protocol.  The four candidates, with their costs:
+
+- *(i) Drivers in the host (Rust).*  Each host speaks semantic events
+  itself.
+  - /Startup/ and /memory/: nothing added.  /Latency/: the lowest.
+  - /Cost/: re-implementing the drivers, and the parts of the fold,
+    policy, queue and notes the protocol needs, in Rust.  That
+    contradicts "Lisp carries policy", and the drivers stop being
+    hackable Lisp.
+  - /Failure/: per session, but cross-session work (pools, delegation,
+    limits, agent tools) has no per-session home.
+  - Rejected.
+- *(ii-a) The service as a worker VM of the desktop editor.*  A child
+  process forked from the zygote.
+  - /Startup/: 0.63 to 0.73 s for a fresh worker to load the agent
+    layer's features (=isolate-spawn :fresh t :require= of
+    =romacs-agent=, its two drivers, store, events, turns, tools and
+    =romacs-mcp=).  Measured twice in a private GUI editor on an i5-2520M
+    (2011), on beta 6c26b7d73's Lisp with the gl-fallback binary.
+  - /Memory/: it shares the editor's pages through the zygote; +25 MB
+    measured in the parent's RSS.
+  - /Failure/: it dies with the editor (=PR_SET_PDEATHSIG=), so remote
+    clients lose the service whenever the desktop editor crashes or
+    restarts.
+- *(ii-b) The service as its own process* (recommended).  A headless
+  Romacs process runs today's Lisp agent layer: drivers, fold, policy,
+  queue, notes, store writer, agent tools.
+  - /Startup/: 0.43 s.  /Memory/: 180 MB RSS; a bare batch process is
+    0.08 s and 94 MB.  Measured three times on the Ryzen 9 5950X, build
+    d886623c, with =/usr/bin/time= around =romacs-vm-gui --batch= requiring
+    the same features.  The restore that follows costs the fold rate
+    above, from each session's folded state.
+  - /Latency/: one more local socket hop per event.  That is an estimate
+    by analogy with the measured host-to-fold hop (0.5 ms at the median);
+    slice 1 measures it.
+  - /Failure/: its own; a user unit restarts it (below).
+- *(iii) The desktop editor as the service.*  Today's arrangement plus an
+  endpoint.  Every remote client depends on the desktop UI process and
+  its main VM's stalls.
+
+*Recommendation: (ii-b).*  One agents service per machine is the single
+attached server of every host and the single authority for every
+session.  Every UI is a client of it through the same protocol, the
+local editor included.  Romacs stays a Lisp machine: the service is
+Romacs, the drivers stay hackable Lisp.  The host's line protocol
+becomes internal (service ↔ host, v0 above) and unchanged, so hosts
+started by older builds keep working.
+
+** When the service crashes or restarts
+- *Harnesses go on.*  Their hosts keep running and keep recording.  Each
+  host runs in its own transient unit (=systemd-run --user
+  --unit=romacs-agent-KEY --slice=romacs-agents.slice=, as an editor
+  launches it today), never in the service's cgroup, so stopping or
+  restarting the service's unit leaves them alone.  The two paths that
+  would put a host in the launcher's cgroup are taken out of the service:
+  - the =setsid --fork= fallback when =systemd-run= fails;
+  - the =setsid= launch of notes-only hosts.
+
+  The service refuses to launch rather than fall back, and says why.  The
+  unit's restart test launches a harness from the service and restarts
+  the unit.
+- *Requests wait.*  A request waiting on an answer (Claude
+  =can_use_tool=, Codex approval) waits; the harness blocks on it.
+- *Queued messages survive.*  They are kept in the =queued= table, as
+  today.
+- *The restarted service recovers.*  It restores every session, attaches
+  to each live host, and replays from each session's folded state.  An
+  unanswered request in the records is pending again.  The command table
+  resolves what was in flight (see Commands).
+- *Editor tools in flight* are answered =outcome unknown=, as the
+  reconnect helper does today.
+- *Clients see the connection end.*  They reconnect.  The service's
+  generation has changed, so every revision is new: clients watch the
+  list again and resume their open sessions from their cursors.
+- *The unit* restarts the service (=Restart=on-failure=).  The first
+  editor starts the service if the unit is not installed.
+
+* Protocol v1: =romacs-agents/1=
+
+** Framing
+- *Messages:* JSON-RPC 2.0.  One message per line on a Unix socket, and
+  one per reassembled WebSocket text message through the relay.  Messages
+  go both ways: the service sends notifications and, to editors (below),
+  requests.
+- *Endpoints:*
+  - =$XDG_RUNTIME_DIR/romacs/agents/service.sock= for local clients;
+  - =service-relay.sock= for the relay alone (below).
+
+  Both are separate from the MCP endpoint the harness relays use.
+- *Limits*, on the encoded message, envelope included:
+  - a message is at most 1 MiB;
+  - a reply is at most 1 MiB encoded.  Its units (below) fill at most
+    768 KiB of it.  Everything else in a reply (the envelope, the echoed
+    =id=, cursors, tokens, revisions) is bounded so that it is at most
+    64 KiB:
+    - a request's JSON-RPC =id= is at most 128 bytes encoded;
+    - a =cid= is at most 128 bytes;
+    - a =more= token and a cursor are at most 1 KiB each.
+
+    A request over those bounds is refused with =-32600=, its =id= not
+    echoed when that is what is too long, as the MCP endpoint already
+    does.  So a reply never exceeds the limit;
+  - every string over 64 KiB in an event, a pending request or a queue
+    entry (a tool's input or output, a message) carries its first 64 KiB
+    and ={"truncated":{"bytes":N,"ref":R}}=; =agents/output {ref, offset,
+    length}= pages the rest;
+  - every unit is bounded.  A unit is what a reply or a notification is
+    made of: a record unit, a pending request, a queue entry, a row, an
+    open item of a page's context, a catalog entry (a project, a
+    provider with its models).  One still over 256 KiB encoded after
+    truncation is replaced by its key fields and a reference, fetched
+    whole through =agents/output=:
+    - ={"seq":N,"oversize":R}= for a record unit;
+    - ={"handle":H,"kind":K,"oversize":R}= for a pending request;
+    - ={"id":I,"oversize":R}= for a queue entry, a row or an open item.
+
+    - ={"name":N,"oversize":R}= for a catalog entry.
+
+    The key fields keep it countable and actionable: a client shows a
+    pending request and can answer it before fetching it whole.  Every
+    such form fits by construction:
+    - its ids are the service's own short ids (a pending request's handle
+      included; the harness's own request id stays in the service);
+    - any other key string in it is cut to 1 KiB.
+  - a reply that returns one value too large for the budget returns
+    =oversize= with a reference instead, never a broken message.  An
+    editor tool's result is bounded where it is made: each editor tool
+    caps its own output (64 KiB), as the MCP tools do today
+    (=romacs-mcp-eval-string= refuses a larger value with "exceeds output
+    limit").  The service therefore never fetches a large result from an
+    editor;
+  - =agents/output {ref, offset, length}= treats =length= as a maximum.
+    It returns as much as fits the reply budget, at least one character
+    unless the output has ended, with the next offset;
+  - continuation tokens expire.  A =more= token lives while it is used,
+    and dies after 60 s unused or when a connection holds more than four.
+    An expired token is answered with =-32017= (=stale=), and the client
+    starts the call again.  So a stalled client never pins a snapshot;
+  - every reply that returns a collection, of any method, pages by
+    units; no method returns an unbounded whole.  That covers the open
+    reply's =pending= and =queue=, a history page with its =context=
+    first, the list, and the catalogs (=projects.list= returns projects
+    and =providers.list= returns providers as units).  A method added
+    later follows the same rule.  Each reply holds
+    whole units and at least one of them, since a unit is at most
+    256 KiB, so every continuation (=more=) advances.  A reply that
+    doesn't fit carries the first part and =more=;
+  - any notification still over 1 MiB after that keeps its scope and is
+    sent in its place, in order:
+    - ={"session","revision","oversize":R}= for a session's;
+    - ={"revision","oversize":R}= for the list's.
+
+    It is fetched whole through =agents/output=.  So every message, live
+    or replied, has a bounded form.
+
+** Handshake and versions
+- *Hello.* =agents/hello= must come first.  Its params:
+  - ={"protocol":"romacs-agents","version":[1,MINOR]}=;
+  - ="client":{"name","version","instance"}=, where =instance= is a UUID
+    the client keeps across reconnects;
+  - ="capabilities":[...]=.
+- *Welcome.* The reply:
+  - ={"version":[1,M]}=, with M the lower of the two minors;
+  - ="server":{"host","build","generation"}=;
+  - ="identity":{"via":"local"|"tailnet","login"}=;
+  - ="capabilities":[...]=, =capabilities= being the intersection.
+- *Before the hello,* every other method is refused (=-32002=, not
+  initialized).
+- *Majors.* A major mismatch is refused with both versions in the error
+  data.
+- *Minors.* Within a major, a minor adds optional fields, events,
+  methods and capabilities.  Never a changed meaning.
+- *Must-ignore.* A client ignores an unknown event type or field.  An
+  ignored event never invalidates the client's state: everything a
+  client must know to stay consistent (rows, pending requests, queue,
+  resets) comes in the core messages below, never only in an event type
+  it may not know.
+
+** Errors
+JSON-RPC errors with numeric codes and =data.kind=:
+
+| code   | kind             | meaning |
+|--------+------------------+---------|
+| -32602 | bad-params       | malformed params |
+| -32002 | not-initialized  | no hello yet |
+| -32010 | unknown-session  | no such session |
+| -32011 | request-gone     | the request is answered, settled or gone; =data.resolution= says how |
+| -32012 | not-live         | the session has no running harness for this command |
+| -32013 | unsupported      | this harness or version cannot do it |
+| -32014 | forbidden        | the identity may not |
+| -32015 | cid-conflict     | a client id reused with a different command |
+| -32016 | busy             | the session is changing hands (handoff); retry |
+| -32017 | stale            | a continuation token expired; start the call again |
+| -32603 | internal         | with a message |
+
+** Generations, revisions and cursors
+- *Generation.*  A service process names itself with a generation, a UUID
+  made at start, in the welcome.  Every revision below is scoped by it:
+  a client that sees a new generation drops its revisions and watches
+  again.
+- *List revision.*  One counter per generation, raised by every change to
+  any row.
+- *Session revision.*  One counter per session per generation, raised by
+  everything that changes what a client mirrors of the session: a
+  record's events, a pending request added or resolved, a row or queue
+  change.  It orders all of a session's notifications.
+- *Session cursor.*  A cursor is ={"seq":N,"epoch":E,"adapter":A}=.
+  - =N= is the seq of the last record whose events were delivered.  All
+    records sharing a seq (legacy staged journals have a few) are
+    delivered together, as one unit, so seq alone resumes without
+    ambiguity.  Seq works for journal-backed sessions too, and no
+    =VACUUM= changes it.
+  - =E= is the session's compaction epoch, 0 for none.  Every
+    transaction that deletes any of the session's records raises it in
+    that same transaction, so a cursor or a page read before a deletion
+    always carries an older epoch.  Slice 0 changes the compactor to do
+    so.
+  - Each page is read in one read transaction that also reads the epoch.
+    A page whose epoch differs from the open's ends the paging with
+    =reset=.
+  - =A= is the adapter version: a digest of the driver that made the
+    events.
+- *Epoch changes reach live subscribers.*  Every cursor a notification
+  carries has the session's epoch.  A deletion of a subscribed session's
+  records is followed by =agents/session.reset {session, revision,
+  epoch}=.  A client that sees an epoch other than its cursor's, in that
+  or in any later notification, discards its history and resume cursor
+  and reopens before it advances anything.
+- *A client's resume cursor* is the end of what it holds without a gap:
+  the highest seq below which it holds every record unit.  Live events
+  past a gap it is still pulling never advance it, so a second
+  disconnect resumes from before the gap.
+- *Resume.*  A client resumes by reopening: it gets the state at once,
+  and pulls the records after its old cursor as history pages (exclusive
+  of =N=).  It is answered =reset= instead, and draws the session afresh
+  from the last turns, when:
+  - the epoch differs;
+  - the adapter version differs;
+  - the gap exceeds the catch-up bound (4,000 records or 8 MiB).
+
+** Delivery order
+- *Per connection, in order.*  For each subscription (the list, or one
+  session), the service writes a reply before any notification belonging
+  to it.  It writes that subscription's notifications in revision order,
+  each carrying its revision.
+- *Reply first.*  A subscription's reply is written before its first
+  notification.  Nothing is held back after the reply: a reply that
+  continues (=more=) is completed from a copy the service keeps, while
+  notifications flow.
+- *Applying.*  A client applies a notification only if its revision is
+  the one after the revision it holds.  It ignores one at or below that
+  revision.  On a gap it re-opens.
+
+** The session list
+- *Watch.*  =agents/sessions.watch {since?: REVISION}= answers, in one
+  call, with ={"revision","rows","removed","reset","more"}=:
+  - with no =since= (or one from another generation), every row;
+  - with one, the rows changed after it and the ids removed (tombstones,
+    kept for the generation).
+- *More.*  When the reply is cut, =more= is a token.
+  =agents/page {more}= continues any paged reply: the list's at the same
+  revision, from the copy the service keeps for the token's life, a
+  session's, a catalog's.  A client reads notifications meanwhile and
+  applies them once it holds the whole reply.
+- *Notifications.*  =agents/sessions.changed {revision, rows, removed}=.
+- *Row (normative):*
+  #+begin_src json
+  {"id": "...", "title": "...", "cwd": "...", "project": "...", "parent": null,
+   "harness": "claude", "provider": "claude", "model": "...", "effort": null,
+   "state": "starting|running|waiting|idle|detached|ended",
+   "attention": false, "pending": 0, "queued": 0, "settled": false,
+   "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
+   "children": 0}
+  #+end_src
+  Every field is present; =null= means unknown.  =pending= counts the
+  session's pending requests, so a list can put waiting sessions first.
+
+** One session
+Live state and history are separate.  Live state is small, and is
+delivered at once.  History is immutable, and is pulled in pages.  No
+paging ever holds live delivery back.
+
+- *Open.*  =agents/session.open {id}=.  The service, on its main VM and
+  atomically, registers the subscription and captures the session
+  revision V, the high-water cursor H and the state: row, pending and
+  answering requests, queue, and the items open at H.  The reply:
+  #+begin_src json
+  {"revision": V, "cursor": H, "row": {}, "pending": [], "answering": [],
+   "queue": [], "undelivered": [], "open": [], "more": null}
+  #+end_src
+  A queue entry is ={"id","text","mode":"now|next|steer","position","images":[]}=.
+  An open item is ={"id","kind":"tool|message|thinking","name","text","input"}=.
+- *Notifications follow at once*, in revision order from V+1, whatever
+  the client does next:
+  - =agents/event {session, revision, cursor, events}=: the events of one
+    record unit;
+  - =agents/pending.added {session, revision, request}=;
+  - =agents/pending.answering {session, revision, handle}=;
+  - =agents/pending.taken {session, revision, handle}=;
+  - =agents/pending.resolved {session, revision, handle, how, ...}=;
+  - =agents/session.changed {session, revision, row}=;
+  - =agents/queue.changed {session, revision, added, removed}=: queue
+    entries added, and the ids of those removed.  A queue change is a
+    delta, never the whole queue.
+- *State too large for one reply* (a long queue, many pending requests)
+  says =more=.  =agents/page {more}= returns the rest of the same state
+  at V, which the service keeps for the token's life.  The client reads
+  its notifications meanwhile but applies them only once it holds the
+  whole state.  The buffering is the client's; the service holds
+  nothing back.
+- *History* is pulled separately (see Pages):
+  - the last turns up to and including H, for a fresh open;
+  - for a reopen after a disconnect, the records with =OLD < seq ≤ H=
+    (=agents/session.history {after: OLD, upto: H}=).
+
+  Live notifications start after H, so history and live delivery meet
+  without a gap or an overlap.
+
+  A client draws history above the live part, which it has already
+  drawn from the state and the notifications.
+- *Close.*  =agents/session.close {id}=.
+- *Overflow.*  Each connection has a 4 MiB send buffer of notifications.
+  Only a client that stops reading its socket can fill it.  The service
+  then closes the connection, and the client reopens: state at once,
+  history pulled.  A closed connection is the one overflow signal that
+  cannot be lost.
+
+** Pages
+- *Immutable.*  History pages hold records before a cursor the open
+  returned, which never change except by compaction.  Each page is read
+  in one read transaction that also reads the epoch.  A page whose epoch
+  is not the client's cursor's answers =reset=, and the client reopens.
+- *Bounds.*  A page holds whole record units, in order, between =first=
+  and =last=.  It starts at a turn's first record when it can.  Its size
+  bounds are:
+  - N turns;
+  - 4,000 records;
+  - 8 MiB of events;
+  - 768 KiB per reply.
+
+  A page that stops at the reply bound says =more=;
+  =agents/page {more}= continues it.
+- *Methods.*  =agents/session.history {id, upto: CURSOR, after?:
+  CURSOR, turns: N}=.  Its bounds are =after < seq ≤ upto=:
+  - without =after=, it returns the last N turns ending at =upto=;
+    repeat with =upto= set to just before the page's =first= to go
+    further back;
+  - with =after=, it returns every record in the range, in pages.
+- *Context.*  A single turn bigger than the bounds is cut at a record
+  unit inside it, and its page's =context= holds the items open at
+  =first= (a tool started and not finished, a partial message), with
+  their ids.  The worker folds from the turn's first record to compute
+  it, within a worker budget of 4 s.  If that budget runs out, =context=
+  is =null= and =complete= is false: a client draws an event whose item
+  it never saw (a tool's output) under an "earlier item" placeholder.
+
+** Pending requests
+- *Request (normative):*
+  #+begin_src json
+  {"handle": {"run": 0, "id": "r17"}, "session": "...",
+   "kind": "tool|question|plan|permissions", "since": 0.0,
+   "origin": null,
+   "tool": {"name": "...", "input": {}, "reason": null},
+   "questions": [{"id": "q1", "text": "...", "header": null,
+                  "select": "one|many", "free_text": false,
+                  "options": [{"id": "o1", "label": "...", "description": null}]}],
+   "plan": null,
+   "choices": [{"decision": "allow|deny", "scope": "once|turn|session"}]}
+  #+end_src
+  - =tool=, =questions= and =plan= are present as the kind needs, else
+    =null=.
+  - =handle.run= is the seq of the harness run's =run= record, so a
+    request id reused by a later run is a different request.
+    =handle.id= is the service's short id for the request; the harness's
+    own request id, of any length, stays in the service.
+  - =choices= lists what this harness accepts for this request:
+    - Claude: allow once, allow for the session, deny with a reason;
+    - Codex: accept, accept for the session, decline; permissions in
+      =turn= or =session= scope.
+- *Arriving and leaving.*  A request arrives as =pending.added=.  It
+  leaves only as =pending.resolved {session, revision, handle, how,
+  actor, decision, scope, reason, answers}=.  =how= is one of:
+  - =answered=: by a user or by policy;
+  - =harness=: the harness settled it (Codex =serverRequest/resolved=);
+  - =turn-end=: the turn ended with it open;
+  - =exit=: the harness exited.  Today that is a silent =clrhash=; the
+    service emits one per request;
+  - =reset=: a fresh snapshot follows.
+
+  =answered= means the answer was recorded by the host.  Whether the
+  harness acted on it shows in the harness's later events (the tool's
+  result, a turn's end), never in the resolution.
+- *Answering.*  The v0 host records an answer before it writes it to the
+  harness, and says nothing if the write blocks or fails.  So between
+  its =in= record and the harness's next record, an answered request is
+  /answering/, not gone:
+  - it moves from =pending= to =answering= in the snapshot, and stays
+    visible there;
+  - it leaves =answering= (=agents/pending.taken=) only on evidence about
+    that answer:
+    - the host's =written= record for the answer's =in= record (below);
+    - the harness settling that request;
+    - the turn ending;
+    - the harness exiting.
+
+    Unrelated harness output never clears it.
+  - a client shows an answer still answering after 30 s as "not taken by
+    the harness yet".  It offers the one recovery that does not need the
+    harness's stdin: stop the harness (its unit stopped, as =agents/stop=
+    does), then resume;
+  - the service never sends an answer again by itself.  The user may,
+    with =agents/answer {..., again: true}=, which is accepted only for a
+    request still answering.  A harness that closes
+  a request it was answered on (Codex =serverRequest/resolved=, also on
+  a cancellation) changes nothing more.
+- *Plans.*  A presented plan (=ExitPlanMode=) is of kind =plan=: always
+  the user's, never answered by policy.
+- *The answer's shape:* =answers= maps a question id to
+  ={"options": [OPTION-ID ...], "text": STRING-or-null}=: one option for
+  =select= =one=, any for =many=, and =text= when =free_text= is set.
+- *Attribution.*  =actor= is ={"kind":"user"|"policy"|"harness"|"unknown","login":...,"client":...}=.
+  - It is persisted as the chat rebuild persists it.  The answering
+    process first writes a note
+    ={"type":"answer","request","by","decision","scope","reason","login","client"}=,
+    which replays as an =attributed= event; then it writes the response
+    line.
+  - The note and the response line carry the same =romacsRequest= tag.
+    An =answer= note counts as an answer only once the response with its
+    tag is recorded.  A note whose response never came (the process
+    died between them) leaves the request pending, and is drawn as "an
+    answer not delivered".
+  - The service reads the actor from that note.  An answer without one
+    (older records, the harness's own settling) has =kind= =unknown= or
+    =harness=.
+- *Closing by the harness.*  A request the harness closes before any
+  answer resolves with =how= =harness=.  Codex's adapter must emit that
+  event whenever =serverRequest/resolved= comes for a request still
+  pending (slice 0).
+- *Policy.*  It runs only in the service.  Every answer it gives is
+  resolved with actor =policy= and drawn by every client.  Nothing is
+  denied on the user's behalf.
+
+** Commands
+- *Client ids.*  Every command carries =cid=.  The pair (connection
+  identity, client instance, =cid=) names it.
+- *The command table.*  =commands= in the store holds each command's:
+  - key and method;
+  - a digest of its params;
+  - state and outcome;
+  - for =start=, the new session's id;
+  - for =send= and =answer=, the =romacsRequest= tag its =in= record
+    carries.
+- *Committed before its effect.*  A command's row is committed with
+  state =admitted= before it takes effect.
+  - Every line the service writes for a command carries the command's
+    =romacsRequest= tag, a per-turn run's =--input= prompt included.  The
+    v0.1 host takes the tag (=--input-tag=) into the prompt's =in=
+    record, so recovery always finds a delivered command by its tag.
+  - Before any handoff of a queued item, the item is marked
+    =dispatching= in the store: before its line is written to an
+    attached host, and before a per-turn run is launched for it (with the
+    run's unit name, in the same transaction).
+  - Launches are tracked from slice 1 on: every host the service starts
+    gets its own unit, and the service never falls back to an untracked
+    =setsid= launch; if the unit cannot be made, the command fails.  A
+    unit pending or activating counts as in flight.
+  - A queued =send= writes its queue item and its row's transition to
+    =queued=, with the item's id, in one transaction of the store, so
+    recovery finds the item through the row.
+  - A =start= records its milestones in its row:
+    - =allocated=: the new id and directory, committed before anything
+      else;
+    - =launched=: the host started;
+    - =prompted=: the prompt recorded.
+- *Repeats.*
+  - A repeated =cid= gets the recorded outcome.
+  - One in flight is coalesced with it.
+  - A =cid= reused with different params is refused (=cid-conflict=).
+  - A row is kept while its command is unfinished: queued, or with its
+    effect unconfirmed.  It expires 24 hours after it is finalized, and
+    a repeat after that is a new command.
+- *Recovery after a restart.*  A row still =admitted= or =written= is
+  resolved from the records, never run again:
+  - a =start= reports the last milestone reached with the session's id;
+    one never =allocated= is =unknown=;
+  - a =send= or =answer= whose =romacsRequest= tag is in an =in= record
+    is =recorded=.  For an answer that only confirms the recording: its
+    request stays =answering= until one of its own clearing events (its
+    =written= record, settlement, the turn's end, the exit) is in the
+    records too;
+  - a =send= whose queue item is still kept is =queued=.  A queue item
+    is deleted only in the transaction that finalizes its command, once
+    its tagged =in= record is observed, never before it is sent.  After a
+    restart, the service reconciles first:
+    - an item whose tag is in the records is finalized;
+    - an item not marked =dispatching= was never handed off, and is
+      dispatched when its turn comes;
+    - an item marked =dispatching= is never handed off again by the
+      service.  If its run's unit is active, the service waits on it.
+      Otherwise, its tag not being in the records, it leaves the queue
+      for the session's =undelivered= list in one transaction, and its
+      command's outcome is =unknown=.  Automatic dispatch is at most once.
+- *Reconciled whenever a handoff ends, not only after a restart.*  When
+  a handoff can no longer produce its tagged =in= record (the write to
+  the host failed, the host connection ended, or the per-turn run's unit
+  exited), the service checks the records for the tag:
+  - found: the item is finalized;
+  - not found: the item moves to =undelivered=, atomically, with outcome
+    =unknown=.
+
+  The same rule runs live and in recovery.
+- *Undelivered.*  An undelivered entry
+  (={"id","text","images","since","cid"}=) is part of the state:
+  - it is in the open reply's =undelivered=;
+  - it arrives live through =agents/undelivered.changed {session,
+    revision, added, removed}=.
+
+  Clients show each as "may not have been sent".  Only the user acts on
+  it: =agents/send= sends it again (a new command), and
+  =agents/undelivered.dismiss {cid, id, entry}= drops it.
+  - anything else is =unknown=.
+- *Admission.*  Each command is admitted atomically at the authority.
+  =answer= reserves its request at admission: a second answer, or
+  policy, gets =request-gone=.  The reservation ends:
+  - when the request resolves (=pending.resolved=);
+  - or, when delivery's outcome is =unknown=, after the service has
+    reattached and read the records.  If the answer's =in= record is
+    there, it is =recorded= and the request is =answering=, until its own
+    clearing events (as above).  If not, the reservation is released and
+    the request is answerable again.
+- *Outcome.*  Each result carries ="state"=:
+  - =queued=: held by the service, as a message waiting for a turn;
+  - =written=: sent to the host;
+  - =recorded=: its =in= record came back.  The host records before it
+    writes to the harness, so this proves the line was kept, not that
+    the harness acted on it;
+  - =unknown=.
+
+  What the harness then did arrives as events.
+
+| method | params | result |
+|--------+--------+--------|
+| =agents/send= | =cid id text mode:"now"/"next"/"steer" images?= | =state= |
+| =agents/answer= | =cid id handle decision scope? reason? answers?= | =state= |
+| =agents/interrupt=, =agents/stop=, =agents/resume= | =cid id= | =state= |
+| =agents/start= | =cid cwd prompt? title? provider? model? effort? parent?= | =state id= |
+| =agents/select= | =cid id model? effort? provider?= | =state= |
+| =agents/plan= | =cid id on= | =state= |
+| =agents/rename=, =agents/settle= | =cid id title=, =cid id on= | =state= =applied= or =unknown=, =revision= |
+| =agents/reply= | =cid id message text= | =state= |
+| =agents/projects.list=, =agents/providers.list= | | ={"projects":[{"cwd","last_time"}]}=; ={"providers":[{"name","harness","models":[{"id","label","efforts"}]}]}= |
+
+- *Unsupported in 1.0 (=unsupported=):* rollback, renew, fork, move to
+  another account.  Each gets a method in a minor version.
+- *Images.*  A local client may send =images= as files by path (the
+  capability =images.path=).  Upload through the relay is a later minor
+  version (=images.upload=).
+
+** Events
+- *Batches.*  =agents/event= carries one record unit's events, in order.
+- *Event (normative):* every event has =type= and =seq= (its record's).
+  The core types and their required fields:
+
+| type | required fields |
+|------+-----------------|
+| =input= | =text images steer own messages request= |
+| =delta= | =id text= (an assistant message's id; text appended) |
+| =thinking= | =id text= |
+| =message-end= | =id text= (the whole message) |
+| =tool= | =id name state= (=started=/=finished=), =input parent output error= (=null= until known) |
+| =tool-output= | =id text= (appended to the tool's output) |
+| =attributed= | =request by decision scope reason login client= |
+| =status=, =error= | =text parent= |
+| =done= | =text error limit duration cost= |
+| =exit= | =status= |
+
+- *Must-ignore.*  Other types (=compacted=, =usage=, =rate-limit=,
+  =selection=, =incoming=, =replied=, =plan=, =suggestion=) are optional
+  to a client.  Pending requests and their resolution never travel only
+  as events: =approval= and =answered= events are also sent, for the
+  transcript, but the pending set follows =pending.added= and
+  =pending.resolved=.
+- *Today's gaps.*  Codex's adapter must emit =tool-output= (it drops
+  output deltas and MCP progress today), before slice 1.
+- *Schemas.*  The spec's JSON Schemas and its test vectors (real records
+  → events → messages) are slice 0's deliverable, built from the fields
+  above.
+
+* The relay: =romacs-relay=
+A small Rust binary in a new crate, =crates/romacs-relay=, built on
+=tungstenite= and =rustls= (both already in the dependency cache).  It
+holds no agent logic.
+
+** Serving
+- *Socket.*  It listens on a private Unix socket,
+  =$XDG_RUNTIME_DIR/romacs/relay/http.sock=, in a directory of mode
+  0700.  It is published with
+  =tailscale serve --bg --https=443 unix:PATH=, which serves only the
+  tailnet.  The setup check (=romacs-relay check=) confirms tailscaled can
+  reach the socket.
+- *Routes.*  =GET /= serves the phone page.  =/agents= upgrades to a
+  WebSocket.
+- *Identity, before any message.*
+  - The request must carry =Tailscale-User-Login=, which Serve sets for a
+    user-owned device and strips from what the caller sends.  It must
+    name a login in the allowlist (=$XDG_CONFIG_HOME/romacs/relay.json=).
+    A request without it, a tagged device's included, is refused
+    (403).
+  - The =Origin= header, when present, must be the page's own origin, so
+    a page on another site cannot use the user's browser and tailnet
+    identity.  A native client sends none.
+- *The handoff to the service.*  The relay connects to
+  =service-relay.sock= and sends first
+  ={"jsonrpc":"2.0","method":"agents/transport","params":{"via":"tailnet","login":...,"peer":...}}=.
+  The service binds that identity to the connection, which stays remote:
+  it can never register as an editor.  The relay drops any client
+  message that names a transport.
+- *Threat model.*  One user's machine: any process of that user already
+  holds the user's authority.  The Unix sockets keep other users out.
+
+** Connecting
+=romacs-relay connect URL --socket PATH= runs on another machine.
+- It opens a local Unix socket that speaks the protocol and copies each
+  client connection to one WebSocket.
+- When the WebSocket drops, it closes the client connection.  The client
+  says hello again and resumes, so it never keeps a dead subscription.
+- The Romacs client therefore only ever opens a Unix socket, the local
+  service's or a bridge's: there is no WebSocket or TLS in Lisp.
+
+* Clients
+
+** The client model: =romacs-agent-client.el=
+A passive mirror:
+- the list's rows and revision;
+- each open session's snapshot, pending requests, queue, open items and
+  events;
+- one function per command.
+
+It folds nothing and has no policy, no queue dispatch and no timers that
+act.  A client cannot answer, resume or send by itself, by construction.
+
+The board and the chat read only through it:
+- the chat draws the events and the pending requests;
+- the board draws the rows.
+
+This is the refactor at the seam: UI code that reads session structs
+moves to the client model's accessors.
+
+** The local editor
+- It connects to =service.sock=, as every other client does.
+- While the service still runs inside the desktop process (first
+  slices), the editor connects to its own process's socket.
+- No UI reads the service's structs directly at any stage.
+
+** Romacs on another machine
+=romacs-agent-remote-host= names the machine.  The editor:
+- starts =romacs-relay connect= as a subprocess;
+- opens its socket;
+- draws the board and chats as it does locally.
+
+** The phone page
+- *What it is:* one static HTML and JavaScript file, with no build step,
+  in =assets/agents-web/= and served by the relay.
+- *What it shows:*
+  - the session list, waiting sessions first;
+  - one chat: the events, and each pending request as a prominent block
+    with its choices or its questions;
+  - a composer;
+  - a start form: project from =projects.list=; provider and model from
+    =providers.list=.
+- *Resuming:* it keeps its cursors and resumes.
+
+** Editor tools from the service
+Once the service runs on its own, an agent's editor tool needs an editor.
+
+- *Registering.*  A local editor registers on its connection to
+  =service.sock= (=agents/editor.register=, never over the relay).
+- *Home editor.*  The latest registration is the home editor, until it
+  disconnects or another registers.  A call goes to the home editor at
+  the time it is sent, and stays pinned to that editor: a later
+  registration does not move it.
+- *Calling.*  The service calls the editor with a JSON-RPC request,
+  =agents/editor.call {call, session, relay_incarnation, tool, args}=,
+  which keeps the session and relay context the caller checks need.
+  =agents/editor.cancel {call}= withdraws it.  The editor answers whether
+  the call was still queued (=not executed=) or had started (=outcome
+  unknown=, its result then dropped).
+- *Outcomes:*
+  - the editor's result;
+  - =not executed=, only when the call was never sent, or the editor
+    refused or withdrew it before taking it;
+  - =outcome unknown= whenever the call was sent and no answer came: the
+    pinned editor disconnected, or died before answering a cancel.
+- *Records.*  The service keeps each call's outcome in the command table,
+  so =romacs_call_outcome= answers after a service restart.  A call in
+  flight when the service died reads =outcome unknown=.
+- *No editor:* with none registered, an editor tool is answered
+  =not executed: no editor attached=.
+
+* Ownership, races, compatibility
+- *One authority per session.*  The service alone writes to hosts.
+  Clients command, and the service admits each command against its state
+  atomically.
+- *Hosts, compatible.*  The service ↔ host protocol stays v0, so hosts
+  started by older builds go on working.  One additive change (v0.1,
+  slice 1): once a written line has reached the harness's stdin, the
+  host journals and sends a record ={"seq":M,"t":T,"written":SEQ}=,
+  SEQ being the line's =in= record.  As a record it replays: a service
+  restarted after the write finds it.  A v0 host writes none.  Its answers then stay
+  =answering= until the turn ends, the request settles or the harness
+  exits.  Its limits show in the
+  outcomes: =recorded= means the host recorded a line, not that the
+  harness acted on it.  A later host change brings a hello with
+  capabilities and keeps v0.
+- *Cut over in order.*  Moving authority from the desktop editor to the
+  service is one ordered handoff:
+  1. the editor stops its restore, attach and writer paths;
+  2. it drains what it owes (notes, queued writes);
+  3. the service restores and attaches;
+  4. the routes are relinked to the service;
+  5. commands are admitted again, with =busy= returned until then.
+- *File ownership across lanes.*  The chat view and the =answer= note
+  belong to the chat rebuild.  This work takes their schema, and both
+  land against the same spec.
+  - Attribution is persisted only in the =answer= note, replayed as
+    =attributed=; an earlier =romacsAnswer= field beside the response is
+    not.
+  - The chat view's history deduplicates by the cursor above (seq, all
+    records of a seq together), the same contract as the protocol's.
+
+* Slices
+Each slice is landable on its own:
+- *S0 — the specification.*  This document's v1 as a reference
+  (=doc/agent-protocol.org=):
+  - v0 written down;
+  - JSON Schemas for every message, and test vectors (real records →
+    events → messages), including:
+    - a unit just over and just under 256 KiB, with the largest
+      permitted request =id= and token;
+    - a page whose =context= alone exceeds a reply;
+    - a catalog larger than a reply, with one provider over 256 KiB
+      followed by another entry;
+    - an editor tool result over the budget;
+    - an expired continuation;
+  - the Codex adapter's =tool-output=, and its =how= =harness= resolution
+    on =serverRequest/resolved= for a request still pending;
+  - the compactor raising the session's epoch in every deleting
+    transaction.
+- *S1 — the service core*, inside the desktop process:
+  - the host's v0.1 changes: the journaled =written= record, and
+    =--input-tag= for per-turn prompts;
+  - launches tracked in their own units, with no =setsid= fallback for
+    hosts the service starts;
+  - =romacs-agent-service.el= on =service.sock=: watch, open, history,
+    commands with the command table, pending lifecycle, editor-less
+    agent tools;
+  - =romacs-agent-client.el=;
+  - a conformance suite against a private editor with a scripted
+    harness:
+    - replay racing live output and a queue change;
+    - a reconnect across compaction;
+    - an oversized event and a paged reply;
+    - two clients answering one request;
+    - a command repeated across a service restart;
+    - the extra local hop measured.
+- *S2 — the local UI on the client model*, over the socket.  The board
+  and the chat move onto the client model, with the chat rebuild; policy
+  answers are drawn with their actor.
+- *S3 — the relay.*  Serve and connect, identity and Origin checks, the
+  page route, and the setup check, with Rust tests against a fake
+  service.
+- *S4 — the phone page.*  Accepted on a phone over the tailnet.
+- *S5 — Romacs on another machine.*  Accepted from it: headless first,
+  then the GUI.
+- *S6 — authority handoff.*  The ordered cutover above, proved with a
+  live harness, a queued message and a pending request across a restart.
+- *S7 — the service in its own process*:
+  - a user unit;
+  - hosts launched in their own units, with no =setsid= fallback;
+  - editor-tool forwarding;
+  - the in-process service path deleted.
+
+  It is proved by restarting the unit with harnesses it launched still
+  running.
