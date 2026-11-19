@@ -635,23 +635,24 @@ given back as they free (auto_vacuum incremental, set once, one rewrite)."
 
 (defconst romacs-agent-events--compact-window 2000
   "The deltas compaction removes a transaction, at most: other writers wait
-for no more than that, but for a message with more, whose deltas go
-together.")
+for no more than that.  A message with more keeps them all, since its
+deltas go together or not at all.")
 
 (defun romacs-agent-events--compact-batches (deltas window)
   "DELTAS, as (SEQ MESSAGE), as the seqs of each transaction that removes
 them: whole messages, in the order their deltas began, up to WINDOW
-seqs a batch; a message with more, alone."
+seqs a batch.  A message with more is left out: kept whole."
   (let ((messages (make-hash-table :test #'equal)) (order nil) (batches nil) (batch nil))
     (pcase-dolist (`(,seq ,message) (sort deltas (lambda (a b) (< (car a) (car b)))))
       (unless (gethash message messages) (push message order))
       (push seq (gethash message messages)))
     (dolist (message (nreverse order))
       (let ((seqs (reverse (gethash message messages))))
-        (when (and batch (> (+ (length batch) (length seqs)) window))
-          (push batch batches)
-          (setq batch nil))
-        (setq batch (append batch seqs))))
+        (when (<= (length seqs) window)
+          (when (> (+ (length batch) (length seqs)) window)
+            (push batch batches)
+            (setq batch nil))
+          (setq batch (append batch seqs)))))
     (when batch (push batch batches))
     (nreverse batches)))
 

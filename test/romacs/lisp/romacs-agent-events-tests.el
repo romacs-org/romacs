@@ -314,12 +314,12 @@ moment more under load."
 
 (ert-deftest romacs-agent-events-compaction-drops-a-codex-commands-streamed-output ()
   ;; A Codex command whose completed item came: its streamed output is gone
-  ;; (the item holds it); one never completed keeps its own.  Removed in
-  ;; windows of two seqs, and imported two records a transaction.
+  ;; (the item holds it); one never completed keeps its own.  Its three
+  ;; deltas fill a batch of three: removed in one transaction.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
         (romacs-agent-events--imported (make-hash-table :test #'equal))
-        (romacs-agent-events--compact-window 2))
+        (romacs-agent-events--compact-window 3))
     (romacs-agent-events-tests--with-session
      0
      (lambda (session journal)
@@ -338,8 +338,8 @@ moment more under load."
        (let ((epoch (romacs-agent-events-epoch (romacs-agent-id session))))
          (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))
-         ;; c1's three deltas, more than a batch of two, went in one
-         ;; transaction: never a message's deltas in part.
+         ;; c1's three deltas went in one transaction: never a message's
+         ;; deltas in part.
          (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (1+ epoch)))
          ;; A store no writer of this build has opened has no epochs: 0,
          ;; read as an editor reads it.
@@ -352,9 +352,9 @@ moment more under load."
 
 (ert-deftest romacs-agent-events-compaction-batches-whole-messages ()
   ;; Whole messages a batch, in the order they began, up to the window;
-  ;; one larger than it alone.
+  ;; one larger than it (e) kept whole.
   (should (equal (romacs-agent-events--compact-batches
-                  '((5 "b") (1 "a") (2 "a") (6 "b") (7 "c") (8 "c") (9 "c") (10 "d")) 3)
+                  '((5 "b") (1 "a") (2 "a") (6 "b") (7 "c") (8 "c") (9 "c") (10 "d") (11 "e") (12 "e") (13 "e") (14 "e")) 3)
                  '((1 2) (5 6) (7 8 9) (10)))))
 
 (ert-deftest romacs-agent-events-compaction-changes-what-follows-a-seq ()

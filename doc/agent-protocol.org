@@ -685,8 +685,11 @@ paging ever holds live delivery back.
   another account.  Each gets a method in a minor version.
 - *Attachments are references, never copies.*  =images= holds paths: a
   path on the agent's host, or =HOST:PATH= for a file on the client's
-  machine, which the agent reads in place (over the ssh it already has).
-  No file's bytes enter the store, the logs or the wire.
+  machine, which the agent reads in place, over ssh from its host.
+  No file's bytes enter the store, the logs or the wire.  A client
+  sends =HOST:PATH= only for a machine the agent's host reaches by ssh;
+  the send checks nothing, and a file the agent cannot read is that
+  turn's tool error.
 
 ** Events
 - *Event (normative).*  =agents/event= carries one record unit's events,
