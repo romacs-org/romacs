@@ -264,5 +264,22 @@ history is read, against the open's."
       (run-hook-with-args 'romacs-agent-client-session-functions client id
                           (list (if (equal method "agents/event") 'event 'changed) params))))))
 
+(defun romacs-agent-client-history (client id params callback)
+  "Ask CLIENT's service for session ID's history (`agents/session.history'
+with PARAMS: upto, after or turns), every page of it; CALLBACK is called
+with (UNITS CURSOR RESET), UNITS the record units in order, or with
+\=(error ERROR)."
+  (let ((units nil))
+    (cl-labels ((part (result error)
+                  (if error (funcall callback (list 'error error))
+                    (setq units (append units (append (gethash "units" result) nil)))
+                    (if (stringp (gethash "more" result))
+                        (romacs-agent-client-request client "agents/page"
+                                                     (romacs-agent-rpc-object "more" (gethash "more" result)) #'part)
+                      (funcall callback (list units (gethash "cursor" result) (eq (gethash "reset" result) t)))))))
+      (let ((request (copy-hash-table params)))
+        (puthash "id" id request)
+        (romacs-agent-client-request client "agents/session.history" request #'part)))))
+
 (provide 'romacs-agent-client)
 ;;; romacs-agent-client.el ends here

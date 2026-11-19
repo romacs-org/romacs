@@ -817,11 +817,9 @@ how long the turn has run."
 (defun romacs-agent-log--replay (session from end)
   "Draw SESSION's records from place FROM to place END at the transcript's
 end, replayed into a copy so the session is not touched."
-  (let ((scratch (romacs-agent--scratch session)) (buffer (current-buffer))
+  (let ((scratch (romacs-agent-replay-copy session from)) (buffer (current-buffer))
         ;; A replay writes nothing of the session (its manifest).
         (romacs-agent--manifest-frozen t))
-    ;; Its run at FROM, as the session numbered its requests then (Codex's).
-    (setf (romacs-agent-driver-state scratch) (list :run (romacs-agent-log--run-at session from)))
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    (with-current-buffer buffer
@@ -829,12 +827,6 @@ end, replayed into a copy so the session is not touched."
                      (when-let* ((seq (plist-get event :seq))) (setq romacs-agent-log--seq (max romacs-agent-log--seq seq))))))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent--record scratch record)) from end))
     (romacs-agent-log--close-stream)))
-
-(defun romacs-agent-log--run-at (session from)
-  "The run of SESSION's harness its records are in at place FROM: the seq
-of the last run note before it in the store, else the live session's."
-  (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
-      (plist-get (romacs-agent-driver-state session) :run)))
 
 (defun romacs-agent-log--earlier-line (from)
   (romacs-agent-log--sealed

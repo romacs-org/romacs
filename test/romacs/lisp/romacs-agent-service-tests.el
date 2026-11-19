@@ -414,4 +414,118 @@ and `wait' waiting until its form holds (5 s at most)."
         (should (wait (cl-find 'changed (car log) :key #'cadr)))
         (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
 
+;;; History
+
+(defun romacs-agent-service-tests--line (seq key value)
+  (concat (json-serialize (romacs-mcp--object key value "seq" seq "t" (+ 1794600000.25 seq))) "\n"))
+
+(defun romacs-agent-service-tests--turn (seq n)
+  "A Claude turn from SEQ: its prompt, its reply streamed in two deltas,
+the whole reply, its result."
+  (let ((id (format "m%d" n)) (text (format "answer %d" n)))
+    (concat (romacs-agent-service-tests--line
+             seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                          "romacsRequest" n "type" "user"))
+            (romacs-agent-service-tests--line
+             (+ seq 1) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "message_start"
+                                                                             "message" (romacs-mcp--object "id" id))))
+            (romacs-agent-service-tests--line
+             (+ seq 2) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" "answer "))))
+            (romacs-agent-service-tests--line
+             (+ seq 3) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" (number-to-string n)))))
+            (romacs-agent-service-tests--line
+             (+ seq 4) "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                 "message" (romacs-mcp--object "id" id "content"
+                                                                               (vector (romacs-mcp--object "type" "text" "text" text)))))
+            (romacs-agent-service-tests--line (+ seq 5) "out" (romacs-mcp--object "type" "result" "result" text)))))
+
+(defmacro romacs-agent-service-tests--with-stored (&rest body)
+  "BODY with `session', a Claude session of three turns kept in SQLite, in
+a state root of its own, and a service of its own on `socket'."
+  (declare (indent 0))
+  `(let* ((root (make-temp-file "rsv-store" t))
+          (socket (expand-file-name "s.sock" root))
+          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
+                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                       process-environment))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (romacs-agent--launched (make-hash-table :test #'equal))
+          (romacs-agent--held-notes (make-hash-table :test #'equal))
+          (romacs-agent-store--db nil) (romacs-agent-events--made nil)
+          (romacs-agent-events--imported (make-hash-table :test #'equal))
+          (romacs-agent-event-functions nil)
+          (id "e7e70000-2222-4333-8444-555566667778")
+          (dir (expand-file-name id (romacs-agent--state-root))))
+     (unwind-protect
+         (progn
+           (make-directory dir t)
+           (romacs-agent--write-json (expand-file-name "manifest.json" dir)
+                                     (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "cwd" root
+                                                         "title" "stored" "titleAuto" :false "argv" []
+                                                         "options" (romacs-mcp--object)))
+           (let ((coding-system-for-write 'utf-8-unix))
+             (write-region (concat (romacs-agent-service-tests--line 1 "note" (romacs-mcp--object "type" "run"))
+                                   (romacs-agent-service-tests--turn 2 1) (romacs-agent-service-tests--turn 8 2)
+                                   (romacs-agent-service-tests--turn 14 3))
+                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+           (romacs-agent--load dir)
+           (let ((session (romacs-agent-get id)))
+             (romacs-agent-events-import session)
+             (cl-macrolet ((wait (form) `(let ((deadline (+ (float-time) 5)))
+                                            (while (and (not ,form) (< (float-time) deadline))
+                                              (accept-process-output nil 0.02))
+                                            ,form)))
+               ,@body)))
+       (romacs-agent-service-stop)
+       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+       (delete-directory root t))))
+
+(defun romacs-agent-service-tests--live (session)
+  "SESSION's records as live delivery sends them: each unit (SEQ . JSON)."
+  (let ((units nil) (unit nil))
+    (dolist (event (romacs-agent-events session))
+      (push event unit)
+      (when (plist-get event :last)
+        (let ((sent (romacs-agent-service--bounded (nreverse unit))))
+          (unless (equal sent []) (push (cons (plist-get event :seq) (json-serialize sent)) units)))
+        (setq unit nil)))
+    (nreverse units)))
+
+(defun romacs-agent-service-tests--history (client id params)
+  "Session ID's history through CLIENT, each unit (SEQ . JSON), and its reset."
+  (let ((answer nil))
+    (romacs-agent-client-history client id params (lambda (result) (setq answer result)))
+    (let ((deadline (+ (float-time) 5)))
+      (while (and (not answer) (< (float-time) deadline)) (accept-process-output nil 0.02)))
+    (cons (mapcar (lambda (unit) (cons (gethash "seq" unit) (json-serialize (gethash "events" unit)))) (car answer))
+          (nth 2 answer))))
+
+(ert-deftest romacs-agent-service-history-is-what-live-sent ()
+  ;; A session's history is its records' units as live delivery sent
+  ;; them; from a place mid-message, folded from its turn's start, its
+  ;; text never comes twice; too far behind, a reset.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (should (> (length live) 9))
+      (should (equal (car (romacs-agent-service-tests--history
+                           client id (romacs-agent-rpc-object "upto" 19 "turns" 10)))
+                     live))
+      ;; The last turn alone.
+      (should (equal (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1)))
+                     (seq-filter (lambda (unit) (>= (car unit) 14)) live)))
+      ;; After seq 10, the first delta of turn 2: its second delta, then the
+      ;; whole message raising no text, as live.
+      (let ((after (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 10)))))
+        (should (equal after (seq-filter (lambda (unit) (> (car unit) 10)) live)))
+        (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
+      (let ((romacs-agent-service--catch-up 5))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2))))))))
+
 ;;; romacs-agent-service-tests.el ends here

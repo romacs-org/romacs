@@ -2097,6 +2097,19 @@ nothing that waits."
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
     scratch))
 
+(declare-function romacs-agent-events-note-seq "romacs-agent-events" (session type end))
+
+(defun romacs-agent-replay-copy (session from)
+  "A copy of SESSION to replay its records from place FROM into
+\(`romacs-agent--scratch'), its harness's run as it was at FROM: the
+seq of the last run note before it in the store, else the live
+session's.  Every reader of a session's history replays into one."
+  (let ((scratch (romacs-agent--scratch session)))
+    (setf (romacs-agent-driver-state scratch)
+          (list :run (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
+                         (plist-get (romacs-agent-driver-state session) :run))))
+    scratch))
+
 (defconst romacs-agent--events-page 2000
   "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
 page a short read, so a long replay holds no snapshot of the store.")

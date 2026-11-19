@@ -191,9 +191,12 @@ by id of `romacs-agent-service--subscription's)."
     ("agents/sessions.watch" . romacs-agent-service--watch)
     ("agents/page" . romacs-agent-service--page)
     ("agents/session.open" . romacs-agent-service--open)
-    ("agents/session.close" . romacs-agent-service--close))
+    ("agents/session.close" . romacs-agent-service--close)
+    ("agents/session.history" . romacs-agent-service--history))
   "Each method served and its function, called with the connection and
-the params; it returns the result, or signals `romacs-agent-service-error'.")
+the params; it returns the result, or signals `romacs-agent-service-error',
+or returns a function, called with a responder that sends the result (or,
+given (error CODE KIND MESSAGE), that error) once it is had.")
 
 (define-error 'romacs-agent-service-error "Agent protocol error")
 
@@ -201,7 +204,8 @@ the params; it returns the result, or signals `romacs-agent-service-error'.")
   (signal 'romacs-agent-service-error (list code kind message data)))
 
 (defun romacs-agent-service--answer (rpc id method params)
-  "The reply to the request ID of METHOD with PARAMS on RPC."
+  "The reply to the request ID of METHOD with PARAMS on RPC, or nil when its
+method answers later (it sends it then)."
   (condition-case err
       (let ((function (cdr (assoc method romacs-agent-service--methods))))
         (cond ((and (not (romacs-agent-service--peer-hello (romacs-agent-rpc-data rpc)))
@@ -209,7 +213,15 @@ the params; it returns the result, or signals `romacs-agent-service-error'.")
                (romacs-agent-service--fail -32002 "not-initialized" "Say agents/hello first"))
               ((null function) (romacs-agent-service--fail -32601 "unknown-method" "No such method"))
               ((not (hash-table-p params)) (romacs-agent-service--fail -32602 "bad-params" "Params must be an object")))
-        (romacs-agent-rpc-result id (funcall function rpc params)))
+        (let ((result (funcall function rpc params)))
+          (if (functionp result)
+              (progn (funcall result (lambda (answer)
+                                       (romacs-agent-rpc-send
+                                        rpc (pcase answer
+                                              (`(error ,code ,kind ,text) (romacs-agent-rpc-error id code kind text))
+                                              (_ (romacs-agent-rpc-result id answer))))))
+                     nil)
+            (romacs-agent-rpc-result id result))))
     (romacs-agent-service-error
      (pcase-let ((`(,code ,kind ,text ,data) (cdr err))) (romacs-agent-rpc-error id code kind text data)))
     (error (romacs-agent-rpc-error id -32603 "internal" (error-message-string err)))))
@@ -230,8 +242,9 @@ from a client, of which none is defined, is ignored."
       (romacs-agent-rpc-send rpc (romacs-agent-rpc-error nil -32600 "bad-request" "A request id is a string or number of 128 bytes at most")))
      ((or (not (equal (gethash "jsonrpc" message) "2.0")) (not (stringp method)))
       (romacs-agent-rpc-send rpc (romacs-agent-rpc-error id -32600 "bad-request" "Not a JSON-RPC 2.0 request")))
-     (t (romacs-agent-rpc-send rpc (romacs-agent-service--answer rpc id method
-                                                                  (gethash "params" message (make-hash-table :test #'equal))))))))
+     (t (when-let* ((reply (romacs-agent-service--answer rpc id method
+                                                         (gethash "params" message (make-hash-table :test #'equal)))))
+          (romacs-agent-rpc-send rpc reply))))))
 
 (defun romacs-agent-service--hello (rpc params)
   "`agents/hello': the version both speak, this service, the caller's identity."
@@ -540,7 +553,8 @@ holds too many."
     (setf (romacs-agent-service--peer-tokens peer) (delq entry (romacs-agent-service--peer-tokens peer)))
     (if (or (null entry) (> (- (float-time) (cadr entry)) romacs-agent-service--token-life))
         (romacs-agent-service--fail -32017 "stale" "The token expired: start the call again")
-      (romacs-agent-service--paged rpc (cddr entry)))))
+      (let ((state (cddr entry)))
+        (funcall (or (plist-get state :page) #'romacs-agent-service--paged) rpc state)))))
 
 ;;; One session
 
@@ -737,6 +751,118 @@ a session not loaded stays so."
     (remhash id (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))
     (unless (romacs-agent-service--subscriptions id) (remhash id romacs-agent-service--units))
     (romacs-agent-rpc-object)))
+
+;;; History
+
+(defconst romacs-agent-service--catch-up 4000
+  "The most records a history call after a place spans: a client further
+behind draws the session afresh (Cursors).")
+
+(defconst romacs-agent-service--replay-batch 200
+  "The records a history replay folds between the editor's other work.")
+
+(defun romacs-agent-service--history (rpc params)
+  "`agents/session.history': session ID's record units with AFTER < seq
+<= UPTO, or, with no AFTER, those of its last TURNS turns up to UPTO;
+replayed from the start of the turn the first is in, so each unit's
+events are as live they were, between the editor's other work.  Paged
+by units; `reset' when the session's epoch moves meanwhile, or AFTER is
+further behind than a catch-up spans."
+  (let* ((id (gethash "id" params)) (upto (gethash "upto" params)) (after (gethash "after" params))
+         (turns (let ((turns (gethash "turns" params))) (if (and (integerp turns) (> turns 0)) (min turns 50) 3)))
+         (session (and (stringp id) (or (romacs-agent-loaded id) (romacs-agent-store-row-session id)))))
+    (unless session (romacs-agent-service--fail -32010 "unknown-session" "No such session"))
+    (unless (and (integerp upto) (or (null after) (and (integerp after) (<= after upto))))
+      (romacs-agent-service--fail -32602 "bad-params" "upto, and after when given, are seqs, after <= upto"))
+    (unless (romacs-agent-events-p session)
+      (romacs-agent-service--fail -32013 "unsupported" "This session's records are in a journal: it has no history served"))
+    (let ((epoch (romacs-agent-events-epoch id)))
+      (if (and after (> (- upto after) romacs-agent-service--catch-up))
+          (romacs-agent-service--history-reply rpc session upto epoch nil t)
+        (let ((from (if after
+                        (car (romacs-agent-events-tail session 1 (+ after 2)))
+                      (car (romacs-agent-events-tail session turns (1+ upto))))))
+          (lambda (respond)
+            (romacs-agent-service--replay
+             session (or from 0) upto (or after (and from (1- from)) -1)
+             (lambda (units)
+               (funcall respond
+                        (romacs-agent-service--history-reply
+                         rpc session upto epoch units (not (eql (romacs-agent-events-epoch id) epoch)))))
+             (lambda (why) (funcall respond (list 'error -32603 "internal" why))))))))))
+
+(defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
+  "A history reply of UNITS (each (SEQ . SENT)) up to UPTO under EPOCH, or
+of none and `reset' when RESET: paged as every collection is."
+  (romacs-agent-service--units-page
+   rpc (list :cursor (romacs-agent-rpc-object "seq" upto "epoch" epoch
+                                              "adapter" (romacs-agent-service--adapter (romacs-agent-harness session)))
+             :reset reset
+             :units (and (not reset)
+                         (delq nil (mapcar (lambda (unit)
+                                             (unless (equal (cdr unit) [])
+                                               (let ((object (romacs-agent-rpc-object "seq" (car unit))))
+                                                 (if (eq (cdr unit) 'oversize)
+                                                     (progn (puthash "events" [] object) (puthash "oversize" t object))
+                                                   (puthash "events" (cdr unit) object))
+                                                 object)))
+                                           units))))))
+
+(defun romacs-agent-service--units-page (rpc state)
+  "STATE, a history reply's (:cursor :reset :units), as one reply: whole
+units up to the budget, at least one, and a token continuing it."
+  (let ((budget romacs-agent-service--unit-budget) (units (plist-get state :units)) (taken nil) (first t))
+    (while (and units (let ((bytes (string-bytes (json-serialize (car units)))))
+                        (when (or first (<= bytes budget)) (setq budget (- budget bytes) first nil) t)))
+      (push (pop units) taken))
+    (romacs-agent-rpc-object
+     "cursor" (plist-get state :cursor) "reset" (if (plist-get state :reset) t :false)
+     "units" (vconcat (nreverse taken))
+     "more" (if units
+                (romacs-agent-service--token rpc (list :page #'romacs-agent-service--units-page
+                                                       :cursor (plist-get state :cursor) :units units))
+              :null))))
+
+(defun romacs-agent-service--replay (session from upto after then fail)
+  "Replay SESSION's records with FROM <= seq <= UPTO into a copy of it
+\(`romacs-agent-replay-copy'), `romacs-agent-service--replay-batch'
+records between the editor's other work, then call THEN with the units
+of those past AFTER, each (SEQ . SENT); FAIL with why, should a step fail."
+  (let* ((scratch (romacs-agent-replay-copy session from))
+         (pager (romacs-agent-events-pager session))
+         (place (cons (1- from) most-positive-fixnum)) (lines nil) (done nil)
+         (units nil) (unit nil) (step nil))
+    (setq step
+          (lambda ()
+            (let ((scheduled nil))
+              (unwind-protect
+                  (condition-case err
+                      (let ((romacs-agent--manifest-frozen t)
+                            (romacs-agent-event-functions
+                             (list (lambda (_ event)
+                                     (when-let* ((seq (plist-get event :seq)))
+                                       (when (> seq after) (push event unit))
+                                       (when (and (plist-get event :last) unit)
+                                         (push (cons seq (romacs-agent-service--bounded (nreverse unit))) units)
+                                         (setq unit nil)))))))
+                        (dotimes (_ romacs-agent-service--replay-batch)
+                          (when (and (null lines) place (not done))
+                            (pcase (funcall (car pager) place)
+                              (`(,read . ,next) (setq lines read place next))
+                              (_ (setq place nil))))
+                          (when-let* ((line (and (not done) (pop lines)))
+                                      (record (ignore-errors (json-parse-string line :object-type 'hash-table
+                                                                                :null-object :null :false-object :false))))
+                            (if (> (gethash "seq" record 0) upto) (setq done t)
+                              (romacs-agent--record scratch record))))
+                        (if (and (not done) (or lines place))
+                            (progn (run-at-time 0 nil step) (setq scheduled t))
+                          (setq done 'whole)))
+                    (error (setq done (error-message-string err))))
+                (unless scheduled (funcall (cdr pager))))
+              (cond ((eq done 'whole) (funcall then (nreverse units)))
+                    ((stringp done) (funcall fail done))))))
+    (funcall step)))
 
 (provide 'romacs-agent-service)
 ;;; romacs-agent-service.el ends here
