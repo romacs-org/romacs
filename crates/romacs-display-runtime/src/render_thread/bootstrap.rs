@@ -81,7 +81,7 @@ impl RenderApp {
             adapter.get_downlevel_capabilities().flags,
         );
         if !off.is_empty() {
-            eprintln!("romacs: gpu below WebGPU's default limits; off: {}", off.join("; "));
+            eprintln!("romacs: gpu lacks what some features need; off: {}", off.join("; "));
         }
         if adapter_info.device_type == wgpu::DeviceType::Cpu {
             eprintln!(

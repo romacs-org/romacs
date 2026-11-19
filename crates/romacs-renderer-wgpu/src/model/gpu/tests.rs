@@ -302,10 +302,15 @@ fn a_gl33_device_refuses_the_model_and_survives() {
 /// `DownlevelFlags::VERTEX_STORAGE`) the GPU error scope turns into an error.
 #[test]
 fn a_rejection_past_the_preflight_is_a_scoped_error_and_the_device_survives() {
-    let Some((device, queue)) = open_device_with(wgpu::Limits {
+    let device = open_device_with(wgpu::Limits {
         max_uniform_buffers_per_shader_stage: 0,
         ..wgpu::Limits::default()
-    }) else {
+    });
+    assert!(
+        device.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
+        "GPU evidence required but no headless wgpu adapter"
+    );
+    let Some((device, queue)) = device else {
         eprintln!("skipping: no headless wgpu adapter");
         return;
     };
