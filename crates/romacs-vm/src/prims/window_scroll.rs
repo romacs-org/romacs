@@ -5,8 +5,6 @@
 //! of `eval' the first time one runs, as message.rs installs its half.
 use super::*;
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/window-scroll.el");
-
 /// Call HELPER of the Lisp half with ARGS, installing the half first;
 /// then, when FOLLOW is a window, move its old point to its point
 /// (`finish').
@@ -15,9 +13,7 @@ fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, follow: Value) -> Ne
     if cx.symbol_function(f)? != Value::NIL {
         return Ok(Step::Call { f, args, then: finish, saved: vec![follow] });
     }
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/window-scroll.el")?;
     let saved = [follow, f].into_iter().chain(args).collect();
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: installed, saved })
 }

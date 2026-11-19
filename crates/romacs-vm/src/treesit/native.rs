@@ -44,6 +44,32 @@ pub(crate) fn open_library(path: &[u8]) -> Result<Library, String> {
     }
 }
 
+/// dynlib_open of each name GNU tries for STEMS, in its order: the
+/// first library that opens and its file name, else None with every
+/// attempt's message in ERRORS.
+pub(crate) fn open_first(stems: &[Vec<u8>], suffixes: &[Vec<u8>], errors: &mut Vec<String>) -> Option<(Library, Vec<u8>)> {
+    for stem in stems {
+        // GNU conses each suffix's names before the last's.
+        for suffix in suffixes.iter().rev() {
+            let mut plain = stem.clone();
+            plain.extend_from_slice(suffix);
+            let mut candidates = vec![plain.clone()];
+            for version in (MIN_ABI_VERSION..=ABI_VERSION).rev() {
+                candidates.push([&plain[..], format!(".{version}.0").as_bytes()].concat());
+            }
+            candidates.push([&plain[..], b".0"].concat());
+            candidates.push([&plain[..], b".0.0"].concat());
+            for candidate in candidates {
+                match open_library(&candidate) {
+                    Ok(handle) => return Some((handle, candidate)),
+                    Err(message) => errors.push(message),
+                }
+            }
+        }
+    }
+    None
+}
+
 /// dynlib_sym of the grammar function NAME in LIBRARY, called: its language
 /// and the library's file name (dynlib_addr), or dlerror's message.
 pub(crate) fn language_symbol(library: Library, name: &[u8]) -> Result<(Language, Option<String>), String> {
@@ -85,6 +111,13 @@ impl Language {
     }
     pub(crate) fn abi_version(&self) -> u32 {
         self.0.abi_version() as u32
+    }
+    /// The loaded grammar's `TSLanguage` address: its identity for the
+    /// session, since no grammar library is ever closed (`Library`), so no
+    /// other grammar can come to occupy it.
+    pub(crate) fn address(&self) -> usize {
+        // A static grammar's copy is itself: no count is kept for it.
+        self.0.clone().into_raw() as usize
     }
     /// Whether this runtime can parse with it (GNU's throwaway parser check).
     pub(crate) fn compatible(&self) -> bool {
@@ -348,7 +381,10 @@ impl Cursor {
     }
 }
 
-/// A compiled query, deleted when dropped.
+/// A compiled query, deleted when dropped. Nothing changes it once
+/// compiled: every method takes `&self` and only reads it, and a match
+/// runs on a cursor of its own (`matches`), so query objects may share one
+/// (`query_memo`).
 pub(crate) struct Query(*mut ffi::TSQuery);
 impl Drop for Query {
     fn drop(&mut self) {
@@ -387,14 +423,14 @@ unsafe fn raw_slice<'a, T>(pointer: *const T, length: u32) -> &'a [T] {
 impl Query {
     /// ts_query_new of SOURCE for LANGUAGE, or the error's offset and
     /// GNU's description of its type.
-    pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Rc<Self>, (u32, &'static str)> {
+    pub(crate) fn new(language: &Language, source: &[u8]) -> Result<Self, (u32, &'static str)> {
         let (mut offset, mut kind) = (0, 0);
         // A static grammar's copy is itself: no count is kept for it.
         let language = language.0.clone().into_raw();
         // SAFETY: SOURCE is read for its length; the language is loaded.
         let query = unsafe { ffi::ts_query_new(language, source.as_ptr().cast(), source.len() as u32, &mut offset, &mut kind) };
         if !query.is_null() {
-            return Ok(Rc::new(Self(query)));
+            return Ok(Self(query));
         }
         let message = match kind {
             ffi::TSQueryErrorNone => "None",

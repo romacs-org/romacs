@@ -85,15 +85,19 @@
       (should (equal before (companion-test-snapshot companion))))))
 
 (ert-deftest companion-native-file-association-and-detachment-retire ()
-  (companion-test-with-claim
-    (with-current-buffer companion
-      (set-visited-file-name (expand-file-name "never-written" default-directory)
-                             t)
-      (set-visited-file-name nil t)
-      (insert "Human detached notes"))
-    (let ((before (companion-test-snapshot companion)))
-      (should-error (romacs-companion-state instance handle) :type 'user-error)
-      (should (equal before (companion-test-snapshot companion))))))
+  ;; Visiting a file name locks it while the buffer is modified, so the name
+  ;; is in a directory of the test's own, never `default-directory'.
+  (let ((directory (make-temp-file "companion-test" t)))
+    (unwind-protect
+        (companion-test-with-claim
+          (with-current-buffer companion
+            (set-visited-file-name (expand-file-name "never-written" directory) t)
+            (set-visited-file-name nil t)
+            (insert "Human detached notes"))
+          (let ((before (companion-test-snapshot companion)))
+            (should-error (romacs-companion-state instance handle) :type 'user-error)
+            (should (equal before (companion-test-snapshot companion)))))
+      (delete-directory directory t))))
 
 (ert-deftest companion-mode-roundtrip-and-kill-retire ()
   (companion-test-with-claim

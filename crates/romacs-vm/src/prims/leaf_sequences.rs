@@ -145,15 +145,27 @@ const SORT_RUN: usize = 1 << 18;
 /// times a fixnum's, so about 15 ms.
 const STRING_RUN: usize = 1 << 14;
 
+/// The orders `sort_native` takes natively: by string, or by fixnum
+/// ascending (`<`, `value<`) or descending (`>`).
+enum Native { Strings, Ascending, Descending }
+
 /// The native order of a predicate that resolves to a builtin subr, when
 /// every key is of a type it compares without signaling. GNU sort.c marks
 /// this point as where keys would be checked for faster comparison.
 fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, Fault> {
+    // The predicate resolved as a call would: aliases followed; a macro
+    // (`(macro . F)`, rebuilt from the slot's flag) or an autoload ends the
+    // walk, and the general path calls it, signalling as GNU does. `nil`
+    // and `t` end it too: the general path's dispatcher does not read their
+    // cells (romacs#309), and the two paths must agree. This fallback goes
+    // when #309 is fixed.
     let mut f = state[1];
     let mut name = None;
     for _ in 0..64 {
+        if f == Value::NIL || f == Value::TRUE { return Ok(false); }
         if let Some(found) = crate::prim::name(f) { name = Some(found); break; }
-        match cx.symbol_function(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
+        if !matches!(cx.kind(f), leaf::Kind::Symbol) { return Ok(false); }
+        match cx.symbol_definition(f) { Ok(next) if next != Value::NIL => f = next, _ => return Ok(false) }
     }
     let keys = cx.vector_values(state[6])?;
     let fixnums = || keys.iter().all(|k| k.integer_value().is_some());
@@ -161,20 +173,25 @@ fn sort_native(cx: &mut Leaf<'_>, state: &[Value]) -> std::result::Result<bool, 
         matches!(cx.kind(k), leaf::Kind::String | leaf::Kind::Bytes)
             || symbols && matches!(cx.kind(k), leaf::Kind::Symbol)
     });
-    let by_string = match name {
-        Some("string-lessp") if strings(true) => true,
-        Some("value<") if strings(false) => true,
-        Some("<" | "value<") if fixnums() => false,
+    let native = match name {
+        Some("string-lessp") if strings(true) => Native::Strings,
+        Some("value<") if strings(false) => Native::Strings,
+        Some("<" | "value<") if fixnums() => Native::Ascending,
+        Some(">") if fixnums() => Native::Descending,
         _ => return Ok(false),
     };
     // The keys' order, sorted with no Lisp to poll: polled between runs
     // (`sort_polled`), nothing written to the input before it ends.
     let mut order: Vec<usize> = (0..keys.len()).collect();
-    if by_string {
+    // Fixnum keys read once, not at each comparison.
+    let ints = || -> Vec<i64> { keys.iter().map(|k| k.integer_value().expect("checked fixnums")).collect() };
+    // Each a stable sort: keys neither before the other keep their order,
+    // as GNU's stable sort keeps them for any predicate.
+    match native {
         // Validated above, so the comparison cannot fail.
-        sort_polled(cx, &mut order, STRING_RUN, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?;
-    } else {
-        sort_polled(cx, &mut order, SORT_RUN, |_, a, b| keys[*a].integer_value().cmp(&keys[*b].integer_value()))?;
+        Native::Strings => sort_polled(cx, &mut order, STRING_RUN, |cx, a, b| cx.string_order(keys[*a], keys[*b]).unwrap_or(std::cmp::Ordering::Equal))?,
+        Native::Ascending => { let ints = ints(); sort_polled(cx, &mut order, SORT_RUN, |_, a, b| ints[*a].cmp(&ints[*b]))?; }
+        Native::Descending => { let ints = ints(); sort_polled(cx, &mut order, SORT_RUN, |_, a, b| ints[*b].cmp(&ints[*a]))?; }
     }
     let items = cx.vector_values(state[5])?;
     // Into the sort's own vectors: polled anywhere.

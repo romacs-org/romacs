@@ -1503,21 +1503,25 @@ impl Vm {
         self.undo_list_slot
     }
     /// The directory a new buffer starts with: the current buffer's
-    /// (reset_buffer), or before any buffer exists the process directory as
-    /// a directory name (init_buffer). init_buffer makes it unibyte and GNU's
-    /// startup.el later decodes it; VM2 runs no such startup, so it is
-    /// decoded here: unibyte when ASCII (as GNU's decoding leaves it),
-    /// multibyte when other UTF-8, else its raw bytes. No file
-    /// name handler exists yet when the first buffer is made, so
-    /// init_buffer's `/:' quoting never applies.
+    /// (reset_buffer), or before any buffer exists (nil current, the
+    /// `*scratch*' not yet made) the startup directory.
     pub(crate) fn inherited_directory(&mut self) -> Value {
         let Some(Fwd::Buffer(i)) = Forwarded::lookup("default-directory") else { unreachable!("declared") };
         let current = self.slots[self.buffer_slot].value;
-        if let Some(buffer) = current.index_if(0).and_then(|n| n.checked_sub(1))
+        if let Some(buffer) = current.object_index_if()
             && self.per_buffer(buffer).is_some()
         {
             return self.forwarded_buffer_value(buffer, i);
         }
+        self.startup_directory_value()
+    }
+    /// The process directory as a directory name (init_buffer). init_buffer
+    /// makes it unibyte and GNU's startup.el later decodes it; VM2 runs no
+    /// such startup, so it is decoded here: unibyte when ASCII (as GNU's
+    /// decoding leaves it), multibyte when other UTF-8, else its raw bytes.
+    /// No file name handler exists yet when the first buffer is made, so
+    /// init_buffer's `/:' quoting never applies.
+    pub(crate) fn startup_directory_value(&mut self) -> Value {
         // init_buffer starts from emacs_wd, a symlinked PWD's spelling kept.
         match crate::environment::startup_directory() {
             Some(dir) => {

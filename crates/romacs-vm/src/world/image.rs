@@ -41,7 +41,7 @@ impl Vm {
     }
     /// Why this VM cannot be captured, or Ok when it can.
     pub fn world_quiescent(&self) -> Result<(), String> {
-        let checks: [(&str, bool); 46] = [
+        let checks: [(&str, bool); 47] = [
             ("stack", self.stack.is_empty()),
             ("site_leaf", self.site_leaf == (0, 0)),
             ("images", self.images.is_empty()),
@@ -75,6 +75,7 @@ impl Vm {
             ("execution", self.execution.holds_nothing()),
             ("spare_programs", self.spare_programs.is_empty()),
             ("regexp_cache", self.regexp_cache.is_empty()),
+            ("treesit_queries", self.treesit_queries.is_empty()),
             ("flat_tables", self.flat_tables.is_empty()),
             ("mode_line_forms", self.mode_line_forms.is_empty()),
             ("lambda_lists", self.lambda_lists.is_empty()),
@@ -116,13 +117,7 @@ impl Vm {
         self.initialize_environment_slot("process-environment");
         self.reseed_environment_variables();
         // GNU init_buffer: every buffer starts in the startup directory.
-        let directory = {
-            let current = self.slots[self.buffer_slot].value;
-            self.slots[self.buffer_slot].value = Value::NIL;
-            let directory = self.inherited_directory();
-            self.slots[self.buffer_slot].value = current;
-            directory
-        };
+        let directory = self.startup_directory_value();
         for buffer in 0..self.objects.len() {
             if matches!(&self.objects[buffer], crate::data::Object::Buffer(b) if b.state.live) {
                 self.set_directory_of(buffer, directory);
@@ -147,11 +142,19 @@ impl Vm {
 /// binds the embedder, so its restorer knows CARRY's type.
 pub fn capture<T: super::safe::SnapshotSafe + super::safe::Schema>(vm: Vm, mut carry: T, file: &std::fs::File, key: [u8; 32]) -> Result<usize, String> {
     let mut vm = vm.at_rest_for_image()?;
+    // A restore makes the image's entries the indices below each table's
+    // length (`Vm::make_image_permanent`): a table with a free entry among
+    // them would hand it to a young one.
+    let tables = &vm.0;
+    if tables.conses.unused() + tables.closures.unused() + tables.cells.unused() + tables.objects.unused() != 0 {
+        return Err("world image: the tables are not dense (collect compacting first)".into());
+    }
     settle(&mut vm.0, &mut carry)?;
     let [serials, writes] = crate::char_table::image_counters();
     let counters = [crate::expand::next_generated(), serials, writes, 0];
     let root = image_root(vm, carry);
-    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key };
+    let fields = ImageFields { len: 0, root, counters, executable: arena::executable_base(), key, carry: carry_tag::<T>(),
+                               carry_name: carry_name::<T>() };
     let written = unsafe { arena::write_image(file, fields) }.map_err(|e| format!("world image: {e}"))?;
     // The VM stays allocated: the image owns it, and this process exits.
     whole_in_memory(file, written).map(|()| written)
@@ -229,16 +232,48 @@ fn ordinals(value: &dyn std::any::Any, notes: &mut romacs_snapshot::Notes) {
     }
 }
 
+/// The tag of type T in an image: one carried as T is restored only as T.
+/// An image serves the executable that made it, so T's `TypeId` there is
+/// T's here.
+fn carry_tag<T: ?Sized + 'static>() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::any::TypeId::of::<T>().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// T's name as an image keeps it: cut to `arena::CARRY_NAME` bytes.
+fn carry_name<T: ?Sized>() -> [u8; arena::CARRY_NAME] {
+    let mut name = [0; arena::CARRY_NAME];
+    let full = std::any::type_name::<T>().as_bytes();
+    let kept = full.len().min(name.len());
+    name[..kept].copy_from_slice(&full[..kept]);
+    name
+}
+
 /// The VM and carry of the image this process mapped, when it was made for
-/// KEY, with the process-global counters it depends on restored. Taken once.
+/// KEY and carried a T, with the process-global counters it depends on
+/// restored. Taken once.
 ///
-/// T must be the type `capture` carried: KEY binds the embedder that made it.
-pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option<(Vm, T)> {
+/// # Errors
+///
+/// Why not, for the world's record: no image mapped, one made for another
+/// key, one made for another carry (naming both), or one restored already.
+pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Result<(Vm, T), String> {
     use std::sync::atomic::AtomicBool;
     static TAKEN: AtomicBool = AtomicBool::new(false);
-    let fields = arena::mapped_image().filter(|fields| fields.key == *key)?;
+    let fields = arena::mapped_image().ok_or("no image mapped")?;
+    if fields.key != *key {
+        return Err("made for another key".into());
+    }
+    // The tag decides, and the name, as far as the image keeps it, must
+    // agree: two types would need both to coincide.
+    if fields.carry != carry_tag::<T>() || fields.carry_name != carry_name::<T>() {
+        let found = fields.carry_name.split(|&b| b == 0).next().unwrap_or_default();
+        return Err(format!("made for the carry {}; this process needs {}", String::from_utf8_lossy(found), std::any::type_name::<T>()));
+    }
     if TAKEN.swap(true, Ordering::AcqRel) {
-        return None;
+        return Err("restored already".into());
     }
     crate::expand::raise_generated(fields.counters[0]);
     crate::char_table::restore_counters([fields.counters[1], fields.counters[2]]);
@@ -252,7 +287,7 @@ pub fn restore<T: super::safe::SnapshotSafe + 'static>(key: &[u8; 32]) -> Option
     // With the other counters of the process: what the VM stores from now
     // on is stamped at or above the epoch its last collection ended at.
     crate::epoch::raise(root.0.allocation.since);
-    Some(*root)
+    Ok(*root)
 }
 
 #[cfg(test)]
@@ -314,6 +349,25 @@ mod tests {
             vm = vm.at_rest_for_image().expect("a VM at rest").0;
             assert!(vm.generations_settled());
         }
+    }
+
+    /// An image's entries are the indices below each table's length, so a
+    /// capture refuses a table with a free entry among them, before it
+    /// writes anything.
+    #[test]
+    fn a_capture_refuses_a_table_with_a_hole() {
+        let mut vm = Vm::new();
+        let [a, _, c] = [(); 3].map(|()| vm.alloc_cons(Value::NIL, Value::NIL));
+        let mut roots = [a, c];
+        vm.collect(&mut roots);
+        assert!(vm.conses.unused() > 0, "a hole between two live conses");
+        let path = std::env::temp_dir().join(format!("romacs-dense-{}", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let refused = super::capture(vm, (), &file, [0; 32]).unwrap_err();
+        let written = file.metadata().unwrap().len();
+        let _ = std::fs::remove_file(&path);
+        assert!(refused.contains("not dense"), "{refused}");
+        assert_eq!(written, 0, "nothing written");
     }
 
     /// A census meets the VM once and counts what it names by this build's

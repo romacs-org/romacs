@@ -178,15 +178,7 @@ fn substring_no_properties(cx, string: Value; optional from: Value, to: Value) {
 
 defsubr! { name = "string-equal", gnu = "fns.c:339", effect = Pure,
 fn string_equal(cx, first: Value, second: Value) {
-    let shape = |value| -> Result<(Vec<u8>, usize), Fault> {
-        if let Ok(name) = cx.symbol_name(value) {
-            let chars=name.chars().count(); Ok((name.into_bytes(),chars))
-        } else {
-            let view=cx.string_view(value)?; Ok((view.bytes,view.chars))
-        }
-    };
-    let a=shape(first)?; let b=shape(second)?;
-    Ok(if a == b { Value::TRUE } else { Value::NIL })
+    Ok(if cx.string_equal(first, second)? { Value::TRUE } else { Value::NIL })
 }}
 
 defsubr! { name = "string-lessp", gnu = "fns.c:559", effect = Pure,

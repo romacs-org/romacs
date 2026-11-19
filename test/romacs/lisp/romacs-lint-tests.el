@@ -217,11 +217,16 @@ file, or a line of nothing, is not."
             (should (string-match-p "pins a line of crates/a/src/lib.rs" (nth 2 (car pins))))))
       (delete-directory root t))))
 
+(defconst romacs-lint-tests--root
+  (locate-dominating-file (or load-file-name buffer-file-name) "Cargo.lock")
+  "The repository this file is in, found as it loads: its tests run after
+`load-file-name' is gone, in a directory of their own.")
+
 (ert-deftest romacs-lint-tests-the-loadup-bootstrap ()
   "The lint gives its findings on the file that boots the machine, which
 it loads into a machine already booted.  It runs in a machine of its own:
 loading that file leaves the one that loads it changed."
-  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+  (let* ((root romacs-lint-tests--root)
          (host (expand-file-name invocation-name invocation-directory))
          (file (expand-file-name "lisp/session/romacs-loadup-bootstrap.el" root))
          (status nil))
@@ -238,7 +243,7 @@ loading that file leaves the one that loads it changed."
 private home: a file that empties `load-path' leaves the next file's
 judgement alone, and a file that writes where it runs writes nothing into
 the tree."
-  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+  (let* ((root romacs-lint-tests--root)
          (host (expand-file-name invocation-name invocation-directory))
          (dir (file-name-as-directory (make-temp-file "romacs-lint-tests-alone-" t)))
          (poison (expand-file-name "a-poison.el" dir))

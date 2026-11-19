@@ -94,6 +94,7 @@ fn act_in_role() -> bool {
     let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
     match std::env::var(ROLE).as_deref() {
         Ok("launch") => launch(&store.unwrap()),
+        Ok("launch-other") => launch_world(&store.unwrap(), "consumer world-image-test, another world"),
         Ok("open-launch") => {
             // As a user whose umask lets everyone write: the builder this
             // spawns inherits it.
@@ -108,6 +109,7 @@ fn act_in_role() -> bool {
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         Ok("census") => census(&store.unwrap()),
+        Ok("other-carry") => other_carry(&store.unwrap()),
         Ok("guard") => guard(&store.unwrap()),
         #[cfg(target_arch = "x86_64")]
         Ok("stray") => stray(&store.unwrap()),
@@ -185,8 +187,13 @@ extern "C" fn count_fork() {
 /// as fork runs every library's atfork handlers while the launch's GPU
 /// thread may be unloading a driver (`World::start_builder`).
 fn launch(store: &Path) {
+    launch_world(store, "consumer world-image-test");
+}
+
+/// `launch`, of the world of RECIPE.
+fn launch_world(store: &Path, recipe: &str) {
     unsafe { libc::pthread_atfork(Some(count_fork), None, None) };
-    let world = match World::new(store.to_owned(), vec!["consumer world-image-test".into()]) {
+    let world = match World::new(store.to_owned(), vec![recipe.into()]) {
         Ok(world) => world,
         Err(error) => {
             println!("WORLD-IMAGE {}", json!({"mode": "source", "reason": error.to_string()}));
@@ -344,6 +351,9 @@ fn stray(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
     std::io::stdout().flush().unwrap();
     if guard == arena::Guard::Reserved {
+        // The fault is the test's: no core for it. Every run otherwise
+        // hands the system's core dumper this process whole.
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable).unwrap();
         // SAFETY: a load, in assembly, from a page this process reserved
         // inaccessible: it faults, which is what the parent expects. Rust
         // code never reads the address, and the instruction writes nothing.
@@ -475,6 +485,32 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // Adopted once per process: a second adoption is refused, says so, and
     // the first image stays the process's.
     assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0,false],"kept":true,"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// A worker's restore of the world in STORE (`World::restore_only`) as
+/// another carry than the u64 it was made with: what it said. An i64, so a
+/// restore that let it through reads a number, not an owner of nothing.
+fn other_carry(store: &Path) {
+    let refused = world(store).restore_only::<i64>().map(|(_, carry)| carry);
+    println!("WORLD-IMAGE {}", refused.unwrap_err());
+}
+
+const OTHER_CARRY: &str = "a_world_restored_as_another_carry_is_refused";
+
+/// A world restored as another carry than its builder's is refused, as one
+/// for another key is: read as another type, the carry is garbage its
+/// restorer would drop. A worker isolate restores its spawner's world as the
+/// carry it knows; it once read a batch world's `()` as the GUI's carry.
+#[test]
+fn a_world_restored_as_another_carry_is_refused() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(OTHER_CARRY);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for the carry u64; this process needs i64"}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -718,7 +754,8 @@ fn pages(scratch: &Path) {
     unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
     block[PAGE..2 * PAGE].fill(0xab);
     let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
-    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32] };
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0,
+                                      carry_name: [0; arena::CARRY_NAME] };
     let len = unsafe { arena::write_image(&out, fields) }.unwrap();
     let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
     assert_eq!(bytes.len(), len);
@@ -924,6 +961,34 @@ fn concurrent_first_launches_share_one_builder_and_say_they_wait() {
     let later = child_of(CONCURRENT, "launch", &store).output().unwrap();
     let text = String::from_utf8_lossy(&later.stdout);
     assert!(text.contains(&format!("WORLD-IMAGE {}", restored())) && !text.contains("WAITING-FOR-BUILD"), "{text}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const TWO_WORLDS: &str = "two_worlds_first_launched_at_once_in_a_fresh_store_both_restore";
+
+/// The first launches of two worlds in one fresh store, at once: each
+/// starts a builder, and each builder makes the store's shared directories
+/// (`World::pinned_dir`) or finds them made by the other. Both build and
+/// restore; neither boots from source because the other made a directory
+/// first, as one once did with "File exists". Rounds of fresh stores, as the
+/// collision is a matter of timing.
+#[test]
+fn two_worlds_first_launched_at_once_in_a_fresh_store_both_restore() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(TWO_WORLDS);
+    for round in 0..4 {
+        let store = scratch.join(format!("store-{round}"));
+        let spawn = |role| child_of(TWO_WORLDS, role, &store).stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let pair = [spawn("launch"), spawn("launch-other")];
+        for child in pair {
+            let output = child.wait_with_output().unwrap();
+            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+            assert!(text.contains(&format!("WORLD-IMAGE {}", restored())), "round {round}: {text}{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
