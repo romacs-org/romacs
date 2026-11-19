@@ -247,44 +247,23 @@ fn drawing_after_device_loss_does_not_unwind() {
     assert!(outcome.is_ok(), "device loss unwound");
 }
 
-/// A device without storage buffers (OpenGL 3.3) refuses a model with the
-/// words the display logs for it, before any GPU work, and stays usable.
-/// What limits cannot say (an adapter without `DownlevelFlags::VERTEX_STORAGE`)
-/// the GPU error scope still turns into an error.
-#[test]
-fn missing_storage_buffers_refuse_the_model_and_the_device_survives() {
-    let limits = wgpu::Limits {
-        max_storage_buffers_per_shader_stage: 0,
-        ..wgpu::Limits::default()
-    };
-    let device = open_device_with(limits);
-    assert!(
-        device.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
-        "GPU evidence required but no headless wgpu adapter"
-    );
-    let Some((device, queue)) = device else {
-        eprintln!("skipping: no headless wgpu adapter");
-        return;
-    };
-    assert!(device.limits().max_storage_buffer_binding_size > 0);
-    let mesh = parse_obj(
-        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
-        remaining_limits(&[]),
-    )
-    .unwrap();
-    let scene = ModelScene::new(vec![mesh]).unwrap();
+/// A one-triangle scene.
+fn triangle() -> ModelScene {
+    let mesh = parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", remaining_limits(&[])).unwrap();
+    ModelScene::new(vec![mesh]).unwrap()
+}
+
+/// `ModelGpu::new` on DEVICE as an Err, never Ok or an unwind; then the
+/// device still completes ordinary submitted work.
+fn refused_and_device_survives(device: &wgpu::Device, queue: &wgpu::Queue) -> String {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ModelGpu::new(&device, &queue, &scene, (16, 16)).map(|_| ())
+        ModelGpu::new(device, queue, &triangle(), (16, 16)).map(|_| ())
     }));
-    match outcome {
-        Ok(Err(error)) => assert_eq!(
-            Some(error),
-            unsupported(&device.limits()).map(|lacking| format!("off on this GPU: {lacking}"))
-        ),
-        Ok(Ok(())) => panic!("no vertex storage must be Err"),
-        Err(_) => panic!("no vertex storage unwound"),
-    }
-    // The device still completes ordinary submitted work afterwards.
+    let error = match outcome {
+        Ok(Err(error)) => error,
+        Ok(Ok(())) => panic!("the model must be refused"),
+        Err(_) => panic!("the refusal unwound"),
+    };
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("after"),
         size: 16,
@@ -293,19 +272,46 @@ fn missing_storage_buffers_refuse_the_model_and_the_device_survives() {
     });
     queue.write_buffer(&buffer, 0, &[7u8; 16]);
     queue.submit(None);
-    buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    buffer.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
     device
-        .poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: Some(std::time::Duration::from_secs(10)),
-        })
+        .poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(10)) })
         .unwrap();
-    assert_eq!(
-        &buffer.slice(..).get_mapped_range().unwrap()[..],
-        &[7u8; 16]
+    assert_eq!(&buffer.slice(..).get_mapped_range().unwrap()[..], &[7u8; 16]);
+    error
+}
+
+/// A device with an OpenGL 3.3 GPU's limits (no storage buffers) refuses a
+/// model with the words the display logs for it, before any GPU work.
+#[test]
+fn a_gl33_device_refuses_the_model_and_survives() {
+    let device = crate::gpu_policy::test_gpu::gl33_device();
+    assert!(
+        device.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
+        "GPU evidence required but no headless wgpu adapter"
     );
+    let Some((device, queue)) = device else {
+        eprintln!("skipping: no headless wgpu adapter");
+        return;
+    };
+    let lacking = unsupported(&device.limits(), wgpu::DownlevelFlags::all()).expect("no storage buffers");
+    assert_eq!(refused_and_device_survives(&device, &queue), format!("off on this GPU: {lacking}"));
+}
+
+/// What the limits preflight cannot see (here a device without the
+/// uniform buffer the camera needs; on hardware, an adapter without
+/// `DownlevelFlags::VERTEX_STORAGE`) the GPU error scope turns into an error.
+#[test]
+fn a_rejection_past_the_preflight_is_a_scoped_error_and_the_device_survives() {
+    let Some((device, queue)) = open_device_with(wgpu::Limits {
+        max_uniform_buffers_per_shader_stage: 0,
+        ..wgpu::Limits::default()
+    }) else {
+        eprintln!("skipping: no headless wgpu adapter");
+        return;
+    };
+    assert_eq!(unsupported(&device.limits(), wgpu::DownlevelFlags::all()), None);
+    let error = refused_and_device_survives(&device, &queue);
+    assert!(error.starts_with("model GPU resources rejected"), "rejected by the scope: {error}");
 }
 
 #[test]

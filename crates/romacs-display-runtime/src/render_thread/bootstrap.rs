@@ -76,7 +76,10 @@ impl RenderApp {
             adapter_info.driver,
             adapter_info.driver_info
         );
-        let off = romacs_renderer_wgpu::gpu_policy::disabled_features(&device.limits());
+        let off = romacs_renderer_wgpu::gpu_policy::disabled_features(
+            &device.limits(),
+            adapter.get_downlevel_capabilities().flags,
+        );
         if !off.is_empty() {
             eprintln!("romacs: gpu below WebGPU's default limits; off: {}", off.join("; "));
         }

@@ -29,13 +29,18 @@ const PICK_STAGING_BYTES: u64 = 256;
 /// (`model.wgsl`'s group 0).
 const STORAGE_BUFFERS: u32 = 4;
 
-/// Why a device with LIMITS cannot draw models, None when it can: models
-/// pull their vertices from storage buffers, which OpenGL 3.3 lacks.
-pub(crate) fn unsupported(limits: &wgpu::Limits) -> Option<String> {
+/// Why a device with LIMITS on an adapter with DOWNLEVEL cannot draw
+/// models, None when it can: models pull their vertices from storage
+/// buffers in the vertex shader, which OpenGL 3.3 lacks.
+pub(crate) fn unsupported(limits: &wgpu::Limits, downlevel: wgpu::DownlevelFlags) -> Option<String> {
     let has = limits.max_storage_buffers_per_shader_stage;
-    (has < STORAGE_BUFFERS).then(|| {
-        format!("3D models (need {STORAGE_BUFFERS} storage buffers per shader stage, the GPU has {has})")
-    })
+    if has < STORAGE_BUFFERS {
+        Some(format!("3D models (need {STORAGE_BUFFERS} storage buffers per shader stage, the GPU has {has})"))
+    } else if !downlevel.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) {
+        Some("3D models (need storage buffers in the vertex shader, the GPU has none)".to_owned())
+    } else {
+        None
+    }
 }
 
 /// canvas-3d colours (`render.py`).
@@ -445,7 +450,9 @@ impl ModelGpu {
         scene: &ModelScene,
         size_px: (u32, u32),
     ) -> Result<Self, String> {
-        if let Some(lacking) = unsupported(&device.limits()) {
+        // A device does not say its adapter's downlevel flags: the limits
+        // refuse here, and the error scope below catches a missing flag.
+        if let Some(lacking) = unsupported(&device.limits(), wgpu::DownlevelFlags::VERTEX_STORAGE) {
             return Err(format!("off on this GPU: {lacking}"));
         }
         let mut positions: Vec<[f32; 4]> = Vec::new();
