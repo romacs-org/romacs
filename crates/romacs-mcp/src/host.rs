@@ -33,7 +33,14 @@
 //! record, written, and the stdin closed, with no server needed; FILE is
 //! then removed. That record is always `{"prompt":TEXT,"images":JSON}`, made
 //! here with TEXT a string: a prompt is never read as JSON, so its words cannot
-//! pose as attachments. `--input-images JSON` gives what the user attached.
+//! pose as attachments. `--input-images JSON` gives what the user attached,
+//! and `--input-tag JSON` the request it answers, kept as `"romacsRequest"`
+//! beside them: what finds the prompt in the records again.
+//!
+//! Once a line written to the harness has reached its stdin, whole, the host
+//! journals `{"seq":M,"t":SECS,"written":SEQ}`, SEQ being that line's `"in"`
+//! record: a reader knows the harness was given it, even after a restart.
+//! A line whose write failed has none (doc/agent-protocol.org).
 #![forbid(unsafe_code)]
 
 use serde_json::{Value as Json, json};
@@ -44,7 +51,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--note JSON] [--store FILE] (-- PROGRAM [ARG...] | --notes-only)";
+const USAGE: &str = "usage: romacs-agent-host --dir DIR --socket SOCKET [--input FILE] [--input-images JSON] [--input-tag JSON] [--note JSON] [--store FILE] (-- PROGRAM [ARG...] | --notes-only)";
 
 struct Config {
     dir: PathBuf,
@@ -52,6 +59,7 @@ struct Config {
     input: Option<PathBuf>,
     note: Option<Json>,
     input_images: Option<Json>,
+    input_tag: Option<Json>,
     /// The SQLite database the session's records go to, instead of its
     /// journal (`--store FILE`): a session Romacs has imported.
     store: Option<PathBuf>,
@@ -64,7 +72,7 @@ struct Config {
 
 fn parse(args: Vec<String>) -> Result<Config, String> {
     let mut args = args.into_iter();
-    let (mut dir, mut socket, mut input, mut note, mut input_images, mut store) = (None, None, None, None, None, None);
+    let (mut dir, mut socket, mut input, mut note, mut input_images, mut input_tag, mut store) = (None, None, None, None, None, None, None);
     let mut notes_only = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -72,6 +80,7 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
             "--socket" => socket = args.next().map(PathBuf::from),
             "--input" => input = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
             "--input-images" => input_images = Some(args.next().and_then(|text| serde_json::from_str(&text).ok()).ok_or(USAGE)?),
+            "--input-tag" => input_tag = Some(args.next().and_then(|text| serde_json::from_str(&text).ok()).ok_or(USAGE)?),
             "--note" => note = Some(args.next().and_then(|text| serde_json::from_str::<Json>(&text).ok()).ok_or(USAGE)?),
             "--store" => store = Some(args.next().map(PathBuf::from).ok_or(USAGE)?),
             "--notes-only" => notes_only = true,
@@ -82,7 +91,7 @@ fn parse(args: Vec<String>) -> Result<Config, String> {
     let argv: Vec<String> = args.collect();
     match (dir, socket) {
         (Some(dir), Some(socket)) if (argv.is_empty() == notes_only) && socket.is_absolute() =>
-            Ok(Config { dir, socket, input, note, input_images, store, notes_only, argv }),
+            Ok(Config { dir, socket, input, note, input_images, input_tag, store, notes_only, argv }),
         _ => Err(USAGE.into()),
     }
 }
@@ -427,9 +436,21 @@ fn lines_of(request: &Json) -> Option<(String, String)> {
     Some((write, journal))
 }
 
-/// The record of a per-turn prompt TEXT, with the IMAGES attached to it.
-fn input_record(seq: u64, text: &str, images: Option<&Json>) -> String {
-    json!({"seq": seq, "t": now(), "in": {"prompt": text, "images": images.cloned().unwrap_or_else(|| json!([]))}}).to_string()
+/// The record of a per-turn prompt TEXT, with the IMAGES attached to it
+/// and the request TAG it answers, when given.
+fn input_record(seq: u64, text: &str, images: Option<&Json>, tag: Option<&Json>) -> String {
+    let mut input = json!({"prompt": text, "images": images.cloned().unwrap_or_else(|| json!([]))});
+    if let Some(tag) = tag { input["romacsRequest"] = tag.clone(); }
+    json!({"seq": seq, "t": now(), "in": input}).to_string()
+}
+
+impl Shared {
+    /// Journal that the line of `"in"` record SEQ reached the harness.
+    fn written(&mut self, seq: u64) {
+        self.seq += 1;
+        let entry = json!({"seq": self.seq, "t": now(), "written": seq}).to_string();
+        self.append(&entry, false);
+    }
 }
 
 /// Serve one connection: its attach line, then the lines it writes.
@@ -454,16 +475,20 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream, harness: bool) {
         // a full stdin never holds the journal (the output, the exit).
         let stdin = shared.lock().unwrap_or_else(|e| e.into_inner()).stdin.clone();
         let mut stdin = stdin.lock().unwrap_or_else(|e| e.into_inner());
-        {
+        let seq = {
             let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
             // A server whose attachment was stolen writes nothing more.
             if shared.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return; }
             shared.seq += 1;
             let entry = record(shared.seq, "in", &journaled);
             shared.append(&entry, false);
-        }
+            shared.seq
+        };
         let written = stdin.as_mut().map(|stdin| writeln!(stdin, "{text}").and_then(|()| stdin.flush()));
-        if !matches!(written, Some(Ok(()))) {
+        // Still holding the stdin: the next line's records come after these.
+        if matches!(written, Some(Ok(()))) {
+            shared.lock().unwrap_or_else(|e| e.into_inner()).written(seq);
+        } else {
             eprintln!("romacs-agent-host: harness stdin closed");
         }
     }
@@ -546,18 +571,30 @@ fn run(config: Config) -> Result<i32, String> {
         let entry = json!({"seq": shared.seq, "t": now(), "note": note}).to_string();
         shared.append(&entry, true);
     }
-    if let Some(file) = &config.input {
-        let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
-        shared.seq += 1;
-        let entry = input_record(shared.seq, &text, config.input_images.as_ref());
-        shared.append(&entry, true);
-        // Its own thread: a harness slow to read never holds up the host.
-        let mut writer = stdin.take();
-        std::thread::spawn(move || { if let Some(w) = writer.as_mut() { let _ = w.write_all(text.as_bytes()); } });
-        let _ = std::fs::remove_file(file);
-    }
+    let input = match &config.input {
+        Some(file) => {
+            let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            shared.seq += 1;
+            let entry = input_record(shared.seq, &text, config.input_images.as_ref(), config.input_tag.as_ref());
+            shared.append(&entry, true);
+            let _ = std::fs::remove_file(file);
+            Some((shared.seq, text, stdin.take()))
+        }
+        None => None,
+    };
     shared.stdin = Arc::new(Mutex::new(stdin));
     let shared = Arc::new(Mutex::new(shared));
+    if let Some((seq, text, mut writer)) = input {
+        // Its own thread: a harness slow to read never holds up the host.
+        // Closed when written, as such a harness reads to its end.
+        let writing = shared.clone();
+        std::thread::spawn(move || {
+            if writer.as_mut().is_some_and(|w| w.write_all(text.as_bytes()).and_then(|()| w.flush()).is_ok()) {
+                drop(writer);
+                writing.lock().unwrap_or_else(|e| e.into_inner()).written(seq);
+            }
+        });
+    }
     let accepting = shared.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
@@ -1087,18 +1124,56 @@ mod tests {
 
     #[test]
     fn a_turn_s_images_are_journaled_beside_its_text() {
-        let with: Json = serde_json::from_str(&input_record(3, "see", Some(&json!(["/a.png"])))).unwrap();
+        let with: Json = serde_json::from_str(&input_record(3, "see", Some(&json!(["/a.png"])), None)).unwrap();
         assert_eq!(with["in"], json!({"prompt": "see", "images": ["/a.png"]}));
-        let without: Json = serde_json::from_str(&input_record(3, "see", None)).unwrap();
+        let without: Json = serde_json::from_str(&input_record(3, "see", None, None)).unwrap();
         assert_eq!(without["in"], json!({"prompt": "see", "images": []}));
+        // The request it answers, kept beside them: what finds it again.
+        let tagged: Json = serde_json::from_str(&input_record(3, "see", None, Some(&json!("c-7")))).unwrap();
+        assert_eq!(tagged["in"], json!({"prompt": "see", "images": [], "romacsRequest": "c-7"}));
     }
 
     #[test]
     fn a_prompt_shaped_like_a_record_stays_its_words() {
         let text = r#"{"text":"quoted","images":["/a.png"]}"#;
-        let kept: Json = serde_json::from_str(&input_record(3, text, None)).unwrap();
+        let kept: Json = serde_json::from_str(&input_record(3, text, None, None)).unwrap();
         assert_eq!(kept["in"]["prompt"], json!(text));
         assert_eq!(kept["in"]["images"], json!([]));
+    }
+
+    #[test]
+    fn a_line_that_reached_the_harness_is_journaled_written() {
+        // Written whole: its `in` record, then `written` naming it.  Its
+        // write failed (no stdin): its `in` record alone.
+        for (harness, expect_written) in [(true, true), (false, false)] {
+            let dir = std::env::temp_dir().join(format!("romacs-agent-host-written-{}-{harness}", std::process::id()));
+            create_private(&dir).unwrap();
+            let path = dir.join("journal.jsonl");
+            std::fs::write(&path, "").unwrap();
+            let journal = OpenOptions::new().append(true).open(&path).unwrap();
+            let mut child = harness.then(|| Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap());
+            let stdin = child.as_mut().and_then(|child| child.stdin.take());
+            let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None,
+                                                      next_attachment: 0, stdin: Arc::new(Mutex::new(stdin)) }));
+            let (server, mut ours) = UnixStream::pair().unwrap();
+            let serving = std::thread::spawn(move || serve(shared, server, true));
+            writeln!(ours, r#"{{"attach":{{"from":1,"steal":false}}}}"#).unwrap();
+            let mut lines = BufReader::new(ours.try_clone().unwrap()).lines();
+            assert_eq!(serde_json::from_str::<Json>(&lines.next().unwrap().unwrap()).unwrap()["attached"], 1);
+            writeln!(ours, r#"{{"write":"{{\"type\":\"user\"}}"}}"#).unwrap();
+            let input: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+            assert_eq!((input["seq"].as_u64(), &input["in"]), (Some(1), &json!({"type": "user"})));
+            if expect_written {
+                let written: Json = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+                assert_eq!((written["seq"].as_u64(), written["written"].as_u64()), (Some(2), Some(1)));
+            }
+            ours.shutdown(std::net::Shutdown::Both).unwrap();
+            serving.join().unwrap();
+            assert_eq!(last_seq(&path), if expect_written { 2 } else { 1 });
+            if let Some(mut child) = child { let _ = child.kill(); let _ = child.wait(); }
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_dir(&dir);
+        }
     }
 
     #[test]
