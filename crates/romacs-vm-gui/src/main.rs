@@ -1018,8 +1018,8 @@ fn run() -> Result<Option<exit::Exit>, String> {
         // the window's end lets the main thread look for it.  A failed
         // startup's screen waits for its window and holds after it, so a
         // display that ends meanwhile still ends the session with it.
-        let _ = result_tx.send(Ended { held: failed, end });
-        let screen = error.and_then(|error| failed_screen(&host, &mut early_window, &error));
+        let screen = send_end_then(&result_tx, Ended { held: failed, end },
+                                   || error.and_then(|error| failed_screen(&host, &mut early_window, &error)));
         if let Some(screen) = screen { hold_failed_startup(screen, &sender, &host); }
         // A screen still up stops before the window goes: its painter holds it.
         drop(host);
@@ -1050,6 +1050,29 @@ struct Ended {
     /// holds (`hold_failed_startup`): its thread, which has no VM left to
     /// drop and may wait on the user, is not joined.
     held: bool,
+}
+
+/// Send END to the main thread, then WAIT (a failed startup's screen
+/// waiting for its window): the end is there whatever ends the display
+/// during the wait.
+fn send_end_then<T>(result_tx: &std::sync::mpsc::Sender<Ended>, end: Ended, wait: impl FnOnce() -> T) -> T {
+    let _ = result_tx.send(end);
+    wait()
+}
+
+#[cfg(test)]
+mod send_end_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_startup_s_end_is_sent_before_its_screen_waits() {
+        let (sent, ends) = std::sync::mpsc::channel();
+        let end = Ended { held: true, end: exit::Exit::new("evaluator-error", "x", 1) };
+        let found = send_end_then(&sent, end, || ends.try_recv().ok());
+        let found = found.expect("the end was there when the wait began");
+        assert!(found.held);
+        assert_eq!(found.end, exit::Exit::new("evaluator-error", "x", 1));
+    }
 }
 
 /// How often a failed startup's screen looks for a termination signal,
