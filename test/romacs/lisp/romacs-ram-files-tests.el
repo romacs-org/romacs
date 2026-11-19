@@ -14,17 +14,20 @@
 ;; Fixtures are made under a directory whose true name is outside
 ;; /dev/shm, which is always a memory-only directory: a fixture inside it
 ;; would be kept off the disk whatever $XDG_RUNTIME_DIR says.
-(defun romacs-ram-files-tests--outside-shm-p (directory)
-  "Whether DIRECTORY's true name is outside /dev/shm."
-  (not (string-prefix-p (file-name-as-directory (file-truename "/dev/shm"))
-                        (file-name-as-directory (file-truename directory)))))
+(defun romacs-ram-files-tests--fixture-root-p (directory)
+  "Whether DIRECTORY can hold fixtures: an existing, writable directory
+whose true name is outside /dev/shm."
+  (and (file-directory-p directory)
+       (file-writable-p directory)
+       (not (string-prefix-p (file-name-as-directory (file-truename "/dev/shm"))
+                             (file-name-as-directory (file-truename directory))))))
 
 (defmacro romacs-ram-files-tests--isolated (&rest body)
   "Run BODY with fixtures made outside /dev/shm and its own copy of
 `process-environment', so `setenv' changes nothing outside it."
   `(let ((temporary-file-directory
-          (seq-find #'romacs-ram-files-tests--outside-shm-p
-                    (list temporary-file-directory "/var/tmp/" (expand-file-name "~/"))))
+          (seq-find #'romacs-ram-files-tests--fixture-root-p
+                    (list temporary-file-directory "/tmp/" "/var/tmp/" (expand-file-name "~/"))))
          (process-environment (copy-sequence process-environment)))
      (should temporary-file-directory)
      ,@body))
