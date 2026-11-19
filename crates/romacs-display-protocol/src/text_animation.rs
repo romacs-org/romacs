@@ -22,10 +22,10 @@ pub struct TextAnimation {
     /// for a kind the host places on the row its layout lays that byte on
     /// (`Self::placed`); None for one placed by TOP as counted.
     pub anchor: Option<usize>,
-    /// Its laid row's top in the frame, in pixels, once the host placed it:
-    /// rows of other heights or blank ones before it make its row in the
-    /// glyph grid no count of laid rows.
-    pub rise: Option<f32>,
+    /// Its laid row's top and height in the frame, in pixels, once the
+    /// host placed it: rows of other heights or blank ones before it make
+    /// its row in the glyph grid no count of laid rows.
+    pub rise: Option<(f32, f32)>,
     pub fps: u32,
     /// Whether it moves; else it shows the frame it reached.
     pub moving: bool,
@@ -87,15 +87,16 @@ impl TextAnimationKind {
 
 impl TextAnimation {
     /// This animation placed on the window's laid-out rows, ROWS their
-    /// starts (bytes of its published text, in order) and tops (pixels
-    /// below ORIGIN_Y, the text area's top in the frame), END the byte after
+    /// starts (bytes of its published text, in order), tops (pixels below
+    /// ORIGIN_Y, the text area's top in the frame) and heights, END the byte after
     /// its last shown character: its TOP and RISE the row ANCHOR is on.  None when the rows do not show it; itself when
     /// it has no anchor.
-    pub fn placed(&self, rows: &[(usize, f32)], end: usize, origin_y: f32) -> Option<Self> {
+    pub fn placed(&self, rows: &[(usize, f32, f32)], end: usize, origin_y: f32) -> Option<Self> {
         let Some(anchor) = self.anchor else { return Some(self.clone()) };
         if anchor >= end && Some(anchor) != rows.last().map(|r| r.0) { return None; }
-        let row = rows.iter().rposition(|&(start, _)| start <= anchor)?;
-        Some(Self { top: i32::try_from(row).ok()?, rise: Some(origin_y + rows[row].1), ..self.clone() })
+        let row = rows.iter().rposition(|&(start, ..)| start <= anchor)?;
+        let (_, y, height) = rows[row];
+        Some(Self { top: i32::try_from(row).ok()?, rise: Some((origin_y + y, height)), ..self.clone() })
     }
 
     /// Whether NEXT continues this one's motion rather than restarting it.
@@ -272,8 +273,9 @@ fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlo
 /// ANIMATION's window's first text row and column in FRAME, where its
 /// block is placed from.
 /// ANIMATION as FRAME shows it: a working thread only on its own row,
-/// the glyph row at the height the host placed it at
-/// (`TextAnimation::placed`'s RISE), whose cells must all hold braille,
+/// a glyph row within the laid row the host placed it on
+/// (`TextAnimation::placed`'s RISE: a taller glyph on its line moves its
+/// text down within that row), whose cells must all hold braille,
 /// the thread's still frame, so it never paints over text not its own;
 /// none while motion is off, the evaluator's still frame showing alone.
 /// Any other kind as it is.
@@ -290,15 +292,17 @@ pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<Te
             if slot_id.window_id.get() as u64 == animation.window => Some((*slot_id, *char, *y)),
         _ => None,
     };
-    let want = animation.rise?;
-    // The glyph row at that height, the thread's cells all braille there.
-    let row = frame.glyphs.iter().filter_map(text).find(|&(_, _, y)| (y - want).abs() < 0.5).map(|(slot, ..)| slot.row)?;
-    let braille = |col: u32| frame.glyphs.iter().filter_map(text).any(|(slot, char, _)| {
+    let (top, height) = animation.rise?;
+    // The glyph rows within that laid row; the thread's is the one whose
+    // cells are all braille.
+    let mut rows: Vec<u32> = frame.glyphs.iter().filter_map(text)
+        .filter(|&(_, _, y)| y > top - 0.5 && y < top + height.max(1.0)).map(|(slot, ..)| slot.row).collect();
+    rows.sort_unstable();
+    rows.dedup();
+    let braille = |row: u32, col: u32| frame.glyphs.iter().filter_map(text).any(|(slot, char, _)| {
         slot.row == row && u32::from(slot.col - first_col) == col && ('\u{2800}'..='\u{28ff}').contains(&char)
     });
-    if !(0..animation.cols).all(braille) {
-        return None;
-    }
+    let row = rows.into_iter().find(|&row| (0..animation.cols).all(|col| braille(row, col)))?;
     let top = i32::try_from(i64::from(row) - i64::from(first_row)).ok()?;
     Some(TextAnimation { top, ..animation.clone() })
 }

@@ -103,20 +103,24 @@ fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
         }
     }
     // The layout's rows, the text area's top at 100 px in the frame.
-    let laid = [(0, 0.0), (1, 16.0), (16, 48.0), (33, 64.0), (51, 80.0)];
+    let laid = [(0, 0.0, 16.0), (1, 16.0, 32.0), (16, 48.0, 16.0), (33, 64.0, 16.0), (51, 80.0, 16.0)];
     let mut animation = thread(Work::Running, 0);
     animation.anchor = Some(51);
     let placed = animation.placed(&laid, 90, 100.0).expect("on a laid row");
-    assert_eq!((placed.top, placed.rise), (4, Some(180.0)));
+    assert_eq!((placed.top, placed.rise), (4, Some((180.0, 16.0))));
     // Found by its height: grid row 5 (4 from the first with glyphs),
     // past the blank and double-height rows.
     assert_eq!(located(&frame, &placed).map(|a| a.top), Some(4));
     // Scrolled past: no laid row shows it.
     animation.anchor = Some(3);
-    assert_eq!(animation.placed(&[(10, 0.0), (20, 16.0)], 40, 100.0), None);
+    assert_eq!(animation.placed(&[(10, 0.0, 16.0), (20, 16.0, 16.0)], 40, 100.0), None);
     // A row that is not its braille is never painted over.
-    let wrong = TextAnimation { rise: Some(148.0), ..placed.clone() };
+    let wrong = TextAnimation { rise: Some((148.0, 16.0)), ..placed.clone() };
     assert_eq!(located(&frame, &wrong), None);
+    // A taller glyph on the thread's own line moves its text down within
+    // the laid row: still found.
+    let tall = TextAnimation { rise: Some((176.0, 24.0)), ..placed.clone() };
+    assert_eq!(located(&frame, &tall).map(|a| a.top), Some(4));
     // Motion off: the still frame shows alone.
     let still = TextAnimation { still: true, ..placed };
     assert_eq!(located(&frame, &still), None);

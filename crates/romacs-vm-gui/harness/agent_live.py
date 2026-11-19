@@ -3039,9 +3039,13 @@ def ui_review(args, base):
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
         a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
         themed('waiting')
+        # Answered only as the question it is; anything else is denied, so
+        # the capture never approves a plan or a tool.
         a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
-               '(question (car (car (romacs-agent--claude-questions (gethash "input" (gethash id (romacs-agent-approvals s)))))))) '
-               '(romacs-agent-respond s id (list :answers (list (cons question "Blue"))) nil (quote user)) t)')
+               '(request (gethash id (romacs-agent-approvals s)))) '
+               '(if (equal (gethash "tool_name" request) "AskUserQuestion") '
+               '(romacs-agent-respond s id (list :answers (list (cons (car (car (romacs-agent--claude-questions (gethash "input" request)))) "Blue"))) nil (quote user)) '
+               '(romacs-agent-respond s id nil "a review capture answers only its question" (quote user))) t)')
         a.idle(sid, 300)
         themed('idle')
         return {'ok': True, 'shots': shots}

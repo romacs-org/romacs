@@ -8,10 +8,10 @@
 ;; evaluator is busy, and tells "alive, working" from "frozen".  It says
 ;; how a piece of work goes:
 ;;
-;;   idle     slack and still
+;;   idle     slack and still: a sparse, sagging line
 ;;   running  a wave travels along it; a bead rides it, one step for
 ;;            each piece of progress the work reports
-;;   waiting  taut, pulsing: the work waits on its user
+;;   waiting  taut and solid, pulsing: the work waits on its user
 ;;   failed   cut, still
 ;;
 ;; Any module shows one over COLS characters of its own text (a long
@@ -30,11 +30,13 @@
 ;; motion over them.  Each state's colour is a
 ;; face's.  At rest (idle, failed) the display draws nothing for it.
 ;;
-;; Running is a colour of the theme's own that cannot read as an error:
-;; its accent, else its blue or cyan, else what links are drawn in, the
-;; first far enough from what `error' and `warning' are drawn in
-;; (`romacs-working--derive', on every theme change).  So whatever the
-;; theme's syntax faces are, running never looks failed.
+;; Running and waiting are colours of the theme's own that cannot read as
+;; an error: running its accent, else its blue or cyan, else what links
+;; are drawn in; waiting its warning colour, else its yellow or orange;
+;; each the first far from what `error' is drawn in and from the
+;; background (`romacs-working--derive', on every theme change).  So
+;; whatever the theme's syntax faces are, neither looks failed, and each
+;; shows on a light theme as on a dark one.
 
 ;;; Code:
 
@@ -45,7 +47,9 @@
 (defface romacs-working-running '((t :inherit link :underline nil))
   "Work that runs: the working thread, and every view's running mark.
 Its colour is derived from the theme (`romacs-working--derive').")
-(defface romacs-working-waiting '((t :inherit warning)) "The working thread, waiting on its user.")
+(defface romacs-working-waiting '((t :inherit warning))
+  "Work that waits on its user: the working thread, and every view's
+mark of it.  Its colour is derived from the theme (`romacs-working--derive').")
 (defface romacs-working-failed '((t :inherit error)) "The working thread, failed.")
 
 (defconst romacs-working-fps 30 "Frames a second of a moving thread.")
@@ -62,31 +66,43 @@ frame resolves its name; nil when it cannot."
 
 (defun romacs-working--far-p (colour others)
   "Whether COLOUR is far from each of OTHERS, colours: their RGB distance
-over a third of the widest."
+over a quarter of the widest (a red and an amber are far)."
   (when-let* ((rgb (romacs-working--rgb colour)))
     (cl-every (lambda (other)
                 (let ((o (and other (romacs-working--rgb other))))
-                  (or (null o) (> (sqrt (apply #'+ (cl-mapcar (lambda (a b) (expt (- a b) 2)) rgb o))) 0.35))))
+                  (or (null o) (> (sqrt (apply #'+ (cl-mapcar (lambda (a b) (expt (- a b) 2)) rgb o))) 0.25))))
               others)))
 
-(defun romacs-working--running-colour ()
-  "The theme's colour for running work: the first of its accent, blue,
-cyan and link colours far from its error and warning colours, else its
-foreground."
-  (let ((avoid (list (face-foreground 'error nil t) (face-foreground 'warning nil t)))
-        (palette (lambda (slot) (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))))
-    (or (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid)))
-                    (list (funcall palette 'accent) (funcall palette 'blue) (funcall palette 'cyan)
-                          (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))
+(defun romacs-working--colour (candidates)
+  "The first of CANDIDATES, colours, far from what `error' is drawn in and
+from the background; else the theme's foreground."
+  (let ((avoid (list (face-foreground 'error nil t) (face-background 'default nil t))))
+    (or (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid))) candidates)
         (face-foreground 'default nil t))))
 
+(defun romacs-working--palette (slot)
+  (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))
+
+(defun romacs-working--running-colour ()
+  "The theme's colour for running work: its accent, blue, cyan or link
+colour, the first far from its error colour and its background."
+  (romacs-working--colour
+   (list (romacs-working--palette 'accent) (romacs-working--palette 'blue) (romacs-working--palette 'cyan)
+         (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t))))
+
+(defun romacs-working--waiting-colour ()
+  "The theme's colour for work waiting on its user: its warning, yellow or
+orange colour, the first far from its error colour and its background."
+  (romacs-working--colour
+   (list (face-foreground 'warning nil t) (romacs-working--palette 'yellow) (romacs-working--palette 'orange)
+         (romacs-working--palette 'bright-yellow))))
+
 (defun romacs-working--derive (&rest _)
-  "Make `romacs-working-running' the theme's running colour, as its
-default spec: a theme's or the user's own spec still wins."
-  (let ((colour (romacs-working--running-colour)))
-    (face-spec-set 'romacs-working-running
-                   (if colour `((t :foreground ,colour)) '((t :inherit default)))
-                   'face-defface-spec)))
+  "Make the running and waiting faces the theme's colours for them, as
+their default specs: a theme's or the user's own spec still wins."
+  (pcase-dolist (`(,face . ,colour) `((romacs-working-running . ,(romacs-working--running-colour))
+                                     (romacs-working-waiting . ,(romacs-working--waiting-colour))))
+    (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit default))) 'face-defface-spec)))
 
 (add-hook 'enable-theme-functions #'romacs-working--derive)
 (add-hook 'disable-theme-functions #'romacs-working--derive)
@@ -104,14 +120,21 @@ default spec: a theme's or the user's own spec still wins."
   (memq work '(running waiting)))
 
 (defun romacs-working-still (cols work)
-  "COLS characters of the thread for WORK at rest, in its face."
-  (let ((line (if (eq work 'waiting) ?⠒ ?⠤)))
-    (propertize (if (and (eq work 'failed) (>= cols 3))
-                    (let* ((gap (max 1 (/ cols 6))) (left (- (/ cols 2) gap)))
-                      (concat (make-string left line) (make-string gap ?⠀)
-                              (make-string (- cols left gap) line)))
-                  (make-string cols line))
-                'face (romacs-working--face work))))
+  "COLS characters of the thread for WORK at rest, in its face: idle a
+sparse line sagging in its middle, waiting a taut solid one, failed cut
+in two, running a line the display sets moving."
+  (propertize (pcase work
+                ('idle (apply #'string (mapcar (lambda (i)
+                                                 (let ((middle (and (> i 0) (< i (1- cols)))))
+                                                   (if (cl-evenp i) (if middle ?⠠ ?⠄) ?⠀)))
+                                               (number-sequence 0 (1- cols)))))
+                ('waiting (make-string cols ?⠶))
+                ('failed (if (< cols 3) (make-string cols ?⠤)
+                           (let* ((gap (max 1 (/ cols 6))) (left (- (/ cols 2) gap)))
+                             (concat (make-string left ?⠤) (make-string gap ?⠀)
+                                     (make-string (- cols left gap) ?⠤)))))
+                (_ (make-string cols ?⠤)))
+              'face (romacs-working--face work)))
 
 (defun romacs-working--paint (thread)
   "Write THREAD's still frame over its cells, in place: every braille

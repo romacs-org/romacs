@@ -99,7 +99,7 @@ syntax face's, which a theme may draw as red as an error.")
   "A tool's output, and its input's lines.")
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
-(defface romacs-agent-log-ask '((t :inherit warning :extend t :inverse-video nil :weight bold))
+(defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
   "An approval or a question that waits on the user.")
 (defface romacs-agent-log-allowed '((t :inherit success))
   "An answer that allowed.")
@@ -559,7 +559,11 @@ Live, in a chat no window shows, the echo area says so too."
                                                 'romacs-agent-log-deny "deny"))))
          (text (concat (propertize (concat "⚠ " head) 'face 'romacs-agent-log-ask)
                        (if why (concat "\n  " (propertize why 'face 'romacs-agent-log-note)) "")
-                       (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body) 'face 'romacs-agent-log-output)) "")
+                       ;; Its question and choices in the text's own face: the
+                       ;; decision reads first, after the heading.
+                       (if body (concat "\n" (propertize (replace-regexp-in-string "^" "  " body)
+                                                          'face (if questions 'default 'romacs-agent-log-output)))
+                         "")
                        "\n  " keys "\n")))
     (let ((start (copy-marker romacs-agent-log--end)))
       (romacs-agent-log--put (propertize (romacs-agent-log--entry text 'ask event)
@@ -716,9 +720,13 @@ unless a note said who gave it, that it was answered."
 (defun romacs-agent-log--doing (session)
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
   (pcase (if (romacs-agent-log--pending) 'waiting-approval (romacs-agent-state session))
-    ('waiting-approval (cons 'waiting (substitute-command-keys
-                                        (concat "waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] allow · "
-                                                "\\[romacs-agent-log-deny] deny · \\[romacs-agent-log-next-ask] goes to it"))))
+    ('waiting-approval
+     (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
+                       (get-text-property (cadr ask) 'romacs-agent-log-questions))))
+       (cons 'waiting (substitute-command-keys
+                       (concat "⚠ waits on you: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] "
+                               (if question "choose" "allow") " · \\[romacs-agent-log-deny] "
+                               (if question "decline" "deny") " · \\[romacs-agent-log-next-ask] goes to it")))))
     ((or 'starting 'running)
      (cons 'working (if-let* ((block (romacs-agent-log--block romacs-agent-log--current)))
                         (format "running %s" (plist-get (cdr block) :name))
@@ -727,7 +735,7 @@ unless a note said who gave it, that it was answered."
     ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
     (state (cons 'idle (format "%s" state)))))
 
-(defconst romacs-agent-log--thread-cols 12
+(defconst romacs-agent-log--thread-cols 8
   "Characters of the working thread that starts the separator.")
 
 (defun romacs-agent-log--work (doing)
@@ -740,7 +748,10 @@ session does, then the composer's prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-working-running)
                 ('failed 'romacs-agent-log-denied) (_ 'romacs-agent-log-rule))))
     (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
-            " " (propertize (cdr doing) 'face face)
+            " " (propertize (cdr doing) 'face face) " "
+            ;; A dim rule after it fences the composer off the transcript.
+            (propertize (make-string (max 4 (- 56 romacs-agent-log--thread-cols (string-width (cdr doing)))) ?─)
+                        'face 'romacs-agent-log-rule)
             "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
 
 (defun romacs-agent-log--separator (&optional force)

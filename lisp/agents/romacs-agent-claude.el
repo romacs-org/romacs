@@ -454,6 +454,9 @@ cache, it reports none) or does not say."
                        :resets (romacs-agent--value (gethash "resetsAt" info))
                        :window (romacs-agent--value (gethash "rateLimitType" info))
                        :windows (romacs-agent--claude-windows info))))))
+      ;; A running tool's heartbeat (its seconds so far): its task notices
+      ;; say what it does.
+      ("tool_progress" nil)
       (_ (list (list :type 'unknown :raw line))))))
 
 (defun romacs-agent--claude-limit-status (status)

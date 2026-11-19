@@ -23,7 +23,7 @@ pub enum Work {
 const DOTS: [[u8; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
 /// Dots of the wave's length, and waves a second.
 const WAVE: f64 = 12.0;
-const SPEED: f64 = 1.2;
+const SPEED: f64 = 0.45;
 /// Cells the bead steps for each beat.
 const STEP: usize = 1;
 
@@ -50,7 +50,11 @@ pub fn thread(cols: usize, work: Work, beats: u64, colour: u32, moved: f64) -> V
             let dot = (cell * 2 + x) as f64;
             let y = centre + amplitude * (tau * (dot / WAVE - SPEED * moved)).sin();
             bits |= column[(y.round() as usize).min(3)];
+            // Taut: a solid line two dots thick, as its still frame.
+            if work == Work::Waiting { bits |= column[2]; }
         }
+        // The bead: a full cell, so it reads in any frame.
+        if work == Work::Running && cell == bead { bits = 0xff; }
         let shade = match work {
             Work::Running if cell == bead => 1.6,
             Work::Running => 1.0,
@@ -85,6 +89,7 @@ mod tests {
     #[test]
     fn waiting_pulses_in_place() {
         let (a, b) = (thread(8, Work::Waiting, 0, 0xd48a20, 0.0), thread(8, Work::Waiting, 0, 0xd48a20, 0.25));
+        assert!(a.iter().all(|c| c.0 == '⠶'), "taut and solid, as its still frame");
         assert_eq!(a.iter().map(|c| c.0).collect::<Vec<_>>(), b.iter().map(|c| c.0).collect::<Vec<_>>());
         assert_ne!(a[0].1, b[0].1);
     }
@@ -94,6 +99,7 @@ mod tests {
         let bright = |cells: Vec<Cell>| cells.iter().position(|c| c.1 == Some(scale(0x808080, 1.6)));
         let at = bright(thread(12, Work::Running, 3, 0x808080, 0.0));
         assert_eq!(at, Some(3));
+        assert_eq!(thread(12, Work::Running, 3, 0x808080, 0.0)[3].0, '⣿', "the bead is a full cell");
         assert_eq!(bright(thread(12, Work::Running, 3, 0x808080, 2.5)), at, "the bead waits for progress");
         assert_eq!(bright(thread(12, Work::Running, 4, 0x808080, 0.0)), Some(4));
         assert_eq!(bright(thread(2, Work::Running, 1, 0x808080, 0.0)), Some(1), "a narrow thread's bead moves too");
