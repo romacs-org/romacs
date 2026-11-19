@@ -331,8 +331,8 @@ and `wait' waiting until its form holds (5 s at most)."
     (should (equal (gethash "/output" (gethash "truncated" event)) 100000))))
 
 (ert-deftest romacs-agent-client-reopens-on-another-epoch ()
-  ;; A live event of another epoch than the open's: the session is opened
-  ;; again, never applied.
+  ;; A live event of another epoch than the open's (read again at the
+  ;; session's load): the session is opened again, the event not applied.
   (romacs-agent-service-tests--with
     (let ((busy (mk "busy" 'running)))
       (romacs-agent-service-start socket)
@@ -344,6 +344,8 @@ and `wait' waiting until its form holds (5 s at most)."
         (advice-add 'romacs-agent-events-epoch :override (lambda (_) 9) '((name . rsv-epoch)))
         (unwind-protect
             (progn
+              ;; Read again as the session loads (a flip moves it then).
+              (romacs-agent-service--loaded busy nil)
               (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 1 :message "m" :text "x" :last t))
               (should (wait (= opened 2)))
               (should-not (cl-find 'event (car log) :key #'cadr)))
@@ -368,32 +370,28 @@ and `wait' waiting until its form holds (5 s at most)."
 
 (ert-deftest romacs-agent-service-tells-a-gap-it-never-sent ()
   ;; A session loaded past a subscription's cutoff with no events (a
-  ;; worker's fold), and a unit whose cursor could not be read: each told
-  ;; as a gap, its bounds the records never sent live.
+  ;; worker's fold): told at once as a gap, its bounds the records never
+  ;; sent live, its epoch read again; then live units follow it.
   (romacs-agent-service-tests--with
     (let ((busy (mk "busy" 'running :seq 9)))
       (romacs-agent-service-start socket)
       (advice-add 'romacs-agent-service--last-seq :override (lambda (_) 7) '((name . rsv-kept)))
-      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client))
+             (events (lambda () (mapcar (lambda (entry) (nth 2 entry))
+                                        (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log))))))
         (unwind-protect
             (progn
               (should (wait (romacs-agent-client-revision client)))
               (romacs-agent-client-open client "busy")
               (should (wait (car log)))
               (romacs-agent-service--loaded busy nil)
-              (should (wait (cl-find 'event (car log) :key #'cadr)))
-              (let ((gap (gethash "gap" (nth 2 (cl-find 'event (car log) :key #'cadr)))))
-                (should (equal (list (gethash "after" gap) (gethash "upto" gap)) '(7 9))))
-              (advice-add 'romacs-agent-service--cursor :override (lambda (&rest _) (error "Busy store"))
-                          '((name . rsv-busy)))
+              (should (wait (funcall events)))
+              (let ((gap (gethash "gap" (car (funcall events)))))
+                (should (equal (list (gethash "after" gap) (gethash "upto" gap)) '(7 9)))
+                (should (equal (gethash "events" (car (funcall events))) [])))
               (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 10 :message "m" :text "x" :last t))
-              (advice-remove 'romacs-agent-service--cursor 'rsv-busy)
-              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 11 :message "m" :text "y" :last t))
-              (should (wait (= (cl-count 'event (car log) :key #'cadr) 2)))
-              (let ((last (nth 2 (car (last (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log)))))))
-                (should (equal (gethash "seq" (gethash "cursor" last)) 11))
-                (should (equal (list (gethash "after" (gethash "gap" last)) (gethash "upto" (gethash "gap" last))) '(9 10)))))
-          (advice-remove 'romacs-agent-service--cursor 'rsv-busy)
+              (should (wait (= (length (funcall events)) 2)))
+              (should-not (gethash "gap" (cadr (funcall events)))))
           (advice-remove 'romacs-agent-service--last-seq 'rsv-kept))))))
 
 (ert-deftest romacs-agent-service-refuses-an-unknown-session ()

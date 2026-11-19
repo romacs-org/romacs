@@ -238,8 +238,9 @@ started by older builds keep working.
     or not encodable, is sent as ={"events": [], "oversize": true}=, its
     cursor kept.  A pending request, a queue entry and a catalog entry
     are cut alike, their key fields never; one still over is sent as
-    its key fields and ="oversize": true= (a request keeps its handle,
-    kind and choices: it is answered still).  A row's strings
+    its key fields and ="oversize": true=: a request keeps its handle,
+    kind, choices, and each question's id, =select=, =free_text= and
+    option ids with labels cut to 64 bytes, so it is answered still.  A row's strings
     are cut to 1,024 characters.  Nothing is fetched whole: a chat needs
     no more of an output, and the files an agent writes are on its host;
   - an editor tool's result is bounded where it is made: each editor tool
@@ -411,9 +412,11 @@ paging ever holds live delivery back.
 - *Notifications follow at once*, in revision order from V+1, whatever
   the client does next:
   - =agents/event {session, revision, cursor, events, gap?}=: the events
-    of one record unit.  =gap= ={after, upto}= names records the editor
-    folded with no events (a worker's fold, a load): the client pulls
-    them as history before it applies these;
+    of one record unit.  A load that folded records with no events (a
+    worker's fold, a journal read with no supervisor) is sent at once as
+    an event with no events and =gap {after, upto}=: the records with
+    =after < seq ≤ upto=, which the client pulls as history.  A unit's
+    cursor carries the epoch read at the open or the session's last load;
   - =agents/pending.added {session, revision, request}=;
   - =agents/pending.answering {session, revision, handle}=;
   - =agents/pending.taken {session, revision, handle}=;

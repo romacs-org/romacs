@@ -30,7 +30,8 @@ those removed, after its list changed.")
 (defvar romacs-agent-client-session-functions nil
   "Functions called with a client, a session's id, and what came of it:
 \=(opened REPLY), (event PARAMS) or (changed PARAMS), each in the order
-its revisions give.")
+its revisions give, or (failed ERROR) when an open, the first or one to
+recover, is refused: nothing more comes of it until it is opened again.")
 
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
@@ -233,7 +234,8 @@ reach `romacs-agent-client-session-functions'."
      (lambda (result error)
        (when (eq (gethash id (romacs-agent-client-sessions client)) asked)
          (if error
-             (remhash id (romacs-agent-client-sessions client))
+             (progn (remhash id (romacs-agent-client-sessions client))
+                    (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'failed error)))
            (let ((cursor (gethash "cursor" result)))
              (puthash id (vector (gethash "revision" result) (gethash "epoch" cursor) (gethash "adapter" cursor))
                       (romacs-agent-client-sessions client)))
