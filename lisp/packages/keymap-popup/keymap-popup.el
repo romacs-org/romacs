@@ -1445,12 +1445,16 @@ override also shadows any exit below that prefix."
                                                                        (and next (concat (funcall key next) " next"))
                                                                        (and previous (concat (funcall key previous) " previous"))))
                                                        "  ")))))
+         ;; Narrower forms: the exit's words go, then the directions'.
+         (medium (delq nil (list (and exit (funcall key exit)) count
+                                 (and next (concat (funcall key next) " next"))
+                                 (and previous (concat (funcall key previous) " previous")))))
          (short (delq nil (list (and exit (funcall key exit)) count
                                 (and next (funcall key next)) (and previous (funcall key previous)))))
          (line (lambda (parts) (and parts (concat (if exit "" "  ") (string-join parts "     "))))))
-    (if (or (null columns) (<= (string-width (or (funcall line full) "")) columns))
-        (funcall line full)
-      (romacs-grid-cut (string-join short " ") columns))))
+    (cond ((or (null columns) (<= (string-width (or (funcall line full) "")) columns)) (funcall line full))
+          ((<= (string-width (string-join medium " ")) columns) (string-join medium " "))
+          (t (romacs-grid-cut (string-join short " ") columns)))))
 
 (defun keymap-popup--write-rendered (buf rendered-rows)
   "Write BUF's title, the shown page of RENDERED-ROWS laid out in its
@@ -1482,12 +1486,12 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
                  0))
          (footer (keymap-popup--footer buf page (length pages) columns)))
     (keymap-popup--set-session buf :page-menu menu :page page :pages (length pages)
-                               ;; The widest footer any page has: a middle page
-                               ;; names both directions, the last the widest count.
+                               ;; The widest footer any page has, so turning a
+                               ;; page never resizes the card.
                                :size (cons (apply #'max (romacs-grid-width pages)
                                                   (if title (string-width title) 0)
                                                   (mapcar (lambda (p) (string-width (or (keymap-popup--footer buf p (length pages) columns) "")))
-                                                          (delete-dups (list 0 (min 1 (1- (length pages))) (1- (length pages))))))
+                                                          (number-sequence 0 (1- (length pages)))))
                                            (+ (apply #'max (mapcar #'length pages))
                                               (if title 2 0) (if footer 2 0))))
     (with-current-buffer buf

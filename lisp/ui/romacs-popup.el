@@ -62,8 +62,8 @@ keys' labels in plain weight; dim is for what cannot be used.")
   "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') moved
 in lightness until it reads on the menu's glass at
 `romacs-popup-key-contrast': a theme whose accent is a mid grey on a
-light card (a monochrome one) still has keys that lead.  Run after a
-theme is enabled or disabled, once its faces are in place."
+light card (a monochrome one) still has keys that lead.  Run from
+`romacs-chrome-faces-functions', once the glow and glass are set."
   (let* ((accent (face-foreground 'romacs-layer-glow nil t))
          (glass (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))
          (legible (and (fboundp 'romacs-color-floor-on) (stringp accent) (stringp glass)
@@ -74,9 +74,8 @@ theme is enabled or disabled, once its faces are in place."
     (unless (equal spec (get 'romacs-popup-key 'face-defface-spec))
       (face-spec-set 'romacs-popup-key spec 'face-defface-spec))))
 
-;; After the chrome's own derived faces (depth 0), which set the glow.
-(add-hook 'enable-theme-functions #'romacs-popup--key-spec 90)
-(add-hook 'disable-theme-functions #'romacs-popup--key-spec 90)
+;; Whenever the chrome has derived the glow and the glass.
+(add-hook 'romacs-chrome-faces-functions #'romacs-popup--key-spec)
 
 (defconst romacs-popup-look
   '((panel :radius 8 :padding 10 :motion slide :edge bottom)

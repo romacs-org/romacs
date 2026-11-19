@@ -228,9 +228,12 @@ text size, in pixels."
       ('float
        ;; Centred on the frame, floating `romacs-layer-float-gap' above
        ;; where a bottom layer ends: a key menu's card.
-       (let ((width (min width (- frame-width (* 2 romacs-layer-margin)))))
+       ;; Never taller than the room between the top chrome and the gap.
+       (let* ((width (min width (- frame-width (* 2 romacs-layer-margin))))
+              (bottom (- (romacs-layer--bottom root) (romacs-layer-float-gap root)))
+              (height (max ch (min height (- bottom (romacs-chrome-top root) (* 2 border))))))
          (list (+ inset (/ (- (frame-text-width root) width (* 2 border)) 2))
-               (max (romacs-chrome-top root) (- (romacs-layer--bottom root) (romacs-layer-float-gap root) outer-height))
+               (max (romacs-chrome-top root) (- bottom height (* 2 border)))
                width height)))
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))
