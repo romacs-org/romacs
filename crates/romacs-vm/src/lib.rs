@@ -1588,8 +1588,8 @@ pub struct Vm {
     resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
-    /// The slot of `obarray`, the variable, once something asked for the
-    /// initial obarray (`Vm::initial_obarray`); `usize::MAX` before.
+    /// The slot of `obarray`, the variable, kept from its making
+    /// (`Vm::slot`); `usize::MAX` until then (`Vm::initial_obarray`).
     obarray_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
@@ -2179,6 +2179,9 @@ impl Vm {
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
         if name == "obarray" {
+            // The variable's own slot, as GNU's `Vobarray' is its symbol's:
+            // an uninterned `obarray' keeps meaning the default table.
+            self.obarray_slot = i;
             self.slots[i].value = self.allocate_object(data::Object::Obarray(Box::new(obarray::Obarray::new(3, true))));
             self.specials.insert(name.to_owned());
         }

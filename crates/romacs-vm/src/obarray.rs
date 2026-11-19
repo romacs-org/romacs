@@ -124,10 +124,10 @@ impl Vm {
         let slot = self.obarray_slot();
         self.slots[slot].value
     }
-    /// The slot of `obarray`, the variable, found by name once and kept
-    /// (`Vm::obarray_slot`): its first finding interns it, where the slot
-    /// constructor installs the initial obarray, so a VM makes the obarray
-    /// only when something asks for it. Kept, it survives `obarray-clear`.
+    /// The slot of `obarray`, the variable: kept since the symbol was made
+    /// (`Vm::slot`, which installs the initial obarray), else made now, so
+    /// a VM makes the obarray only when something asks for it. Kept, it
+    /// survives `obarray-clear` and an `unintern` of `obarray` itself.
     fn obarray_slot(&mut self) -> usize {
         if self.obarray_slot == usize::MAX { self.obarray_slot = self.slot("obarray"); }
         self.obarray_slot
@@ -204,7 +204,8 @@ impl Vm {
         if Self::image_value(table) { return Err(self.read_only_fault(table)); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         if initial {
-            // Found before the names go, so the variable keeps its obarray.
+            // Found before the names go (a code image's names were not made
+            // through `Vm::slot`), so the variable keeps its obarray.
             self.obarray_slot();
             let slots: Vec<usize> = self.names.drain().map(|(_, slot)| slot).collect();
             for slot in slots { self.set_initial_obarray(slot, false); }
@@ -214,11 +215,12 @@ impl Vm {
         Ok(())
     }
     /// How many symbols TABLE, an obarray, holds, as `obarray_next` walks
-    /// them: the initial obarray's are `nil`, `t` and the VM's other names
-    /// (a walk of the name table).
+    /// them: the initial obarray's are `nil`, `t` and the VM's other names,
+    /// counted without a walk (a backing slot named "nil" or "t" is not
+    /// walked).
     pub(super) fn obarray_count(&self, table: &Obarray) -> usize {
         if !table.initial { return table.len(); }
-        2 + self.names.iter().filter(|(name, _)| !matches!(name.as_str(), "nil" | "t")).count()
+        2 + self.names.len() - ["nil", "t"].iter().filter(|name| self.names.contains_key(**name)).count()
     }
     pub(super) fn obarray_next(&self, table: Value, bucket_index: usize, current: Value) -> Option<(usize, Value)> {
         let Object::Obarray(t) = self.object_if(table)? else { return None };
