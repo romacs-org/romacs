@@ -389,6 +389,7 @@ impl Vm {
                 crate::gc_mark::trim_after_graves(self.gc_stress.threads);
             }
             let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            if let Some(ns) = elapsed { crate::host::note_collection_time(ns); }
             self.count_collection(elapsed.unwrap_or(0));
             self.note_collection(elapsed, until_key, minor, late);
         }
