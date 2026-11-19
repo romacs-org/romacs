@@ -690,6 +690,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let working = self.intern("working");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -719,6 +720,19 @@ impl Vm {
                         word: self.display_face("romacs-landing-word")?.foreground,
                     };
                     TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
+                }
+                // (working WORK EPOCH FACE): lisp/ui/romacs-working.el's thread,
+                // in FACE's foreground.
+                [head, work, epoch, face] if head == working => {
+                    use romacs_logo::working::Work;
+                    let work = match self.symbol_name_of(work).as_deref() {
+                        Some("running") => Work::Running,
+                        Some("waiting") => Work::Waiting,
+                        Some("failed") => Work::Failed,
+                        _ => Work::Idle,
+                    };
+                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                    TextAnimationKind::Working { work, epoch: natural(epoch)?, colour: self.display_face(&face)?.foreground }
                 }
                 _ => return Err("bad text animation kind".into()),
             };

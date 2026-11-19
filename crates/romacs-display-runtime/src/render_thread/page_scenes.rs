@@ -156,7 +156,8 @@ impl PageScene {
     pub(crate) fn prepare(&mut self, frame: &FrameGlyphBuffer, animation: &TextAnimation, moved: f64,
                           renderer: &mut WgpuRenderer) {
         self.pending = None;
-        let TextAnimationKind::Logo { epoch, colours, .. } = animation.kind;
+        // Only the logo has a scene: any other kind is drawn as its cells.
+        let TextAnimationKind::Logo { epoch, colours, .. } = animation.kind else { self.shown = None; return };
         let Some(block) = block(frame, animation) else { self.shown = None; return };
         // Laid out in the cells as drawn, which may be taller than the
         // frame's character height Lisp sized the braille by.

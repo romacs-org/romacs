@@ -1,0 +1,103 @@
+//! The working thread: one row of braille cells, a thread whose motion
+//! says how a piece of work goes, drawn frame after frame by the render
+//! thread while the evaluator may be busy (lisp/ui/romacs-working.el).
+//!
+//! Idle, the thread lies slack and still; running, a wave travels along
+//! it with a bright bead riding it; waiting on its user, it is taut and
+//! pulses; failed, it is cut.  A frame is a pure function of the work's
+//! state, the thread's colour and the seconds of motion.
+use crate::Cell;
+
+/// How the work goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Work {
+    Idle,
+    Running,
+    Waiting,
+    Failed,
+}
+
+/// Dots of a braille cell (2 wide, 4 high), drawille's layout: bit of
+/// the dot at column X and row Y.
+const DOTS: [[u8; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+/// Dots of the wave's length, and waves a second.
+const WAVE: f64 = 12.0;
+const SPEED: f64 = 1.2;
+/// Cells a second the bead runs.
+const BEAD: f64 = 6.0;
+
+/// COLS cells of the thread for WORK in COLOUR (RGB) after MOVED seconds.
+pub fn thread(cols: usize, work: Work, colour: u32, moved: f64) -> Vec<Cell> {
+    let tau = std::f64::consts::TAU;
+    let (amplitude, centre) = match work {
+        Work::Running => (1.4, 1.5),
+        Work::Idle | Work::Failed => (0.0, 2.0),
+        Work::Waiting => (0.0, 1.0),
+    };
+    let bead = (moved * BEAD).rem_euclid(cols.max(1) as f64) as usize;
+    let pulse = 0.55 + 0.45 * (0.5 + 0.5 * (tau * moved).sin());
+    (0..cols).map(|cell| {
+        // Failed: cut in its middle.
+        if work == Work::Failed && (cols / 2 - cols.min(4) / 4..=cols / 2).contains(&cell) {
+            return (' ', None);
+        }
+        let mut bits = 0u8;
+        for (x, column) in DOTS.iter().enumerate() {
+            let dot = (cell * 2 + x) as f64;
+            let y = centre + amplitude * (tau * (dot / WAVE - SPEED * moved)).sin();
+            bits |= column[(y.round() as usize).min(3)];
+        }
+        let shade = match work {
+            Work::Running if cell == bead => 1.6,
+            Work::Running => 1.0,
+            Work::Waiting => pulse,
+            Work::Idle => 0.6,
+            Work::Failed => 1.0,
+        };
+        (char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '), Some(scale(colour, shade)))
+    }).collect()
+}
+
+/// COLOUR's channels times SHADE, toward white past 1.
+fn scale(colour: u32, shade: f64) -> u32 {
+    let channel = |shift: u32| {
+        let c = f64::from((colour >> shift) & 0xff);
+        let v = if shade <= 1.0 { c * shade } else { c + (255.0 - c) * (shade - 1.0) };
+        (v.round().clamp(0.0, 255.0) as u32) << shift
+    };
+    channel(16) | channel(8) | channel(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_moves_and_idle_does_not() {
+        assert_ne!(thread(12, Work::Running, 0xd48a20, 0.0), thread(12, Work::Running, 0xd48a20, 0.3));
+        assert_eq!(thread(12, Work::Idle, 0xd48a20, 0.0), thread(12, Work::Idle, 0xd48a20, 5.0));
+    }
+
+    #[test]
+    fn waiting_pulses_in_place() {
+        let (a, b) = (thread(8, Work::Waiting, 0xd48a20, 0.0), thread(8, Work::Waiting, 0xd48a20, 0.25));
+        assert_eq!(a.iter().map(|c| c.0).collect::<Vec<_>>(), b.iter().map(|c| c.0).collect::<Vec<_>>());
+        assert_ne!(a[0].1, b[0].1);
+    }
+
+    #[test]
+    fn failed_is_cut() {
+        let cells = thread(12, Work::Failed, 0xff0000, 0.0);
+        assert!(cells.iter().any(|c| c.0 == ' '));
+        assert!(cells.iter().any(|c| c.0 != ' '));
+    }
+
+    #[test]
+    fn every_cell_is_a_braille_dot_pattern() {
+        for work in [Work::Idle, Work::Running, Work::Waiting, Work::Failed] {
+            for cell in thread(10, work, 0x808080, 1.7) {
+                assert!(cell.0 == ' ' || ('\u{2800}'..='\u{28ff}').contains(&cell.0));
+            }
+        }
+    }
+}

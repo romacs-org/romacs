@@ -12,6 +12,8 @@
 //! host draws it while a first start prepares its world.
 use std::sync::{Arc, Mutex, OnceLock};
 
+pub mod working;
+
 /// One cell: its character and, unless it is empty, its colour as RGB.
 pub type Cell = (char, Option<u32>);
 

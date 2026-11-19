@@ -42,6 +42,7 @@
 (require 'romacs-agent-store)
 
 (require 'keymap-popup)
+(require 'romacs-working)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
@@ -723,13 +724,19 @@ unless a note said who gave it, that it was answered."
                       "working")))
     (state (cons 'idle (format "%s" state)))))
 
+(defconst romacs-agent-log--thread-cols 12
+  "Characters of the working thread that starts the separator.")
+
+(defun romacs-agent-log--work (doing)
+  "The working thread's work for DOING (`romacs-working')."
+  (pcase (car doing) ('waiting 'waiting) ('working 'running) (_ 'idle)))
+
 (defun romacs-agent-log--separator-text (doing)
-  "The separator for DOING, (STATE . WORDS): what the session does, then
-the composer's prompt."
+  "The separator for DOING, (STATE . WORDS): the working thread, what the
+session does, then the composer's prompt."
   (let ((face (pcase (car doing) ('waiting 'romacs-agent-log-ask) ('working 'romacs-agent-log-tool) (_ 'romacs-agent-log-rule))))
-    (concat (propertize (concat (pcase (car doing) ('waiting "⚠") ('working "◉") (_ "○")) " " (cdr doing) " ")
-                        'face face)
-            (propertize (make-string 40 ?─) 'face 'romacs-agent-log-rule)
+    (concat (romacs-working-still romacs-agent-log--thread-cols (romacs-agent-log--work doing))
+            " " (propertize (cdr doing) 'face face)
             "\n" (propertize "❯ " 'face 'romacs-agent-log-prompt))))
 
 (defun romacs-agent-log--separator (&optional force)
@@ -751,7 +758,9 @@ the composer's prompt."
                                 'field 'romacs-agent-log-separator))
             (delete-region (point) (+ (point) old))
             (set-marker romacs-agent-log--input (point))
-            (set-marker romacs-agent-log--end start)))))))
+            (set-marker romacs-agent-log--end start))))
+      ;; The thread moves as the session does, drawn by the display.
+      (romacs-working-set (current-buffer) (romacs-agent-log--work doing)))))
 
 (defvar-local romacs-agent-log--title nil "The title the chat's name was made from.")
 (defvar-local romacs-agent-log--header-made nil
@@ -941,6 +950,9 @@ records now, or with LATER when a window first shows it."
               romacs-agent-log--input (point-min-marker))
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
+        (romacs-working-show buffer buffer romacs-agent-log--end romacs-agent-log--thread-cols
+                             (romacs-agent-log--work romacs-agent-log--state))
+        (add-hook 'kill-buffer-hook (lambda () (romacs-working-stop (current-buffer))) nil t)
         (puthash (romacs-agent-id session) buffer romacs-agent-log--chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))

@@ -83,6 +83,11 @@ HARNESS_RULES = (
     # The agent client end to end (sessions, selections and restarts, relays, tools).
     (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
+    # The working thread: drawn by the render thread while the main VM is busy.
+    (re.compile(r'^(?:lisp/ui/romacs-(?:working|animate)\.el|crates/romacs-logo/src/working\.rs'
+                r'|crates/romacs-display-protocol/src/text_animation\.rs'
+                r'|crates/romacs-display-runtime/src/render_thread/text_animations(?:\.rs|/)'
+                r'|crates/romacs-vm-gui/harness/working_live\.py)'), 'working'),
 )
 EDITOR = 'romacs-vm-gui'
 HARNESS_DIR = 'crates/romacs-vm-gui/harness/'

@@ -55,3 +55,28 @@ fn an_animated_frame_promises_no_layout_identity() {
     animations.paint(&mut frame);
     assert_eq!(frame.layout_identity, 0, "a retained root must not stand in for it");
 }
+
+fn thread(work: romacs_logo::working::Work, epoch: u64) -> TextAnimation {
+    TextAnimation { window: 1, top: 0, cols: 12, rows: 1, fps: 30, moving: true, still: false,
+                    kind: TextAnimationKind::Working { work, epoch, colour: [0xd4, 0x8a, 0x20] } }
+}
+
+#[test]
+fn a_working_thread_moves_by_itself_and_keeps_its_motion_across_states() {
+    use romacs_logo::working::Work;
+    let mut animations = TextAnimations::default();
+    let start = Instant::now();
+    animations.replace(vec![(1, thread(Work::Running, 0))]);
+    animations.tick(start);
+    let first = animations.running[&1].animation.cells(0.0);
+    animations.tick(start + Duration::from_millis(40));
+    let moved = animations.running[&1].moved;
+    assert_ne!(animations.running[&1].animation.cells(moved), first, "the render thread alone moves it");
+    // Its work changes: its motion goes on; a new epoch starts it over.
+    animations.replace(vec![(1, thread(Work::Waiting, 0))]);
+    assert!((animations.running[&1].moved - moved).abs() < 1e-9);
+    animations.replace(vec![(1, thread(Work::Waiting, 1))]);
+    assert_eq!(animations.running[&1].moved, 0.0);
+    // A thread is never a logo's scene.
+    assert!(!animations.running[&1].drawn_as_scene());
+}

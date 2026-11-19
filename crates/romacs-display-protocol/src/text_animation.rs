@@ -38,6 +38,14 @@ pub enum TextAnimationKind {
         epoch: u64,
         colours: LogoColours,
     },
+    /// A thread in one row whose motion says how a piece of work goes
+    /// (romacs_logo::working), in COLOUR.  A new EPOCH starts it over; a
+    /// new WORK goes on from where it was.
+    Working {
+        work: romacs_logo::working::Work,
+        epoch: u64,
+        colour: [u8; 3],
+    },
 }
 
 /// The colours the logo takes from the theme: the mark's light (the
@@ -67,7 +75,12 @@ impl TextAnimation {
             (
                 TextAnimationKind::Logo { epoch: a, .. },
                 TextAnimationKind::Logo { epoch: b, .. },
+            )
+            | (
+                TextAnimationKind::Working { epoch: a, .. },
+                TextAnimationKind::Working { epoch: b, .. },
             ) => a == b,
+            _ => false,
         }
     }
 
@@ -86,6 +99,10 @@ impl TextAnimation {
                 } else {
                     vec![]
                 }
+            }
+            TextAnimationKind::Working { work, colour: [r, g, b], .. } => {
+                let colour = (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+                romacs_logo::working::thread(self.cols as usize, work, colour, moved)
             }
         }
     }
