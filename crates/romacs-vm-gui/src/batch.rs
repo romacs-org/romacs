@@ -246,6 +246,8 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
+        // The tree's compile checks what it finds on the same `load-path'.
+        println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
         let (artifact, held) = vm.compile_lisp_file(&file)?;
         if held { println!("romacs-compile-held"); }
         println!("romacs-compiled: {}", artifact.display());
