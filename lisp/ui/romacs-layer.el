@@ -188,6 +188,21 @@ minibuffer line, or the layer hosting the minibuffer window
 \(`romacs-chrome-bottom')."
   (romacs-chrome-bottom root))
 
+(defconst romacs-layer-margin 12
+  "Pixels a floating layer keeps from the frame's edges and chrome.")
+
+(defun romacs-layer--clamp (left top width height border)
+  "LEFT TOP WIDTH HEIGHT, a layer's outer position and text size with
+BORDER pixels round it, moved and cut to lie inside the root frame's
+native rect: a layer never leaves the frame."
+  (let* ((root (romacs-layer--root-frame))
+         (frame-width (frame-native-width root)) (frame-height (frame-native-height root))
+         (width (max 1 (min width (- frame-width (* 2 border)))))
+         (height (max 1 (min height (- frame-height (* 2 border))))))
+    (list (max 0 (min left (- frame-width width (* 2 border))))
+          (max 0 (min top (- frame-height height (* 2 border))))
+          width height)))
+
 (defun romacs-layer--placement (position columns lines border)
   "Where POSITION puts a layer of COLUMNS by LINES with BORDER pixels:
 \(LEFT TOP WIDTH HEIGHT), its outer position in the root frame and its
@@ -205,6 +220,13 @@ text size, in pixels."
       ('bottom
        (let ((top (- (romacs-layer--bottom root) outer-height)))
          (list inset (max inset top) frame-width height)))
+      ('float
+       ;; Centred on the frame, floating a margin above where a bottom
+       ;; layer ends: a key menu's card.
+       (let ((width (min width (- frame-width (* 2 romacs-layer-margin)))))
+         (list (+ inset (/ (- (frame-text-width root) width (* 2 border)) 2))
+               (max (romacs-chrome-top root) (- (romacs-layer--bottom root) romacs-layer-margin outer-height))
+               width height)))
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))
          (list (+ inset (/ (- frame-width width) 2)) (+ inset (/ (- (frame-text-height root) outer-height) 2)) width height)))
@@ -250,7 +272,8 @@ bottom.  As (LEFT TOP WIDTH HEIGHT), or nil when POS is not shown."
 
 (cl-defun romacs-layer-show (buffer &key position columns lines max-lines)
   "Show BUFFER in a layer over the frame and return the layer's frame.
-POSITION is `bottom', `center', `point' or (at WINDOW POS),
+POSITION is `bottom', `float' (centred, a margin above the bottom),
+`center', `point' or (at WINDOW POS),
 `romacs-layer-position' by default; nil, showing nothing, when POS is
 not shown in WINDOW.  COLUMNS and LINES size it, by default to BUFFER's
 text, at most MAX-LINES lines, by default `romacs-layer-max-lines'; a
@@ -263,12 +286,13 @@ text, at most MAX-LINES lines, by default `romacs-layer-max-lines'; a
                                     (or columns (car text))
                                     (min (or lines (cdr text)) (or max-lines romacs-layer-max-lines))
                                     border)
-      (`(,left ,top ,width ,height)
-       (set-frame-size frame width height t)
-       (set-frame-position frame left top)
+      ((and `(,_ ,_ ,_ ,_) placed)
+       (pcase-let ((`(,left ,top ,width ,height) (apply #'romacs-layer--clamp (append placed (list border)))))
+         (set-frame-size frame width height t)
+         (set-frame-position frame left top))
        ;; The edge it slides in from and grows away from.
        (set-frame-parameter frame 'romacs-layer-edge
-                            (if (eq (or position romacs-layer-position) 'bottom) 'bottom 'top))
+                            (if (memq (or position romacs-layer-position) '(bottom float)) 'bottom 'top))
        ;; A layer shown anew starts at its text's top; one re-placed while
        ;; shown keeps its viewport (a scrolled popup refitting).
        (unless (frame-visible-p frame)

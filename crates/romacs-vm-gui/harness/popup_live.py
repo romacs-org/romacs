@@ -165,7 +165,9 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
               :chrome-bottom (romacs-chrome-bottom (frame-parent frame))
               :inset (frame-internal-border-width (frame-parent frame))
               :parent-text-width (frame-text-width (frame-parent frame))
-              :kind (frame-parameter frame 'romacs-popup-kind)))
+              :kind (frame-parameter frame 'romacs-popup-kind)
+              :margin romacs-layer-margin
+              :description (keymap-popup--active-get buffer :resolved-docstring)))
        nil {state} nil (quote quiet)))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--fit-layer :after
@@ -817,13 +819,24 @@ def multiset(runs):
     return sorted((text, tuple(faces or ())) for text, faces in runs)
 
 
+def romacs_menu(gnu):
+    """GNU's runs as Romacs's menu deliberately draws them
+    (ledger/divergences/VM2-MENU-LAYERS.md): the title is the menu's
+    description in `keymap-popup-title', without the exit key the footer
+    already shows, and a submenu's label ends in ` ›' instead of a syntax
+    face's colour."""
+    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']]
+    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in gnu['body']]
+    return {'title': title, 'body': body}
+
+
 def check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs):
     """keymap_popup_fixture.el's menu in Romacs's panel shows every key,
     heading, entry, exit row and title in the faces pinned GNU X11 shows
     them in (keymap_popup_faces.gnu): the same runs, as multisets (the
     panel's width may lay columns out differently), the title its first
     row; and each run is painted in its face's colour."""
-    gnu = json.loads(lisp_string([l for l in (HERE / 'keymap_popup_faces.gnu').read_text().splitlines() if l and not l.startswith(';')][-1]))
+    gnu = romacs_menu(json.loads(lisp_string([l for l in (HERE / 'keymap_popup_faces.gnu').read_text().splitlines() if l and not l.startswith(';')][-1])))
     keys('-M', 'ctrl', 'c', '-m', 'ctrl', 'k')
     fio.wait(faces_state.exists, args.timeout, 'fixture popup', process)
     time.sleep(1.5)
@@ -892,7 +905,11 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
         painted.append((carry + text).rstrip())
         carry = ''
     painted = [text for text in painted if text.strip()]
-    if painted != lines:
+    # Romacs's panel pads its columns with `:align-to' stretches
+    # (romacs-grid.el), which the scene lists as no characters: its rows
+    # are compared without their blanks.
+    same = (lambda a, b: [''.join(t.split()) for t in a] == [''.join(t.split()) for t in b]) if args.layer else (lambda a, b: a == b)
+    if not same(painted, lines):
         raise AssertionError(f'popup painted {painted} for its lines {lines}')
     # Its rows start at its window's top inside the frame's rect, a line apart.
     left, top = probe['position']
@@ -910,15 +927,17 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
     if ys[-1] + line > top + height:
         raise AssertionError(f'last popup row {ys[-1]} below the frame bottom {top + height}')
     if args.layer:
-        # Romacs's panel: across the frame's bottom above the status bar,
-        # its title (the popup's mode-line text) its first row, no mode
-        # line of its own, and no context segment in the status bar.
+        # Romacs's panel: a card centred on the frame, floating a margin
+        # (`romacs-layer-margin') above the status bar, its title (the
+        # menu's description) its first row, no mode line of its own, and
+        # no context segment in the status bar.
         if probe['kind'] != 'panel' or probe['mode-line']:
             raise AssertionError(f"panel kind {probe['kind']}, mode line {probe['mode-line']}")
-        if (left, top + height) != (probe['inset'], probe['chrome-bottom']):
-            raise AssertionError(f"panel at {left},{top} {width}x{height}, chrome bottom {probe['chrome-bottom']}")
-        if not lines or not lines[0].lstrip().startswith('q'):
-            raise AssertionError(f'title row {lines[:1]}')
+        centre = probe['inset'] + probe['parent-text-width'] / 2
+        if abs(left + width / 2 - centre) > 1 or top + height != probe['chrome-bottom'] - probe['margin']:
+            raise AssertionError(f"panel at {left},{top} {width}x{height}, centre {centre}, chrome bottom {probe['chrome-bottom']}")
+        if not lines or lines[0].strip() != probe['description']:
+            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r}')
         bar = ' '.join(t for _, t in shown['root_mode_lines'])
         if 'Dismiss' in bar or lines[0].strip() in bar:
             raise AssertionError(f'status bar shows the popup: {bar!r}')
