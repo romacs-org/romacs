@@ -217,25 +217,28 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 
 ;;; Sessions
 
-;; Each session opened: its revision once its open is answered, the
-;; notices that came before that held (opening), or `closed'.
+;; Each session opened is, by id, the state of its open: (opening .
+;; NOTICES) while it is asked, the notices that came meanwhile held, then
+;; [REVISION EPOCH ADAPTER] once it is answered.  A reply is applied only
+;; while the state it was asked with is still the session's.
 
 (defun romacs-agent-client-open (client id)
   "Open session ID on CLIENT: its reply, then each event and change of it,
 reach `romacs-agent-client-session-functions'."
-  (puthash id (list 'opening) (romacs-agent-client-sessions client))
-  (romacs-agent-client-request
-   client "agents/session.open" (romacs-agent-rpc-object "id" id)
-   (lambda (result error)
-     (let ((held (gethash id (romacs-agent-client-sessions client))))
-       (cond
-        ((or error (not (eq (car-safe held) 'opening)))
-         (remhash id (romacs-agent-client-sessions client)))
-        (t
-         (puthash id (gethash "revision" result) (romacs-agent-client-sessions client))
-         (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))
-         (dolist (notice (reverse (cdr held)))
-           (romacs-agent-client--session-notice client (car notice) (cdr notice)))))))))
+  (let ((asked (list 'opening)))
+    (puthash id asked (romacs-agent-client-sessions client))
+    (romacs-agent-client-request
+     client "agents/session.open" (romacs-agent-rpc-object "id" id)
+     (lambda (result error)
+       (when (eq (gethash id (romacs-agent-client-sessions client)) asked)
+         (if error
+             (remhash id (romacs-agent-client-sessions client))
+           (let ((cursor (gethash "cursor" result)))
+             (puthash id (vector (gethash "revision" result) (gethash "epoch" cursor) (gethash "adapter" cursor))
+                      (romacs-agent-client-sessions client)))
+           (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))
+           (dolist (notice (reverse (cdr asked)))
+             (romacs-agent-client--session-notice client (car notice) (cdr notice)))))))))
 
 (defun romacs-agent-client-close-session (client id)
   "Close session ID on CLIENT."
@@ -244,19 +247,22 @@ reach `romacs-agent-client-session-functions'."
 
 (defun romacs-agent-client--session-notice (client method params)
   "Apply METHOD's PARAMS to their session: held while it opens, the next
-revision passed on, an earlier one ignored, a gap answered by opening it
-again."
-  (let* ((id (gethash "session" params)) (held (gethash id (romacs-agent-client-sessions client)))
-         (revision (gethash "revision" params)))
+revision passed on, an earlier one ignored; a gap, or an event of another
+epoch or adapter than the open's, answered by opening it again."
+  (let* ((id (gethash "session" params)) (state (gethash id (romacs-agent-client-sessions client)))
+         (revision (gethash "revision" params)) (cursor (gethash "cursor" params)))
     (cond
-     ((null held))
-     ((eq (car-safe held) 'opening)
-      (setcdr held (cons (cons method params) (cdr held))))
+     ((null state))
+     ((eq (car-safe state) 'opening)
+      (setcdr state (cons (cons method params) (cdr state))))
      ((not (integerp revision)))
-     ((<= revision held))
-     ((/= revision (1+ held)) (romacs-agent-client-open client id))
+     ((<= revision (aref state 0)))
+     ((or (/= revision (1+ (aref state 0)))
+          (and cursor (not (and (equal (gethash "epoch" cursor) (aref state 1))
+                                (equal (gethash "adapter" cursor) (aref state 2))))))
+      (romacs-agent-client-open client id))
      (t
-      (puthash id revision (romacs-agent-client-sessions client))
+      (aset state 0 revision)
       (run-hook-with-args 'romacs-agent-client-session-functions client id
                           (list (if (equal method "agents/event") 'event 'changed) params))))))
 

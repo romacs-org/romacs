@@ -292,12 +292,14 @@ and `wait' waiting until its form holds (5 s at most)."
     log))
 
 (ert-deftest romacs-agent-service-sends-a-session-s-record-units ()
-  ;; Open: the row and the cursor live events follow from; then each
-  ;; record unit's events, once whole, in revision order; a replay's copy
-  ;; of the session sends nothing.
+  ;; Open: the row and the cursor live events follow from, the last
+  ;; record kept; then each record unit past it, once whole, in revision
+  ;; order.  A replay's copy of the session sends nothing, nor a unit at
+  ;; or below the cursor (a supervisor's replay on attach).
   (romacs-agent-service-tests--with
     (let ((busy (mk "busy" 'running :seq 7)))
       (romacs-agent-service-start socket)
+      (advice-add 'romacs-agent-service--last-seq :override (lambda (_) 7) '((name . rsv-kept)))
       (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
         (should (wait (romacs-agent-client-revision client)))
         (romacs-agent-client-open client "busy")
@@ -305,6 +307,7 @@ and `wait' waiting until its form holds (5 s at most)."
         (pcase-let ((`("busy" opened ,reply) (car (car log))))
           (should (equal (gethash "seq" (gethash "cursor" reply)) 7))
           (should (equal (gethash "id" (gethash "row" reply)) "busy")))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 6 :message "r" :text "replayed" :last t))
         (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 8 :message "m" :text "Hel"))
         (run-hook-with-args 'romacs-agent-event-functions (romacs-agent--scratch busy)
                             '(:type delta :seq 3 :message "m" :text "old" :last t))
@@ -314,7 +317,8 @@ and `wait' waiting until its form holds (5 s at most)."
                (params (nth 2 (car notices))))
           (should (= (length notices) 1))
           (should (equal (gethash "seq" (gethash "cursor" params)) 8))
-          (should (equal (mapcar (lambda (event) (gethash "text" event)) (gethash "events" params)) '("Hel" "lo"))))))))
+          (should (equal (mapcar (lambda (event) (gethash "text" event)) (gethash "events" params)) '("Hel" "lo"))))
+        (advice-remove 'romacs-agent-service--last-seq 'rsv-kept)))))
 
 (ert-deftest romacs-agent-service-cuts-a-long-string ()
   ;; A tool's output over 64 KiB: its first 64 KiB, the event saying how
@@ -324,7 +328,43 @@ and `wait' waiting until its form holds (5 s at most)."
                             :output (make-string 100000 ?o)))))
          (event (aref sent 0)))
     (should (= (string-bytes (gethash "output" event)) (* 64 1024)))
-    (should (equal (gethash "output" (gethash "truncated" event)) 100000))))
+    (should (equal (gethash "/output" (gethash "truncated" event)) 100000))))
+
+(ert-deftest romacs-agent-client-reopens-on-another-epoch ()
+  ;; A live event of another epoch than the open's: the session is opened
+  ;; again, never applied.
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running)))
+      (romacs-agent-service-start socket)
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)) (opened 0))
+        (add-hook 'romacs-agent-client-session-functions (lambda (_ _ notice) (when (eq (car notice) 'opened) (cl-incf opened))))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-open client "busy")
+        (should (wait (= opened 1)))
+        (advice-add 'romacs-agent-events-epoch :override (lambda (_) 9) '((name . rsv-epoch)))
+        (unwind-protect
+            (progn
+              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 1 :message "m" :text "x" :last t))
+              (should (wait (= opened 2)))
+              (should-not (cl-find 'event (car log) :key #'cadr)))
+          (advice-remove 'romacs-agent-events-epoch 'rsv-epoch))))))
+
+(ert-deftest romacs-agent-client-applies-only-its-own-open ()
+  ;; Open, close and open again before the first reply: the first reply
+  ;; never takes the second open's place.
+  (romacs-agent-service-tests--with
+    (mk "busy" 'running)
+    (romacs-agent-service-start socket)
+    (let* ((client (romacs-agent-client-connect socket)) (opened 0))
+      (add-hook 'romacs-agent-client-session-functions (lambda (_ _ notice) (when (eq (car notice) 'opened) (cl-incf opened))))
+      (should (wait (romacs-agent-client-revision client)))
+      (romacs-agent-client-open client "busy")
+      (romacs-agent-client-close-session client "busy")
+      (romacs-agent-client-open client "busy")
+      (should (wait (= opened 1)))
+      (accept-process-output nil 0.2)
+      (should (= opened 1))
+      (should (vectorp (gethash "busy" (romacs-agent-client-sessions client)))))))
 
 (ert-deftest romacs-agent-service-refuses-an-unknown-session ()
   (romacs-agent-service-tests--with

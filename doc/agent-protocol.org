@@ -233,9 +233,11 @@ started by older builds keep working.
     made of: a record unit, a pending request, a queue entry, a row, a
     catalog entry.  A string in one is cut to its first 64 KiB, then, while
     the unit is over 256 KiB, to 8 KiB and to 1 KiB; each cut is named
-    under its object's =truncated= (={"output": BYTES}=, a path for one
-    nested), as long as it was.  A record unit still over is sent as
-    ={"events": [], "oversize": true}=, its cursor kept.  A row's strings
+    by its JSON Pointer under its event's =truncated=
+    (={"/output": BYTES}=), as long as it was.  A record unit still over,
+    or not encodable, is sent as ={"events": [], "oversize": true}=, its
+    cursor kept.  A pending request, a queue entry and a catalog entry
+    are cut alike; their key fields (a handle, an id, a name) never are.  A row's strings
     are cut to 1,024 characters.  Nothing is fetched whole: a chat needs
     no more of an output, and the files an agent writes are on its host;
   - an editor tool's result is bounded where it is made: each editor tool
@@ -330,11 +332,9 @@ JSON-RPC errors with numeric codes and =data.kind=:
   - =A= is the adapter version: a digest of the driver that made the
     events.
 - *Epochs and live events.*  Every cursor a notification carries has
-  the session's epoch.  A loaded session's epoch never moves: compaction
-  and the flip touch only sessions no editor has loaded, and only a
-  loaded session sends live events.  An open or a page of another epoch
-  than the client's cursor makes it discard its history and resume
-  cursor and open again.
+  the session's epoch and adapter.  A live event, an open or a page of
+  another epoch or adapter than the client's cursor makes it discard its
+  history and resume cursor and open again.
 - *A client's resume cursor* is the end of what it holds without a gap:
   the highest seq below which it holds every record unit.  Live events
   past a gap it is still pulling never advance it, so a second
@@ -396,9 +396,11 @@ paging ever holds live delivery back.
 
 - *Open.*  =agents/session.open {id}=.  The service, on its main VM and
   atomically, registers the subscription and captures the session
-  revision V, the high-water cursor H and the state: row, pending and
-  answering requests, queue.  Opening reads: a session not loaded stays
-  so, and has no live events until an editor loads it.  The reply:
+  revision V, the cursor H of its last record kept and the state: row,
+  pending and answering requests, queue.  Opening reads: a session not
+  loaded stays so, and has no live events until an editor loads it.
+  Live events follow H for this subscription alone: a unit at or below
+  it (a supervisor's replay on attach) is never sent it.  The reply:
   #+begin_src json
   {"revision": V, "cursor": H, "row": {}, "pending": [], "answering": [],
    "queue": [], "undelivered": [], "more": null}
