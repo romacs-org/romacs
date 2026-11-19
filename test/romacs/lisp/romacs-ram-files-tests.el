@@ -81,4 +81,198 @@
       (delete-directory runtime t)
       (delete-directory (file-name-directory image) t))))
 
+;; The memory-only directories are named by $XDG_RUNTIME_DIR and /dev/shm,
+;; and a file under either, through links or not, stays off the disk.  Each
+;; case asserts what only the hook sets (`warm-restart-left-out'): in batch,
+;; backups and auto-saves are off whether or not it acts.
+(ert-deftest romacs-ram-files-tests-a-symlinked-runtime-directory-holds-its-files ()
+  (let* ((real (make-temp-file "romacs-ram-files-real-" t))
+         (link (concat (make-temp-name (expand-file-name "romacs-ram-files-link-" temporary-file-directory))))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (make-symbolic-link real link)
+    (setenv "XDG_RUNTIME_DIR" link)
+    (unwind-protect
+        (dolist (name (list (expand-file-name "entry.txt" link) (expand-file-name "other.txt" real)))
+          (let ((buffer (find-file-noselect name)))
+            (with-current-buffer buffer
+              ;; What only the hook sets: batch leaves backups and
+              ;; auto-saves off whatever it does.
+              (should (local-variable-p 'warm-restart-left-out))
+              (should backup-inhibited)
+              (should-not buffer-auto-save-file-name)
+              (should (romacs-ram-files-p name)))
+            (kill-buffer buffer)))
+      (delete-file link)
+      (delete-directory real t))))
+
+(ert-deftest romacs-ram-files-tests-a-runtime-directory-changed-at-run-time-is-seen ()
+  (let* ((first (make-temp-file "romacs-ram-files-a-" t))
+         (second (make-temp-file "romacs-ram-files-b-" t))
+         (process-environment process-environment))
+    (unwind-protect
+        (progn
+          (setenv "XDG_RUNTIME_DIR" first)
+          (should (romacs-ram-files-p (expand-file-name "x" first)))
+          (should-not (romacs-ram-files-p (expand-file-name "x" second)))
+          (setenv "XDG_RUNTIME_DIR" second)
+          (should (romacs-ram-files-p (expand-file-name "x" second)))
+          (should-not (romacs-ram-files-p (expand-file-name "x" first))))
+      (delete-directory first t)
+      (delete-directory second t))))
+
+(ert-deftest romacs-ram-files-tests-a-runtime-directory-created-later-holds-its-files ()
+  "XDG_RUNTIME_DIR names a directory that does not exist yet; an
+unrelated visit comes first; once the directory exists, a file in it is
+kept off the disk."
+  (let* ((parent (make-temp-file "romacs-ram-files-later-" t))
+         (runtime (expand-file-name "private" parent))
+         (elsewhere (make-temp-file "romacs-ram-files-disk-" t))
+         (process-environment process-environment)
+         (auto-save-default t)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (setenv "XDG_RUNTIME_DIR" runtime)
+    (unwind-protect
+        (progn
+          (kill-buffer (find-file-noselect (expand-file-name "notes.txt" elsewhere)))
+          (make-directory runtime)
+          (let ((secret (find-file-noselect (expand-file-name "secret.txt" runtime))))
+            (with-current-buffer secret
+              (should (local-variable-p 'warm-restart-left-out))
+              (should (romacs-ram-files-p buffer-file-name)))
+            (kill-buffer secret)))
+      (delete-directory parent t)
+      (delete-directory elsewhere t))))
+
+(ert-deftest romacs-ram-files-tests-a-revert-through-a-retargeted-link-is-kept-off-disk ()
+  "A file visited through a link to an ordinary directory, the link then
+pointed into the runtime directory, and the buffer reverted: the revert
+takes the true name again, and the buffer is kept off the disk."
+  (let* ((runtime (make-temp-file "romacs-ram-files-run-" t))
+         (elsewhere (make-temp-file "romacs-ram-files-disk-" t))
+         (link (make-temp-name (expand-file-name "romacs-ram-files-via-" temporary-file-directory)))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (setenv "XDG_RUNTIME_DIR" runtime)
+    (dolist (dir (list runtime elsewhere))
+      (with-temp-file (expand-file-name "secret.txt" dir) (insert dir)))
+    (make-symbolic-link elsewhere link)
+    (unwind-protect
+        (let ((buffer (find-file-noselect (expand-file-name "secret.txt" link))))
+          (with-current-buffer buffer
+            (should-not (local-variable-p 'warm-restart-left-out))
+            (delete-file link)
+            (make-symbolic-link runtime link)
+            (revert-buffer t t)
+            (should (equal (buffer-string) runtime))
+            (should (local-variable-p 'warm-restart-left-out))
+            (should-not buffer-auto-save-file-name))
+          (kill-buffer buffer))
+      (delete-file link)
+      (delete-directory runtime t)
+      (delete-directory elsewhere t))))
+
+;; A runtime directory named through a link that is pointed elsewhere
+;; mid-session, as a session manager rotates /run/user/UID/session-*.
+(ert-deftest romacs-ram-files-tests-a-runtime-link-rotated-to-a-new-directory-is-followed ()
+  (let* ((parent (make-temp-file "romacs-ram-files-rot-" t))
+         (first (expand-file-name "session-a" parent))
+         (second (expand-file-name "session-b" parent))
+         (link (expand-file-name "runtime" parent))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (make-directory first) (make-directory second)
+    (make-symbolic-link first link)
+    (setenv "XDG_RUNTIME_DIR" link)
+    (unwind-protect
+        (progn
+          (should (romacs-ram-files-p (expand-file-name "x" first)))
+          (delete-file link)
+          (make-symbolic-link second link)
+          (let ((secret (find-file-noselect (expand-file-name "secret.txt" second))))
+            (with-current-buffer secret
+              (should (local-variable-p 'warm-restart-left-out)))
+            (kill-buffer secret))
+          (should-not (romacs-ram-files-p (expand-file-name "x" first))))
+      (delete-directory parent t))))
+
+;; A visit whose true name `directory-abbrev-alist' abbreviated through a
+;; link, then the alist cleared and the mode set again.
+(ert-deftest romacs-ram-files-tests-a-mode-change-takes-the-true-name-afresh ()
+  (let* ((runtime (make-temp-file "romacs-ram-files-abbrev-" t))
+         (home (make-temp-file "romacs-ram-files-home-" t))
+         (alias (expand-file-name "secrets" home))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (setenv "XDG_RUNTIME_DIR" runtime)
+    (make-symbolic-link runtime alias)
+    (unwind-protect
+        (let* ((directory-abbrev-alist
+                (list (cons (concat "\\`" (regexp-quote (file-name-as-directory (file-truename runtime))))
+                            (file-name-as-directory alias))))
+               (secret (find-file-noselect (expand-file-name "secret.txt" runtime))))
+          (with-current-buffer secret
+            (should (string-prefix-p alias (expand-file-name buffer-file-truename)))
+            (should (local-variable-p 'warm-restart-left-out))
+            (setq directory-abbrev-alist nil)
+            (normal-mode)
+            (should (local-variable-p 'warm-restart-left-out)))
+          (kill-buffer secret))
+      (delete-directory home t)
+      (delete-directory runtime t))))
+
+(ert-deftest romacs-ram-files-tests-a-runtime-directory-renamed-and-relinked-is-followed ()
+  "The runtime link's directory renamed (same inode) and the link pointed
+at its new name: a file under the new name is kept off the disk."
+  (let* ((parent (make-temp-file "romacs-ram-files-mv-" t))
+         (first (expand-file-name "session-a" parent))
+         (second (expand-file-name "session-b" parent))
+         (link (expand-file-name "runtime" parent))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (make-directory first)
+    (make-symbolic-link first link)
+    (setenv "XDG_RUNTIME_DIR" link)
+    (unwind-protect
+        (progn
+          (should (romacs-ram-files-p (expand-file-name "x" first)))
+          (rename-file first second)
+          (delete-file link)
+          (make-symbolic-link second link)
+          (let ((secret (find-file-noselect (expand-file-name "secret.txt" second))))
+            (with-current-buffer secret
+              (should (local-variable-p 'warm-restart-left-out)))
+            (kill-buffer secret)))
+      (delete-directory parent t))))
+
+;; The runtime directory renamed in place with a compatibility link left
+;; at its old name, the runtime link unchanged.
+(ert-deftest romacs-ram-files-tests-a-renamed-runtime-directory-with-a-compatibility-link-holds-its-files ()
+  (let* ((parent (make-temp-file "romacs-ram-files-compat-" t))
+         (first (expand-file-name "session-a" parent))
+         (second (expand-file-name "session-b" parent))
+         (link (expand-file-name "runtime" parent))
+         (process-environment process-environment)
+         (find-file-hook (list #'romacs-ram-files-keep-off-disk))
+         (after-change-major-mode-hook (list #'romacs-ram-files-keep-off-disk)))
+    (make-directory first)
+    (make-symbolic-link first link)
+    (setenv "XDG_RUNTIME_DIR" link)
+    (unwind-protect
+        (progn
+          (should (romacs-ram-files-p (expand-file-name "x" first)))
+          (rename-file first second)
+          (make-symbolic-link second first)
+          (let ((secret (find-file-noselect (expand-file-name "secret.txt" second))))
+            (with-current-buffer secret
+              (should (local-variable-p 'warm-restart-left-out)))
+            (kill-buffer secret)))
+      (delete-directory parent t))))
+
 ;;; romacs-ram-files-tests.el ends here
