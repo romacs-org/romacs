@@ -161,7 +161,8 @@ when a window first shows it.")
   (setq romacs-agent-log--session session)
   (setq-local romacs-agent-ui--session session)
   (let ((name (romacs-agent-log--buffer-name session)))
-    (unless (equal (buffer-name) name) (rename-buffer name t))))
+    (unless (equal (buffer-name) name) (rename-buffer name t)))
+  (romacs-agent-log--header-show))
 
 ;;; Drawing
 
@@ -686,15 +687,32 @@ unless a note said who gave it, that it was answered."
             (set-marker romacs-agent-log--input (point))
             (set-marker romacs-agent-log--end start)))))))
 
+(defvar-local romacs-agent-log--title nil "The title the chat's name was made from.")
+(defvar-local romacs-agent-log--header-made nil
+  "What the header was last made from: made again only when it differs.")
+
+(defun romacs-agent-log--header-show ()
+  "Make the header say what the session says now: a value, never a form,
+so a redisplay runs no Lisp for it; made only when what it reads changed."
+  (let* ((session romacs-agent-log--session)
+         (start (romacs-agent-turn-start session))
+         (running (memq (romacs-agent-state session) '(starting running waiting-approval)))
+         (inputs (list (romacs-agent-ui--header-inputs session) (length romacs-agent-log--asks)
+                       (and start running (round (- (float-time) start))))))
+    (unless (equal inputs romacs-agent-log--header-made)
+      (setq romacs-agent-log--header-made inputs)
+      (let ((header (string-replace "%" "%%" (romacs-agent-log--header))))
+        (unless (equal-including-properties header header-line-format)
+          (setq header-line-format header)
+          (force-mode-line-update))))))
+
 (defun romacs-agent-log--header ()
   "The header line: the session's own header, what waits on the user, and
 how long the turn has run."
   (let* ((session romacs-agent-log--session)
          (pending (length romacs-agent-log--asks))
          (start (romacs-agent-turn-start session)))
-    (concat (if (fboundp 'romacs-agent-ui--header-text)
-                (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
-              (romacs-agent-title session))
+    (concat (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
             (if (> pending 0)
                 (propertize (format "  ⚠ %d wait%s on you: %s" pending (if (= pending 1) "s" "")
                                     (substitute-command-keys "\\<romacs-agent-log-mode-map>\\[romacs-agent-log-next-ask]"))
@@ -717,13 +735,15 @@ how long the turn has run."
     (with-current-buffer buffer
       (let ((seq (plist-get event :seq)))
         (when (or (null seq) (> seq romacs-agent-log--seq))
-          (unless (and (eq session romacs-agent-log--session) (equal (buffer-name) (romacs-agent-log--buffer-name session)))
+          (unless (and (eq session romacs-agent-log--session)
+                       (equal (romacs-agent-title session) romacs-agent-log--title))
+            (setq romacs-agent-log--title (romacs-agent-title session))
             (romacs-agent-log--set-session session))
           (romacs-agent-log-draw session event)
           (when (and seq (plist-get event :last)) (setq romacs-agent-log--seq seq))
           (romacs-agent-log--separator)
           (when (eq (car romacs-agent-log--state) 'working) (romacs-agent-log--tick-start))
-          (force-mode-line-update))))))
+          (romacs-agent-log--header-show))))))
 
 (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
 
@@ -865,7 +885,8 @@ records now, or with LATER when a window first shows it."
   (unless romacs-agent-log--filled
     (setq romacs-agent-log--filled t)
     (romacs-agent-log--fill)
-    (romacs-agent-log--separator t)))
+    (romacs-agent-log--separator t)
+    (romacs-agent-log--header-show)))
 
 (defun romacs-agent-log--shown (_window)
   "A window shows this chat: drawn now, when it was not."
@@ -1127,7 +1148,7 @@ transcript's comes with it."
         (when (and (derived-mode-p 'romacs-agent-log-mode)
                    (memq (romacs-agent-state romacs-agent-log--session) '(starting running waiting-approval)))
           (setq running t)
-          (force-mode-line-update))))
+          (romacs-agent-log--header-show))))
     (unless (or running (not (timerp romacs-agent-log--ticker)))
       (cancel-timer romacs-agent-log--ticker)
       (setq romacs-agent-log--ticker nil))))
@@ -1221,7 +1242,7 @@ On the transcript's text:
   :interactive nil
   (setq-local truncate-lines nil word-wrap t)
   (setq-local scroll-conservatively 101)
-  (setq-local header-line-format '(:eval (romacs-agent-log--header)))
+  (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 

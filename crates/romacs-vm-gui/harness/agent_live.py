@@ -2952,14 +2952,16 @@ def chat_log(args, base):
             # Its output shows under its call while it runs, then whole once
             # it ends: the text from the command's row to the separator.
             def command_block():
-                text = a.chat(codex)
-                command = text.rfind('seq 1 40')
-                row = text.rfind('● ', 0, command) if command >= 0 else -1
-                if row < 0:
-                    return ''
-                # To the next entry: another call, a reply, a prompt, the separator.
-                ends = [i for i in (text.find(mark, row + 1) for mark in ('\n● ', '\n✻', '\n❯', '\n◉', '\n○', '\n⚠')) if i >= 0]
-                return text[row:min(ends)] if ends else text[row:]
+                """The command's tool entry, its row and what is under it, to
+                the next entry."""
+                return parity_live.read_sexp(a.eval(
+                    f'(with-current-buffer (romacs-agent-log-chat {a.s(codex)}) '
+                    '(let ((pos (point-min)) (found nil)) '
+                    '(while (setq pos (text-property-any pos romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool))) '
+                    '(when (string-match-p "seq 1 40" (buffer-substring-no-properties pos (save-excursion (goto-char pos) (line-end-position)))) '
+                    '(setq found pos)) (setq pos (1+ pos))) '
+                    '(if found (buffer-substring-no-properties found (or (next-single-property-change (1+ found) '
+                    '(quote romacs-agent-log-entry) nil romacs-agent-log--end) romacs-agent-log--end)) "")))')) or ''
             a.until(codex, lambda: a.state(codex) == 'running'
                     and re.search(r'⋮ \d+ lines? so far\n\s+line \d+', command_block()) is not None,
                     120, 'Codex output while it runs')
