@@ -89,31 +89,32 @@
                (should (string-prefix-p "ab⠶⠶" (buffer-string))))
       (romacs-working-stop 'mixed))))
 
+(defmacro romacs-working-tests--theme (palette faces &rest body)
+  "BODY with the theme's PALETTE and FACES' foregrounds, alists, its
+background near black."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'romacs-theme-color) (lambda (slot &optional _) (alist-get slot ,palette)))
+             ((symbol-function 'face-foreground) (lambda (face &rest _) (alist-get face ,faces)))
+             ((symbol-function 'face-background) (lambda (&rest _) "#121212")))
+     ,@body))
+
 (ert-deftest romacs-working-running-never-takes-the-error-colour ()
-  ;; A theme whose accent is its error red (as a keyword face may be):
-  ;; running takes its next colour far from it.
-  (cl-letf (((symbol-function 'romacs-theme-color)
-             (lambda (slot &optional _) (alist-get slot '((accent . "#d35f5f") (blue . "#d4605e") (cyan . "#5fafd7")))))
-            ((symbol-function 'face-foreground)
-             (lambda (face &rest _) (alist-get face '((error . "#d35f5f") (warning . "#d7af5f")))))
-            ((symbol-function 'face-background) (lambda (&rest _) "#121212")))
+  ;; A theme whose accent is its error red: running takes its cool colour.
+  (romacs-working-tests--theme '((accent . "#d35f5f") (blue . "#d4605e") (cyan . "#5fafd7"))
+      '((error . "#d35f5f") (warning . "#d7af5f"))
     (should (equal (romacs-working--running-colour) "#5fafd7")))
-  ;; A theme whose warning is its error red: waiting takes its yellow.
-  (cl-letf (((symbol-function 'romacs-theme-color)
-             (lambda (slot &optional _) (alist-get slot '((yellow . "#d7af5f")))))
-            ((symbol-function 'face-foreground)
-             (lambda (face &rest _) (alist-get face '((error . "#d35f5f") (warning . "#d35f5f")))))
-            ((symbol-function 'face-background) (lambda (&rest _) "#121212")))
-    (should (equal (romacs-working--waiting-colour) "#d7af5f")))
-  ;; No colour far from error, the foreground included: the foreground
-  ;; all the same, never the last theme's colour.
-  (cl-letf (((symbol-function 'romacs-theme-color) (lambda (&rest _) "#d35f5f"))
-            ((symbol-function 'face-foreground)
-             (lambda (face &rest _) (alist-get face '((error . "#d35f5f") (link . "#d35f5f") (default . "#d45f5e")))))
-            ((symbol-function 'face-background) (lambda (&rest _) "#121212")))
-    (should (equal (romacs-working--running-colour) "#d45f5e")))
-  (should (romacs-working--far-p "#5fafd7" '("#d35f5f")))
-  (should-not (romacs-working--far-p "#d4605e" '("#d35f5f"))))
+  ;; Omarchy matte black's palette: its yellow and orange are reds, its
+  ;; amber is filed as green, its accent orange; running is no red.
+  (let ((matte '((accent . "#e68e0d") (yellow . "#b91c1c") (orange . "#c63d3d") (green . "#ffc107")
+                 (cyan . "#bebebe") (blue . "#e68e0d") (bright-yellow . "#b90a0a"))))
+    (romacs-working-tests--theme matte '((error . "#d35f5f") (warning . "#d35f5f") (default . "#bebebe"))
+      (should (equal (romacs-working--waiting-colour) "#e68e0d"))
+      ;; Its grey, so the amber stays waiting's.
+      (should (equal (romacs-working--running-colour) "#bebebe"))))
+  ;; Nothing stands off error: the foreground all the same, never the last
+  ;; theme's colour.
+  (romacs-working-tests--theme '((accent . "#d35f5f")) '((error . "#d35f5f") (link . "#d35f5f") (default . "#d45f5e"))
+    (should (equal (romacs-working--running-colour) "#d45f5e"))))
 
 (provide 'romacs-working-tests)
 ;;; romacs-working-tests.el ends here

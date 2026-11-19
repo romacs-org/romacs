@@ -73,29 +73,58 @@ over a quarter of the widest (a red and an amber are far)."
                   (or (null o) (> (sqrt (apply #'+ (cl-mapcar (lambda (a b) (expt (- a b) 2)) rgb o))) 0.25))))
               others)))
 
-(defun romacs-working--colour (candidates)
-  "The first of CANDIDATES, colours, far from what `error' is drawn in and
-from the background; else the theme's foreground."
-  (let ((avoid (list (face-foreground 'error nil t) (face-background 'default nil t))))
-    (or (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid))) candidates)
+(defun romacs-working--hue (colour)
+  "COLOUR's hue in degrees, or nil for a grey (saturation under a tenth)."
+  (when-let* ((rgb (romacs-working--rgb colour)))
+    (let* ((hi (apply #'max rgb)) (lo (apply #'min rgb)) (span (- hi lo)))
+      (unless (< span 0.1)
+        (pcase-let ((`(,r ,g ,b) rgb))
+          (mod (* 60 (cond ((= hi r) (/ (- g b) span))
+                           ((= hi g) (+ 2 (/ (- b r) span)))
+                           (t (+ 4 (/ (- r g) span)))))
+               360.0))))))
+
+(defun romacs-working--hue-gap (a b)
+  "Degrees between hues A and B round the circle; 180 when either is a grey."
+  (if (and a b) (let ((d (abs (- a b)))) (min d (- 360 d))) 180))
+
+(defun romacs-working--colour (candidates &rest fits)
+  "The first of CANDIDATES, colours of the theme, standing off the
+background and error's hue, that the first of FITS (functions of a hue,
+nil for a grey) holds for, else the next of FITS, else any; else the
+theme's foreground.  Hue, not a slot's name, decides: a theme may name a
+red its yellow."
+  (let* ((error (romacs-working--hue (face-foreground 'error nil t)))
+         (off (lambda (colour) (and (stringp colour)
+                                    (romacs-working--far-p colour (list (face-background 'default nil t)))
+                                    (>= (romacs-working--hue-gap (romacs-working--hue colour) error) 30)))))
+    (or (cl-some (lambda (fit) (cl-find-if (lambda (colour) (and (funcall off colour) (funcall fit (romacs-working--hue colour))))
+                                          candidates))
+                 fits)
+        (cl-find-if off candidates)
         (face-foreground 'default nil t))))
 
-(defun romacs-working--palette (slot)
-  (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))
+(defun romacs-working--palette (&rest slots)
+  (and (fboundp 'romacs-theme-color) (mapcar #'romacs-theme-color slots)))
 
 (defun romacs-working--running-colour ()
-  "The theme's colour for running work: its accent, blue, cyan or link
-colour, the first far from its error colour and its background."
+  "The theme's colour for running work: of its accent, blue, cyan and link
+colours, a cool one first, else a grey, else any whose hue stands off its
+error's, so a warm theme keeps its amber for waiting."
   (romacs-working--colour
-   (list (romacs-working--palette 'accent) (romacs-working--palette 'blue) (romacs-working--palette 'cyan)
-         (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t))))
+   (append (romacs-working--palette 'accent 'blue 'cyan 'bright-blue 'bright-cyan)
+           (list (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))
+   (lambda (hue) (and hue (<= 160 hue 290)))
+   #'null))
 
 (defun romacs-working--waiting-colour ()
-  "The theme's colour for work waiting on its user: its warning, yellow or
-orange colour, the first far from its error colour and its background."
+  "The theme's colour for work waiting on its user: of its warning and
+warm colours, an amber first (hue 30-70), else any whose hue stands off
+its error's."
   (romacs-working--colour
-   (list (face-foreground 'warning nil t) (romacs-working--palette 'yellow) (romacs-working--palette 'orange)
-         (romacs-working--palette 'bright-yellow))))
+   (cons (face-foreground 'warning nil t)
+         (romacs-working--palette 'yellow 'orange 'bright-yellow 'accent 'green 'bright-green))
+   (lambda (hue) (and hue (<= 30 hue 70)))))
 
 (defun romacs-working--derive (&rest _)
   "Make the running and waiting faces the theme's colours for them, as
