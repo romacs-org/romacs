@@ -147,7 +147,8 @@ fn a_long_motion_is_inspected_and_finishes() {
 (goto-char 1)
 (inspect-ready)
 (let ((moved (vertical-motion 5000000)))
-  (with-temp-file (expand-file-name "moved" (getenv "MARK")) (insert (format "%d" moved))))
+  (with-temp-file (expand-file-name "moved.part" (getenv "MARK")) (insert (format "%d" moved)))
+  (rename-file (expand-file-name "moved.part" (getenv "MARK")) (expand-file-name "moved" (getenv "MARK"))))
 (inspect-spin "marker")"#);
     let start = Instant::now();
     let moved = session.dir.join("moved");
