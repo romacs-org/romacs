@@ -452,6 +452,14 @@ fn input_record(seq: u64, text: &str, images: Option<&Json>, tag: Option<&Json>)
 }
 
 impl Shared {
+    /// Journal the harness's exit with CODE, the journal's last record.
+    fn exit(&mut self, code: i32) {
+        self.seq += 1;
+        let entry = json!({"seq": self.seq, "t": now(), "exit": code}).to_string();
+        self.append(&entry, true);
+        self.closed = true;
+    }
+
     /// Journal that the line of `"in"` record SEQ reached the harness.
     fn written(&mut self, seq: u64) {
         self.seq += 1;
@@ -484,8 +492,10 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream, harness: bool) {
         let mut stdin = stdin.lock().unwrap_or_else(|e| e.into_inner());
         let seq = {
             let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
-            // A server whose attachment was stolen writes nothing more.
-            if shared.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return; }
+            // A server whose attachment was stolen writes nothing more, nor
+            // one whose harness's exit is journaled: a line written now
+            // would have no record.
+            if shared.closed || shared.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return; }
             shared.seq += 1;
             let entry = record(shared.seq, "in", &journaled);
             shared.append(&entry, false);
@@ -640,11 +650,7 @@ fn run(config: Config) -> Result<i32, String> {
     // its stdout open.
     let _ = drained.recv_timeout(std::time::Duration::from_secs(1));
     let code = status.code().unwrap_or(128 + std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or(0));
-    let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
-    shared.seq += 1;
-    let entry = json!({"seq": shared.seq, "t": now(), "exit": code}).to_string();
-    shared.append(&entry, true);
-    shared.closed = true;
+    shared.lock().unwrap_or_else(|e| e.into_inner()).exit(code);
     let _ = std::fs::remove_file(&config.socket);
     Ok(0)
 }
@@ -1196,10 +1202,7 @@ mod tests {
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let mut shared = Shared { seq: 1, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
                                   stdin: Arc::new(Mutex::new(None)), closed: false };
-        shared.seq += 1;
-        let exit = json!({"seq": shared.seq, "t": now(), "exit": 0}).to_string();
-        shared.append(&exit, true);
-        shared.closed = true;
+        shared.exit(0);
         // A late writer's acknowledgement: not journaled after the exit.
         shared.written(1);
         assert_eq!(last_seq(&path), 2);
