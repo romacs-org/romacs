@@ -96,7 +96,7 @@ struct Chunk {
 
 /// The first refill's size and the largest. Small under test, so the suites
 /// cross a refill at every character.
-const CHUNK_FIRST: usize = if cfg!(test) { 1 } else { 16 };
+const CHUNK_FIRST: usize = if cfg!(test) { 1 } else { 32 };
 const CHUNK_MAX: usize = if cfg!(test) { 3 } else { 8192 };
 /// A string stream's first characters, read one at a time as before chunks:
 /// most reads from a string are this short. One under test, so the suites
@@ -115,8 +115,10 @@ impl Chunk {
         self.taken = self.taken.checked_sub(1)?;
         Some(self.chars[self.taken].1)
     }
-    fn refilled(&mut self, chars: Vec<(u32, u8)>) {
-        self.want = (self.want * 2).clamp(CHUNK_FIRST, CHUNK_MAX);
+    /// CHARS read ahead, REQUESTED of them asked for: the next refill
+    /// asks for twice as many.
+    fn refilled(&mut self, chars: Vec<(u32, u8)>, requested: usize) {
+        self.want = (requested * 2).clamp(CHUNK_FIRST, CHUNK_MAX);
         self.chars = chars;
         self.taken = 0;
     }
@@ -210,12 +212,12 @@ impl Reader<'_, '_, '_, '_, '_> {
                     None if self.chunk.direct < DIRECT_FIRST => {
                         self.chunk.direct += 1;
                         let (c, width) = self.m.leaf((root, from), build::string_char)?;
-                        (c, width as u8)
+                        (c, build::width_u8(width))
                     }
                     None => {
                         let n = self.chunk.want.clamp(CHUNK_FIRST, CHUNK_MAX).min(left);
                         let chars = self.m.leaf((root, from, n), build::string_chars)?;
-                        self.chunk.refilled(chars);
+                        self.chunk.refilled(chars, n);
                         self.chunk.next().ok_or("string stream changed length")?
                     }
                 };
@@ -234,20 +236,14 @@ impl Reader<'_, '_, '_, '_, '_> {
                     Some(at) => at,
                     None => self.m.leaf(root, build::buffer_start)?,
                 };
-                let (c, width) = match self.chunk.next() {
-                    Some(c) => c,
-                    None => {
-                        let n = self.chunk.want.clamp(CHUNK_FIRST, CHUNK_MAX);
-                        let chars = self.m.leaf((root, at, n), build::buffer_chars)?;
-                        self.chunk.refilled(chars);
-                        match self.chunk.next() {
-                            Some(c) => c,
-                            None => {
-                                self.chunk.at = Some(at);
-                                return Ok(None);
-                            }
-                        }
-                    }
+                if self.chunk.taken == self.chunk.chars.len() {
+                    let n = self.chunk.want.clamp(CHUNK_FIRST, CHUNK_MAX);
+                    let chars = self.m.leaf((root, at, n), build::buffer_chars)?;
+                    self.chunk.refilled(chars, n);
+                }
+                let Some((c, width)) = self.chunk.next() else {
+                    self.chunk.at = Some(at);
+                    return Ok(None);
                 };
                 self.chunk.at = Some(at + usize::from(width));
                 Ok(Some(c))
@@ -268,12 +264,7 @@ impl Reader<'_, '_, '_, '_, '_> {
     fn unget(&mut self, c: u32) -> Result<()> {
         match &mut self.input {
             Input::Host { byte, .. } => *byte -= host_width(c),
-            Input::String {
-                root,
-                character,
-                byte,
-                ..
-            } => {
+            Input::String { root, .. } => {
                 let width = match self.chunk.back() {
                     Some(width) => usize::from(width),
                     None => self.m.leaf((*root, c), build::string_width)?,
@@ -288,12 +279,11 @@ impl Reader<'_, '_, '_, '_, '_> {
             }
             Input::Buffer { root } => {
                 let root = *root;
-                match (self.chunk.at, self.chunk.back()) {
-                    (Some(at), Some(width)) => self.chunk.at = Some(at - usize::from(width)),
-                    _ => {
-                        self.commit()?;
-                        self.m.leaf((root, c), build::buffer_unget)?;
-                    }
+                if let (Some(at), Some(width)) = (self.chunk.at, self.chunk.back()) {
+                    self.chunk.at = Some(at - usize::from(width));
+                } else {
+                    self.commit()?;
+                    self.m.leaf((root, c), build::buffer_unget)?;
                 }
             }
         }

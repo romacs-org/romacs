@@ -94,28 +94,6 @@ impl Vm {
         }
         Ok(())
     }
-    fn reader_buffer_get(&mut self, source: Value) -> Result<Option<u32>> {
-        let (buffer, at, marker) = self.reader_buffer_location(source)?;
-        let (code, width) = match self.object(buffer)? {
-            Object::Buffer(b) => {
-                if at >= b.accessible().end.0 {
-                    return Ok(None);
-                }
-                let c = b.character_at(ByteOffset(at))?.ok_or("invalid buffer reader point")? as u32;
-                (c, crate::lstring::char_string(c, &mut [0; 5]))
-            }
-            Object::ByteBuffer(b) => {
-                if at >= b.restriction.end.0 {
-                    return Ok(None);
-                }
-                let c = *b.bytes.get(at).ok_or("invalid byte buffer reader point")? as u32;
-                (if c >= 128 { c + 0x3fff00 } else { c }, 1)
-            }
-            _ => unreachable!(),
-        };
-        self.reader_buffer_position(source, buffer, at + width, marker)?;
-        Ok(Some(code))
-    }
     /// Where the buffer or marker stream SOURCE reads from: its point, or
     /// the marker's position.
     fn reader_buffer_start(&self, source: Value) -> Result<usize> {
@@ -123,7 +101,7 @@ impl Vm {
     }
     /// Up to N characters of SOURCE's buffer from byte AT, no further than
     /// its accessible end: each character's code and width, as
-    /// `reader_buffer_get` reads them one at a time.
+    /// a read took them one at a time.
     fn reader_buffer_chars(&self, source: Value, mut at: usize, n: usize) -> Result<Vec<(u32, u8)>> {
         let (buffer, _, _) = self.reader_buffer_location(source)?;
         let mut out = Vec::with_capacity(n);
@@ -133,7 +111,7 @@ impl Vm {
                 while out.len() < n && at < end {
                     let c = b.character_at(ByteOffset(at))?.ok_or("invalid buffer reader point")? as u32;
                     let width = crate::lstring::char_string(c, &mut [0; 5]);
-                    out.push((c, width as u8));
+                    out.push((c, width_u8(width)));
                     at += width;
                 }
             }
@@ -209,17 +187,30 @@ pub(super) fn string_char(vm: &mut Vm, (root, byte): (usize, usize)) -> Result<(
     let bytes = view.bytes().get(byte..).filter(|b| !b.is_empty()).ok_or("string stream changed length")?;
     super::parse::string_input_char(bytes, view.is_multibyte())
 }
+/// A character's width in bytes, as the reader's chunks keep it: at most
+/// 5, so it always fits.
+pub(super) fn width_u8(width: usize) -> u8 {
+    u8::try_from(width).unwrap_or(u8::MAX)
+}
 /// Up to N characters of the string stream rooted at ROOT from BYTE: each
 /// one's code and width, as `string_char` reads them one at a time.
 pub(super) fn string_chars(vm: &mut Vm, (root, mut byte, n): (usize, usize, usize)) -> Result<Vec<(u32, u8)>> {
     let view = vm.str_view(vm.external_roots[root]).ok_or("string stream no longer exists")?;
     let (bytes, multibyte) = (view.bytes(), view.is_multibyte());
+    // The characters up to the first the string no longer holds (Lisp may
+    // have shortened it): the reader errs only if it reaches that one.
     let mut out = Vec::with_capacity(n);
     while out.len() < n {
-        let rest = bytes.get(byte..).filter(|b| !b.is_empty()).ok_or("string stream changed length")?;
-        let (c, width) = super::parse::string_input_char(rest, multibyte)?;
-        out.push((c, width as u8));
-        byte += width;
+        let decoded = bytes.get(byte..).filter(|b| !b.is_empty()).ok_or_else(|| "string stream changed length".into())
+            .and_then(|rest| super::parse::string_input_char(rest, multibyte));
+        match decoded {
+            Ok((c, width)) => {
+                out.push((c, width_u8(width)));
+                byte += width;
+            }
+            Err(e) if out.is_empty() => return Err(e),
+            Err(_) => break,
+        }
     }
     Ok(out)
 }
@@ -261,9 +252,6 @@ pub(super) fn string_run(vm: &mut Vm, (mut s, (root, mut byte, mut character, en
 }
 /// The next character of the buffer or marker stream rooted at ROOT.
 #[inline]
-pub(super) fn buffer_get(vm: &mut Vm, root: usize) -> Result<Option<u32>> {
-    vm.reader_buffer_get(vm.external_roots[root])
-}
 /// CODE unread to the buffer or marker stream rooted at ROOT.
 pub(super) fn buffer_unget(vm: &mut Vm, (root, code): (usize, u32)) -> Result<()> {
     vm.reader_buffer_unget(vm.external_roots[root], code)

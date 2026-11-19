@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'cl-lib)
 
 ;; The reader takes a buffer's characters ahead in runs, so it must leave
 ;; point, or the marker it reads from, exactly where pinned GNU does: after
@@ -45,5 +46,27 @@ error and where point is after it."
            ;; Pinned GNU's answer.
            '
            (((:ok (a b) 6) (:ok c 8) (:err end-of-file 8)) ((:err end-of-file 5) (:err end-of-file 5) (:err end-of-file 5)) ((:err invalid-read-syntax 2) (:ok x 3) (:err end-of-file 3)) ((:ok abc 4) (:ok d 6) (:err end-of-file 6)) (foo 4 3 bar 8) ((255 97) nil 5) ((:ok 97 26) (:ok z 28) (:err end-of-file 28)) ((:ok a 2) (:ok (b) 5) (:err end-of-file 5)) ((:ok (116 101 120 34 116) 9) (:ok 'q 12) (:ok [v 1] 18)) (((a b) . 5) (def . 7) end-of-file)))))
+
+;; Lisp the reader calls (`char-from-name' for a `\N{NAME}') may change
+;; the stream under the characters read ahead.
+(ert-deftest reader-positions-tests-a-callback-that-edits-the-buffer-is-read-after ()
+  "A `char-from-name' that rewrites the text after `\\N{X}' is read with its
+edit, from the point it saw (pinned GNU: ((xxxx 120 new) 13 18))."
+  (should (equal (with-temp-buffer
+                   (insert "(xxxx ?\\N{X} old)") (goto-char 1)
+                   (let (seen)
+                     (cl-letf (((symbol-function 'char-from-name)
+                                (lambda (&rest _) (setq seen (point))
+                                  (save-excursion (goto-char 13) (delete-char 4) (insert " new")) 120)))
+                       (list (read (current-buffer)) seen (point)))))
+                 '((xxxx 120 new) 13 18))))
+
+(ert-deftest reader-positions-tests-a-shortened-string-reads-to-its-quote ()
+  "Romacs lets a `char-from-name' shorten the string being read (pinned GNU
+refuses the `aset' itself); the read still ends at the closing quote it
+then finds, as it did before characters were read ahead."
+  (let ((s (copy-sequence "\"é\\N{LATIN SMALL LETTER A}x\"")))
+    (cl-letf (((symbol-function 'char-from-name) (lambda (&rest _) (aset s 1 ?e) ?a)))
+      (should (equal (read-from-string s) '("éa" . 27))))))
 
 ;;; reader-positions-tests.el ends here
