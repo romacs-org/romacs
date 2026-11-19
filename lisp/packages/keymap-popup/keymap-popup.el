@@ -1437,7 +1437,7 @@ override also shadows any exit below that prefix."
          (hint (keymap-popup--paging-hint exit))
          (next (and (< (1+ page) pages) (car hint)))
          (previous (and (> page 0) (cadr hint)))
-         (count (and (> pages 1) (propertize (format "%d/%d" (1+ page) pages) 'face 'keymap-popup-inapt)))
+         (count (and (> pages 1) (format "%d/%d" (1+ page) pages)))
          (full (delq nil (list (and exit (concat (make-string (max 0 (- 3 (string-width exit))) ?\s)
                                                  (funcall key exit) "  "
                                                  (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu")))

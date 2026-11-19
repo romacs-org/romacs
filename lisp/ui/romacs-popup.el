@@ -61,10 +61,14 @@ keys' labels in plain weight; dim is for what cannot be used.")
 (defun romacs-popup--key-spec (&rest _)
   "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') moved
 in lightness until it reads on the menu's glass at
-`romacs-popup-key-contrast': a theme whose accent is a mid grey on a
-light card (a monochrome one) still has keys that lead.  Run from
+`romacs-popup-key-contrast'; a theme whose accent is a grey (a
+monochrome one) gives its keys the text's colour instead.  Run from
 `romacs-chrome-faces-functions', once the glow and glass are set."
   (let* ((accent (face-foreground 'romacs-layer-glow nil t))
+         ;; A grey accent (a monochrome theme's) has no hue to set keys
+         ;; apart: they take the text's own colour, which their weight
+         ;; sets apart from labels.
+         (accent (if (romacs-chrome--chromatic accent) accent (face-foreground 'default nil t)))
          (glass (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))
          (legible (and (fboundp 'romacs-color-floor-on) (stringp accent) (stringp glass)
                        (color-defined-p accent) (color-defined-p glass)
