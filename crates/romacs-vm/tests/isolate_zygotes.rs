@@ -553,10 +553,11 @@ fn an_interrupted_job_past_its_budget_gets_the_memory_reply() {
 fn a_child_blocked_in_a_primitive_ends_within_seconds_of_sigterm() {
     let mut vm = vm();
     ready_zygote(&mut vm);
-    // A job blocked in a primitive (the bare VM's `sleep-for' is a plain
-    // sleep): no safepoint sees the termination, and no SIGKILL follows
-    // here. The alarm the handler armed ends it.
-    let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (sleep-for 60))))
+    // A job blocked in a primitive no signal ends (`romacs--test-block',
+    // which polls nothing): no wait hears the termination and no safepoint
+    // sees it, and no SIGKILL follows here. The alarm the handler armed
+    // ends it.
+    let out = eval(&mut vm, "(let* ((f (isolate-spawn '(lambda () (romacs--test-block 10))))
                                     (id (romacs--isolate-id (isolate-future-isolate f)))
                                     (end (+ (float-time) 10)))
                                (while (and (null (romacs--isolate-pid id)) (< (float-time) end)) (romacs--isolate-wait 0.05))
