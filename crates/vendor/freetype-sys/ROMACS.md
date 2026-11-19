@@ -41,6 +41,11 @@ build systems, docs, tests and tools are left out.
   of `FT_PUBLIC_FUNCTION_ATTRIBUTE` is skipped when a build defines it,
   which the item above needs.
 - `Cargo.toml`: the metadata and dependencies the build above uses.
+- `src/lib.rs`: `extern crate libz_sys` no longer waits for the `bundled`
+  feature, which nothing enables now; and the crate expects
+  `unpredictable_function_pointer_comparisons`, which upstream's derives on
+  callback-holding FFI structs raise. As a git dependency its warnings were
+  capped; as a path dependency they printed in every build.
 - `NOTICE` and `install-notices.sh` (ours): the notices the licences ask a
   binary distribution to carry, installed by `tools/package-release` and
   `nix/package.nix`.

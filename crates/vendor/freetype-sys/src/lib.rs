@@ -2,12 +2,15 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![deny(missing_copy_implementations)]
+#![expect(
+    unpredictable_function_pointer_comparisons,
+    reason = "upstream derives PartialEq/Hash on FFI structs holding callbacks; Romacs never compares them (ROMACS.md)"
+)]
 
 use core::ffi::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort, c_void};
 
-// Keep libz-sys in the final native-link graph when bundled libpng refers to
-// zlib symbols only from C object files.
-#[cfg(feature = "bundled")]
+// Keep libz-sys in the final native-link graph: libpng, always built from
+// source here, refers to zlib symbols only from C object files.
 extern crate libz_sys;
 
 mod tt_tables;
