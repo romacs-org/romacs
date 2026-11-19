@@ -119,10 +119,18 @@ fn bucket(bytes: &[u8], size: usize) -> usize {
 
 impl Vm {
     /// The value of `obarray`, the variable: the obarray a nil OBARRAY
-    /// argument means. Its slot is found once (`Vm::obarray_slot`), where
-    /// the slot constructor installs the initial obarray.
-    pub(super) fn initial_obarray(&self) -> Value {
-        self.slots[self.obarray_slot].value
+    /// argument means.
+    pub(super) fn initial_obarray(&mut self) -> Value {
+        let slot = self.obarray_slot();
+        self.slots[slot].value
+    }
+    /// The slot of `obarray`, the variable, found by name once and kept
+    /// (`Vm::obarray_slot`): its first finding interns it, where the slot
+    /// constructor installs the initial obarray, so a VM makes the obarray
+    /// only when something asks for it. Kept, it survives `obarray-clear`.
+    fn obarray_slot(&mut self) -> usize {
+        if self.obarray_slot == usize::MAX { self.obarray_slot = self.slot("obarray"); }
+        self.obarray_slot
     }
     pub(super) fn resolve_obarray(&mut self, mut value: Value) -> std::result::Result<Value, prim::Fault> {
         if value == Value::NIL { value = self.initial_obarray(); }
@@ -195,6 +203,8 @@ impl Vm {
         if Self::image_value(table) { return Err(self.read_only_fault(table)); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         if initial {
+            // Found before the names go, so the variable keeps its obarray.
+            self.obarray_slot();
             let slots: Vec<usize> = self.names.drain().map(|(_, slot)| slot).collect();
             for slot in slots { self.set_initial_obarray(slot, false); }
             return Ok(());
