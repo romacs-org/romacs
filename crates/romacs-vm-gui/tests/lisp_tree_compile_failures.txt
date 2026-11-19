@@ -3,7 +3,8 @@
 # lisp_tree_compiles.rs, which fails on a failure not listed here and on an
 # entry whose file now compiles: a fix deletes its line. An entry is added
 # only by a reviewed change, which shows it with its reason in the diff. A
-# listed file that comes to fail for another reason is not caught.
+# listed file that comes to fail for another reason is not caught, nor is a
+# file turned source-only by a .dir-locals.el outside the tree.
 lisp/emacs-lisp/shortdoc-doc.el: a constant the store's codec cannot serialise: a hash table
 lisp/char-fold.el: a constant the store's codec cannot serialise: a char-table
 lisp/international/titdic-cnv.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
