@@ -241,8 +241,7 @@ started by older builds keep working.
     whole through =agents/output=:
     - ={"seq":N,"oversize":R}= for a record unit;
     - ={"handle":H,"kind":K,"oversize":R}= for a pending request;
-    - ={"id":I,"oversize":R}= for a queue entry, a row or an open item.
-
+    - ={"id":I,"oversize":R}= for a queue entry or an open item;
     - ={"name":N,"oversize":R}= for a catalog entry.
 
     The key fields keep it countable and actionable: a client shows a
@@ -274,10 +273,10 @@ started by older builds keep working.
     whole units and at least one of them, since a unit is at most
     256 KiB, so every continuation (=more=) advances.  A reply that
     doesn't fit carries the first part and =more=;
-  - any notification still over 1 MiB after that is sent as
-    ={"revision","stale":true}= (with =session= for a session's), in
-    its place: the client asks again from the revision it holds, a
-    reply that pages.  So every message has a bounded form.
+  - a list notification still over 1 MiB after that is sent as
+    ={"revision","stale":true}= in its place: the client watches again
+    from the revision it holds, a reply that pages.  A row's strings
+    are cut to 1,024 characters, so a row is a small unit.
 
 ** Handshake and versions
 - *Hello.* =agents/hello= must come first.  Its params:
@@ -380,9 +379,10 @@ JSON-RPC errors with numeric codes and =data.kind=:
   revision.  On a gap it re-opens.
 
 ** The session list
-- *Watch.*  =agents/sessions.watch {since?: REVISION}= answers, in one
-  call, with ={"revision","rows","removed","reset","more"}=:
-  - with no =since= (or one from another generation), every row;
+- *Watch.*  =agents/sessions.watch {since?, generation?}= answers, in
+  one call, with ={"revision","rows","removed","reset","more"}=:
+  - with no =since=, or one whose =generation= is not the service's,
+    every row;
   - with one, the rows changed after it and the ids removed (tombstones,
     kept for the generation).
   A row changes when its session raises an event, when the store's row
@@ -397,7 +397,7 @@ JSON-RPC errors with numeric codes and =data.kind=:
   #+begin_src json
   {"id": "...", "title": "...", "cwd": "...", "project": "...", "parent": null,
    "harness": "claude", "provider": "claude", "model": "...", "effort": null,
-   "state": "starting|running|waiting-approval|idle|detached|ended",
+   "state": "starting|running|waiting-approval|idle|detached|unstarted|ended",
    "key": "working", "pending": 0, "queued": 0,
    "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
    "children": 0}

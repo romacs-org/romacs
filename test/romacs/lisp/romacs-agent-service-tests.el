@@ -135,7 +135,7 @@ and `wait' waiting until its form holds (5 s at most)."
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
     (let ((raw (romacs-agent-service-tests--raw socket)))
-      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/sessions.watch\",\"params\":{}}\n")
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/nothing\",\"params\":{}}\n")
       (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[2,0]}}\n")
       (process-send-string raw "not json\n")
       (should (wait (= (length (process-get raw 'lines)) 3)))
@@ -167,5 +167,54 @@ and `wait' waiting until its form holds (5 s at most)."
         (should-not (romacs-agent-rpc-live-p rpc))
         (should (< sent 64)))
       (delete-process raw))))
+
+(ert-deftest romacs-agent-service-keeps-rows-small ()
+  ;; A title of any length: a row carries its first 1,024 characters.
+  (romacs-agent-service-tests--with
+    (mk "long" 'idle :title (make-string 5000 ?t))
+    (romacs-agent-service-start socket)
+    (let ((row (gethash "long" (romacs-agent-service--list-rows romacs-agent-service--list))))
+      (should (= (length (gethash "title" row)) 1024)))))
+
+(ert-deftest romacs-agent-service-pages-removed-ids-too ()
+  ;; Removed ids are units of a page as rows are: a page holds at least
+  ;; one, never more than its budget, and the rest continue it.
+  (let* ((romacs-agent-service--unit-budget 1)
+         (rpc (romacs-agent-rpc-make nil (romacs-agent-service--peer-make)))
+         (first (romacs-agent-service--paged rpc (list :revision 3 :reset nil :rows nil :removed '("a" "b" "c"))))
+         (second (romacs-agent-service--paged
+                  rpc (cddr (assoc (gethash "more" first) (romacs-agent-service--peer-tokens (romacs-agent-rpc-data rpc)))))))
+    (should (equal (gethash "removed" first) ["a"]))
+    (should (stringp (gethash "more" first)))
+    (should (equal (gethash "removed" second) ["b"]))
+    (should (eq (gethash "reset" second) :false))))
+
+(ert-deftest romacs-agent-service-since-is-of-a-generation ()
+  ;; A revision of another generation reads as none: the whole list.
+  (romacs-agent-service-tests--with
+    (mk "a" 'idle)
+    (romacs-agent-service-start socket)
+    (let ((raw (romacs-agent-service-tests--raw socket)))
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (process-send-string raw (format "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"agents/sessions.watch\",\"params\":{\"since\":1,\"generation\":\"%s\"}}\n"
+                                       romacs-agent-service--generation))
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"agents/sessions.watch\",\"params\":{\"since\":1,\"generation\":\"another\"}}\n")
+      (should (wait (= (length (process-get raw 'lines)) 3)))
+      (pcase-let ((`(,_ ,same ,other) (process-get raw 'lines)))
+        (should (eq (gethash "reset" (gethash "result" same)) :false))
+        (should (equal (gethash "rows" (gethash "result" same)) []))
+        (should (eq (gethash "reset" (gethash "result" other)) t))
+        (should (= (length (gethash "rows" (gethash "result" other))) 1)))
+      (delete-process raw))))
+
+(ert-deftest romacs-agent-service-remakes-a-parent-with-its-child ()
+  ;; A worker's event remakes its parent's row too: its key follows its
+  ;; workers'.
+  (romacs-agent-service-tests--with
+    (mk "lead" 'idle)
+    (mk "kid" 'running :options '(:parent "lead"))
+    (romacs-agent-service-start socket)
+    (should (equal (sort (mapcar #'car (romacs-agent-service--rows-of romacs-agent-service--list '("kid"))) #'string<)
+                   '("kid" "lead")))))
 
 ;;; romacs-agent-service-tests.el ends here

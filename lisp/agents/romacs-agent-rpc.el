@@ -38,11 +38,14 @@ socket still holds part of one (HELD), and what its owner keeps (DATA)."
   (process-live-p (romacs-agent-rpc-process rpc)))
 
 (defun romacs-agent-rpc-lines (rpc chunk)
-  "The whole lines CHUNK completes on RPC, in order; the rest is kept."
+  "The whole lines CHUNK completes on RPC, in order, the rest kept; `over'
+when a line is longer than a message may be, which its peer is closed for."
   (let* ((text (concat (romacs-agent-rpc-partial rpc) chunk))
          (lines (split-string text "\n")))
     (setf (romacs-agent-rpc-partial rpc) (car (last lines)))
-    (delete "" (butlast lines))))
+    (if (cl-some (lambda (line) (> (string-bytes line) romacs-agent-rpc-message-limit)) lines)
+        'over
+      (delete "" (butlast lines)))))
 
 (defun romacs-agent-rpc-parse (line)
   "LINE, UTF-8 bytes as read, as a message (a hash table), or nil when it
@@ -83,7 +86,8 @@ DATA's fields beside the kind."
   "Send MESSAGE (a hash table) on RPC, never waiting: what the socket does
 not take now is queued, behind whatever already is.  A message over the
 limit signals, never sent broken; a connection whose queue is over its
-limit is closed.  Non-nil while RPC is live."
+limit is closed.  The channel itself holds at most the rest of one
+message beside the queue.  Non-nil while RPC is live."
   (let ((line (romacs-agent-rpc-encode message)))
     (when (> (1- (string-bytes line)) romacs-agent-rpc-message-limit)
       (error "Agent protocol message of %d bytes is over the limit" (1- (string-bytes line))))
