@@ -526,7 +526,10 @@ a state root of its own, and a service of its own on `socket'."
         (should (equal after (seq-filter (lambda (unit) (> (car unit) 10)) live)))
         (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
       (let ((romacs-agent-service--catch-up 5))
-        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2))))))))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2)))))
+      ;; A turn starting out of reach: a reset, never a read from mid-turn.
+      (let ((romacs-agent-service--turn-reach 3))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))))))))
 
 (ert-deftest romacs-agent-service-history-stops-at-its-bound ()
   ;; Past its bytes' bound a reply stops, its cursor where; the client asks

@@ -446,11 +446,12 @@ paging ever holds live delivery back.
 - *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
   bounds =after < seq ≤ upto=:
   - without =after=, about the last =turns= prompts (3 by default, 50
-    at most; a steer counts) ending at =upto=, at most 4,000 records;
+    at most; a steer counts) ending at =upto=, fewer when they start
+    further back than 20,000 records;
     =upto= set to just before the first unit goes further back;
-  - with =after=, every record unit in the range.  A range, with the
-    start of the turn it begins in, over 4,000 records answers =reset=:
-    the client draws the session afresh.
+  - with =after=, every record unit in the range.  A range over 4,000
+    records, or one whose turn starts further back than 20,000, answers
+    =reset=: the client draws the session afresh.
 - *Read as live.*  The service replays from the first record of the turn
   the range begins in, so each unit's events are those live delivery
   sent (a message's text never twice), between the editor's other work.
@@ -837,8 +838,10 @@ Once the service runs on its own, an agent's editor tool needs an editor.
   - Attribution is persisted only in the =answer= note, replayed as
     =attributed=; an earlier =romacsAnswer= field beside the response is
     not.
-  - The chat view's history deduplicates by the cursor above (seq, all
-    records of a seq together), the same contract as the protocol's.
+  - The chat view's history deduplicates by the cursor above (a seq is
+    one unit, its first record folded), the same contract as the
+    protocol's, and replays through the same copy
+    (=romacs-agent-replay-copy=).
 
 * Slices
 Each slice is landable on its own:

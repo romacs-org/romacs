@@ -755,8 +755,12 @@ a session not loaded stays so."
 ;;; History
 
 (defconst romacs-agent-service--catch-up 4000
-  "The most records a history replay folds: a read after a place further
-behind, or one whose turn began further back, is `reset'.")
+  "The most records a history read after a place spans: further behind,
+it is `reset'.")
+
+(defconst romacs-agent-service--turn-reach 20000
+  "The most records before a history read's start a turn's start is looked
+for in, and folded from: further back, the read is `reset'.")
 
 (defconst romacs-agent-service--history-bytes (* 8 1024 1024)
   "The most bytes of units one history reply collects: past them, it stops
@@ -781,13 +785,13 @@ meanwhile, or a read after a place would fold too many."
     (unless (romacs-agent-events-p session)
       (romacs-agent-service--fail -32013 "unsupported" "This session's records are in a journal: it has no history served"))
     (let* ((epoch (romacs-agent-events-epoch id))
-           (start (or (car (if after (romacs-agent-events-tail session 1 (+ after 2))
-                             (romacs-agent-events-tail session turns (1+ upto))))
-                      0))
-           ;; A read from the start: no more than the bound, from its end
-           ;; when the turns are longer (nothing drawn before it to repeat).
-           (from (if after start (max start (- upto romacs-agent-service--catch-up)))))
-      (if (and after (> (- upto from) romacs-agent-service--catch-up))
+           (cut (if after (1+ after) upto))
+           ;; A turn's start, looked for within its reach: the replay folds
+           ;; from there, never mid-turn (a message's text would come twice).
+           (begin (max 0 (- cut romacs-agent-service--turn-reach)))
+           (from (and (not (and after (> (- upto after) romacs-agent-service--catch-up)))
+                      (romacs-agent-service--turn-start session (if after 1 turns) (1+ cut) begin))))
+      (if (null from)
           (romacs-agent-service--history-reply rpc session upto epoch nil t)
         (lambda (respond)
           (romacs-agent-service--replay
@@ -799,6 +803,15 @@ meanwhile, or a read after a place would fold too many."
                            rpc session stopped epoch units (not (eql (romacs-agent-events-epoch id) epoch)))
                         (error (list 'error -32603 "internal" (error-message-string err))))))
            (lambda (why) (funcall respond (list 'error -32603 "internal" why)))))))))
+
+(defun romacs-agent-service--turn-start (session turns end begin)
+  "The seq of the start of the turn TURNS prompts back from before seq END,
+looked for from seq BEGIN: the session's start when it begins there;
+fewer turns back when not that many are found, but at least the last;
+nil when no turn starts in reach."
+  (or (car (romacs-agent-events-tail session turns end begin))
+      (and (zerop begin) 0)
+      (and (> turns 1) (car (romacs-agent-events-tail session 1 end begin)))))
 
 (defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
   "A history reply of UNITS (each (SEQ . SENT)) through UPTO under EPOCH, or
