@@ -12,6 +12,7 @@
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent)
   (require 'romacs-agent-ui))
+(require 'romacs-agent-test-attached)
 
 ;; Codex's app-server driver is persistent: a per-turn harness is a test
 ;; harness's.
@@ -60,11 +61,12 @@
                 ((symbol-function 'romacs-agent--harness-free-p) (lambda (_session) t))
                 ((symbol-function 'romacs-agent--input) (lambda (_session text &rest _) (push text sent)))
                 ((symbol-function 'romacs-agent--note) #'ignore))
+        (romacs-agent-test-attach session t)
         (romacs-agent-select session "b" "high")
         (should (= (length written) 2))
         (should (eq (plist-get (romacs-agent-pending-selection session) :state) 'applying))
         (romacs-agent-send session "waits")
-        (romacs-agent--send-next session)
+        (romacs-agent--dispatch session)
         (should-not sent)
         (should (= (romacs-agent-queue-length session) 1))
         (let ((ids (plist-get (romacs-agent-pending-selection session) :waiting)))
@@ -92,7 +94,7 @@
   (dolist (state '(ended detached))
     (romacs-agent-select-tests--with (:state state)
       (let ((resumed nil))
-        (romacs-agent--enqueue session (list "held" nil nil))
+        (romacs-agent--enqueue session (romacs-agent-item "held"))
         (setf (romacs-agent-pending-selection session) (list :state 'restarting :stopped t :model "b"))
         (cl-letf (((symbol-function 'romacs-agent-resume) (lambda (_session) (setq resumed t)))
                   ((symbol-function 'romacs-agent--input) (lambda (&rest _) (error "No harness to take it"))))
@@ -105,6 +107,7 @@
         (let ((sent nil))
           (cl-letf (((symbol-function 'romacs-agent--input) (lambda (_session text &rest _) (push text sent))))
             (setf (romacs-agent-state session) 'starting)
+            (romacs-agent-test-attach session t)
             (romacs-agent--settle session))
           (should-not (romacs-agent-pending-selection session))
           (should (equal (car (last sent)) "held")))))))
@@ -138,7 +141,7 @@
 
 (ert-deftest romacs-agent-select-armed-died-keeps-messages ()
   (romacs-agent-select-tests--with (:state 'ended)
-    (romacs-agent--enqueue session (list "held" nil nil))
+    (romacs-agent--enqueue session (romacs-agent-item "held"))
     (cl-letf (((symbol-function 'romacs-agent--input) (lambda (&rest _) (error "No harness to take it"))))
       (romacs-agent-select session "b" nil))
     (should-not (romacs-agent-pending-selection session))

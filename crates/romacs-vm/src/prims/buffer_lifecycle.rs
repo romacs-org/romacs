@@ -80,9 +80,7 @@ fn lifecycle_lisp(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>) -> Next {
     if cx.fboundp(helper) {
         return Ok(Step::Call { f: helper, args, then: return_result, saved: vec![] });
     }
-    let source = cx.string(include_str!("../../../../lisp/vm/buffer_lifecycle.el"));
-    let parsed = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let form = cx.pair(parsed).expect("reader result").0;
+    let form = super::lisp_half(cx, "vm/buffer_lifecycle.el")?;
     let f = cx.intern("eval");
     let saved = std::iter::once(helper).chain(args).collect();
     Ok(Step::Call { f, args: vec![form, Value::TRUE], then: lifecycle_helper, saved })

@@ -311,9 +311,6 @@ mod leaf {
         pub(crate) fn lossage_limit(&self) -> usize { self.vm.lossage_limit() }
         pub(crate) fn set_lossage_limit(&mut self, limit: usize) { self.vm.set_lossage_limit(limit) }
         pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
-        pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
-            self.symbol_slot(v)
-        }
         /// WRITE from this leaf (`Vm::write_from_native'). A failure comes back
         /// only from a write made at once: with no engine to complete the
         /// leaf, a watcher's signal stays pending as itself and a `throw',
@@ -628,11 +625,24 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            let name = if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) };
-            if let Some(name) = name { return Ok(f(&mut name.chars().map(u32::from))); }
+            if let Some(name) = self.symbol_text(v) { return Ok(f(&mut name.chars().map(u32::from))); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
+        }
+        /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
+        /// its name: the same character count, byte count and bytes, read in
+        /// place, with nothing copied.
+        pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
+            let text = |v| match self.symbol_text(v) {
+                Some(name) => Ok((name.chars().count(), name.as_bytes())),
+                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or(Fault::Wrong("stringp", v)),
+            };
+            Ok(text(v)? == text(w)?)
+        }
+        /// V's name when it is a symbol (`nil' and `t' too), borrowed.
+        fn symbol_text(&self, v: Value) -> Option<&str> {
+            if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
@@ -1106,6 +1116,7 @@ mod leaf {
         pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal_including_properties(a, b)
         }
+        #[inline]
         fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
@@ -1404,17 +1415,19 @@ mod leaf {
         pub fn batch_warning(&self, kind: &str, text: &str) {
             eprintln!("Warning ({kind}): {text}");
         }
+        /// The slot whose function cell symbol V names: `nil` and `t`, which
+        /// are not slot references, by their names, None if not yet made. The
+        /// one lookup for reading and writing a cell and its macro flag.
+        fn cell_slot(&self, v: Value) -> std::result::Result<Option<usize>, Fault> {
+            if v == Value::NIL || v == Value::TRUE {
+                let name = if v == Value::NIL { "nil" } else { "t" };
+                return Ok(self.vm.names.get(name).copied());
+            }
+            self.symbol_slot(v).map(Some)
+        }
         /// The function cell itself; aliases are not followed and void is nil.
         pub fn symbol_function(&self, v: Value) -> std::result::Result<Value, Fault> {
-            let slot = if v == Value::NIL || v == Value::TRUE {
-                let name = if v == Value::NIL { "nil" } else { "t" };
-                let Some(&slot) = self.vm.names.get(name) else {
-                    return Ok(Value::NIL);
-                };
-                slot
-            } else {
-                self.symbol_slot(v)?
-            };
+            let Some(slot) = self.cell_slot(v)? else { return Ok(Value::NIL) };
             let value = self.vm.slots[slot].function;
             Ok(if value == Value::UNBOUND {
                 Value::NIL
@@ -1426,8 +1439,7 @@ mod leaf {
         /// Leaf allocation cannot compact, so RAW stays valid until returned.
         pub fn symbol_definition(&mut self, v: Value) -> std::result::Result<Value, Fault> {
             let raw = self.symbol_function(v)?;
-            if v.index_if(7).and_then(|i| i.checked_sub(1))
-                .is_some_and(|slot| self.vm.macros.contains(&slot)) {
+            if self.cell_slot(v)?.is_some_and(|slot| self.vm.macros.contains(&slot)) {
                 let tag = self.intern("macro");
                 Ok(self.cons(tag, raw))
             } else {
@@ -1447,10 +1459,9 @@ mod leaf {
                     Err(Fault::SettingConstant(v))
                 };
             }
-            let slot = if v == Value::TRUE {
-                self.vm.slot("t")
-            } else {
-                self.symbol_slot(v)?
+            let slot = match self.cell_slot(v)? {
+                Some(slot) => slot,
+                None => self.vm.slot("t"),
             };
             let (definition, is_macro) = if let Some((head, body)) = self.pair(value) {
                 if head == self.intern("macro") {
@@ -1545,7 +1556,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
-            self.vm.permanent_names_added.push(value);
+            self.vm.names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.
@@ -1640,7 +1651,8 @@ mod leaf {
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
                 7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
-                0 if Vm::image_string(v) => Kind::String,
+                // A private object first: an executable-image string is past
+                // the private table, so `object_if' answers None for it.
                 0 => match self.vm.object_if(v) {
                     Some(data::Object::Float(_)) => Kind::Float,
                     Some(data::Object::Bignum(_)) => Kind::Bignum,
@@ -1674,6 +1686,7 @@ mod leaf {
                         crate::treesit::Object::Query(_) => Kind::TreesitQuery,
                         crate::treesit::Object::Task(_) => Kind::Invalid,
                     },
+                    None if Vm::image_string(v) => Kind::String,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -2571,15 +2584,22 @@ impl Vm {
         let c = self.intern(name);
         (c, self.list_value(data))
     }
-    /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
-    /// loops written in Lisp over leaf cursors, so their state is registers.
+    /// Evaluate the VM's own Lisp (`prims::PRELUDES`) as the runtime tree
+    /// holds it: callback loops written in Lisp over leaf cursors, so their
+    /// state is registers, and the Lisp of the process, inotify, isolate and
+    /// window-change primitives. Its definitions stand in for GNU's C, so no
+    /// `load-history` entry names them. A world build records what it read;
+    /// a file that signals, or a process with no runtime tree, gets an error
+    /// naming the file or the reason, and none runs a copy compiled into the
+    /// executable.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
-        self.eval_source_raw(prims::HOOKS_LISP)?;
-        self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
-        self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
-        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
+        let mut value = Value::NIL;
+        for path in prims::PRELUDES {
+            let file = crate::host::runtime_lisp(path)?;
+            let source = crate::host::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            value = self.eval_source_raw(&source).map_err(|e| format!("{}: {e}", file.display()))?;
+        }
+        Ok(value)
     }
 }
 
@@ -2878,14 +2898,13 @@ mod tests {
     }
 
     #[test]
-    fn installed_prelude_is_the_committed_file() {
+    fn installed_prelude_defines_mapcar() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude_raw().unwrap();
         let v = vm
             .eval_source_raw("(mapcar (lambda (x) (* x x)) '(1 2 3))")
             .unwrap();
         assert_eq!(vm.display(v).unwrap(), "(1 4 9)");
-        assert!(prims::PRELUDE.contains("(defun mapcar (function sequence)"));
     }
 
     #[test]

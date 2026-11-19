@@ -31,7 +31,9 @@ The launcher sets it; a VM made by `Vm::new' is bare.")
 
 (defvar isolate-world nil
   "The world this VM restored from, as (STORE . KEY), or nil.
-A worker of a `world' VM adopts exactly this world.")
+A worker of a `world' VM adopts exactly this world.  One that cannot
+refuses it: its jobs settle with `isolate-world-unavailable' and this is
+set to nil, so later workers boot from source.")
 
 (defvar isolate-compiled-store nil
   "The compiled-Lisp store this VM loads from, or nil.
@@ -164,7 +166,6 @@ a hash table of the files `load-history' named.")
 spawner to run on a worker with the features they were queued for.")
 
 (define-error 'isolate-error "Isolate error")
-(define-error 'isolate-world-unavailable "No world for a worker isolate" 'isolate-error)
 (define-error 'isolate-killed "Isolate killed" 'isolate-error)
 (define-error 'isolate-died "Isolate died" 'isolate-error)
 (define-error 'isolate-queue-full "Isolate queue full" 'isolate-error)
@@ -187,8 +188,9 @@ spawner to run on a worker with the features they were queued for.")
 ;; ROLE nil for a worker `isolate-create' made, `pool' for one the pool
 ;; made, `zygote', or `job' for a child forked for one job; ZYGOTE the
 ;; zygote record a `job' child is of.
-(defun romacs--isolate-make (id name require program)
-  (record 'isolate id name 'live require nil nil nil program nil nil nil))
+(defun romacs--isolate-make (id name require program &optional world)
+  "An isolate's record; WORLD is the (STORE . KEY) its worker was told to adopt."
+  (record 'isolate id name 'live require nil nil nil program nil nil nil world))
 (defun isolate-p (object) "Non-nil for an isolate." (eq (type-of object) 'isolate))
 (defun romacs--isolate-id (isolate) (aref isolate 1))
 (defun isolate-name (isolate) "ISOLATE's name, or nil." (aref isolate 2))
@@ -231,8 +233,8 @@ spawner to run on a worker with the features they were queued for.")
 (defun romacs--isolate-boot-arguments ()
   "The worker's boot arguments for this VM's boot: the world it adopts,
 else the chain from source (a VM that booted from source, or whose world
-is gone), else a bare VM.  A worker always starts: one with no world boots
-slower, never refused while its callers wait."
+is gone), else a bare VM.  A worker with no world boots slower; one that
+cannot adopt the world refuses it once (`romacs--isolate-world-refused')."
   (cond ((and (eq isolate-boot 'world) isolate-world)
          (append (list "--world" (car isolate-world) (cdr isolate-world))
                  (and isolate-compiled-store (list "--compiled-store" isolate-compiled-store))))
@@ -273,7 +275,13 @@ and has the features of :require loaded."
                             isolate-worker-arguments))
          (program (or isolate-worker-program (romacs--isolate-executable)))
          (id (romacs--isolate-start program arguments))
-         (isolate (romacs--isolate-make id name require program)))
+         (isolate (romacs--isolate-make id name require program
+                                        ;; A copy: the arguments are what the
+                                        ;; worker was told, whatever later
+                                        ;; becomes of `isolate-world'.
+                                        (and (eq isolate-boot 'world) isolate-world
+                                             (cons (copy-sequence (car isolate-world))
+                                                   (copy-sequence (cdr isolate-world)))))))
     (push isolate romacs--isolates)
     (romacs--isolate-submit isolate 'romacs--isolate-prepare (list (romacs--isolate-seeds) require) nil nil nil)
     isolate))
@@ -787,6 +795,25 @@ have sent), its futures settle, the event is reported, and it is forgotten."
       (unless (or retired (and (eq (aref isolate 10) 'job) (null pending)))
         (run-hook-with-args 'isolate-error-functions isolate event (list data children))))))
 
+(defun romacs--isolate-world-refused (isolate reason)
+  "ISOLATE's worker could not adopt the world it was told to, for REASON.
+It is ended; its jobs settle with `isolate-world-unavailable', whose data
+is REASON and that world; and the world is forgotten when `isolate-world'
+still names it, so later workers boot from source
+\(`romacs--isolate-boot-arguments'), none of them refused again."
+  (let ((id (romacs--isolate-id isolate))
+        (world (aref isolate 12)))
+    (when (equal isolate-world world) (setq isolate-world nil))
+    (romacs--isolate-signal id 9)
+    (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
+    ;; Out of the dispatch before its futures' callbacks run: the death
+    ;; the reap queued is not reported as well; and closed whatever a
+    ;; callback signals, since no later dispatch will see it.
+    (setq romacs--isolates (delq isolate romacs--isolates))
+    (unwind-protect
+        (romacs--isolate-dead isolate 'isolate-world-unavailable (list reason world))
+      (romacs--isolate-close id))))
+
 (defun romacs--isolate-memory-error (budget)
   "A job's reply when its child ended for growing past BUDGET bytes."
   (list 'isolate-memory-exhausted (list budget) nil
@@ -807,10 +834,13 @@ have sent), its futures settle, the event is reported, and it is forgotten."
           (cond
            ((eq kind 'hello)
             (aset isolate 9 t)
-            (unless (romacs--isolate-hello-ok-p value (aref isolate 8))
+            (cond
+             ((not (romacs--isolate-hello-ok-p value (aref isolate 8)))
               (romacs--isolate-signal id 9)
               (while (null (romacs--isolate-reap id)) (romacs--isolate-wait 0.01))
-              (romacs--isolate-dead isolate 'isolate-refused (list "worker is not this executable" value))))
+              (romacs--isolate-dead isolate 'isolate-refused (list "worker is not this executable" value)))
+             ((romacs--isolate-hello-refusal value)
+              (romacs--isolate-world-refused isolate (romacs--isolate-hello-refusal value)))))
            ((memq kind '(result error))
             ;; A forked child exits after its one job: its end is no news.
             (when (eq (aref isolate 10) 'job) (aset isolate 3 'retired))

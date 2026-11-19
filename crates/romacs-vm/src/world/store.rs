@@ -533,7 +533,7 @@ impl World {
         let (world, image) = World::read_only(store, recipe, false)?;
         match arena::adopt(&image) {
             arena::Restore::Mapped => image::restore::<T>(&world.key).map(|(vm, carry)| (world, Box::new(vm), carry))
-                .ok_or_else(|| json!({"image": "made for another key"})),
+                .map_err(|reason| json!({"image": reason})),
             failed => Err(arena_reason(failed)),
         }
     }
@@ -633,11 +633,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Launch::Restored { vm: Box::new(vm), carry, manifest }
                 }
-                None => Launch::Chain { reason: json!({"image": "made for another key"}) },
+                Err(reason) => Launch::Chain { reason: json!({"image": reason}) },
             },
             failed => Launch::Chain { reason: arena_reason(failed) },
         }
@@ -730,11 +730,11 @@ impl World {
         let _store = self.store_lock(host::Flock::Shared);
         match arena::adopt(&image) {
             arena::Restore::Mapped => match image::restore::<T>(&self.key) {
-                Some((vm, carry)) => {
+                Ok((vm, carry)) => {
                     self.mark_use();
                     Ok((Box::new(vm), carry))
                 }
-                None => Err(json!({"image": "made for another key"})),
+                Err(reason) => Err(json!({"image": reason})),
             },
             failed => Err(json!({"image": format!("{failed:?}")})),
         }
@@ -1076,10 +1076,8 @@ impl World {
         let mut manifest = self.manifest(trace, trace["uncaptured"].clone(), events);
         vm.world_lift();
         vm.world_normalize();
+        // Dense, as `image::capture` requires.
         vm.collect_compacting();
-        if vm.conses.unused() + vm.closures.unused() + vm.cells.unused() + vm.objects.unused() != 0 {
-            return Err("world image: the tables did not compact".into());
-        }
         let (temporary, file) = self.temporary(".rwi").map_err(|e| e.to_string())?;
         let placed = image::capture(vm, carry, &file, self.key).and_then(|len| {
             file.sync_all().map_err(|e| e.to_string())?;

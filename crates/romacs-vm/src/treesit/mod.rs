@@ -7,6 +7,7 @@
 //! 1-based ones; `TextBody` offsets are 0-based.
 pub(crate) mod ahead;
 pub(crate) mod native;
+pub(crate) mod query_memo;
 
 use crate::text::{FrozenText, TextBody};
 use std::sync::OnceLock;
@@ -489,9 +490,13 @@ pub(crate) struct Query {
 }
 
 /// A compiled query and each pattern's predicates
-/// (`treesit_predicates_for_pattern`).
+/// (`treesit_predicates_for_pattern`). Immutable once made, and shared by
+/// every query object compiled from the same text for the same grammar
+/// (`query_memo`).
 pub(crate) struct Compiled {
-    pub query: Rc<native::Query>,
+    pub query: native::Query,
+    /// The text compiled: a sexp's expansion, or the string.
+    pub text: Box<[u8]>,
     pub predicates: Vec<Vec<Predicate>>,
 }
 
@@ -508,7 +513,7 @@ pub(crate) enum Arg {
 }
 
 impl Compiled {
-    pub(crate) fn new(query: Rc<native::Query>) -> Self {
+    pub(crate) fn new(query: native::Query, text: &[u8]) -> Self {
         let predicates = (0..query.pattern_count()).map(|p| {
             let mut out = Vec::new();
             let mut current: Vec<Arg> = Vec::new();
@@ -530,7 +535,7 @@ impl Compiled {
             }
             out
         }).collect();
-        Self { query, predicates }
+        Self { query, text: text.into(), predicates }
     }
 }
 

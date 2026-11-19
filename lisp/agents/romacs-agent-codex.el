@@ -668,6 +668,8 @@ thread: its rollout, wherever its day put it."
   :argv #'romacs-agent--codex-argv
   :next #'romacs-agent--codex-next
   :input #'romacs-agent--codex-input
+  ;; A message steers the turn once Codex has named it, else waits for its end.
+  :steerable (lambda (session) (plist-get (romacs-agent-driver-state session) :turn))
   :interrupt #'romacs-agent--codex-interrupt
   :respond #'romacs-agent--codex-respond
   :events #'romacs-agent--codex-events

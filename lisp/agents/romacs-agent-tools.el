@@ -683,27 +683,27 @@ turn's end wakes it then.  Ends of \"all\" tasks wait for the last of them."
          (lambda () (cl-some (lambda (item) (romacs-agent-tools--wanted-p (car item) (cadr item))) ready))
          ;; Each is a message from another session: the chat reads these.
          (append (mapcar (lambda (item) (romacs-agent-tools--wake-message (car item) (cdr item))) ready)
-                 (mapcar (lambda (copy) (romacs-agent-tools--copy-message (car copy) (cdr copy))) copies)))))))
+                 (mapcar (lambda (copy) (romacs-agent-tools--copy-message (car copy) (cdr copy))) copies))
+         ;; A turn of its own, after the one running.
+         'next)))))
 
-(defun romacs-agent-tools--deliver (session text delivered &optional valid messages)
-  "Give SESSION's harness TEXT as its next message, then call DELIVERED.
+(defun romacs-agent-tools--deliver (session text delivered &optional valid messages kind)
+  "Give SESSION's harness TEXT as its next message, then call DELIVERED;
+KIND as `romacs-agent-item' says (`now' by default: into a turn running).
 A per-turn harness takes it as its next turn (queued behind a running
 one); another once its supervisor is attached.  VALID, when given, is
 asked first: nil drops the message.  MESSAGES say whose it is
 \(`romacs-agent--input')."
-  (let ((deliver (lambda () (when (or (null valid) (funcall valid))
-                              (romacs-agent-send session text delivered valid nil messages)))))
-    (cond
-     ;; A worker folds it still: delivered once it is folded, its attach's
-     ;; wait counted from then.
-     ((romacs-agent--folding-p session)
-      (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages))))
-     ((romacs-agent--per-turn-p session) (funcall deliver))
-     (t
-      ;; A parent whose harness was stopped or ended is resumed to take it.
-      (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
-        (romacs-agent--continue session))
-      (romacs-agent--when-attached session deliver)))))
+  (if (romacs-agent--folding-p session)
+      ;; Whether it runs is known once a worker has folded it.
+      (romacs-agent--when-folded session (lambda () (romacs-agent-tools--deliver session text delivered valid messages kind)))
+    ;; A parent whose harness was stopped or ended is resumed to take it.
+    (unless (or (process-live-p (romacs-agent-connection session)) (eq (romacs-agent-state session) 'starting))
+      (romacs-agent--continue session))
+    ;; No sender keeps it: kept for the resume, should it be refused.
+    (romacs-agent--admit session (romacs-agent-item text :messages messages :delivered delivered :valid valid
+                                                    :kind (or kind 'now))
+                         nil t)))
 
 (defvar romacs-agent-tools--scheduled (make-hash-table :test #'equal)
   "Children whose wake is scheduled.")
@@ -1541,8 +1541,8 @@ once its running turn ends (`romacs-agent-renew-soon')."
 (defun romacs-agent-tools--cancel (arguments)
   (romacs-mcp--instance arguments)
   (let ((child (romacs-agent-tools--known arguments)))
-    (setf (romacs-agent-cancelled child) t (romacs-agent-queue child) nil
-          (romacs-agent-queue-tail child) nil (romacs-agent-queue-length child) 0)
+    (setf (romacs-agent-cancelled child) t)
+    (romacs-agent--clear-queue child)
     ;; A restarted server knows it was cancelled.
     (with-temp-file (expand-file-name "cancelled" (romacs-agent-dir child)))
     ;; An idle one has no end of a run to tell its views.

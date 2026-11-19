@@ -2167,6 +2167,24 @@ def rpc(args, base):
         run2 = [e for e in rpcs() if e.get('rpc') in ('initialize', 'session/new', 'session/load', 'session/prompt')][len(run1):]
         manifest = json.loads((a.home / '.local/state/romacs/agents' / sid / 'manifest.json').read_text())
 
+        # romacs#287: a message queued behind a turn (one waiting for an
+        # approval) outlives a server restart, and goes after that turn.
+        a.send(sid, 'ask pwd')
+        until(lambda: a.state(sid) == 'waiting-approval', 30, 'kept: approval asked')
+        a.eval(f'(romacs-agent-send-later {a.s(sid)} "say kept")')
+        a.client('--stop=none')
+        until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'kept: server gone')
+        a.restart()
+        # Loaded by the restore, not by asking for it.
+        until(lambda: a.eval(f'(and (romacs-agent-loaded {lisp_text(sid)}) t)') == 't', 15, 'kept: restored')
+        until(lambda: a.state(sid) == 'waiting-approval', 30, 'kept: approval still asked')
+        kept_queue = a.eval(f'(mapcar (quote car) (romacs-agent-queue {a.s(sid)}))')
+        a.eval(f'(romacs-agent-respond {a.s(sid)} (car (hash-table-keys (romacs-agent-approvals {a.s(sid)}))) t)')
+        # Its reply, a line of its own (its prompt reads "say kept").
+        until(lambda: 'kept' in [l.strip() for l in a.chat(sid).split('permission allow', 1)[-1].splitlines()],
+              30, 'kept: answered after the restart')
+        a.idle(sid)
+
         # Its chat drawn again (the journal replayed into a copy): nothing
         # is written to the harness.
         written = len(rpcs())
@@ -2188,10 +2206,12 @@ def rpc(args, base):
         until(lambda: not Path(f'/proc/{a.pid}').exists(), 15, 'server gone')
         a.restart()
         until(lambda: a.eval(f'(and {a.s(sid)} t)') == 't', 15, 'restored')
+        # Counted before the message is sent: the fake answers within a
+        # millisecond of its gate, before a count read after.
+        before = done(sid)
         held_state = a.eval(f'(progn (romacs-agent-send {a.s(sid)} "say held") '
                             f'(list (romacs-agent-queue-length {a.s(sid)}) (romacs-agent--ready-p {a.s(sid)})))')
         held_gate.touch()
-        before = done(sid)
         a.until(sid, lambda: done(sid) > before, 30, 'held message answered')
         slow_pid = next(e['pid'] for e in rpcs() if e.get('rpc') == 'initialize' and e['pid'] not in seen_pids)
         slow_run = [(e.get('rpc'), e.get('session')) for e in rpcs() if e.get('pid') == slow_pid and 'rpc' in e]
@@ -2237,7 +2257,7 @@ def rpc(args, base):
         result = {'run1': methods(run1), 'run2': methods(run2), 'native': native, 'manifest_native': manifest.get('harnessSession'),
                   'held_state': held_state, 'slow_run': slow_run, 'fresh_run': fresh_run,
                   'redraw_writes': redraw_writes, 'items': items, 'view': view, 'imported': imported,
-                  'loads': loads, 'ids': ids}
+                  'loads': loads, 'ids': ids, 'kept_queue': kept_queue}
         result['ok'] = (methods(run1) == ['initialize', 'session/new', 'session/prompt', 'session/prompt', 'session/prompt']
                         and methods(run2) == ['initialize', 'session/load', 'session/prompt']
                         and run2[1].get('session') == native and native.startswith('rpc-')
@@ -2247,6 +2267,7 @@ def rpc(args, base):
                         and [m for m, _ in slow_run] == ['initialize', 'session/load', 'session/prompt']
                         and slow_run[1][1] == native and slow_run[2][1] == native
                         and held_state == '(1 nil)'
+                        and kept_queue == '("say kept")'
                         and fresh_run == ['initialize', 'session/new', 'session/prompt']
                         and sorted(i[1] for i in items if i[0] == 'rpc-same') == ['fakerpc', 'fakerpc2']
                         and ['rpc-fixture', 'fakerpc', 'say from the fixture'] in items
@@ -3599,11 +3620,67 @@ def history_real(args, base):
         a.close()
 
 
+def live_rows(args, base):
+    """What a lead's delegates do now, above its composer: a row for each
+    one that works, its title, its turn's clock and what it does (the call
+    it started, or that it needs approval), with the lead idle; the clocks
+    move with no event from anyone; frames a second apart are kept."""
+    a = Agents(args, base, 'lr')
+    try:
+        a.up()
+        a.work.mkdir(parents=True, exist_ok=True)
+        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
+        parent = a.start('say ready')
+        a.idle(parent)
+
+        def delegate(task, title):
+            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
+                {'task': task, 'title': title, 'target': {'provider': 'claude'}, 'clientRequestId': title}))
+            a.idle(parent, 60)
+            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
+            return record['taskId']
+
+        # One runs a long call (its harness's own subagent), one asks.
+        held = delegate('agent 300 read the code', 'held call')
+        asking = delegate('ask true', 'asks approval')
+        until(lambda: a.state(asking) == 'waiting-approval', 30, 'child waiting')
+        until(lambda: a.state(held) == 'running', 30, 'child running')
+        a.idle(parent, 60)
+
+        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.keyboard_ready()
+
+        def rows():
+            return parity_live.read_sexp(a.eval(
+                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
+                '(substring-no-properties (or (overlay-get romacs-agent-ui--composer (quote before-string)) "")))')) or ''
+
+        until(lambda: 'held call' in rows() and 'asks approval' in rows(), 20, 'rows above the composer')
+        result = {'rows': rows(), 'frames': []}
+        for i in range(4):
+            path = base / f'live-rows-{i}.png'
+            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
+            result['frames'].append(str(path))
+            time.sleep(1)
+        result['rows_later'] = rows()
+        held_row = lambda text: next((line for line in text.splitlines() if 'held call' in line), '')
+        clock = lambda text: (lambda m: int(m.group(1)) if m else None)(re.search(r'held call  (\d+)s · ', held_row(text)))
+        result['clocks'] = [clock(result['rows']), clock(result['rows_later'])]
+        result['lead_state'] = a.state(parent)
+        result['ok'] = (None not in result['clocks'] and result['clocks'][1] > result['clocks'][0]
+                        and result['lead_state'] == 'idle' and 'thinking' not in held_row(result['rows'])
+                        and '◆ asks approval' in result['rows'] and 'needs approval' in result['rows']
+                        )
+        return result
+    finally:
+        a.close()
+
+
 WORKFLOWS = {'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 
