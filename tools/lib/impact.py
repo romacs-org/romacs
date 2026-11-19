@@ -82,7 +82,9 @@ CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test
 # 2 to 19 minutes cold, and cold for every new build) for the compiler and the
 # Lisp a file's compile walks it with: romacs-compile.el, and the macro
 # expansion and closure conversion it calls (macroexp, byte-run, bytecomp,
-# cconv). A Lisp file that comes to fail to compile is caught by the full gate.
+# cconv). A Lisp file that comes to fail to compile, and a change to the
+# compile pipeline outside these paths (world/, batch.rs), are caught by the
+# full gate the nightly runs.
 PATH_GATED = {
     'romacs-vm-gui::lisp_tree_compiles': re.compile(
         r'^(?:crates/romacs-vm/src/compiled_lisp/'
