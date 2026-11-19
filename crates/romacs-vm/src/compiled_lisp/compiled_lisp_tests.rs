@@ -361,7 +361,14 @@ fn a_tree_decides_held_artifacts_itself() {
     };
     let published = publish("b");
     assert_eq!(held(&load_path), Some(published.clone()), "held on the load-path it was compiled on");
-    assert_eq!(held(&[store.join("elsewhere").to_string_lossy().into_owned()]), None, "B resolves elsewhere");
+    assert_eq!(held(&[store.join("elsewhere").to_string_lossy().into_owned()]), None, "B resolves nowhere");
+    // A second b.el in a directory searched first shadows the one A was
+    // compiled against: the tree's process leaves A to a compile process.
+    let first = store.join("first");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::write(first.join("b.el"), "(provide 'b)\n").unwrap();
+    assert_eq!(held(&[first.to_string_lossy().into_owned(), load_path[0].clone()]), None, "B is shadowed");
+    assert_eq!(held(&load_path), Some(published.clone()), "and holds again where it was resolved");
     std::fs::remove_file(&published).unwrap();
     publish("~/b");
     assert_eq!(held(&load_path), None, "a name under ~ is the compile process's to resolve");

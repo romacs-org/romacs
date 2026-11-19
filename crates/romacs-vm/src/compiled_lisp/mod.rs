@@ -477,6 +477,11 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// The `load-path' a compile process searches, as its compiles record
     /// library resolutions on it: what a tree's compile (`tree`) checks the
     /// artifacts it finds against.
+    ///
+    /// # Errors
+    ///
+    /// When `load-path` is not a list of strings and nils, or expanding a
+    /// relative entry against `default-directory` signals.
     pub fn compile_load_path(&mut self) -> Result<Vec<String>> {
         self.load_path_roots()
     }
