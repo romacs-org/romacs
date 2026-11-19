@@ -236,12 +236,11 @@ started by older builds keep working.
     by its JSON Pointer under its event's =truncated=
     (={"/output": BYTES}=), as long as it was.  A record unit still over,
     or not encodable, is sent as ={"events": [], "oversize": true}=, its
-    cursor kept.  A pending request, a queue entry and a catalog entry
+    seq kept.  A pending request, a queue entry and a catalog entry
     are cut alike, their key fields never; one still over is sent as
     its key fields and ="oversize": true=: a request keeps its handle,
-    kind, choices, and each question's id, =select=, =free_text=, text
-    and option ids and labels cut to 64 bytes, at most 64 questions of
-    64 options, so it is answered still.  A row's strings
+    kind and choices, and is answered by its decision; a question that
+    needs its options is answered on the agent's host.  A row's strings
     are cut to 1,024 characters.  Nothing is fetched whole: a chat needs
     no more of an output, and the files an agent writes are on its host;
   - an editor tool's result is bounded where it is made: each editor tool
@@ -337,8 +336,9 @@ JSON-RPC errors with numeric codes and =data.kind=:
 - *Epochs are read where history is.*  An open and each page carry the
   cursor with its epoch and adapter; a page of another than the open's
   makes the client discard its history and open again.  A live event
-  carries its seq alone: a record past the open's cursor, which no
-  compaction or flip touches.
+  carries its seq alone.  Records a client was sent live can still be
+  compacted once the harness stops; its next history read sees the
+  epoch move.
 - *A client's resume cursor* is the end of what it holds without a gap:
   the highest seq below which it holds every record unit.  Live events
   past a gap it is still pulling never advance it, so a second

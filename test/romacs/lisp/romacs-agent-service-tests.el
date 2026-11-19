@@ -367,7 +367,7 @@ and `wait' waiting until its form holds (5 s at most)."
 (ert-deftest romacs-agent-service-tells-a-gap-it-never-sent ()
   ;; A session loaded past a subscription's cutoff with no events (a
   ;; worker's fold): told at once as a gap, its bounds the records never
-  ;; sent live, its epoch read again; then live units follow it.
+  ;; sent live; then live units follow it.
   (romacs-agent-service-tests--with
     (let ((busy (mk "busy" 'running :seq 9)))
       (romacs-agent-service-start socket)
