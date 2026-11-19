@@ -717,7 +717,8 @@ paging ever holds live delivery back.
 - *Slice 1 adds* =tool-output {id text}= (streamed command output),
   =approval=, =answered= and =attributed= (keyed by service handles).
   A tool's output is its completed item's, as its harness caps it:
-  streamed output is live, and compaction removes it.
+  streamed output is live only; compaction removes it once the item
+  completes.
 
 * The relay: =romacs-relay=
 A small Rust binary in a new crate, =crates/romacs-relay=, built on

@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 (defconst romacs-agent-wire-events
   '((input text images steer own messages request)
