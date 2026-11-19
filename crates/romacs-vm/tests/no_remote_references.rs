@@ -102,7 +102,9 @@ const FIELDS: &[(&str, Class)] = &[
     // (frozen.rs), so no store.
     ("regions", Rescanned),
     ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("keeper", Free), ("inotify", Free),
-    ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
+    ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("permanent_local_slot", Free),
+    ("permanent_local_hook_slot", Free), ("change_major_mode_hook_slot", Free),
+    ("defun_start_epoch", Free),
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
     ("forwarded", Root),
