@@ -314,12 +314,13 @@ moment more under load."
 
 (ert-deftest romacs-agent-events-compaction-drops-a-codex-commands-streamed-output ()
   ;; A Codex command whose completed item came: its streamed output is gone
-  ;; (the item holds it); one never completed keeps its own.  Its three
-  ;; deltas fill a batch of three: removed in one transaction.
+  ;; (the item holds it); one never completed keeps its own.  The item
+  ;; holds all of it, so its deltas may go a part at a time: three, in
+  ;; batches of two.
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
   (let ((romacs-agent-store--db nil) (romacs-agent-events--made nil)
         (romacs-agent-events--imported (make-hash-table :test #'equal))
-        (romacs-agent-events--compact-window 3))
+        (romacs-agent-events--compact-window 2))
     (romacs-agent-events-tests--with-session
      0
      (lambda (session journal)
@@ -338,9 +339,8 @@ moment more under load."
        (let ((epoch (romacs-agent-events-epoch (romacs-agent-id session))))
          (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))
-         ;; c1's three deltas went in one transaction: never a message's
-         ;; deltas in part.
-         (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (1+ epoch)))
+         ;; Two transactions, each raising the epoch.
+         (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (+ 2 epoch)))
          ;; A store no writer of this build has opened has no epochs: 0,
          ;; read as an editor reads it.
          (sqlite-execute (romacs-agent-events--db) "drop table epochs")
@@ -352,10 +352,13 @@ moment more under load."
 
 (ert-deftest romacs-agent-events-compaction-batches-whole-messages ()
   ;; Whole messages a batch, in the order they began, up to the window;
-  ;; one larger than it (e) kept whole.
+  ;; one larger than it (e) kept whole; a delta of no message (a command's
+  ;; output) alone, filling batches as they go.
   (should (equal (romacs-agent-events--compact-batches
-                  '((5 "b") (1 "a") (2 "a") (6 "b") (7 "c") (8 "c") (9 "c") (10 "d") (11 "e") (12 "e") (13 "e") (14 "e")) 3)
-                 '((1 2) (5 6) (7 8 9) (10)))))
+                  '((5 "b") (1 "a") (2 "a") (6 "b") (7 "c") (8 "c") (9 "c") (10 "d") (11 "e") (12 "e") (13 "e") (14 "e")
+                    (15 nil) (16 nil) (17 nil) (18 nil))
+                  3)
+                 '((1 2) (5 6) (7 8 9) (10 15 16) (17 18)))))
 
 (ert-deftest romacs-agent-events-compaction-changes-what-follows-a-seq ()
   ;; Why compacting raises the epoch: a reader that holds a streamed

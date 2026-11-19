@@ -584,12 +584,17 @@ when SESSION is imported."
 (defconst romacs-agent-events--delta-ids
   '(("json_extract(record, '$.out.type') = 'stream_event'
       and json_extract(record, '$.out.event.type') = 'content_block_delta'"
-     . "json_extract(record, '$.out.api_message_id')")
-    ("json_extract(record, '$.out.method') in ('item/agentMessage/delta', 'item/commandExecution/outputDelta',
-                                               'item/fileChange/outputDelta')"
-     . "json_extract(record, '$.out.params.itemId')"))
-  "Each kind of delta compaction removes, as (WHERE . ID): what an `out'
-record of that kind is, and the message it is of.")
+     "json_extract(record, '$.out.api_message_id')" whole)
+    ("json_extract(record, '$.out.method') = 'item/agentMessage/delta'"
+     "json_extract(record, '$.out.params.itemId')" whole)
+    ("json_extract(record, '$.out.method') in ('item/commandExecution/outputDelta', 'item/fileChange/outputDelta')"
+     "json_extract(record, '$.out.params.itemId')" nil))
+  "Each kind of delta compaction removes, as (WHERE ID WHOLE): what an
+`out' record of that kind is, the message it is of, and whether its
+message's deltas go only all together.  A message's whole record raises
+no text while any of its deltas remain (its driver saw it streamed), so
+a message's deltas go together or not at all; a command's completed item
+holds all its output whatever its deltas, which may go a part at a time.")
 
 (defconst romacs-agent-events--compact-statements
   `("create temp table if not exists whole (id text primary key, seq integer) without rowid"
@@ -610,13 +615,15 @@ record of that kind is, and the message it is of.")
     ,(mapconcat (lambda (kind)
                   (format "select seq, %s from events where session = ?1 and kind = 'out' and seq < ?2 and %s
                              and seq < (select seq from temp.whole where id = %s)"
-                          (cdr kind) (car kind) (replace-regexp-in-string "record" "events.record" (cdr kind))))
+                          (if (nth 2 kind) (nth 1 kind) "null") (car kind)
+                          (replace-regexp-in-string "record" "events.record" (nth 1 kind))))
                 romacs-agent-events--delta-ids " union all "))
   "What compacting a session removes, its records before seq ?2: the
 deltas of each message whose whole message came after them, and the
 streamed output of each Codex command or file change whose completed item
 came after it (that item holds the output a chat shows).  The last
-statement reads them, as (SEQ MESSAGE).")
+statement reads them, as (SEQ MESSAGE), MESSAGE nil for a delta that
+may go alone (`romacs-agent-events--delta-ids').")
 
 (defconst romacs-agent-events--vacuum-limit (* 64 1024 1024)
   "The largest database made to give back its freed pages by itself: making
@@ -640,12 +647,14 @@ deltas go together or not at all.")
 
 (defun romacs-agent-events--compact-batches (deltas window)
   "DELTAS, as (SEQ MESSAGE), as the seqs of each transaction that removes
-them: whole messages, in the order their deltas began, up to WINDOW
-seqs a batch.  A message with more is left out: kept whole."
+them, up to WINDOW seqs a batch: a MESSAGE's whole, in the order its
+deltas began, and a delta of none (nil) alone.  A message with more
+than WINDOW is left out: kept whole."
   (let ((messages (make-hash-table :test #'equal)) (order nil) (batches nil) (batch nil))
     (pcase-dolist (`(,seq ,message) (sort deltas (lambda (a b) (< (car a) (car b)))))
-      (unless (gethash message messages) (push message order))
-      (push seq (gethash message messages)))
+      (let ((key (or message (list seq))))
+        (unless (gethash key messages) (push key order))
+        (push seq (gethash key messages))))
     (dolist (message (nreverse order))
       (let ((seqs (reverse (gethash message messages))))
         (when (<= (length seqs) window)
