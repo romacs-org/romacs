@@ -2178,9 +2178,10 @@ impl Vm {
         self.initialize_c_special(name, i);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
-        if name == "obarray" {
-            // The variable's own slot, as GNU's `Vobarray' is its symbol's:
-            // an uninterned `obarray' keeps meaning the default table.
+        // The first `obarray' is the variable, its slot kept as GNU's
+        // `Vobarray' is its symbol's; one interned after it was uninterned
+        // is a plain symbol, as in GNU.
+        if name == "obarray" && self.obarray_slot == usize::MAX {
             self.obarray_slot = i;
             self.slots[i].value = self.allocate_object(data::Object::Obarray(Box::new(obarray::Obarray::new(3, true))));
             self.specials.insert(name.to_owned());
