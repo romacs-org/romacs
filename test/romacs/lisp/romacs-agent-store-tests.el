@@ -92,9 +92,25 @@ journal one turn long."
       (puthash (romacs-agent-id session) session romacs-agent--sessions)
       (romacs-agent--keep session 'idle)
       (setf (romacs-agent-title session) "renamed")
-      (romacs-agent--update-manifest session)
-      (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, cwd from sessions")
-                     '(("renamed" "idle" "/p/two/")))))))
+      (let ((events nil) (romacs-agent-event-functions nil))
+        (add-hook 'romacs-agent-event-functions (lambda (_s e) (push (plist-get e :type) events)))
+        (romacs-agent--update-manifest session)
+        (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, cwd from sessions")
+                       '(("renamed" "idle" "/p/two/"))))
+        ;; Its views told once it is written, to read the row again.
+        (should (memq 'changed events)))
+      ;; Queued, not written yet: its views are told only once it is; a
+      ;; write that failed is tried once more.
+      (let ((done nil) (told 0) (idle nil))
+        (cl-letf (((symbol-function 'romacs-agent-write) (lambda (_f _a d _k) (setq done d) 'queued))
+                  ((symbol-function 'run-with-idle-timer) (lambda (&rest args) (push args idle))))
+          (romacs-agent-store-title (romacs-agent-id session) "later" (lambda () (cl-incf told)))
+          (should (= told 0))
+          (funcall done '(error (sqlite-locked-error "locked")))
+          (should (= told 0))
+          (should (= (length idle) 1))
+          (funcall done '(ok t))
+          (should (= told 1)))))))
 
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()
   ;; Restored: a listed session with no kept state and no supervisor is
