@@ -2943,23 +2943,27 @@ def chat_log(args, base):
         text = a.chat(sid)
 
         # A Codex session: a command's output shows as it runs.
-        codex = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)} nil "codex"))) (romacs-agent-show session) '
+        codex = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)} nil nil "codex"))) (romacs-agent-show session) '
                        '(delete-other-windows) (romacs-agent-id session))').strip('"')
         a.eval(f'(progn (romacs-agent-send {a.s(codex)} {lisp_text(CODEX_PROMPT)}) t)')
         try:
             a.until(codex, lambda: a.eval(f'(with-current-buffer (romacs-agent-log-chat {a.s(codex)}) (and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t))') == 't',
                     300, 'a Codex command drawn')
-            # Its output shows while it runs, then whole once it ends.
-            chat = f'(romacs-agent-log-chat {a.s(codex)})'
+            # Its output shows under its call while it runs, then whole once
+            # it ends: the text from the command's row to the separator.
+            def command_block():
+                text = a.chat(codex)
+                row = text.rfind('● $ for i')
+                return text[row:] if row >= 0 else ''
             a.until(codex, lambda: a.state(codex) == 'running'
-                    and a.eval(f'(with-current-buffer {chat} (and (string-match-p "so far" (buffer-string)) t))') == 't',
+                    and re.search(r'⋮ \d+ lines? so far\n\s+line \d+', command_block()) is not None,
                     120, 'Codex output while it runs')
             at_end()
             shot('codex-running')
             a.idle(codex, 300)
             at_end()
             shot('codex-done')
-            result['codex'] = 'line 40' in a.chat(codex) or 'line 3' in a.chat(codex)
+            result['codex'] = re.search(r'⎿ line 1\n\s+line 2', command_block()) is not None
         except RuntimeError as error:
             result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
@@ -3321,6 +3325,10 @@ def children(args, base):
     RET one chosen from the list of them; opening a failure takes it out
     of the count."""
     a = Agents(args, base, 'ch')
+    def old_chat(sid):
+        """The old chat's text, read with no view selected."""
+        return parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(sid)})) '
+                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
     try:
         a.up()
         a.work.mkdir(parents=True, exist_ok=True)
@@ -3420,7 +3428,7 @@ def children(args, base):
 
         # The harness's own subagent: counted while it runs; its row goes to its card.
         a.send(parent, 'agent 6 read the code')
-        until(lambda: 'read the code' in a.chat(parent), 15, 'subagent card')
+        until(lambda: 'read the code' in old_chat(parent), 15, 'subagent card')
         # The harness's own subagent counts apart from the delegated threads.
         until(lambda: '1 working' in header(), 15, 'subagent counted')
         result['header_subagent'] = header()

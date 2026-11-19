@@ -292,5 +292,45 @@
     (romacs-agent-log-history-next)
     (should (equal (romacs-agent-log--draft) "my draft"))))
 
+;; Sol review round 2.
+
+(ert-deftest romacs-agent-log-a-recovered-question-is-still-asked ()
+  (romacs-agent-log-tests--with
+    (let ((request (make-hash-table :test #'equal)))
+      (puthash "tool_name" "AskUserQuestion" request)
+      (puthash "input" (json-parse-string "{\"questions\":[{\"question\":\"Colour?\",\"header\":\"C\",\"options\":[{\"label\":\"Red\"},{\"label\":\"Blue\"}]}]}")
+               request)
+      (puthash "q9" request (romacs-agent-approvals session)))
+    (romacs-agent-log--sync-asks session)
+    (goto-char (cadr (assoc "q9" romacs-agent-log--asks)))
+    (should (get-text-property (point) 'romacs-agent-log-questions))
+    (let (opened)
+      (cl-letf (((symbol-function 'romacs-agent-ask-open) (lambda (_s id questions &rest _) (setq opened (list id questions))))
+                ((symbol-function 'romacs-agent-respond) (lambda (&rest _) (error "Answered without its answers"))))
+        (romacs-agent-log-allow))
+      (should (equal (car opened) "q9"))
+      (should (equal (caar (cadr opened)) "Colour?")))))
+
+(ert-deftest romacs-agent-log-background-work-stays-under-its-call ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "b" :name "Bash" :input (romacs-agent-log-tests--input "command" "sleep 60"))
+    (draw :type 'task :id "b" :state 'started :task "t1" :background t)
+    (draw :type 'tool :state 'completed :id "b" :output "Running in the background")
+    (draw :type 'delta :text "root goes on")
+    (draw :type 'message-end)
+    ;; Known by its task alone, then ended: under its call still.
+    (draw :type 'task :task "t1" :state 'backgrounded)
+    (draw :type 'task :id "b" :state 'completed :summary "slept")
+    (should (string-match-p "│ · runs in the background\n  ⎿ Running in the background\n│ · moved to the background\n│ · completed: slept\nroot goes on"
+                            (romacs-agent-log-tests--transcript)))
+    (should-not (romacs-agent-log--block "b"))))
+
+(ert-deftest romacs-agent-log-a-call-shows-its-input-as-it-ended ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "w" :name "WebSearch" :input (romacs-agent-log-tests--input))
+    (draw :type 'tool :state 'completed :id "w" :input (romacs-agent-log-tests--input "query" "romacs") :output "found")
+    (goto-char (point-min))
+    (should (equal (gethash "query" (car (get-text-property (point) 'romacs-agent-log-full))) "romacs"))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
