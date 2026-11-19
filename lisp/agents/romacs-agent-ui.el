@@ -36,6 +36,7 @@
 (require 'romacs-markdown)
 (require 'romacs-agent-turns)
 (require 'romacs-agent-drawn)
+(require 'romacs-agent-log)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -1399,7 +1400,7 @@ prompt's does."
                                 'romacs-agent-compaction (plist-get event :text)))
         ;; A tool call the policy answers asks no one: its card shows it; a
         ;; plan presented shows as its plan.
-        ((and 'approval (guard (or (plist-get event :plan) (romacs-agent--auto-p event)))) nil)
+        ((and 'approval (guard (romacs-agent--auto-answer-p session event))) nil)
         ('plan
          (romacs-agent-ui--line session event "── Proposed plan ──" 'face 'romacs-agent-section)
          (romacs-agent-ui--insert (concat (string-trim (or (plist-get event :text) "")) "\n"))
@@ -2526,8 +2527,13 @@ composer as it is."
      (romacs-agent-ui--fill (current-buffer)))))
 
 (defun romacs-agent-show (session &optional action)
-  "Show SESSION's chat buffer, made from its journal when new, as
-`pop-to-buffer' does with ACTION."
+  "Show SESSION's chat (romacs-agent-log.el), as `pop-to-buffer' does
+with ACTION."
+  (romacs-agent-log-show session action))
+
+(defun romacs-agent-ui--show-chat (session &optional action)
+  "Show SESSION's chat buffer of before, made from its journal when new, as
+`pop-to-buffer' does with ACTION: its tests', until it is deleted."
   (let ((buffer (romacs-agent-buffer session)))
     (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
     ;; Shown first: its rules fit its window.
@@ -3257,7 +3263,7 @@ PROPERTY: the previous one is the run point is in, past its start."
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
     (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions (romacs-agent-ui--asked-place id))
-      (romacs-agent-respond romacs-agent-ui--session id t))))
+      (romacs-agent-respond romacs-agent-ui--session id t nil 'user))))
 
 (defun romacs-agent-chat-answer ()
   "Answer the questions on this row, in their layer."
@@ -3339,14 +3345,14 @@ of the session; a question is answered instead."
   (interactive nil romacs-agent-chat-mode)
   (if (romacs-agent-ui--asking-p) (romacs-agent-chat-allow)
     (let ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here"))))
-      (romacs-agent-respond romacs-agent-ui--session id (list :always t)))))
+      (romacs-agent-respond romacs-agent-ui--session id (list :always t) nil 'user))))
 
 (defun romacs-agent-chat-deny ()
   "Deny the tool call the harness asks about."
   (interactive nil romacs-agent-chat-mode)
   (let ((id (romacs-agent-ui--approval-here)))
     (unless id (user-error "No approval here"))
-    (romacs-agent-respond romacs-agent-ui--session id nil)))
+    (romacs-agent-respond romacs-agent-ui--session id nil nil 'user)))
 
 ;;; Chat actions
 
