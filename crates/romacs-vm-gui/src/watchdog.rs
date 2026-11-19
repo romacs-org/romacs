@@ -18,12 +18,14 @@
 //!   {"kind":"stall","ms":MS,"cpu_ms":CPU,"gc_ms":GC,"instructions":N,
 //!    "during":"startup"|"session","buffer":B,"samples":[[FUNCTION...],...]}
 //!
-//! MS is how long the span ran; CPU the evaluator thread's CPU time in it,
-//! GC the time its collections took, N the instructions it retired (absent
-//! where the kernel gives no counter).  MS well above CPU is a span that
-//! waited (on the disk, a process, a starved host), CPU near MS one that
-//! computed, GC near CPU one that collected.  An `ongoing` record has no
-//! CPU, GC or N: the watchdog's thread cannot read the evaluator's meters.
+//! MS is how long the span ran; CPU the evaluator thread's CPU time in it;
+//! GC the wall time its collections took, marks given up for a key
+//! included; N the instructions it retired (absent where the kernel gives
+//! no counter).  MS well above CPU is a span that waited (on the disk, a
+//! process, a starved host), CPU near MS one that computed.  GC is a share
+//! of MS, not of CPU: a collection waiting on its marking threads or
+//! descheduled counts in it.  An `ongoing` record has no CPU, GC or N: the
+//! watchdog's thread cannot read the evaluator's meters.
 //! Each sample is the stack's functions, innermost first, a second apart
 //! from the first second.
 use std::sync::Mutex;
@@ -285,25 +287,29 @@ mod tests {
         assert!(line.get("ongoing").is_none());
         let going: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, None)).unwrap();
         assert_eq!(going["ongoing"], true);
-        assert!(going.get("cpu_ms").is_none(), "the watchdog's thread cannot read the evaluator's meters");
+        for meter in ["cpu_ms", "gc_ms", "instructions"] {
+            assert!(going.get(meter).is_none(), "the watchdog's thread cannot read the evaluator's meters: {meter}");
+        }
+        let uncounted = Meters { instructions: None, ..spent };
+        let line: serde_json::Value = serde_json::from_str(&record(&stall, 5_159_000_000, false, Some(uncounted))).unwrap();
+        assert_eq!(line["cpu_ms"], 1204);
+        assert!(line.get("instructions").is_none(), "no counter, no count");
     }
 
-    /// A stall's CPU time is the evaluator thread's own: a span that
-    /// computes for 20 ms and then sleeps for 40 ms says it ran about 20 ms
-    /// of its 60.
+    /// The meters count the calling thread's own CPU time: 20 ms computed
+    /// and 40 ms asleep count about 20 ms of the 60.  Read as the watchdog
+    /// reads them, without its shared wait hooks, which other tests drive.
     #[test]
-    fn a_stall_says_how_much_of_it_computed() {
-        THRESHOLD.store(1_000_000, Ordering::Relaxed);
-        working();
-        let start = romacs_vm::host::thread_cpu_time();
-        while romacs_vm::host::thread_cpu_time() - start < Duration::from_millis(20) { std::hint::spin_loop(); }
+    fn the_meters_count_computing_not_waiting() {
+        let (start, wall) = (Meters::now(), Instant::now());
+        let cpu = romacs_vm::host::thread_cpu_time();
+        while romacs_vm::host::thread_cpu_time() - cpu < Duration::from_millis(20) { std::hint::spin_loop(); }
         std::thread::sleep(Duration::from_millis(40));
-        waiting();
-        let ended = std::mem::take(&mut *ENDED.lock().unwrap());
-        THRESHOLD.store(u64::MAX, Ordering::Relaxed);
-        let [Ended { since, end, spent }] = ended[..] else { panic!("one stall: {ended:?}") };
+        let (spent, wall) = (Meters::now().since(start), wall.elapsed());
         assert!(spent.cpu >= 20_000_000, "{spent:?}");
-        assert!(spent.cpu + 30_000_000 <= end - since, "the sleep is waiting, not CPU: {spent:?} of {}", end - since);
+        let wall = u64::try_from(wall.as_nanos()).unwrap();
+        assert!(spent.cpu + 30_000_000 <= wall, "the sleep is waiting, not CPU: {spent:?} of {wall}");
+        assert_eq!(spent.gc, 0, "no collection ran on this thread");
     }
 
     /// A span past the threshold that ends between two looks is kept by

@@ -382,14 +382,16 @@ impl Vm {
         if !collected {
             self.gc_times = last;
         }
-        if collected {
+        if collected && until_key {
             // What it freed goes back while nobody waits. Elsewhere the
             // next allocations want it, and would fault it in again.
-            if until_key {
-                crate::gc_mark::trim_after_graves(self.gc_stress.threads);
-            }
-            let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
-            if let Some(ns) = elapsed { crate::host::note_collection_time(ns); }
+            crate::gc_mark::trim_after_graves(self.gc_stress.threads);
+        }
+        let elapsed = start.map(|start| u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
+        // The stall watchdog's meter counts a mark given up for a key too:
+        // the evaluator spent that time collecting all the same.
+        if let Some(ns) = elapsed { crate::host::note_collection_time(ns); }
+        if collected {
             self.count_collection(elapsed.unwrap_or(0));
             self.note_collection(elapsed, until_key, minor, late);
         }
