@@ -602,7 +602,7 @@ fn copy_staged(cx: &mut Leaf<'_>, value: Value, saved: &[Value]) -> Next {
         // GNU's O_TRUNC truncates a regular file and leaves anything else (a
         // FIFO, a device) as it is; so does this.
         if existing.file_type().is_file() {
-            output.set_len(0).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
+            host::truncate(&output).map_err(|e| errno(cx, "Opening output file", &[newname], e))?;
         }
     }
     if !host::clone_file(&output, &input) {

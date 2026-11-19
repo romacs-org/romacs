@@ -255,9 +255,35 @@ fn advice_cannot_skip_the_copy_before_the_delete() {
     let _ = std::fs::remove_dir_all(&b);
 }
 
+/// A reader process the test owns: killed and reaped if it is still
+/// running when dropped, so a failed case never leaves it blocked in open.
+struct Reader(std::process::Child);
+
+impl Reader {
+    /// Its exit status within five seconds, else None (it is then killed).
+    fn finish(&mut self) -> Option<std::process::ExitStatus> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Some(status) = self.0.try_wait().unwrap() { return Some(status); }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        None
+    }
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
 /// `copy-file` onto an existing FIFO with a reader writes the bytes through
 /// it and leaves it a FIFO, as GNU's does (Sol r2 S4): only a regular
-/// destination is truncated.
+/// destination is truncated. An engine that never opens the FIFO fails the
+/// case within five seconds rather than hanging it (Sol r3 S6).
 #[test]
 fn copy_file_onto_a_fifo_writes_through_it() {
     let dir = std::env::temp_dir().join(format!("romacs-copy-fifo-{}", std::process::id()));
@@ -266,9 +292,11 @@ fn copy_file_onto_a_fifo_writes_through_it() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("src"), "data\n").unwrap();
         assert!(std::process::Command::new("mkfifo").arg(dir.join("dst")).status().unwrap().success());
-        let mut reader = std::process::Command::new("sh").arg("-c").arg("cat dst > got").current_dir(&dir).spawn().unwrap();
+        let got = std::fs::File::create(dir.join("got")).unwrap();
+        let mut reader = Reader(std::process::Command::new("cat").arg(dir.join("dst")).stdout(got).spawn().unwrap());
         let value = engine(&format!("(copy-file {:?} {:?} t)", dir.join("src").to_str().unwrap(), dir.join("dst").to_str().unwrap()));
-        assert!(reader.wait().unwrap().success());
+        let status = reader.finish();
+        assert!(status.is_some_and(|s| s.success()), "the reader: {status:?} after {value}");
         let fifo = std::fs::symlink_metadata(dir.join("dst")).unwrap().file_type();
         (value, std::fs::read_to_string(dir.join("got")).unwrap(), std::os::unix::fs::FileTypeExt::is_fifo(&fifo))
     };
@@ -276,11 +304,13 @@ fn copy_file_onto_a_fifo_writes_through_it() {
     let gnu = run(&mut |expression| {
         let output = std::process::Command::new(&oracle).args(["-Q", "--batch", "--eval", &format!("(prin1 {})", wrapped(expression))])
             .stdin(std::process::Stdio::null()).output().unwrap();
+        assert!(output.status.success(), "GNU: {}", String::from_utf8_lossy(&output.stderr));
         text(&String::from_utf8_lossy(&output.stdout))
     });
     let mut vm = gnu_lisp::gnu_lisp(&[]);
     let romacs = run(&mut |expression| vm.eval_source(&wrapped(expression)).and_then(romacs_vm::Local::display).map(|v| text(&v)).unwrap_or_else(|e| e));
     assert_eq!(romacs, gnu);
     assert_eq!(romacs.1, "data\n");
+    assert!(romacs.2, "the destination is still a FIFO");
     let _ = std::fs::remove_dir_all(&dir);
 }

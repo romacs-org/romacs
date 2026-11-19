@@ -1979,6 +1979,12 @@ pub fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<(
     result
 }
 
+/// ftruncate FILE to empty: `copy-file`'s replacement of an existing
+/// output, through the descriptor its caller checked (not the path).
+pub fn truncate(file: &File) -> io::Result<()> {
+    crate::flight::checked("ftruncate", String::new, || file.set_len(0), |r| crate::flight::outcome(r, |()| 0))
+}
+
 pub fn fchown(file: &File, uid: Option<u32>, gid: Option<u32>) -> io::Result<()> {
     crate::flight::checked("fchown", String::new, || std::os::unix::fs::fchown(file, uid, gid), |r| crate::flight::outcome(r, |()| 0))
 }
