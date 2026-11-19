@@ -81,8 +81,9 @@ as the last whole pass made it and each row made since adds to it.")
 ;;; Places and the listener
 
 (defun romacs-agent-service-socket ()
-  "Where the service listens: `service.sock' in the agents' runtime directory."
-  (expand-file-name "service.sock" (romacs-agent--runtime-root)))
+  "Where the service listens: `service.sock' in a directory of its own in
+the agents' runtime directory, its user's alone."
+  (expand-file-name "service/service.sock" (romacs-agent--runtime-root)))
 
 ;;;###autoload
 (defun romacs-agent-service-start (&optional socket)
@@ -182,7 +183,7 @@ the params; it returns the result, or signals `romacs-agent-service-error'.")
         (cond ((and (not (romacs-agent-service--peer-hello (romacs-agent-rpc-data rpc)))
                     (not (equal method "agents/hello")))
                (romacs-agent-service--fail -32002 "not-initialized" "Say agents/hello first"))
-              ((null function) (romacs-agent-service--fail -32601 "unknown-method" (format "No method %s" method)))
+              ((null function) (romacs-agent-service--fail -32601 "unknown-method" "No such method"))
               ((not (hash-table-p params)) (romacs-agent-service--fail -32602 "bad-params" "Params must be an object")))
         (romacs-agent-rpc-result id (funcall function rpc params)))
     (romacs-agent-service-error
@@ -217,8 +218,7 @@ from a client, of which none is defined, is ignored."
       (romacs-agent-service--fail -32602 "bad-params" "Say protocol romacs-agents and version [MAJOR, MINOR]"))
     (unless (= major (car romacs-agent-service-version))
       (romacs-agent-service--fail -32013 "unsupported" "Another major version"
-                                  (romacs-agent-rpc-object "served" (vconcat romacs-agent-service-version)
-                                                           "asked" version)))
+                                  (romacs-agent-rpc-object "served" (vconcat romacs-agent-service-version))))
     (let ((peer (romacs-agent-rpc-data rpc)))
       (setf (romacs-agent-service--peer-hello peer) t)
       (romacs-agent-rpc-object
@@ -285,15 +285,15 @@ for the rows made before the next whole pass."
           (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
     rows))
 
-(defun romacs-agent-service--row (id)
-  "The row of session ID now, its children not counted, or nil when it is
-gone; an unloaded one joins the board's view of them, which a child's key
-reads."
-  (let* ((romacs-agent-board--unloaded romacs-agent-service--unloaded)
-         (session (or (romacs-agent-loaded id) (romacs-agent-store-row-session id))))
-    (when (and session (not (romacs-agent-loaded id)) romacs-agent-service--unloaded)
-      (puthash id session (car romacs-agent-service--unloaded)))
-    (and session (romacs-agent-service-row session (romacs-agent-board--key session)))))
+(defun romacs-agent-service--session (id)
+  "Session ID as it is now, loaded or from its row, or nil when it is gone;
+the board's view of the unloaded sessions (`romacs-agent-service--unloaded')
+made to agree, as a child's key reads its parent there."
+  (let ((session (or (romacs-agent-loaded id) (romacs-agent-store-row-session id)))
+        (unloaded (car romacs-agent-service--unloaded)))
+    (when unloaded
+      (if (and session (not (romacs-agent-loaded id))) (puthash id session unloaded) (remhash id unloaded)))
+    session))
 
 (defun romacs-agent-service--parent (row)
   (let ((parent (and row (gethash "parent" row)))) (and (stringp parent) parent)))
@@ -302,23 +302,30 @@ reads."
   "The rows of IDS made again, as updates (ID . ROW) of LIST, ROW nil for a
 session gone; with each one's parent, whose key follows its workers, and,
 for one that came, went or moved, its children, whose keys follow their
-parent, and its old parent, whose count changed."
+parent, and its old parent, whose count changed.  Every session of the
+batch is looked up before any key is made, as a key reads others."
   (let ((rows (romacs-agent-service--list-rows list))
         (children (romacs-agent-service--list-children list))
-        (done (make-hash-table :test #'equal)) (updates nil) (todo ids))
+        (sessions (make-hash-table :test #'equal)) (order nil) (todo ids))
     (while todo
       (let ((id (pop todo)))
-        (unless (gethash id done)
-          (puthash id t done)
-          (let* ((row (romacs-agent-service--row id)) (was (gethash id rows))
-                 (parent (romacs-agent-service--parent row)) (old (romacs-agent-service--parent was)))
-            (push (cons id row) updates)
-            (when (and parent (not (gethash parent done))) (push parent todo))
-            (unless (and row was (equal parent old))
-              (when (and old (not (gethash old done))) (push old todo))
+        (unless (gethash id sessions)
+          (let* ((session (romacs-agent-service--session id))
+                 (parent (and session (plist-get (romacs-agent-options session) :parent)))
+                 (was (gethash id rows)) (old (romacs-agent-service--parent was)))
+            (puthash id (or session :gone) sessions)
+            (push id order)
+            (when (stringp parent) (push parent todo))
+            (unless (and session was (equal parent old))
+              (when old (push old todo))
               (when-let* ((kids (gethash id children)))
-                (maphash (lambda (kid _) (unless (gethash kid done) (push kid todo))) kids)))))))
-    updates))
+                (maphash (lambda (kid _) (push kid todo)) kids)))))))
+    (let ((romacs-agent-board--unloaded romacs-agent-service--unloaded))
+      (mapcar (lambda (id)
+                (let ((session (gethash id sessions)))
+                  (cons id (and (not (eq session :gone))
+                                (romacs-agent-service-row session (romacs-agent-board--key session))))))
+              (nreverse order)))))
 
 (defun romacs-agent-service--apply (list updates)
   "Apply UPDATES, each (ID . ROW), to LIST: the children index kept, each
@@ -419,7 +426,9 @@ expired tokens are let go."
       (setf (romacs-agent-service--peer-tokens peer)
             (cl-remove-if (lambda (entry) (> (- (float-time) (cadr entry)) romacs-agent-service--token-life))
                           (romacs-agent-service--peer-tokens peer)))))
-  (when romacs-agent-service--dirty (romacs-agent-service--refresh-soon)))
+  (when (or romacs-agent-service--dirty
+            (> (- (float-time) romacs-agent-service--whole-at) romacs-agent-service--whole-every))
+    (romacs-agent-service--refresh-soon)))
 
 ;;; Watching, paging
 

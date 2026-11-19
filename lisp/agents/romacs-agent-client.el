@@ -34,7 +34,7 @@ made once.")
 ROWS by id and REVISION, the requests waiting on a reply (PENDING, id to
 callback), the next request id, the WATCH under way (nil, or (STAGE .
 NOTICES): the rows its pages staged and the notifications held), and
-whether another must follow it (AGAIN)."
+whether another must follow it (AGAIN: t, or `whole' for all the list)."
   rpc server
   (rows (make-hash-table :test #'equal))
   (revision nil)
@@ -45,9 +45,9 @@ whether another must follow it (AGAIN)."
 (defun romacs-agent-client--instance ()
   (or romacs-agent-client-instance
       (setq romacs-agent-client-instance
-            (let ((hex (secure-hash 'sha256 (format "%s%s%s%s" (random) (float-time) (emacs-pid) (system-name)))))
-              (format "%s-%s-4%s-%s-%s" (substring hex 0 8) (substring hex 8 12) (substring hex 13 16)
-                      (substring hex 16 20) (substring hex 20 32))))))
+            (format "%04x%04x-%04x-4%03x-%04x-%04x%04x%04x"
+                    (random 65536) (random 65536) (random 65536) (random 4096)
+                    (logior #x8000 (random 16384)) (random 65536) (random 65536) (random 65536)))))
 
 (defun romacs-agent-client-connect (socket)
   "Connect to the service at SOCKET, say hello and watch its list.  The client."
@@ -80,18 +80,23 @@ whether another must follow it (AGAIN)."
   "The connection ended: every request waiting on it is told so."
   (unless (process-live-p process)
     (when-let* ((client (process-get process 'romacs-agent-client)))
-      (let ((pending (romacs-agent-client-pending client))
-            (gone (romacs-agent-rpc-object "code" -32603 "message" "The service connection ended"
-                                           "data" (romacs-agent-rpc-object "kind" "disconnected"))))
-        (maphash (lambda (_ callback) (ignore-errors (funcall callback nil gone))) (copy-hash-table pending))
-        (clrhash pending)))))
+      (let ((callbacks (hash-table-values (romacs-agent-client-pending client))))
+        (clrhash (romacs-agent-client-pending client))
+        (dolist (callback callbacks)
+          (ignore-errors (funcall callback nil (romacs-agent-client--gone))))))))
+
+(defun romacs-agent-client--gone ()
+  (romacs-agent-rpc-object "code" -32603 "message" "The service connection ended"
+                           "data" (romacs-agent-rpc-object "kind" "disconnected")))
 
 (defun romacs-agent-client-request (client method params callback)
   "Ask CLIENT's service METHOD with PARAMS; CALLBACK is called with the
 result and nil, or nil and the error, once its reply comes."
   (let ((id (cl-incf (romacs-agent-client-next client))))
-    (puthash id callback (romacs-agent-client-pending client))
-    (romacs-agent-rpc-send (romacs-agent-client-rpc client) (romacs-agent-rpc-request id method params))
+    (if (not (romacs-agent-client-live-p client))
+        (funcall callback nil (romacs-agent-client--gone))
+      (puthash id callback (romacs-agent-client-pending client))
+      (romacs-agent-rpc-send (romacs-agent-client-rpc client) (romacs-agent-rpc-request id method params)))
     id))
 
 (defun romacs-agent-client--filter (process chunk)
@@ -118,12 +123,12 @@ result and nil, or nil and the error, once its reply comes."
 
 ;;; The list
 
-(defun romacs-agent-client--watch (client)
-  "Watch CLIENT's list from the revision it holds (all of it with none),
-unless a watch is under way: then once it is done."
+(defun romacs-agent-client--watch (client &optional whole)
+  "Watch CLIENT's list from the revision it holds (all of it with none, or
+when WHOLE), unless a watch is under way: then once it is done."
   (if (romacs-agent-client-watch client)
-      (setf (romacs-agent-client-again client) t)
-    (let ((since (romacs-agent-client-revision client))
+      (setf (romacs-agent-client-again client) (if (or whole (eq (romacs-agent-client-again client) 'whole)) 'whole t))
+    (let ((since (and (not whole) (romacs-agent-client-revision client)))
           (generation (gethash "generation" (gethash "server" (romacs-agent-client-server client)))))
       (setf (romacs-agent-client-watch client) (list (make-hash-table :test #'equal))
             (romacs-agent-client-again client) nil)
@@ -139,9 +144,10 @@ first part said the list is all in the reply.  Its rows are staged
   (let ((stage (car (romacs-agent-client-watch client))))
     (cond
      ((and error (equal (gethash "kind" (gethash "data" error)) "stale"))
-      ;; Its continuation expired: read the list again, whole.
-      (setf (romacs-agent-client-watch client) nil (romacs-agent-client-revision client) nil)
-      (romacs-agent-client--watch client))
+      ;; Its continuation expired: read the list again, whole; what is
+      ;; shown stays, rows and revision together, until that is in.
+      (setf (romacs-agent-client-watch client) nil)
+      (romacs-agent-client--watch client 'whole))
      (error
       ;; Not to be had: this client stops mirroring rather than retry.
       (setf (romacs-agent-client-watch client) nil)
@@ -173,7 +179,8 @@ apply what came meanwhile, and watch again when that was asked for."
     (setf (romacs-agent-client-revision client) revision (romacs-agent-client-watch client) nil)
     (run-hook-with-args 'romacs-agent-client-rows-functions client changed removed)
     (dolist (params notices) (romacs-agent-client--changed client params))
-    (when (romacs-agent-client-again client) (romacs-agent-client--watch client))))
+    (when-let* ((again (romacs-agent-client-again client)))
+      (romacs-agent-client--watch client (eq again 'whole)))))
 
 (defun romacs-agent-client--changed (client params)
   "Apply `agents/sessions.changed' PARAMS: the next revision applied, an

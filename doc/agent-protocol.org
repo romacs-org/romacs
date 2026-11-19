@@ -212,8 +212,8 @@ started by older builds keep working.
   go both ways: the service sends notifications and, to editors (below),
   requests.
 - *Endpoints:*
-  - =$XDG_RUNTIME_DIR/romacs/agents/service.sock= for local clients;
-  - =service-relay.sock= for the relay alone (below).
+  - =$XDG_RUNTIME_DIR/romacs/agents/service/service.sock= for local clients;
+  - =service-relay.sock= beside it, for the relay alone (below).
 
   Both are separate from the MCP endpoint the harness relays use.
 - *Limits*, on the encoded message, envelope included:

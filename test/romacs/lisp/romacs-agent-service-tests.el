@@ -217,4 +217,52 @@ and `wait' waiting until its form holds (5 s at most)."
     (should (equal (sort (mapcar #'car (romacs-agent-service--rows-of romacs-agent-service--list '("kid"))) #'string<)
                    '("kid" "lead")))))
 
+(ert-deftest romacs-agent-service-looks-up-a-batch-before-its-keys ()
+  ;; An unloaded parent and its finished child found in one poll, the
+  ;; child first: the child's key reads its parent known, as the board's.
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (let ((stored (list (cons "p" (romacs-agent--make :id "p" :harness 'claude :state 'idle :cwd "/p/"))
+                        (cons "c" (romacs-agent--make :id "c" :harness 'claude :state 'idle :cwd "/p/"
+                                                      :done-seq 4 :options '(:parent "p"))))))
+      (cl-letf (((symbol-function 'romacs-agent-store-row-session) (lambda (id) (cdr (assoc id stored)))))
+        (let ((updates (romacs-agent-service--rows-of romacs-agent-service--list '("c" "p"))))
+          (should (equal (gethash "key" (cdr (assoc "c" updates))) "completed")))))))
+
+(ert-deftest romacs-agent-service-runs-its-whole-pass-when-quiet ()
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (setq romacs-agent-service--whole-at 0 romacs-agent-service--dirty nil)
+    (when (timerp romacs-agent-service--refresh-timer) (cancel-timer romacs-agent-service--refresh-timer))
+    (setq romacs-agent-service--refresh-timer nil)
+    (romacs-agent-service--poll)
+    (should (timerp romacs-agent-service--refresh-timer))))
+
+(ert-deftest romacs-agent-service-answers-a-long-request-in-bounds ()
+  ;; A method name near a message's limit: answered, its error bounded.
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (let ((raw (romacs-agent-service-tests--raw socket)))
+      (process-send-string raw "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (process-send-string raw (format "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"%s\",\"params\":{}}\n"
+                                       (make-string (- (* 1024 1024) 100) ?m)))
+      (should (wait (= (length (process-get raw 'lines)) 2)))
+      (should (equal (gethash "code" (gethash "error" (cadr (process-get raw 'lines)))) -32601))
+      (delete-process raw))))
+
+(ert-deftest romacs-agent-service-starts-beside-agents-already-running ()
+  ;; The agents' runtime directory made by others with the usual umask:
+  ;; the service's socket is in a directory of its own.
+  (let* ((root (make-temp-file "rsv-run" t))
+         (process-environment (cons (concat "XDG_RUNTIME_DIR=" root) process-environment))
+         (romacs-agent--sessions (make-hash-table :test #'equal)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-store-unloaded) #'ignore))
+          (make-directory (romacs-agent--runtime-root) t)
+          (set-file-modes (romacs-agent--runtime-root) #o755)
+          (should (equal (romacs-agent-service-start) (romacs-agent-service-socket)))
+          (should (file-exists-p (romacs-agent-service-socket))))
+      (romacs-agent-service-stop)
+      (delete-directory root t))))
+
 ;;; romacs-agent-service-tests.el ends here
