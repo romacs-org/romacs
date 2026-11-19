@@ -828,9 +828,10 @@ how long the turn has run."
 (defun romacs-agent-log--progress (event)
   "Step the working thread on for EVENT when it is progress: a call begun
 or ended, a line of its output, a message ended."
-  (when (or (memq (plist-get event :type) '(tool message-end))
-            (and (eq (plist-get event :type) 'tool-output) (string-search "\n" (or (plist-get event :text) ""))))
-    (romacs-working-advance (current-buffer))))
+  (pcase (plist-get event :type)
+    ((or 'tool 'message-end) (romacs-working-advance (current-buffer)))
+    ;; A line of output each.
+    ('tool-output (romacs-working-advance (current-buffer) (cl-count ?\n (or (plist-get event :text) ""))))))
 
 ;;; Replay
 

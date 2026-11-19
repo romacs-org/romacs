@@ -284,9 +284,9 @@ shown; ID stops when BUFFER is killed."
     (push animation romacs-animate--animations)
     (with-current-buffer buffer
       ;; Only this registration: a later one of ID may animate elsewhere.
-      (add-hook 'kill-buffer-hook
-                (lambda () (when (eq (romacs-animate--get id) animation) (romacs-animate-stop id)))
-                nil t)))
+      (let ((hook (lambda () (when (eq (romacs-animate--get id) animation) (romacs-animate-stop id)))))
+        (romacs-animate--set animation :kill hook)
+        (add-hook 'kill-buffer-hook hook nil t))))
   (romacs-animate--watch t)
   (run-at-time 0 nil #'romacs-animate--wake)
   id)
@@ -296,7 +296,10 @@ shown; ID stops when BUFFER is killed."
   (let ((animation (romacs-animate--get id)))
     (when animation
       (setq romacs-animate--elements (romacs-animate--without (romacs-animate--slot animation :key)))
-      (setq romacs-animate--animations (delq animation romacs-animate--animations))))
+      (setq romacs-animate--animations (delq animation romacs-animate--animations))
+      (let ((buffer (romacs-animate--slot animation :buffer)))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (remove-hook 'kill-buffer-hook (romacs-animate--slot animation :kill) t))))))
   (unless romacs-animate--animations (romacs-animate--watch nil))
   (romacs-animate--wake))
 
@@ -323,6 +326,13 @@ display its element as it now is."
   (let ((animation (romacs-animate--get id)))
     (when (and animation (romacs-animate--windows animation))
       (romacs-animate--draw animation 0)
+      (romacs-animate--sync animation (romacs-animate-motion-p)))))
+
+(defun romacs-animate-refresh (id)
+  "Give the display animation ID's element as it now is, drawing no frame:
+for an element whose parameters changed while its text did not."
+  (let ((animation (romacs-animate--get id)))
+    (when (and animation (romacs-animate--windows animation))
       (romacs-animate--sync animation (romacs-animate-motion-p)))))
 
 (defun romacs-animate-statistics (&optional reset)

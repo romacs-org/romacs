@@ -251,6 +251,32 @@ fn text_slot(glyph: &FrameGlyph, animation: &TextAnimation) -> Option<DisplaySlo
 
 /// ANIMATION's window's first text row and column in FRAME, where its
 /// block is placed from.
+/// ANIMATION as FRAME shows it: a working thread's block confirmed on the
+/// frame's own rows, its first row the one, at or within two of the
+/// evaluator's estimate (which counts rows before layout), whose cells
+/// all hold braille, the thread's still frame; none when no row does, so
+/// it never paints over text not its own, and none while motion is off.
+/// Any other kind as it is.
+pub fn located(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<TextAnimation> {
+    if !matches!(animation.kind, TextAnimationKind::Working { .. }) {
+        return Some(animation.clone());
+    }
+    // Motion off: the evaluator's still frame shows, nothing over it.
+    if animation.still {
+        return None;
+    }
+    let (first_row, first_col) = origin(frame, animation)?;
+    let braille: std::collections::HashSet<(i64, u16)> = frame.glyphs.iter().filter_map(|glyph| match glyph {
+        FrameGlyph::Char { slot_id, char, row_role: GlyphRowRole::Text, .. }
+            if slot_id.window_id.get() as u64 == animation.window && ('\u{2800}'..='\u{28ff}').contains(char) =>
+            Some((i64::from(slot_id.row) - i64::from(first_row), slot_id.col - first_col)),
+        _ => None,
+    }).collect();
+    [0, -1, 1, -2, 2].into_iter().map(|delta| animation.top + delta).find(|&top| {
+        (0..animation.cols).all(|col| u16::try_from(col).is_ok_and(|col| braille.contains(&(i64::from(top), col))))
+    }).map(|top| TextAnimation { top, ..animation.clone() })
+}
+
 fn origin(frame: &FrameGlyphBuffer, animation: &TextAnimation) -> Option<(u32, u16)> {
     frame.glyphs.iter().filter_map(|glyph| text_slot(glyph, animation)).fold(None, |origin: Option<(u32, u16)>, slot| {
         Some(origin.map_or((slot.row, slot.col), |(r, c)| (r.min(slot.row), c.min(slot.col))))

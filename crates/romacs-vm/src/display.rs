@@ -702,9 +702,14 @@ impl Vm {
             };
             if !shown { continue; }
             let rows = natural(rows)? as u32;
+            // A marker of the caller's, read as this frame freezes: one
+            // detached or in another buffer places nothing.
             let start = match start.integer_value() {
                 Some(n) => n,
-                None => self.marker_position_value(start)?.integer_value().ok_or("text animation start")?,
+                None => {
+                    if self.marker(start)?.buffer != buffer { continue; }
+                    match self.marker_position_value(start)?.integer_value() { Some(n) => n, None => continue }
+                }
             };
             let (top, in_view) = self.text_animation_row(window, start, rows)?;
             let kind = match self.list_values(kind)?[..] {

@@ -25,7 +25,7 @@ const DOTS: [[u8; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
 const WAVE: f64 = 12.0;
 const SPEED: f64 = 1.2;
 /// Cells the bead steps for each beat.
-const STEP: usize = 2;
+const STEP: usize = 1;
 
 /// COLS cells of the thread for WORK in COLOUR (RGB), BEATS of progress
 /// reported, after MOVED seconds.
@@ -93,9 +93,10 @@ mod tests {
     fn progress_steps_the_bead_and_time_alone_does_not() {
         let bright = |cells: Vec<Cell>| cells.iter().position(|c| c.1 == Some(scale(0x808080, 1.6)));
         let at = bright(thread(12, Work::Running, 3, 0x808080, 0.0));
-        assert_eq!(at, Some(6));
+        assert_eq!(at, Some(3));
         assert_eq!(bright(thread(12, Work::Running, 3, 0x808080, 2.5)), at, "the bead waits for progress");
-        assert_eq!(bright(thread(12, Work::Running, 4, 0x808080, 0.0)), Some(8));
+        assert_eq!(bright(thread(12, Work::Running, 4, 0x808080, 0.0)), Some(4));
+        assert_eq!(bright(thread(2, Work::Running, 1, 0x808080, 0.0)), Some(1), "a narrow thread's bead moves too");
     }
 
     #[test]

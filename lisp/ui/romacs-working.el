@@ -19,7 +19,7 @@
 ;;
 ;;   (romacs-working-show ID BUFFER START COLS &optional WORK)
 ;;   (romacs-working-set ID WORK)
-;;   (romacs-working-advance ID)      ; progress: the bead steps on
+;;   (romacs-working-advance ID &optional N)  ; N pieces of progress
 ;;   (romacs-working-stop ID)
 ;;
 ;; START is where a line of BUFFER begins: a position, or a marker of the
@@ -71,12 +71,14 @@ over a third of the widest."
 
 (defun romacs-working--running-colour ()
   "The theme's colour for running work: the first of its accent, blue,
-cyan and link colours far from its error and warning colours."
+cyan and link colours far from its error and warning colours, else its
+foreground."
   (let ((avoid (list (face-foreground 'error nil t) (face-foreground 'warning nil t)))
         (palette (lambda (slot) (and (fboundp 'romacs-theme-color) (romacs-theme-color slot)))))
     (cl-find-if (lambda (colour) (and (stringp colour) (romacs-working--far-p colour avoid)))
                 (list (funcall palette 'accent) (funcall palette 'blue) (funcall palette 'cyan)
-                      (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)))))
+                      (face-foreground 'link nil t) (face-foreground 'minibuffer-prompt nil t)
+                      (face-foreground 'default nil t)))))
 
 (defun romacs-working--derive (&rest _)
   "Make `romacs-working-running' the theme's running colour, as its
@@ -143,7 +145,7 @@ registered for it."
   (cond ((not (romacs-working--moving-p (plist-get thread :work)))
          (plist-put thread :animated nil)
          (romacs-animate-stop id))
-        ((plist-get thread :animated) (romacs-animate-redraw id))
+        ((plist-get thread :animated) (romacs-animate-refresh id))
         (t (plist-put thread :animated t)
            (romacs-animate-start id (plist-get thread :buffer) romacs-working-fps
                                  (lambda (_dt) (romacs-working--paint thread))
@@ -174,12 +176,14 @@ default).  A thread ID shown already moves there."
     (romacs-working--paint thread)
     (romacs-working--animate id thread)))
 
-(defun romacs-working-advance (id)
-  "Thread ID's work made progress: its bead steps on."
+(defun romacs-working-advance (id &optional n)
+  "Thread ID's work made N pieces of progress (one by default): its bead
+steps on as many cells."
   (when-let* ((thread (gethash id romacs-working--threads))
-              ((eq (plist-get thread :work) 'running)))
-    (plist-put thread :beats (1+ (plist-get thread :beats)))
-    (romacs-animate-redraw id)))
+              ((eq (plist-get thread :work) 'running))
+              ((> (or n 1) 0)))
+    (plist-put thread :beats (+ (plist-get thread :beats) (or n 1)))
+    (romacs-animate-refresh id)))
 
 (defun romacs-working-stop (id)
   "Show thread ID no more."

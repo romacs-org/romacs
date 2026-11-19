@@ -81,3 +81,30 @@ fn a_working_thread_moves_by_itself_and_keeps_its_motion_across_states() {
     assert!(!animations.running[&1].animation.kind.scened());
     assert!(logo(true, 0).kind.scened());
 }
+
+#[test]
+fn a_thread_is_placed_on_its_own_braille_row_and_never_over_other_text() {
+    use romacs_display_protocol::face::BoxVerticalEdges;
+    use romacs_display_protocol::frame_glyphs::GlyphRowRole;
+    use romacs_display_protocol::text_animation::located;
+    use romacs_display_protocol::types::{DisplayWindowId, FaceId};
+    use romacs_logo::working::Work;
+    let mut frame = FrameGlyphBuffer::new();
+    frame.char_width = 8.0;
+    frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
+    for (r, text) in ["a long reply line", "that wrapped once", "⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ running"].into_iter().enumerate() {
+        for (c, ch) in text.chars().enumerate() {
+            frame.add_char_on_row(ch, (c as f32 * 8.0, r as f32 * 16.0, r as u32), (8.0, 16.0, 12.0),
+                                  FaceId::new(0), BoxVerticalEdges::Both);
+        }
+    }
+    // The evaluator, counting lines, thought it was on row 1.
+    let at = |top: i32, still: bool| {
+        let mut animation = thread(Work::Running, 0);
+        (animation.top, animation.still) = (top, still);
+        located(&frame, &animation).map(|a| a.top)
+    };
+    assert_eq!(at(1, false), Some(2));
+    assert_eq!(at(9, false), None, "no braille row near: nothing painted");
+    assert_eq!(at(2, true), None, "motion off: the still frame shows alone");
+}
