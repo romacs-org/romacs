@@ -38,6 +38,9 @@ def workspace(root):
         'crates/romacs-vm-gui/tests/scaling.rs': 'const H: &str = "harness/scaling_live.py";\n',
         'crates/romacs-vm-gui/tests/fixtures/sample.el': '',
         'crates/romacs-vm-gui/tests/samples.rs': 'const F: &str = "tests/fixtures/sample.el";\n',
+        'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs': 'const K: &str = include_str!("lisp_tree_compile_failures.txt");\n',
+        'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt': '',
+        'crates/romacs-vm/src/compiled_lisp/tree.rs': '',
         'crates/romacs-vm-gui/harness/live_oracle.py': '',
         'crates/romacs-vm-gui/harness/scaling_live.py': 'import live_oracle\n',
         'crates/romacs-vm-gui/harness/world_live.py': 'from live_oracle import stop\n',
@@ -104,7 +107,8 @@ class Select(unittest.TestCase):
     def test_runs_give_one_run_a_package_with_its_own_terms(self):
         runs = impact.runs(self.select('crates/romacs-vm-gui/src/main.rs', 'crates/romacs-vm/tests/quit_async.rs'), self.root)
         found = {package: (flags, terms) for package, flags, terms in runs}
-        self.assertEqual(found['romacs-vm-gui'], (['--lib', '--bins', '--test', 'all'], 'package(romacs-vm-gui)'))
+        gated = impact.test_file('romacs-vm-gui::lisp_tree_compiles')
+        self.assertEqual(found['romacs-vm-gui'], (['--lib', '--bins', '--test', 'all'], f'(package(romacs-vm-gui)) & not ({gated})'))
         self.assertIn(impact.test_file('romacs-vm::quit_async'), found['romacs-vm'][1])
         self.assertNotIn('romacs-vm-gui', found['romacs-vm'][1])
         self.assertIsNone(impact.runs(self.select('Cargo.lock'), self.root))
@@ -141,6 +145,25 @@ class Select(unittest.TestCase):
         self.assertEqual(set(found['packages']), {'romacs-vm', 'romacs-vm-gui'})
         self.assertEqual(found['lisp'], ['lisp/session/x.el'])
         self.assertEqual(set(found['harnesses']), set(impact.HARNESSES))
+
+    def test_a_gated_test_runs_only_for_its_paths(self):
+        gated = 'romacs-vm-gui::lisp_tree_compiles'
+        for path in ('lisp/session/x.el', 'crates/romacs-vm/src/gc.rs'):
+            with self.subTest(path):
+                found = self.select(path)
+                self.assertIn('romacs-vm-gui', found['packages'])
+                self.assertEqual(found['leave'], [gated])
+                self.assertIn(f'not ({impact.test_file(gated)})', found['filter'])
+                gui = {package: terms for package, _, terms in impact.runs(found, self.root)}['romacs-vm-gui']
+                self.assertTrue(gui.endswith(f'& not ({impact.test_file(gated)})'), gui)
+        for path in ('crates/romacs-vm/src/compiled_lisp/tree.rs', 'lisp/emacs-lisp/romacs-compile.el',
+                     'lisp/emacs-lisp/macroexp.el', 'crates/romacs-vm-gui/tests/lisp_tree_compile_failures.txt',
+                     'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs'):
+            with self.subTest(path):
+                found = self.select(path)
+                self.assertEqual(found['leave'], [])
+                self.assertNotIn('not (', found['filter'])
+        self.assertEqual(self.select('lisp/session/x.el', 'Cargo.lock')['leave'], [], 'everything runs it')
 
     def test_a_rule_adds_its_harness(self):
         self.assertIn('agent', self.select('crates/romacs-vm-gui/harness/agent_live.py')['harnesses'])
