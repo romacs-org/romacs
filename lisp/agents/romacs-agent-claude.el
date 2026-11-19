@@ -411,7 +411,7 @@ cache, it reports none) or does not say."
          (when (equal (gethash "subtype" request) "can_use_tool")
            (puthash (gethash "request_id" line) request (romacs-agent-approvals session))
            (append
-            ;; A plan presented: shown, and its call stopped (`romacs-agent--plan-captured').
+            ;; A plan presented: shown, and asked of the user.
             (let ((plan (and (equal (gethash "tool_name" request) "ExitPlanMode") (hash-table-p (gethash "input" request))
                              (romacs-agent--value (gethash "plan" (gethash "input" request))))))
               (and (stringp plan) (not (string-empty-p (string-trim plan))) (list (list :type 'plan :text plan))))

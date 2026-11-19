@@ -194,6 +194,13 @@ are not part of it; CLOSE ends it."
                                                 " and json_extract(record, '$.note.type') = ? order by seq, rowid")
                                      (list (romacs-agent-id session) (or end most-positive-fixnum) type))))))
 
+(defun romacs-agent-events-note-seq (session type end)
+  "The seq of SESSION's last note of TYPE (a string) before seq END, or nil."
+  (when-let* ((db (romacs-agent-events--db)))
+    (caar (sqlite-select db (concat "select max(seq) from events where session = ? and kind = 'note' and seq < ?"
+                                    " and json_extract(record, '$.note.type') = ?")
+                         (list (romacs-agent-id session) end type)))))
+
 (defun romacs-agent-events-tail (session turns &optional end begin)
   "As `romacs-agent--journal-tail', in places that are seqs: (FROM .
 PROMPTS), FROM the seq of a prompt that started its turn with none under
