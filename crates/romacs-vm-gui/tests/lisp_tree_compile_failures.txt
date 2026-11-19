@@ -18,4 +18,3 @@ lisp/leim/quail/ethiopic.el: Ethiopic characters above U+10FFFF, no Unicode map 
 lisp/leim/quail/quick-cns.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
 lisp/leim/quail/tibetan.el: Tibetan precomposed glyph codes above U+10FFFF (buffers hold Unicode only)
 lisp/leim/quail/tsang-cns.el: CNS 11643 characters above U+10FFFF, no Unicode map yet (romacs#321)
-lisp/ui/romacs-mode-line.el: void-function romacs-mode-line--variable: a macro calls a helper that is not eval-and-compile
