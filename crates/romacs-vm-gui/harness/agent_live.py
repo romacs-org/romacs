@@ -2440,11 +2440,12 @@ def composer(args, base, real=False):
         # ends, shows.
         release = a.root / 'release-hold'
         a.send(sid, f'hold {release} romacs_eval {{"instance": "?"}}')
-        # Held until released: the call stays open.
-        until(lambda: a.eval(f'(with-current-buffer {chat} (and romacs-agent-log--blocks t))') == 't', 15, 'tool call open')
+        # Held until released: the call's output is the transcript's last text.
+        last_call = lambda: (lambda tail: '⎿' in tail and '❯' not in tail)(a.chat(sid).rsplit('● ', 1)[-1])
+        until(lambda: a.state(sid) == 'running' and last_call(), 15, 'tool output last')
         steps['output_last'] = a.eval(f'(with-current-buffer {chat} (format "%S" (text-properties-at (1- romacs-agent-log--input))))')
         good.append(typed('while_output_last', 'typed while'))
-        good.append(a.eval(f'(with-current-buffer {chat} (and romacs-agent-log--blocks t))') == 't' and a.state(sid) == 'running')
+        good.append(last_call() and a.state(sid) == 'running')
         release.write_text('')
         a.idle(sid)
         good.append(typed('after_output_turn', ' and after', 'typed while and after'))
@@ -2889,7 +2890,8 @@ def chat_log(args, base):
             return int(a.eval(f'(hash-table-count (romacs-agent-approvals {a.s(sid)}))'))
 
         def at_end():
-            a.eval('(progn (goto-char (point-max)) (recenter -1) t)')
+            a.eval('(with-selected-window (selected-window) (set-buffer (window-buffer)) '
+                   '(goto-char (point-max)) (recenter -1) t)')
 
         ctrl = lambda key: ['-M', 'ctrl', '-k', key, '-m', 'ctrl']
         sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
@@ -2945,20 +2947,24 @@ def chat_log(args, base):
                        '(delete-other-windows) (romacs-agent-id session))').strip('"')
         a.eval(f'(progn (romacs-agent-send {a.s(codex)} {lisp_text(CODEX_PROMPT)}) t)')
         try:
-            a.until(codex, lambda: a.eval('(and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t)') == 't',
+            a.until(codex, lambda: a.eval(f'(with-current-buffer (romacs-agent-log-chat {a.s(codex)}) (and (text-property-any (point-min) romacs-agent-log--end (quote romacs-agent-log-entry) (quote tool)) t))') == 't',
                     300, 'a Codex command drawn')
-            time.sleep(3)
+            # Its output shows while it runs, then whole once it ends.
+            chat = f'(romacs-agent-log-chat {a.s(codex)})'
+            a.until(codex, lambda: a.state(codex) == 'running'
+                    and a.eval(f'(with-current-buffer {chat} (and (string-match-p "so far" (buffer-string)) t))') == 't',
+                    120, 'Codex output while it runs')
             at_end()
             shot('codex-running')
             a.idle(codex, 300)
             at_end()
             shot('codex-done')
-            result['codex'] = True
+            result['codex'] = 'line 40' in a.chat(codex) or 'line 3' in a.chat(codex)
         except RuntimeError as error:
             result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
                        'shows': {word: word in text for word in ('seq 1', 'notes.txt', '∴', '⎿', 'allowed by you', '✻')}})
-        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked']
+        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result['codex'] is True
                         and not result['denied_by_romacs'] and all(result['shows'].values()))
         return result
     finally:
@@ -3263,7 +3269,7 @@ def chat_view(args, base):
             time.sleep(.5)
 
         # The first prompt of a chat started with none, its window alone.
-        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-show session) '
+        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-ui--show-chat session) '
                      '(romacs-agent-id session))').strip('"')
         a.eval('(progn (delete-other-windows) t)')
         a.keyboard_ready()
@@ -3288,8 +3294,8 @@ def chat_view(args, base):
         child = json.loads(a.called('romacs_delegate_task')['text'])['taskId']
         until(lambda: a.state(child) == 'idle', 20, 'child done')
         a.idle(sid, 30)
-        a.eval(f'(progn (romacs-agent-show {a.s(sid)}) (delete-other-windows) (split-window-right) '
-               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-show {a.s(child)}) (current-buffer))) '
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(sid)}) (delete-other-windows) (split-window-right) '
+               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(child)}) (current-buffer))) '
                f'(other-window 1) (goto-char (point-max)) t)')
         a.keyboard_ready()
         a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
@@ -3342,7 +3348,7 @@ def children(args, base):
         a.idle(parent, 60)
         until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
 
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         a.keyboard_ready()
 
         def header():
@@ -3393,7 +3399,7 @@ def children(args, base):
         a.keys(rows[0].split('broken task')[0].split()[-1] if rows else '1')
         until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
         result['opened'] = shown()
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
         result['header_seen'] = header()
 
@@ -3410,7 +3416,7 @@ def children(args, base):
         a.keys('-k', 'Return')
         until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
         result['chosen'] = shown()
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
 
         # The harness's own subagent: counted while it runs; its row goes to its card.
         a.send(parent, 'agent 6 read the code')
@@ -3759,7 +3765,7 @@ def live_rows(args, base):
         until(lambda: a.state(held) == 'running', 30, 'child running')
         a.idle(parent, 60)
 
-        a.eval(f'(progn (romacs-agent-show {a.s(parent)}) (delete-other-windows) t)')
+        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
         a.keyboard_ready()
 
         def rows():

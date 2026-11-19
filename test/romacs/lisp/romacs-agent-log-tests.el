@@ -206,5 +206,91 @@
     (romacs-agent-log-previous 1)
     (should (eq (get-text-property (point) 'romacs-agent-log-entry) 'tool))))
 
+;; Sol review round 1 (2026-11-19).
+
+(ert-deftest romacs-agent-log-prompt-motion-ends ()
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "one")
+    (draw :type 'delta :text "reply")
+    (draw :type 'done :time 0)
+    (draw :type 'input :text "two")
+    (goto-char (point-min))
+    (romacs-agent-log-next-prompt 1)
+    (should (looking-at-p "\n❯ two"))
+    ;; Past the last prompt: said, never a hang.
+    (should-error (romacs-agent-log-next-prompt 1) :type 'user-error)
+    (goto-char (point-min))
+    (should-error (romacs-agent-log-previous-prompt 1) :type 'user-error)))
+
+(ert-deftest romacs-agent-log-subagent-text-goes-in-whole-lines ()
+  (romacs-agent-log-tests--with
+    (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "d"))
+    (draw :type 'delta :text "hello " :parent "a")
+    (draw :type 'delta :text "world\nnext " :parent "a")
+    (draw :type 'tool :state 'started :id "r" :name "Read" :parent "a")
+    (draw :type 'tool :state 'completed :id "a" :output "done")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "│ hello world\n│ next\n│ ● " text))
+      (should (string-match-p "⎿ done" text)))
+    ;; A background subagent's later word goes under its call still.
+    (draw :type 'task :id "a" :state 'completed :summary "counted")
+    (draw :type 'delta :text "root text")
+    (should (string-match-p "│ · completed: counted\n[^│]*root text" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
+  (romacs-agent-log-tests--with
+    (puthash "q" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "q" :tool "AskUserQuestion" :user t
+          :questions '(("Colour?" :options ("Red" "Blue"))))
+    (let ((answers (make-hash-table :test #'equal)))
+      (puthash "Colour?" "Blue" answers)
+      (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
+    ;; Said who answered, and what; still answerable until the harness has it.
+    (should (string-match-p "allowed by you\n  Colour\\? → Blue" (romacs-agent-log-tests--transcript)))
+    (should (assoc "q" romacs-agent-log--asks))
+    (remhash "q" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "q" :behavior "allow")
+    (should-not romacs-agent-log--asks)
+    (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-ret-on-an-approval-only-shows-it ()
+  (romacs-agent-log-tests--with
+    (puthash "b" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "b" :tool "Bash" :input (romacs-agent-log-tests--input "command" "make"))
+    (goto-char (cadr (assoc "b" romacs-agent-log--asks)))
+    (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-log-open))
+    (let (answered)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
+        (save-window-excursion (romacs-agent-log-open)))
+      (should-not answered))))
+
+(ert-deftest romacs-agent-log-what-the-session-waits-on-is-drawn ()
+  (romacs-agent-log-tests--with
+    ;; A request the records drew under another id, or not at all.
+    (let ((request (make-hash-table :test #'equal)))
+      (puthash "tool_name" "Bash" request)
+      (puthash "input" (romacs-agent-log-tests--input "command" "ls") request)
+      (puthash "7:1" request (romacs-agent-approvals session)))
+    (puthash "0:1" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "0:1" :tool "Bash")
+    (remhash "0:1" (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (should-not (assoc "0:1" romacs-agent-log--asks))
+    (should (assoc "7:1" romacs-agent-log--asks))))
+
+(ert-deftest romacs-agent-log-recall-keeps-the-draft ()
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first")
+    (draw :type 'input :text "second")
+    (goto-char (point-max))
+    (insert "my draft")
+    (romacs-agent-log-history-previous)
+    (should (equal (romacs-agent-log--draft) "second"))
+    (romacs-agent-log-history-previous)
+    (should (equal (romacs-agent-log--draft) "first"))
+    (romacs-agent-log-history-next)
+    (romacs-agent-log-history-next)
+    (should (equal (romacs-agent-log--draft) "my draft"))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

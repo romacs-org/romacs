@@ -1957,7 +1957,9 @@ is let go, however it is read (live, a replay, a journal read here)."
                                ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
                                                      :by (gethash "by" note) :decision (gethash "decision" note)
                                                      :scope (gethash "scope" note)
-                                                     :reason (romacs-agent--value (gethash "reason" note)))))
+                                                     :reason (romacs-agent--value (gethash "reason" note))
+                                                     :answers (let ((answers (gethash "answers" note)))
+                                                                (and (hash-table-p answers) (> (hash-table-count answers) 0) answers)))))
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
@@ -4337,7 +4339,11 @@ SESSION's records first, so every view shows who decided."
                                    "type" "answer" "request" request-id "by" (symbol-name by)
                                    "decision" (if allow "allow" "deny")
                                    "scope" (if (and (consp allow) (plist-get allow :always)) "session" "once")
-                                   "reason" (or message :null))))
+                                   "reason" (or message :null)
+                                   "answers" (let ((object (romacs-mcp--object)))
+                                               (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
+                                                 (puthash question answer object))
+                                               object))))
     (romacs-agent--line session line)))
 
 (defun romacs-agent--host-pid (session)
