@@ -338,13 +338,24 @@ moment more under load."
        (let ((epoch (romacs-agent-events-epoch (romacs-agent-id session))))
          (should (= (romacs-agent-events-compact (romacs-agent-id session)) 3))
          (should (equal (romacs-agent-events-tests--seqs session) '(1 2 6 7 8)))
-         ;; c1's three deltas (seqs 3 to 5, over two windows of seqs) went
-         ;; in one transaction, the window of its whole record: never a
-         ;; message's deltas in part.
+         ;; c1's three deltas, more than a batch of two, went in one
+         ;; transaction: never a message's deltas in part.
          (should (= (romacs-agent-events-epoch (romacs-agent-id session)) (1+ epoch)))
-         ;; A store no writer of this build has opened has no epochs: 0.
+         ;; A store no writer of this build has opened has no epochs: 0,
+         ;; read as an editor reads it.
          (sqlite-execute (romacs-agent-events--db) "drop table epochs")
-         (should (= (romacs-agent-events-epoch (romacs-agent-id session)) 0)))))))
+         (let ((read (sqlite-open (romacs-agent-store--file) t)))
+           (unwind-protect
+               (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () read)))
+                 (should (= (romacs-agent-events-epoch (romacs-agent-id session)) 0)))
+             (sqlite-close read))))))))
+
+(ert-deftest romacs-agent-events-compaction-batches-whole-messages ()
+  ;; Whole messages a batch, in the order they began, up to the window;
+  ;; one larger than it alone.
+  (should (equal (romacs-agent-events--compact-batches
+                  '((5 "b") (1 "a") (2 "a") (6 "b") (7 "c") (8 "c") (9 "c") (10 "d")) 3)
+                 '((1 2) (5 6) (7 8 9) (10)))))
 
 (ert-deftest romacs-agent-events-compaction-changes-what-follows-a-seq ()
   ;; Why compacting raises the epoch: a reader that holds a streamed

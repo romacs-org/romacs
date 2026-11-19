@@ -683,9 +683,10 @@ paging ever holds live delivery back.
 
 - *Unsupported in 1.0 (=unsupported=):* rollback, renew, fork, move to
   another account.  Each gets a method in a minor version.
-- *Images.*  A local client may send =images= as files by path (the
-  capability =images.path=).  Upload through the relay is a later minor
-  version (=images.upload=).
+- *Attachments are references, never copies.*  =images= holds paths: a
+  path on the agent's host, or =HOST:PATH= for a file on the client's
+  machine, which the agent reads in place (over the ssh it already has).
+  No file's bytes enter the store, the logs or the wire.
 
 ** Events
 - *Event (normative).*  =agents/event= carries one record unit's events,
