@@ -42,8 +42,7 @@ def classified(rows):
     return members, classes
 
 
-CENSUS = {m: {'gnu_parity_loaded': 1, 'gnu_target_total': 1596, 'shared_total': 1590, 'files_measured': 1811,
-              'chain': None, 'loaded': ['lisp/a.el']} for m in pr.CENSUS_MODES}
+CENSUS = {m: {'gnu_parity_loaded': 1, 'chain': None, 'loaded': ['lisp/a.el']} for m in pr.CENSUS_MODES}
 
 
 def honest(rows, real_passed=0, files=None):
