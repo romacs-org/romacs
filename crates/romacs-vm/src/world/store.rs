@@ -239,6 +239,15 @@ fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
     }
 }
 
+/// How long ago a file must have changed for its stat to vouch for its
+/// content (`World::remember_read`).
+const RACY_SECONDS: u64 = 2;
+
+/// The worlds this process found holding (`World::valid_manifest`), by
+/// key: what `World::lisp_files_digest` need not check again.
+// CELL(Plain)
+static VALIDATED: std::sync::Mutex<std::collections::BTreeSet<[u8; 32]>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+
 /// A file's identity and change times, as the digest cache names it.
 fn identity_name(meta: &std::fs::Metadata) -> String {
     use std::os::unix::fs::MetadataExt;
@@ -456,6 +465,8 @@ fn real_dir(path: &Path) -> bool {
 
 /// Whether NAME is a digest-cache entry's: `identity_name`'s shape.
 fn identity_entry(name: &str) -> bool {
+    // A file read's entry (`World::read_entry`) is named alike, prefixed.
+    let name = name.strip_prefix("read-").unwrap_or(name);
     let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
     let fields: Vec<&str> = name.split('-').collect();
     fields.len() == 5 && fields[..3].iter().all(|f| digits(f))
@@ -504,7 +515,7 @@ impl World {
         checked_store(&store, host::getenv("HOME").map(PathBuf::from).as_deref()).map_err(fail)?;
         let key = world_key(&store, &recipe, false).map_err(fail)?;
         let world = World { store, key, recipe };
-        let manifest = if replay { world.valid_manifest() } else { world.published_manifest() }
+        let manifest = if replay { world.checked_manifest(false) } else { world.published_manifest() }
             .map_err(|reason| world.explained(reason))?;
         let image = world.checked_image(&manifest, false)?;
         Ok((world, image))
@@ -515,7 +526,7 @@ impl World {
     /// with the executable and the copy of the Lisp tree beside it. Its key
     /// binds the executable, its libraries and RECIPE; what else its build
     /// read is the installation's own, so its records are kept in its
-    /// manifest (`lisp_files_digest` reads them) but not asked again. Nothing is
+    /// manifest but not asked again. Nothing is
     /// made or written there, no lock taken, no use stamped and the digest
     /// cache, which the installer's build filled, is only read. No launch
     /// prunes such a store or builds in it.
@@ -542,17 +553,21 @@ impl World {
         self.store.join(format!("{}{suffix}", hex(&self.key)))
     }
 
-    /// The digest of the Lisp this world's build read, from its published
-    /// manifest alone (no record is checked): every file's content, each
-    /// named relative to the first of ROOTS that holds it (`root0/subr.el`),
-    /// so the same tree copied elsewhere gives the same digest. With the
-    /// embedder's build and `libraries_identity`, what compiled Lisp made
-    /// against this world depends on (`crate::compiled_lisp`): not this
-    /// executable's file, which two builds of one commit make different
-    /// (romacs#277). None when no world was published.
+    /// The digest of the Lisp this world's build read, from its manifest
+    /// once every record holds again, as a launch checks it: every file's
+    /// content, each named relative to the first of ROOTS that holds it
+    /// (`root0/subr.el`), so the same tree copied elsewhere gives the same
+    /// digest. With the embedder's build and `libraries_identity`, what
+    /// compiled Lisp made against this world depends on
+    /// (`crate::compiled_lisp`): not this executable's file, which two
+    /// builds of one commit make different (romacs#277). None when no world
+    /// was published, or a file its build read has changed since: no
+    /// process keys compiled Lisp by a world that would be built again.
     pub fn lisp_files_digest(&self, roots: &[PathBuf]) -> Option<String> {
-        let text = host::read_store_file(self.file(".json")).ok()?;
-        files_digest(&serde_json::from_str(&text).ok()?, roots)
+        // A world this process launched from, checked then, is not checked
+        // twice: a compile process that booted from its compile world.
+        let manifest = if VALIDATED.lock().unwrap().contains(&self.key) { self.published_manifest() } else { self.valid_manifest() };
+        files_digest(&manifest.ok()?, roots)
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -575,19 +590,92 @@ impl World {
     }
 
     /// The manifest, when its records still hold: every keyed fact the build
-    /// read, asked again, gives the same answer.
+    /// read, asked again, gives the same answer. A file read is asked by its
+    /// stat first (`held_read`), a path probe directly (`held_probe`), and
+    /// a fact the build asked twice once.
     fn valid_manifest(&self) -> Result<Json, Json> {
+        self.checked_manifest(true)
+    }
+
+    /// `valid_manifest`, the digest cache filled with each file read asked
+    /// again when REMEMBER, as a store this process may write is (not an
+    /// installation's).
+    fn checked_manifest(&self, remember: bool) -> Result<Json, Json> {
         let manifest = self.published()?;
+        // A build asks many facts more than once: each is asked again once.
+        let mut asked = std::collections::HashSet::new();
         for record in manifest["records"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            if !asked.insert(Self::fact(record)) || host::unrecorded(|| Self::held_probe(record) || self.held_read(record)) {
+                continue;
+            }
             let mut expected = record.clone();
             if let Some(fields) = expected.as_object_mut() { fields.remove("site"); }
             match host::replay(record) {
-                Some(now) if now == expected => {}
+                Some(now) if now == expected => if remember { self.remember_read(record) },
                 now => return Err(json!({"stale": expected, "now": now})),
             }
         }
         captured(&manifest)?;
+        VALIDATED.lock().unwrap().insert(self.key);
         Ok(manifest)
+    }
+
+    /// What RECORD asks and was answered, its site aside: the same fact
+    /// asked twice by a build is the same text.
+    fn fact(record: &Json) -> String {
+        let field = |name: &str| record.get(name).map_or_else(String::new, Json::to_string);
+        ["kind", "path", "probe", "fact", "name", "form", "key", "result", "value"].map(field).join("\0")
+    }
+
+    /// Whether RECORD is a path probe (existence, file or directory) whose
+    /// answer is the same now, asked directly: a build's load-path search
+    /// asks thousands, mostly of absent files, and the replay a record of
+    /// another kind needs costs more than the probe.
+    fn held_probe(record: &Json) -> bool {
+        let probe = match record["probe"].as_str() {
+            Some("Exists") => host::Probe::Exists,
+            Some("IsFile") => host::Probe::IsFile,
+            Some("IsDir") => host::Probe::IsDir,
+            _ => return false,
+        };
+        record["kind"] == "probe"
+            && record["path"].as_str().is_some_and(|path| Some(host::probe(probe, path)) == record["result"].as_bool())
+    }
+
+    /// Whether RECORD is a file read whose file, by its stat, is the one
+    /// the digest cache saw with the content RECORD names: its device,
+    /// inode, size and change times (`identity_name`) unchanged since that
+    /// content was read and hashed, so it is not read again.
+    fn held_read(&self, record: &Json) -> bool {
+        let (Some(path), Some(sha256)) = (Self::read_path(record), record["result"]["sha256"].as_str()) else { return false };
+        host::metadata(path).ok()
+            .and_then(|meta| host::read_store_file(self.read_entry(&meta)).ok())
+            .is_some_and(|cached| cached == sha256)
+    }
+
+    /// Remember that RECORD, a file read just asked again and holding, names
+    /// its file's content as its stat now stands (`held_read`). Not for a
+    /// file changed within the last `RACY_SECONDS`: the kernel stamps change
+    /// times from a coarse clock, so a write in the same tick that keeps the
+    /// size would keep the stat, and only a later read would see it.
+    fn remember_read(&self, record: &Json) {
+        use std::os::unix::fs::MetadataExt;
+        let (Some(path), Some(sha256)) = (Self::read_path(record), record["result"]["sha256"].as_str()) else { return };
+        let Ok(meta) = host::unrecorded(|| host::metadata(path)) else { return };
+        if (meta.mtime().max(meta.ctime()).max(0) as u64).saturating_add(RACY_SECONDS) >= now_seconds() {
+            return;
+        }
+        let _ = store_subdir(&self.store.join("ids")).and_then(|()| host::write_store_file(self.read_entry(&meta), sha256));
+    }
+
+    /// The path of RECORD when it is a file read named by a plain string.
+    fn read_path(record: &Json) -> Option<&str> {
+        (record["kind"] == "file-read").then(|| record["path"].as_str()).flatten()
+    }
+
+    /// The digest cache's entry for a file read of the file whose stat is META.
+    fn read_entry(&self, meta: &std::fs::Metadata) -> PathBuf {
+        self.store.join("ids").join(format!("read-{}", identity_name(meta)))
     }
 
     /// The image MANIFEST names, opened, when its content is the one it
@@ -1489,6 +1577,51 @@ mod tests {
         assert_ne!(a, super::files_digest(&manifest("/a/tree", serde_json::json!({"errno": 2})), &at("/a/tree")).unwrap());
     }
     use super::*;
+
+    /// A world's file reads are asked by their stat first: a file read once
+    /// and holding is not read again while its stat stands (the digest
+    /// cache's `read-` entry vouches for it, and an installation's store is
+    /// never written), and a changed file is read and found stale.
+    #[test]
+    fn a_worlds_file_reads_are_asked_by_their_stat_first() {
+        let store = marked_store("stat-first");
+        let file = store.join("subr.el");
+        std::fs::write(&file, "(defmacro m () 1)").unwrap();
+        // A file changed within RACY_SECONDS is read again each time, its stat not trusted yet.
+        std::thread::sleep(std::time::Duration::from_secs(RACY_SECONDS + 1));
+        let record = |sha: String| serde_json::json!({"kind": "file-read", "path": file.to_str().unwrap(),
+                                                      "result": {"len": 17, "sha256": sha}});
+        let sha = hex(&sha256(b"(defmacro m () 1)"));
+        let world = World { store: store.clone(), key: [0x5a; 32], recipe: vec![] };
+        std::fs::write(world.file(".json"), serde_json::json!({"records": [record(sha.clone())]}).to_string()).unwrap();
+        let entry = || world.read_entry(&std::fs::metadata(&file).unwrap());
+        assert!(world.checked_manifest(false).is_ok());
+        assert!(!entry().exists(), "an installation's store is not written");
+        assert!(world.valid_manifest().is_ok());
+        assert_eq!(std::fs::read_to_string(entry()).unwrap(), sha);
+        assert!(identity_entry(&entry().file_name().unwrap().to_string_lossy()), "prune and reset know the entry");
+        // The entry vouches for the file while its stat stands: a manifest
+        // naming other content holds, which only a read would contradict.
+        std::fs::write(world.file(".json"), serde_json::json!({"records": [record("00".repeat(32))]}).to_string()).unwrap();
+        std::fs::write(entry(), "00".repeat(32)).unwrap();
+        assert!(world.valid_manifest().is_ok());
+        // A changed file changes its stat: it is read, and the world is stale.
+        std::fs::write(world.file(".json"), serde_json::json!({"records": [record(sha)]}).to_string()).unwrap();
+        std::fs::write(&file, "(defmacro m () 2)").unwrap();
+        assert!(world.valid_manifest().is_err_and(|why| why.get("stale").is_some()));
+        assert!(!entry().exists(), "a file changed within RACY_SECONDS is not vouched for");
+        // A probe is asked directly, once however often the build asked it:
+        // an absent file made since is a stale world.
+        let absent = store.join("absent.el");
+        let probe = serde_json::json!({"kind": "probe", "probe": "IsFile", "path": absent.to_str().unwrap(), "result": false});
+        let site = |line: u32| { let mut p = probe.clone(); p["site"] = serde_json::json!({"line": line}); p };
+        std::fs::write(&file, "(defmacro m () 1)").unwrap();
+        std::fs::write(world.file(".json"), serde_json::json!({"records": [site(1), site(2)]}).to_string()).unwrap();
+        assert!(world.valid_manifest().is_ok());
+        std::fs::write(&absent, "").unwrap();
+        assert!(world.valid_manifest().is_err_and(|why| why.get("stale").is_some()));
+        let _ = std::fs::remove_dir_all(&store);
+    }
 
     /// Build a shared library at OUT from SOURCE with ARGS, or None when no
     /// C compiler is here.
