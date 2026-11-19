@@ -1498,7 +1498,9 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
       (let ((inhibit-read-only t))
         (erase-buffer)
         (when title (insert title "\n\n"))
-        (insert (string-join (nth page pages) "\n") "\n")
+        ;; Every page as tall as the tallest, so the footer stays put.
+        (insert (string-join (nth page pages) "\n") "\n"
+                (make-string (- (apply #'max (mapcar #'length pages)) (length (nth page pages))) ?\n))
         (when footer (insert "\n" footer "\n"))
         (goto-char (point-min))
         (when window (set-window-start window (point-min)))))
