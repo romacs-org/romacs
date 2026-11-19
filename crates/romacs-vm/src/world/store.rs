@@ -54,7 +54,7 @@ const LOCK_ENV: &str = "ROMACS_WORLD_LOCK_FD";
 /// counts the build as failed.
 const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 /// A file's identity, as a publication changes it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FileIdentity { device: u64, inode: u64, modified: (i64, i64) }
 
 /// How long after the Nth transient failure a launch builds again.
@@ -243,13 +243,6 @@ fn subdir(dir: &Path, mode: u32) -> std::io::Result<()> {
 /// content (`World::held_read`).
 const RACY_SECONDS: u64 = 2;
 
-/// The worlds this process found holding (`World::valid_manifest`): each
-/// store, key and publication of the manifest checked (`World::publication`),
-/// what `World::lisp_files_digest` need not check again.
-// CELL(Plain)
-static VALIDATED: std::sync::Mutex<std::collections::BTreeSet<(PathBuf, [u8; 32], FileIdentity)>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
-
 /// A file's identity and change times, as the digest cache names it.
 fn identity_name(meta: &std::fs::Metadata) -> String {
     use std::os::unix::fs::MetadataExt;
@@ -299,10 +292,12 @@ fn libraries_digest() -> Result<[u8; 32], String> {
     Ok(sha256(entries.join("\n").as_bytes()))
 }
 
-/// `World::lisp_files_digest` of MANIFEST: each file-read record's path,
+/// The digest of the Lisp a world's build read, from its MANIFEST: what
+/// compiled Lisp made against that world depends on, with the embedder's
+/// build and `libraries_identity`: each file-read record's path,
 /// relative to the first of ROOTS that holds it, and its recorded result
 /// (the content's length and digest, or why it could not be read).
-fn files_digest(manifest: &Json, roots: &[PathBuf]) -> Option<String> {
+pub fn lisp_digest(manifest: &Json, roots: &[PathBuf]) -> Option<String> {
     let name = |path: &str| roots.iter().enumerate()
         .find_map(|(i, root)| Path::new(path).strip_prefix(root).ok().map(|rest| format!("root{i}/{}", rest.display())))
         .unwrap_or_else(|| path.to_owned());
@@ -556,26 +551,12 @@ impl World {
     }
 
     /// The digest of the Lisp this world's build read, from its manifest
-    /// once every record holds again, as a launch checks it: every file's
-    /// content, each named relative to the first of ROOTS that holds it
-    /// (`root0/subr.el`), so the same tree copied elsewhere gives the same
-    /// digest. With the embedder's build and `libraries_identity`, what
-    /// compiled Lisp made against this world depends on
-    /// (`crate::compiled_lisp`): not this executable's file, which two
-    /// builds of one commit make different (romacs#277). None when no world
-    /// was published, or a file its build read has changed since: no
-    /// process keys compiled Lisp by a world that would be built again.
+    /// once every record holds again, as a launch checks it
+    /// (`lisp_digest`). None when no world was published, or a file its
+    /// build read has changed since: no process that did not restore this
+    /// world keys compiled Lisp by a world that would be built again.
     pub fn lisp_files_digest(&self, roots: &[PathBuf]) -> Option<String> {
-        // A world this process launched from, checked then, is not checked
-        // twice (a compile process that booted from its compile world): the
-        // same store's same publication, unreplaced while it is read.
-        let publication = self.publication();
-        let checked = |p: &FileIdentity| VALIDATED.lock().unwrap().contains(&(self.store.clone(), self.key, *p));
-        let manifest = match publication.filter(checked) {
-            Some(p) => self.published_manifest().ok().filter(|_| self.publication() == Some(p)),
-            None => self.valid_manifest().ok(),
-        };
-        files_digest(&manifest?, roots)
+        lisp_digest(&self.valid_manifest().ok()?, roots)
     }
 
     /// Whether a launch would restore this world now: its manifest holds
@@ -609,7 +590,6 @@ impl World {
     /// again when REMEMBER, as a store this process may write is (not an
     /// installation's).
     fn checked_manifest(&self, remember: bool) -> Result<Json, Json> {
-        let publication = self.publication();
         let manifest = self.published()?;
         // A build asks many facts more than once: each record, its site
         // aside, is asked again once.
@@ -627,10 +607,6 @@ impl World {
             }
         }
         captured(&manifest)?;
-        // The publication checked, if it was not replaced while it was read.
-        if let Some(publication) = publication.filter(|p| Some(p) == self.publication().as_ref()) {
-            VALIDATED.lock().unwrap().insert((self.store.clone(), self.key, publication));
-        }
         Ok(manifest)
     }
 
@@ -1581,10 +1557,10 @@ mod tests {
             {"kind": "probe", "path": format!("{root}/etc"), "result": "ok"}]});
         let read = |sha: &str| serde_json::json!({"len": 3, "sha256": sha});
         let at = |root: &str| vec![std::path::PathBuf::from(root)];
-        let a = super::files_digest(&manifest("/a/tree", read("11")), &at("/a/tree")).unwrap();
-        assert_eq!(a, super::files_digest(&manifest("/b/c/tree", read("11")), &at("/b/c/tree")).unwrap());
-        assert_ne!(a, super::files_digest(&manifest("/a/tree", read("22")), &at("/a/tree")).unwrap());
-        assert_ne!(a, super::files_digest(&manifest("/a/tree", serde_json::json!({"errno": 2})), &at("/a/tree")).unwrap());
+        let a = super::lisp_digest(&manifest("/a/tree", read("11")), &at("/a/tree")).unwrap();
+        assert_eq!(a, super::lisp_digest(&manifest("/b/c/tree", read("11")), &at("/b/c/tree")).unwrap());
+        assert_ne!(a, super::lisp_digest(&manifest("/a/tree", read("22")), &at("/a/tree")).unwrap());
+        assert_ne!(a, super::lisp_digest(&manifest("/a/tree", serde_json::json!({"errno": 2})), &at("/a/tree")).unwrap());
     }
     use super::*;
 
@@ -1637,16 +1613,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&store);
     }
 
-    /// A check is reused only for the store and publication it checked:
-    /// another store's world under the same key, or this store's manifest
-    /// published again, is checked itself.
+    /// A world's digest is its own store's manifest, checked: another
+    /// store's stale world under the same key gives none, nor does this
+    /// store's manifest published again stale. A process that restored a
+    /// world keys by that world's own manifest (`lisp_digest`): after a
+    /// preloaded file changed and a valid world was published again, the
+    /// restored world's digest is not the new one's, so what it compiles
+    /// is never found by a loader of the new world.
     #[test]
-    fn a_worlds_check_is_reused_only_for_the_publication_checked() {
-        let (a, b) = (marked_store("reuse-a"), marked_store("reuse-b"));
+    fn a_worlds_digest_is_its_own_checked_manifest_or_the_restored_one() {
+        let (a, b) = (marked_store("digest-a"), marked_store("digest-b"));
         let file = b.join("subr.el");
         std::fs::write(&file, "x").unwrap();
         let manifest = |sha: String| serde_json::json!({"records": [{"kind": "file-read", "path": file.to_str().unwrap(),
-                                                                    "result": {"len": 1, "sha256": sha}}]}).to_string();
+                                                                    "result": {"len": 1, "sha256": sha}}]});
         let publish = |world: &World, text: String| {
             let staged = world.store.join("staged.json");
             std::fs::write(&staged, text).unwrap();
@@ -1654,14 +1634,20 @@ mod tests {
         };
         let key = [0x6b; 32];
         let (in_a, in_b) = (World { store: a.clone(), key, recipe: vec![] }, World { store: b.clone(), key, recipe: vec![] });
-        publish(&in_b, manifest(hex(&sha256(b"x"))));
-        publish(&in_a, manifest("00".repeat(32)));
+        let restored = manifest(hex(&sha256(b"x")));
+        publish(&in_b, restored.to_string());
+        publish(&in_a, manifest("00".repeat(32)).to_string());
         let roots = [b.clone()];
-        assert!(in_b.valid_manifest().is_ok());
-        assert!(in_b.lisp_files_digest(&roots).is_some());
+        assert_eq!(in_b.lisp_files_digest(&roots), lisp_digest(&restored, &roots));
         assert!(in_a.lisp_files_digest(&roots).is_none(), "another store's stale world, same key");
-        publish(&in_b, manifest("00".repeat(32)));
+        publish(&in_b, manifest("00".repeat(32)).to_string());
         assert!(in_b.lisp_files_digest(&roots).is_none(), "the same store's manifest published again, stale");
+        // The restored world's preloaded file changes, and a valid world is published again.
+        std::fs::write(&file, "y").unwrap();
+        publish(&in_b, manifest(hex(&sha256(b"y"))).to_string());
+        let published = in_b.lisp_files_digest(&roots);
+        assert!(published.is_some());
+        assert_ne!(lisp_digest(&restored, &roots), published, "the restored world keys as the new one");
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
     }
