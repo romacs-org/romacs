@@ -24,6 +24,16 @@ pub(super) fn profiled_bytes(object: &Object) -> usize {
         }
 }
 
+/// OBJECT's text when it is a string or a byte string.
+#[inline]
+fn object_text(object: &Object) -> Option<crate::lstring::StrView<'_>> {
+    match object {
+        Object::String(s) | Object::RawString(s) => Some(s.view()),
+        Object::Bytes(bytes) => Some(crate::lstring::StrView { bytes, chars: bytes.len(), multibyte: false }),
+        _ => None,
+    }
+}
+
 pub(super) fn payload_bytes(object: &Object) -> usize {
     match object {
         Object::String(s) | Object::RawString(s) => s.bytes.len(),
@@ -230,6 +240,7 @@ impl LispString {
     pub fn is_multibyte(&self) -> bool {
         self.flags & MULTIBYTE != 0
     }
+    #[inline]
     pub fn view(&self) -> crate::lstring::StrView<'_> {
         crate::lstring::StrView {
             bytes: &self.bytes,
@@ -416,7 +427,19 @@ impl Vm {
         Ok(self.allocate_object(Object::Bignum(Box::new(integer))))
     }
 
+    #[inline]
     pub(crate) fn str_view(&self, value: Value) -> Option<crate::lstring::StrView<'_>> {
+        let index = value.index_if(0)?;
+        match self.objects.get(index.wrapping_sub(1)) {
+            Some(object) => object_text(object),
+            None => self.str_view_past_table(value),
+        }
+    }
+    /// `str_view` of a value past the private table: a string of the
+    /// executable image, or a frozen string.
+    #[cold]
+    #[inline(never)]
+    fn str_view_past_table(&self, value: Value) -> Option<crate::lstring::StrView<'_>> {
         if Self::image_string(value) {
             let text = self.string_value(value).ok()?;
             return Some(crate::lstring::StrView {
@@ -426,15 +449,7 @@ impl Vm {
                 multibyte: !text.is_ascii(),
             });
         }
-        match self.object_if(value)? {
-            Object::String(s) | Object::RawString(s) => Some(s.view()),
-            Object::Bytes(bytes) => Some(crate::lstring::StrView {
-                bytes,
-                chars: bytes.len(),
-                multibyte: false,
-            }),
-            _ => None,
-        }
+        object_text(self.object_if(value)?)
     }
     /// VALUE's text from character FROM on: a string's through its own
     /// character/byte cursor (`LispString::byte_offset`, GNU's
@@ -510,24 +525,40 @@ impl Vm {
     }
     /// The object V names, private or frozen (`frozen.rs`); never an
     /// executable-image string, which `string_value` reads.
+    #[inline]
     pub(super) fn object(&self, value: Value) -> Result<&Object> {
-        let index = value.index(0)?;
-        if index & crate::image::IMAGE != 0 {
-            return self.frozen_object(index).ok_or_else(|| "invalid frozen object reference".into());
+        self.object_if(value).ok_or_else(|| self.object_refusal(value))
+    }
+    /// Why `object` names no object for VALUE.
+    #[cold]
+    #[inline(never)]
+    fn object_refusal(&self, value: Value) -> String {
+        match value.index(0) {
+            Err(text) => text,
+            Ok(index) if index & crate::image::IMAGE != 0 => "invalid frozen object reference".into(),
+            Ok(0) => "sequence required".into(),
+            Ok(_) => "invalid object reference".into(),
         }
-        self.objects
-            .get(index.checked_sub(1).ok_or("sequence required")?)
-            .filter(|object| !matches!(object, Object::Free))
-            .ok_or_else(|| "invalid object reference".into())
     }
     // Non-diagnostic type discrimination, total over private and frozen
-    // objects; executable-image strings are not objects.
+    // objects; executable-image strings are not objects. The private table's
+    // bounds check is the only test on the way to a private object: `nil'
+    // (index 0) and a frozen or image index (bit 60) both fall past it.
+    #[inline]
     pub(super) fn object_if(&self, value: Value) -> Option<&Object> {
         let index = value.index_if(0)?;
-        if index & crate::image::IMAGE != 0 {
-            return self.frozen_object(index);
+        match self.objects.get(index.wrapping_sub(1)) {
+            Some(Object::Free) => None,
+            Some(object) => Some(object),
+            None => self.object_past_table(index),
         }
-        self.objects.get(index.checked_sub(1)?).filter(|object| !matches!(object, Object::Free))
+    }
+    /// `object_if` of an index past the private table: a frozen region's
+    /// object, else none.
+    #[cold]
+    #[inline(never)]
+    fn object_past_table(&self, index: usize) -> Option<&Object> {
+        if index & crate::image::IMAGE != 0 { self.frozen_object(index) } else { None }
     }
     /// The private object V names, for writing: a frozen or image value
     /// refuses with GNU's read-only error, left pending (`refuse_read_only`).

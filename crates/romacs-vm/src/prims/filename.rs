@@ -202,13 +202,10 @@ fn completion_expanded(cx: &mut Leaf<'_>, directory: Value, saved: &[Value]) -> 
     if cx.symbol_function(helper)? != Value::NIL {
         return Ok(Step::Call { f: helper, args, then: completed_by_handler, saved: vec![] });
     }
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/dired.el")?;
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: completion_loop, saved: args })
 }
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/dired.el");
 const COMPLETION_LOOP: &str = "romacs--file-name-completion";
 
 fn completion_loop(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {

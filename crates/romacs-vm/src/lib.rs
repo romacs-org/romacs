@@ -138,6 +138,7 @@ mod frozen;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
+pub use isolate::refuse as isolate_refuse;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -380,13 +381,35 @@ impl Value {
             Self(((index as u64) << 3) | tag)
         }
     }
+    /// The payload of a reference of logical tag TAG. Every caller passes a
+    /// constant: a tag that is its own three bits (0, 3, 4, 6, 7) is then one
+    /// mask and compare, and only fixnums and cells take `tag`'s decode.
+    #[inline(always)]
     fn index_if(self, tag: u64) -> Option<usize> {
-        (self.tag() == tag).then_some(self.payload() as usize)
+        match tag {
+            0 | 3 | 4 | 6 | 7 => (self.0 & 7 == tag).then_some((self.0 >> 3) as usize),
+            _ => (self.tag() == tag).then_some(self.payload() as usize),
+        }
     }
+    #[inline(always)]
     fn index(self, tag: u64) -> Result<usize> {
-        self.index_if(tag)
-            .ok_or_else(|| format!("wrong value type (expected tag {tag})"))
+        self.index_if(tag).ok_or_else(|| wrong_tag(tag))
     }
+}
+
+/// `Value::index`'s refusal, built only when it is one. Callers that test
+/// with `index` meet it on ordinary control flow, so its text is copied from
+/// a constant rather than formatted.
+#[cold]
+#[inline(never)]
+fn wrong_tag(tag: u64) -> String {
+    const TEXT: [&str; 8] = [
+        "wrong value type (expected tag 0)", "wrong value type (expected tag 1)",
+        "wrong value type (expected tag 2)", "wrong value type (expected tag 3)",
+        "wrong value type (expected tag 4)", "wrong value type (expected tag 5)",
+        "wrong value type (expected tag 6)", "wrong value type (expected tag 7)",
+    ];
+    TEXT.get(tag as usize).map_or_else(|| format!("wrong value type (expected tag {tag})"), |&text| text.into())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

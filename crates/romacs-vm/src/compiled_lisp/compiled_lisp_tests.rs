@@ -329,3 +329,44 @@ fn tree_workers_overlap() {
     assert_eq!(done.len(), 4);
     assert_eq!(most.load(Ordering::SeqCst), 4, "the workers ran one at a time");
 }
+
+/// A tree's compile decides a file whose artifact holds without a compile
+/// process, on the `load-path' a compile process searches, and leaves to a
+/// process what does not hold or what it cannot tell.
+#[test]
+fn a_tree_decides_held_artifacts_itself() {
+    let store = test_store("held");
+    let lib = store.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let source = lib.join("a.el");
+    std::fs::write(&source, "(require 'b)\n").unwrap();
+    std::fs::write(lib.join("b.el"), "(provide 'b)\n").unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, identity: std::sync::OnceLock::new(),
+    };
+    // A's artifact, published as its compile would, having resolved NAME.
+    let publish = |name: &str| {
+        let digest = store::source_digest(&store, &source).unwrap();
+        let key = store::key("env", None, &source, &digest);
+        let record = json!({"kind": "resolved", "name": name, "nosuffix": false, "path": lib.join("b.el").to_string_lossy()});
+        let (bytes, inputs) = store::encode(&store::Status::Compiled, &source.to_string_lossy(), &[record], &[], &[]);
+        store::publish(&store, &key, &inputs, &bytes).unwrap()
+    };
+    let load_path = [lib.to_string_lossy().into_owned()];
+    let held = |load_path: &[String]| match tree::held(&configured, &source, load_path) {
+        Some(tree::Outcome::Published { artifact, held: true, status: store::Status::Compiled }) => Some(artifact),
+        _ => None,
+    };
+    let published = publish("b");
+    assert_eq!(held(&load_path), Some(published.clone()), "held on the load-path it was compiled on");
+    assert_eq!(held(&[store.join("elsewhere").to_string_lossy().into_owned()]), None, "B resolves elsewhere");
+    std::fs::remove_file(&published).unwrap();
+    publish("~/b");
+    assert_eq!(held(&load_path), None, "a name under ~ is the compile process's to resolve");
+    publish("b");
+    std::fs::write(&source, "(require 'b) ; changed\n").unwrap();
+    assert_eq!(held(&load_path), None, "a changed source compiles again");
+    std::fs::remove_dir_all(&store).unwrap();
+}

@@ -311,9 +311,6 @@ mod leaf {
         pub(crate) fn lossage_limit(&self) -> usize { self.vm.lossage_limit() }
         pub(crate) fn set_lossage_limit(&mut self, limit: usize) { self.vm.set_lossage_limit(limit) }
         pub(crate) fn set_local_zone(&mut self, zone: crate::LocalZone) { self.vm.local_zone = zone; }
-        pub(crate) fn symbol_slot_of(&self, v: Value) -> std::result::Result<usize, Fault> {
-            self.symbol_slot(v)
-        }
         /// WRITE from this leaf (`Vm::write_from_native'). A failure comes back
         /// only from a write made at once: with no engine to complete the
         /// leaf, a watcher's signal stays pending as itself and a `throw',
@@ -1106,6 +1103,7 @@ mod leaf {
         pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal_including_properties(a, b)
         }
+        #[inline]
         fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
@@ -1640,7 +1638,8 @@ mod leaf {
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
                 7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
-                0 if Vm::image_string(v) => Kind::String,
+                // A private object first: an executable-image string is past
+                // the private table, so `object_if' answers None for it.
                 0 => match self.vm.object_if(v) {
                     Some(data::Object::Float(_)) => Kind::Float,
                     Some(data::Object::Bignum(_)) => Kind::Bignum,
@@ -1674,6 +1673,7 @@ mod leaf {
                         crate::treesit::Object::Query(_) => Kind::TreesitQuery,
                         crate::treesit::Object::Task(_) => Kind::Invalid,
                     },
+                    None if Vm::image_string(v) => Kind::String,
                     None => Kind::Invalid,
                 },
                 _ => Kind::Invalid,
@@ -2571,15 +2571,22 @@ impl Vm {
         let c = self.intern(name);
         (c, self.list_value(data))
     }
-    /// Evaluate the built-in T3 Lisp prelude (`prims/prelude.el`): callback
-    /// loops written in Lisp over leaf cursors, so their state is registers.
+    /// Evaluate the VM's own Lisp (`prims::PRELUDES`) as the runtime tree
+    /// holds it: callback loops written in Lisp over leaf cursors, so their
+    /// state is registers, and the Lisp of the process, inotify, isolate and
+    /// window-change primitives. Its definitions stand in for GNU's C, so no
+    /// `load-history` entry names them. A world build records what it read;
+    /// a file that signals, or a process with no runtime tree, gets an error
+    /// naming the file or the reason, and none runs a copy compiled into the
+    /// executable.
     pub(crate) fn install_lisp_prelude_raw(&mut self) -> Result<Value> {
-        self.eval_source_raw(prims::HOOKS_LISP)?;
-        self.eval_source_raw(prims::PRELUDE)?;
-        self.eval_source_raw(prims::PROCESS_PRELUDE)?;
-        self.eval_source_raw(prims::INOTIFY_PRELUDE)?;
-        self.eval_source_raw(prims::ISOLATE_PRELUDE)?;
-        self.eval_source_raw(prims::WINDOW_CHANGE_PRELUDE)
+        let mut value = Value::NIL;
+        for path in prims::PRELUDES {
+            let file = crate::host::runtime_lisp(path)?;
+            let source = crate::host::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            value = self.eval_source_raw(&source).map_err(|e| format!("{}: {e}", file.display()))?;
+        }
+        Ok(value)
     }
 }
 
@@ -2878,14 +2885,13 @@ mod tests {
     }
 
     #[test]
-    fn installed_prelude_is_the_committed_file() {
+    fn installed_prelude_defines_mapcar() {
         let mut vm = Vm::new();
         vm.install_lisp_prelude_raw().unwrap();
         let v = vm
             .eval_source_raw("(mapcar (lambda (x) (* x x)) '(1 2 3))")
             .unwrap();
         assert_eq!(vm.display(v).unwrap(), "(1 4 9)");
-        assert!(prims::PRELUDE.contains("(defun mapcar (function sequence)"));
     }
 
     #[test]

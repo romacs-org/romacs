@@ -338,5 +338,19 @@ class Report(unittest.TestCase):
         self.assertEqual(check.report([('forecast', 'ok', 'clean', [])]), (['forecast: ok clean', 'dev-check: ok'], 0))
 
 
+class Epoch(unittest.TestCase):
+    def test_lisp_vm_beside_romacs_vm_rust_names_the_epoch(self):
+        status, _, findings = check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'})
+        self.assertEqual(status, 'ok')
+        self.assertEqual(len(findings), 1)
+        self.assertIn('lisp/vm/keyboard.el', findings[0])
+        self.assertIn(check.EPOCH, findings[0])
+
+    def test_a_raised_epoch_or_lisp_alone_is_quiet(self):
+        self.assertEqual(check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs', check.EPOCH})[2], [])
+        self.assertEqual(check.epoch({'lisp/vm/keyboard.el'})[2], [])
+        self.assertEqual(check.epoch({'crates/romacs-vm/src/prims/keyboard.rs'})[2], [])
+
+
 if __name__ == '__main__':
     unittest.main()

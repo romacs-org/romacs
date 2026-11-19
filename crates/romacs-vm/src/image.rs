@@ -437,15 +437,23 @@ impl Vm {
     /// V's car and cdr when it is a cons of this VM's own table, read in
     /// place: the case a list walk meets, kept small enough to inline
     /// into it. None for anything else, which `cons_pair` reads.
+    /// An image or frozen index (bit 60) is past the table, as is any stale one.
     #[inline]
     pub(crate) fn private_cons(&self, v: Value) -> Option<(Value, Value)> {
-        if v.tag() != 3 { return None; }
-        let index = usize::try_from(v.payload()).ok()?;
-        if index & IMAGE != 0 { return None; }
-        self.conses.get(index).copied()
+        v.index_if(3).and_then(|index| self.conses.get(index)).copied()
     }
     #[inline(always)]
     pub(crate) fn cons_pair(&self, v: Value) -> Result<(Value, Value)> {
+        match self.private_cons(v) {
+            Some(pair) => Ok(pair),
+            None => self.cons_pair_past_table(v),
+        }
+    }
+    /// `cons_pair` of anything but a private cons: an image or frozen cons,
+    /// or the refusal.
+    #[cold]
+    #[inline(never)]
+    fn cons_pair_past_table(&self, v: Value) -> Result<(Value, Value)> {
         let index = v.index(3)?;
         if index & IMAGE != 0 {
             if crate::frozen::region_of(index) != 0 {

@@ -5,6 +5,8 @@
 //! puts the root window 25 pixels down. Window dividers and the internal
 //! border (romacs-chrome.el's pane gap) against pinned GNU X11's answers
 //! on the same frame (frame_chrome.el, frame_chrome.gnu).
+#[path = "support/tree_lisp.rs"]
+mod tree_lisp;
 use romacs_vm::Vm;
 use std::path::Path;
 #[path = "support/gui_probe.rs"]
@@ -289,7 +291,7 @@ fn classic_chrome_is_todays_geometry() {
 #[test]
 fn a_divider_change_runs_the_size_change_functions() {
     let mut vm = gnu_session();
-    vm.eval_source(include_str!("../../../lisp/vm/window-change.el")).unwrap();
+    vm.eval_source(&tree_lisp::text("vm/window-change.el")).unwrap();
     eval(&mut vm, "(progn (split-window-right) (setq probe-log nil))");
     vm.frame_snapshot(1216, 876).unwrap();
     eval(&mut vm, "(add-hook 'window-size-change-functions (lambda (_) (push 'size probe-log)))");
