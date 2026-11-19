@@ -2537,6 +2537,16 @@ pub fn drain_isolate_wake() {
     }
 }
 
+/// For `romacs--test-block' alone (prims/block_test_hooks.rs): write the
+/// file READY, then sleep SECONDS polling nothing, std's sleep retrying a
+/// signal's EINTR, so no signal ends the wait. Test builds only.
+#[cfg(any(test, feature = "test-hooks"))]
+pub fn test_block(ready: &Path, seconds: u64) -> io::Result<()> {
+    std::fs::write(ready, b"")?;
+    std::thread::sleep(std::time::Duration::from_secs(seconds));
+    Ok(())
+}
+
 /// A worker ends within SECONDS of its first SIGTERM: a termination is a
 /// flag its loop reads, which a worker blocked inside a primitive never
 /// does, and with its spawner gone nothing else would end it.

@@ -565,7 +565,8 @@ fn rust_files(dir: &Path) -> Vec<PathBuf> {
 
 /// Every crate root under CRATE, as cargo discovers them, plus the
 /// romacs-vm primitive modules that build.rs declares: each `src/prims` file
-/// but `mod.rs`, test-only by build.rs's `is_test_source`.
+/// but `mod.rs` and the test-only ones (build.rs's `source_gate` under
+/// `test`; `*_test_hooks.rs` are scanned like shipped code).
 fn roots(krate: &Path) -> Vec<PathBuf> {
     let src = krate.join("src");
     let mut roots: Vec<PathBuf> = ["lib.rs", "main.rs"].iter().map(|f| src.join(f)).filter(|p| p.is_file()).collect();

@@ -566,6 +566,7 @@ fn a_child_blocked_in_a_primitive_ends_within_seconds_of_sigterm() {
                                     (id (romacs--isolate-id (isolate-future-isolate f)))
                                     (end (+ (float-time) 10)))
                                (while (and (not (file-exists-p {ready_lisp})) (< (float-time) end)) (romacs--isolate-wait 0.05))
+                               (unless (file-exists-p {ready_lisp}) (error \"the job never reached its wait\"))
                                (romacs--isolate-signal id 15)
                                (romacs--isolate-pid id))"));
     let _ = std::fs::remove_file(&ready);

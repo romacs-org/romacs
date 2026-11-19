@@ -118,9 +118,12 @@ impl Handshake {
     fn ready(&self) -> String {
         format!("(write-region \"\" nil {} nil 'no-message)", self.file("ready"))
     }
-    /// The spawner's form that waits, up to 10 s, until the job is ready.
+    /// The spawner's form that waits, up to 10 s, until the job is ready,
+    /// and signals if it never is.
     fn await_ready(&self) -> String {
-        format!("(let ((end (+ (float-time) 10))) (while (and (not (file-exists-p {})) (< (float-time) end)) (romacs--isolate-wait 0.01)))", self.file("ready"))
+        let ready = self.file("ready");
+        format!("(let ((end (+ (float-time) 10))) (while (and (not (file-exists-p {ready})) (< (float-time) end)) (romacs--isolate-wait 0.01)) \
+                 (unless (file-exists-p {ready}) (error \"the job never reached its wait\")))")
     }
 }
 impl Drop for Handshake {

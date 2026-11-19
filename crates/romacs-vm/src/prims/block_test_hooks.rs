@@ -10,8 +10,7 @@ use super::*;
 defsubr! { name = "romacs--test-block", gnu = "romacs:test", effect = Global,
 fn romacs_test_block(cx, seconds: Integer, ready: Value) {
     let ready = cx.string_text(ready)?;
-    // HOST(std::fs, std::thread::sleep): a test hook's handshake and its wait no signal ends; never shipped
-    std::fs::write(&ready, b"").map_err(|e| Fault::Error(format!("romacs--test-block: {ready}: {e}")))?;
-    std::thread::sleep(std::time::Duration::from_secs(u64::try_from(seconds.0).unwrap_or(0)));
+    crate::host::test_block(std::path::Path::new(&ready), u64::try_from(seconds.0).unwrap_or(0))
+        .map_err(|e| Fault::Error(format!("romacs--test-block: {ready}: {e}")))?;
     Ok(Value::NIL)
 }}
