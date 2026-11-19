@@ -695,8 +695,9 @@ impl Vm {
     }
     /// `annotation_variable` of the variable at SLOT.
     fn annotation_slot_value(&self, slot: usize) -> Value {
-        let local = self.slots[self.buffer_slot].value.index_if(0)
-            .and_then(|index| self.per_buffer(index - 1))
+        // Nil current is the `*scratch*' not yet made, which has no locals.
+        let local = self.slots[self.buffer_slot].value.object_index_if()
+            .and_then(|index| self.per_buffer(index))
             .and_then(|b| b.locals().get(Value::reference(slot + 1, 7)));
         let value = local.unwrap_or(self.slots[slot].value);
         if value == Value::UNBOUND { Value::NIL } else { value }
@@ -1161,6 +1162,17 @@ mod tests {
     fn run(vm: &mut Vm, v: serde_json::Value) -> Value {
         let f = vm.compile(&Form::from_json(v).unwrap()).unwrap();
         vm.execute_raw(f).unwrap()
+    }
+    /// With no buffer current (nil, index 0) a property lookup reads the
+    /// variable's default: there are no buffer-local values to read.
+    #[test]
+    fn a_property_variable_reads_its_default_when_no_buffer_is_current() {
+        let mut vm = Vm::new();
+        run(&mut vm, serde_json::json!(["set-default", ["quote", "char-property-alias-alist"], ["quote", [["p", "q"]]]]));
+        let current = std::mem::replace(&mut vm.slots[vm.buffer_slot].value, Value::NIL);
+        let read = vm.annotation_variable("char-property-alias-alist");
+        vm.slots[vm.buffer_slot].value = current;
+        assert_eq!(vm.display(read).unwrap(), "((p q))");
     }
     #[test]
     fn category_alias_default_order_and_explicit_nil_match_gnu() {

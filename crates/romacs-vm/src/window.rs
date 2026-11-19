@@ -205,7 +205,7 @@ impl Vm {
         }
     }
     pub(super) fn window_mut(&mut self, v: Value) -> Result<&mut Window> {
-        match self.objects.get_entry_mut(v.index(0)?.saturating_sub(1)) {
+        match v.object_index_if().and_then(|index| self.objects.get_entry_mut(index)) {
             Some(Object::Window(w)) => Ok(w),
             _ => Err("window required".into()),
         }
@@ -2454,13 +2454,11 @@ impl<'a> Windows<'a> {
         }
     }
     pub(crate) fn set_terminal_params(&mut self, terminal: Value, params: Value) -> std::result::Result<(), Fault> {
-        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) { t.params = params; }
+        if let Some(Object::Terminal(t)) = terminal.object_index_if().and_then(|index| self.vm.objects.get_entry_mut(index)) { t.params = params; }
         Ok(())
     }
     pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
-        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) {
+        if let Some(Object::Terminal(t)) = terminal.object_index_if().and_then(|index| self.vm.objects.get_entry_mut(index)) {
             if keyboard { t.keyboard_coding = coding; } else { t.terminal_coding = coding; }
         }
         Ok(())

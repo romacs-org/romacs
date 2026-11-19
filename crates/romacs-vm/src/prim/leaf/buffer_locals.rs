@@ -15,9 +15,10 @@ impl Leaf<'_> {
         // enable-multibyte-characters is always local (buffer.c:5300).
         if slot == self.vm.multibyte_slot { return Ok(true); }
         if let Some(fwd) = self.vm.forwarding(slot) {
-            return Ok(matches!(fwd, Fwd::Buffer(i) if self.vm.per_buffer_local_p(buffer.index(0).unwrap() - 1, i)));
+            let Fwd::Buffer(i) = fwd else { return Ok(false) };
+            return Ok(self.vm.per_buffer_local_p(buffer.object_index().map_err(Fault::Error)?, i));
         }
-        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        let index = buffer.object_index().map_err(Fault::Error)?;
         Ok(self.vm.per_buffer(index).is_some_and(|b| b.locals().contains(Value::reference(slot + 1, 7))))
     }
     /// data.c Flocal_variable_if_set_p: a buffer-forwarded or automatically
@@ -51,9 +52,9 @@ impl Leaf<'_> {
     }
     pub(in crate::prim) fn clear_local_slot(&mut self, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
         if let Some(fwd) = self.vm.forwarding(slot) {
-            if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.index(0).unwrap() - 1, i); }
+            if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.object_index().map_err(Fault::Error)?, i); }
         } else {
-            let index = buffer.index(0).map_err(Fault::Error)? - 1;
+            let index = buffer.object_index().map_err(Fault::Error)?;
             if let Some(at) = self.vm.local_at(index, slot) {
                 self.vm.store_local(index, slot, at, crate::variable_runtime::LocalStore::Kill);
             }
@@ -76,7 +77,7 @@ impl Leaf<'_> {
             self.intern(name);
         }
         // Snapshot slot IDs, not borrowed values, before allocating list cells.
-        let slots = self.vm.local_candidates(buffer.index(0).unwrap() - 1);
+        let slots = self.vm.local_candidates(buffer.object_index().map_err(Fault::Error)?);
         let mut entries = Vec::new();
         for slot in slots {
             if self.vm.indirect_variable(slot) != slot { continue; }

@@ -7,6 +7,7 @@
 //! 1-based ones; `TextBody` offsets are 0-based.
 pub(crate) mod ahead;
 pub(crate) mod native;
+pub(crate) mod query_memo;
 
 use crate::text::{FrozenText, TextBody};
 use std::sync::OnceLock;
@@ -87,8 +88,8 @@ pub(crate) struct Registry {
     pub parsers: Vec<(Value, Rc<RefCell<Core>>)>,
     /// A first parse started before a parser asks for it.
     pub early: Option<Early>,
-    /// Bytes inserted and deleted since a frame last fontified a window of
-    /// the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
+    /// Bytes inserted and deleted, or an overwrite's that differ, since a
+    /// frame last fontified a window of the text (`Vm::defer_parse'). The text's, not a parser's: an embedded
     /// parser out of view may never catch up, and one a query runs is not
     /// the frame.
     // CELL(Plain)
@@ -233,9 +234,10 @@ impl Registry {
         (1..=limit).contains(&self.edited.get())
             && self.parsers.iter().any(|(_, core)| core.borrow().need_reparse)
     }
-    /// treesit_record_change_1 for every parser of TEXT, edited already.
-    pub(crate) fn record(&self, change: Change, text: &TextBody) {
-        self.edited.set(self.edited.get() + (change.old_end - change.start) + (change.new_end - change.start));
+    /// treesit_record_change_1 for every parser of TEXT, edited already,
+    /// the change's CHARGE bytes added to `edited`.
+    pub(crate) fn record(&self, change: Change, text: &TextBody, charge: usize) {
+        self.edited.set(self.edited.get() + charge as i64);
         for (_, core) in &self.parsers {
             core.borrow_mut().record(change, text);
         }
@@ -489,9 +491,13 @@ pub(crate) struct Query {
 }
 
 /// A compiled query and each pattern's predicates
-/// (`treesit_predicates_for_pattern`).
+/// (`treesit_predicates_for_pattern`). Immutable once made, and shared by
+/// every query object compiled from the same text for the same grammar
+/// (`query_memo`).
 pub(crate) struct Compiled {
-    pub query: Rc<native::Query>,
+    pub query: native::Query,
+    /// The text compiled: a sexp's expansion, or the string.
+    pub text: Box<[u8]>,
     pub predicates: Vec<Vec<Predicate>>,
 }
 
@@ -508,7 +514,7 @@ pub(crate) enum Arg {
 }
 
 impl Compiled {
-    pub(crate) fn new(query: Rc<native::Query>) -> Self {
+    pub(crate) fn new(query: native::Query, text: &[u8]) -> Self {
         let predicates = (0..query.pattern_count()).map(|p| {
             let mut out = Vec::new();
             let mut current: Vec<Arg> = Vec::new();
@@ -530,7 +536,7 @@ impl Compiled {
             }
             out
         }).collect();
-        Self { query, predicates }
+        Self { query, text: text.into(), predicates }
     }
 }
 

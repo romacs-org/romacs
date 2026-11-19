@@ -625,11 +625,24 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            let name = if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) };
-            if let Some(name) = name { return Ok(f(&mut name.chars().map(u32::from))); }
+            if let Some(name) = self.symbol_text(v) { return Ok(f(&mut name.chars().map(u32::from))); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
+        }
+        /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
+        /// its name: the same character count, byte count and bytes, read in
+        /// place, with nothing copied.
+        pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
+            let text = |v| match self.symbol_text(v) {
+                Some(name) => Ok((name.chars().count(), name.as_bytes())),
+                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or(Fault::Wrong("stringp", v)),
+            };
+            Ok(text(v)? == text(w)?)
+        }
+        /// V's name when it is a symbol (`nil' and `t' too), borrowed.
+        fn symbol_text(&self, v: Value) -> Option<&str> {
+            if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
@@ -1402,17 +1415,19 @@ mod leaf {
         pub fn batch_warning(&self, kind: &str, text: &str) {
             eprintln!("Warning ({kind}): {text}");
         }
+        /// The slot whose function cell symbol V names: `nil` and `t`, which
+        /// are not slot references, by their names, None if not yet made. The
+        /// one lookup for reading and writing a cell and its macro flag.
+        fn cell_slot(&self, v: Value) -> std::result::Result<Option<usize>, Fault> {
+            if v == Value::NIL || v == Value::TRUE {
+                let name = if v == Value::NIL { "nil" } else { "t" };
+                return Ok(self.vm.names.get(name).copied());
+            }
+            self.symbol_slot(v).map(Some)
+        }
         /// The function cell itself; aliases are not followed and void is nil.
         pub fn symbol_function(&self, v: Value) -> std::result::Result<Value, Fault> {
-            let slot = if v == Value::NIL || v == Value::TRUE {
-                let name = if v == Value::NIL { "nil" } else { "t" };
-                let Some(&slot) = self.vm.names.get(name) else {
-                    return Ok(Value::NIL);
-                };
-                slot
-            } else {
-                self.symbol_slot(v)?
-            };
+            let Some(slot) = self.cell_slot(v)? else { return Ok(Value::NIL) };
             let value = self.vm.slots[slot].function;
             Ok(if value == Value::UNBOUND {
                 Value::NIL
@@ -1424,8 +1439,7 @@ mod leaf {
         /// Leaf allocation cannot compact, so RAW stays valid until returned.
         pub fn symbol_definition(&mut self, v: Value) -> std::result::Result<Value, Fault> {
             let raw = self.symbol_function(v)?;
-            if v.index_if(7).and_then(|i| i.checked_sub(1))
-                .is_some_and(|slot| self.vm.macros.contains(&slot)) {
+            if self.cell_slot(v)?.is_some_and(|slot| self.vm.macros.contains(&slot)) {
                 let tag = self.intern("macro");
                 Ok(self.cons(tag, raw))
             } else {
@@ -1445,10 +1459,9 @@ mod leaf {
                     Err(Fault::SettingConstant(v))
                 };
             }
-            let slot = if v == Value::TRUE {
-                self.vm.slot("t")
-            } else {
-                self.symbol_slot(v)?
+            let slot = match self.cell_slot(v)? {
+                Some(slot) => slot,
+                None => self.vm.slot("t"),
             };
             let (definition, is_macro) = if let Some((head, body)) = self.pair(value) {
                 if head == self.intern("macro") {
@@ -1543,7 +1556,7 @@ mod leaf {
                 None => self.string(&name),
             };
             self.vm.permanent_symbol_names.insert(symbol.0, value);
-            self.vm.permanent_names_added.push(value);
+            self.vm.names_added.push(value);
             Ok(value)
         }
         /// VALUE as the compiler reads a macro's expansion.

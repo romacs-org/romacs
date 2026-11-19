@@ -94,6 +94,9 @@ impl Vm {
     /// Swap the current buffer's text with OTHER's (Fbuffer_swap_text).
     pub(crate) fn buffer_swap_text(&mut self, other: Value) -> std::result::Result<(), prim::Fault> {
         use prim::Fault;
+        // The current buffer resolved as everywhere else: nil makes
+        // `*scratch*` current, so no index is taken from nil.
+        let ia = self.buffer_index().map_err(Fault::Error)?;
         let current = self.slots[self.buffer_slot].value;
         if !matches!(self.object_if(other), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
             return Err(Fault::Wrong("bufferp", other));
@@ -109,7 +112,8 @@ impl Vm {
                 _ => {}
             }
         }
-        let (ia, ib) = (current.index(0).map_err(Fault::Error)? - 1, other.index(0).map_err(Fault::Error)? - 1);
+        // OTHER is a live buffer (checked above), so its index is at least 1.
+        let ib = other.index(0).map_err(Fault::Error)? - 1;
         let mut members = self.buffer_referrers(ia);
         members.extend(self.buffer_referrers(ib));
         members.sort_unstable();
@@ -164,5 +168,21 @@ impl Vm {
             Object::ByteBuffer(b) => Ok(b.restriction.start.0 as i64 + 1),
             _ => Err("buffer required".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Vm;
+
+    /// The first form of a fresh VM finds its `*scratch*' not yet made, the
+    /// current buffer nil: `buffer-swap-text' swaps with the `*scratch*' nil
+    /// resolves to, and takes no index from nil.
+    #[test]
+    fn swapping_text_as_the_first_form_swaps_with_scratch() {
+        let mut vm = Vm::new();
+        let swapped = vm.eval_source_raw("(let ((b (get-buffer-create \"swap-target\" t))) (buffer-swap-text b) (insert \"here\") \
+            (list (buffer-name) (buffer-string) (buffer-size b)))").unwrap();
+        assert_eq!(vm.display(swapped).unwrap(), "(\"*scratch*\" \"here\" 0)");
     }
 }

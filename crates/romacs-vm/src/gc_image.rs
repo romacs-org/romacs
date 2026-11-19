@@ -231,11 +231,9 @@ mod tests {
             '((old) (new) (sym) t))"));
     }
 
-    /// A permanent cell's lexical pair, named by `cell_pairs` alone, is a
-    /// root of every full: one made since the restore survives with what it
-    /// holds, and the cell that takes its value is remembered from then on.
-    #[test]
-    fn a_full_keeps_the_new_lexical_pair_of_a_permanent_cell() {
+    /// A permanent cell with a new lexical pair, its pair's value young:
+    /// the VM, the roots naming the cell, the cell's index and the value.
+    fn permanent_cell_with_a_new_pair() -> (Vm, [Value; 1], usize, Value) {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         let cell = vm.alloc_cell(Value::TRUE);
@@ -247,11 +245,60 @@ mod tests {
         let young = vm.alloc_cons(Value::integer(5).unwrap(), Value::NIL);
         let pair = vm.alloc_cons(Value::NIL, young);
         vm.cell_pairs.insert(cell, pair);
+        (vm, roots, cell, young)
+    }
+
+    /// A permanent cell's lexical pair, named by `cell_pairs` alone, is a
+    /// root of every full: one made since the restore survives with what it
+    /// holds, and the cell that takes its value is remembered from then on.
+    #[test]
+    fn a_full_keeps_the_new_lexical_pair_of_a_permanent_cell() {
+        let (mut vm, mut roots, cell, young) = permanent_cell_with_a_new_pair();
         vm.collect(&mut roots);
         assert_eq!(vm.cells[cell], young, "the cell took its pair's value");
         assert!(vm.cells.is_remembered(cell), "and is read by every full from now on");
         vm.collect(&mut roots);
         assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(5).unwrap());
+    }
+
+    /// A minor that meets the same pair makes the cell remembered too, and
+    /// leaves it unmarked: its card is clear, so its sweep never meets it
+    /// (`Table::remember`), and the next full still reads it.
+    #[test]
+    fn a_minor_then_a_full_keep_the_new_lexical_pair_of_a_permanent_cell() {
+        let (mut vm, mut roots, cell, young) = permanent_cell_with_a_new_pair();
+        assert!(vm.collect_minor(&roots));
+        assert!(vm.cells.is_remembered(cell) && !vm.cells.claimed(cell), "remembered, and no mark left");
+        vm.collect(&mut roots);
+        assert_eq!(vm.cells[cell], young, "the cell took its pair's value");
+        vm.collect(&mut roots);
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(5).unwrap());
+    }
+
+    /// A young value stored into an image entry is read by the next minor,
+    /// through the entry's card, which leaves the entry remembered for every
+    /// full. That minor makes the value old, as it makes every survivor, so
+    /// the minor after it passes the card, clear again, and keeps the value
+    /// too. Were a minor to leave a survivor young, the card would have to
+    /// stay set: this would then fail.
+    #[test]
+    fn a_young_value_stored_into_an_image_entry_outlives_two_minors() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        let cons = vm.alloc_cons(Value::NIL, Value::NIL);
+        let mut roots = [cons];
+        dense(&mut vm, &mut roots);
+        let i = roots[0].index_if(3).unwrap();
+        vm.make_image_permanent();
+        let young = vm.alloc_cons(Value::integer(9).unwrap(), Value::NIL);
+        vm.conses.set_car(i, young);
+        assert!(vm.collect_minor(&roots));
+        assert!(vm.conses.is_remembered(i), "the store is recorded for every full");
+        assert!(!vm.conses.touched().iter().any(|run| run.contains(&i)), "the entry's card is clear");
+        assert!(vm.collect_minor(&roots));
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(9).unwrap());
+        vm.collect(&mut roots);
+        assert_eq!(vm.conses[i].0, young);
     }
 
     /// An image function changed in place since the restore is read by

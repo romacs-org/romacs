@@ -16,6 +16,8 @@ pub(super) struct Sweep<'a, T, F> {
     pub(super) destroy: &'a mut F,
     pub(super) freed: usize,
     pub(super) last: usize,
+    /// The lowest entry freed, `usize::MAX` before any.
+    pub(super) lowest: usize,
 }
 
 impl<T, F: FnMut(usize, &mut T)> Sweep<'_, T, F> {
@@ -61,6 +63,7 @@ impl<T, F: FnMut(usize, &mut T)> Sweep<'_, T, F> {
                 (self.destroy)(i, entry);
                 *color = self.dead;
                 self.freed += 1;
+                self.lowest = self.lowest.min(i);
                 if self.quarantine { self.last = i + 1; }
             } else if *color != FREE {
                 if *color & IN_USE != 0 && *color != OLD | IN_USE { *color = OLD | IN_USE; }

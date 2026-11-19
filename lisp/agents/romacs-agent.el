@@ -1822,9 +1822,15 @@ nothing while `romacs-agent--manifest-frozen'."
         (cl-loop for (name value) on fields by #'cddr do (puthash name value manifest))
         (romacs-agent--write-json file manifest)))))
 
-(defun romacs-agent--update-manifest (session)
-  "Write SESSION's title back to its manifest."
-  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false))
+(declare-function romacs-agent-store-title "romacs-agent-store" (id title &optional then again))
+
+(defun romacs-agent--update-manifest (session &optional then)
+  "Write SESSION's title back to its manifest, and to its row: a kept
+state rewrites no row for a rename.  THEN, when given, is called once
+the row is written (`romacs-agent-store-title')."
+  (romacs-agent--manifest-put session "title" (romacs-agent-title session) "titleAuto" :false)
+  (unless (or romacs-agent--manifest-frozen (not (file-exists-p (romacs-agent-store--file))))
+    (romacs-agent-store-title (romacs-agent-id session) (romacs-agent-title session) then)))
 
 (defun romacs-agent-activity-seq (session)
   "The seq of SESSION's last turn activity: its last prompt or turn end."
@@ -2177,6 +2183,12 @@ signalled."
                      (unless scheduled (funcall (cdr pager))))
                    (unless (or scheduled failed) (funcall then (nreverse events))))))
     (funcall step)))
+
+;; The journal reader below (this pager, `romacs-agent--read-journal-file'
+;; and the `romacs-agent--journal-file-*' functions) is for sessions still
+;; in a journal: an earlier build's that an install found running.  The
+;; installer moves them (`romacs-agent-events-migrate'); once none is left
+;; the reader goes (romacs#317).  No feature grows on it.
 
 (defun romacs-agent--journal-pager (session)
   "SESSION's records a page at a time, as they are now: (FETCH . CLOSE),
@@ -5366,13 +5378,6 @@ binds, is restored anew.")
 listing has it (romacs-agent-store): such a session with no kept state
 and no supervisor running is left unloaded, its journal unread, until it
 is asked for (`romacs-agent-get').")
-
-(defvar romacs-agent-store-background nil
-  "Whether the editor moves every session's journal to SQLite in the
-background, in worker VMs, once it is idle after a start.  Off: a
-journal moves only when something waits for it (a chat opened, a
-resume).  Those moves' long transactions held the store's lock against
-every session's supervisor.")
 
 (defvar romacs-agent-mark-kinds nil
   "What can wait on a session left unloaded, so a restore loads it: a list

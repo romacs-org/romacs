@@ -2190,7 +2190,7 @@ impl Vm {
             if !self.buffer_state(buffer).map_err(Fault::Error)?.modified() {
                 self.record_first_change().map_err(Fault::Error)?;
             }
-            let index = buffer.index(0).map_err(Fault::Error)? - 1;
+            let index = buffer.object_index().map_err(Fault::Error)?;
             match self.objects.entry_mut(index) {
                 Object::Buffer(b) => b.state.record_change(false),
                 Object::ByteBuffer(b) => b.state.record_change(false),
@@ -2204,7 +2204,7 @@ impl Vm {
 
     /// Whether BUFFER keeps undo: its undo list is not t.
     pub(crate) fn keeps_undo(&mut self, buffer: Value) -> std::result::Result<bool, crate::prim::Fault> {
-        let index = buffer.index(0).map_err(crate::prim::Fault::Error)? - 1;
+        let index = buffer.object_index().map_err(crate::prim::Fault::Error)?;
         Ok(self.undo_list_of(index) != Value::TRUE)
     }
 
@@ -2216,7 +2216,7 @@ impl Vm {
             let (condition, data) = self.read_only_signal(plan.object);
             return Err(Fault::Signal(condition, data));
         }
-        let index = plan.object.index(0).map_err(Fault::Error)? - 1;
+        let index = plan.object.object_index().map_err(Fault::Error)?;
         if undo {
             let undo = self.property_undo(plan.object, plan.range.clone(), &plan.change)?;
             let current = self.slots[self.buffer_slot].value;

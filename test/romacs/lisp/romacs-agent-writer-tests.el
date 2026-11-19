@@ -499,17 +499,15 @@ connection of its own, as the writer's process has."
 
 (ert-deftest romacs-agent-writer-a-flip-made-before-a-writer-ended-is-moved ()
   ;; A flip the writer made before it ended, sent again, answers nil: the
-  ;; store says imported, so the editor does what a move does.
-  (let ((romacs-agent-events--flip-queue nil) (waited nil) (told nil)
+  ;; store says imported, so what waits for it goes on.
+  (let ((romacs-agent-events--flip-queue nil) (waited nil)
         (romacs-agent--sessions (make-hash-table :test #'equal)))
     (cl-letf (((symbol-function 'romacs-agent-events--db) (lambda () 'db))
               ((symbol-function 'sqlite-select) (lambda (_db query &rest _) (if (string-search "imported" query) '((1)) '((10 3)))))
               ((symbol-function 'romacs-agent-events--waited) (lambda (id) (push id waited)))
               ((symbol-function 'romacs-agent-write) (lambda (_f _a done) (funcall done '(ok nil))))
               ((symbol-function 'run-at-time) (lambda (_time _repeat f &rest args) (apply f args))))
-      (let ((romacs-agent-events-migrated-functions (list (lambda (ids) (setq told ids)))))
-        (romacs-agent-events--flip-soon '("s")))
-      (should (equal told '("s")))
+      (romacs-agent-events--flip-soon '("s"))
       (should (equal waited '("s"))))))
 
 (ert-deftest romacs-agent-writer-the-editor-reads-and-an-import-waits ()

@@ -16,7 +16,7 @@
 ;; vector.  Elsewhere the render thread sweeps light across the braille
 ;; letters.  Either way no Lisp runs per frame.  Where motion is off
 ;; (`romacs-animation', `romacs-animate-motion-p') it stands still, on a
-;; GPU in its posed, lit still frame.  SPC pauses and Home restarts it;
+;; GPU in its posed, lit still frame.  SPC pauses and r restarts it;
 ;; the other keys stay the startup screen's.
 
 ;;; Code:
@@ -98,7 +98,7 @@ the logo's motion.  The display places it wherever the window scrolls."
 (defvar romacs-landing-map
   (let ((map (make-sparse-keymap)))
     (define-key map " " #'romacs-landing-pause)
-    (define-key map [home] #'romacs-landing-restart)
+    (define-key map "r" #'romacs-landing-restart)
     map)
   "The logo's keys in *Romacs*, over the startup screen's.")
 
