@@ -92,8 +92,9 @@ line above them brings earlier ones."
   "A message the user sent.")
 (defface romacs-agent-log-thinking '((t :inherit (shadow italic)))
   "What the agent thinks.")
-(defface romacs-agent-log-tool '((t :inherit font-lock-function-name-face))
-  "A tool call's name.")
+(defface romacs-agent-log-tool '((t :inherit romacs-working-running))
+  "A tool call's mark and name: the theme's own colour for work, never a
+syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
 (defface romacs-agent-log-note '((t :inherit shadow))

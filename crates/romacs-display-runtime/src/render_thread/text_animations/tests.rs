@@ -89,9 +89,10 @@ fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
     use romacs_display_protocol::text_animation::located;
     use romacs_display_protocol::types::{DisplayWindowId, FaceId};
     use romacs_logo::working::Work;
-    // A double-height row (two grid rows), a wrapped line, the thread.
-    let rows: [(&str, u32, f32); 4] = [("a tall heading", 0, 0.0), ("a long reply line", 2, 32.0),
-                                       ("that wrapped once", 3, 48.0), ("⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ running", 4, 64.0)];
+    // A blank row, a double-height row (two grid rows), a wrapped line,
+    // the thread; the blank row emits no glyph.
+    let rows: [(&str, u32, f32); 4] = [("a tall heading", 1, 16.0), ("a long reply line", 3, 48.0),
+                                       ("that wrapped once", 4, 64.0), ("⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ running", 5, 80.0)];
     let mut frame = FrameGlyphBuffer::new();
     frame.char_width = 8.0;
     frame.set_draw_context(DisplayWindowId::new(1), GlyphRowRole::Text, None);
@@ -101,19 +102,20 @@ fn a_thread_is_placed_on_its_laid_row_and_never_over_other_text() {
                                   FaceId::new(0), BoxVerticalEdges::Both);
         }
     }
-    // The layout's rows: starts 0, 15, 32, 50, the last at 64 px.
-    let laid = [(0, 0.0), (15, 32.0), (32, 48.0), (50, 64.0)];
+    // The layout's rows, the text area's top at 100 px in the frame.
+    let laid = [(0, 0.0), (1, 16.0), (16, 48.0), (33, 64.0), (51, 80.0)];
     let mut animation = thread(Work::Running, 0);
-    animation.anchor = Some(50);
-    let placed = animation.placed(&laid, 90).expect("on a laid row");
-    assert_eq!((placed.top, placed.rise), (3, Some(64.0)));
-    // Found by its height: grid row 4, past the double-height row.
+    animation.anchor = Some(51);
+    let placed = animation.placed(&laid, 90, 100.0).expect("on a laid row");
+    assert_eq!((placed.top, placed.rise), (4, Some(180.0)));
+    // Found by its height: grid row 5 (4 from the first with glyphs),
+    // past the blank and double-height rows.
     assert_eq!(located(&frame, &placed).map(|a| a.top), Some(4));
     // Scrolled past: no laid row shows it.
     animation.anchor = Some(3);
-    assert_eq!(animation.placed(&[(10, 0.0), (20, 16.0)], 40), None);
+    assert_eq!(animation.placed(&[(10, 0.0), (20, 16.0)], 40, 100.0), None);
     // A row that is not its braille is never painted over.
-    let wrong = TextAnimation { rise: Some(32.0), ..placed.clone() };
+    let wrong = TextAnimation { rise: Some(148.0), ..placed.clone() };
     assert_eq!(located(&frame, &wrong), None);
     // Motion off: the still frame shows alone.
     let still = TextAnimation { still: true, ..placed };

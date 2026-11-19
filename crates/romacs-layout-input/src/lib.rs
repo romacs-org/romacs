@@ -817,6 +817,8 @@ pub struct WindowEnd {
     /// The rows laid out from the window start, top to bottom, through the
     /// first that reaches the text area's bottom.
     pub rows: Vec<Row>,
+    /// The text area's top in the frame, which the rows' Y count from.
+    pub origin_y: f32,
     /// Where point shows, when a laid-out row holds it.
     pub point: Option<PointPlace>,
 }

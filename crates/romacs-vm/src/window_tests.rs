@@ -646,7 +646,7 @@ fn g3a_buffer_assignment_resets_recorded_end_distance() {
             r#"(progn (set-buffer (get-buffer-create "recorded-end")) (insert "Ωabcdef") (set-window-buffer nil (current-buffer)))"#,
         );
         let frame = vm.frame_snapshot(640, 480).unwrap();
-        vm.display_apply_layout(&[crate::WindowEnd { id: frame.windows[0].snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], point: None }])
+        vm.display_apply_layout(&[crate::WindowEnd { id: frame.windows[0].snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None }])
             .unwrap();
         assert_eq!(run(&mut vm, "(window-end)").as_integer().unwrap(), 4);
         run(
@@ -675,7 +675,7 @@ fn g3a_geometry_and_layout_end_journal() {
         "(progn (set-buffer (get-buffer-create \"ends\")) (insert \"Ωabcdef\") (set-window-buffer nil (current-buffer)))",
     );
     let snapshot = vm.display_snapshot(800, 576).unwrap();
-    vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], point: None }]).unwrap();
+    vm.display_apply_layout(&[crate::WindowEnd { id: snapshot.id, end: 4, visible_end: 0, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None }]).unwrap();
     yes(&mut vm, "(= (window-end nil) 4)");
     // UPDATE answers a current end as recorded; a stale one lays the window
     // out again, which needs the host's layout attached.
@@ -1051,7 +1051,7 @@ fn unchanged_windows_redisplay_their_header_line_too() {
 /// whole rows.
 fn whole(snapshot: &romacs_layout_input::WindowSnapshot) -> crate::WindowEnd {
     let len = snapshot.text.utf8.len();
-    crate::WindowEnd { id: snapshot.id, end: len, visible_end: len + 1, body_height: snapshot.height as f32, rows: vec![], point: None }
+    crate::WindowEnd { id: snapshot.id, end: len, visible_end: len + 1, body_height: snapshot.height as f32, rows: vec![], origin_y: 0.0, point: None }
 }
 
 /// Overlay calls that change nothing a window may show leave its record

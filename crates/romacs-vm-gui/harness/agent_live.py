@@ -2993,7 +2993,8 @@ def ui_review(args, base):
     while a turn runs, while it waits on the user (a question), and at
     rest, plus a strip of frames of the working thread while it runs.
     Costs money: not a default workflow."""
-    a = Agents(args, base, 'ur')
+    # The software rasterizer draws no animation unless asked to, as a GPU does.
+    a = Agents(args, base, 'ur', env_extra={'ROMACS_LAYER_ANIMATION': '1'})
     try:
         a.up()
         a.providers([('claude', args.claude_config, args.claude_program or real_program('claude'), ['--model', args.claude_model])])
@@ -3038,8 +3039,9 @@ def ui_review(args, base):
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(ASK_PROMPT)}) t)')
         a.until(sid, lambda: pending(sid) > 0, 300, 'a question asked')
         themed('waiting')
-        a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s))))) '
-               '(romacs-agent-respond s id nil "no answer, review shot" (quote user)) t)')
+        a.eval(f'(let* ((s {a.s(sid)}) (id (car (hash-table-keys (romacs-agent-approvals s)))) '
+               '(question (car (car (romacs-agent--claude-questions (gethash "input" (gethash id (romacs-agent-approvals s)))))))) '
+               '(romacs-agent-respond s id (list :answers (list (cons question "Blue"))) nil (quote user)) t)')
         a.idle(sid, 300)
         themed('idle')
         return {'ok': True, 'shots': shots}
