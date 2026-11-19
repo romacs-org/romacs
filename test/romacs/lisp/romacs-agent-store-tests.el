@@ -92,24 +92,35 @@ journal one turn long."
       (puthash (romacs-agent-id session) session romacs-agent--sessions)
       (romacs-agent--keep session 'idle)
       (setf (romacs-agent-title session) "renamed")
-      (let ((events nil) (romacs-agent-event-functions nil))
-        (add-hook 'romacs-agent-event-functions (lambda (_s e) (push (plist-get e :type) events)))
-        (romacs-agent--update-manifest session)
+      (let ((told 0))
+        (romacs-agent--update-manifest session (lambda () (cl-incf told)))
         (should (equal (sqlite-select (romacs-agent-store--open) "select title, state, cwd from sessions")
                        '(("renamed" "idle" "/p/two/"))))
         ;; Its views told once it is written, to read the row again.
-        (should (memq 'changed events)))
-      ;; Queued, not written yet: its views are told only once it is; a
-      ;; write that failed is tried once more.
-      (let ((done nil) (told 0) (idle nil))
-        (cl-letf (((symbol-function 'romacs-agent-write) (lambda (_f _a d _k) (setq done d) 'queued))
-                  ((symbol-function 'run-with-idle-timer) (lambda (&rest args) (push args idle))))
-          (romacs-agent-store-title (romacs-agent-id session) "later" (lambda () (cl-incf told)))
+        (should (= told 1)))
+      ;; Queued: its views told only once it is written.  A write that
+      ;; failed is tried once more, unless a later rename came meanwhile.
+      (let ((writes nil) (told 0) (idle nil) (id (romacs-agent-id session)))
+        (cl-letf (((symbol-function 'romacs-agent-write)
+                   (lambda (_f args done _k) (push (cons (cadr args) done) writes) 'queued))
+                  ((symbol-function 'run-with-idle-timer)
+                   (lambda (_secs _repeat f &rest args) (push (cons f args) idle))))
+          (romacs-agent-store-title id "A" (lambda () (cl-incf told)))
           (should (= told 0))
-          (funcall done '(error (sqlite-locked-error "locked")))
+          (funcall (cdr (pop writes)) '(error (sqlite-locked-error "locked")))
           (should (= told 0))
-          (should (= (length idle) 1))
-          (funcall done '(ok t))
+          ;; B asked for before A's retry: A's retry writes nothing.
+          (romacs-agent-store-title id "B")
+          (should (equal (mapcar #'car writes) '("B")))
+          (let ((retry (pop idle))) (apply (car retry) (cdr retry)))
+          (should (equal (mapcar #'car writes) '("B")))
+          ;; With none later, a retry writes, and tells once written.
+          (setq writes nil)
+          (romacs-agent-store-title id "C" (lambda () (cl-incf told)))
+          (funcall (cdr (pop writes)) '(error (sqlite-locked-error "locked")))
+          (let ((retry (pop idle))) (apply (car retry) (cdr retry)))
+          (should (equal (mapcar #'car writes) '("C")))
+          (funcall (cdr (pop writes)) '(ok t))
           (should (= told 1)))))))
 
 (ert-deftest romacs-agent-store-leaves-the-listed-unloaded ()

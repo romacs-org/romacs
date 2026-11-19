@@ -3600,7 +3600,9 @@ the session stays."
                romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
-    (romacs-agent--update-manifest session)
+    ;; Its views drawn again now, and once its row says it: those of a
+    ;; session not loaded read the row.
+    (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
     (romacs-agent-ui--batch)))
 

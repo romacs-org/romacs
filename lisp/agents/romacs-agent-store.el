@@ -750,17 +750,23 @@ quietly nothing when the database cannot be written."
                     (list project))
     t))
 
+(defvar romacs-agent-store--titles (make-hash-table :test #'equal)
+  "Each session id to the title its row was last asked to say.")
+
 (defun romacs-agent-store-title (id title &optional then again)
   "Keep TITLE as what the row of the session ID names says, by the writer:
 a rename reaches the row at once, whatever state its session keeps.
 THEN, when given, is called once it is written, for the views that read
 the row; one that fails is tried once more a moment later, unless AGAIN
-says this is that try (as `romacs-agent-store-put')."
-  (romacs-agent-write 'romacs-agent-store--title-row (list id title)
-                      (lambda (answer)
-                        (cond ((eq (car answer) 'ok) (when then (funcall then)))
-                              ((not again) (run-with-idle-timer 1 nil #'romacs-agent-store-title id title then t))))
-                      (list 'title id)))
+says this is that try (as `romacs-agent-store-put') or a later rename
+was asked for meanwhile."
+  (unless again (puthash id title romacs-agent-store--titles))
+  (when (equal (gethash id romacs-agent-store--titles) title)
+    (romacs-agent-write 'romacs-agent-store--title-row (list id title)
+                        (lambda (answer)
+                          (cond ((eq (car answer) 'ok) (when then (funcall then)))
+                                ((not again) (run-with-idle-timer 1 nil #'romacs-agent-store-title id title then t))))
+                        (list 'title id))))
 
 (defun romacs-agent-store--title-row (id title)
   "Set the title in the row of the session ID names to TITLE, here, and
