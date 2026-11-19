@@ -106,9 +106,19 @@ struct Shared {
     /// The harness's stdin, its own lock: a slow harness never holds up
     /// journaling or the exit.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
-    /// Lines journaled `in` whose write has not yet ended: the exit waits
-    /// for their `written` records (`Shared::settle`).
-    writing: usize,
+    /// The writes to the harness under way and ended (`Writes`).
+    writes: Arc<Mutex<Writes>>,
+}
+
+/// The writes of lines journaled `in`: those under way, and the `in` seqs of
+/// those that reached the harness, not yet journaled `written`.  Its own
+/// lock, taken last and never held while taking another: a write's end is
+/// published even while the journal is held (a replay), and the exit
+/// journals every one before it journals the exit (`finish`).
+#[derive(Default)]
+struct Writes {
+    under_way: usize,
+    done: Vec<u64>,
 }
 
 /// How long a write to the attached server may block before it is
@@ -448,11 +458,20 @@ fn input_record(seq: u64, text: &str, images: Option<&Json>, tag: Option<&Json>)
 }
 
 impl Shared {
-    /// The write of the line of `"in"` record SEQ ended, OK when it reached
-    /// the harness whole: journaled `written` then.
-    fn wrote(&mut self, seq: u64, ok: bool) {
-        self.writing = self.writing.saturating_sub(1);
-        if ok {
+    /// Journal a line about to be written: its `in` record, its write
+    /// under way.  Its seq.
+    fn writing(&mut self, journaled: &str) -> u64 {
+        self.seq += 1;
+        let entry = record(self.seq, "in", journaled);
+        self.append(&entry, false);
+        self.writes.lock().unwrap_or_else(|e| e.into_inner()).under_way += 1;
+        self.seq
+    }
+
+    /// Journal `written` for each write that reached the harness since.
+    fn journal_written(&mut self) {
+        let done = std::mem::take(&mut self.writes.lock().unwrap_or_else(|e| e.into_inner()).done);
+        for seq in done {
             self.seq += 1;
             let entry = json!({"seq": self.seq, "t": now(), "written": seq}).to_string();
             self.append(&entry, false);
@@ -460,21 +479,34 @@ impl Shared {
     }
 }
 
+/// The write of the line of `in` record SEQ ended, OK when it reached the
+/// harness whole: published at once, then journaled.
+fn wrote(shared: &Arc<Mutex<Shared>>, writes: &Arc<Mutex<Writes>>, seq: u64, ok: bool) {
+    {
+        let mut writes = writes.lock().unwrap_or_else(|e| e.into_inner());
+        writes.under_way = writes.under_way.saturating_sub(1);
+        if ok { writes.done.push(seq); }
+    }
+    shared.lock().unwrap_or_else(|e| e.into_inner()).journal_written();
+}
+
 /// How long the exit waits for writes under way to end: a harness gone has
 /// closed its stdin, so a write ends at once unless a descendant holds it.
 const WRITES_SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// SHARED once the writes under way have ended, or WRITES_SETTLE has passed:
-/// a line the harness took before it exited is journaled `written` before
-/// its exit is.
-fn settled(shared: &Arc<Mutex<Shared>>) -> std::sync::MutexGuard<'_, Shared> {
+/// Journal the harness's exit with CODE: once the writes under way have
+/// ended (or WRITES_SETTLE has passed), every write that reached the
+/// harness journaled `written` before it.
+fn finish(shared: &Arc<Mutex<Shared>>, writes: &Arc<Mutex<Writes>>, code: i32) {
     let since = std::time::Instant::now();
-    loop {
-        let guard = shared.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.writing == 0 || since.elapsed() >= WRITES_SETTLE { return guard; }
-        drop(guard);
+    while writes.lock().unwrap_or_else(|e| e.into_inner()).under_way > 0 && since.elapsed() < WRITES_SETTLE {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
+    shared.journal_written();
+    shared.seq += 1;
+    let entry = json!({"seq": shared.seq, "t": now(), "exit": code}).to_string();
+    shared.append(&entry, true);
 }
 
 /// Serve one connection: its attach line, then the lines it writes.
@@ -497,23 +529,22 @@ fn serve(shared: Arc<Mutex<Shared>>, stream: UnixStream, harness: bool) {
         // The harness's stdin first, then the journal briefly: lines are
         // journaled in the order they are written, and a writer blocked on
         // a full stdin never holds the journal (the output, the exit).
-        let stdin = shared.lock().unwrap_or_else(|e| e.into_inner()).stdin.clone();
+        let (stdin, writes) = {
+            let shared = shared.lock().unwrap_or_else(|e| e.into_inner());
+            (shared.stdin.clone(), shared.writes.clone())
+        };
         let mut stdin = stdin.lock().unwrap_or_else(|e| e.into_inner());
         let seq = {
             let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
             // A server whose attachment was stolen writes nothing more.
             if shared.attached.as_ref().map(|(attached, _)| *attached) != Some(id) { return; }
-            shared.seq += 1;
-            let entry = record(shared.seq, "in", &journaled);
-            shared.append(&entry, false);
-            shared.writing += 1;
-            shared.seq
+            shared.writing(&journaled)
         };
         let written = stdin.as_mut().map(|stdin| writeln!(stdin, "{text}").and_then(|()| stdin.flush()));
         let ok = matches!(written, Some(Ok(())));
         if !ok { eprintln!("romacs-agent-host: harness stdin closed"); }
         // Still holding the stdin: the next line's records come after these.
-        shared.lock().unwrap_or_else(|e| e.into_inner()).wrote(seq, ok);
+        wrote(&shared, &writes, seq, ok);
     }
     let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
     if shared.attached.as_ref().map(|(attached, _)| *attached) == Some(id) { shared.attached = None; }
@@ -587,7 +618,7 @@ fn run(config: Config) -> Result<i32, String> {
         "socket": config.socket, "started": now(), "argv": config.argv}).to_string())?;
     let stdout = child.stdout.take().ok_or("harness stdout")?;
     let mut stdin = child.stdin.take();
-    let mut shared = Shared { seq, store, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writing: 0 };
+    let mut shared = Shared { seq, store, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writes: Default::default() };
     // The run's first record: its output is read only from here on.
     if let Some(note) = &config.note {
         shared.seq += 1;
@@ -600,7 +631,7 @@ fn run(config: Config) -> Result<i32, String> {
             shared.seq += 1;
             let entry = input_record(shared.seq, &text, config.input_images.as_ref(), config.input_tag.as_ref());
             shared.append(&entry, true);
-            shared.writing += 1;
+            shared.writes.lock().unwrap_or_else(|e| e.into_inner()).under_way += 1;
             let _ = std::fs::remove_file(file);
             Some((shared.seq, text, stdin.take()))
         }
@@ -613,9 +644,10 @@ fn run(config: Config) -> Result<i32, String> {
         // Journaled `written`, then closed: such a harness reads to its end,
         // and may exit at once.
         let writing = shared.clone();
+        let writes = shared.lock().unwrap_or_else(|e| e.into_inner()).writes.clone();
         std::thread::spawn(move || {
             let ok = writer.as_mut().is_some_and(|w| w.write_all(text.as_bytes()).and_then(|()| w.flush()).is_ok());
-            writing.lock().unwrap_or_else(|e| e.into_inner()).wrote(seq, ok);
+            wrote(&writing, &writes, seq, ok);
             drop(writer);
         });
     }
@@ -657,10 +689,8 @@ fn run(config: Config) -> Result<i32, String> {
     // its stdout open.
     let _ = drained.recv_timeout(std::time::Duration::from_secs(1));
     let code = status.code().unwrap_or(128 + std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or(0));
-    let mut shared = settled(&shared);
-    shared.seq += 1;
-    let entry = json!({"seq": shared.seq, "t": now(), "exit": code}).to_string();
-    shared.append(&entry, true);
+    let writes = shared.lock().unwrap_or_else(|e| e.into_inner()).writes.clone();
+    finish(&shared, &writes, code);
     let _ = std::fs::remove_file(&config.socket);
     Ok(0)
 }
@@ -670,7 +700,7 @@ fn run(config: Config) -> Result<i32, String> {
 fn run_notes(config: &Config, listener: UnixListener, store: Store, seq: u64) -> Result<i32, String> {
     write_atomic(&config.dir.join("host.json"), &json!({"pid": std::process::id(), "harness": null,
         "socket": config.socket, "started": now(), "argv": [], "notesOnly": true}).to_string())?;
-    let shared = Arc::new(Mutex::new(Shared { seq, store, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writing: 0 }));
+    let shared = Arc::new(Mutex::new(Shared { seq, store, attached: None, next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
     let accepting = shared.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
@@ -1031,7 +1061,7 @@ mod tests {
         std::fs::write(&path, format!("{}\n", record(1, "out", "a"))).unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
-                                                  stdin: Arc::new(Mutex::new(None)), writing: 0 }));
+                                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
         assert_eq!(attach(&shared, server, &request, true), Some(1));
@@ -1056,7 +1086,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
-                                                  stdin: Arc::new(Mutex::new(None)), writing: 0 }));
+                                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
         let (server, mut ours) = UnixStream::pair().unwrap();
         let serving = std::thread::spawn(move || serve(shared, server, false));
         writeln!(ours, r#"{{"attach":{{"from":1,"steal":false}}}}"#).unwrap();
@@ -1094,7 +1124,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
-                                                  stdin: Arc::new(Mutex::new(None)), writing: 0 }));
+                                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
         let attach_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let steal_request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":true}}"#).unwrap();
         let (first, ours) = UnixStream::pair().unwrap();
@@ -1122,7 +1152,7 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None, next_attachment: 0,
-                                                  stdin: Arc::new(Mutex::new(None)), writing: 0 }));
+                                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
         let request: Json = serde_json::from_str(r#"{"attach":{"from":1,"steal":false}}"#).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
         drop(ours);
@@ -1179,7 +1209,7 @@ mod tests {
             let mut child = harness.then(|| Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap());
             let stdin = child.as_mut().and_then(|child| child.stdin.take());
             let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None,
-                                                      next_attachment: 0, stdin: Arc::new(Mutex::new(stdin)), writing: 0 }));
+                                                      next_attachment: 0, stdin: Arc::new(Mutex::new(stdin)), writes: Default::default() }));
             let (server, mut ours) = UnixStream::pair().unwrap();
             let serving = std::thread::spawn(move || serve(shared, server, true));
             writeln!(ours, r#"{{"attach":{{"from":1,"steal":false}}}}"#).unwrap();
@@ -1202,32 +1232,44 @@ mod tests {
     }
 
     #[test]
-    fn the_exit_waits_for_a_write_under_way() {
-        // A harness that took its line and exited at once: its `written`
-        // record comes before its exit.
-        let dir = std::env::temp_dir().join(format!("romacs-agent-host-settle-{}", std::process::id()));
+    fn the_exit_journals_every_write_that_reached_the_harness() {
+        // A harness that took its line and exited at once, while a replay
+        // holds the journal past the exit's wait: its write's end, published
+        // without the journal, is journaled `written` before the exit.
+        let dir = std::env::temp_dir().join(format!("romacs-agent-host-finish-{}", std::process::id()));
         create_private(&dir).unwrap();
         let path = dir.join("journal.jsonl");
         std::fs::write(&path, "").unwrap();
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
-        let shared = Arc::new(Mutex::new(Shared { seq: 1, store: Store::journal(journal, path.clone()).unwrap(), attached: None,
-                                                  next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writing: 1 }));
-        let writer = shared.clone();
-        let writing = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            writer.lock().unwrap().wrote(1, true);
-        });
-        {
-            let mut shared = settled(&shared);
-            shared.seq += 1;
-            let entry = json!({"seq": shared.seq, "t": now(), "exit": 0}).to_string();
-            shared.append(&entry, true);
-        }
-        writing.join().unwrap();
-        let kinds: Vec<String> = std::fs::read_to_string(&path).unwrap().lines()
-            .map(|line| serde_json::from_str::<Json>(line).unwrap())
-            .map(|record| if record.get("written").is_some() { "written".into() } else { "exit".into() }).collect();
-        assert_eq!(kinds, ["written", "exit"]);
+        let shared = Arc::new(Mutex::new(Shared { seq: 0, store: Store::journal(journal, path.clone()).unwrap(), attached: None,
+                                                  next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writes: Default::default() }));
+        let writes = shared.lock().unwrap().writes.clone();
+        let seq = shared.lock().unwrap().writing("{\"type\":\"user\"}");
+        let (held_tx, held) = std::sync::mpsc::channel();
+        let replay = {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                let _journal = shared.lock().unwrap();
+                held_tx.send(()).unwrap();
+                std::thread::sleep(WRITES_SETTLE + std::time::Duration::from_millis(300));
+            })
+        };
+        held.recv().unwrap();
+        let writer = {
+            let (shared, writes) = (shared.clone(), writes.clone());
+            std::thread::spawn(move || wrote(&shared, &writes, seq, true))
+        };
+        // Its end published, its journaling waiting on the replay.
+        while writes.lock().unwrap().done.is_empty() { std::thread::sleep(std::time::Duration::from_millis(5)); }
+        finish(&shared, &writes, 0);
+        replay.join().unwrap();
+        writer.join().unwrap();
+        let records: Vec<Json> = std::fs::read_to_string(&path).unwrap().lines()
+            .map(|line| serde_json::from_str(line).unwrap()).collect();
+        let kinds: Vec<&str> = records.iter().map(|record| ["in", "written", "exit"].into_iter()
+            .find(|key| record.get(*key).is_some()).unwrap()).collect();
+        assert_eq!(kinds, ["in", "written", "exit"]);
+        assert_eq!(records[1]["written"].as_u64(), Some(seq));
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }
@@ -1241,7 +1283,7 @@ mod tests {
         let journal = OpenOptions::new().append(true).open(&path).unwrap();
         let (server, ours) = UnixStream::pair().unwrap();
         let mut shared = Shared { seq: 4, store: Store::journal(journal, path.clone()).unwrap(), attached: Some((1, server)), next_attachment: 1,
-                                  stdin: Arc::new(Mutex::new(None)), writing: 0 };
+                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() };
         let note = json!({"type": "selection"});
         assert!(shared.note(1, &note));
         assert!(!shared.note(2, &note), "a stolen attachment notes nothing");
@@ -1259,7 +1301,7 @@ mod tests {
         std::fs::create_dir_all(&session).unwrap();
         let database = dir.join("sessions.sqlite");
         let mut shared = Shared { seq: 0, store: Store::open(&session, Some(&database)).unwrap(), attached: None,
-                                  next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writing: 0 };
+                                  next_attachment: 0, stdin: Arc::new(Mutex::new(None)), writes: Default::default() };
         shared.output(&[r#"{"type":"assistant","message":{"id":"m1"}}"#.to_owned()]);
         shared.output(&[r#"{"type":"system","subtype":"thinking_tokens","tokens":5}"#.to_owned()]);
         shared.output(&[r#"{"type":"result","result":"done"}"#.to_owned()]);
@@ -1317,7 +1359,7 @@ mod tests {
         rusqlite::Connection::open(&database).unwrap().execute_batch("drop table events").unwrap();
         let (server, mut client) = UnixStream::pair().unwrap();
         let mut shared = Shared { seq: 0, store, attached: Some((1, server)), next_attachment: 1,
-                                  stdin: Arc::new(Mutex::new(None)), writing: 0 };
+                                  stdin: Arc::new(Mutex::new(None)), writes: Default::default() };
         let started = std::time::Instant::now();
         let fixer = { let database = database.clone(); std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(400));
@@ -1348,7 +1390,7 @@ mod tests {
             let store = Store::open(&session, database.as_deref()).unwrap();
             let (server, client) = UnixStream::pair().unwrap();
             let mut shared = Shared { seq: 0, store, attached: Some((1, server)), next_attachment: 1,
-                                      stdin: Arc::new(Mutex::new(None)), writing: 0 };
+                                      stdin: Arc::new(Mutex::new(None)), writes: Default::default() };
             shared.output(&lines);
             assert_eq!(shared.store.last_seq(), kept);
             let mut replayed = Vec::new();
