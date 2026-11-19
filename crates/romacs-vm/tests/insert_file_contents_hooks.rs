@@ -197,7 +197,7 @@ fn visiting_replace_does_not_ask_about_supersession_as_gnu() {
 
 /// A first-change-hook that inserts text before `insert-file-contents`
 /// decides the coding of an empty buffer: GNU keeps the hook's text before
-/// the file's ("hookfile"). VM2 refuses, with the hook's text, the buffer's
+/// the file's ("hookfile"). VM2 refuses, keeping the hook's text, the buffer's
 /// multibyteness and its undo list as they were
 /// (ledger/divergences/VM2-IFC-HOOKTEXT1.md). It used to keep only the
 /// file's text in a unibyte buffer, losing the hook's.

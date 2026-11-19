@@ -344,8 +344,9 @@ mod tests {
     #[test]
     fn every_edit_of_the_bytes_is_reported() {
         type Editor = fn(&mut ByteBuffer);
-        // Each editor, and exactly what it must report: (OLD, INSERTED).
-        let edits: [(Editor, (Range<usize>, &[u8])); 5] = [
+        /// What an editor must report: (OLD, INSERTED).
+        type Report = (Range<usize>, &'static [u8]);
+        let edits: [(Editor, Report); 5] = [
             // As `fileio_fill_raw` does: the markers grow to the bytes first.
             (|b| { assert!(b.anchors.grow(7)); b.fill(b"abc\xffdef").unwrap(); }, (0..0, b"abc\xffdef")),
             (|b| b.set_byte(1, 0x80).unwrap(), (1..2, b"\x80")),

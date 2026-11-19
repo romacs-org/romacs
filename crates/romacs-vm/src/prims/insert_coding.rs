@@ -370,7 +370,8 @@ fn decide_closure(cx: &mut Leaf<'_>, closure: Value, saved: &[Value]) -> Next {
     // only if the buffer was empty before the insertion"), but a
     // first-change-hook or before-change function run since may have
     // inserted text. GNU keeps that text before the file's; VM2 refuses
-    // before changing anything (ledger/divergences/VM2-IFC-HOOKTEXT1.md).
+    // before the exchange touches the buffer's text, multibyteness, undo
+    // list or markers (ledger/divergences/VM2-IFC-HOOKTEXT1.md).
     if !cx.buffer_shape()?.empty {
         return Err(refuse("insert-file-contents deciding its coding in a buffer a change hook has edited"));
     }
