@@ -489,17 +489,26 @@ chip of the task's results arriving."
         (delete-region start (prop-match-end found))
         (romacs-agent-ui--insert-at start chip)))))
 
+(defun romacs-agent-ui--parent-of (id)
+  "The id of the session that delegated the one ID names, or nil, loading
+no session: from it loaded, its row, else its manifest (a row not filled
+yet, as an install draws turns before it fills rows)."
+  (if-let* ((child (or (romacs-agent-loaded id) (romacs-agent-store-row-session id))))
+      (plist-get (romacs-agent-options child) :parent)
+    (when-let* ((manifest (romacs-agent--read-json
+                           (expand-file-name "manifest.json" (expand-file-name id (romacs-agent--state-root)))))
+                (options (gethash "options" manifest))
+                ((hash-table-p options)))
+      (romacs-agent--value (gethash "parent" options)))))
+
 (defun romacs-agent-ui--wakes (session text)
   "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
 what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     ;; Its parent, from the child loaded or its row: drawing
-                     ;; a chat loads no other session.
-                     (when-let* ((id (plist-get wake :id))
-                                 (child (or (romacs-agent-loaded id) (romacs-agent-store-row-session id))))
-                       (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+                     (when-let* ((id (plist-get wake :id)))
+                       (equal (romacs-agent-ui--parent-of id) (romacs-agent-id session))))
                    wakes)
          wakes)))
 

@@ -255,18 +255,19 @@ prompt before END, or END (its end by default) when it has none."
         end)))
 
 (defun romacs-agent-events-ends (ids)
-  "How far the records of the sessions IDS names go, in one query: each
+  "How far the records of the sessions IDS names go, in one read: each
 \(ID . PLACE), PLACE the seq after its last (as `romacs-agent-events-end')."
   (when-let* ((db (romacs-agent-events--db)))
     ;; Each session's last seq by its own look into the index, not every
     ;; seq of it (a `group by' reads them all); a query for each 200, well
     ;; inside SQLite's limit on a compound select.
-    (mapcan (lambda (chunk)
+    (romacs-agent-events--reading db
+      (mapcan (lambda (chunk)
               (delq nil (mapcar (lambda (row) (and (cadr row) (cons (car row) (1+ (cadr row)))))
                                 (sqlite-select db (mapconcat (lambda (_) "select ?, (select max(seq) from events where session = ?)")
                                                              chunk " union all ")
                                                (mapcan (lambda (id) (list id id)) chunk)))))
-            (seq-partition ids 200))))
+              (seq-partition ids 200)))))
 
 (defun romacs-agent-events-over-p (session from limit)
   "Whether SESSION's records from seq FROM on hold more than LIMIT bytes

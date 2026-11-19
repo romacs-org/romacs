@@ -173,7 +173,21 @@ recorded in a private directory; `delivered' collects what wakes it."
                (lambda (id) (and (equal id (romacs-agent-id child)) child))))
       (should (romacs-agent-ui--wakes parent text))
       ;; Another's task: not a wake of this chat's.
-      (should-not (romacs-agent-ui--wakes (romacs-agent--make :id "66666666-0000-4000-8000-000000000000") text)))))
+      (should-not (romacs-agent-ui--wakes (romacs-agent--make :id "66666666-0000-4000-8000-000000000000") text)))
+    ;; No row yet (an install draws turns before it fills rows): its
+    ;; manifest says whose it is, still loading no session.
+    (let ((root (make-temp-file "romacs-wakes-" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'romacs-agent-get) (lambda (&rest _) (error "A child loaded")))
+                    ((symbol-function 'romacs-agent-load-session) (lambda (&rest _) (error "A child loaded")))
+                    ((symbol-function 'romacs-agent-store-row-session) #'ignore)
+                    ((symbol-function 'romacs-agent--state-root) (lambda () root)))
+            (make-directory (expand-file-name (romacs-agent-id child) root))
+            (romacs-agent--write-json (expand-file-name "manifest.json" (expand-file-name (romacs-agent-id child) root))
+                                      (romacs-mcp--object "id" (romacs-agent-id child)
+                                                          "options" (romacs-mcp--object "parent" (romacs-agent-id parent))))
+            (should (romacs-agent-ui--wakes parent text)))
+        (delete-directory root t)))))
 
 ;; What the reviews of the wakes found.
 
