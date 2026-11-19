@@ -612,8 +612,12 @@ impl Vm {
     /// again.
     pub(crate) fn isolate_quit_taken(&mut self) -> bool {
         // A termination quits once, whatever `inhibit-quit' says: the
-        // worker's loop then ends (`romacs--isolate-terminated-p').
+        // worker's loop then ends (`romacs--isolate-terminated-p'). It
+        // supersedes an interrupt still pending and the job's claim, so the
+        // cleanup it unwinds through cannot take the older interrupt.
         if crate::host::take_terminate_quit() {
+            crate::host::take_interrupt();
+            self.isolates.claim = None;
             return true;
         }
         let slot = self.slot("inhibit-quit");

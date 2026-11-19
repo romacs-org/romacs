@@ -395,27 +395,26 @@ impl Vm {
     /// keyboard input or a signal wakes GNU's select: while a host shares
     /// the signal or `debug-on-event' names one, the wait goes in slices of
     /// [`QUIT_SLICE`]; a worker polls its wake pipe beside FDS
-    /// (`worker_wake_fd'). Either returns no events, for the caller's next
-    /// safepoint to quit.
+    /// (`worker_wake_fd'), whose wake returns at once with FDS's events as
+    /// they are, for the caller to quit (`worker_quit') or dispatch them. A
+    /// press or debug event returns no events, for the next safepoint.
     pub(crate) fn poll_quittable(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
                                  -> std::io::Result<Vec<i16>> {
         let wake = self.worker_wake_fd();
         let set: Vec<_> = fds.iter().copied().chain(wake.map(|fd| (fd, libc::POLLIN))).collect();
-        // FDS's events, or none once the wake pipe woke it (drained, so an
+        // FDS's events and whether the wake pipe woke it (drained, so an
         // interrupt `inhibit-quit' holds does not wake the next wait).
-        let poll = |timeout| -> std::io::Result<Option<Vec<i16>>> {
+        let poll = |timeout| -> std::io::Result<(Vec<i16>, bool)> {
             let mut revents = crate::subprocess::poll(&set, timeout)?;
-            if wake.is_some() && revents.pop().is_some_and(|r| r != 0) {
-                crate::host::drain_isolate_wake();
-                return Ok(None);
-            }
-            Ok(Some(revents))
+            let woken = wake.is_some() && revents.pop().is_some_and(|r| r != 0);
+            if woken { crate::host::drain_isolate_wake(); }
+            Ok((revents, woken))
         };
         // A debug event ends it too, without a host (handle_user_signal
         // interrupts GNU's select).
         let debug = self.debug_event_mask();
         if std::sync::Arc::strong_count(&self.quit) == 1 && debug == 0 {
-            return Ok(poll(timeout)?.unwrap_or_else(|| vec![0; fds.len()]));
+            return Ok(poll(timeout)?.0);
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
@@ -423,8 +422,8 @@ impl Vm {
                 return Ok(vec![0; fds.len()]);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            let Some(revents) = poll(Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))? else { return Ok(vec![0; fds.len()]) };
-            if revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left <= QUIT_SLICE) {
+            let (revents, woken) = poll(Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))?;
+            if woken || revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left <= QUIT_SLICE) {
                 return Ok(revents);
             }
         }
