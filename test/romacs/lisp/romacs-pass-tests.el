@@ -178,7 +178,9 @@ stored, and a new password for an existing entry keeps its fields."
 warm restart while modified; storing it writes the text and kills it."
   (romacs-pass-tests--with-store romacs-pass-tests--entries
     (romacs-pass-edit "email/work")
-    (romacs-pass-tests--wait (lambda () (get-buffer "*pass: email/work*")))
+    (romacs-pass-tests--wait (lambda () (and (get-buffer "*pass: email/work*")
+                                             (not (buffer-local-value 'romacs-pass--decrypting
+                                                                      (get-buffer "*pass: email/work*"))))))
     (with-current-buffer "*pass: email/work*"
       (should (equal (buffer-string) (cdr (assoc "email/work" romacs-pass-tests--entries))))
       (should-not buffer-file-name)
@@ -201,6 +203,103 @@ warm restart while modified; storing it writes the text and kills it."
       (romacs-pass-edit-save))
     (romacs-pass-tests--wait (lambda () (romacs-pass-entry-p "new/edited")))
     (should (equal (romacs-pass-read "new/edited") "fresh\n"))))
+
+;;;; Waiting for gpg
+
+(defun romacs-pass-tests--slow-gpg (seconds)
+  "A gpg that waits SECONDS before it runs: a program file in the test's
+temporary directory, for `epg-gpg-program'."
+  (let ((file (make-temp-file "slow-gpg-" nil ".sh"
+                              (format "#!/bin/sh\nsleep %s\nexec %s \"$@\"\n"
+                                      seconds (shell-quote-argument (executable-find "gpg"))))))
+    (set-file-modes file #o700)
+    file))
+
+(ert-deftest romacs-pass-edit-shows-at-once-and-fills-later ()
+  "A slow gpg leaves the edit buffer shown at once, empty, read-only and
+not storable, C-g stopping it; its text comes when gpg answers, and C-g is
+itself again."
+  (romacs-pass-tests--with-store romacs-pass-tests--entries
+    (let ((epg-gpg-program (romacs-pass-tests--slow-gpg 1)))
+      (romacs-pass-edit "email/work")
+      (let ((buffer (get-buffer "*pass: email/work*")))
+        (should buffer)
+        (with-current-buffer buffer
+          (should (process-live-p romacs-pass--decrypting))
+          (should buffer-read-only)
+          (should (equal (buffer-string) ""))
+          (should (equal (substring-no-properties header-line-format)
+                         "Decrypting email/work...  C-g or C-c C-k stops"))
+          (should (eq (key-binding (kbd "C-g")) #'romacs-pass-edit-cancel))
+          (should-error (romacs-pass-edit-save) :type 'user-error))
+        ;; Asking again while it waits shows the same buffer, still waiting.
+        (romacs-pass-edit "email/work")
+        (should (buffer-local-value 'romacs-pass--decrypting buffer))
+        (romacs-pass-tests--wait (lambda () (not (buffer-local-value 'romacs-pass--decrypting buffer))))
+        (with-current-buffer buffer
+          (should (equal (buffer-string) (cdr (assoc "email/work" romacs-pass-tests--entries))))
+          (should-not buffer-read-only)
+          (should-not (buffer-modified-p))
+          (should (eq (key-binding (kbd "C-g")) #'keyboard-quit)))
+        ;; Asked again, unmodified, it waits once more: holding none of the
+        ;; old text, in its undo list either, and with no change to keep.
+        (romacs-pass-edit "email/work")
+        (with-current-buffer buffer
+          (should romacs-pass--decrypting)
+          (should (equal (buffer-string) ""))
+          (should-not buffer-undo-list)
+          (should-not (buffer-modified-p))
+          (should-not (romacs-pass--restart-blocker)))
+        (romacs-pass-tests--wait (lambda () (not (buffer-local-value 'romacs-pass--decrypting buffer))))
+        (kill-buffer buffer)))))
+
+(ert-deftest romacs-pass-edit-cancel-stops-gpg-quietly ()
+  "Cancelling a buffer that waits for gpg kills both, reports no failure,
+and leaves the entry as it was."
+  (romacs-pass-tests--with-store romacs-pass-tests--entries
+    (let ((epg-gpg-program (romacs-pass-tests--slow-gpg 5))
+          (said nil))
+      (romacs-pass-edit "email/work")
+      (let* ((buffer (get-buffer "*pass: email/work*"))
+             (process (buffer-local-value 'romacs-pass--decrypting buffer)))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (format &rest args) (push (apply #'format-message format args) said))))
+          (with-current-buffer buffer (romacs-pass-edit-cancel))
+          (should-not (buffer-live-p buffer))
+          (romacs-pass-tests--wait (lambda () (not (process-live-p process))))
+          (accept-process-output nil 0.1))
+        (should-not (seq-some (lambda (line) (string-search "could not decrypt" line)) said))))
+    (should (equal (romacs-pass-read "email/work") (cdr (assoc "email/work" romacs-pass-tests--entries))))))
+
+(ert-deftest romacs-pass-notes-a-slow-decryption-by-its-times ()
+  "A decryption over `romacs-pass-slow-decrypt-seconds' goes on the usage
+log's record with its times and outcome, never the entry's name; the
+commands say at once that gpg is at work."
+  (romacs-pass-tests--with-store romacs-pass-tests--entries
+    (let ((romacs-pass-slow-decrypt-seconds 0)
+          (romacs-pass-clear-seconds 60) (kill-ring nil) (kill-ring-yank-pointer nil)
+          (notes nil) (said nil))
+      (cl-letf (((symbol-function 'romacs-usage-log-note)
+                 (lambda (kind &rest plist) (push (cons kind plist) notes)))
+                ((symbol-function 'message)
+                 (lambda (format &rest args) (when format (push (apply #'format-message format args) said)))))
+        (romacs-pass-copy "email/work")
+        (should (equal (car said) "Decrypting email/work..."))
+        (romacs-pass-tests--wait (lambda () (car kill-ring)))
+        ;; Written as it is, not through EPA's encrypting handler for .gpg.
+        (let ((file-name-handler-alist nil))
+          (write-region "not an OpenPGP message" nil
+                        (expand-file-name "broken.gpg" auth-source-pass-filename) nil 'silent))
+        (should-error (romacs-pass-read "broken")))
+      (should (= (length notes) 2))
+      (pcase-let ((`(,failed ,ok) notes))
+        (should (equal (car ok) "pass-decrypt"))
+        (should (equal (plist-get (cdr ok) :status) "ok"))
+        (should (natnump (plist-get (cdr ok) :ms)))
+        (should (<= (plist-get (cdr ok) :output_ms) (plist-get (cdr ok) :ms)))
+        (should (floatp (plist-get (cdr ok) :t)))
+        (should (equal (plist-get (cdr failed) :status) "failed")))
+      (should-not (seq-some (lambda (note) (string-search "email" (format "%S" note))) notes)))))
 
 ;;;; auth-source
 
