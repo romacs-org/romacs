@@ -1567,6 +1567,37 @@ containing it, until no links are left at any level.
 	       (rest (substring filename (match-end 0))))
 	   (setq filename (concat (expand-file-name first-part) rest)))))
 
+  ;; A local name with no file name handler, on the outermost call, is
+  ;; walked natively (LISP-NATIVE-TRUENAME); the walk returns nil to leave
+  ;; a long chain of links, or a loop, to the algorithm below.
+  (or (and (null counter) (null prev-dirs) (not (eq system-type 'windows-nt))
+           (let ((name (file-truename--local-name filename)))
+             (and name
+                  (not (find-file-name-handler name 'file-truename))
+                  (let ((true-name (romacs--file-truename-local name)))
+                    ;; A link may lead into a name a handler claims.
+                    (and true-name
+                         (or (string= true-name name)
+                             (not (find-file-name-handler true-name 'file-truename)))
+                         true-name)))))
+      (file-truename--walk filename counter prev-dirs)))
+
+(defun file-truename--local-name (filename)
+  "FILENAME made absolute for the native walk, or nil to leave it to GNU's.
+`default-directory' is read only for a relative name, as GNU's algorithm
+reads it, and expanded only when it does not already begin with a slash."
+  (cond ((file-name-absolute-p filename) filename)
+        (default-directory
+         ;; Not `file-name-as-directory': it asks for a file name handler
+         ;; too, which the caller asks once of the joined name.
+         (let ((dir (if (string-prefix-p "/" default-directory)
+                        default-directory
+                      (expand-file-name default-directory))))
+           (concat dir (unless (string-suffix-p "/" dir) "/") filename)))))
+
+(defun file-truename--walk (filename counter prev-dirs)
+  "GNU's `file-truename' algorithm: FILENAME's true name, COUNTER and
+PREV-DIRS as `file-truename' takes them."
   (or counter (setq counter (list 100)))
   (let (done
 	;; For speed, remove the ange-ftp completion handler from the list.
