@@ -1,6 +1,7 @@
 """Public-entry controls for the source-loaded Elisp test runner."""
 import hashlib
 import importlib.machinery
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -67,28 +68,42 @@ class ElispRunner(unittest.TestCase):
         fake = Path(self.temp.name) / 'fake-host'
         fake.write_text(f'#!/bin/sh\ntouch {ran}\nexit 0\n')
         fake.chmod(0o700)
-        for text in ['(ert-deftest an-ert-test () (should t))\n', '(defun no-tests-here () nil)\n',
-                     # The only test commented out leaves the file none.
-                     ';; (romacs-deftest fixture-pass () (romacs-should t))\n(defun no-tests-here () nil)\n']:
+        for text in ['(ert-deftest an-ert-test () (should t))\n',
+                     ';;; -*- lexical-binding: t -*-\n(require \'ert)\n\n(ert-deftest an-ert-test ()\n  (should t))\n']:
             self.fixture.write_text(text)
             result = self.run_tests(binary=fake)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('tools/test-ert', result.stderr)
             self.assertFalse(ran.exists(), 'the host ran for a file the runner should refuse')
 
+    def test_a_file_that_registers_no_test_fails_by_name(self):
+        for text in ['(defun no-tests-here () nil)\n',
+                     # The only test commented out leaves the file none.
+                     ';; (romacs-deftest fixture-pass () (romacs-should t))\n(defun no-tests-here () nil)\n',
+                     # A test form that never runs as the file loads.
+                     '(defun register-later () (romacs-deftest fixture () t))\n']:
+            self.fixture.write_text(text)
+            result = self.run_tests()
+            self.assertNotEqual(result.returncode, 0, text)
+            self.assertIn(f'{self.fixture.resolve()} registered no romacs-test', result.stdout + result.stderr)
+
     def test_forms_inside_strings_comments_and_characters_are_not_read(self):
         self.fixture.write_text('''(romacs-deftest fixture-pass ()
   (romacs-should (equal (list ?\\" ?\\( ?;) (list 34 40 59)))
   (romacs-should (stringp "a string that shows
 (ert-deftest not-a-test () t)
-in its text")))
+in its text"))
+  (romacs-should (eq (car '(ert-deftest example () t)) 'ert-deftest)))
+'(ert-deftest quoted-at-top-level () t)
 ''')
         result = self.run_tests('--test', 'fixture-pass')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('PASS fixture-pass', result.stdout)
 
     def test_the_editor_header_selects_files_only_from_the_leading_comments(self):
-        runner = importlib.machinery.SourceFileLoader('test_elisp', str(ROOT / 'tools/test-elisp')).load_module()
+        loader = importlib.machinery.SourceFileLoader('test_elisp', str(ROOT / 'tools/test-elisp'))
+        runner = importlib.util.module_from_spec(importlib.util.spec_from_loader('test_elisp', loader))
+        loader.exec_module(runner)
         plain = '(romacs-deftest a () (romacs-should t))\n'
         marked = ';;; f.el --- x\n;; romacs-test: editor (needs the editor)\n' + plain
         late = plain + ';; romacs-test: editor\n'

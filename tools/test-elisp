@@ -52,14 +52,22 @@ def code_only(text):
     return ''.join(out)
 
 
-def not_romacs_test(text):
-    """Why TEXT is no romacs-test file, or None when it is one."""
+def defines_ert_tests(text):
+    """Whether TEXT defines ERT tests: an `(ert-deftest' read as a top-level
+    form, not quoted and not inside another form. Such a file cannot load
+    here, so it is refused before any host runs."""
     code = code_only(text)
-    if re.search(r'\(ert-deftest(?![^\s()])', code):
-        return 'it defines ERT tests (ert-deftest)'
-    if not re.search(r'\(romacs-deftest(?![^\s()])', code):
-        return 'it defines no romacs-deftest'
-    return None
+    depth = 0
+    for i, c in enumerate(code):
+        if c == '(':
+            before = code[:i].rstrip()[-1:]
+            if depth == 0 and before not in ("'", '`', ',', '#', '@') \
+               and re.match(r'\(ert-deftest(?![^\s()])', code[i:]):
+                return True
+            depth += 1
+        elif c == ')':
+            depth = max(depth - 1, 0)
+    return False
 
 
 def needs_editor(text):
@@ -78,9 +86,8 @@ def selection(files, texts, core, named):
     """The FILES to run, given their TEXTS, or an error: the bare VM (CORE)
     skips a file whose header needs the editor, and refuses one NAMED."""
     for path, text in zip(files, texts):
-        problem = not_romacs_test(text)
-        if problem:
-            return None, f'{path}: {problem}; this runner runs romacs-test files (romacs-deftest), and ERT files run with tools/test-ert'
+        if defines_ert_tests(text):
+            return None, f'{path}: it defines ERT tests (ert-deftest); this runner runs romacs-test files (romacs-deftest), and ERT files run with tools/test-ert'
     if core:
         editor = [p for p, t in zip(files, texts) if needs_editor(t)]
         if named and editor:
@@ -124,7 +131,9 @@ def main():
     if args.test and not all(c.isalnum() or c in '-_/:.' for c in args.test):
         parser.error('--test must be a test symbol name')
     source = f'(setq load-path (cons {quote(ROOT / "lisp/emacs-lisp")} load-path))\n(require \'romacs-test)\n'
-    source += ''.join(f'(load {quote(path)} nil t)\n' for path in files)
+    # Each file must register a test as it loads (a replaced one counts):
+    # a file that registers none is an error that names it.
+    source += ''.join(f'(let ((before romacs-test--registry)) (load {quote(path)} nil t) (when (eq before romacs-test--registry) (error "%s registered no romacs-test; ERT files run with tools/test-ert" {quote(path)})))\n' for path in files)
     source += f'(let ((summary (romacs-test-run {selector}))) (when (or (> (plist-get summary :failed) 0) (> (plist-get summary :errors) 0)) (error "Selected Elisp tests failed")))\n(princ "{COMPLETE}\\n")\n'
     command = [str(binary), '--source'] if args.core else [str(binary), '--batch', str(ROOT / 'lisp')]
     started = time.perf_counter()
