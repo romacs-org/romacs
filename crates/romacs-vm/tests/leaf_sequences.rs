@@ -128,6 +128,9 @@ fn sort_large_inputs_stay_stable_and_agree_with_lisp_predicates() {
         ("strings", format!("(sort {WORDS} 'string-lessp)"), format!("(sort {WORDS} (lambda (a b) (string-lessp a b)))")),
         ("strings_reverse_vector", format!("(sort (vconcat {WORDS}) :lessp #'string-lessp :reverse t)"), format!("(sort (vconcat {WORDS}) :lessp (lambda (a b) (string-lessp a b)) :reverse t)")),
         ("alias_chain", format!("(progn (defalias 'romacs-test-less 'string-lessp) (sort {WORDS} 'romacs-test-less))"), format!("(sort {WORDS} (lambda (a b) (string-lessp a b)))")),
+        ("fixnum_greater", format!("(sort {PAIRS} :key #'car :lessp #'>)"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (> a b)))")),
+        ("fixnum_greater_reverse", format!("(sort {PAIRS} :key #'car :lessp #'> :reverse t)"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (> a b)) :reverse t)")),
+        ("greater_alias", format!("(progn (defalias 'romacs-test-greater '>) (sort {PAIRS} :key #'car :lessp 'romacs-test-greater))"), format!("(sort {PAIRS} :key #'car :lessp (lambda (a b) (> a b)))")),
     ] {
         check(name, &format!("(equal {native} {lisp})"), "t");
     }
@@ -139,4 +142,49 @@ fn sort_large_lisp_predicates_are_called_n_log_n_times_and_signal() {
     check("sort_large_predicate_error", &format!("(condition-case e (sort {PAIRS} :key #'car :lessp (lambda (a b) (if (= a 3) (error \"boom %d\" a) (< a b)))) (error e))"), "(error \"boom 3\")");
     check("sort_large_mixed_types_signal", &format!("(condition-case e (sort (cons 1 {WORDS}) #'string-lessp) (error (car e)))"), "wrong-type-argument");
     check("sort_redefined_predicate_is_called", &format!("(progn (defalias 'romacs-test-order 'string-lessp) (defalias 'romacs-test-order (lambda (a b) (string-lessp b a))) (equal (sort {WORDS} 'romacs-test-order) (sort {WORDS} :lessp #'string-lessp :reverse t)))"), "t");
+}
+
+/// The native path takes only a predicate a call would reach as the
+/// built-in subr: a macro wrapping `<` or `>`, or an autoload, goes the
+/// general path, which signals as pinned GNU does.
+#[test]
+fn sort_native_path_takes_only_what_a_call_would_call() {
+    for (name, setup, predicate, expected) in [
+        ("macro_greater", "(defalias 'romacs-test-gt-macro (cons 'macro #'>))", "'romacs-test-gt-macro", "invalid-function"),
+        ("macro_less", "(defalias 'romacs-test-lt-macro (cons 'macro #'<))", "'romacs-test-lt-macro", "invalid-function"),
+        ("autoload_less", "(autoload 'romacs-test-lt-autoload \"romacs-test-no-such-file\")", "'romacs-test-lt-autoload", "file-missing"),
+        ("alias_greater", "(defalias 'romacs-test-gt-alias '>)", "'romacs-test-gt-alias", "(3 2 1)"),
+        ("alias_to_macro", "(progn (defalias 'romacs-test-gt-macro2 (cons 'macro #'>)) (defalias 'romacs-test-to-macro 'romacs-test-gt-macro2))", "'romacs-test-to-macro", "invalid-function"),
+        ("alias_to_autoload", "(progn (autoload 'romacs-test-gt-autoload \"romacs-test-no-such-file\") (defalias 'romacs-test-to-autoload 'romacs-test-gt-autoload))", "'romacs-test-to-autoload", "file-missing"),
+    ] {
+        check(name, &format!("(progn {setup} (condition-case e (sort (list 3 1 2) {predicate}) (error (car e))))"), expected);
+    }
+    // Sol's round-3 case: `t`'s cell, which is no slot reference, holding
+    // a macro wrapping the built-in subr; and `symbol-function` reading the
+    // macro flag back through the same slot lookup.
+    // The native path refuses it and the call signals. Which error is the
+    // dispatcher's: pinned GNU says invalid-function; Romacs's dispatcher
+    // does not read `t`'s cell at all yet, and says void-function.
+    for op in ["<", ">"] {
+        check(&format!("t_macro_{op}"),
+              &format!("(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '{op}))) (condition-case nil (progn (sort [1 3 2] t) 'sorted) (error 'signalled))) (fset 't old)))"),
+              "signalled");
+    }
+    // `t` holding the plain `>`: the native path gives what the general
+    // path gives. That is void-function today, because the dispatcher
+    // doesn't read `t`'s cell (pinned GNU sorts); when romacs#309 is fixed,
+    // this and sort's nil/t fallback change together.
+    check("t_plain_greater_matches_the_general_path",
+          "(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (symbol-function '>)) (list (condition-case e (sort [1 3 2] t) (error (car e))) (condition-case e (sort (list 1.5 3 2) t) (error (car e))))) (fset 't old)))",
+          "(void-function void-function)");
+    check("t_symbol_function_macro",
+          "(let ((old (symbol-function t))) (unwind-protect (progn (fset 't (cons 'macro (symbol-function '>))) (car-safe (symbol-function 't))) (fset 't old)))",
+          "macro");
+    // Sol's case, on a vector: an uninterned symbol whose cell is a macro
+    // wrapping the built-in subr.
+    for op in ["<", ">"] {
+        check(&format!("uninterned_macro_{op}"),
+              &format!("(let ((p (make-symbol \"sort-macro\"))) (fset p (cons 'macro (symbol-function '{op}))) (condition-case e (sort [1 3 2] p) (error (car e))))"),
+              "invalid-function");
+    }
 }

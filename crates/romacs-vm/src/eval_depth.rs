@@ -49,7 +49,7 @@ impl Vm {
         if symbol == usize::MAX {
             return None;
         }
-        let buffer = self.slots[self.buffer_slot].value.index_if(0)?.checked_sub(1)?;
+        let buffer = self.slots[self.buffer_slot].value.object_index_if()?;
         Some(crate::variable_runtime::LocalEntry { buffer, at: self.local_at(buffer, symbol)?.ok()? })
     }
     /// `max-lisp-eval-depth' as evaluation reads it: the current buffer's

@@ -3505,6 +3505,7 @@ version = "0.0.20"
 name = "romacs-vm"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "crossbeam-deque",
  "errno",
  "flate2",
