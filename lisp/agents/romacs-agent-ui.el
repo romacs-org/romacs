@@ -495,9 +495,10 @@ what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     ;; A preview loads no session: a child loaded, or none.
-                     (when-let* ((child (if romacs-agent-ui--previewing (romacs-agent-loaded (plist-get wake :id))
-                                          (romacs-agent-get (plist-get wake :id)))))
+                     ;; Its parent, from the child loaded or its row: drawing
+                     ;; a chat loads no other session.
+                     (when-let* ((id (plist-get wake :id))
+                                 (child (or (romacs-agent-loaded id) (romacs-agent-store-row-session id))))
                        (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
                    wakes)
          wakes)))

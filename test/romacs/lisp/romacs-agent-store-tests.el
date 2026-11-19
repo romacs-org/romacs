@@ -288,10 +288,12 @@ journal one turn long."
             (romacs-agent--quiet-tick)
             (should (= queries 1))
             (should-not loaded)
+            ;; Each one's end; one with no records, none.
+            (should (equal (sort (mapcar #'car (romacs-agent-events-ends (cons "none" ids))) #'string<) ids))
             (romacs-agent-events-append (romacs-agent--quiet-session (expand-file-name (cadr ids) root))
                                         (romacs-mcp--object "seq" 9 "t" 9.0 "note" (romacs-mcp--object "type" "late")))
             (romacs-agent--quiet-tick)
-            (should (= queries 2))
+            (should (= queries 3))
             (should (equal loaded (list (cadr ids))))))
         (clrhash romacs-agent--quiet)
         (romacs-agent--quiet-tick)
