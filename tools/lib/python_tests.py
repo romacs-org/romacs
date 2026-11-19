@@ -31,6 +31,8 @@ ELSEWHERE = {
                     'test_audit_manifest', 'test_gate_vacuity')},
     'crates/romacs-vm-gui/harness/test_fileio_live.py': 'crates/romacs-vm-gui/tests/fileio_observer.rs',
     'crates/romacs-vm-gui/harness/test_find_file_live.py': 'crates/romacs-vm-gui/tests/find_file.rs',
+    'crates/romacs-vm-gui/harness/test_perkey_ab.py': 'crates/romacs-vm-gui/tests/perkey_verdicts.rs',
+    'crates/romacs-vm-gui/harness/test_perkey_live.py': 'crates/romacs-vm-gui/tests/perkey_verdicts.rs',
     'crates/romacs-vm-gui/harness/test_scaling_live.py': 'crates/romacs-vm-gui/tests/scaling.rs',
     'tools/tests/parity_ratchet_test.py': 'crates/romacs-gnu-tests/tests/parity_ratchet.rs',
     'tools/tests/honest_ratchet_test.py': 'tools/tests/parity_ratchet_test.py',
