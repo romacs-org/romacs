@@ -1786,6 +1786,36 @@ pub fn clock_ticks_per_second() -> u64 {
     Some(rustix::param::clock_ticks_per_second()).filter(|&n| n > 0).unwrap_or(100)
 }
 
+/// The calling thread's CPU time (`CLOCK_THREAD_CPUTIME_ID`).  A meter, as
+/// [`instruction_count`] is: the stall watchdog reads it on the evaluator's
+/// thread to split a span of work into running and waiting, so it is
+/// neither logged for a replay nor counted among the host calls.
+#[must_use]
+pub fn thread_cpu_time() -> std::time::Duration {
+    let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+    std::time::Duration::new(u64::try_from(t.tv_sec).unwrap_or(0), u32::try_from(t.tv_nsec).unwrap_or(0))
+}
+
+thread_local! {
+    /// The time this thread's collections took, ever, in nanoseconds
+    /// ([`collection_time`]).
+    static COLLECTION_NS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// A collection on this thread took NS nanoseconds (`Vm::collect_until_key`).
+pub(crate) fn note_collection_time(ns: u64) {
+    COLLECTION_NS.with(|total| total.set(total.get().saturating_add(ns)));
+}
+
+/// The time the calling thread's collections took, ever: the stall
+/// watchdog's share of a span spent collecting.  A meter, like
+/// [`thread_cpu_time`]; collections in build mode are not timed
+/// ([`collection_clock`]), so they add nothing.
+#[must_use]
+pub fn collection_time() -> std::time::Duration {
+    std::time::Duration::from_nanos(COLLECTION_NS.with(Cell::get))
+}
+
 /// The time since boot, suspended time included (`CLOCK_BOOTTIME`), as
 /// GNU's get_host_uptime reads it; None where the clock is missing.
 pub fn boot_clock() -> Option<std::time::Duration> {
