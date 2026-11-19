@@ -805,13 +805,17 @@ meanwhile, or a read after a place would fold too many."
            (lambda (why) (funcall respond (list 'error -32603 "internal" why)))))))))
 
 (defun romacs-agent-service--turn-start (session turns end begin)
-  "The seq of the start of the turn TURNS prompts back from before seq END,
-looked for from seq BEGIN: the session's start when it begins there;
-fewer turns back when not that many are found, but at least the last;
-nil when no turn starts in reach."
-  (or (car (romacs-agent-events-tail session turns end begin))
-      (and (zerop begin) 0)
-      (and (> turns 1) (car (romacs-agent-events-tail session 1 end begin)))))
+  "The seq of the start of the turn TURNS turns back from before seq END,
+fewer when not that many are there, from SESSION's turn rows, each
+turn's first seq kept exactly; else (a turn whose row is not written
+yet) as the chat finds it (`romacs-agent-events-tail'), looked for from
+seq BEGIN, the session's start when it begins there.  Nil when it is
+before BEGIN, out of reach."
+  (let ((start (or (car (last (and (fboundp 'romacs-agent-turns-first-seqs)
+                                   (romacs-agent-turns-first-seqs session turns end))))
+                   (car (romacs-agent-events-tail session turns end begin))
+                   (and (zerop begin) 0))))
+    (and start (>= start begin) start)))
 
 (defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
   "A history reply of UNITS (each (SEQ . SENT)) through UPTO under EPOCH, or

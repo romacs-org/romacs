@@ -840,8 +840,8 @@ Once the service runs on its own, an agent's editor tool needs an editor.
     not.
   - The chat view's history deduplicates by the cursor above (a seq is
     one unit, its first record folded), the same contract as the
-    protocol's, and replays through the same copy
-    (=romacs-agent-replay-copy=).
+    protocol's; its replays fold into copies made the same way
+    (=romacs-agent--scratch=), which never act on the live session.
 
 * Slices
 Each slice is landable on its own:

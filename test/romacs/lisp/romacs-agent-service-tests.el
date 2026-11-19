@@ -476,6 +476,8 @@ a state root of its own, and a service of its own on `socket'."
            (romacs-agent--load dir)
            (let ((session (romacs-agent-get id)))
              (romacs-agent-events-import session)
+             (require 'romacs-agent-turns)
+             (romacs-agent-turns-fill session)
              (cl-macrolet ((wait (form) `(let ((deadline (+ (float-time) 5)))
                                             (while (and (not ,form) (< (float-time) deadline))
                                               (accept-process-output nil 0.02))
@@ -527,7 +529,11 @@ a state root of its own, and a service of its own on `socket'."
         (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
       (let ((romacs-agent-service--catch-up 5))
         (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2)))))
-      ;; A turn starting out of reach: a reset, never a read from mid-turn.
+      ;; A turn starting in reach (14, the window from 13) is read from its
+      ;; start; one out of reach is a reset, never a read from mid-turn.
+      (let ((romacs-agent-service--turn-reach 6))
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
       (let ((romacs-agent-service--turn-reach 3))
         (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))))))))
 
