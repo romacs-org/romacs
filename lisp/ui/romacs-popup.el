@@ -37,19 +37,46 @@
   "A menu's text and background.")
 
 (defface romacs-popup-key '((t :inherit romacs-layer-glow))
-  "A key in a menu.")
+  "A key in a menu: the theme's accent, made legible on the menu's glass
+\(`romacs-popup--key-spec').")
 
 (defface romacs-popup-title '((t :inherit bold))
   "A menu's title.")
 
-(defface romacs-popup-group-title '((t :inherit (shadow bold)))
-  "A group's title in a menu: quieter than the keys under it.")
+(defface romacs-popup-group-title '((t :inherit bold))
+  "A group's title in a menu: the text's own colour, bold, above its
+keys' labels in plain weight; dim is for what cannot be used.")
 
 (defface romacs-popup-description '((t))
   "What a key in a menu does.")
 
 (defface romacs-popup-dim '((t :inherit shadow))
   "A menu's secondary text.")
+
+(declare-function romacs-color-floor-on "romacs-theme" (fg backgrounds minimum))
+
+(defconst romacs-popup-key-contrast 4.5
+  "The contrast a menu's keys keep on its glass, WCAG AA for text.")
+
+(defun romacs-popup--key-spec (&rest _)
+  "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') moved
+in lightness until it reads on the menu's glass at
+`romacs-popup-key-contrast': a theme whose accent is a mid grey on a
+light card (a monochrome one) still has keys that lead.  Run after a
+theme is enabled or disabled, once its faces are in place."
+  (let* ((accent (face-foreground 'romacs-layer-glow nil t))
+         (glass (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))
+         (legible (and (fboundp 'romacs-color-floor-on) (stringp accent) (stringp glass)
+                       (color-defined-p accent) (color-defined-p glass)
+                       (romacs-color-floor-on (romacs-chrome--hex accent) (list (romacs-chrome--hex glass))
+                                              romacs-popup-key-contrast)))
+         (spec `((t :inherit romacs-layer-glow ,@(and legible (list :foreground legible))))))
+    (unless (equal spec (get 'romacs-popup-key 'face-defface-spec))
+      (face-spec-set 'romacs-popup-key spec 'face-defface-spec))))
+
+;; After the chrome's own derived faces (depth 0), which set the glow.
+(add-hook 'enable-theme-functions #'romacs-popup--key-spec 90)
+(add-hook 'disable-theme-functions #'romacs-popup--key-spec 90)
 
 (defconst romacs-popup-look
   '((panel :radius 8 :padding 10 :motion slide :edge bottom)
@@ -934,15 +961,18 @@ DIMENSIONS is (LINES . COLUMNS)."
 (defun romacs-popup-room (kind)
   "The room a KIND menu floating over the root frame has for its text,
 \(COLUMNS . ROWS): the frame's text area below its top chrome and above
-`romacs-chrome-bottom', less `romacs-layer-margin' and the kind's
-padding each side, in the frame's columns and lines."
+`romacs-chrome-bottom', less the kind's padding each side and
+`romacs-layer-margin' (above it `romacs-layer-float-gap'), in the
+frame's columns and lines."
   (let* ((root (romacs-layer--root-frame))
          (padding (if romacs-layer-glass
                       (plist-get (alist-get kind romacs-popup-look) :padding)
                     (alist-get 'child-frame-border-width romacs-layer-frame-parameters)))
          (inset (* 2 (+ padding romacs-layer-margin))))
     (cons (max 1 (/ (- (frame-text-width root) inset) (frame-char-width root)))
-          (max 1 (/ (- (romacs-chrome-bottom root) (romacs-chrome-top root) inset) (frame-char-height root))))))
+          (max 1 (/ (- (romacs-chrome-bottom root) (romacs-chrome-top root)
+                       (* 2 padding) romacs-layer-margin (romacs-layer-float-gap root))
+                    (frame-char-height root))))))
 
 (defun romacs-popup-panel-columns ()
   "The columns a `panel' menu's text can fill (`romacs-popup-room'),

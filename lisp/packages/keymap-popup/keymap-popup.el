@@ -1422,23 +1422,32 @@ the continuation glyph (`window-max-chars-per-line')."
     (cons (and window (max 1 (window-max-chars-per-line window))) nil)))
 
 (defun keymap-popup--footer (buf page pages columns)
-  "BUF's footer line: its exit key and what it does, and the paging keys
-with PAGE of PAGES when there is more than one; nil when there is
-nothing to say.  Past COLUMNS (nil for no limit) the words go first,
-the keys and the page count last.  It describes navigation, not a
-source binding, so it carries no mouse properties.  C-u's prefix
+  "BUF's footer line: its exit key and what it does, its label where an
+entry's label starts (the key right-aligned in the column one-key
+entries leave it), then, when there is more than one page, PAGE of
+PAGES and the key to each page there is (next, previous); nil when
+there is nothing to say.  Past COLUMNS (nil for no limit) the words go
+first, the keys and the page count last.  It describes navigation, not
+a source binding, so it carries no mouse properties.  C-u's prefix
 override also shadows any exit below that prefix."
   (let* ((exit (keymap-popup--active-get buf :exit-key))
          (exit (and exit (not (eq (car (keymap-popup--key-events exit)) ?\C-u))
                     (substring-no-properties exit)))
          (key (lambda (k) (propertize k 'face 'keymap-popup-key)))
+         (hint (keymap-popup--paging-hint exit))
+         (next (and (< (1+ page) pages) (car hint)))
+         (previous (and (> page 0) (cadr hint)))
          (count (and (> pages 1) (propertize (format "%d/%d" (1+ page) pages) 'face 'keymap-popup-inapt)))
-         (paging (and count (mapconcat key (keymap-popup--paging-hint exit) " ")))
-         (full (delq nil (list (and exit (concat (funcall key exit) "  "
+         (full (delq nil (list (and exit (concat (make-string (max 0 (- 3 (string-width exit))) ?\s)
+                                                 (funcall key exit) "  "
                                                  (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu")))
-                               (and count (concat paging "  page " count)))))
-         (short (delq nil (list (and exit (funcall key exit)) (and count (concat paging " " count)))))
-         (line (lambda (parts) (and parts (concat "  " (string-join parts "     "))))))
+                               (and count (string-join (delq nil (list count
+                                                                       (and next (concat (funcall key next) " next"))
+                                                                       (and previous (concat (funcall key previous) " previous"))))
+                                                       "  ")))))
+         (short (delq nil (list (and exit (funcall key exit)) count
+                                (and next (funcall key next)) (and previous (funcall key previous)))))
+         (line (lambda (parts) (and parts (concat (if exit "" "  ") (string-join parts "     "))))))
     (if (or (null columns) (<= (string-width (or (funcall line full) "")) columns))
         (funcall line full)
       (romacs-grid-cut (string-join short " ") columns))))
@@ -1473,10 +1482,12 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
                  0))
          (footer (keymap-popup--footer buf page (length pages) columns)))
     (keymap-popup--set-session buf :page-menu menu :page page :pages (length pages)
-                               ;; The last page's footer is the widest (its count's).
-                               :size (cons (max (romacs-grid-width pages)
-                                                (if title (string-width title) 0)
-                                                (string-width (or (keymap-popup--footer buf (1- (length pages)) (length pages) columns) "")))
+                               ;; The widest footer any page has: a middle page
+                               ;; names both directions, the last the widest count.
+                               :size (cons (apply #'max (romacs-grid-width pages)
+                                                  (if title (string-width title) 0)
+                                                  (mapcar (lambda (p) (string-width (or (keymap-popup--footer buf p (length pages) columns) "")))
+                                                          (delete-dups (list 0 (min 1 (1- (length pages))) (1- (length pages))))))
                                            (+ (apply #'max (mapcar #'length pages))
                                               (if title 2 0) (if footer 2 0))))
     (with-current-buffer buf

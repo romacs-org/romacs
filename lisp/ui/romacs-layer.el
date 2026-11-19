@@ -191,6 +191,11 @@ minibuffer line, or the layer hosting the minibuffer window
 (defconst romacs-layer-margin 12
   "Pixels a floating layer keeps from the frame's edges and chrome.")
 
+(defun romacs-layer-float-gap (root)
+  "Pixels a `float' layer of ROOT keeps above the status bar: a line, and
+at least `romacs-layer-margin', so its glow clears the bar."
+  (max romacs-layer-margin (frame-char-height root)))
+
 (defun romacs-layer--clamp (left top width height border)
   "LEFT TOP WIDTH HEIGHT, a layer's outer position and text size with
 BORDER pixels round it, moved and cut to lie inside the root frame's
@@ -221,11 +226,11 @@ text size, in pixels."
        (let ((top (- (romacs-layer--bottom root) outer-height)))
          (list inset (max inset top) frame-width height)))
       ('float
-       ;; Centred on the frame, floating a margin above where a bottom
-       ;; layer ends: a key menu's card.
+       ;; Centred on the frame, floating `romacs-layer-float-gap' above
+       ;; where a bottom layer ends: a key menu's card.
        (let ((width (min width (- frame-width (* 2 romacs-layer-margin)))))
          (list (+ inset (/ (- (frame-text-width root) width (* 2 border)) 2))
-               (max (romacs-chrome-top root) (- (romacs-layer--bottom root) romacs-layer-margin outer-height))
+               (max (romacs-chrome-top root) (- (romacs-layer--bottom root) (romacs-layer-float-gap root) outer-height))
                width height)))
       ('center
        (let ((width (min width (- frame-width (* 4 cw)))))

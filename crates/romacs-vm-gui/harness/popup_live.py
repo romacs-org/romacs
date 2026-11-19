@@ -166,7 +166,7 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
               :inset (frame-internal-border-width (frame-parent frame))
               :parent-text-width (frame-text-width (frame-parent frame))
               :kind (frame-parameter frame 'romacs-popup-kind)
-              :margin romacs-layer-margin
+              :margin (romacs-layer-float-gap (frame-parent frame))
               :description (keymap-popup--active-get buffer :resolved-docstring)))
        nil {state} nil (quote quiet)))))
 (with-eval-after-load 'keymap-popup
@@ -927,8 +927,8 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
     if ys[-1] + line > top + height:
         raise AssertionError(f'last popup row {ys[-1]} below the frame bottom {top + height}')
     if args.layer:
-        # Romacs's panel: a card centred on the frame, floating a margin
-        # (`romacs-layer-margin') above the status bar, its title (the
+        # Romacs's panel: a card centred on the frame, floating
+        # `romacs-layer-float-gap' above the status bar, its title (the
         # menu's description) its first row, no mode line of its own, and
         # no context segment in the status bar.
         if probe['kind'] != 'panel' or probe['mode-line']:

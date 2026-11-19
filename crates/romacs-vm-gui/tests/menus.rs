@@ -60,7 +60,7 @@ fn menus_share_one_look_and_motion() {
                            (frame-parameter f 'romacs-popup-kind) (frame-parameter f 'romacs-layer-radius)
                            (frame-parameter f 'child-frame-border-width) (frame-parameter f 'romacs-layer-motion)
                            (frame-parameter f 'romacs-layer-edge)
-                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (- (romacs-chrome-bottom) romacs-layer-margin)))
+                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (- (romacs-chrome-bottom) (romacs-layer-float-gap (frame-parent f)))))
                 (romacs-popup-which-key-hide))))"));
         report.push(printed(&mut vm, "(romacs-popup-panel-p which-key--buffer)"));
         // A which-key page as wide as it is told it may be fits its panel's
@@ -202,7 +202,7 @@ fn menus_share_one_look_and_motion() {
         let page_bounds = "(let ((buf (keymap-popup--popup-buffer)))
             (list (keymap-popup--session-get buf :page)
                   (= (keymap-popup--session-get buf :page) (1- (keymap-popup--session-get buf :pages)))
-                  (with-current-buffer buf (and (string-search (format \"page %d/%d\" (1+ (keymap-popup--session-get buf :page)) (keymap-popup--session-get buf :pages)) (buffer-string)) t))))";
+                  (with-current-buffer buf (and (string-search (format \"%d/%d\" (1+ (keymap-popup--session-get buf :page)) (keymap-popup--session-get buf :pages)) (buffer-string)) t))))";
         keys(&mut vm, &engine, &[META | 22, META | 22, META | 22, META | 22, META | 22]);
         report.push(printed(&mut vm, page_bounds));
         keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25); 5]);
