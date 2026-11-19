@@ -1505,19 +1505,13 @@ mod tests {
     /// Load PATH and the library as this process mapped it.
     fn load(path: &Path) -> arena::Library {
         let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        // UNSAFE(loading a library runs its initializers: dlopen has no safe form)
+        // SAFETY: the library is one this test just built from a few lines of C
+        // with no initializers, and it is never unloaded.
         assert!(!unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) }.is_null(), "{}", path.display());
-        let mut found: Option<arena::Library> = None;
-        unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: libc::size_t, data: *mut libc::c_void) -> libc::c_int {
-            let (want, found) = unsafe { &mut *data.cast::<(&std::ffi::CStr, &mut Option<arena::Library>)>() };
-            let info = unsafe { &*info };
-            if !info.dlpi_name.is_null() && unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) } == *want {
-                **found = Some(unsafe { arena::Library::at(info.dlpi_name, info.dlpi_addr as usize, info.dlpi_phdr as usize, info.dlpi_phnum as usize) });
-            }
-            0
-        }
-        let mut data = (name.as_c_str(), &mut found);
-        unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut data).cast()) };
-        found.expect("loaded")
+        // UNSAFE(a library's mapped headers are memory no type owns)
+        // SAFETY: nothing dlcloses it, so it stays loaded.
+        unsafe { arena::find_library(&name) }.expect("loaded")
     }
 
     /// The old identity of a library without a build-id: its executable

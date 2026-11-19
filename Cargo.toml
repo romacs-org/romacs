@@ -116,6 +116,12 @@ unicode-general-category = "1.1.0"
 stacker = "0.1"
 tree-sitter-language = "0.1.7"
 fontconfig = "0.11.0"
+# FreeType comes from crates/vendor/freetype-sys (2.13.2), never the host:
+# the metric probe, bitmap and colour glyphs, and the GUI oracle's glyph
+# templates rasterise the same on every machine, and a FreeType upgrade is
+# a deliberate change that re-captures the oracle's fixtures. The host's
+# 2.15 re-hinted Liberation Mono and moved them.
+freetype-rs = "0.38.0"
 yeslogic-fontconfig-sys = "6.0.0"
 x11-dl = "2.21"
 core-foundation = "0.10.1"
@@ -344,8 +350,9 @@ wgpu-hal = { git = "https://github.com/eval-exec/wgpu", rev = "9717f9fe277beec2c
 # Fork branch: patch (based on neomacs-variable-weight-match).
 # Scoped font-cache insertion is maintained in the cosmic-text fork.
 cosmic-text = { git = "https://github.com/eval-exec/cosmic-text", rev = "5951ae9b0a4c794e594c56f596ba04e5f57416a1" }
-# Fork branch: fix/bundled-zlib-include.
-freetype-sys = { git = "https://github.com/eval-exec/freetype-sys", rev = "a4eb0a7cf08d9b503bda7d7261c97f8973d34bf1" }
+# The eval-exec fork's freetype-sys, built from its FreeType and libpng
+# sources with hidden symbols: crates/vendor/freetype-sys/ROMACS.md.
+freetype-sys = { path = "crates/vendor/freetype-sys" }
 # Fork branch: patch (based on the 0.5.15 release revision, 31d81fed).
 # Row-wise baseline JPEG: `McuRowReader` hands back one MCU row at a time, and
 # `is_progressive` is public so a progressive image can be routed to the

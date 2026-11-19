@@ -413,11 +413,6 @@ loading it would undo that one's changes; merge it first")
 (defvar romacs-agent--sessions (make-hash-table :test #'equal)
   "Session id to session.")
 
-(defconst romacs-agent--plan-captured
-  "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn."
-  "What a harness asking to leave plan mode is told, as T3 Code tells it:
-the plan is the user's to take up.")
-
 (defun romacs-agent--set-options (session options)
   "Make OPTIONS SESSION's, in its manifest too."
   (setf (romacs-agent-options session) options)
@@ -463,26 +458,17 @@ now (its driver's :plan), else at its next launch."
         (romacs-agent--line session object))
       (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" (if on t :false))))))
 
-(defconst romacs-agent--plan-tool-refused
-  "This tool requires approval in Plan mode, but approvals are disabled for this thread."
-  "What a tool call is told in plan mode under the `allow' policy, as T3
-Code tells it: a plan changes nothing.")
-
 (defun romacs-agent--answer-unasked (session id)
-  "Answer SESSION's request ID that no user is asked: a plan presented is
-captured and its call stopped; in plan mode a tool call is refused; else,
-under the `allow' policy, it is allowed.  Only while it still waits, and
-never one of the user's own (questions)."
+  "Allow SESSION's request ID that no user is asked, under the `allow'
+policy, out of plan mode: only while it still waits.  Romacs denies
+nothing on its user's behalf: what it does not allow waits on the user."
   (when (and (romacs-agent--live-p session) (gethash id (romacs-agent-approvals session))
-             (not (member id (romacs-agent-asks session))))
-    (let ((plan (member id (plist-get (romacs-agent-driver-state session) :plans))))
-      (condition-case err
-          (cond (plan (romacs-agent-respond session id nil romacs-agent--plan-captured))
-                ((not (eq romacs-agent-approval-policy 'allow)))
-                ((plist-get (romacs-agent-options session) :plan)
-                 (romacs-agent-respond session id nil romacs-agent--plan-tool-refused))
-                (t (romacs-agent-respond session id t)))
-        (error (message "Romacs could not answer %s: %s" id (error-message-string err)))))))
+             (not (member id (romacs-agent-asks session)))
+             (eq romacs-agent-approval-policy 'allow)
+             (not (plist-get (romacs-agent-options session) :plan)))
+    (condition-case err
+        (romacs-agent-respond session id t nil 'policy)
+      (error (message "Romacs could not answer %s: %s" id (error-message-string err))))))
 
 (defun romacs-agent-asks (session)
   "The approvals SESSION's run waits on that only the user can answer
@@ -509,10 +495,13 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
-(defun romacs-agent--auto-p (event)
-  "Whether approval EVENT is Romacs's to answer: a tool call, under the
-`allow' policy; never what only the user can answer (:user)."
-  (and (eq romacs-agent-approval-policy 'allow) (not (plist-get event :user))))
+(defun romacs-agent--auto-answer-p (session event)
+  "Whether Romacs answers SESSION's approval EVENT itself: a tool call,
+under the `allow' policy, out of plan mode.  A plan presented, a question,
+or any call in plan mode is the user's to answer."
+  (and (eq romacs-agent-approval-policy 'allow)
+       (not (plist-get event :user)) (not (plist-get event :plan))
+       (not (plist-get (romacs-agent-options session) :plan))))
 
 (defun romacs-agent--live-p (session)
   "Whether SESSION's records are its live ones: the registered session,
@@ -861,6 +850,12 @@ instances) is derived again when it changes.")
       unparsed, when it says nothing else: a list of (:id :failed :parent
       :bytes :seq :time), else nil.  A chat's replay draws such calls'
       ends from it and parses their outputs only when they are opened;
+  :usage (HOME CALLBACK)   optional: ask, asynchronously, the usage of
+      the account configured at HOME (its configuration directory,
+      absolute), without a turn: CALLBACK is called once with a
+      `rate-limit' event naming every window that binds the account,
+      or nil when that is not known now.  An account at its limit is
+      asked again and again (`romacs-agent-room-check-interval');
   :suggestions WORDS   optional: the words its command line asks for a
       predicted next prompt by (`romacs-agent--suggestion-words'), each a
       `suggestion' event (:text) after a turn's end;
@@ -1683,14 +1678,12 @@ on whatever becomes of this server."
     ;; A plan presented: captured, its call told to stop (T3 Code's way);
     ;; the plan is the user's to take up.  A tool call the policy answers
     ;; waits on no one: its answer goes now, or on catching up.
-    ('approval (cond
-                ((or (plist-get event :plan) (romacs-agent--auto-p event))
-                 ;; A plan is known as one on catching up too.
-                 (when (plist-get event :plan)
-                   (setf (romacs-agent-driver-state session)
-                         (plist-put (romacs-agent-driver-state session) :plans
-                                    (cons (plist-get event :request-id)
-                                          (plist-get (romacs-agent-driver-state session) :plans)))))
+    ('approval (when (plist-get event :plan)
+                 (setf (romacs-agent-driver-state session)
+                       (plist-put (romacs-agent-driver-state session) :plans
+                                  (cons (plist-get event :request-id) (plist-get (romacs-agent-driver-state session) :plans)))))
+               (cond
+                ((romacs-agent--auto-answer-p session event)
                  (when (romacs-agent--live-p session)
                    (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
                 (t (romacs-agent--set-asks session (cons (plist-get event :request-id) (romacs-agent-asks session)))
@@ -1976,6 +1969,13 @@ is let go, however it is read (live, a replay, a journal read here)."
                              (pcase (gethash "type" note)
                                ("run" (list (list :type 'run)))
                                ("plan" (list (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
+                               ;; Who answered an approval, and how (`romacs-agent-respond').
+                               ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
+                                                     :by (gethash "by" note) :decision (gethash "decision" note)
+                                                     :scope (gethash "scope" note)
+                                                     :reason (romacs-agent--value (gethash "reason" note))
+                                                     :answers (let ((answers (gethash "answers" note)))
+                                                                (and (hash-table-p answers) (> (hash-table-count answers) 0) answers)))))
                                ("selection" (list (list :type 'selection
                                                         :from (romacs-agent--selection-of (gethash "from" note))
                                                         :to (romacs-agent--selection-of (gethash "to" note)))))
@@ -2861,7 +2861,9 @@ window was.")
     (when-let* ((kept (ignore-errors (with-temp-buffer (insert-file-contents (romacs-agent--room-file))
                                                        (read (current-buffer))))))
       (pcase-dolist (`(,name . ,room) kept)
-        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room)))))
+        (unless (gethash name romacs-agent--room) (puthash name room romacs-agent--room))))
+    ;; Kept spent: they may have room by now, asked soon.
+    (romacs-agent--room-watch 10))
   romacs-agent--room)
 
 (defun romacs-agent--with-lock (file function)
@@ -2913,37 +2915,104 @@ wrote there meanwhile, under its lock: each account's newer report wins."
       (with-temp-file temporary (prin1 rows (current-buffer)))
       (rename-file temporary file t))))
 
+(defvar romacs-agent-room-functions nil
+  "Functions called with an instance's name once a report gives it room
+again, after it was at its limit: what waits for its reset goes on.")
+
 (defun romacs-agent--note-room (session event)
   "Keep EVENT, a `rate-limit' report of SESSION's harness, as its
-instance's, unless an older one: a replay reports the past too.  Its
-overage spent is no instance's limit: only the models that need usage
-credits are refused, and the others run."
+instance's (`romacs-agent-note-room')."
+  (romacs-agent-note-room (romacs-agent-provider session) event))
+
+(defun romacs-agent-note-room (provider event)
+  "Keep EVENT, a `rate-limit' report of instance PROVIDER's usage, as its
+own, unless an older one: a replay reports the past too.  Its overage
+spent is no instance's limit: only the models that need usage credits
+are refused, and the others run.  An instance it gives room again runs
+`romacs-agent-room-functions'."
   (let* ((table (romacs-agent--room-table))
-         (known (gethash (romacs-agent-provider session) table))
+         (known (gethash provider table))
+         (spent (not (romacs-agent-room provider)))
          (time (or (plist-get event :time) (float-time))))
     (unless (or (and known (> (plist-get known :time) time))
                 (and (eq (plist-get event :status) 'rejected)
                      (string-match-p "overage" (format "%s" (plist-get event :window)))))
-      (let* ((windows (romacs-agent--room-windows
-                       (romacs-agent--room-kept-windows known)
-                       ;; One that names no windows reports its own.
-                       (or (plist-get event :windows)
+      (let* ((reported (or (plist-get event :windows)
+                           ;; One that names no windows reports its own.
                            (and (plist-get event :window)
                                 (list (list :name (romacs-agent--room-window-name (plist-get event :window))
                                             :status (plist-get event :status) :used (plist-get event :used)
-                                            :resets (plist-get event :resets)))))
-                       time))
+                                            :resets (plist-get event :resets))))))
+             (windows (romacs-agent--room-windows
+                       (romacs-agent--room-kept-windows known) reported time))
              (room (append (or (romacs-agent--room-binding windows time)
                                (list :status (plist-get event :status) :used (plist-get event :used)
                                      :resets (plist-get event :resets) :window (plist-get event :window)))
                            (list :time time :windows windows))))
-        (puthash (romacs-agent-provider session) room table)
+        (puthash provider room table)
         ;; On disk what a restart needs: not each request's use, but each
         ;; window's state, and its use once it is worth a word (every 5%).
         (unless (and known (cl-every (lambda (key) (equal (plist-get known key) (plist-get room key)))
                                      '(:status :resets :window))
                      (equal (romacs-agent--room-gist (plist-get known :windows)) (romacs-agent--room-gist windows)))
-          (romacs-agent--keep-room))))))
+          (romacs-agent--keep-room))
+        (unless (eq spent (not (romacs-agent-room provider)))
+          (romacs-agent--room-watch)
+          (when spent (run-hook-with-args 'romacs-agent-room-functions provider)))))))
+
+;;; Asking spent accounts again
+
+(defcustom romacs-agent-room-check-interval 600
+  "Seconds between asks of each account at its limit for its usage, by
+its harness's driver (its :usage), while one is: an account whose limit
+reset early, or was lifted, gets room again without a turn on it.  nil
+never asks; the reports turns make are then all that is known."
+  :type '(choice (number :tag "Seconds") (const :tag "Never" nil))
+  :group 'romacs-agent)
+
+(defvar romacs-agent--room-timer nil
+  "The timer asking the spent accounts again (`romacs-agent-check-room').")
+
+(defvar romacs-agent--room-asking (make-hash-table :test #'equal)
+  "The instances whose usage is being asked now, each to t.")
+
+(defun romacs-agent--room-spent-instances ()
+  "The enabled instances at their limit whose driver can ask their usage."
+  (cl-remove-if-not (lambda (i) (and (plist-get i :enabled) (not (romacs-agent-room (plist-get i :name)))
+                                     (plist-get (romacs-agent--driver-of (plist-get i :harness)) :usage)))
+                    (romacs-agent-instances)))
+
+(defun romacs-agent--room-watch (&optional first)
+  "Ask the spent accounts again every `romacs-agent-room-check-interval'
+while there is one (the first time in FIRST seconds, default that
+interval); with none, stop."
+  (let ((due (and romacs-agent-room-check-interval (romacs-agent--room-spent-instances))))
+    (cond ((and due (not romacs-agent--room-timer))
+           (setq romacs-agent--room-timer
+                 (run-at-time (or first romacs-agent-room-check-interval) romacs-agent-room-check-interval
+                              #'romacs-agent-check-room)))
+          ((and (not due) romacs-agent--room-timer)
+           (cancel-timer romacs-agent--room-timer)
+           (setq romacs-agent--room-timer nil)))))
+
+(defun romacs-agent-check-room ()
+  "Ask each account at its limit for its usage now, without a turn: each
+answer is kept as its report (`romacs-agent-note-room'), so one with room
+again draws new work, and what waited for its reset goes on."
+  (interactive)
+  (dolist (instance (romacs-agent--room-spent-instances))
+    (let ((name (plist-get instance :name)) (harness (plist-get instance :harness)))
+      (unless (gethash name romacs-agent--room-asking)
+        (puthash name t romacs-agent--room-asking)
+        (condition-case err
+            (funcall (plist-get (romacs-agent--driver-of harness) :usage)
+                     (romacs-agent--home harness (plist-get instance :config-dir))
+                     (lambda (report)
+                       (remhash name romacs-agent--room-asking)
+                       (when report (romacs-agent-note-room name report))))
+          (error (remhash name romacs-agent--room-asking)
+                 (message "Asking %s's usage: %s" name (error-message-string err)))))))
+  (romacs-agent--room-watch))
 
 (defun romacs-agent--room-window-name (name)
   "NAME, a window's as reports of before named it, as windows are now."
@@ -4343,12 +4412,31 @@ its thread.  One a worker folds still is interrupted once it is folded."
         ('nil (user-error "Session %s has no turn to interrupt yet" (romacs-agent-title session)))
         (_ (romacs-agent--line session how))))))
 
-(defun romacs-agent-respond (session request-id allow &optional message)
+(defun romacs-agent-respond (session request-id allow &optional message by)
   "Answer SESSION's approval REQUEST-ID: ALLOW, as a driver's :respond
 takes it, allows (t, or a plist of :answers or :always), else it is denied
-with MESSAGE."
+with MESSAGE.  BY, `user' or `policy', is who answered: a note says so in
+SESSION's records first, so every view shows who decided."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (romacs-agent--line session (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
+         ;; A plan is proceeded with once: no rule for the session.
+         (allow (if (and plan allow) t allow))
+         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+    (when by
+      (romacs-agent--note session (romacs-mcp--object
+                                   "type" "answer" "request" request-id "by" (symbol-name by)
+                                   "decision" (if allow "allow" "deny")
+                                   "scope" (if (and (consp allow) (plist-get allow :always)) "session" "once")
+                                   "reason" (or message :null)
+                                   "answers" (let ((object (romacs-mcp--object)))
+                                               (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
+                                                 (puthash question answer object))
+                                               object))))
+    (romacs-agent--line session line)
+    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
+    ;; agent goes on to implement it.
+    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
+      (romacs-agent-set-plan session nil))))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))

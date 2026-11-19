@@ -7,7 +7,8 @@
 ;; their pool's order, each with its limit windows (five-hour, weekly) as
 ;; its harness last reported them (`romacs-agent--room'), its live
 ;; sessions, and whether new work draws on it now; then a line saying
-;; what to do.  Read from the kept reports alone: no provider is asked.
+;; what to do.  Read from the kept reports alone: turns make them, and an
+;; account at its limit is asked again (`romacs-agent-check-room').
 ;; As T3 Code's Limits view, one row per window.
 
 ;;; Code:
@@ -148,8 +149,8 @@ a list of tables, one a harness."
  "romacs_limits"
  "Each harness's accounts in their pool's order: each limit window (5h, week...) with its use in percent, status \
 and reset, the account's live sessions (and how many are in a turn), whether new work draws on it now (pick), and \
-a line per harness saying where new work goes. Read from the limit reports the harnesses last made: no provider \
-is asked, so an account that has not run lately shows its last report. harness: one harness (claude, codex)."
+a line per harness saying where new work goes. Read from the limit reports kept: turns make them, and an account \
+at its limit is asked again every few minutes when its harness can say (claude), so one that reset early gets room. harness: one harness (claude, codex)."
  (romacs-mcp--schema '(("instance" . "string") ("harness" . "string")) nil)
  #'romacs-agent-limits--tool
  (romacs-mcp--object "readOnlyHint" t))
