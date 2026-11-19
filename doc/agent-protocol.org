@@ -840,9 +840,11 @@ Once the service runs on its own, an agent's editor tool needs an editor.
   slice 1): once a written line has reached the harness's stdin, the
   host journals and sends a record ={"seq":M,"t":T,"written":SEQ}=,
   SEQ being the line's =in= record.  As a record it replays: a service
-  restarted after the write finds it.  A v0 host writes none.  Its answers then stay
-  =answering= until the turn ends, the request settles or the harness
-  exits.  Its limits show in the
+  restarted after the write finds it.  It is not promised for a line
+  the harness took just before it exited, whose exit clears its answer
+  the same; nothing is journaled after the exit.  A v0 host writes none:
+  its answers stay =answering= until the turn ends, the request settles
+  or the harness exits.  Its limits show in the
   outcomes: =recorded= means the host recorded a line, not that the
   harness acted on it.  A later host change brings a hello with
   capabilities and keeps v0.
