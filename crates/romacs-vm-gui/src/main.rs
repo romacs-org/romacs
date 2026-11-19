@@ -1013,12 +1013,13 @@ fn run() -> Result<Option<exit::Exit>, String> {
                      isolate_world, store_problem, &host, quit, prune, serve, serve_landing, &mut early_window)
         }));
         let (end, failed) = evaluator_end(result);
-        let screen = if failed { failed_screen(&host, &mut early_window, &end.detail) } else { None };
+        let error = failed.then(|| end.detail.clone());
         // The end goes first: dropping the sender closes the window, and
         // the window's end lets the main thread look for it.  A failed
-        // startup's screen holds after it, so a display that ends while it
-        // holds still ends the session with it.
-        let _ = result_tx.send(Ended { held: screen.is_some(), end });
+        // startup's screen waits for its window and holds after it, so a
+        // display that ends meanwhile still ends the session with it.
+        let _ = result_tx.send(Ended { held: failed, end });
+        let screen = error.and_then(|error| failed_screen(&host, &mut early_window, &error));
         if let Some(screen) = screen { hold_failed_startup(screen, &sender, &host); }
         // A screen still up stops before the window goes: its painter holds it.
         drop(host);
@@ -1045,9 +1046,9 @@ fn run() -> Result<Option<exit::Exit>, String> {
 /// The evaluator's end, as the main thread gets it.
 struct Ended {
     end: exit::Exit,
-    /// Sent as a failed startup's screen starts to hold
-    /// (`hold_failed_startup`): its thread, which has no VM left to drop
-    /// and may wait on the user, is not joined.
+    /// A failed startup's, sent before its screen waits for its window and
+    /// holds (`hold_failed_startup`): its thread, which has no VM left to
+    /// drop and may wait on the user, is not joined.
     held: bool,
 }
 
