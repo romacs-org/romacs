@@ -138,6 +138,7 @@ mod frozen;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
+pub use isolate::refuse as isolate_refuse;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -380,13 +381,49 @@ impl Value {
             Self(((index as u64) << 3) | tag)
         }
     }
+    /// The payload of a reference of logical tag TAG. Every caller passes a
+    /// constant: a tag that is its own three bits (0, 3, 4, 6, 7) is then one
+    /// mask and compare, and only fixnums and cells take `tag`'s decode.
+    #[inline(always)]
     fn index_if(self, tag: u64) -> Option<usize> {
-        (self.tag() == tag).then_some(self.payload() as usize)
+        match tag {
+            0 | 3 | 4 | 6 | 7 => (self.0 & 7 == tag).then_some((self.0 >> 3) as usize),
+            _ => (self.tag() == tag).then_some(self.payload() as usize),
+        }
     }
+    #[inline(always)]
     fn index(self, tag: u64) -> Result<usize> {
-        self.index_if(tag)
-            .ok_or_else(|| format!("wrong value type (expected tag {tag})"))
+        self.index_if(tag).ok_or_else(|| wrong_tag(tag))
     }
+    /// The object table entry this object reference names: its index less
+    /// one. Nil shares the tag with index 0 and names no object; taking its
+    /// entry is the caller's bug, which a debug build stops at and a release
+    /// build signals. Neither wraps to a wrong entry.
+    fn object_index(self) -> Result<usize> {
+        let index = self.index(0)?;
+        debug_assert!(index != 0, "object_index: nil names no object table entry");
+        index.checked_sub(1).ok_or_else(|| "nil names no object".into())
+    }
+    /// As `object_index`, None for nil and every other non-object, where
+    /// the caller means "no object" by them.
+    fn object_index_if(self) -> Option<usize> {
+        self.index_if(0)?.checked_sub(1)
+    }
+}
+
+/// `Value::index`'s refusal, built only when it is one. Callers that test
+/// with `index` meet it on ordinary control flow, so its text is copied from
+/// a constant rather than formatted.
+#[cold]
+#[inline(never)]
+fn wrong_tag(tag: u64) -> String {
+    const TEXT: [&str; 8] = [
+        "wrong value type (expected tag 0)", "wrong value type (expected tag 1)",
+        "wrong value type (expected tag 2)", "wrong value type (expected tag 3)",
+        "wrong value type (expected tag 4)", "wrong value type (expected tag 5)",
+        "wrong value type (expected tag 6)", "wrong value type (expected tag 7)",
+    ];
+    TEXT.get(tag as usize).map_or_else(|| format!("wrong value type (expected tag {tag})"), |&text| text.into())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1322,6 +1359,9 @@ pub struct Vm {
     regexp: regexp::MatchState,
     #[snapshot(at_rest)]
     regexp_cache: regexp::PatternCache,
+    /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
+    #[snapshot(at_rest)]
+    treesit_queries: treesit::query_memo::Memo,
     /// The char tables read as flat rows (`char_table::flat`).
     #[snapshot(at_rest)]
     flat_tables: char_table::FlatTables,
@@ -1617,10 +1657,11 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
-    /// The names `permanent_symbol_names` took since the last collection,
-    /// the only ones a minor can find young.
+    /// The symbol names made since the last collection, the only ones a
+    /// minor can find young: those `permanent_symbol_names` took, and those
+    /// of symbols of obarrays of their own (`obarray_symbol_names`).
     #[snapshot(at_rest)]
-    permanent_names_added: Vec<Value>,
+    names_added: Vec<Value>,
     // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
@@ -1778,10 +1819,11 @@ impl Vm {
             buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
             caches_filled: Vec::new(),
-            permanent_names_added: Vec::new(),
+            names_added: Vec::new(),
             payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
@@ -4230,3 +4272,28 @@ mod capture_tests {
 mod orderless;
 mod fzf;
 pub use fzf::advance_completion_generation;
+
+#[cfg(test)]
+mod object_index_tests {
+    use super::*;
+    /// An object reference's entry is its index less one; nil names none.
+    #[test]
+    fn an_object_reference_names_its_entry_and_nil_none() {
+        assert_eq!(Value::reference(5, 0).object_index(), Ok(4));
+        assert_eq!(Value::reference(5, 0).object_index_if(), Some(4));
+        assert_eq!(Value::NIL.object_index_if(), None);
+    }
+    /// Taking nil's entry is the caller's bug: a debug build stops there.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "nil names no object table entry")]
+    fn a_debug_build_stops_at_nils_entry() {
+        let _ = Value::NIL.object_index();
+    }
+    /// A release build signals it, and never wraps to an entry.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_signals_for_nils_entry() {
+        assert!(Value::NIL.object_index().is_err());
+    }
+}

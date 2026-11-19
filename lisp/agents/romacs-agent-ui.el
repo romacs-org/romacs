@@ -1564,6 +1564,11 @@ and the parent of one whose state that changed, in the next batch."
       (romacs-agent-ui--children-changed parent))
     (romacs-agent-ui--header-refresh session)
     (when-let* ((buffer (romacs-agent-buffer session)) ((buffer-live-p buffer)))
+      ;; Its delegates' rows above the composer, and their clocks ticking.
+      (with-current-buffer buffer
+        (when (and (eq romacs-agent-ui--session session) (overlayp romacs-agent-ui--composer))
+          (romacs-agent-ui--composer-update)
+          (when (romacs-agent-ui--ticks-p session) (romacs-agent-ui--tick-start))))
       (when (and (buffer-live-p keymap-popup--buffer)
                  (eq buffer (plist-get (keymap-popup--session-state keymap-popup--buffer) :source)))
         (keymap-popup--refresh keymap-popup--buffer)))))
@@ -2166,6 +2171,57 @@ made: the one line that moves while the run's own steps stay folded."
                                  (truncate-string-to-width (plist-get run :doing) room nil nil t)))))
         (concat (romacs-agent-ui--rule (concat state doing tail)) "\n")))))
 
+(defconst romacs-agent-ui--worker-rows 5
+  "How many of a session's working delegates its chat shows above the
+composer; the rest are counted.")
+
+(defun romacs-agent-ui--live-workers (session)
+  "SESSION's delegates something still goes on in, as loaded sessions: a
+working delegate has a live supervisor, so it is loaded."
+  (seq-filter (lambda (child) (memq (romacs-agent-ui--state-key child) romacs-agent-ui--live-keys))
+              (romacs-agent-children session)))
+
+(defun romacs-agent-ui--worker-row (child)
+  "Working CHILD's row above its parent's composer: ● (◆ while it waits
+for an answer), its title, how long its turn has run, and what it does
+now: the tool its turn last started (`romacs-agent-activity', as the
+board says), else thinking."
+  (let* ((asks (memq (romacs-agent-ui--state-key child) '(approval question)))
+         (start (romacs-agent-turn-start child))
+         (tool (romacs-agent-activity child))
+         (what (cond (asks "needs approval")
+                     (tool (romacs-agent-ui--tool-name tool))
+                     (t "thinking")))
+         (tail (concat (if (numberp start)
+                           (propertize (concat "  " (romacs-agent-ui--clock (max 0 (- (float-time) start))))
+                                       'face 'romacs-agent-dim)
+                         "")
+                       (propertize (concat " · " what) 'face 'romacs-agent-dim)))
+         ;; The title gives way: the clock and what it does always show.
+         (room (max 8 (- (romacs-agent-ui--rule-width) 4 (string-width tail)))))
+    (concat "  " (propertize (if asks "◆" "●") 'face (if asks 'romacs-agent-approval 'romacs-agent-running))
+            " " (propertize (truncate-string-to-width (or (romacs-agent-title child) "task") room nil nil t)
+                            'face 'romacs-agent-delegate)
+            tail)))
+
+(defun romacs-agent-ui--worker-rows (session)
+  "The rows of SESSION's working delegates, each a line, the first
+`romacs-agent-ui--worker-rows' of them and how many more: what runs
+now, read live at each tick."
+  (let ((live (romacs-agent-ui--live-workers session)))
+    (concat (mapconcat (lambda (child) (concat (romacs-agent-ui--worker-row child) "\n"))
+                       (seq-take live romacs-agent-ui--worker-rows) "")
+            (if (> (length live) romacs-agent-ui--worker-rows)
+                (propertize (format "  +%d more working\n" (- (length live) romacs-agent-ui--worker-rows))
+                            'face 'romacs-agent-dim)
+              ""))))
+
+(defun romacs-agent-ui--ticks-p (session)
+  "Whether SESSION's chat shows a clock that moves: its own turn runs, or
+a delegate of it works."
+  (or (memq (romacs-agent-state session) '(starting running waiting-approval))
+      (romacs-agent-ui--live-workers session)))
+
 (defun romacs-agent-ui--composer-empty-p ()
   (= (marker-position romacs-agent-ui--end) (point-max)))
 
@@ -2176,6 +2232,7 @@ hidden, started on a line of its own), then the live rule while a turn
 runs.  The composer starts on its own line, whoever wrote last and
 whatever the session's state."
   (concat (if (or romacs-agent-ui--run (save-excursion (goto-char romacs-agent-ui--end) (bolp))) "" "\n")
+          (romacs-agent-ui--worker-rows romacs-agent-ui--session)
           (or (romacs-agent-ui--live-rule) "")))
 
 (defun romacs-agent-ui--overlay-show (overlay property value)
@@ -2210,7 +2267,7 @@ there."
      (lambda (window)
        (with-current-buffer (window-buffer window)
          (when (and (derived-mode-p 'romacs-agent-chat-mode) romacs-agent-ui--session
-                    (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
+                    (romacs-agent-ui--ticks-p romacs-agent-ui--session))
            (setq running t)
            (romacs-agent-ui--composer-update))))
      nil 'visible)
@@ -2293,7 +2350,7 @@ The transcript is read-only, its keys its own:
 (defun romacs-agent-ui--shown-again (&optional window)
   "WINDOW shows this chat again: one made without its transcript gets it
 \(`romacs-agent-ui--fill'), seen; rules drawn while it was hidden fit it,
-and a running turn's live rule ticks."
+and a running turn's live rule ticks, as its working delegates' rows do."
   (with-current-buffer (if (window-live-p window) (window-buffer window) (current-buffer))
     (when (and romacs-agent-ui--unfilled romacs-agent-ui--session)
       (romacs-agent-ui--fill (current-buffer))
@@ -2301,8 +2358,7 @@ and a running turn's live rule ticks."
       (romacs-agent-mark-seen romacs-agent-ui--session)
       (romacs-agent-ui--batch))
     (romacs-agent-ui--refit-rules)
-    (when (and romacs-agent-ui--session
-               (memq (romacs-agent-state romacs-agent-ui--session) '(starting running waiting-approval)))
+    (when (and romacs-agent-ui--session (romacs-agent-ui--ticks-p romacs-agent-ui--session))
       (romacs-agent-ui--composer-update)
       (romacs-agent-ui--tick-start))))
 

@@ -1,3 +1,5 @@
+#[path = "support/tree_lisp.rs"]
+mod tree_lisp;
 use romacs_vm::Vm;
 
 #[test]
@@ -23,7 +25,7 @@ fn following_char_preserves_high_octets_in_byte_buffers() {
 fn pristine_gnu_header_extraction_preserves_folding_duplicates_and_point() {
     let mut vm = Vm::new();
     vm.install_lisp_prelude().unwrap();
-    let source = include_str!("../../../lisp/mail/mailheader.el");
+    let source = tree_lisp::text("mail/mailheader.el");
     let end = source.find("(defun mail-header-extract-no-properties").unwrap();
     vm.eval_source(&source[..end]).unwrap();
     let actual = vm.eval_source(r#"(with-temp-buffer

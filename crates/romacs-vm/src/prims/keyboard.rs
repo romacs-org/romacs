@@ -12,16 +12,12 @@
 use super::*;
 use crate::prim::leaf::Kind;
 
-/// The Lisp half, evaluated once per VM on first use, with minibuf.c's
-/// (prims/minibuf.rs), whose recursive edit is this command loop. window.c's
-/// change functions, which the loop's redisplays run, are the prelude's
-/// (prims/mod.rs `WINDOW_CHANGE_PRELUDE`): a session that reads no key has
-/// them too, as GNU's are C.
-const LISP_HALF: [&str; 3] = [
-    super::HOOKS_LISP,
-    include_str!("../../../../lisp/vm/keyboard.el"),
-    include_str!("../../../../lisp/vm/minibuf.el"),
-];
+/// The Lisp half, evaluated once per VM on first use from the runtime
+/// tree, with minibuf.c's (prims/minibuf.rs), whose recursive edit is this
+/// command loop. window.c's change functions, which the loop's redisplays
+/// run, are the prelude's (prims/mod.rs `PRELUDES`): a session that reads
+/// no key has them too, as GNU's are C.
+const LISP_HALF: [&str; 3] = ["vm/hooks.el", "vm/keyboard.el", "vm/minibuf.el"];
 
 /// keyboard.c `this_command_keys' (a vector of the events read for this
 /// command), `this_single_command_key_start' and `raw_keybuf', as traced
@@ -51,9 +47,7 @@ pub(crate) fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, tail: usi
 pub(crate) fn install(cx: &mut Leaf<'_>, then: Then, saved: Vec<Value>) -> Next {
     let mut forms = Value::NIL;
     for half in LISP_HALF.iter().rev() {
-        let source = cx.string(half);
-        let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-        let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+        let form = super::lisp_half(cx, half)?;
         forms = cx.cons(form, forms);
     }
     let progn = cx.intern("progn");

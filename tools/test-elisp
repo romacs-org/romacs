@@ -61,7 +61,9 @@ def main():
             directory.mkdir()
             env[key] = str(directory)
         try:
-            result = subprocess.run(command, input=source, text=True, env=env, capture_output=True, timeout=args.timeout)
+            # In the private HOME, so a test's `default-directory' is never the source tree.
+            result = subprocess.run(command, input=source, text=True, env=env, cwd=temp, capture_output=True,
+                                    timeout=args.timeout)
         except subprocess.TimeoutExpired as error:
             if error.stdout:
                 sys.stdout.write(error.stdout.decode() if isinstance(error.stdout, bytes) else error.stdout)

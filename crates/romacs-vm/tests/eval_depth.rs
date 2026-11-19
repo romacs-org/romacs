@@ -1,3 +1,5 @@
+#[path = "support/tree_lisp.rs"]
+mod tree_lisp;
 use romacs_vm::Vm;
 #[path = "support/own_test.rs"]
 mod own_test;
@@ -254,8 +256,8 @@ fn gnu_real_compiler_fixtures_survive_on_two_mib() {
     if std::env::var_os("ROMACS_DEPTH_GNU_FIXTURE_CHILD").is_some() {
         std::thread::Builder::new().stack_size(2 * 1024 * 1024).spawn(|| {
             for (origin, source, prefix) in [
-                ("comp-common.el", include_str!("../../../lisp/emacs-lisp/comp-common.el"), "(defconst comp-primitive-type-specifiers"),
-                ("cus-start.el", include_str!("../../../lisp/cus-start.el"), "(let* ((quoter"),
+                ("comp-common.el", tree_lisp::text("emacs-lisp/comp-common.el"), "(defconst comp-primitive-type-specifiers"),
+                ("cus-start.el", tree_lisp::text("cus-start.el"), "(let* ((quoter"),
             ] {
                 // The form by its text at a line's start, not by its line: the file's edits move it.
                 let offset = source.find(&format!("\n{prefix}")).unwrap_or_else(|| panic!("DEPTH_GNU_FIXTURE_ID: {origin}")) + 1;

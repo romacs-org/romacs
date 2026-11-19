@@ -668,6 +668,17 @@ pub fn runtime_root() -> PathBuf {
     })
 }
 
+/// The runtime tree's lisp/PATH, or why this process has none: the VM's
+/// own Lisp (lisp/vm/) is read from its tree, never from a copy compiled
+/// into the executable.
+///
+/// # Errors
+///
+/// Why no runtime tree was found ([`runtime_root`]).
+pub fn runtime_lisp(path: &str) -> Result<PathBuf, String> {
+    found_runtime().map(|root| root.join("lisp").join(path))
+}
+
 /// [`runtime_root`], or why there is none, for a lookup that has a
 /// fallback: a process with no runtime tree goes on.  Found once.
 fn found_runtime() -> Result<PathBuf, String> {
