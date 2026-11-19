@@ -1566,7 +1566,7 @@ fn evaluate(
             eprintln!("romacs: world store warning: {error}");
         }
         // Romacs's own Lisp that failed to load, which the launch went on without.
-        if launch == startup::Launch::Loadup && let Err(error) = startup::report_lisp_errors(&mut vm) {
+        if let Err(error) = startup::report_lisp_errors(&mut vm) {
             eprintln!("romacs: Lisp errors: {error}");
         }
         let finished = match launch {
