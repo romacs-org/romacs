@@ -712,13 +712,12 @@ paging ever holds live delivery back.
 | =compacted=, =plan= | =text= |
 | =usage= | =context_used= |
 
-- *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el= holds a turn
-  of each harness, record by record, with the events sent for each.  A
-  driver change that changes what is sent changes them, in review.
-- *Joining in slice 1:* =tool-output {id text}= (Codex command output
-  and MCP progress, from the chat rebuild's driver change), and the
-  transcript's =approval=, =answered= and =attributed=, whose request ids
-  are handles only the service can give.
+- *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el=: a turn of
+  each harness, each record with the events sent for it.
+- *Slice 1 adds* =tool-output {id text}= (streamed command output),
+  =approval=, =answered= and =attributed= (keyed by service handles).
+  A tool's output is its completed item's, as its harness caps it:
+  streamed output is live, and compaction removes it.
 
 * The relay: =romacs-relay=
 A small Rust binary in a new crate, =crates/romacs-relay=, built on

@@ -594,7 +594,9 @@ when SESSION is imported."
 message's deltas go only all together.  A message's whole record raises
 no text while any of its deltas remain (its driver saw it streamed), so
 a message's deltas go together or not at all; a command's completed item
-holds all its output whatever its deltas, which may go a part at a time.")
+is what a reader keeps of its output, which a harness may cap: its
+streamed deltas are shown live and are not kept (doc/agent-protocol.org),
+and may go a part at a time.")
 
 (defconst romacs-agent-events--compact-statements
   `("create temp table if not exists whole (id text primary key, seq integer) without rowid"
@@ -650,19 +652,22 @@ deltas go together or not at all.")
 them, up to WINDOW seqs a batch: a MESSAGE's whole, in the order its
 deltas began, and a delta of none (nil) alone.  A message with more
 than WINDOW is left out: kept whole."
-  (let ((messages (make-hash-table :test #'equal)) (order nil) (batches nil) (batch nil))
+  (let ((messages (make-hash-table :test #'equal)) (order nil)
+        (batches nil) (batch nil) (size 0))
     (pcase-dolist (`(,seq ,message) (sort deltas (lambda (a b) (< (car a) (car b)))))
       (let ((key (or message (list seq))))
         (unless (gethash key messages) (push key order))
         (push seq (gethash key messages))))
-    (dolist (message (nreverse order))
-      (let ((seqs (reverse (gethash message messages))))
-        (when (<= (length seqs) window)
-          (when (> (+ (length batch) (length seqs)) window)
-            (push batch batches)
-            (setq batch nil))
-          (setq batch (append batch seqs)))))
-    (when batch (push batch batches))
+    ;; Each message's seqs are kept last first, and so is the batch:
+    ;; turned once, as a batch is closed.
+    (dolist (key (nreverse order))
+      (let* ((seqs (gethash key messages)) (count (length seqs)))
+        (when (<= count window)
+          (when (> (+ size count) window)
+            (push (nreverse batch) batches)
+            (setq batch nil size 0))
+          (setq batch (append seqs batch) size (+ size count)))))
+    (when batch (push (nreverse batch) batches))
     (nreverse batches)))
 
 
