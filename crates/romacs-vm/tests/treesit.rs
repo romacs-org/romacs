@@ -974,13 +974,16 @@ fn a_twin_waiting_for_a_thread_stops_when_it_can_copy() {
     assert_eq!(vm.eval_source(holding).unwrap().display().unwrap(), "3", "three threads are busy");
     vm.eval_source("(set-window-buffer nil (get-buffer \"ts-twin-wait\"))").unwrap();
     deferred_frame(&mut vm);
-    // One parser took the last thread; ask it, which waits for its tree.
-    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    // The parser made last comes first in the text's list and took the last
+    // thread; ask it, which waits for its tree.
+    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-twin))").unwrap();
     deferred_frame(&mut vm);
     assert_eq!(vm.eval_source(holding).unwrap().display().unwrap(), "3", "the threads are still busy");
     let parsing = vm.eval_source("(with-current-buffer \"ts-twin-wait\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
     assert_eq!(parsing, "nil", "the twin waits for no thread once it can copy");
-    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-twin))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    vm.eval_source("(with-current-buffer \"ts-twin-wait\" (treesit-parser-root-node treesit-test-parser))").unwrap();
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before, "the waiting parser copied its twin's tree");
 }
 
 /// Lisp that asks for a tree while its first parse runs on a thread waits
