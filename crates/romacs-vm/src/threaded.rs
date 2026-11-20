@@ -2420,7 +2420,7 @@ fn polled<'x, 'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (pc, collect)
 #[cold]
 #[inline(never)]
 fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
-    if crate::host::interrupt_pending() && isolate_quit(e) {
+    if crate::host::interrupt_pending() && e.vm.isolate_quit_taken() {
         // A signal, not an engine failure: `condition-case' catches it.
         e.vm.quit_unwinding = true;
         return Some(raise(e, "quit", &[]));
@@ -2428,22 +2428,6 @@ fn interrupt_quit(e: &mut Engine<'_>) -> Option<Value> {
     let escape = e.vm.maybe_quit()?;
     e.escape = Some(escape);
     Some(Value::UNBOUND)
-}
-/// Whether an isolate's interrupt or termination quits here.
-fn isolate_quit(e: &mut Engine<'_>) -> bool {
-    // A termination quits once, whatever `inhibit-quit' says: the worker's
-    // loop then ends (`romacs--isolate-terminated-p').
-    if crate::host::take_terminate_quit() {
-        return true;
-    }
-    let slot = e.vm.slot("inhibit-quit");
-    if e.vm.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
-        return false;
-    }
-    // Held, not taken, while a run of aftermath masks the job: taken now it
-    // would find no job to quit and be lost.
-    if e.vm.aftermath_runs > 0 { return false; }
-    crate::host::take_interrupt() && e.vm.isolate_interrupt_targets_running()
 }
 // Like GNU bytecode.c:638-646, only a plain, bound symbol takes the slot
 // read. Inspect the live set-only redirect on every entry: localization need

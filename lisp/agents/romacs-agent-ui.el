@@ -2539,10 +2539,10 @@ composer as it is."
      (setq romacs-agent-ui--unfilled t)
      (romacs-agent-ui--fill (current-buffer)))))
 
-(defun romacs-agent-show (session &optional action)
+(defun romacs-agent-show (session &optional action source)
   "Show SESSION's chat (romacs-agent-log.el), as `pop-to-buffer' does
-with ACTION."
-  (romacs-agent-log-show session action))
+with ACTION; SOURCE's session, this editor's by default."
+  (romacs-agent-log-show session action source))
 
 (defun romacs-agent-ui--show-chat (session &optional action)
   "Show SESSION's chat buffer of before, made from its journal when new, as
@@ -3657,6 +3657,7 @@ the session stays."
     ;; session not loaded read the row.
     (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
+    (romacs-agent--changed session)
     (romacs-agent-ui--batch)))
 
 (defun romacs-agent-chat-effort (effort)

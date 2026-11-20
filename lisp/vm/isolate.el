@@ -1256,13 +1256,16 @@ onto the queue."
 (defun romacs--isolate-run-queued ()
   "Run the queued jobs in order, reading what arrived before each: a
 cancellation sent behind a job cancels it before it runs."
-  (while (and romacs--isolate-deferred romacs--isolate-serving)
+  (while (and romacs--isolate-deferred romacs--isolate-serving
+              (not (romacs--isolate-terminated-p)))
     ;; A signal nobody took (its job was in a leaf, or done) is stale.
     (romacs--isolate-interrupted-p)
     (romacs--isolate-wait 0)
     (romacs--isolate-note-control-frames)
-    (let ((frame (pop romacs--isolate-deferred)))
-      (romacs--isolate-run-job (nth 1 frame) (nth 2 frame)))))
+    ;; A termination read with the frames starts no further job.
+    (unless (romacs--isolate-terminated-p)
+      (let ((frame (pop romacs--isolate-deferred)))
+        (romacs--isolate-run-job (nth 1 frame) (nth 2 frame))))))
 
 (defun romacs--isolate-serve-frames ()
   "Take every frame from the parent; run the queued jobs unless inside one."

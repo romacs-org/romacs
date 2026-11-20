@@ -159,6 +159,12 @@ def check_panels(recorded, position):
                                  f'rounded, input on top and placed: {recorded}')
 
 
+def every_prompt_exited(heights):
+    """Whether the HEIGHTS file records an exit for every prompt it records."""
+    starts = [line.split()[0] for line in heights.read_text().splitlines() if line.strip()] if heights.exists() else []
+    return starts.count('(prompt') > 0 and starts.count('(exit') == starts.count('(prompt')
+
+
 def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout, process, output, env, position):
     """M-x, C-x C-f and C-x b through `romacs-complete-mode'."""
     def shown(name, what, test):
@@ -203,7 +209,9 @@ def romacs_complete(report, keys, layer, selected, probe, heights, work, timeout
     keys('-M', 'alt', 'x', '-m', 'alt')
     fio.wait(lambda: 'M-x' in layer()[0], timeout, 'M-x prompt again', process)
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
-    time.sleep(1.5)
+    # The quit's exit record is written once its prompt has gone: wait for it,
+    # not for a fixed time a loaded host can outrun.
+    fio.wait(lambda: every_prompt_exited(heights), timeout, "the quit prompt's exit record", process)
     fio.shot(output / 'quit.png', env, report)
     recorded = heights.read_text().splitlines()
     report['checks'].append({'root_heights': recorded})
