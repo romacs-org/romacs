@@ -82,9 +82,35 @@ the store keeps them (`romacs-agent-store-folded').")
           (and romacs-agent-board--unloaded
                (gethash (romacs-agent-id session) (cdr romacs-agent-board--unloaded)))))
 
+(defvar romacs-agent-board-source romacs-agent-log-local
+  "Whose sessions the board shows and opens: a chat's source
+\(`romacs-agent-log--source'), this editor's own or another machine's,
+one at a time.")
+
+(cl-defgeneric romacs-agent-board-source-sessions (source)
+  "Every session of SOURCE's to show, those not loaded known to
+`romacs-agent-board--unloaded'.")
+
+(cl-defgeneric romacs-agent-board-source-key (source session)
+  "SOURCE's SESSION's state key on the board.")
+
+(cl-defgeneric romacs-agent-board-source-live (source session)
+  "SOURCE's SESSION to open, as it is now, or nil when it is gone.")
+
+(cl-defgeneric romacs-agent-board-source-history (_source)
+  "The harness transcripts the board lists with SOURCE's sessions, newest
+first: none, as of a source here."
+  nil)
+
+(cl-defmethod romacs-agent-board-source-history ((_source romacs-agent-log-local-source))
+  (romacs-agent-history-items))
+
 (defun romacs-agent-board--sessions ()
-  "Every session to show: the loaded ones, then those shown from their rows
-alone, which `romacs-agent-board--unloaded' is set to know."
+  "Every session the board shows (`romacs-agent-board-source')."
+  (romacs-agent-board-source-sessions romacs-agent-board-source))
+
+(cl-defmethod romacs-agent-board-source-sessions ((_source romacs-agent-log-local-source))
+  "The loaded sessions, then those shown from their rows alone."
   (let ((unloaded (romacs-agent-store-unloaded))
         (by-id (make-hash-table :test #'equal)) (children (make-hash-table :test #'equal)))
     (dolist (session unloaded)
@@ -95,8 +121,12 @@ alone, which `romacs-agent-board--unloaded' is set to know."
     (append (hash-table-values romacs-agent--sessions) unloaded)))
 
 (defun romacs-agent-board--key (session)
-  "SESSION's state key on the board: its own, except that a delegated task
-whose turn ended well is done here, where its parent's user reads it."
+  "SESSION's state key on the board (`romacs-agent-board-source')."
+  (romacs-agent-board-source-key romacs-agent-board-source session))
+
+(cl-defmethod romacs-agent-board-source-key ((_source romacs-agent-log-local-source) session)
+  "SESSION's own key, except that a delegated task whose turn ended well
+is done here, where its parent's user reads it."
   (let ((key (romacs-agent-ui--state-key session)))
     (if (and (eq key 'idle) (romacs-agent-board--parent session)
              (> (romacs-agent-done-seq session) 0) (not (romacs-agent-failed session)))
@@ -478,7 +508,7 @@ each window showing it keeps the row at its point and at its start."
                           windows)))
       (romacs-agent-board--draw
        (romacs-agent-board-rows (romacs-agent-board--sessions)
-                                (and (not romacs-agent-board--settled) (romacs-agent-history-items))
+                                (and (not romacs-agent-board--settled) (romacs-agent-board-source-history romacs-agent-board-source))
                                 (romacs-agent-board--view))
        (or columns (romacs-agent-board--columns buffer)))
       (pcase-dolist (`(,window ,at ,start) spots)
@@ -580,7 +610,7 @@ another buffer now runs the board's window hooks too."
 
 (defun romacs-agent-board--show-chat (session)
   "Show SESSION's chat in the board's window."
-  (romacs-agent-show session romacs-agent-board--here))
+  (romacs-agent-show session romacs-agent-board--here romacs-agent-board-source))
 
 (defun romacs-agent-board-open ()
   "Open the thread on this line, the transcript read-only, or a project's
@@ -603,14 +633,17 @@ newest thread; on \"more\", list every transcript."
       ('more (romacs-agent-board-history)))))
 
 (defun romacs-agent-board--live (session)
-  "SESSION, loaded first when it was shown from its row alone, unless no
-longer known: then the board is drawn again."
+  "SESSION as it is now, unless no longer known: then the board is drawn again."
+  (or (romacs-agent-board-source-live romacs-agent-board-source session)
+      (progn (romacs-agent-board--redraw)
+             (user-error "That thread is gone: the board is drawn again"))))
+
+(cl-defmethod romacs-agent-board-source-live ((_source romacs-agent-log-local-source) session)
+  "SESSION, loaded first when it was shown from its row alone."
   (or (and (eq (romacs-agent-loaded (romacs-agent-id session)) session) session)
       (and romacs-agent-board--unloaded
            (eq (gethash (romacs-agent-id session) (car romacs-agent-board--unloaded)) session)
-           (romacs-agent-get (romacs-agent-id session)))
-      (progn (romacs-agent-board--redraw)
-             (user-error "That thread is gone: the board is drawn again"))))
+           (romacs-agent-get (romacs-agent-id session)))))
 
 (defun romacs-agent-board--fold-project (project folded)
   "Fold PROJECT, a directory, to its heading when FOLDED, else show its
