@@ -29,7 +29,7 @@
 //! as a GNU installation without `.elc` files.
 mod background;
 mod codec;
-mod stats;
+pub(crate) mod stats;
 mod tree;
 pub(crate) mod store;
 mod unit;
@@ -39,7 +39,8 @@ mod compiled_lisp_tests;
 use crate::*;
 pub(crate) use background::{note_idle, start as start_background, stop as stop_background};
 pub use tree::compile_tree;
-use stats::{Miss, Outcome};
+pub(crate) use stats::Route;
+use stats::Miss;
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -138,6 +139,12 @@ pub fn configure(config: Config) {
         });
     }
     let _ = CONFIG.set(Configured { config, chain, trace, no_prune, identity: std::sync::OnceLock::new() });
+}
+
+/// Count a load of PATH that took ROUTE, once its input is in hand
+/// (`stats`).
+pub(crate) fn note_load(path: &Path, route: Route) {
+    stats::note(path, route, compiles());
 }
 
 /// This process's compiled loads so far (`stats`), with the store and the
@@ -257,6 +264,14 @@ fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment
     };
     let out = reader.join().unwrap_or_default();
     status.is_some_and(|s| s.success()).then_some(out)
+}
+
+/// What a compile process's standard output OUT says: the artifact it
+/// published, and whether one holding already was there, so it compiled
+/// nothing (`Vm::compile_lisp_file`).
+fn compile_output(out: &str) -> Option<(PathBuf, bool)> {
+    let artifact = out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)?;
+    Some((artifact, out.lines().any(|line| line == "romacs-compile-held")))
 }
 
 /// The `.el` files under DIR, its subdirectories' after its own, each
@@ -407,40 +422,36 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// up this compile's chain (a cycle: gnus-sum's compile requires
     /// gnus-art, which requires gnus-sum), whatever the store holds, so a
     /// compile's result never depends on whether another one published
-    /// first. Each load is counted by what it took (`stats`).
-    pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<Option<Compiled>> {
-        let (outcome, compiled) = self.compiled_load_outcome(path)?;
-        stats::note(path, outcome);
-        Ok(compiled)
-    }
-
-    /// `compiled_load`'s answer, with what it took (`stats`).
-    fn compiled_load_outcome(&mut self, path: &Path) -> Result<(Outcome, Option<Compiled>)> {
-        let Some(configured) = configured() else { return Ok((Outcome::Off, None)) };
+    /// first. With it, the route the load takes (`stats`), which the
+    /// loader counts once the load's input is in hand.
+    pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<(Route, Option<Compiled>)> {
+        let Some(configured) = configured() else { return Ok((Route::Off, None)) };
         let config = &configured.config;
         if configured.chain.lines().any(|file| Path::new(file) == path) {
-            return Ok((Outcome::Miss(Miss::Chain), None));
+            return Ok((Route::Miss(Miss::Chain), None));
         }
         let load_path = self.load_path_roots()?;
-        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok((Outcome::Miss(Miss::Unreadable), None)) };
-        let (outcome, artifact, data) = match found {
-            Some((artifact, data)) => (Outcome::Taken, artifact, data),
-            None if config.compiler.is_empty() => return Ok((Outcome::Miss(Miss::ReadOnly), None)),
+        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok((Route::Miss(Miss::Unreadable), None)) };
+        let (route, artifact, data) = match found {
+            Some((artifact, data)) => (Route::Taken, artifact, data),
+            None if config.compiler.is_empty() => return Ok((Route::Miss(Miss::ReadOnly), None)),
             None if config.defer_misses => {
                 background::note_miss(path, &load_path);
-                return Ok((Outcome::Miss(Miss::Deferred), None));
+                return Ok((Route::Miss(Miss::Deferred), None));
             }
             None => match self.compile_now(config, path, &load_path)?
-                .and_then(|artifact| store::open(&artifact).ok().map(|data| (artifact, data))) {
-                Some((artifact, data)) => (Outcome::Compiled, artifact, data),
-                None => return Ok((Outcome::Miss(Miss::Failed), None)),
+                .and_then(|(artifact, held)| store::open(&artifact).ok().map(|data| (artifact, held, data))) {
+                // A compile that found an artifact holding already (another
+                // process published it since this one looked) compiled nothing.
+                Some((artifact, held, data)) => (if held { Route::Taken } else { Route::Compiled }, artifact, data),
+                None => return Ok((Route::Miss(Miss::Failed), None)),
             },
         };
         if !matches!(data.status, store::Status::Compiled) {
-            return Ok((Outcome::Miss(Miss::NotCompiled), None));
+            return Ok((Route::Miss(Miss::NotCompiled), None));
         }
         store::note_use(&config.store, &artifact, path);
-        Ok((outcome, Some(Compiled { artifact, artifact_data: data })))
+        Ok((route, Some(Compiled { artifact, artifact_data: data })))
     }
 
     /// PATH's stored artifact whose inputs hold on LOAD_PATH, if any; Err
@@ -457,17 +468,16 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     }
 
     /// Compile PATH in a compile process now: the artifact it published,
-    /// or None when it did not, or PATH is being compiled already up the
-    /// chain (its compile-time loads read source, as GNU's would with no
-    /// `.elc`).
-    fn compile_now(&mut self, config: &Config, path: &Path, load_path: &[String]) -> Result<Option<PathBuf>> {
+    /// and whether it held already (`compile_output`), or None when it did
+    /// not, or PATH is being compiled already up the chain (its
+    /// compile-time loads read source, as GNU's would with no `.elc`).
+    fn compile_now(&mut self, config: &Config, path: &Path, load_path: &[String]) -> Result<Option<(PathBuf, bool)>> {
         let Some(configured) = configured() else { return Ok(None) };
         let Some((program, args, environment)) = compile_command(configured, path, load_path) else { return Ok(None) };
         if configured.trace {
             crate::host::event_line("romacs-compiled-lisp", &json!({"compile": path.to_string_lossy()}));
         }
-        Ok(run_compile(&config.store, program, args, environment)
-            .and_then(|out| out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)))
+        Ok(run_compile(&config.store, program, args, environment).and_then(|out| compile_output(&out)))
     }
 
     /// Install unit INDEX of a compiled load, with SLOTS for its names:

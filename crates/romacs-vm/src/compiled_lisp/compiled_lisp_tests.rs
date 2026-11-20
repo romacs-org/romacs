@@ -418,3 +418,13 @@ fn a_tree_decides_held_artifacts_itself() {
     assert_eq!(held(&load_path), None, "a changed source compiles again");
     std::fs::remove_dir_all(&store).unwrap();
 }
+
+/// A compile process says the artifact it published, and whether one
+/// holding already was there, so a load counts it as taken, not compiled.
+#[test]
+fn a_compile_that_found_its_artifact_holding_says_so() {
+    let held = "romacs-compile-load-path: []\nromacs-compile-held\nromacs-compiled: /s/k/a.rlc\n";
+    assert_eq!(compile_output(held), Some((PathBuf::from("/s/k/a.rlc"), true)));
+    assert_eq!(compile_output("romacs-compiled: /s/k/a.rlc\n"), Some((PathBuf::from("/s/k/a.rlc"), false)));
+    assert_eq!(compile_output("romacs-compile-held\n"), None);
+}

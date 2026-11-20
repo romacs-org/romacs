@@ -161,8 +161,7 @@ fn compile_child(configured: &Configured, path: &Path) -> (Outcome, Option<Vec<S
     };
     let load_path = out.lines().find_map(|line| line.strip_prefix("romacs-compile-load-path: "))
         .and_then(|text| serde_json::from_str(text).ok());
-    let held = out.lines().any(|line| line == "romacs-compile-held");
-    let Some(artifact) = out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from) else {
+    let Some((artifact, held)) = compile_output(&out) else {
         return (Outcome::Failed("the compile process published nothing".into()), load_path);
     };
     let outcome = match store::open(&artifact) {
