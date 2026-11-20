@@ -754,6 +754,22 @@ fn gated_kernels_take_their_scope_at_their_first_chunk() {
     }
 }
 
+/// `nreverse`'s first poll comes at `KERNEL_CHUNK` steps of its walk, as
+/// every gated kernel's does: a list between one chunk and two, with a
+/// press pending, quits through the engine's call target and is left as it
+/// was (the walk writes nothing).
+#[test]
+fn nreverse_polls_at_its_first_chunk() {
+    let (mut vm, signal) = busy_vm();
+    let args = values_of(&mut vm, "(list (setq l (let (l) (dotimes (i 20000) (push (- 20000 i) l)) l)))");
+    assert!(signal.interrupt(), "a busy evaluator takes the press");
+    let outcome = call_kernel(&mut vm, crate::Primitive::Nreverse, &args, true);
+    assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "no quit at its first chunk");
+    vm.propagated_escape = None;
+    vm.quit_unwinding = false;
+    assert_eq!(eval(&mut vm, "(equal (list (length l) (car l) (nth 19999 l)) '(20000 1 20000))"), Value::TRUE, "the list is whole");
+}
+
 /// `nreverse`'s walk hands off to its polled continuation once Brent's
 /// power reaches `KERNEL_CHUNK`, after `KERNEL_CHUNK` - 1 steps: on either side
 /// of that, and across it, a proper list comes back reversed, and a list

@@ -142,13 +142,15 @@ impl Vm {
     }
 
     /// The rest of `core_nreverse`'s walk, from a restart of Brent's check
-    /// that set SLOW to FAST with a power of `KERNEL_CHUNK`: the same steps,
-    /// polled each `KERNEL_CHUNK` of them (`Vm::kernel_poll`), which writes
-    /// nothing. Ok at the walk's end or at the cycle it found.
+    /// that set SLOW to FAST with a power of `KERNEL_CHUNK`, after
+    /// `KERNEL_CHUNK` - 1 steps: the same steps, polled at each
+    /// `KERNEL_CHUNK` of the whole walk, the first of them the next step
+    /// (`Vm::kernel_poll`), which writes nothing. Ok at the walk's end or at
+    /// the cycle it found.
     #[cold]
     #[inline(never)]
     fn brent_polled<const SCOPED: bool>(&mut self, seq: Value, mut slow: Value, mut fast: Value) -> Result<()> {
-        let (mut power, mut lam) = (crate::quit::KERNEL_CHUNK, 0usize);
+        let (mut power, mut lam, mut until_poll) = (crate::quit::KERNEL_CHUNK, 0usize, 1usize);
         while fast.tag_is(3) {
             if Self::image_value(fast) {
                 return Err(self.refuse_read_only(seq));
@@ -158,11 +160,12 @@ impl Vm {
             if fast == slow {
                 break;
             }
-            // Every power is a multiple of KERNEL_CHUNK: one compare a step.
-            if lam.is_multiple_of(crate::quit::KERNEL_CHUNK) {
-                if lam == power {
-                    (slow, power, lam) = (fast, power * 2, 0);
-                }
+            if lam == power {
+                (slow, power, lam) = (fast, power * 2, 0);
+            }
+            until_poll -= 1;
+            if until_poll == 0 {
+                until_poll = crate::quit::KERNEL_CHUNK;
                 self.kernel_poll::<SCOPED>()?;
             }
         }
