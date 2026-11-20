@@ -40,10 +40,12 @@ fn lock(socket: &Path) -> std::io::Result<Option<OwnedFd>> {
 /// as unsafe runtime functions; std's `remove_var` is unsafe too, and
 /// std's `exit` runs the C library's exit handlers in a parent that
 /// shares them with the child.
+#[expect(unsafe_code, reason = "fork, clearenv and _exit: see the SAFETY comments")]
 fn detach() -> std::io::Result<std::fs::File> {
     let (mut ready, report) = std::io::pipe()?;
     // SAFETY: fork at startup, before any thread exists; the child goes on
     // as the only thread of an ordinary process.
+    // UNSAFE(rustix's fork is an unsafe runtime function)
     match unsafe { libc::fork() } {
         -1 => Err(std::io::Error::last_os_error()),
         0 => {
@@ -55,6 +57,7 @@ fn detach() -> std::io::Result<std::fs::File> {
             let _ = rustix::stdio::dup2_stderr(&null);
             // SAFETY: clearenv in a single-threaded process: nothing else
             // reads the environment while it is emptied.
+            // UNSAFE(std's remove_var is unsafe too)
             unsafe { libc::clearenv() };
             std::env::set_current_dir("/")?;
             Ok(std::fs::File::from(OwnedFd::from(report)))
@@ -64,6 +67,7 @@ fn detach() -> std::io::Result<std::fs::File> {
             let mut answer = String::new();
             let _ = ready.read_to_string(&mut answer);
             // SAFETY: _exit takes a status; the parent has nothing to flush.
+            // UNSAFE(std's exit runs exit handlers the child shares)
             unsafe { libc::_exit(i32::from(answer != "ready")) }
         }
     }
@@ -93,7 +97,9 @@ fn start(socket: &Path, foreground: bool, idle_ms: Option<u64>, build: Build) ->
     serve(table, build)
 }
 
-/// Run the keeper as its arguments say.
+/// Run the keeper as its arguments say. The first thing a keeper binary's
+/// `main` does: a resumed keeper adopts what it inherited before this
+/// image opens a descriptor of its own ([`crate::exec`]).
 #[must_use]
 pub fn main(build: Build) -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -103,11 +109,7 @@ pub fn main(build: Build) -> ExitCode {
         let mut bytes = Vec::new();
         std::io::stdin().read_to_end(&mut bytes).map_err(|e| e.to_string()).and_then(|_| Table::check(&bytes, build.table))
     } else if let Some(table) = fd("--resume") {
-        // SAFETY: `--resume` is passed only by `exec::exec`, which leaves
-        // exactly the table's descriptors, the table and the fallback open.
-        // They are inherited by number, which only an unsafe adoption can
-        // own (`exec::resume`).
-        unsafe { crate::exec::resume(table, fd("--fallback"), build) }.and_then(|table| serve(table, build))
+        crate::exec::resume(table, fd("--fallback"), build).and_then(|table| serve(table, build))
     } else if let Some(socket) = value("--socket") {
         start(Path::new(&socket), args.iter().any(|a| a == "--foreground"), value("--idle-ms").and_then(|v| v.parse().ok()), build)
     } else {

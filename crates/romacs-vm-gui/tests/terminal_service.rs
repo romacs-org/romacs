@@ -582,7 +582,7 @@ fn a_helper_runs_its_shell_on_the_pty_its_spawner_made() {
     assert!(text.lines().any(|line| line == format!("/dev/pts/{number}")), "the shell is on another pty:\n{text}");
     service.close(id).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) {
+    while !spawn::wait(&child.pidfd).is_some_and(spawn::Status::ended) {
         assert!(Instant::now() < deadline, "the helper did not end at its close");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -633,7 +633,7 @@ fn an_attach_paints_the_screen_before_it_has_the_history() {
     assert_eq!(after, before, "scrolling back shows what it showed before");
     second.close(two).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) {
+    while !spawn::wait(&child.pidfd).is_some_and(spawn::Status::ended) {
         assert!(Instant::now() < deadline, "the helper did not end at its close");
         std::thread::sleep(Duration::from_millis(10));
     }
