@@ -369,27 +369,34 @@ class Epoch(unittest.TestCase):
         for raised, ours, tip in [(['0123abcd'], 'oops\n', None), ([], 'oops\n', '3\n'), ([], '\u00b2\n', '3\n')]:
             self.assertEqual(check.epoch(set(), raised, ours, tip)[0], 'FAIL', ours)
 
-    # Shapes of a branch's history: its commits newest first as (COMMIT, PARENT ...), each
-    # commit's generation (`t*` are the trunk's, which raise nothing of the branch's), and
-    # the raises still in effect at the newest.
+    def test_a_generation_has_one_spelling(self):
+        for ours in ['03\n', '3\n\n', ' 3\n', '3 \n', '3\r\n', '']:
+            status, _, findings = check.epoch(set(), [], ours, '3\n')
+            self.assertEqual(status, 'FAIL', repr(ours))
+            self.assertIn('no leading zero', findings[0])
+        for ours in ['3', '3\n', '0\n', '10\n']:
+            self.assertEqual(check.epoch(set(), [], ours, '3\n')[0], 'ok', repr(ours))
+
+    # Shapes of a branch's history: its commits as (COMMIT, PARENT ...), each commit's
+    # generation (`t*` are the trunk's), and the branch's own raises.
     SHAPES = [
         ('a raise', [('r', 'b')], {'b': 2, 'r': 3}, {'r'}),
-        ('a full revert (S1)', [('v', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'v': 2}, set()),
-        ('a partial revert (S5)', [('v', 'q'), ('q', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'q': 4, 'v': 3}, {'r'}),
-        ('a raise lowered above its start', [('l', 'r'), ('r', 'b')], {'b': 2, 'r': 4, 'l': 3}, {'r'}),
-        ('a formatting edit (S2)', [('f', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'f': 3}, {'r'}),
+        ('a full revert (S1): the raise still counts', [('v', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'v': 2}, {'r'}),
+        ('a partial revert (S5)', [('v', 'q'), ('q', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'q': 4, 'v': 3}, {'r', 'q'}),
+        ('the first of two raises reverted (S7)', [('v', 'q'), ('q', 'r'), ('r', 'b')], {'b': 3, 'r': 4, 'q': 5, 'v': 3},
+         {'r', 'q'}),
+        ('the same number, spelled again', [('f', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'f': 3}, {'r'}),
         ('the trunk taken in, equal', [('m', 'r', 't3'), ('r', 'b')], {'b': 2, 'r': 3, 't3': 3, 'm': 3}, {'r'}),
         ("the trunk's higher number taken", [('m', 'r', 't5'), ('r', 'b')], {'b': 2, 'r': 3, 't5': 5, 'm': 5}, {'r'}),
         ("only the trunk's raise", [('m', 'c', 't3'), ('c', 'b')], {'b': 2, 'c': 2, 't3': 3, 'm': 3}, set()),
         ('a raise in a merge commit', [('m', 'r', 't3'), ('r', 'b')], {'b': 2, 'r': 3, 't3': 3, 'm': 4}, {'r', 'm'}),
-        ('a side branch reverting its own raise only',
-         [('m', 's', 'v'), ('v', 'u'), ('u', 'b'), ('s', 'b')], {'b': 2, 's': 3, 'u': 3, 'v': 2, 'm': 3}, {'s'}),
         ('an uncommitted raise', [(check.TREE, 'h'), ('h', 'b')], {'b': 3, 'h': 3, check.TREE: 4}, {check.TREE}),
+        ('an uncommitted tree at its HEAD', [(check.TREE, 'h'), ('h', 'b')], {'b': 3, 'h': 3, check.TREE: 3}, set()),
     ]
 
-    def test_raises_in_effect_over_each_shape(self):
+    def test_own_raises_over_each_shape(self):
         for name, lines, value, expected in self.SHAPES:
-            self.assertEqual(check.raises_in_effect([list(line) for line in lines], value), expected, name)
+            self.assertEqual(set(check.own_raises([list(line) for line in lines], value)), expected, name)
 
 
 class EpochHistory(unittest.TestCase):
@@ -468,23 +475,22 @@ class EpochHistory(unittest.TestCase):
         raises, ours, tip = check.epoch_history(self.repo, 'beta')
         self.assertEqual((len(raises), ours, tip), (1, '4\n', '3\n'))
 
-    def test_a_reverted_raise_raises_nothing_as_a_lane_or_merged(self):
+    def test_a_reverted_raise_still_takes_a_number_as_a_lane_or_merged(self):
         self.git('checkout', '-q', '-b', 'reverted', 'beta~1')
         self.commit('raise', {check.EPOCH: '3\n'})
         self.commit('revert the raise', {check.EPOCH: '2\n'})
         self.commit('docs', {'e.txt': 'e\n'})
-        self.assertEqual(self.stage()[:3:2], ('ok', []))
+        self.assertIn('raise it to 4', self.stage()[2][0])
         self.git('checkout', '-q', '--detach', 'beta')
         self.git('merge', '-q', '--no-ff', '-m', 'land reverted', 'reverted')
-        self.assertEqual(self.stage()[:3:2], ('ok', []))
+        self.assertIn('raise it to 4', self.stage()[2][0])
 
-    def test_a_formatting_edit_raises_nothing_and_hides_no_raise(self):
-        self.git('checkout', '-q', '-b', 'blank', 'beta')
-        self.commit('blank line', {check.EPOCH: '3\n\n'})
+    def test_a_second_spelling_fails_and_its_fix_raises_nothing(self):
+        self.git('checkout', '-q', '-b', 'spelled', 'beta')
+        self.commit('leading zero', {check.EPOCH: '03\n'})
+        self.assertIn('no leading zero', self.stage()[2][0])
+        self.commit('one spelling', {check.EPOCH: '3\n'})
         self.assertEqual(self.stage()[:3:2], ('ok', []))
-        self.git('checkout', '-q', 'second')
-        self.commit('blank line', {check.EPOCH: '3\n\n'})
-        self.assertEqual(self.stage()[0], 'FAIL')
 
     def test_an_uncommitted_raise_counts(self):
         self.git('checkout', '-q', '-b', 'dirty', 'beta')
