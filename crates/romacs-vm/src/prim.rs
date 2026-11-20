@@ -649,8 +649,10 @@ mod leaf {
         /// name stays unibyte there), else the name KEY stands for
         /// (`symkey::with_name').  An ASCII key reads the same either way.
         pub(crate) fn read_symbol_name<R>(&self, v: Value, key: &str, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> R {
-            if !key.is_ascii()
-                && let Ok(slot) = self.symbol_slot(v)
+            if key.is_ascii() {
+                return f(crate::lstring::StrView { bytes: key.as_bytes(), chars: key.len(), multibyte: true });
+            }
+            if let Ok(slot) = self.symbol_slot(v)
                 && let Some(&name) = self.vm.obarray_symbol_names.get(&slot)
                 && let Some(view) = self.vm.str_view(name) { return f(view); }
             crate::symkey::with_name(key, f)
