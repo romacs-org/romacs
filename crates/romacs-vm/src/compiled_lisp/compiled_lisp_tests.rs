@@ -420,11 +420,16 @@ fn a_tree_decides_held_artifacts_itself() {
 }
 
 /// A compile process says the artifact it published, and whether one
-/// holding already was there, so a load counts it as taken, not compiled.
+/// holding already was there, so a load counts it as taken, not compiled:
+/// in its last record, whatever the file's compile-time code printed.
 #[test]
 fn a_compile_that_found_its_artifact_holding_says_so() {
-    let held = "romacs-compile-load-path: []\nromacs-compile-held\nromacs-compiled: /s/k/a.rlc\n";
-    assert_eq!(compile_output(held), Some((PathBuf::from("/s/k/a.rlc"), true)));
-    assert_eq!(compile_output("romacs-compiled: /s/k/a.rlc\n"), Some((PathBuf::from("/s/k/a.rlc"), false)));
+    let artifact = Path::new("/s/k/a.rlc");
+    let (compiled, held) = (compile_record(artifact, false), compile_record(artifact, true));
+    assert_eq!(compile_output(&format!("romacs-compile-load-path: []\n{held}\n")), Some((artifact.to_owned(), true)));
+    assert_eq!(compile_output(&format!("{compiled}\n")), Some((artifact.to_owned(), false)));
+    // A package printing either record, or the old marker, at compile time.
+    let printed = format!("romacs-compile-held\n{held}\nromacs-compiled-held: /elsewhere.rlc\n{compiled}\n");
+    assert_eq!(compile_output(&printed), Some((artifact.to_owned(), false)));
     assert_eq!(compile_output("romacs-compile-held\n"), None);
 }

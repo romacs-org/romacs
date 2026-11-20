@@ -30,7 +30,8 @@ pub(crate) enum Miss {
     Deferred,
     /// No artifact held, and this process compiles nothing.
     ReadOnly,
-    /// A compile ran here and gave no artifact that opened.
+    /// A compile was tried here (its process may not have started) and gave
+    /// no artifact that opened.
     Failed,
     /// The artifact holds the file as source: its compile refused it or
     /// signalled.

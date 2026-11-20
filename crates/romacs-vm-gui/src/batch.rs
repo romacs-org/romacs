@@ -269,8 +269,7 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
         // The tree's compile checks what it finds on the same `load-path'.
         println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
         let (artifact, held) = vm.compile_lisp_file(&file)?;
-        if held { println!("romacs-compile-held"); }
-        println!("romacs-compiled: {}", artifact.display());
+        println!("{}", romacs_vm::compiled_lisp::compile_record(&artifact, held));
         vm.shutdown_background_processes()
     })?.join().map_err(|_| "compile process panicked".to_owned())?
 }

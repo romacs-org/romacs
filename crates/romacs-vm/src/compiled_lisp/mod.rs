@@ -266,12 +266,25 @@ fn run_compile(store: &Path, program: OsString, args: Vec<OsString>, environment
     status.is_some_and(|s| s.success()).then_some(out)
 }
 
-/// What a compile process's standard output OUT says: the artifact it
-/// published, and whether one holding already was there, so it compiled
-/// nothing (`Vm::compile_lisp_file`).
+/// A compile process's last record: the artifact it compiled and
+/// published, or one it found holding already, so it compiled nothing.
+const COMPILED: &str = "romacs-compiled: ";
+const HELD: &str = "romacs-compiled-held: ";
+
+/// The record a compile process ends its standard output with: ARTIFACT,
+/// HELD when it was there already (`Vm::compile_lisp_file`).
+pub fn compile_record(artifact: &Path, held: bool) -> String {
+    format!("{}{}", if held { HELD } else { COMPILED }, artifact.display())
+}
+
+/// What a compile process's standard output OUT says (`compile_record`):
+/// the artifact, and whether it held already. Its last record, as what the
+/// file's compile-time code printed comes before it.
 fn compile_output(out: &str) -> Option<(PathBuf, bool)> {
-    let artifact = out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from)?;
-    Some((artifact, out.lines().any(|line| line == "romacs-compile-held")))
+    out.lines().rev().find_map(|line| {
+        line.strip_prefix(COMPILED).map(|path| (PathBuf::from(path), false))
+            .or_else(|| line.strip_prefix(HELD).map(|path| (PathBuf::from(path), true)))
+    })
 }
 
 /// The `.el` files under DIR, its subdirectories' after its own, each

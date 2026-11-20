@@ -24,8 +24,8 @@ fn compiled_lisp_background(cx, on: Value, delay: Value) {
 // `:misses' is the latest 32 loads that read source with compiled Lisp
 // on, newest first, each (FILE . REASON).  REASON is `deferred' (the file
 // is queued for a background compile), `read-only' (no artifact, and this
-// process compiles nothing), `failed' (a compile ran and gave no artifact
-// that opened), `not-compiled' (its compile refused the file or
+// process compiles nothing), `failed' (a compile was tried here and gave
+// no artifact that opened), `not-compiled' (its compile refused the file or
 // signalled), `chain' (the file is being compiled up this compile's chain)
 // or `unreadable' (the file could not be read for its artifact's key).
 //
