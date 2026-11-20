@@ -189,4 +189,22 @@ other operation on."
               (should (multibyte-string-p (file-truename multibyte))))))
       (delete-directory root t))))
 
+(ert-deftest file-truename-tests-a-circular-handler-alist-signals ()
+  ;; In a child with a deadline, so that a walk that loops fails the test
+  ;; instead of hanging the run.
+  (let* ((form "(let ((c (list (cons \"\\\\`/zzz-none:\" 'ignore)))) (setcdr c c) (let ((file-name-handler-alist c)) (condition-case e (progn (file-truename \"/tmp/f\") (princ \"returned\")) (error (princ (format \"signalled %S\" (car e)))))))")
+         (output (generate-new-buffer " *truename-cycle*"))
+         (child (make-process :name "truename-cycle" :buffer output :noquery t :connection-type 'pipe
+                              :command (list (expand-file-name invocation-name invocation-directory)
+                                             "-Q" "--batch" "--eval" form)))
+         (deadline (+ (float-time) 60)))
+    (unwind-protect
+        (progn
+          (while (and (process-live-p child) (< (float-time) deadline))
+            (accept-process-output child 0.1))
+          (should-not (process-live-p child))
+          (should (string-prefix-p "signalled" (with-current-buffer output (buffer-string)))))
+      (delete-process child)
+      (kill-buffer output))))
+
 ;;; file-truename-tests.el ends here

@@ -1573,10 +1573,12 @@ containing it, until no links are left at any level.
   ;; own call, where some operations' handlers are inhibited.
   (or (and (null counter) (null prev-dirs) (not (eq system-type 'windows-nt))
            (null inhibit-file-name-operation) (null inhibit-file-name-handlers)
-           (not (file-truename--links-virtualized-p))
            (let ((name (file-truename--local-name filename)))
              (and name
+                  ;; First: it signals on a circular handler alist, which
+                  ;; the scan below then never meets.
                   (not (find-file-name-handler name 'file-truename))
+                  (not (file-truename--links-virtualized-p))
                   (let ((walk (romacs--file-truename-local name)))
                     ;; Through links, the walk also names what each one
                     ;; spliced in: GNU's walk asks for a handler of each.
