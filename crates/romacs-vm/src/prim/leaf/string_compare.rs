@@ -1,7 +1,7 @@
 //! fns.c `Fcompare_strings`' loop over strings and symbol names where they
 //! lie: the characters are decoded from the bytes, a pair that differs is
 //! folded through the buffer's upcase table read flat, and neither text is
-//! copied but an escaped symbol name's decoding (`symkey::with_name`).
+//! copied but an escaped symbol name's decoding (`Leaf::read_symbol_name`).
 use super::{Fault, Kind, Leaf, Value};
 use crate::lstring::{BYTE8_OFFSET, StrView};
 use std::cmp::Ordering;

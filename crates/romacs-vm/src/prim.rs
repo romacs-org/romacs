@@ -644,10 +644,14 @@ mod leaf {
             if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
                 else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
-        /// F of symbol V's name, KEY its key, as `symbol-name' gives it: the
-        /// string a private obarray keeps for a symbol it interned (a unibyte
-        /// name stays unibyte there), else the name KEY stands for
-        /// (`symkey::with_name').  An ASCII key reads the same either way.
+        /// F of symbol V's name, KEY its key, as `symbol-name' gives it: an
+        /// ASCII key as itself; else the string a private obarray keeps for a
+        /// symbol it interned (a unibyte name stays unibyte there), else the
+        /// name KEY stands for (`symkey::with_name').  The one place a symbol's
+        /// name is read as text to compare it: string=, string-lessp,
+        /// string-version-lessp and string-collate-equalp reach it through
+        /// `with_text', assoc-string and Fcompare_strings' other callers
+        /// through `with_compared', and value< directly.
         pub(crate) fn read_symbol_name<R>(&self, v: Value, key: &str, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> R {
             if key.is_ascii() {
                 return f(crate::lstring::StrView { bytes: key.as_bytes(), chars: key.len(), multibyte: true });

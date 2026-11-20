@@ -27,8 +27,8 @@ impl Leaf<'_> {
         if let Some(&name) = self.vm.permanent_symbol_names.get(&value.0) {
             return self.string_view(name);
         }
-        // No name made yet: the one its key stands for (`symkey'), not the key.
+        // No name made yet: the one its key stands for, not the key.
         let key = self.symbol_key(value).ok_or(Fault::Wrong("symbolp", value))?;
-        Ok(crate::symkey::with_name(key, |name| name.to_owned()))
+        Ok(self.read_symbol_name(value, key, |name| name.to_owned()))
     }
 }
