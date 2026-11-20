@@ -502,6 +502,7 @@
               (type "now")
               (should (buffer-modified-p))
               (romacs-agent-log-send)
+              (should-not (buffer-modified-p))
               (type "later") (romacs-agent-log-queue)
               (romacs-agent-log-interrupt)
               (type "after") (romacs-agent-log-interrupt-and-send))

@@ -1128,7 +1128,9 @@ shows it; its session loaded only then, as its records are read."
     (unless (string-empty-p text)
       (funcall send text)
       (setq romacs-agent-log--recalled nil)
-      (delete-region romacs-agent-log--input (point-max)))))
+      (delete-region romacs-agent-log--input (point-max))
+      ;; Sent: nothing typed is left.
+      (set-buffer-modified-p nil))))
 
 (defun romacs-agent-log--running-p (&optional session)
   "Whether SESSION, the chat's by default, runs a turn."
