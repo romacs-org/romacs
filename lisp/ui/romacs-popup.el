@@ -728,7 +728,7 @@ element by element, numbers by `<', strings by `string-version-lessp'
 key, unmodified keys first, then C-, M-, C-M- and the rest; within each,
 letters (lower case before upper), digits, punctuation, then named keys
 \(`romacs-popup--event-rank').  A value for `which-key-sort-order', and
-Romacs's: a key-hint card sorts within its groups by that option."
+Romacs's: the option orders a key-hint card's rows."
   (let ((ea (romacs-popup--key-event (car a))) (eb (romacs-popup--key-event (car b))))
     (cond ((and ea eb) (romacs-popup--rank< (romacs-popup--event-rank ea) (romacs-popup--event-rank eb)))
           ((or ea eb) (and ea t))
