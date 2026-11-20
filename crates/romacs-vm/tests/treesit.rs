@@ -739,8 +739,14 @@ fn a_first_parse_waits_for_a_free_thread() {
         if vm.eval_source("(with-current-buffer \"ts-hold-3\" (romacs--treesit-parsing-p))").unwrap().display().unwrap() == "nil" { break; }
         std::thread::sleep(std::time::Duration::from_micros(500));
     }
-    // A thread's end wakes the frame, which starts the waiting parse.
-    assert!(vm.land_treesit(), "the ended threads wake the waiting window");
+    // A thread's end wakes the frame, which starts the waiting parse. The
+    // landing is recorded just after the result is sent: wait for it.
+    let mut woke = false;
+    for _ in 0..40_000 {
+        if vm.land_treesit() { woke = true; break; }
+        std::thread::sleep(std::time::Duration::from_micros(500));
+    }
+    assert!(woke, "the ended threads wake the waiting window");
     deferred_frame(&mut vm);
     wait_landed(&mut vm, "ts-wait");
     while deferred_frame(&mut vm) {}
