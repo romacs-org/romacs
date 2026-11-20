@@ -194,3 +194,27 @@ fn visiting_replace_does_not_ask_about_supersession_as_gnu() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A first-change-hook that inserts text before `insert-file-contents`
+/// decides the coding of an empty buffer: GNU keeps the hook's text before
+/// the file's ("hookfile"). VM2 refuses, keeping the hook's text, the buffer's
+/// multibyteness and its undo list as they were
+/// (ledger/divergences/VM2-IFC-HOOKTEXT1.md). It used to keep only the
+/// file's text in a unibyte buffer, losing the hook's.
+#[test]
+fn insert_file_contents_refuses_a_buffer_a_change_hook_edited() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("romacs-ifc-hooktext-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("file");
+    std::fs::write(&file, b"file").unwrap();
+    let mut vm = gnu_ert_vm::bootstrapped();
+    for multibyte in ["nil", "t"] {
+        let expression = template::fill(
+            r#"(progn (set-buffer-multibyte MB) (buffer-enable-undo) (let ((first-change-hook (list (lambda () (insert "hook")))) (coding-system-for-read nil)) (list (condition-case e (insert-file-contents FILE) (error (cadr e))) (buffer-string) enable-multibyte-characters (eq buffer-undo-list t))))"#,
+            &[("MB", multibyte), ("FILE", &lisp(&file))]);
+        // `romacs' gives the printed form of `prin1-to-string''s string.
+        let expected = format!(r#"("VM2 insert-file-contents deciding its coding in a buffer a change hook has edited is unsupported" "hook" {multibyte} nil)"#);
+        assert_eq!(romacs(&mut vm, &expression), serde_json::to_string(&expected).unwrap(), "multibyte {multibyte}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

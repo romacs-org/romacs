@@ -2075,6 +2075,10 @@ goes."
           ;; Nothing written (or its write failed): idle, said once.
           (when (and idle (eq (romacs-agent-state session) 'idle)) (romacs-agent--changed session))))))))
 
+(defvar romacs-agent--copies (make-hash-table :test #'eq :weakness 'key)
+  "The copies of sessions replays fold into (`romacs-agent--scratch'): what
+is folded there acts on nothing of the live session's.")
+
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
 and changes nothing of SESSION's, writes nothing to its harness, and sends
@@ -2095,7 +2099,31 @@ nothing that waits."
           ;; The live session's: a confirmation replayed here is not this copy's.
           (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
+    (puthash scratch t romacs-agent--copies)
     scratch))
+
+(declare-function romacs-agent-events-note-seq "romacs-agent-events" (session type end))
+
+(defun romacs-agent-replay-copy (session from)
+  "A copy of SESSION to replay its records from place FROM into
+\(`romacs-agent--scratch'), its harness's run as it was at FROM: the
+seq of the last run note before it in the store, else the live
+session's.  Every reader of a session's history replays into one."
+  (let ((scratch (romacs-agent--scratch session)))
+    (setf (romacs-agent-driver-state scratch)
+          (list :run (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
+                         (plist-get (romacs-agent-driver-state session) :run)))
+          ;; No turn under way at FROM, a turn's start: its first prompt
+          ;; is no steer, whatever the live session is doing.
+          (romacs-agent-input-seq scratch) 0 (romacs-agent-completed-seq scratch) 0)
+    scratch))
+
+(defun romacs-agent-replay-record (copy record)
+  "Fold RECORD into COPY (`romacs-agent-replay-copy'), as a view's replay
+does: nothing of the live session's is written (its manifest), nor, as
+for any copy, let go (`romacs-agent--held-echoed')."
+  (let ((romacs-agent--manifest-frozen t))
+    (romacs-agent--record copy record)))
 
 (defconst romacs-agent--events-page 2000
   "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
@@ -3397,8 +3425,10 @@ attachment, and let go once its record of the note comes back
 
 (defun romacs-agent--held-echoed (session record)
   "RECORD, SESSION's, is a held note come back from its supervisor: let
-it go."
-  (when-let* ((note (gethash "note" record))
+it go.  Never for a replay's copy (`romacs-agent--copies'): it shares
+the session's id, and an old note there may share a held one's."
+  (when-let* (((not (gethash session romacs-agent--copies)))
+              (note (gethash "note" record))
               ((hash-table-p note))
               (id (gethash "romacsNote" note))
               (held (gethash (romacs-agent-id session) romacs-agent--held-notes)))

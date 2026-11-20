@@ -46,7 +46,7 @@ frozen snapshots.
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
 | GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
-| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`tools/test-elisp`) |
+| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`romacs-deftest`, `tools/test-elisp`) |
 | Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
 | Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |
