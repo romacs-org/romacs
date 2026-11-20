@@ -72,6 +72,7 @@ prim.rs install_lisp_prelude_raw eval_source_raw 1 boundary  # VM setup: no call
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
 prim/leaf/graphics.rs land_images call_prepared_source_propagating 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
 prim.rs write write_from_native 1 held  # a native writer: queued for its engine's completion, or, with no engine to complete it, its watchers hold collection (rooted_write unset)
+prims/buffer_lifecycle.rs other_buffer_fallback safe_call 1 held  # a leaf or its continuation: the engine is not suspended, and only the call's value is used after it
 prims/face.rs function_height safe_call 1 held  # a leaf: its engine is not suspended
 protocol.rs submit eval_source_raw 1 boundary  # a protocol request: the result is printed right after
 protocol.rs submit invoke_prepared_raw 1 boundary  # ARGS become the engine's registers before it can collect

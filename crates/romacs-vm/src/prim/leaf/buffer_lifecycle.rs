@@ -79,6 +79,17 @@ impl Leaf<'_> {
             .unwrap_or(Value::NIL))
     }
     /// buffer-list: the live buffers in the buffer list's order.
+    /// buffer.c candidate_buffer: B can be `other-buffer''s choice against
+    /// BUFFER, being a live buffer other than BUFFER whose name does not
+    /// start with a space.
+    pub fn other_buffer_candidate(&self, b: Value, buffer: Value) -> bool {
+        b != buffer && self.vm.buffer_state(b).is_ok_and(|s| s.live && !s.name.as_deref().is_some_and(|n| n.starts_with(' ')))
+    }
+    /// The buffer list's order as it stands, dead buffers not yet dropped
+    /// included.
+    pub fn buffer_order(&self) -> Vec<Value> {
+        self.vm.buffer_order_snapshot()
+    }
     pub fn lifecycle_list(&mut self) -> Value {
         let order: Vec<Value> = self.vm.buffer_order().into_iter()
             .filter(|&b| self.vm.buffer_state(b).is_ok_and(|s| s.live)).collect();

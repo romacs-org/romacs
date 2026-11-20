@@ -130,6 +130,46 @@ fn binary_scratch_replacement_does_not_panic() {
     assert!(result.is_ok(), "BUFFER_LIFECYCLE_BINARY_REPLACEMENT: public buffer representation change must not panic");
 }
 
+/// buffer.c Fother_buffer with no frame predicate, the scan that runs no
+/// Lisp, against pinned GNU: BUFFER absent, current or another, a hidden
+/// buffer, a buffer a window shows (VISIBLE-OK and the "not so good" choice),
+/// a bury and a kill; then a predicate rejecting every buffer, so the
+/// `get-scratch-buffer-create' fallback runs, and nil when it signals. Each
+/// engine's own buffers are killed first; a bare VM has no simple.el, so it
+/// gets a stand-in for the fallback's function.
+#[test]
+fn other_buffer_without_predicate_matches_pinned_gnu() {
+    let source = r#"(append (prin1-to-string
+      (let* ((names (lambda (v) (if (bufferp v) (buffer-name v) v)))
+             (a (get-buffer-create "ob-a")) (b (get-buffer-create "ob-b")) (c (get-buffer-create "ob-c"))
+             (hidden (get-buffer-create " ob-hidden")))
+        (unless (fboundp 'get-scratch-buffer-create)
+          (defun get-scratch-buffer-create () (get-buffer-create "*scratch*")))
+        (modify-frame-parameters nil (list (cons 'buffer-predicate nil)))
+        (dolist (x (buffer-list))
+          (unless (or (memq x (list a b c)) (eq (aref (buffer-name x) 0) ?\s)) (kill-buffer x)))
+        (set-window-buffer (selected-window) hidden)
+        (list (funcall names (other-buffer))
+              (funcall names (other-buffer a))
+              (progn (set-buffer b) (funcall names (other-buffer (current-buffer))))
+              (progn (set-window-buffer (selected-window) a) (funcall names (other-buffer b)))
+              (funcall names (other-buffer))
+              (funcall names (other-buffer b t))
+              (progn (bury-buffer-internal a) (funcall names (other-buffer b)))
+              (progn (kill-buffer c) (funcall names (other-buffer b)))
+              (funcall names (other-buffer b nil (selected-frame)))
+              (progn (modify-frame-parameters nil (list (cons 'buffer-predicate (lambda (_) nil))))
+                     (funcall names (other-buffer b)))
+              (let ((old (symbol-function 'get-scratch-buffer-create)))
+                (kill-buffer "*scratch*")
+                (fset 'get-scratch-buffer-create (lambda () (error "No scratch")))
+                (prog1 (other-buffer b) (fset 'get-scratch-buffer-create old)))))) nil)"#;
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    check(&mut boot(), source, &String::from_utf8(output.stdout).unwrap(), "OTHER_BUFFER_NO_PREDICATE_GNU");
+}
+
 /// buffer.c Fother_buffer against pinned GNU: the frame's
 /// `buffer-predicate', hidden, dead and visible buffers, VISIBLE-OK and
 /// FRAME. The predicate keeps the buffers each engine starts with out.
