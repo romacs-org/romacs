@@ -326,6 +326,11 @@
     (remhash "g" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "g" :how 'harness)
     (should (string-match-p "an answer not delivered: the harness settled it first" (romacs-agent-log-tests--transcript))))
+  ;; An older note named no one: its answer is said, never as Romacs's.
+  (let ((answers (make-hash-table :test #'equal)))
+    (puthash "Colour?" "Blue" answers)
+    (should (equal (substring-no-properties (romacs-agent-log--answer-text '(:kind "unknown") "allow" "once" nil answers))
+                   "✔ answered: Blue")))
   ;; Policy's answer from another client says which too.
   (should (string-match-p "allowed by Romacs.*(via phone)"
                           (romacs-agent-log--answer-text '(:kind "policy" :client "phone") "allow" "once" nil))))

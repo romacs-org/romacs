@@ -618,7 +618,8 @@ from a client other than this editor says which."
          (allowed (equal decision "allow")))
     (if (and (hash-table-p answers) allowed)
         (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
-                (if (equal by "user") "answered: " "answered by Romacs: ")
+                (pcase by ("user" "answered: ") ("policy" "answered by Romacs: ")
+                       ("harness" "answered by the harness: ") (_ "answered: "))
                 ;; One question: its answer; more: each question with its own.
                 (let ((one (= (hash-table-count answers) 1)))
                   (mapconcat (lambda (question)
