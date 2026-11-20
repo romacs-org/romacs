@@ -150,6 +150,16 @@ place_release() {
     fi
 }
 
+# Move the agents' sessions still kept in journals (an earlier release's)
+# into their SQLite store, before any Romacs starts: once, as every later
+# install finds them done.  One whose agent still runs waits for the next.
+migrate_agents() {
+    [ -d "${XDG_STATE_HOME:-$HOME/.local/state}/romacs/agents" ] || return 0
+    say "Moving the agents' sessions to their store"
+    "$prefix/bin/romacs" --batch -l romacs-agent -f romacs-agent-events-migrate-batch ||
+        warn "some agent sessions could not be moved; they stay in their journals for the next install."
+}
+
 report_session() {
     case :$PATH: in
         *":$bin:"*) ;;
@@ -188,6 +198,7 @@ main() {
     trap 'rm -rf -- "$work" "$staging"' EXIT
     fetch_release "$channel" "$work"
     place_release "$work/$name.tar.gz"
+    migrate_agents
     report_session
     say "Romacs is installed. Run: romacs (its first start prepares it, as its window shows)"
 }

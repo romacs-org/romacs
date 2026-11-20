@@ -180,7 +180,7 @@ impl Vm {
     /// of BUFFER, the current one: `add_text_properties_1` gives the text an
     /// interval tree before it prepares, so the read-only checks always run.
     pub(crate) fn prepare_property_change(&mut self, buffer: Value, start: i64, end: i64, bytes: std::ops::Range<ByteOffset>) -> Faulty<Prepared> {
-        let index = buffer.index(0).map_err(Fault::Error)? - 1;
+        let index = buffer.object_index().map_err(Fault::Error)?;
         let overlays = self.buffer_has_overlays(index);
         self.prepare_change_at(buffer, start, end, Some((bytes.start, bytes.end)), true, overlays)
     }

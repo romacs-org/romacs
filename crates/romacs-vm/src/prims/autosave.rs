@@ -10,8 +10,6 @@ use super::*;
 /// auto-save file is created with while `do-auto-save' runs.
 pub(super) const AUTO_SAVING: &str = "#:vm2-auto-saving";
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/auto-save.el");
-
 defsubr! { name = "do-auto-save", gnu = "fileio.c:6315", effect = Global,
 fn do_auto_save(cx; optional no_message: Value, current_only: Value) -> Step {
     // The loop runs `auto-save-hook' as keyboard.c safe_run_hooks does,
@@ -24,9 +22,7 @@ fn do_auto_save(cx; optional no_message: Value, current_only: Value) -> Step {
 fn keyboard_installed(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
     let helper = cx.intern("romacs--do-auto-save");
     if cx.symbol_function(helper)? != Value::NIL { return half_installed(cx, Value::NIL, saved); }
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/auto-save.el")?;
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: half_installed, saved: saved.to_vec() })
 }
 

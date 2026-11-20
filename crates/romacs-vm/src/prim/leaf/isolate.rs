@@ -95,6 +95,14 @@ impl Leaf<'_> {
             && lines.next() == Some(program.as_str()))
     }
 
+    pub(crate) fn isolate_hello_refusal(&mut self, text: Value) -> Out {
+        let text = String::from_utf8_lossy(self.string_view(text)?.bytes()).into_owned();
+        Ok(match crate::isolate::refusal(&text) {
+            Some(reason) => self.vm.make_lisp_string(reason.as_bytes().to_vec(), true),
+            None => Value::NIL,
+        })
+    }
+
     pub(crate) fn isolate_hello(&mut self, boot: Value) -> Out {
         let boot = self.symbol_name(boot)?;
         let text = crate::isolate::hello(&boot);

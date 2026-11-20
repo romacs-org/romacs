@@ -316,13 +316,22 @@ call for an undo boundary, 1 when it might not have been simple."
 
 (defun romacs--casify-noncontiguous (function)
   "casefiddle.c casify_pnc_region: FUNCTION, a region casing command, on
-each (BEG . END) of the bounds `region-extract-function' gives."
-  (let ((bounds (funcall region-extract-function 'bounds)))
+each (BEG . END) of the bounds `region-extract-function' gives.
+A circular list of bounds signals `circular-list' where GNU's FOR_EACH_TAIL
+does (lisp.h): the tortoise stays at the head, and moves up to the tail
+after 4096 steps and each later power of two, until the tail meets it."
+  (let* ((bounds (funcall region-extract-function 'bounds))
+         (tortoise bounds)
+         (steps 0))
     (while (consp bounds)
       (let ((bound (car bounds)))
         (or (consp bound) (signal 'wrong-type-argument (list 'consp bound)))
         (funcall function (car bound) (cdr bound)))
-      (setq bounds (cdr bounds)))
+      (setq bounds (cdr bounds))
+      (if (eq bounds tortoise) (signal 'circular-list (list bounds)))
+      (setq steps (1+ steps))
+      (if (and (= (logand steps 4095) 0) (= (logand steps (1- steps)) 0))
+          (setq tortoise bounds)))
     (if bounds (signal 'wrong-type-argument (list 'listp bounds))))
   nil)
 

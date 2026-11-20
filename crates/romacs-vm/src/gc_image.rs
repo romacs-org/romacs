@@ -128,15 +128,21 @@ mod tests {
     }
 
     /// A VM whose heap is made the image's, as a restore makes it, after
-    /// SETUP and a collection; verify on, so every full's mark is held to
-    /// the reference walk, which reads through permanent entries.
+    /// SETUP and a compacting collection (a world is captured dense); verify
+    /// on, so every full's mark is held to the reference walk, which reads
+    /// through permanent entries.
     fn imaged(setup: &str) -> Vm {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         eval(&mut vm, setup);
-        vm.collect(&mut []);
+        dense(&mut vm, &mut []);
         vm.make_image_permanent();
         vm
+    }
+    /// A compacting collection keeping ROOTS: the tables dense, as a world's.
+    fn dense(vm: &mut Vm, roots: &mut [Value]) {
+        vm.allocation.compact = true;
+        vm.collect(roots);
     }
 
     /// A full's mark leaves an untouched image entry unread, reads the ones
@@ -225,21 +231,29 @@ mod tests {
             '((old) (new) (sym) t))"));
     }
 
-    /// A permanent cell's lexical pair, named by `cell_pairs` alone, is a
-    /// root of every full: one made since the restore survives with what it
-    /// holds, and the cell that takes its value is remembered from then on.
-    #[test]
-    fn a_full_keeps_the_new_lexical_pair_of_a_permanent_cell() {
+    /// A permanent cell with a new lexical pair, its pair's value young:
+    /// the VM, the roots naming the cell, the cell's index and the value.
+    fn permanent_cell_with_a_new_pair() -> (Vm, [Value; 1], usize, Value) {
         let mut vm = Vm::new();
         vm.set_gc_verify(true);
         let cell = vm.alloc_cell(Value::TRUE);
         let mut roots = [Value::reference(cell, 5)];
-        vm.collect(&mut roots);
+        dense(&mut vm, &mut roots);
+        let cell = roots[0].index_if(5).unwrap();
         vm.make_image_permanent();
         assert!(vm.cells.permanent(cell));
         let young = vm.alloc_cons(Value::integer(5).unwrap(), Value::NIL);
         let pair = vm.alloc_cons(Value::NIL, young);
         vm.cell_pairs.insert(cell, pair);
+        (vm, roots, cell, young)
+    }
+
+    /// A permanent cell's lexical pair, named by `cell_pairs` alone, is a
+    /// root of every full: one made since the restore survives with what it
+    /// holds, and the cell that takes its value is remembered from then on.
+    #[test]
+    fn a_full_keeps_the_new_lexical_pair_of_a_permanent_cell() {
+        let (mut vm, mut roots, cell, young) = permanent_cell_with_a_new_pair();
         vm.collect(&mut roots);
         assert_eq!(vm.cells[cell], young, "the cell took its pair's value");
         assert!(vm.cells.is_remembered(cell), "and is read by every full from now on");
@@ -247,27 +261,121 @@ mod tests {
         assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(5).unwrap());
     }
 
-    /// An image function changed in place since the restore is read by
-    /// every full, and so is what it was given; an untouched one is not, but
-    /// the lowered code made for it since is: a callee a call site of an
-    /// image function entered, which nothing else names, is kept (verify's
-    /// walk reads lowered code).
+    /// A minor that meets the same pair makes the cell remembered too, and
+    /// leaves it unmarked: its card is clear, so its sweep never meets it
+    /// (`Table::remember`), and the next full still reads it.
     #[test]
-    fn a_full_reads_the_image_functions_changed_and_lowered_since_the_restore() {
-        use crate::{Closure, Form, Op};
-        let mut vm = imaged("(progn (defun img-caller () (img-callee)) (defun img-callee () 1) (img-caller))");
-        let id = vm.compile(&Form::Int(0)).unwrap();
-        let index = vm.closures.len();
-        vm.closures.push(Closure { function: id, captures: vec![], metadata: vec![], document: Value::NIL });
-        let mut roots = [Value::reference(index, 4)];
+    fn a_minor_then_a_full_keep_the_new_lexical_pair_of_a_permanent_cell() {
+        let (mut vm, mut roots, cell, young) = permanent_cell_with_a_new_pair();
+        assert!(vm.collect_minor(&roots));
+        assert!(vm.cells.is_remembered(cell) && !vm.cells.claimed(cell), "remembered, and no mark left");
         vm.collect(&mut roots);
+        assert_eq!(vm.cells[cell], young, "the cell took its pair's value");
+        vm.collect(&mut roots);
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(5).unwrap());
+    }
+
+    /// A young value stored into an image entry is read by the next minor,
+    /// through the entry's card, which leaves the entry remembered for every
+    /// full. That minor makes the value old, as it makes every survivor, so
+    /// the minor after it passes the card, clear again, and keeps the value
+    /// too. Were a minor to leave a survivor young, the card would have to
+    /// stay set: this would then fail.
+    #[test]
+    fn a_young_value_stored_into_an_image_entry_outlives_two_minors() {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        let cons = vm.alloc_cons(Value::NIL, Value::NIL);
+        let mut roots = [cons];
+        dense(&mut vm, &mut roots);
+        let i = roots[0].index_if(3).unwrap();
         vm.make_image_permanent();
+        let young = vm.alloc_cons(Value::integer(9).unwrap(), Value::NIL);
+        vm.conses.set_car(i, young);
+        assert!(vm.collect_minor(&roots));
+        assert!(vm.conses.is_remembered(i), "the store is recorded for every full");
+        assert!(!vm.conses.touched().iter().any(|run| run.contains(&i)), "the entry's card is clear");
+        assert!(vm.collect_minor(&roots));
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(9).unwrap());
+        vm.collect(&mut roots);
+        assert_eq!(vm.conses[i].0, young);
+    }
+
+    /// A VM whose heap is made the image's after SETUP, as `imaged`, the
+    /// closures it made named by nothing but image entries: no source-cache
+    /// entry, prepared or compiled handle, each of which pins its code on
+    /// its own.
+    fn imaged_bare(setup: &str) -> Vm {
+        let mut vm = Vm::new();
+        vm.set_gc_verify(true);
+        eval(&mut vm, setup);
+        vm.clear_source_cache();
+        dense(&mut vm, &mut []);
+        vm.make_image_permanent();
+        vm
+    }
+    /// The function of the closure SOURCE evaluates to, which must be
+    /// request-owned code, retired once unmarked, and the closure's index.
+    fn request_function(vm: &mut Vm, source: &str) -> (usize, usize) {
+        let closure = eval(vm, source).index_if(4).expect("a closure");
+        let function = vm.closures[closure].function;
+        assert!(vm.request_code.live[function] && !vm.request_code.permanent[function], "{source}: request-owned, pinned by nothing");
+        (function, closure)
+    }
+    /// Whether request function ID is still installed with its code.
+    fn kept(vm: &Vm, id: usize) -> bool {
+        vm.request_code.live[id] && !vm.functions[id].code.is_empty()
+    }
+    /// Fulls with only the image naming what the test made.
+    fn fulls(vm: &mut Vm) {
+        vm.clear_source_cache();
+        for _ in 0..2 { vm.collect(&mut []); }
+    }
+
+    /// An image function untouched since the restore, which only a
+    /// permanent closure names, starts reached: a full neither retires it nor
+    /// reads it.
+    #[test]
+    fn a_full_keeps_an_untouched_image_function_only_a_permanent_closure_names() {
+        let mut vm = imaged_bare("(setq img-f (lambda (x) (list x 'body)))");
+        let (function, closure) = request_function(&mut vm, "img-f");
+        assert!(vm.closures.permanent(closure));
+        fulls(&mut vm);
+        assert!(kept(&vm, function), "the function lives");
+        assert!(is_true(&mut vm, "(equal (funcall img-f 1) '(1 body))"));
+    }
+
+    /// An image function changed since the restore (as a lazy body's
+    /// materialization replaces one), which only a permanent closure names,
+    /// is read by every full: what its new code names survives.
+    #[test]
+    fn a_full_reads_an_image_function_changed_since_the_restore() {
+        use crate::Op;
+        let mut vm = imaged_bare("(setq img-g (lambda () 'old))");
+        let (function, _) = request_function(&mut vm, "img-g");
         let young = vm.alloc_cons(Value::integer(7).unwrap(), Value::NIL);
-        std::sync::Arc::get_mut(vm.functions.change(id)).unwrap().code = vec![Op::Const(0, young)];
-        eval(&mut vm, "(progn (defun img-callee () (list 2)) (img-caller) (defun img-callee () 3) nil)");
-        for _ in 0..2 { vm.collect(&mut roots); }
-        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(7).unwrap(), "the changed function's constant survived");
-        assert!(is_true(&mut vm, "(equal (img-caller) 3)"));
+        std::sync::Arc::make_mut(vm.functions.change(function)).code = vec![Op::Const(0, young)];
+        fulls(&mut vm);
+        assert!(kept(&vm, function), "the function lives");
+        assert_eq!(vm.conses[young.index_if(3).unwrap()].0, Value::integer(7).unwrap(), "its new constant survived");
+    }
+
+    /// Calling an untouched image function fills its lowered call site with
+    /// the callee made since the restore. With nothing else naming the
+    /// callee, a full keeps it through that lowered code.
+    #[test]
+    fn a_full_keeps_the_callee_an_untouched_image_functions_lowered_code_entered() {
+        let mut vm = imaged_bare("(progn (setq img-target nil) (setq img-caller (lambda () (funcall img-target))))");
+        let (caller, _) = request_function(&mut vm, "img-caller");
+        eval(&mut vm, "(setq img-target (lambda () (list 'new)))");
+        let (callee, _) = request_function(&mut vm, "img-target");
+        assert!(is_true(&mut vm, "(equal (funcall img-caller) '(new))"));
+        let mut entered = Vec::new();
+        vm.execution.lowered_values(caller, &mut |_| {}, &mut |f| entered.push(f));
+        assert!(entered.contains(&callee), "the caller's lowered site entered the callee: {entered:?}");
+        eval(&mut vm, "(setq img-target nil)");
+        fulls(&mut vm);
+        assert!(kept(&vm, callee), "the callee lives through the lowered entry alone");
     }
 
     /// An image char table's nodes written since the restore are read by a
@@ -303,7 +411,7 @@ mod tests {
     fn the_census_counts_the_untraced_image() {
         let mut vm = Vm::new();
         eval(&mut vm, "(progn (setq img-strings nil img-vec (make-vector 100 nil) img-wide (string #x3b2 ?b)) (dotimes (i 500) (setq img-strings (cons (number-to-string i) img-strings))))");
-        vm.collect(&mut []);
+        dense(&mut vm, &mut []);
         vm.collect(&mut []);
         let traced = vm.gc_census;
         vm.make_image_permanent();

@@ -138,6 +138,7 @@ mod frozen;
 mod isolate;
 mod keeper;
 pub use isolate::worker_socket as isolate_worker_socket;
+pub use isolate::refuse as isolate_refuse;
 mod request_code;
 pub use gc::HeapStats;
 pub use image::{ImageBuilder, ImageRegion};
@@ -380,13 +381,62 @@ impl Value {
             Self(((index as u64) << 3) | tag)
         }
     }
+    /// The payload of a reference of logical tag TAG. Every caller passes a
+    /// constant: a tag that is its own three bits (0, 3, 4, 6, 7) is then one
+    /// mask and compare, and only fixnums and cells take `tag`'s decode.
+    #[inline(always)]
     fn index_if(self, tag: u64) -> Option<usize> {
-        (self.tag() == tag).then_some(self.payload() as usize)
+        match tag {
+            0 | 3 | 4 | 6 | 7 => (self.0 & 7 == tag).then_some((self.0 >> 3) as usize),
+            _ => (self.tag() == tag).then_some(self.payload() as usize),
+        }
     }
+    #[inline(always)]
     fn index(self, tag: u64) -> Result<usize> {
-        self.index_if(tag)
-            .ok_or_else(|| format!("wrong value type (expected tag {tag})"))
+        self.index_if(tag).ok_or_else(|| wrong_tag(tag))
     }
+    /// Whether this value has logical tag TAG; every caller passes a
+    /// constant. A tag that is its own three bits is one mask and compare,
+    /// as in `index_if`. `tag() == TAG` also pays the fixnum test, which
+    /// LLVM does not fold away: a cons test is 8 instructions against 3.
+    #[inline(always)]
+    fn tag_is(self, tag: u64) -> bool {
+        match tag {
+            0 | 3 | 4 | 6 | 7 => self.0 & 7 == tag,
+            1 => self.0 & 3 == 1,
+            5 => self.0 & 7 == 2 && self != Self::TRUE,
+            _ => self.tag() == tag,
+        }
+    }
+    /// The object table entry this object reference names: its index less
+    /// one. Nil shares the tag with index 0 and names no object; taking its
+    /// entry is the caller's bug, which a debug build stops at and a release
+    /// build signals. Neither wraps to a wrong entry.
+    fn object_index(self) -> Result<usize> {
+        let index = self.index(0)?;
+        debug_assert!(index != 0, "object_index: nil names no object table entry");
+        index.checked_sub(1).ok_or_else(|| "nil names no object".into())
+    }
+    /// As `object_index`, None for nil and every other non-object, where
+    /// the caller means "no object" by them.
+    fn object_index_if(self) -> Option<usize> {
+        self.index_if(0)?.checked_sub(1)
+    }
+}
+
+/// `Value::index`'s refusal, built only when it is one. Callers that test
+/// with `index` meet it on ordinary control flow, so its text is copied from
+/// a constant rather than formatted.
+#[cold]
+#[inline(never)]
+fn wrong_tag(tag: u64) -> String {
+    const TEXT: [&str; 8] = [
+        "wrong value type (expected tag 0)", "wrong value type (expected tag 1)",
+        "wrong value type (expected tag 2)", "wrong value type (expected tag 3)",
+        "wrong value type (expected tag 4)", "wrong value type (expected tag 5)",
+        "wrong value type (expected tag 6)", "wrong value type (expected tag 7)",
+    ];
+    TEXT.get(tag as usize).map_or_else(|| format!("wrong value type (expected tag {tag})"), |&text| text.into())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1322,6 +1372,9 @@ pub struct Vm {
     regexp: regexp::MatchState,
     #[snapshot(at_rest)]
     regexp_cache: regexp::PatternCache,
+    /// Compiled tree-sitter queries by grammar and text (`treesit::query_memo`).
+    #[snapshot(at_rest)]
+    treesit_queries: treesit::query_memo::Memo,
     /// The char tables read as flat rows (`char_table::flat`).
     #[snapshot(at_rest)]
     flat_tables: char_table::FlatTables,
@@ -1548,6 +1601,15 @@ pub struct Vm {
     resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// The slots of `permanent-local' and `permanent-local-hook', the
+    /// properties `kill-all-local-variables' asks each Lisp local about, and
+    /// of the hook it runs first.
+    pub(crate) permanent_local_slot: usize,
+    pub(crate) permanent_local_hook_slot: usize,
+    pub(crate) change_major_mode_hook_slot: usize,
+    /// The slot of `obarray`, the variable, kept from its making
+    /// (`Vm::slot`); `usize::MAX` until then (`Vm::initial_obarray`).
+    obarray_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
     variable_redirects: Vec<Option<VariableRedirect>>,
@@ -1617,10 +1679,11 @@ pub struct Vm {
     symbol_names: Vec<String>,
     obarray_symbol_names: HashMap<usize, Value>,
     permanent_symbol_names: HashMap<u64, Value>,
-    /// The names `permanent_symbol_names` took since the last collection,
-    /// the only ones a minor can find young.
+    /// The symbol names made since the last collection, the only ones a
+    /// minor can find young: those `permanent_symbol_names` took, and those
+    /// of symbols of obarrays of their own (`obarray_symbol_names`).
     #[snapshot(at_rest)]
-    permanent_names_added: Vec<Value>,
+    names_added: Vec<Value>,
     // CELL(Held)
     native_case_roots: [std::sync::Weak<std::sync::Mutex<char_table::CharTableNode>>; 4],
     obarray_free_slots: Vec<usize>,
@@ -1778,10 +1841,11 @@ impl Vm {
             buffer_resolutions: 0,
             regexp: regexp::MatchState::default(),
             regexp_cache: regexp::PatternCache::default(),
+            treesit_queries: treesit::query_memo::Memo::default(),
             flat_tables: char_table::FlatTables::default(),
             shared_holders: None,
             caches_filled: Vec::new(),
-            permanent_names_added: Vec::new(),
+            names_added: Vec::new(),
             payload_settled: 0,
             mode_line_forms: Default::default(),
             images: Default::default(),
@@ -1861,6 +1925,10 @@ impl Vm {
             resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            permanent_local_slot: usize::MAX,
+            permanent_local_hook_slot: usize::MAX,
+            change_major_mode_hook_slot: usize::MAX,
+            obarray_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
@@ -2061,6 +2129,9 @@ impl Vm {
         }
         vm.declare_special_raw("macroexp--dynvars", Value::NIL);
         vm.truncate_lines_slot = vm.slot("truncate-lines");
+        vm.permanent_local_slot = vm.slot("permanent-local");
+        vm.permanent_local_hook_slot = vm.slot("permanent-local-hook");
+        vm.change_major_mode_hook_slot = vm.slot("change-major-mode-hook");
         vm.declare_special_raw("menu-bar-lines", Value::integer(0).unwrap());
         vm.specials.insert("major-mode".into());
         // GNU's DEFVAR macros mark every built-in variable special.
@@ -2132,7 +2203,11 @@ impl Vm {
         self.initialize_c_special(name, i);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
-        if name == "obarray" {
+        // The first `obarray' is the variable, its slot kept as GNU's
+        // `Vobarray' is its symbol's; one interned after it was uninterned
+        // is a plain symbol, as in GNU.
+        if name == "obarray" && self.obarray_slot == usize::MAX {
+            self.obarray_slot = i;
             self.slots[i].value = self.allocate_object(data::Object::Obarray(Box::new(obarray::Obarray::new(3, true))));
             self.specials.insert(name.to_owned());
         }
@@ -3930,7 +4005,7 @@ impl Vm {
                 data::Object::SubCharTable(_) => Ok("#<sub-char-table>".into()),
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(t) => self.display_table(t, depth),
-                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", t.len())),
+                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", self.obarray_count(t))),
                 data::Object::Free => Err("invalid object reference".into()),
                 data::Object::Bytes(v) => Ok(format!(
                     "#u8({})",
@@ -4230,3 +4305,28 @@ mod capture_tests {
 mod orderless;
 mod fzf;
 pub use fzf::advance_completion_generation;
+
+#[cfg(test)]
+mod object_index_tests {
+    use super::*;
+    /// An object reference's entry is its index less one; nil names none.
+    #[test]
+    fn an_object_reference_names_its_entry_and_nil_none() {
+        assert_eq!(Value::reference(5, 0).object_index(), Ok(4));
+        assert_eq!(Value::reference(5, 0).object_index_if(), Some(4));
+        assert_eq!(Value::NIL.object_index_if(), None);
+    }
+    /// Taking nil's entry is the caller's bug: a debug build stops there.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "nil names no object table entry")]
+    fn a_debug_build_stops_at_nils_entry() {
+        let _ = Value::NIL.object_index();
+    }
+    /// A release build signals it, and never wraps to an entry.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_signals_for_nils_entry() {
+        assert!(Value::NIL.object_index().is_err());
+    }
+}

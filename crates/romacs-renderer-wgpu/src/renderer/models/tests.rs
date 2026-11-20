@@ -8,13 +8,16 @@ use crate::model::obj::parse_obj;
 use crate::model::scene::remaining_limits;
 use romacs_display_protocol::model::ModelView;
 
-/// A headless renderer, or `None` to skip; `ROMACS_MODEL_REQUIRE_EVIDENCE=1`
-/// makes a missing adapter a failure instead of a silent pass.
+/// A headless renderer that draws models, or `None` to skip;
+/// `ROMACS_MODEL_REQUIRE_EVIDENCE=1` makes a missing adapter, or one that
+/// does not draw models, a failure instead of a silent pass.
 fn try_renderer() -> Option<WgpuRenderer> {
-    let renderer = crate::gpu_policy::test_gpu::renderer(64, 64).ok();
+    let renderer = crate::gpu_policy::test_gpu::renderer(64, 64)
+        .ok()
+        .filter(|_| crate::gpu_policy::test_gpu::draws_models());
     assert!(
         renderer.is_some() || std::env::var_os("ROMACS_MODEL_REQUIRE_EVIDENCE").is_none(),
-        "GPU evidence required but no headless wgpu adapter"
+        "GPU evidence required but no headless wgpu adapter that draws models"
     );
     renderer
 }

@@ -1237,11 +1237,13 @@ Should be invoked when the cached images aren't up-to-date."
 
 (defun doc-view-pdf-password-protected-ghostscript-p (pdf)
   "Return non-nil if a PDF file is password-protected.
-The test is performed using `doc-view-ghostscript-program'."
+The test is performed using `doc-view-ghostscript-program', on the first
+page alone: ghostscript says so on opening the file, and running the
+whole document takes seconds for a book."
   (with-temp-buffer
     (apply #'call-process doc-view-ghostscript-program nil (current-buffer)
            nil `(,@doc-view-ghostscript-options
-                 "-sNODISPLAY"
+                 "-sNODISPLAY" "-dFirstPage=1" "-dLastPage=1"
                  ,pdf))
     (goto-char (point-min))
     (search-forward "This file requires a password for access." nil t)))

@@ -170,7 +170,7 @@ longer its conversation's, or one with no checkpoint when :files."
 unless QUIET."
   (when (eq (romacs-agent-rollback--holder session) token)
     (romacs-agent-rollback--hold session nil)
-    (when (and (not quiet) (romacs-agent-queue session)) (romacs-agent--send-next session nil))))
+    (unless quiet (romacs-agent--dispatch session))))
 
 (defun romacs-agent-rollback--await (session token match then)
   "Call THEN with SESSION's first event MATCH accepts, once: while SESSION

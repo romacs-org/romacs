@@ -176,7 +176,7 @@ line's `env' sets only its own configuration variable."
    (load romacs-agent-driver-test--fakerpc nil t)
    (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (written nil))
      (let ((session (romacs-agent--make :id "rpc-own" :harness 'fakerpc :cwd "/tmp" :state 'idle
-                                        :input-seq 3 :done-seq 4 :own-turn "renew-note")))
+                                        :input-seq 3 :done-seq 4 :completed-seq 4 :own-turn "renew-note")))
        (puthash "rpc-own" session romacs-agent--sessions)
        (setf (romacs-agent-driver-state session) (list :ready t :compact-turn t))
        (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
@@ -190,10 +190,11 @@ line's `env' sets only its own configuration variable."
          (romacs-agent-driver-test--feed session 5 "in" (car written))
          (should-not (plist-get (romacs-agent-driver-state session) :compact-turn)))))))
 
-(ert-deftest romacs-agent-a-message-sent-while-replaying-claims-no-turn ()
-  ;; Written before its attachment caught up with its records: the turn
-  ;; they may yet end (an exit replayed) is not this message's, so the
-  ;; session stays as its records leave it, the message's asker unclaimed.
+(ert-deftest romacs-agent-a-message-sent-while-replaying-waits ()
+  ;; Sent before its attachment caught up with its records: the turn they
+  ;; may yet end (an exit replayed) is not this message's, so it waits,
+  ;; the session as its records leave it, the message's asker unclaimed;
+  ;; caught up, it goes.
   (romacs-agent-driver-test--registry
    (load romacs-agent-driver-test--fakerpc nil t)
    (let ((romacs-agent--sessions (make-hash-table :test #'equal)) (written nil))
@@ -206,9 +207,13 @@ line's `env' sets only its own configuration variable."
                  ((symbol-function 'romacs-agent--changed) #'ignore)
                  ((symbol-function 'process-live-p) (lambda (_) t)))
          (romacs-agent-send session "hello")
-         (should written)
+         (should-not written)
          (should (eq (romacs-agent-state session) 'idle))
-         (should (equal (romacs-agent-answering session) "earlier")))))))
+         (should (equal (romacs-agent-answering session) "earlier"))
+         (setf (romacs-agent-caught-up session) t)
+         (romacs-agent--dispatch session)
+         (should written)
+         (should (eq (romacs-agent-state session) 'running)))))))
 
 (ert-deftest romacs-agent-ready-with-a-prompt-waiting-is-never-idle ()
   ;; Ready with its first prompt waiting: the prompt goes, and the session
@@ -223,9 +228,9 @@ line's `env' sets only its own configuration variable."
        (let ((session (romacs-agent--make :id "rpc-ready" :harness 'fakerpc :cwd "/tmp" :state 'starting)))
          (puthash "rpc-ready" session romacs-agent--sessions)
          (pcase case
-           ('prompt (romacs-agent--enqueue session (list "hello" nil nil nil nil)))
-           ('unwanted (romacs-agent--enqueue session (list "hello" nil #'ignore nil nil)))
-           ('held (romacs-agent--enqueue session (list "hello" nil nil nil nil))
+           ('prompt (romacs-agent--enqueue session (romacs-agent-item "hello")))
+           ('unwanted (romacs-agent--enqueue session (romacs-agent-item "hello" :valid #'ignore)))
+           ('held (romacs-agent--enqueue session (romacs-agent-item "hello"))
                   (setf (romacs-agent-pending-selection session) '(:model "m"))))
          (cl-letf (((symbol-function 'romacs-agent--line) (lambda (_ object &rest _) (push object written)))
                    ((symbol-function 'romacs-agent--fold-now) #'ignore)
@@ -255,7 +260,7 @@ line's `env' sets only its own configuration variable."
               (should (= (romacs-agent-queue-length session) 1))
               ;; The hold ended: the waiting prompt goes.
               (setf (romacs-agent-pending-selection session) nil)
-              (romacs-agent--send-next session)
+              (romacs-agent--dispatch session)
               (should (= (length written) 3))
               (should (= (romacs-agent-queue-length session) 0)))
              (_ (should (eq (romacs-agent-state session) 'idle))))))))))

@@ -91,7 +91,7 @@ state, would otherwise lose before the renewal is finished.")
     (romacs-agent-renew--hold session nil)
     ;; Its debt is its own again, unless the renewal is journaled.
     (unless (romacs-agent-renewing session) (remhash session romacs-agent-renew--owed))
-    (when (romacs-agent-queue session) (romacs-agent--send-next session nil))))
+    (romacs-agent--dispatch session)))
 
 (defvar romacs-agent-renew--written (make-hash-table :test #'eq :weakness 'key)
   "Sessions to the request id of the last prompt written to their harness
@@ -371,10 +371,19 @@ else none.  The turn failing, or its harness ending, gives none."
                                 (run-at-time 0 nil then (and note (not (string-empty-p note)) note)
                                              (if (and note (not (string-empty-p note))) "note" "selection"))))))))
       (add-hook 'romacs-agent-event-functions waiter)
-      (condition-case nil
-          (romacs-agent--input session romacs-agent-renew--note-prompt nil nil "renew-note")
-        (error (remove-hook 'romacs-agent-event-functions waiter)
-               (funcall then nil "selection")))))))
+      ;; Written now, through its hold, or not at all.
+      (let ((item (romacs-agent-item romacs-agent-renew--note-prompt :own "renew-note" :token token)))
+        (condition-case nil
+            ;; Never left queued, however this ends (a quit too): at the
+            ;; queue's head it would hold everything behind it.
+            (unwind-protect
+                (progn (romacs-agent--admit session item t)
+                       (when (memq item (romacs-agent-queue session)) (error "Not written")))
+              (romacs-agent--dequeue session item))
+          ;; A quit too: the renewal goes on without its note, and lets go
+          ;; of its hold as it does.
+          ((quit error) (remove-hook 'romacs-agent-event-functions waiter)
+           (funcall then nil "selection"))))))))
 
 (defvar romacs-agent-renew--finishing (make-hash-table :test #'eq :weakness 'key)
   "Sessions whose journaled renewal is being finished: once each.")
@@ -411,7 +420,7 @@ says so, and its harness runs anew on it.  Once: its new run's note ends it."
                ;; the new conversation first: its next run would lose it.
                (when-let* ((owed (or (romacs-agent-renew--owed-now session) (gethash session romacs-agent-renew--owed))))
                  (dolist (turn (reverse owed))
-                   (romacs-agent--enqueue-first session (list (car turn) nil nil (cadr turn)))))
+                   (romacs-agent--enqueue-first session (romacs-agent-item (car turn) :images (cadr turn) :kind 'next))))
                (remhash session romacs-agent-renew--owed)
                (romacs-agent--relaunch session))
       (error (remhash session romacs-agent-renew--finishing)

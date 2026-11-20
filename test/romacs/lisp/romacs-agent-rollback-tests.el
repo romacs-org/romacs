@@ -413,7 +413,7 @@ and its resume reads none of the session's records."
      (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 9 "turns" 1 "prompt" "dropped prompt"
                                                     "files" t)))
     (romacs-agent-test-stored session)
-    (let ((buffer (save-window-excursion (romacs-agent-show session))))
+    (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat session))))
       (unwind-protect
           (with-current-buffer buffer
             (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
@@ -441,7 +441,7 @@ and its resume reads none of the session's records."
       (should (equal (car (car (romacs-agent-queue session))) "meanwhile"))
       (should-not written)
       ;; Once released, what waited goes on as usual.
-      (cl-letf (((symbol-function 'romacs-agent--send-next) (lambda (s &rest _) (push s released))))
+      (cl-letf (((symbol-function 'romacs-agent--dispatch) (lambda (s &rest _) (push s released))))
         (while (and (not outcome) (< (float-time) end)) (accept-process-output nil 0.05)))
       (should (equal outcome '(:done 1)))
       (should-not (plist-get (romacs-agent-driver-state session) :rolling-back))

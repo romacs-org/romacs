@@ -702,18 +702,35 @@ impl Vm {
         chain.pruned = chain.members.len();
     }
     /// The slots of the variables the buffer at object INDEX has a Lisp
-    /// local of, in slot order: its own store's.
+    /// local of, in slot order: its own store's. The tests' view of it;
+    /// `Vm::held_local_slots` reads the store directly.
+    #[cfg(test)]
     pub(crate) fn local_slots(&self, index: usize) -> Vec<usize> {
         self.per_buffer(index).map_or_else(Vec::new, |b| b.locals().iter().filter_map(|(symbol, _)| symbol.index_if(7).map(|i| i - 1)).collect())
     }
-    /// The slots of the variables the buffer at object INDEX may have a
-    /// local binding of, in slot order: the always local
-    /// `enable-multibyte-characters', the per-buffer built-ins and its
-    /// Lisp locals.
-    pub(crate) fn local_candidates(&mut self, index: usize) -> Vec<usize> {
-        let mut slots = self.local_slots(index);
+    /// The slots of the variables the buffer at object INDEX holds a local
+    /// value of, in slot order: the always local
+    /// `enable-multibyte-characters', its Lisp locals and the per-buffer
+    /// built-ins it set. What it holds, not a lookup per built-in: one pass
+    /// over its stored per-buffer values into one vector, and a name lookup
+    /// and a sort for each of the K it holds.
+    pub(crate) fn held_local_slots(&self, index: usize) -> Vec<usize> {
+        let mut slots = Vec::with_capacity(8);
         slots.push(self.multibyte_slot);
-        slots.extend(self.per_buffer_slots());
+        if let Some(b) = self.per_buffer(index) {
+            slots.extend(b.locals().iter().filter_map(|(symbol, _)| symbol.index_if(7).map(|i| i - 1)));
+            slots.extend(b.set_indices().filter(|&i| !self.per_buffer_always_local(i as u16)).filter_map(|i| self.per_buffer_slot(i)));
+        }
+        slots.sort_unstable();
+        slots.dedup();
+        slots
+    }
+    /// The slots of the variables the buffer at object INDEX has a local
+    /// binding of, in slot order: what it holds (`Vm::held_local_slots`) and
+    /// the per-buffer built-ins local in every buffer.
+    pub(crate) fn local_candidates(&mut self, index: usize) -> Vec<usize> {
+        let mut slots = self.held_local_slots(index);
+        slots.extend(crate::forwarded::always_local_indices().filter_map(|i| self.per_buffer_slot(i)));
         slots.sort_unstable();
         slots.dedup();
         slots
@@ -2190,7 +2207,7 @@ impl Vm {
             if !self.buffer_state(buffer).map_err(Fault::Error)?.modified() {
                 self.record_first_change().map_err(Fault::Error)?;
             }
-            let index = buffer.index(0).map_err(Fault::Error)? - 1;
+            let index = buffer.object_index().map_err(Fault::Error)?;
             match self.objects.entry_mut(index) {
                 Object::Buffer(b) => b.state.record_change(false),
                 Object::ByteBuffer(b) => b.state.record_change(false),
@@ -2204,7 +2221,7 @@ impl Vm {
 
     /// Whether BUFFER keeps undo: its undo list is not t.
     pub(crate) fn keeps_undo(&mut self, buffer: Value) -> std::result::Result<bool, crate::prim::Fault> {
-        let index = buffer.index(0).map_err(crate::prim::Fault::Error)? - 1;
+        let index = buffer.object_index().map_err(crate::prim::Fault::Error)?;
         Ok(self.undo_list_of(index) != Value::TRUE)
     }
 
@@ -2216,7 +2233,7 @@ impl Vm {
             let (condition, data) = self.read_only_signal(plan.object);
             return Err(Fault::Signal(condition, data));
         }
-        let index = plan.object.index(0).map_err(Fault::Error)? - 1;
+        let index = plan.object.object_index().map_err(Fault::Error)?;
         if undo {
             let undo = self.property_undo(plan.object, plan.range.clone(), &plan.change)?;
             let current = self.slots[self.buffer_slot].value;

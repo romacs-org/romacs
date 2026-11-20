@@ -48,6 +48,31 @@ fn region_extract_function_is_special() {
     ]);
 }
 
+/// casefiddle.c casify_pnc_region walks the bounds with FOR_EACH_TAIL: each
+/// bound is cased in turn, a bound that is not a cons or a dotted end
+/// signals once the bounds before it are cased, and a circular list signals
+/// `circular-list` rather than casing forever (casefiddle-tests.el's
+/// casefiddle-invalid-region-extract-function). A cycle behind a prefix
+/// (A B C B ...) is found where FOR_EACH_TAIL finds it: with the tail C,
+/// after as many casings.
+#[test]
+fn noncontiguous_casing_walks_the_bounds() {
+    same_as_gnu("noncontiguous-case", &[
+        "(with-temp-buffer (insert \"abcd efgh\") (let ((f (lambda (bounds) (let ((region-extract-function (lambda (_) bounds))) (condition-case e (upcase-region nil nil t) (error (car e))))))) (list (funcall f (let ((l (list (cons 1 3)))) (setcdr l l))) (funcall f '(nil)) (funcall f '((6 . 8) . 5)) (funcall f '((8 . 10) (3 . 4))) (buffer-string))))",
+        r#"(with-temp-buffer
+             (insert "abcd")
+             (let* ((casings 0)
+                    (c (list (cons 1 2)))
+                    (b (cons (cons 2 3) c))
+                    (a (cons (cons 3 4) b))
+                    (before-change-functions (list (lambda (&rest _) (setq casings (1+ casings)))))
+                    (region-extract-function (lambda (_) a)))
+               (setcdr c b)
+               (condition-case e (upcase-region nil nil t)
+                 (circular-list (list (eq (cadr e) a) (eq (cadr e) b) (eq (cadr e) c) casings)))))"#,
+    ]);
+}
+
 /// xdisp.c `get-display-property`: a list or vector of specifications, one
 /// specification, one with several values, PROPERTIES given, a string.
 #[test]

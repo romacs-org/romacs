@@ -125,6 +125,13 @@ fn isolate_hello_ok_p(cx, text: Value, program: Value) {
     Ok(if cx.isolate_hello_ok(text, program)? { Value::TRUE } else { Value::NIL })
 }}
 
+// (romacs--isolate-hello-refusal TEXT): the reason a worker's hello TEXT
+// gives for refusing to boot as asked (`isolate::refuse'), or nil.
+defsubr! { name = "romacs--isolate-hello-refusal", gnu = "romacs:isolate", effect = Reads,
+fn isolate_hello_refusal(cx, text: Value) {
+    cx.isolate_hello_refusal(text)
+}}
+
 // (romacs--isolate-hello BOOT): this process's hello text, for a worker.
 defsubr! { name = "romacs--isolate-hello", gnu = "romacs:isolate", effect = Reads,
 fn isolate_hello(cx, boot: Value) {

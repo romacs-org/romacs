@@ -39,6 +39,20 @@ fn successful_accesses_do_not_allocate_errors() {
         );
     }
 }
+/// `string=' and `string-lessp' read their arguments in place: a string
+/// or a symbol's name is compared where it lies, never copied first.
+#[test]
+fn string_comparisons_copy_neither_argument() {
+    let mut vm = Vm::new();
+    vm.set_collection_floor(usize::MAX / 4);
+    vm.eval_source("(defvar A (copy-sequence \"sym-name-1\")) (defvar B (copy-sequence \"sym-name-1\")) (defvar M (copy-sequence \"h\u{e9}llo\")) (defvar S 'sym-name-1)")
+        .unwrap();
+    for body in ["(string= A B)", "(string= A \"zzq\")", "(string= M M)", "(string= S A)", "(string-lessp A B)", "(string-lessp S M)"] {
+        let source = format!("(let ((i 0)) (while (< i 1000) {body} (setq i (1+ i))) i)");
+        let allocations = count(&mut vm, &source);
+        assert!(allocations <= 2, "{body}: {allocations} allocations for 1000 comparisons");
+    }
+}
 #[test]
 fn closures_use_one_environment_allocation_not_one_per_capture() {
     let mut vm = Vm::new();

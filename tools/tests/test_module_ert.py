@@ -143,6 +143,18 @@ time.sleep(30 if {hang!r} else 0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
 
+    def test_a_file_runs_in_its_private_home_not_the_source_tree(self):
+        # A test that visits, locks or writes a relative file name must not
+        # reach the tree another run is using.
+        self.fixture.write_text(f"""(require 'ert)
+(ert-deftest fixture-where ()
+  (should (file-equal-p default-directory (getenv "HOME")))
+  (should-not (file-in-directory-p default-directory {json.dumps(str(ROOT))})))
+""")
+        result = self.invoke('--selector', 'fixture-where')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
+
     def test_each_file_runs_in_its_own_process(self):
         first = self.home / 'first.el'
         first.write_text("""(require 'ert)

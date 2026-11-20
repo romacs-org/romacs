@@ -6,6 +6,7 @@
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
       (romacs-mcp-tools (copy-alist romacs-mcp-tools)))
   (require 'romacs-agent))
+(require 'romacs-agent-test-attached)
 
 (defmacro romacs-agent-attach-tests--with-chat (var &rest body)
   "BODY in a chat of a session VAR, its directory temporary."
@@ -640,9 +641,12 @@ size hook firing as `read-key' waits: the result and the layouts shown."
                                      :title "codex" :dir dir :harness-session "thread"
                                      :driver-state (list :ready t))))
       (write-region "x" nil image nil 'silent)
+      (romacs-agent-test-attach codex)
       ;; A child's result quoting a file uploads nothing.
       (should-not (romacs-agent-attach-tests--codex-images
                    codex (lambda () (romacs-agent-send codex (format "Delegated result: [image: %s]" image)))))
+      ;; Its turn ended.
+      (setf (romacs-agent-state codex) 'idle)
       ;; Attached, it goes.
       (should (equal (romacs-agent-attach-tests--codex-images
                       codex (lambda () (romacs-agent-send codex "see" nil nil (list image))))
@@ -651,7 +655,7 @@ size hook firing as `read-key' waits: the result and the layouts shown."
       (setf (romacs-agent-state codex) 'running)
       (romacs-agent-send-later codex "later" nil (list image))
       (setf (romacs-agent-state codex) 'idle)
-      (should (equal (romacs-agent-attach-tests--codex-images codex (lambda () (romacs-agent--send-next codex)))
+      (should (equal (romacs-agent-attach-tests--codex-images codex (lambda () (romacs-agent--dispatch codex)))
                      (list image))))))
 
 (ert-deftest romacs-agent-attach-loads-the-tray ()

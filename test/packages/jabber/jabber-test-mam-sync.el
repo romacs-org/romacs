@@ -349,7 +349,7 @@ And a parent that loaded before the thread was read is stale again."
   (jabber-test-mam-sync--with-session
     (let (queried)
       (cl-letf (((symbol-function 'isolate-spawn)
-                 (lambda (&rest _) (signal 'isolate-world-unavailable '("no world"))))
+                 (lambda (&rest _) (signal 'isolate-error '("Cannot start isolate worker"))))
                 ((symbol-function 'jabber-mam--query) (lambda (&rest args) (push args queried))))
         (jabber-mam-maybe-catchup jc)
         (jabber-mam-sync--start jabber-test-mam-sync--account)

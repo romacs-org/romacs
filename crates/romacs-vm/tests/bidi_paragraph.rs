@@ -44,3 +44,17 @@ fn paragraph_direction_matches_pinned_gnu() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The first form a fresh VM evaluates finds no buffer made yet: its
+/// current buffer is the `*scratch*' it makes on demand, and the direction
+/// is that buffer's, as pinned GNU answers in its `*scratch*'.
+#[test]
+fn a_fresh_vm_answers_for_the_scratch_buffer_it_has_not_made() {
+    let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
+    let form = "(current-bidi-paragraph-direction)";
+    let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {form})")]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = String::from_utf8(output.stdout).unwrap();
+    let mut vm = Vm::new();
+    assert_eq!(vm.eval_source(form).and_then(|v| v.display()), Ok(expected));
+}

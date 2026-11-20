@@ -246,7 +246,7 @@ pub(crate) fn append_window(snapshot: &WindowSnapshot, mut frame: Option<&mut Fr
     // A body width of zero is legal: an empty body paints nothing and
     // displays nothing, which makes window-end equal window-start.
     if validate(snapshot)? {
-        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], point: None });
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None });
     }
     let text = &snapshot.text.utf8;
     let line_start = text[..snapshot.start_byte].rfind('\n').map_or(0, |at| at + 1);
@@ -306,7 +306,8 @@ pub(crate) fn append_window(snapshot: &WindowSnapshot, mut frame: Option<&mut Fr
         Some(numbers) => window_metrics(&mut pass, numbers.face.0 as usize, published.as_ref().map(|p| &p.0[..]), kept)?.2,
         None => 0.0,
     };
-    let view = rows(snapshot, &window_frame, &mut pass, numbers_cell, metrics0, paint == Paint::Whole, kept)?;
+    let mut view = rows(snapshot, &window_frame, &mut pass, numbers_cell, metrics0, paint == Paint::Whole, kept)?;
+    view.end.origin_y = oy;
     let Some(frame) = frame else { return Ok(view.end) };
     if paint == Paint::Cursor {
         add_cursor(frame, snapshot, (ox, oy, body_height), cursor, view.cursor);
@@ -786,7 +787,7 @@ fn rows(snapshot: &WindowSnapshot, frame: &Frame, pass: &mut Pass, numbers_cell:
         }
         count(kept, wrapped);
     };
-    Ok(View { end: WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height: body, rows, point: place }, marks, placed, cursor, reached_end })
+    Ok(View { end: WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height: body, rows, origin_y: 0.0, point: place }, marks, placed, cursor, reached_end })
 }
 
 /// The advance of a scrolled row's left truncation glyph.

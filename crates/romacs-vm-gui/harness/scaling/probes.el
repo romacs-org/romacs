@@ -338,10 +338,10 @@ writer, waited for; an error when it does not read within half a minute."
     (romacs-agent-show session)
     (dotimes (i 100)
       (let ((seq (* 10 i)) (id (format "m%d" i)))
-        (romacs-agent-ui--render session (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
-        (romacs-agent-ui--render session (list :type 'delta :text reply :message id :seq (+ seq 2) :last t))
-        (romacs-agent-ui--render session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
-    (romacs-agent-buffer session)))
+        (romacs-agent-log--on-event session (list :type 'input :text "a prompt" :seq (+ seq 1) :last t))
+        (romacs-agent-log--on-event session (list :type 'delta :text reply :message id :seq (+ seq 2) :last t))
+        (romacs-agent-log--on-event session (list :type 'done :duration 1.0 :seq (+ seq 3) :last t))))
+    (romacs-agent-log-chat session)))
 
 ;;;; Session images (lisp/session/warm-restart.el)
 

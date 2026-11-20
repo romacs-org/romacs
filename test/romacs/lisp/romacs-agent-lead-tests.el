@@ -14,6 +14,7 @@
   (require 'romacs-agent-tools)
   (require 'romacs-agent-claude)
   (require 'romacs-agent-history))
+(require 'romacs-agent-test-attached)
 
 (defconst romacs-agent-lead-tests--lead "aaaaaaaa-0000-4000-8000-000000000000")
 (defconst romacs-agent-lead-tests--other "bbbbbbbb-0000-4000-8000-000000000000")
@@ -87,6 +88,8 @@ what waited for that end goes."
         (romacs-agent-reply child) result (romacs-agent-done-seq child) seq
         (romacs-agent-driver-state child) '(:ready t))
   (push (list seq result nil) (romacs-agent-ends child))
+  ;; Said on its attachment.
+  (unless (process-live-p (romacs-agent-connection child)) (romacs-agent-test-attach child))
   (romacs-agent-tools--wake child)
   (romacs-agent--settle child))
 
@@ -98,7 +101,7 @@ what waited for that end goes."
                                    :options (list :parent (or parent (romacs-agent-id lead))))))
     (puthash (romacs-agent-id child) child romacs-agent--sessions)
     (romacs-agent--index child)
-    child))
+    (romacs-agent-test-attach child)))
 
 ;;; romacs_task_send
 

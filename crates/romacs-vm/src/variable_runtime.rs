@@ -441,13 +441,13 @@ impl Vm {
         }
         if let Some(fwd) = self.forwarding(slot) {
             return match fwd {
-                forwarded::Fwd::Buffer(i) => Ok(self.forwarded_buffer_value(buffer.index(0)? - 1, i)),
+                forwarded::Fwd::Buffer(i) => Ok(self.forwarded_buffer_value(buffer.object_index()?, i)),
                 forwarded::Fwd::Tracked(_) => Ok(self.slots[slot].value),
                 _ => self.forwarded_value(fwd),
             };
         }
         if self.localized(slot) {
-            if let Some(value) = self.per_buffer(buffer.index(0)? - 1).and_then(|b| b.locals().get(Value::reference(slot + 1, 7))) {
+            if let Some(value) = self.per_buffer(buffer.object_index()?).and_then(|b| b.locals().get(Value::reference(slot + 1, 7))) {
                 return Ok(value);
             }
             if let Some(fwd) = self.localized_forwarded(slot) {

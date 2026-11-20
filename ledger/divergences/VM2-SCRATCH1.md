@@ -1,0 +1,5 @@
+## Observable by a package
+
+| # | mechanism | GNU | romacs | why |
+|---|---|---|---|---|
+| VM2-SCRATCH1 | When `*scratch*` is made | buffer.c `init_buffer_once` makes `*scratch*` and sets it current before any Lisp runs, so a current buffer always exists | `Vm::new` makes no buffer: the current buffer is nil until something resolves it (`Vm::buffer_index`), which makes `*scratch*` then. The editor's startup Lisp resolves it at once; a bare VM (an isolate worker, an embedder) may run Lisp first. Name lookups that do not know the unmade `*scratch*` see no such buffer: in a bare VM, `(kill-buffer "*scratch*")` and `(make-indirect-buffer "*scratch*" NAME)` signal before it is made. `set-buffer` on the name `*scratch*` makes it even after it was killed, where GNU signals `No buffer named *scratch*` | A bare `Vm::new()` allocates nothing, which collector tests and code images rely on: a code image publishes only strings and conses, and `*scratch*` brings a buffer and the case tables | <!-- symbols: current-buffer, set-buffer, kill-buffer, make-indirect-buffer, get-buffer -->

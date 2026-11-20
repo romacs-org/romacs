@@ -153,6 +153,76 @@ warning; one long word, and the argument line, are not."
                     (format "(defun romacs-lint-tests--m (x) \"Short.\n\n(fn %s %s)\" x)" wide wide))
                    '("warning: in romacs-lint-tests--k: docstring has a line wider than 80 columns; fix: wrap it")))))
 
+(defun romacs-lint-tests--tree-lint (files)
+  "Lint FILES, ((PATH . LINES)...), written into a tree of their own with
+a lisp/bundled.json; return ((PATH . FINDINGS)...), each finding
+\"LINE LEVEL: TEXT\"."
+  (let ((root (make-temp-file "romacs-lint-tree-" t)))
+    (unwind-protect
+        (let ((romacs-lint-root nil))
+          (with-temp-file (expand-file-name "Cargo.lock" root))
+          (make-directory (expand-file-name "lisp" root))
+          (with-temp-file (expand-file-name "lisp/bundled.json" root)
+            (insert "{\"directories\": [\"agents\"], \"packages\": \"packages\", \"off_path\": [\"vm\"],"
+                    " \"files\": [\"lisp/textmodes/romacs-borrowed.el\"]}"))
+          (pcase-dolist (`(,path . ,lines) files)
+            (let ((file (expand-file-name path root)))
+              (make-directory (file-name-directory file) t)
+              (with-temp-file file (insert (string-join lines "\n") "\n"))))
+          (mapcar (lambda (result)
+                    (cons (file-relative-name (car result) root)
+                          (mapcar (lambda (finding) (format "%d %s: %s" (nth 0 finding) (nth 1 finding) (nth 2 finding)))
+                                  (cdr result))))
+                  (romacs-lint-files (mapcar (lambda (entry) (expand-file-name (car entry) root)) files))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-lint-tests-own-docstrings ()
+  "Romacs's own Lisp documents each public definition and each command;
+a private helper, a declaration, a documented definition and a value
+for a variable GNU documents pass."
+  (let* ((own (list romacs-lint-tests--cookie
+                    "(defun romacs-lint-tests-bare (x) x)"
+                    "(defun romacs-lint-tests-told (x) \"Return X.\" x)"
+                    "(defun romacs-lint-tests--helper (x) x)"
+                    "(defun romacs-lint-tests--command () (interactive) nil)"
+                    "(defun romacs-lint-tests--told-command () \"Do nothing.\" (interactive) nil)"
+                    "(defvar romacs-lint-tests-declared)"
+                    "(defvar romacs-lint-tests-valued nil)"
+                    "(defvar kill-ring nil)"
+                    "(defface romacs-lint-tests-face '((t)) \"A face.\")"
+                    "(defvar-keymap romacs-lint-tests-map :doc \"Keys.\" \"a\" #'ignore)"
+                    "(define-minor-mode romacs-lint-tests-mode nil)"
+                    "(defvar-local romacs-lint-tests-local 1)"
+                    "(defgroup romacs-lint-tests-group nil nil)"
+                    "(defvar-keymap romacs-lint-tests-bare-map \"b\" #'ignore)"
+                    "(cl-defstruct romacs-lint-tests-struct a)"
+                    "(cl-defstruct (romacs-lint-tests-told-struct (:copier nil)) \"A record.\" a)"
+                    "(progn"
+                    "  (defvar romacs-lint-tests-wrapped 1))"
+                    "(defun romacs-lint-tests-lone () \"value\")"
+                    "(cl-defgeneric romacs-lint-tests-generic (x) (:documentation \"Told.\"))"))
+         (results (romacs-lint-tests--tree-lint
+                   `(("lisp/agents/romacs-lint-tests-a.el" ,@own)
+                     ("lisp/romacs-lint-tests-b.el" ,@own)
+                     ("lisp/vm/lint-tests-c.el" ,@own)
+                     ("lisp/lint-tests-gnu.el" ,@own)
+                     ("lisp/packages/p/romacs-lint-tests-d.el" ,@own)
+                     ("lisp/textmodes/romacs-borrowed.el" ,@own))))
+         (expected '("2 warning: in romacs-lint-tests-bare: public definition has no docstring; fix: say what it does, as its body does it"
+                     "5 warning: in romacs-lint-tests--command: public definition has no docstring; fix: say what it does, as its body does it"
+                     "8 warning: in romacs-lint-tests-valued: public definition has no docstring; fix: say what it does, as its body does it"
+                     "12 warning: in romacs-lint-tests-mode: public definition has no docstring; fix: say what it does, as its body does it"
+                     "13 warning: in romacs-lint-tests-local: public definition has no docstring; fix: say what it does, as its body does it"
+                     "14 warning: in romacs-lint-tests-group: public definition has no docstring; fix: say what it does, as its body does it"
+                     "15 warning: in romacs-lint-tests-bare-map: public definition has no docstring; fix: say what it does, as its body does it"
+                     "16 warning: in romacs-lint-tests-struct: public definition has no docstring; fix: say what it does, as its body does it"
+                     "19 warning: in romacs-lint-tests-wrapped: public definition has no docstring; fix: say what it does, as its body does it"
+                     "20 warning: in romacs-lint-tests-lone: public definition has no docstring; fix: say what it does, as its body does it")))
+    (dolist (path '("lisp/agents/romacs-lint-tests-a.el" "lisp/romacs-lint-tests-b.el" "lisp/vm/lint-tests-c.el"))
+      (should (equal (cons path (cdr (assoc path results))) (cons path expected))))
+    (dolist (path '("lisp/lint-tests-gnu.el" "lisp/packages/p/romacs-lint-tests-d.el" "lisp/textmodes/romacs-borrowed.el"))
+      (should (equal (assoc path results) (list path))))))
+
 (ert-deftest romacs-lint-tests-unreadable ()
   "A file that stops reading says where."
   (should (equal (romacs-lint-tests--lint romacs-lint-tests--cookie "(defvar romacs-lint-tests--i nil)" "(defun romacs-lint-tests--i (x)")
@@ -217,11 +287,16 @@ file, or a line of nothing, is not."
             (should (string-match-p "pins a line of crates/a/src/lib.rs" (nth 2 (car pins))))))
       (delete-directory root t))))
 
+(defconst romacs-lint-tests--root
+  (locate-dominating-file (or load-file-name buffer-file-name) "Cargo.lock")
+  "The repository this file is in, found as it loads: its tests run after
+`load-file-name' is gone, in a directory of their own.")
+
 (ert-deftest romacs-lint-tests-the-loadup-bootstrap ()
   "The lint gives its findings on the file that boots the machine, which
 it loads into a machine already booted.  It runs in a machine of its own:
 loading that file leaves the one that loads it changed."
-  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+  (let* ((root romacs-lint-tests--root)
          (host (expand-file-name invocation-name invocation-directory))
          (file (expand-file-name "lisp/session/romacs-loadup-bootstrap.el" root))
          (status nil))
@@ -238,7 +313,7 @@ loading that file leaves the one that loads it changed."
 private home: a file that empties `load-path' leaves the next file's
 judgement alone, and a file that writes where it runs writes nothing into
 the tree."
-  (let* ((root (locate-dominating-file (or load-file-name buffer-file-name default-directory) "Cargo.lock"))
+  (let* ((root romacs-lint-tests--root)
          (host (expand-file-name invocation-name invocation-directory))
          (dir (file-name-as-directory (make-temp-file "romacs-lint-tests-alone-" t)))
          (poison (expand-file-name "a-poison.el" dir))

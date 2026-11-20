@@ -139,7 +139,7 @@ def prepared_store(binary, persistent, directory, timeout):
     home.mkdir()
     env = host_environment(home, binary, store)
     status = run_host([str(binary), '--world-store', str(store), '--world-build', '--batch'],
-                      env, directory / 'prepare.log', timeout)
+                      env, home, directory / 'prepare.log', timeout)
     if status == 0 and any(store.glob('**/*.rwi')):
         return store, None
     log = (directory / 'prepare.log').read_text(encoding='utf-8', errors='replace').strip()
@@ -161,13 +161,15 @@ def session_members(session):
     return members
 
 
-def run_host(command, env, log, timeout):
+def run_host(command, env, home, log, timeout):
     """The host's status, or None when it ran out of TIMEOUT; either way nothing it
-    started outlives it.  Its output goes to a file: a descendant keeping it open
-    cannot hold the run."""
+    started outlives it.  It starts in its private HOME, so `default-directory' is
+    never the source tree: a test that writes or locks a relative file does it
+    there.  Its output goes to a file: a descendant keeping it open cannot hold
+    the run."""
     with log.open('wb') as sink:
         process = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT, env=env,
-                                   cwd=ROOT, start_new_session=True)
+                                   cwd=home, start_new_session=True)
     try:
         return process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -206,7 +208,7 @@ def run_suite(path, selector, binary, timeout, load_paths, store, compiled=False
         for directory in load_paths + [path.parent]:
             command += ['-L', str(directory)]
         started = time.monotonic()
-        status = run_host(command + ['-l', str(script)], env, home / 'output', timeout)
+        status = run_host(command + ['-l', str(script)], env, home, home / 'output', timeout)
         output = (home / 'output').read_text(encoding='utf-8', errors='replace')
     result = (dict(NOTHING, status='timeout', reason=f'no result within {timeout:g}s')
               if status is None else verdict(output, status))

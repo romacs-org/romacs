@@ -28,6 +28,9 @@ class ChangedFilter(unittest.TestCase):
         (self.repo / 'tools/lib').mkdir(parents=True)
         for name in ('impact.py', 'test_modules.py'):
             (self.repo / 'tools/lib' / name).write_text((ROOT / 'tools/lib' / name).read_text())
+        # The gate imports that copy, which writes its bytecode beside it
+        # unless Python runs with -B; the tree ignores it, as this one must.
+        (self.repo / '.gitignore').write_text('**/__pycache__/\n')
         self.git('add', '.')
         self.git('commit', '-q', '-m', 'base')
 
@@ -47,7 +50,9 @@ class ChangedFilter(unittest.TestCase):
         selected = changed_filter(self.repo)
         self.assertIn('package(romacs-vm)', selected)
         self.assertIn('package(romacs-vm-gui)', selected)
-        self.assertTrue(selected.endswith(ONLY_STRUCTURAL))
+        # Then the path-gated tests no path of the change calls for are left out.
+        left = ' | '.join(impact.test_file(test) for test in sorted(impact.PATH_GATED))
+        self.assertTrue(selected.endswith(f'{ONLY_STRUCTURAL}) & not ({left})'))
 
     def test_a_test_file_selects_its_binary_and_the_structural_rules(self):
         self.write('crates/romacs-vm/tests/quit_async.rs')

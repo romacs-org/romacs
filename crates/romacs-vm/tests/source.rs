@@ -195,3 +195,18 @@ fn source_stream_is_a_real_agent_boundary() {
     let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(reply["value"], "3");
 }
+
+#[test]
+fn raw_source_cli_runs_on_the_lisp_prelude() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_romacs-vm"))
+        .arg("--source")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"(mapcar #'1+ '(1 2 3))").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "(2 3 4)");
+}

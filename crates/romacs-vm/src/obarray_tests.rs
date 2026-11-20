@@ -125,3 +125,18 @@ fn a_text_property_key_keeps_its_obarray_symbol() {
                                    (symbol-name (car (text-properties-at 0 tpk-string))))");
     assert_eq!(vm.display(keys).unwrap(), "(\"kept-unibyte\" \"kept-multibyte\" \"kept-string\")");
 }
+
+/// GNU's default obarray is the value of `obarray`'s own symbol: unintern
+/// that symbol, intern a new `obarray` (a plain, unbound symbol), `set` the
+/// original to another table, and a plain `intern` uses that table (pinned
+/// GNU: `(t nil nil nil)`).
+#[test]
+fn the_default_obarray_is_the_original_obarray_variable_even_uninterned() {
+    let mut vm = Vm::new();
+    let got = run(&mut vm, "(let* ((s 'obarray) (o obarray) (p (obarray-make))) \
+                              (unintern s o) \
+                              (let ((r (intern \"obarray\" o))) \
+                                (set s p) (intern \"s1-probe\") \
+                                (list (and (intern-soft \"s1-probe\" p) t) (intern-soft \"s1-probe\" o) (eq r s) (boundp r))))");
+    assert_eq!(vm.display(got).unwrap(), "(t nil nil nil)");
+}

@@ -127,7 +127,7 @@ whatever TMPDIR is); `delivered' collects wakes."
     (romacs-agent-tools--flush parent)
     (should (= (length delivered) 1))
     ;; A message waiting for it does not make it running.
-    (romacs-agent--enqueue child (list "hello" nil nil nil))
+    (romacs-agent--enqueue child (romacs-agent-item "hello"))
     (should (equal (romacs-agent-tools--status child) "failed"))))
 
 (ert-deftest romacs-agent-launch-waits-for-attach-as-long-as-it-tries ()
@@ -218,7 +218,6 @@ whatever TMPDIR is); `delivered' collects wakes."
         (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore)
                   ((symbol-function 'romacs-agent--state-root) (lambda () root))
                   ((symbol-function 'romacs-agent-events-own) (lambda (_) 'queued))
-                  ((symbol-function 'romacs-agent-events--migrate-next) #'ignore)
                   ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness")))
                   ((symbol-function 'romacs-agent--launch) (lambda (session &rest _) (push (romacs-agent-id session) launched)))
                   ((symbol-function 'romacs-agent--attach) #'ignore)
@@ -242,7 +241,6 @@ whatever TMPDIR is); `delivered' collects wakes."
         (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore)
                   ((symbol-function 'romacs-agent--state-root) (lambda () root))
                   ((symbol-function 'romacs-agent-events-own) (lambda (_) 'queued))
-                  ((symbol-function 'romacs-agent-events--migrate-next) #'ignore)
                   ((symbol-function 'romacs-agent--argv) (lambda (&rest _) '("harness")))
                   ((symbol-function 'romacs-agent--launch) (lambda (&rest _) (error "No such directory")))
                   ((symbol-function 'romacs-agent--no-supervisor) #'ignore))

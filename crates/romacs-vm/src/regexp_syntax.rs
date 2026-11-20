@@ -50,7 +50,7 @@ mod tests {
             vm.display(value).unwrap(),
             "(t syntax-table 0 (2) (4 . 41) (2) nil)"
         );
-        let source = include_str!("../../../lisp/subr.el");
+        let source = crate::host::read_to_string(crate::host::runtime_lisp("subr.el").unwrap()).unwrap();
         let start = source.find("(defun make-syntax-table ").unwrap();
         let end = start + source[start..].find("(defun syntax-after ").unwrap();
         run(&mut vm, &source[start..end]);
@@ -606,8 +606,8 @@ impl Vm {
                 Ok(args[0])
             }
             ModifySyntaxEntry => {
-                // Compiled patterns may have read the old classes.
-                self.clear_regexp_cache(false);
+                // Patterns compiled against a table may have read the old classes.
+                self.forget_table_bound_patterns();
                 let (from, to) = if args[0].tag() == 3 {
                     let (a, b) = self.cons_pair(args[0])?;
                     (self.regexp_int(a)?, self.regexp_int(b)?)

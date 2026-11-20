@@ -3,6 +3,8 @@
 //! reserves above the mini-window, the window it shows, what it shows,
 //! the pane labels of the windows' own bands and the height the host
 //! measures for it.
+#[path = "support/tree_lisp.rs"]
+mod tree_lisp;
 use romacs_vm::Vm;
 #[path = "support/gui_probe.rs"]
 mod gui_probe;
@@ -376,7 +378,7 @@ impl romacs_vm::LayoutHost for Rows {
     fn lay_out(&mut self, frame: &romacs_layout_input::FrameSnapshot) -> Result<Vec<romacs_vm::WindowEnd>, String> {
         Ok(frame.windows.iter().map(|w| {
             let len = w.snapshot.text.utf8.len();
-            romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], point: None }
+            romacs_vm::WindowEnd { id: w.snapshot.id, end: len, visible_end: len, body_height: w.snapshot.height as f32, rows: vec![], origin_y: 0.0, point: None }
         }).collect())
     }
 }
@@ -384,7 +386,7 @@ impl romacs_vm::LayoutHost for Rows {
 #[test]
 fn a_taller_bar_face_lays_the_frame_out_again_once() {
     let mut vm = session();
-    vm.eval_source(include_str!("../../../lisp/vm/window-change.el")).unwrap();
+    vm.eval_source(&tree_lisp::text("vm/window-change.el")).unwrap();
     vm.set_layout_host(Some(Box::new(Rows)));
     snapshot(&mut vm);
     vm.display_apply_layout(&[]).unwrap();

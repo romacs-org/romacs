@@ -606,6 +606,42 @@ impl Vm {
         self.isolates.parent.as_ref().is_some_and(|p| p.closed)
     }
 
+    /// Whether an isolate's pending interrupt or termination quits here,
+    /// taken if so: at an engine safepoint, or at a worker's wait that it
+    /// ended (`process_select`), which reaches no safepoint before it waits
+    /// again.
+    pub(crate) fn isolate_quit_taken(&mut self) -> bool {
+        // A termination quits once, whatever `inhibit-quit' says: the
+        // worker's loop then ends (`romacs--isolate-terminated-p'). It
+        // supersedes an interrupt still pending and the job's claim, so the
+        // cleanup it unwinds through cannot take the older interrupt.
+        if crate::host::take_terminate_quit() {
+            crate::host::take_interrupt();
+            self.isolates.claim = None;
+            return true;
+        }
+        let slot = self.slot("inhibit-quit");
+        if self.variable_value(slot).is_ok_and(|v| v != Value::NIL && v != Value::UNBOUND) {
+            return false;
+        }
+        // Held, not taken, while a run of aftermath masks the job: taken now
+        // it would find no job to quit and be lost.
+        if self.aftermath_runs > 0 { return false; }
+        crate::host::take_interrupt() && self.isolate_interrupt_targets_running()
+    }
+
+    /// In a worker, the quit a native wait raises once its poll ended with
+    /// nothing ready: a pending interrupt or termination the safepoint would
+    /// take (`isolate_quit_taken`), raised here since the wait's loop reaches
+    /// no safepoint before it waits again. None to go on waiting.
+    pub(crate) fn worker_quit(&mut self) -> Option<crate::prim::Fault> {
+        if !crate::host::interrupt_pending() || !self.isolate_quit_taken() {
+            return None;
+        }
+        self.quit_unwinding = true;
+        Some(crate::prim::Fault::Signal(self.intern("quit"), Value::NIL))
+    }
+
     /// At an engine safepoint after SIGUSR1: whether the spawner's interrupt
     /// names the running job. The spawner sends an `interrupt' frame for a
     /// generation before the signal, so the frame is readable here: those
@@ -669,6 +705,15 @@ impl Vm {
         })
     }
 
+    /// In a worker, the wake pipe its spawner's interrupt (SIGUSR1) and
+    /// termination (SIGTERM) write (`host::catch_isolate_signals'): the
+    /// signal lands on any thread, so every wait the worker makes polls this
+    /// beside its own descriptors, and drains it on waking; the flags, not
+    /// the bytes, say what happened.
+    pub(crate) fn worker_wake_fd(&self) -> Option<RawFd> {
+        self.isolates.parent.as_ref().and(crate::host::isolate_wake_fd())
+    }
+
     /// The descriptors a wait on the isolates needs: every peer's socket
     /// and every live worker's pidfd, readable when something happened.
     pub(crate) fn isolate_fds(&self) -> Vec<(RawFd, i16)> {
@@ -676,7 +721,7 @@ impl Vm {
         if let Some(parent) = &self.isolates.parent && !parent.closed {
             fds.push((parent.socket.as_raw_fd(), libc::POLLIN));
         }
-        if self.isolates.parent.is_some() && let Some(wake) = crate::host::isolate_wake_fd() {
+        if let Some(wake) = self.worker_wake_fd() {
             fds.push((wake, libc::POLLIN));
         }
         fds.extend(self.isolates.forked.values().map(|pidfd| (pidfd.as_raw_fd(), libc::POLLIN)));
@@ -709,7 +754,7 @@ impl Vm {
             let ready = crate::subprocess::poll(&fds, timeout).map_err(|e| e.to_string())?;
             let ready: Vec<RawFd> = fds.iter().zip(ready).filter(|(_, r)| *r != 0).map(|((fd, _), _)| *fd).collect();
             let mut news = false;
-            if let Some(wake) = crate::host::isolate_wake_fd() && ready.contains(&wake) {
+            if let Some(wake) = self.worker_wake_fd() && ready.contains(&wake) {
                 crate::host::drain_isolate_wake();
                 news = true;
             }
@@ -936,6 +981,45 @@ pub fn worker_socket(fd: i32, parent: Option<i32>) -> std::result::Result<OwnedF
     // SAFETY: the launcher put the socket at FD and nothing else owns it, so
     // this one owner closes it once.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// A worker that cannot boot as its spawner asked, for REASON: its hello
+/// over SOCKET says `unavailable` and why, in place of a boot. The spawner
+/// settles the worker's jobs with that (`romacs--isolate-world-refused` in
+/// `lisp/vm/isolate.el`) and ends the worker, rather than starting it
+/// again. Until then the socket stays open, however long the spawner
+/// takes, so a job it writes meanwhile finds a worker, not a closed
+/// socket, and is settled by the refusal; and a zygote's unforked children
+/// die only after it. What arrives meanwhile is read and dropped, but for
+/// the sockets of children a zygote is asked to fork: those stay open with
+/// the worker, so a job posted to such a child finds it until the refusal
+/// is handled. A spawner gone closes the socket, or its death signal ends
+/// the worker.
+///
+/// # Errors
+///
+/// When the hello cannot be sent or the socket read.
+pub fn refuse(socket: OwnedFd, reason: &str) -> std::result::Result<(), String> {
+    let _ = crate::host::set_nonblocking(socket.as_fd());
+    let text = hello(&format!("{REFUSED}\n{}", reason.replace('\n', " ")));
+    let mut peer = Peer::new(socket);
+    peer.send(Kind::Hello, 0, &Payload::Text(text), true).map_err(|e| e.to_string())?;
+    while !peer.closed {
+        crate::subprocess::poll(&[(peer.socket.as_raw_fd(), libc::POLLIN)], None).map_err(|e| e.to_string())?;
+        peer.receive(&mut |_| {}).map_err(|e| e.to_string())?;
+        peer.inbox.retain(|frame| matches!(frame.payload, Payload::Socket(_)));
+    }
+    Ok(())
+}
+
+/// The boot a refusing worker's hello names (`refuse`).
+const REFUSED: &str = "unavailable";
+
+/// The reason a worker's hello TEXT gives for refusing to boot as asked
+/// (`refuse`), or None for a worker that booted.
+pub(crate) fn refusal(text: &str) -> Option<&str> {
+    let mut lines = text.splitn(5, '\n').skip(3);
+    (lines.next() == Some(REFUSED)).then(|| lines.next().unwrap_or(""))
 }
 
 impl Vm {
