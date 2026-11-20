@@ -1419,3 +1419,81 @@ fn inline_cached_prefix_keeps_consumed_accounting_and_captures() {
         assert_eq!(stats.verify_bad_no + stats.verify_bad_yes, 0, "{stats:?}");
     });
 }
+
+/// The DFA's verdict at candidate 0 with the given stop and point, beside
+/// the matcher's, on one warm DFA (the same instance across calls).
+fn end_verdict(
+    dfa: &mut ExistenceDfa,
+    compiled: &CompiledPattern,
+    text: &[u8],
+    stop: usize,
+    point: usize,
+) -> (Exists, bool) {
+    let syntax = DefaultSyntaxLookup;
+    dfa.begin_search(compiled, &syntax);
+    let verdict = with_first_step(false, || {
+        dfa.anchored_exists(compiled, text, 0, stop, point, &syntax)
+    });
+    let matched = re_match(compiled, text, 0, stop, &syntax, point).is_some();
+    (verdict, matched)
+}
+
+/// The answer at the text's end is kept per state, and a state is its
+/// kernel plus its previous character's facts: the same kernel reached after
+/// a word character and after punctuation (or a newline) answers each end
+/// assertion afresh, in either order.
+#[test]
+fn end_answers_follow_the_previous_characters_facts() {
+    for (source, yes, no) in [
+        ("[^z]\\>\\'", "a", "."),
+        ("[^z]\\_>\\'", "_", " "),
+        ("[^z]\\(?:^\\)\\'", "\n", "a"),
+    ] {
+        for order in [[yes, no], [no, yes]] {
+            let compiled = regex_compile(source, false, false).unwrap();
+            let mut dfa = first_step_dfa(&compiled, &DefaultSyntaxLookup);
+            for _ in 0..2 {
+                for text in order {
+                    let (verdict, matched) =
+                        end_verdict(&mut dfa, &compiled, text.as_bytes(), text.len(), 0);
+                    let decided = if text == yes {
+                        verdict == Exists::Yes
+                    } else {
+                        matches!(verdict, Exists::No { .. })
+                    };
+                    assert!(decided, "{source:?} on {text:?}: {verdict:?}");
+                    assert_eq!(matched, text == yes, "{source:?} on {text:?}");
+                }
+            }
+        }
+    }
+}
+
+/// A stop short of the text's end is not answered from the kept end answer:
+/// `\>` there reads the character after the stop.
+#[test]
+fn a_bounded_stop_is_not_answered_from_the_end() {
+    let compiled = regex_compile("[^z]\\>", false, false).unwrap();
+    let mut dfa = first_step_dfa(&compiled, &DefaultSyntaxLookup);
+    assert_eq!(end_verdict(&mut dfa, &compiled, b"a", 1, 0), (Exists::Yes, true));
+    let (verdict, matched) = end_verdict(&mut dfa, &compiled, b"ab", 1, 0);
+    assert!(!matched);
+    assert!(matches!(verdict, Exists::No { .. }), "{verdict:?}");
+}
+
+/// A pattern that tests point answers at the end by where point is.
+#[test]
+fn a_point_test_at_the_end_follows_point() {
+    let compiled = regex_compile("[^z]\\=", false, false).unwrap();
+    let mut dfa = first_step_dfa(&compiled, &DefaultSyntaxLookup);
+    for (point, yes) in [(1, true), (0, false), (1, true)] {
+        let (verdict, matched) = end_verdict(&mut dfa, &compiled, b"a", 1, point);
+        assert_eq!(matched, yes, "point {point}");
+        let wrong = if yes {
+            matches!(verdict, Exists::No { .. })
+        } else {
+            verdict == Exists::Yes
+        };
+        assert!(!wrong, "point {point}: {verdict:?}");
+    }
+}
