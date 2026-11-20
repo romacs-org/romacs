@@ -440,10 +440,12 @@ That is, one base consonant and one or more subjoined consonants, as
 (defvar tibetan-decomposed nil)
 (defvar tibetan-decomposed-temp nil)
 
-;; For automatic composition.
-(set-char-table-range
- composition-function-table '(#xF00 . #xFD1)
- (list (vector tibetan-composable-pattern 0 #'font-shape-gstring)))
+;; For automatic composition, where the display shapes through
+;; `font-shape-gstring'.
+(when (fboundp 'font-shape-gstring)
+  (set-char-table-range
+   composition-function-table '(#xF00 . #xFD1)
+   (list (vector tibetan-composable-pattern 0 #'font-shape-gstring))))
 
 (provide 'tibetan)
 

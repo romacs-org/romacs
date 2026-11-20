@@ -58,4 +58,28 @@
       (should-not (quail-tibetan-update-translation nil))
       (should (equal quail-current-str "")))))
 
+(defun tibetan-tests--keyed (method keys)
+  "The text input method METHOD inserts for KEYS typed one by one, as its
+input function receives them, with the package's guidance (on for both)."
+  (with-temp-buffer
+    (switch-to-buffer (current-buffer))
+    (activate-input-method method)
+    (let ((input-method-verbose-flag t)
+          (events (listify-key-sequence keys)))
+      (while events
+        (setq unread-command-events (cdr events))
+        (let ((inserted (funcall input-method-function (car events))))
+          (setq events unread-command-events unread-command-events nil)
+          (dolist (char inserted) (when (characterp char) (insert char)))))
+      (buffer-substring-no-properties (point-min) (point-max)))))
+
+(ert-deftest tibetan-input-methods-type-the-inherent-vowel-and-stacks ()
+  ;; The inherent vowel ("" for Wylie `a', TibKey `A') and a stack are one
+  ;; Quail candidate each: as many candidates as characters, none for "",
+  ;; signalled `args-out-of-range'.  Pinned GNU types the same keys as
+  ;; these, with its invisible vowel sign where the vowel is inherent.
+  (dolist (case '(("tibetan-wylie" "ka " "ཀ་") ("tibetan-wylie" "a " "་") ("tibetan-wylie" "rka " "རྐ་")
+                  ("tibetan-wylie" "phyw " "ཕྱྭ་") ("tibetan-tibkey" "qA " "ཀ་") ("tibetan-tibkey" "A " "་")))
+    (should (equal (tibetan-tests--keyed (nth 0 case) (nth 1 case)) (nth 2 case)))))
+
 ;;; tibetan-tests.el ends here

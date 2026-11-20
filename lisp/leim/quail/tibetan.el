@@ -74,6 +74,37 @@
 	    (setq quail-current-str quail-current-key)))))
   control-flag)
 
+;; GNU's transcriptions each named one character (a precomposed glyph,
+;; or the invisible vowel sign for "a"); Romacs's are Unicode stacks, and
+;; "a" is the inherent vowel, "" (ledger/divergences/VM2-TIBETAN-UNICODE.md).
+;; Quail takes a string of other than one character as that many candidates
+;; (none for ""), so each such translation is given as one candidate, the
+;; whole string.
+(defun quail-tibetan--rules (rules)
+  "RULES, a symbol whose value is an alist of keys and translations, as Quail
+takes them: a symbol of its own, uninterned, whose value gives a
+translation of other than one character as a one-candidate vector."
+  (let ((symbol (make-symbol (symbol-name rules))))
+    (set symbol (mapcar (lambda (rule)
+                          (let ((translation (cdr rule)))
+                            (if (and (stringp translation) (/= (length translation) 1))
+                                (cons (car rule) (vector translation))
+                              rule)))
+                        (symbol-value rules)))
+    symbol))
+
+(defun quail-tibetan--table (table)
+  "TABLE, a state transition table for `quail-map-from-table', each of its
+rules as `quail-tibetan--rules' gives them."
+  (mapcar (lambda (state)
+            (cons (car state)
+                  (mapcar (lambda (transition)
+                            (if (consp transition)
+                                (cons (quail-tibetan--rules (car transition)) (cdr transition))
+                              (quail-tibetan--rules transition)))
+                          (cdr state))))
+          table))
+
 ;;; Wylie transcription based input methods.
 
 ;; Special alist for `འ'.  It must be treated as a subjoined
@@ -183,6 +214,7 @@
 ;;;             as specified in Unicode v.3
 (quail-install-map
  (quail-map-from-table
+  (quail-tibetan--table
   '((base-state (tibetan-consonant-transcription-alist . svm-state)
 		(tibetan-precomposed-transcription-alist . svm-state)
 		(tibetan-wylie-non-stacking-alist . svm-state)
@@ -196,7 +228,7 @@
 		(tibetan-modifier-transcription-alist . m-state))
     (vm-state (tibetan-vowel-transcription-alist . vm-state)
 	      (tibetan-modifier-transcription-alist . m-state))
-    (m-state (tibetan-modifier-transcription-alist . m-state)))))
+    (m-state (tibetan-modifier-transcription-alist . m-state))))))
 
 ;;;
 ;;; TibKey key alignment based input method
@@ -451,6 +483,7 @@
 
 (quail-install-map
  (quail-map-from-table
+  (quail-tibetan--table
   '((base-state (tibetan-consonant-tibkey-alist . s-state)
 		(tibetan-non-stacking-tibkey-alist . s-state)
 		tibetan-subjoined-tibkey-alist
@@ -459,6 +492,6 @@
 		tibetan-punctuation-tibkey-alist)
     (s-state (tibetan-subjoined-tibkey-alist . s-state)
 	     (tibetan-vowel-tibkey-alist . m-state))
-    (m-state tibetan-modifier-tibkey-alist))))
+    (m-state tibetan-modifier-tibkey-alist)))))
 
 ;;; tibetan.el ends here
