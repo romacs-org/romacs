@@ -318,7 +318,17 @@
     (draw :type 'approval :request-id "h" :tool "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
     (remhash "h" (romacs-agent-approvals session))
     (draw :type 'answered :request-id "h" :how 'harness)
-    (should (string-match-p "settled by the harness" (romacs-agent-log-tests--transcript)))))
+    (should (string-match-p "settled by the harness" (romacs-agent-log-tests--transcript)))
+    ;; Answered, then settled by the harness before it took the answer.
+    (puthash "g" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "g" :tool "Bash")
+    (draw :type 'attributed :request-id "g" :actor '(:kind "user") :decision "allow" :scope "once")
+    (remhash "g" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "g" :how 'harness)
+    (should (string-match-p "an answer not delivered: the harness settled it first" (romacs-agent-log-tests--transcript))))
+  ;; Policy's answer from another client says which too.
+  (should (string-match-p "allowed by Romacs.*(via phone)"
+                          (romacs-agent-log--answer-text '(:kind "policy" :client "phone") "allow" "once" nil))))
 
 (ert-deftest romacs-agent-log-asks-left-open-say-how-they-ended ()
   (romacs-agent-log-tests--with
@@ -333,7 +343,12 @@
       (should (string-match-p "an answer not delivered" text))
       (should (string-match-p "the turn ended with it unanswered" text)))
     (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
+    ;; In a replay, what the session waited on then decides, not now.
     (remhash "c" (romacs-agent-approvals session))
+    (let ((romacs-agent-log--replaying (romacs-agent--make :id "L" :approvals (make-hash-table :test #'equal))))
+      (puthash "c" t (romacs-agent-approvals romacs-agent-log--replaying))
+      (romacs-agent-log-draw session '(:type done)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
     (draw :type 'exit :status 1)
     (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
     (should-not romacs-agent-log--asks)))
