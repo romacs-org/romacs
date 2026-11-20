@@ -39,9 +39,10 @@ socket still holds part of one (HELD), and what its owner keeps (DATA)."
   (process-live-p (romacs-agent-rpc-process rpc)))
 
 (defun romacs-agent-rpc-lines (rpc chunk)
-  "The whole lines CHUNK completes on RPC, in order, blank ones dropped and
+  "The whole lines CHUNK completes on RPC, in order, empty ones dropped and
 the unfinished rest kept for the next chunk; `over' when a line, the rest
-included, is longer than a message may be (the caller closes the peer)."
+included, is over `romacs-agent-rpc-message-limit' bytes (the caller
+closes the peer)."
   (let* ((text (concat (romacs-agent-rpc-partial rpc) chunk))
          (lines (split-string text "\n")))
     (setf (romacs-agent-rpc-partial rpc) (car (last lines)))
@@ -68,8 +69,9 @@ is no JSON object."
   (romacs-agent-rpc-object "jsonrpc" "2.0" "id" id "result" result))
 
 (defun romacs-agent-rpc-error (id code kind message &optional data)
-  "An error reply to ID: CODE and its KIND (`data.kind'), MESSAGE, and
-DATA's fields beside the kind."
+  "An error reply to ID (null when nil): CODE and its KIND (`data.kind'),
+MESSAGE, and DATA's fields beside the kind.  DATA, a table, is the reply's
+data itself: its \"kind\" is set in place."
   (let ((fields (or data (make-hash-table :test #'equal))))
     (puthash "kind" kind fields)
     (romacs-agent-rpc-object "jsonrpc" "2.0" "id" (or id :null)

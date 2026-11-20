@@ -17,8 +17,10 @@
 (defvar auto-mode-alist '(("\\.el\\'" . emacs-lisp-mode)))
 (defvar romacs-find-file-mode-function 'romacs-find-file-set-auto-mode
   "Function called with no argument in a buffer `romacs-find-file-noselect'
-has just read its file into (or found missing), before `find-file-hook',
-to choose the buffer's mode; nil chooses none.")
+has just read its file into, before `find-file-hook' (and, for a missing
+file, after `find-file-not-found-functions'), to choose the buffer's mode;
+nil leaves the mode as it is.  A file already visited is not read again,
+and this is not called.")
 
 (defun romacs-find-file--check-syntax (filename)
   "Reject unsupported filename syntax before any filesystem access."
@@ -57,7 +59,8 @@ File-local variables are never evaluated."
     file))
 
 (defun romacs-find-file-set-auto-mode ()
-  "Choose the first callable filename mode from `auto-mode-alist'.
+  "Call the mode of the first `auto-mode-alist' entry whose regexp matches
+`buffer-file-name' and whose mode is non-nil; signal when it is not callable.
 This is filename policy only, not GNU's full mode, coding or local-variable
 lifecycle.  The default native Elisp mode records major-mode; it does not
 claim the complete GNU Elisp editing environment."

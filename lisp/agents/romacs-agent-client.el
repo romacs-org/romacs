@@ -83,7 +83,10 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   (romacs-agent-rpc-live-p (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client-close (client)
-  "Close CLIENT's connection to its service, dropping what it held unsent."
+  "Close CLIENT's connection to its service, dropping what it held unsent.
+Closing ends the connection at once: its sentinel calls each request
+still waiting on a reply with the `disconnected' error, and tells each
+session followed through it that it ended."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
 (defun romacs-agent-client--sentinel (process _event)
@@ -104,8 +107,10 @@ whatever follows a session through it."
 
 (defun romacs-agent-client-request (client method params callback)
   "Ask CLIENT's service METHOD with PARAMS; CALLBACK is called with the
-result and nil, or nil and the error, once its reply comes, or at once
-with the `disconnected' error when CLIENT is not live.  The request's id."
+result and nil, or nil and the error, once its reply comes; with the
+`disconnected' error at once when CLIENT is not live, or when the
+connection ends before the reply.  A request that cannot be sent (over the
+message limit) signals, and nothing waits on it.  The request's id."
   (let ((id (cl-incf (romacs-agent-client-next client))))
     (if (not (romacs-agent-client-live-p client))
         (funcall callback nil (romacs-agent-client--gone))
@@ -245,8 +250,11 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 ;; service answers an open before it sends anything of it, and is dropped.
 
 (defun romacs-agent-client-open (client id)
-  "Open session ID on CLIENT: its reply, then each event and change of it,
-reach `romacs-agent-client-session-functions'."
+  "Open session ID on CLIENT.  `romacs-agent-client-session-functions'
+is told (opening), then (opened REPLY) or (failed ERROR), then each
+notice of the session whose revision is the one after the revision held.
+A notice that comes while it opens is dropped, and one that skips a
+revision opens it again."
   (let ((asked (list 'opening)))
     (puthash id asked (romacs-agent-client-sessions client))
     (run-hook-with-args 'romacs-agent-client-session-functions client id '(opening))
@@ -261,7 +269,8 @@ reach `romacs-agent-client-session-functions'."
            (run-hook-with-args 'romacs-agent-client-session-functions client id (list 'opened result))))))))
 
 (defun romacs-agent-client-close-session (client id)
-  "Close session ID on CLIENT."
+  "Stop following session ID on CLIENT: forget its open here, and ask the
+service to send this connection no more of it."
   (remhash id (romacs-agent-client-sessions client))
   (romacs-agent-client-request client "agents/session.close" (romacs-agent-rpc-object "id" id) #'ignore))
 
@@ -290,9 +299,11 @@ history is read, against the open's."
 
 (defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
-with PARAMS: upto, after or turns), every page of it; CALLBACK is called
-with (UNITS CURSOR RESET FROM), UNITS the record units in order (nil on
-a reset), FROM the seq they begin at when earlier records are not read, or with
+with PARAMS: upto, and after, or turns and records), every page of it;
+CALLBACK is called with (UNITS CURSOR RESET FROM), UNITS the record units
+in order (nil on a reset), FROM, for a read with no after that leaves
+earlier records out, the seq its records begin at (a record with nothing
+to draw is no unit, so the first unit may come later), else nil; or with
 \=(error ERROR).  With EXPECT, the cursor (a table) the history already
 held was read under, a reply of another epoch or adapter is a reset: its
 units are not to be joined to that history."

@@ -18,14 +18,21 @@ each `romacs-process-start' started and neither
 (defun romacs-process-start (argv input directory timeout callback)
   "Start ARGV with INPUT in DIRECTORY, bounded by TIMEOUT seconds.
 Once it completes, `romacs-process-dispatch-ready' calls CALLBACK on the
-evaluator with one argument, the list (STATUS STDOUT STDERR ERROR); a
-non-nil value from it says it changed what is shown.  The command's id."
+evaluator with one argument, the list (STATUS STDOUT STDERR ERROR):
+STDOUT and STDERR decoded as UTF-8, invalid bytes replaced, and ERROR
+what kept it from finishing (it did not start, or ran past TIMEOUT), else
+nil.  A non-nil value from CALLBACK says it changed what is shown.
+TIMEOUT is 1 to 120; a request the runtime refuses signals here.  A
+command `romacs-process-forget' retires first is never called back.  The
+command's id."
   (let ((id (romacs--process-start argv input directory timeout)))
     (setq romacs-process-handlers (cons (cons id callback) romacs-process-handlers))
     id))
 
 (defun romacs-process-forget (id)
-  "Retire ID and its callback.  This never retries an external effect."
+  "Retire ID and its callback.  This never retries an external effect.
+A command still running is asked to stop; an ID unknown or already
+retired signals an error."
   (let ((entry (assq id romacs-process-handlers)))
     (setq romacs-process-handlers (delq entry romacs-process-handlers)))
   (romacs--process-forget id))

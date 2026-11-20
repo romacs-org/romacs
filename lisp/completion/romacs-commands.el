@@ -43,7 +43,8 @@ obsolete, with no current name or for an older major version."
 
 (defun romacs-commands--predicate (buffer)
   "M-x's predicate in BUFFER, as simple.el's: a command that
-`read-extended-command-predicate' accepts."
+`read-extended-command-predicate' accepts.  A predicate that signals is
+taken to accept, its error shown, unless `debug-on-error' is set."
   (lambda (sym)
     (and (commandp sym)
          (cond ((null read-extended-command-predicate))
@@ -127,9 +128,10 @@ other predicate gets simple.el's table over the obarray."
 (defun read-extended-command-1 (prompt initial-input)
   "Read a command's name for M-x, as simple.el's does: PROMPT (\"M-x \"
 when nil) after the prefix argument it is given, INITIAL-INPUT in the
-minibuffer, a name M-x's predicate accepts in the current buffer
-required, from the commands the runtime keeps (`romacs-commands--table'),
-the name read saved on `extended-command-history'.  The name, a string."
+minibuffer, from the commands the runtime keeps (`romacs-commands--table'):
+input that is not empty must be a name M-x's predicate accepts in the
+current buffer.  Its history is `extended-command-history'.  The name, a
+string, \"\" for empty input."
   (let* ((buffer (current-buffer))
          (pred (romacs-commands--predicate buffer)))
     (minibuffer-with-setup-hook
