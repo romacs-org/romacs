@@ -339,10 +339,11 @@ argument ALL, what every turn of the session did."
 (defun romacs-agent-chat-attach (file)
   "Put FILE's path in the composer: the agent reads it where it is, no
 copy is made.  Interactively the clipboard's image, saved with the
-session; with a prefix argument, or when the clipboard holds none, a
-file asked for."
+session; with a prefix argument, when the clipboard holds none, or in a
+chat whose session takes no commands from here, a file asked for."
   (interactive
-   (list (if-let* ((type (and (not current-prefix-arg) (romacs-agent-menu--clipboard-image-type))))
+   (list (if-let* ((type (and (not current-prefix-arg) (romacs-agent-log--commands-p)
+                              (romacs-agent-menu--clipboard-image-type))))
              (romacs-agent-menu--save-clipboard-image (romacs-agent-menu--session) type)
            (read-file-name "Attach: " nil nil t)))
    romacs-agent-log-mode)
