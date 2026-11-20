@@ -15,7 +15,8 @@
 ;;   warning  a free variable; an unused lexical variable; an obsolete
 ;;            function; a missing or nil `lexical-binding' cookie; a
 ;;            docstring line over 80 columns; a string that pins a line
-;;            of a file of this repository.
+;;            of a file of this repository; in Romacs's own Lisp, a
+;;            public definition or a command with no docstring.
 ;;   hint     what the machine offers instead: a `romacs-lint-hint' the
 ;;            owner of a better path put on the function called, work
 ;;            that reaches no state and so can run in a worker, a
@@ -406,11 +407,64 @@ what decides where an instance keeps each slot."
 ;;;; Docstrings
 
 (defun romacs-lint--docstring (form)
-  "Top-level FORM's docstring, or nil: a function's, a variable's, a face's."
+  "Top-level FORM's docstring, or nil: a function's, a variable's, a face's,
+a group's, a keymap's or a mode's."
   (let ((doc (pcase (car-safe form)
-               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro 'define-inline) (nth 3 form))
-               ((or 'defvar 'defconst 'defcustom 'defface 'defvar-local) (nth 3 form)))))
+               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro 'define-inline 'cl-defgeneric)
+                (nth 3 form))
+               ((or 'defvar 'defconst 'defcustom 'defface 'defvar-local 'defgroup) (nth 3 form))
+               ('define-minor-mode (nth 2 form))
+               ('define-derived-mode (nth 4 form))
+               ('defvar-keymap (plist-get (cddr form) :doc)))))
     (and (stringp doc) doc)))
+
+(defun romacs-lint--command-p (form)
+  "Non-nil when top-level FORM defines a command: its body, after the
+docstring and `declare', begins with `interactive'."
+  (and (memq (car-safe form) '(defun cl-defun))
+       (let ((body (nthcdr 3 form)))
+         (while (or (stringp (car body)) (eq (car-safe (car body)) 'declare))
+           (setq body (cdr body)))
+         (eq (car-safe (car body)) 'interactive))))
+
+(defun romacs-lint--undocumented (form)
+  "What public definition top-level FORM makes with no docstring, or nil.
+Public is a name with no `--', or a command, which M-x offers whatever
+its name.  A `defvar' with no value declares, and defines nothing; one
+of a variable the machine has documented (GNU's, given a value before
+GNU's file loads) needs no second docstring."
+  (let ((name (romacs-lint--name form))
+        (variable (memq (car-safe form) '(defvar defvar-local defconst defcustom))))
+    (and (symbolp name)
+         (memq (car form) '(defun defmacro defsubst cl-defun cl-defmacro define-inline cl-defgeneric
+                             defvar defvar-local defconst defcustom defface defgroup defvar-keymap
+                             define-minor-mode define-derived-mode))
+         (not (and (memq (car form) '(defvar defvar-local)) (null (cddr form))))
+         (or (not (string-search "--" (symbol-name name))) (romacs-lint--command-p form))
+         (not (romacs-lint--docstring form))
+         (not (and variable (get name 'variable-documentation)))
+         name)))
+
+(defun romacs-lint--own-file-p (file root)
+  "Non-nil when FILE is Romacs's own Lisp, which documents every public
+definition: a file of a subsystem directory or of the VM's halves, or a
+`romacs-' file elsewhere on the load-path, as ROOT's lisp/bundled.json
+lays the tree out (`romacs-bundled-autoloads' reads it so too).  Not a
+bundled package's, nor a file that json names from outside (`files').
+FILE may be a base's copy outside ROOT, at its path under a lisp/."
+  (let ((layout (expand-file-name "lisp/bundled.json" (or root "/nonexistent")))
+        (relative (if (and root (file-in-directory-p file root))
+                      (file-relative-name file root)
+                    (and (string-match "/\\(lisp/.*\\)\\'" file) (match-string 1 file)))))
+    (and relative (string-prefix-p "lisp/" relative) (file-readable-p layout)
+         (let* ((json (with-temp-buffer
+                        (insert-file-contents layout)
+                        (json-parse-buffer :object-type 'alist :array-type 'list)))
+                (top (cadr (split-string relative "/"))))
+           (and (not (member relative (alist-get 'files json)))
+                (not (equal top (alist-get 'packages json)))
+                (or (member top (append (alist-get 'directories json) (alist-get 'off_path json)))
+                    (string-prefix-p "romacs-" (file-name-nondirectory relative))))))))
 
 (defun romacs-lint--wide-docstring-p (doc)
   "Non-nil when a line of DOC that could be wrapped is over 80 columns.
@@ -558,6 +612,12 @@ revision its struct layouts are held to."
                    for untrue = (romacs-lint--declaration function library arglist root)
                    when untrue collect (list line 'error untrue))
           (and base (romacs-lint--layout-changes (car (romacs-lint--read base)) forms))
+          (and (romacs-lint--own-file-p file root)
+               (cl-loop for (line . form) in forms
+                        for name = (romacs-lint--undocumented form)
+                        when name
+                        collect (list line 'warning
+                                      (format "in %s: public definition has no docstring; fix: say what it does, as its body does it" name))))
           (and (not (equal cookie "nil"))
                (let ((reports (mapcar (lambda (form)
                                         (cons form (romacs-lint--form-findings (car form) (cdr form) special declared own)))
