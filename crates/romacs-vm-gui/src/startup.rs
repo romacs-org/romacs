@@ -379,9 +379,11 @@ pub fn drive_loadup(vm: &mut Vm, dir: &std::path::Path) -> Result<crate::loadup:
 /// subsystem directories, in lisp/bundled.json's order, then each package
 /// in lisp/packages/. No name in them is another library's, so they follow GNU's load-path without shadowing it.
 pub fn bundled_load_path(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let layout = lisp_layout::layout(&own_lisp(dir))?;
-    let mut path: Vec<_> = layout.directories.iter().map(|name| dir.join(name)).filter(|p| p.is_dir()).collect();
-    let packages = dir.join(&layout.packages);
+    // The layout names directories of the tree it lies in.
+    let own = own_lisp(dir);
+    let layout = lisp_layout::layout(&own)?;
+    let mut path: Vec<_> = layout.directories.iter().map(|name| own.join(name)).filter(|p| p.is_dir()).collect();
+    let packages = own.join(&layout.packages);
     if packages.is_dir() {
         path.extend(sorted_subdirectories(&packages)?);
     }

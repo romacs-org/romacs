@@ -1088,8 +1088,10 @@ const FAILED_SIGNAL_LOOK: std::time::Duration = std::time::Duration::from_millis
 /// nothing either.
 fn failed_screen(host: &std::cell::RefCell<prompt::Shared>, early_window: &mut Option<crossbeam_channel::Receiver<Result<(), String>>>,
                  error: &str) -> Option<loading::Loading> {
-    let screen = { let mut shared = host.borrow_mut(); if shared.window_shown() { shared.loading.take() } else { None } }?;
-    if let Some(ready) = early_window.take() && !made(&ready) { return None; }
+    // A window asked for at the start is not yet shown, only being made.
+    let early = early_window.take().map(|ready| made(&ready));
+    if early == Some(false) { return None; }
+    let screen = { let mut shared = host.borrow_mut(); if early.is_some() || shared.window_shown() { shared.loading.take() } else { None } }?;
     loading::fail(error, startup::first_noted_lisp_error().as_deref());
     Some(screen)
 }
@@ -1440,8 +1442,6 @@ fn evaluate(
     // can wait for it too.
     early_window: &mut Option<crossbeam_channel::Receiver<Result<(), String>>>,
 ) -> Result<exit::Exit, String> {
-    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
-    startup::mark_phase("layout-engine");
     let (mut vm, carry) = match restored {
         Some((vm, carry)) => {
             let mut vm = *vm;
@@ -1465,6 +1465,10 @@ fn evaluate(
         (_, _, startup::Launch::Loadup | startup::Launch::GnuOnly) => { vm.eval_source("(setq isolate-boot 'source)")?; }
         _ => { vm.eval_source("(setq isolate-boot 'bare)")?; }
     }
+    // After the world's first Lisp error is taken: an engine that fails to
+    // start ends a session whose screen shows that error first.
+    let engine = std::rc::Rc::new(std::cell::RefCell::new(romacs_layout::LayoutEngine::new()?));
+    startup::mark_phase("layout-engine");
     // Measuring primitives ask the engine that paints (VM2-WTPS1).
     vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
     // The window's session ends with `kill-emacs': its hook has run, so the
