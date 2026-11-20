@@ -390,19 +390,31 @@ impl Vm {
         let _ = self.assign_variable(slot, value);
     }
 
-    /// subprocess::poll of FDS for at most TIMEOUT, which a host's C-g or a
-    /// debug event ends early, as keyboard input or a signal wakes GNU's
-    /// select: while a host shares the signal or `debug-on-event' names
-    /// one, the wait goes in slices of [`QUIT_SLICE`], and returns no
-    /// events once a press or debug event waits, for the caller's next
-    /// safepoint to quit.
+    /// subprocess::poll of FDS for at most TIMEOUT, which a host's C-g, a
+    /// debug event or a worker's interrupt or termination ends early, as
+    /// keyboard input or a signal wakes GNU's select: while a host shares
+    /// the signal or `debug-on-event' names one, the wait goes in slices of
+    /// [`QUIT_SLICE`]; a worker polls its wake pipe beside FDS
+    /// (`worker_wake_fd'), whose wake returns at once with FDS's events as
+    /// they are, for the caller to quit (`worker_quit') or dispatch them. A
+    /// press or debug event returns no events, for the next safepoint.
     pub(crate) fn poll_quittable(&self, fds: &[(std::os::fd::RawFd, i16)], timeout: Option<std::time::Duration>)
                                  -> std::io::Result<Vec<i16>> {
+        let wake = self.worker_wake_fd();
+        let set: Vec<_> = fds.iter().copied().chain(wake.map(|fd| (fd, libc::POLLIN))).collect();
+        // FDS's events and whether the wake pipe woke it (drained, so an
+        // interrupt `inhibit-quit' holds does not wake the next wait).
+        let poll = |timeout| -> std::io::Result<(Vec<i16>, bool)> {
+            let mut revents = crate::subprocess::poll(&set, timeout)?;
+            let woken = wake.is_some() && revents.pop().is_some_and(|r| r != 0);
+            if woken { crate::host::drain_isolate_wake(); }
+            Ok((revents, woken))
+        };
         // A debug event ends it too, without a host (handle_user_signal
         // interrupts GNU's select).
         let debug = self.debug_event_mask();
         if std::sync::Arc::strong_count(&self.quit) == 1 && debug == 0 {
-            return crate::subprocess::poll(fds, timeout);
+            return Ok(poll(timeout)?.0);
         }
         let deadline = timeout.map(|timeout| crate::host::monotonic() + timeout);
         loop {
@@ -410,8 +422,8 @@ impl Vm {
                 return Ok(vec![0; fds.len()]);
             }
             let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
-            let revents = crate::subprocess::poll(fds, Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))?;
-            if revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left <= QUIT_SLICE) {
+            let (revents, woken) = poll(Some(left.map_or(QUIT_SLICE, |left| left.min(QUIT_SLICE))))?;
+            if woken || revents.iter().any(|&r| r != 0) || left.is_some_and(|left| left <= QUIT_SLICE) {
                 return Ok(revents);
             }
         }

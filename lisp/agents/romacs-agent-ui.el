@@ -3657,6 +3657,7 @@ the session stays."
     ;; session not loaded read the row.
     (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
+    (romacs-agent--changed session)
     (romacs-agent-ui--batch)))
 
 (defun romacs-agent-chat-effort (effort)

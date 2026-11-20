@@ -54,7 +54,7 @@ fn fixture(a: &Path, b: &Path) {
     at(&a.join("d/inner"), 1_400_000_000);
     std::os::unix::fs::symlink("f", a.join("l")).unwrap();
     std::fs::write(a.join("locked"), "secret\n").unwrap();
-    std::fs::set_permissions(a.join("locked"), std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(a.join("locked"), std::fs::Permissions::from_mode(0o000)).unwrap();
     assert!(std::process::Command::new("mkfifo").arg(a.join("fifo")).status().unwrap().success());
     std::fs::create_dir(a.join("mixed")).unwrap();
     std::fs::write(a.join("mixed/a"), "a\n").unwrap();
