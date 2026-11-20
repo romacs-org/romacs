@@ -1,9 +1,10 @@
 //! Compiled Lisp holds over a copy of the files its compile read the
-//! attributes of: a library that asks a file's attributes as it loads is
-//! compiled once, then the file is replaced by a copy with its content and
-//! times (another inode, as a restore or a reflink of an installation
-//! gives), and the next session takes the artifact, compiling nothing.
-//! A change of the file's content or times would still recompile it.
+//! attributes of: a library whose compile asks a file's attributes (an
+//! input of its artifact) is compiled once, then the file is replaced by a
+//! copy with its content and times (another inode, as a restore or a
+//! reflink of an installation gives), and the next session takes the
+//! artifact, compiling nothing. A change of the file's content or times
+//! would still recompile it.
 use std::path::Path;
 use std::process::Command;
 
@@ -37,7 +38,7 @@ fn compiled_lisp_holds_over_a_copy_of_the_files_it_stat() {
     let data = root.join("lib/t-copied.dat");
     std::fs::write(&data, "data").unwrap();
     std::fs::write(root.join("lib/t-copied.el"), format!(";;; -*- lexical-binding: t -*-\n\
-        (defvar t-copied-size (file-attribute-size (file-attributes {:?})))\n\
+        (defvar t-copied-size (eval-when-compile (file-attribute-size (file-attributes {:?}))))\n\
         (provide 't-copied)\n", data.to_str().unwrap())).unwrap();
     // A sibling `.elc`: GNU would load compiled code, so Romacs does.
     std::fs::write(root.join("lib/t-copied.elc"), "").unwrap();
