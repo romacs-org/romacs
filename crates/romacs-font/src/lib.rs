@@ -15,10 +15,17 @@
 //! No Lisp value crosses this boundary, and none can: the crate does not
 //! depend on any evaluator. Layout and rendering both depend on it, which is
 //! why the renderer's font helpers live here too.
+//!
+//! Foreign calls stay in their safe wrappers, `fc` (Fontconfig) and
+//! `probe::variations` (`FreeType`'s variation calls); unsafe code anywhere
+//! else fails the build.
+
+#![deny(unsafe_code)]
 
 pub mod cluster;
 pub mod entity;
 pub mod font_match;
+#[expect(unsafe_code, reason = "the Fontconfig C API, wrapped once for the catalog")]
 mod fc;
 mod fontconfig_catalog;
 mod frame;

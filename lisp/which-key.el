@@ -381,7 +381,9 @@ which groups by mode.  Ordering options are:
 
 See the README and the docstrings for those functions for more
 information."
-  :type '(choice (function-item which-key-key-order)
+  :type '(choice (function-item romacs-popup-key-order)
+                 (const :tag "The keymaps' order" nil)
+                 (function-item which-key-key-order)
                  (function-item which-key-key-order-alpha)
                  (function-item which-key-description-order)
                  (function-item which-key-prefix-then-key-order)
@@ -1650,9 +1652,11 @@ which are strings.  KEY is of the form produced by `key-binding'."
   (key-description (which-key--current-key-list key-str)))
 
 (defun which-key--local-binding-p (keydesc)
-  (eq (which-key--safe-lookup-key-description
-       (current-local-map)
-       (which-key--current-key-string (car keydesc)))
+  "Whether KEYDESC, (KEY . BINDING) as which-key collects it, KEY the
+whole sequence, is the local map's binding of KEY."
+  ;; KEY already holds the prefix: prepending the current one looked up
+  ;; the prefix twice once a display had recorded it.
+  (eq (which-key--safe-lookup-key-description (current-local-map) (car keydesc))
       (intern (cdr keydesc))))
 
 (defun which-key--map-binding-p (map keydesc)
@@ -1877,10 +1881,16 @@ alists.  Return a list (key separator description)."
 (defun which-key--compute-binding (binding)
   "Replace BINDING with remapped binding if it exists.
 Requires `which-key-compute-remaps' to be non-nil."
-  (copy-sequence (symbol-name
-                  (or (and which-key-compute-remaps
-                           (command-remapping binding))
-                      binding))))
+  (let ((remap (and which-key-compute-remaps (command-remapping binding))))
+    ;; A remap to a function object is named as a binding to one is.
+    (copy-sequence (cond ((null remap) (symbol-name binding))
+                         ((symbolp remap) (symbol-name remap))
+                         ((eq 'lambda (car-safe remap)) "lambda")
+                         ((eq 'closure (car-safe remap)) "closure")
+                         ;; A keyboard macro by its keys, as a binding to one.
+                         ((stringp remap) remap)
+                         ((vectorp remap) (key-description remap))
+                         (t "function")))))
 
 (defun which-key--get-menu-item-binding (def)
   "Retrieve binding for menu-item."

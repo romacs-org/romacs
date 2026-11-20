@@ -103,7 +103,9 @@
            '((which-key-popup-type 'custom)
              (which-key-custom-show-popup-function #'romacs-popup-which-key-show)
              (which-key-custom-hide-popup-function #'romacs-popup-which-key-hide)
-             (which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions)))
+             (which-key-custom-popup-max-dimensions-function #'romacs-popup-which-key-max-dimensions)
+             ;; Unmodified keys first, then C-, M-, C-M-: each group whole.
+             (which-key-sort-order #'romacs-popup-key-order)))
     (which-key-mode t)
     ;; Follow the desktop's theme, where the desktop is Omarchy.
     (omarchy-mode (omarchy-detected-p) idle)

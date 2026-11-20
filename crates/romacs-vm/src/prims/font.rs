@@ -276,13 +276,14 @@ fn put_extra(cx: &mut Leaf<'_>, font: Value, prop: Value, value: Value) -> std::
         if cx.pair(entry).is_some_and(|(key, _)| key == prop) { cx.setcdr(entry, value)?; return Ok(()); }
         tail = rest;
     }
-    let name = cx.symbol_name(prop)?;
+    cx.symbol_name(prop)?; // PROP must be a symbol.
     let mut entries = Vec::new();
     let mut tail = extra;
     while let Some((entry, rest)) = cx.pair(tail) { entries.push(entry); tail = rest; }
+    // Ordered as string-lessp orders the names (font.c), not by their keys.
     let at = entries.iter().position(|&entry| {
         let key = cx.pair(entry).map_or(Value::NIL, |(key, _)| key);
-        cx.symbol_name(key).is_ok_and(|key| name < key)
+        cx.string_order(prop, key).is_ok_and(|order| order.is_lt())
     }).unwrap_or(entries.len());
     let entry = cx.cons(prop, value);
     entries.insert(at, entry);

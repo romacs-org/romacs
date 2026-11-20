@@ -77,6 +77,9 @@ use freetype::Library;
 use freetype::face::LoadFlag;
 use freetype::freetype_sys as ft;
 
+#[expect(unsafe_code, reason = "FreeType's variation calls, which freetype-rs does not wrap")]
+mod variations;
+
 /// Probe `file`[`face_index`] like GNU `font_open_entity`: try
 /// `pixel_size`, bumping upward (at most 15 times) until average
 /// width and height are positive.
@@ -157,16 +160,18 @@ pub fn named_instance_wght_values(file: &str, face_index: u32) -> Vec<u16> {
     let Ok(mut face) = library.new_face(file, face_index as isize) else {
         return Vec::new();
     };
-    let Some(mm) = MmVar::of(&library, &mut face) else {
+    let Some(var) = variations::of(&library, &mut face) else {
         return Vec::new();
     };
-    let Some(wght) = mm.axes().iter().position(|axis| axis.tag == WGHT) else {
+    let Some(wght) = var.axes.iter().position(|axis| axis.tag == WGHT) else {
         return Vec::new();
     };
-    let mut weights: Vec<u16> = mm
-        .named_styles()
+    let mut weights: Vec<u16> = var
+        .named_styles
+        .iter()
+        .filter_map(|coords| coords.get(wght))
         // FT_Fixed 16.16 → integer CSS weight.
-        .map(|coords| (coords[wght] as f64 / 65536.0).round())
+        .map(|&value| (value as f64 / 65536.0).round())
         .filter(|value| (1.0..=1000.0).contains(value))
         .map(|value| value as u16)
         .collect();
@@ -192,16 +197,16 @@ pub fn named_instance_variation_coords(
     let Ok(mut face) = library.new_face(file, (face_selector & 0xffff) as isize) else {
         return Vec::new();
     };
-    let Some(mm) = MmVar::of(&library, &mut face) else {
+    let Some(var) = variations::of(&library, &mut face) else {
         return Vec::new();
     };
-    let Some(coords) = mm.named_styles().nth(named_instance - 1) else {
+    let Some(coords) = var.named_styles.get(named_instance - 1) else {
         return Vec::new();
     };
-    mm.axes()
+    var.axes
         .iter()
         .zip(coords)
-        .filter(|&(axis, value)| *value != axis.def)
+        .filter(|&(axis, value)| *value != axis.default)
         .filter_map(|(axis, value)| FontVariationCoord::try_new(axis.tag as u32, *value as f32 / 65536.0))
         .collect()
 }
@@ -222,85 +227,19 @@ pub fn postscript_name(file: &str, face_selector: u32) -> Option<String> {
 /// Set the `wght` design axis (OT axis units == CSS weight), leaving
 /// all other axes at their defaults. No-op for non-variable fonts.
 fn apply_wght_axis(library: &Library, face: &mut freetype::Face, wght: f32) {
-    let Some(mm) = MmVar::of(library, face) else {
+    let Some(var) = variations::of(library, face) else {
         return;
     };
-    let coords: Vec<ft::FT_Fixed> = mm
-        .axes()
+    let coords: Vec<ft::FT_Fixed> = var
+        .axes
         .iter()
-        .map(|axis| if axis.tag == WGHT { (f64::from(wght) * 65536.0) as ft::FT_Fixed } else { axis.def })
+        .map(|axis| if axis.tag == WGHT { (f64::from(wght) * 65536.0) as ft::FT_Fixed } else { axis.default })
         .collect();
-    set_design_coordinates(face, coords);
+    variations::set_design_coordinates(face, &coords);
 }
 
 /// The `wght` axis tag.
 const WGHT: ft::FT_ULong = u32::from_be_bytes(*b"wght") as ft::FT_ULong;
-
-/// A face's variation data (`FT_Get_MM_Var`), released with its library.
-struct MmVar<'a> {
-    library: &'a Library,
-    mm: std::ptr::NonNull<ft::FT_MM_Var>,
-}
-
-impl<'a> MmVar<'a> {
-    /// FACE's variation data; None for a face without variations.
-    fn of(library: &'a Library, face: &mut freetype::Face) -> Option<Self> {
-        let mut mm: *mut ft::FT_MM_Var = std::ptr::null_mut();
-        // SAFETY: the face is live and mutably borrowed; FreeType writes into
-        // `mm` the address of a copy it allocates for the caller, which
-        // outlives the face.
-        let error = unsafe { ft::FT_Get_MM_Var(face.raw_mut(), &mut mm) };
-        if error != 0 {
-            return None;
-        }
-        std::ptr::NonNull::new(mm).map(|mm| Self { library, mm })
-    }
-
-    fn axes(&self) -> &[ft::FT_Var_Axis] {
-        // SAFETY: FreeType allocated the structure for this owner, which
-        // frees it only on drop; `axis` holds `num_axis` entries.
-        unsafe {
-            let mm = self.mm.as_ref();
-            if mm.num_axis == 0 { &[] } else { std::slice::from_raw_parts(mm.axis, mm.num_axis as usize) }
-        }
-    }
-
-    /// Each named instance's design coordinates, one per axis.
-    fn named_styles(&self) -> impl Iterator<Item = &[ft::FT_Fixed]> {
-        let axes = self.axes().len();
-        // SAFETY: as in `axes`; `namedstyle` holds `num_namedstyles`
-        // entries, and each entry's `coords` one value per axis.
-        let styles = unsafe {
-            let mm = self.mm.as_ref();
-            if mm.num_namedstyles == 0 {
-                &[]
-            } else {
-                std::slice::from_raw_parts(mm.namedstyle, mm.num_namedstyles as usize)
-            }
-        };
-        styles.iter().map(move |style| {
-            // SAFETY: as above.
-            unsafe { if axes == 0 { &[] } else { std::slice::from_raw_parts(style.coords, axes) } }
-        })
-    }
-}
-
-impl Drop for MmVar<'_> {
-    fn drop(&mut self) {
-        // SAFETY: the structure came from FT_Get_MM_Var on a face of this
-        // library and is released once.
-        unsafe { ft::FT_Done_MM_Var(self.library.raw(), self.mm.as_ptr()) };
-    }
-}
-
-/// Set FACE's design coordinates, one per axis.
-fn set_design_coordinates(face: &mut freetype::Face, mut coords: Vec<ft::FT_Fixed>) {
-    // SAFETY: the face is live and mutably borrowed; `coords` holds the
-    // count passed, and FreeType copies it.
-    unsafe {
-        ft::FT_Set_Var_Design_Coordinates(face.raw_mut(), coords.len() as ft::FT_UInt, coords.as_mut_ptr());
-    }
-}
 
 fn probe_at_exact_px(face: &freetype::Face, pixel_size: u32) -> Option<FontPxMetrics> {
     face.set_pixel_sizes(pixel_size, pixel_size).ok()?;
@@ -533,43 +472,116 @@ pub fn probe_font_px_metrics(
 /// The GSUB/GPOS capability of `file`[`face_index`], read once per
 /// unchanged file. A malformed but readable file caches `None`; a read
 /// error stays retryable.
+#[must_use]
 pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
-    otf_capability_in(otf_capability_cache(), file, face_index, mapped)
+    otf_capability_in(otf_capability_cache(), file, face_index, |file| read_capability(file, face_index))
 }
 
-/// FILE mapped, not copied: a font collection runs to tens of megabytes,
-/// of which the layout tables are a small part. FreeType maps font files
-/// the same way.
-fn mapped(file: &str) -> std::io::Result<memmap2::Mmap> {
+/// The largest layout table `read_capability` reads: a font's run to a few
+/// megabytes, and a larger one (a sparse file's, say) is not allocated.
+const LAYOUT_TABLE_LIMIT: u64 = 64 << 20;
+
+/// The capability of `file`'s face `face_index`, read table by table rather than
+/// whole: a font collection runs to tens of megabytes, of which the table
+/// directory and the tables a face needs are a small part. Ok(None) for a
+/// face ttf-parser refuses, as `otf_capability_from_bytes` would.
+fn read_capability(file: &str, face_index: u32) -> std::io::Result<Option<OtfCapability>> {
+    use std::os::unix::fs::FileExt;
     let file = std::fs::File::open(file)?;
-    // SAFETY: the map is read-only and dropped before this observation
-    // returns; a font file truncated meanwhile faults, as FreeType's do.
-    unsafe { memmap2::Mmap::map(&file) }
+    let len = file.metadata()?.len();
+    // The first NEED of FILE's LENGTH bytes at OFFSET; None where the
+    // LENGTH bytes run past its end.
+    let read = |offset: u64, length: u64, need: u64| -> std::io::Result<Option<Vec<u8>>> {
+        if offset.checked_add(length).is_none_or(|end| end > len) {
+            return Ok(None);
+        }
+        let mut data = vec![0; usize::try_from(length.min(need)).map_err(std::io::Error::other)?];
+        file.read_exact_at(&mut data, offset)?;
+        Ok(Some(data))
+    };
+    let be32 = |bytes: &[u8], at: usize| u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+    // Where the face's directory starts, as `RawFace::parse` finds it: a
+    // collection's face at its offset, which follows the whole offset array.
+    let Some(header) = read(0, 12, 12)? else { return Ok(None) };
+    let start = if &header[..4] == b"ttcf" {
+        let faces = be32(&header, 8);
+        let first = 12 + 4 * u64::from(faces);
+        if face_index >= faces || first > len {
+            return Ok(None);
+        }
+        let Some(offset) = read(12 + 4 * u64::from(face_index), 4, 4)? else { return Ok(None) };
+        let offset = u64::from(be32(&offset, 0));
+        if offset < first {
+            return Ok(None);
+        }
+        offset
+    } else if face_index == 0 {
+        0
+    } else {
+        return Ok(None);
+    };
+    // The face's directory alone; its records hold offsets in the file.
+    let Some(face_header) = read(start, 12, 12)? else { return Ok(None) };
+    if &face_header[..4] == b"ttcf" {
+        return Ok(None);
+    }
+    let records = u64::from(u16::from_be_bytes([face_header[4], face_header[5]]));
+    let directory_length = 12 + 16 * records;
+    let Some(directory) = read(start, directory_length, directory_length)? else { return Ok(None) };
+    let Ok(raw) = ttf_parser::RawFace::parse(&directory, 0) else { return Ok(None) };
+    // The first NEED bytes of each table as `Face::parse` collects it from
+    // the whole file: the directory's last record of the tag, absent when it
+    // runs past the end. head, hhea and maxp are parsed from their first 54,
+    // 36 and 6 bytes; a layout table is read whole, and one larger than any
+    // font's (a sparse file's, say) is absent rather than allocated.
+    let record = |tag: &[u8; 4]| {
+        let record = raw.table_records.into_iter().filter(|record| &record.tag.to_bytes() == tag).last()?;
+        Some((u64::from(record.offset), u64::from(record.length)))
+    };
+    let prefix = |tag, need| record(tag).map_or(Ok(None), |(offset, length)| read(offset, length, need));
+    let whole = |tag| match record(tag) {
+        Some((offset, length)) if length <= LAYOUT_TABLE_LIMIT => read(offset, length, length),
+        _ => Ok(None),
+    };
+    let (Some(head), Some(hhea), Some(maxp)) = (prefix(b"head", 54)?, prefix(b"hhea", 36)?, prefix(b"maxp", 6)?) else {
+        return Ok(None);
+    };
+    let (gsub, gpos) = (whole(b"GSUB")?, whole(b"GPOS")?);
+    let tables = ttf_parser::RawFaceTables {
+        head: &head,
+        hhea: &hhea,
+        maxp: &maxp,
+        gsub: gsub.as_deref(),
+        gpos: gpos.as_deref(),
+        ..Default::default()
+    };
+    Ok(ttf_parser::Face::from_raw_tables(tables).ok().map(|face| capability_of(&face)))
 }
 
-fn otf_capability_in<D: AsRef<[u8]>>(
+fn otf_capability_in(
     cache: &OtfCapabilityCache,
     file: &str,
     face_index: u32,
-    read: impl FnOnce(&str) -> std::io::Result<D>,
+    read: impl FnOnce(&str) -> std::io::Result<Option<OtfCapability>>,
 ) -> Option<OtfCapability> {
-    observe_file(cache, file, face_index, || {
-        read(file).ok().map(|data| otf_capability_from_bytes(data.as_ref(), face_index))
-    })
-    .flatten()
+    observe_file(cache, file, face_index, || read(file).ok()).flatten()
 }
 
 #[cfg(test)]
 #[path = "probe/tests/otf_cache_test.rs"]
 mod otf_cache_tests;
 
+#[must_use]
 pub fn otf_capability_from_bytes(data: &[u8], face_index: u32) -> Option<OtfCapability> {
-    let face = ttf_parser::Face::parse(data, face_index).ok()?;
+    ttf_parser::Face::parse(data, face_index).ok().map(|face| capability_of(&face))
+}
+
+fn capability_of(face: &ttf_parser::Face) -> OtfCapability {
     let tables = face.tables();
-    Some(OtfCapability {
+    OtfCapability {
         gsub: tables.gsub.map(otf_table_scripts).unwrap_or_default(),
         gpos: tables.gpos.map(otf_table_scripts).unwrap_or_default(),
-    })
+    }
 }
 
 fn otf_table_scripts(table: ttf_parser::opentype_layout::LayoutTable) -> Vec<OtfScript> {

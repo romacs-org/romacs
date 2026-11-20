@@ -24,6 +24,10 @@ What counts, summed over the workspace (`report` shows each crate's share):
               second route beside `defsubr!` (tools/lib/primitive_index.py)
   primitives_outside_prims  `defsubr! { name = ... }` declarations outside
               PRIMS (the harness's own tests and probes)
+  vm_replacements  places in the engine's modules (ENGINE), outside tests,
+              that make a `Vm` or `Registers` or swap, replace or take one:
+              a register capability would then outlive its file, which no
+              type prevents (lisp-speed.md §13.6 I6). No declaration.
   generated   tracked files outside GNU's own trees and crates/vendor/ whose
               first lines say a tool wrote them: GNU's recordings and imports
               from outside sources, kept with their recorder
@@ -99,6 +103,13 @@ ALLOWED_LINT = re.compile(r'(?<![:\w])(?:dead_code|unused(?:_\w+)?)\b')
 REASON = re.compile(r'\breason\s*=')
 TODO = re.compile(r'\b(?:TODO|FIXME|XXX|HACK)\b(?!\([\w.-]*#\d+\))')
 DEFSUBR = re.compile(r'\bdefsubr\s*!\s*\{\s*name\s*=')
+ENGINE = re.compile(r'crates/romacs-vm/src/(?:threaded\w*|traversal)\.rs')
+TEST_FILE = re.compile(r'_tests?\.rs$')
+CFG_TEST = re.compile(r'#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]')
+VM_REPLACEMENT = re.compile(
+    r'\b(?:Vm|Registers)\s*::\s*(?:new|default)\b'
+    r'|\bmem\s*::\s*(?:swap|replace|take)\s*\(\s*(?:&\s*mut\s+)?\*?\s*(?:[\w.]*\.)?(?:vm|stack)\s*[,)]'
+    r'|\*\s*(?:[\w.]*\.)?vm\s*=(?!=)')
 CLIPPY = ('cargo', 'clippy', '--locked', '--offline', '--workspace', '--all-targets',
           '--message-format=json', '--', '-W', 'clippy::pedantic', '--cap-lints', 'warn')
 # How each count's new instance is declared where it occurs, for the failure.
@@ -110,6 +121,7 @@ DECLARE = {
     'unsafe_undocumented': 'put a `// SAFETY:` comment on the line above its `unsafe`',
     'legacy_primitives': f'declare it with `defsubr!` in {PRIMS}',
     'primitives_outside_prims': 'declare it with `SMELL(primitive): reason` in the comment lines above it',
+    'vm_replacements': 'remove it: the engine never makes or swaps a `Vm` or its `Registers`',
     'lint': 'declare it as `#[expect({}, reason = "...")]` on the item',
 }
 
@@ -135,6 +147,33 @@ def file_smells(src, long_file_lines=LONG_FILE_LINES):
     smells = Counter(allows=allowed_names(code), todos=sum(len(TODO.findall(text)) for _, _, text in comments),
                      long_files=int(long))
     return smells, primitives
+
+
+def without_tests(code):
+    """CODE, comments and literals already blank, with every `#[cfg(test)]`
+    item blanked too: from the attribute to its block's close or its `;`."""
+    out = list(code)
+    for m in CFG_TEST.finditer(code):
+        end = m.end()
+        while end < len(code) and code[end] not in '{;':
+            end += 1
+        depth = 0
+        while end < len(code):
+            depth += {'{': 1, '}': -1}.get(code[end], 0)
+            end += 1
+            if depth == 0:
+                break
+        for i in range(m.start(), end):
+            if out[i] != '\n':
+                out[i] = ' '
+    return ''.join(out)
+
+
+def vm_replacements(src):
+    """The lines of SRC, an engine module, that make or replace a `Vm` or its
+    `Registers` outside tests (`vm_replacements` above)."""
+    code = without_tests(unsafe_census.lex(src)[0])
+    return [code.count('\n', 0, m.start()) + 1 for m in VM_REPLACEMENT.finditer(code)]
 
 
 def crate_census(root, long_file_lines=LONG_FILE_LINES):
@@ -309,6 +348,8 @@ def layout(root, strays):
             'members_outside_crates': sorted(m for m in members if not m.startswith('crates/')),
             'legacy_primitives': sum('variant' in p for p in primitives),
             'primitives_outside_prims': sum(strays.values()),
+            'vm_replacements': sum(len(vm_replacements((Path(root) / n).read_text())) for n in names
+                                   if ENGINE.fullmatch(n) and not TEST_FILE.search(n)),
             'generated': sorted(n for n in names if says_generated(root, n))}
 
 
@@ -358,7 +399,7 @@ def summary(now):
     unsafe = sum(now['unsafe'].values(), Counter())
     totals = {smell: crates[smell] for smell in CRATE_SMELLS}
     totals.update(unsafe_sites=unsafe['sites'] - unsafe['declared'], unsafe_undocumented=unsafe['undocumented'])
-    totals.update({key: now['layout'][key] for key in ('legacy_primitives', 'primitives_outside_prims')})
+    totals.update({key: now['layout'][key] for key in ('legacy_primitives', 'primitives_outside_prims', 'vm_replacements')})
     totals.update({f'lint {lint}': n for lint, n in now['lints'].items()})
     return {'totals': totals, 'generated': list(now['layout']['generated'])}
 

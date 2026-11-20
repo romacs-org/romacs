@@ -40,16 +40,6 @@ use romacs_renderer_wgpu::WgpuGlyphAtlas;
 /// How close together two titlebar clicks must be to count as a double click.
 const TITLEBAR_DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
 
-/// Unique across resize, device loss, destruction and recreation (no handle ABA).
-pub(super) fn next_surface_generation() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_update(
-        std::sync::atomic::Ordering::Relaxed,
-        std::sync::atomic::Ordering::Relaxed,
-        |id| id.checked_add(1),
-    )
-    .expect("surface generation exhausted")
-}
 
 /// Native window/surface state for a top-level GUI frame.
 pub(crate) struct GuiFrameNativeWindowState {
@@ -58,7 +48,6 @@ pub(crate) struct GuiFrameNativeWindowState {
     pub window: Arc<dyn Window>,
     /// Absent during device-loss recovery; the retained native window stays live.
     pub surface: Option<wgpu::Surface<'static>>,
-    pub surface_generation: u64,
     /// Backend of the adapter this surface presents through; wgpu surfaces
     /// do not expose it, and the GL resize quirk needs it.
     pub surface_backend: wgpu::Backend,
@@ -129,7 +118,6 @@ impl GuiFrameNativeWindowState {
         if self.surface.is_none() {
             return false;
         }
-        self.surface_generation = next_surface_generation();
         if self.surface_backend == wgpu::Backend::Gl {
             let rebuilt = instance
                 .create_surface(self.window.clone())
@@ -140,14 +128,6 @@ impl GuiFrameNativeWindowState {
             match rebuilt {
                 Ok(surface) => {
                     self.surface = Some(surface);
-                    #[cfg(target_os = "linux")]
-                    // SAFETY: the rebuilt surface and device share this renderer instance.
-                    unsafe {
-                        romacs_renderer_wgpu::native_presentation::prepare_surface(
-                            device,
-                            self.surface.as_ref().expect("configured surface"),
-                        );
-                    }
                     self.surface
                         .as_ref()
                         .expect("configured surface")
@@ -160,14 +140,6 @@ impl GuiFrameNativeWindowState {
                     // window's present path entirely.
                 }
             }
-        }
-        #[cfg(target_os = "linux")]
-        // SAFETY: this surface and device share the renderer instance; configure follows immediately.
-        unsafe {
-            romacs_renderer_wgpu::native_presentation::prepare_surface(
-                device,
-                self.surface.as_ref().expect("configured surface"),
-            );
         }
         self.surface
             .as_ref()
@@ -2014,7 +1986,7 @@ impl GuiFrameWindowManager {
             match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
-                    window_icon.apply(window.as_ref());
+                    window_icon.apply(window.as_ref(), &event_loop.owned_display_handle());
                     let raw_scale_factor = window.scale_factor();
                     let scale_factor = effective_window_scale_factor(raw_scale_factor);
                     let phys =
@@ -2061,13 +2033,6 @@ impl GuiFrameWindowManager {
                         desired_maximum_frame_latency:
                             crate::presentation::pacing::MAXIMUM_FRAME_LATENCY,
                     };
-                    #[cfg(target_os = "linux")]
-                    // SAFETY: this surface and device share the renderer instance; configure follows immediately.
-                    unsafe {
-                        romacs_renderer_wgpu::native_presentation::prepare_surface(
-                            device, &surface,
-                        );
-                    }
                     surface.configure(device, &config);
                     romacs_renderer_wgpu::diagnostics::surface_fingerprint(
                         adapter, &surface, &config,
@@ -2125,7 +2090,6 @@ impl GuiFrameWindowManager {
                                     content_insets: Default::default(),
                                     window,
                                     surface: Some(surface),
-                                    surface_generation: next_surface_generation(),
                                     surface_backend: adapter.get_info().backend,
                                     surface_config: config,
                                     width: phys.width,
@@ -2541,7 +2505,6 @@ impl GuiFrameWindowManager {
         self.for_each_top_level_window_mut(|window_state| {
             if let FrameLifecycle::Active { native, .. } = &mut window_state.lifecycle {
                 drop(native.surface.take());
-                native.surface_generation = next_surface_generation();
                 window_state
                     .render
                     .set_surface_state(SurfaceState::Suspended);
@@ -2601,14 +2564,8 @@ impl GuiFrameWindowManager {
                 view_formats: vec![],
                 desired_maximum_frame_latency: crate::presentation::pacing::MAXIMUM_FRAME_LATENCY,
             };
-            #[cfg(target_os = "linux")]
-            // SAFETY: this surface and device share the renderer instance; configure follows immediately.
-            unsafe {
-                romacs_renderer_wgpu::native_presentation::prepare_surface(device, &surface);
-            }
             surface.configure(device, &config);
             romacs_renderer_wgpu::diagnostics::surface_fingerprint(adapter, &surface, &config);
-            native.surface_generation = next_surface_generation();
             // All old associations were retired before primary re-initialization.
             native.surface = Some(surface);
             native.surface_config = config;

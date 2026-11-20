@@ -4,6 +4,7 @@
 // parameters (geometry, colors, atlas/pipeline handles); folding them into
 // structs is a separate refactor, so this bulk category is allowed crate-wide.
 #![allow(clippy::too_many_arguments)]
+#![forbid(unsafe_code)]
 
 pub mod gpu_policy;
 pub mod cost;
@@ -16,8 +17,6 @@ pub use romacs_imaging::{
 };
 pub(crate) mod media_budget;
 pub mod model;
-#[cfg(target_os = "linux")]
-pub mod native_presentation;
 pub mod renderer;
 mod root_gpu_timing;
 pub mod scene_graph;

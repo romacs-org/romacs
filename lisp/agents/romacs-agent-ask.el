@@ -27,7 +27,7 @@
 (require 'cl-lib)
 (require 'romacs-popup)
 
-(declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message))
+(declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message by))
 (declare-function romacs-agent-title "romacs-agent" (session))
 (declare-function romacs-agent-id "romacs-agent" (session))
 
@@ -112,20 +112,6 @@ one pick does not answer it all.  Each choosing row carries
    (if (romacs-agent-ask--at-once-p questions) ""
      (concat "\n" (propertize (concat (propertize "   ↵ Send" 'face 'romacs-popup-key) "\n")
                               'romacs-agent-ask (cons nil 'send))))))
-
-(defun romacs-agent-ask-record (questions chosen)
-  "The chat's one row for QUESTIONS: the first and how many more, then
-CHOSEN's answers when it is answered, t when how is not known, else
-that it waits."
-  (concat "? " (car (split-string (caar questions) "\n"))
-          (if (cdr questions) (format " (+%d)" (length (cdr questions))) "")
-          (propertize (cond ((consp chosen)
-                             (concat "  → " (mapconcat (lambda (pair) (string-join (cdr pair) ", ")) chosen " · ")))
-                            (chosen "  · answered")
-                            ;; The chat's key for its row (romacs-agent-ui.el).
-                            (t (substitute-command-keys
-                                "  · waiting: \\<romacs-agent-ui--asked-map>\\[romacs-agent-chat-answer] answers")))
-                      'face 'romacs-agent-dim)))
 
 ;;; The layer
 
