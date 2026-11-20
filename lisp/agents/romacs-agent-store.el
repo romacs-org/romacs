@@ -623,14 +623,17 @@ OUTCOME), OUTCOME the JSON of its result; nil when none is."
                                        (list key since)))))
     (cons (car row) (cadr row))))
 
-(defun romacs-agent-store-command-admit (key digest outcome done)
+(defun romacs-agent-store-command-admit (key digest outcome since done)
   "Admit the command KEY names, of params DIGEST, kept as OUTCOME, by the
 writer, in one step: DONE called with (ok t) once it is, (ok (DIGEST .
-OUTCOME)) when one of KEY was kept already, as it was, or (error ERR)."
-  (romacs-agent-write 'romacs-agent-store--command-admitted (list key digest outcome (float-time)) done (list 'command key)))
+OUTCOME)) when one of KEY was kept since time SINCE already, as it was,
+or (error ERR).  One of KEY kept before SINCE has expired: let go of."
+  (romacs-agent-write 'romacs-agent-store--command-admitted (list key digest outcome since (float-time)) done
+                      (list 'command key)))
 
-(defun romacs-agent-store--command-admitted (key digest outcome at)
+(defun romacs-agent-store--command-admitted (key digest outcome since at)
   (let ((db (or (romacs-agent-store--open) (error "The agents' store could not be opened"))))
+    (sqlite-execute db "delete from commands where key = ? and at < ?" (list key since))
     (if (> (sqlite-execute db "insert or ignore into commands (key, digest, outcome, at) values (?, ?, ?, ?)"
                            (list key digest outcome at))
            0)

@@ -842,6 +842,7 @@ a state root of its own, and a service of its own on `socket'."
     (romacs-agent-service-start socket)
     (let* ((home (make-temp-file "rsv-claude" t)) (cwd (make-temp-file "rsv-project" t))
            (romacs-agent-providers (list (cons "claude" home))) (romacs-agent-default-provider "claude")
+           (romacs-agent-start-deadline 0.5)
            (romacs-agent-service--commands (make-hash-table :test #'equal))
            (client (romacs-agent-client-connect socket)) (launched nil)
            (ask (lambda (method params)
@@ -857,7 +858,7 @@ a state root of its own, and a service of its own on `socket'."
                (first (car (funcall ask "agents/start" params)))
                (again (car (funcall ask "agents/start" params))))
           (should (stringp (gethash "id" first)))
-          ;; Its launch waiting for its records' place: queued.
+          ;; Its launch still waited for at its deadline: queued.
           (should (equal (gethash "state" first) "queued"))
           (should (equal (gethash "id" again) (gethash "id" first)))
           ;; Kept in the store: a service started again names the same one.
@@ -868,6 +869,12 @@ a state root of its own, and a service of its own on `socket'."
           (should (equal (romacs-agent-title (romacs-agent-loaded (gethash "id" first))) "far start")))
         (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" (romacs-agent-rpc-object "cid" "s2" "cwd" "relative")))))
                        "bad-params"))
+        ;; A host that does not start: the start says so, and so does its repeat.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch) (setf (romacs-agent-state session) 'unstarted))))
+          (let ((params (romacs-agent-rpc-object "cid" "s3" "cwd" cwd)))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))))
         (should (seq-some (lambda (p) (equal (gethash "cwd" p) root))
                           (gethash "projects" (car (funcall ask "agents/projects.list" (romacs-agent-rpc-object))))))
         (should (equal (mapcar (lambda (p) (gethash "name" p))
