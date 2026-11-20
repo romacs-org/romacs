@@ -278,7 +278,9 @@
         (should (equal (romacs-agent-log--menu-title) "Agent · lane chat"))
         ;; A finished one is the board's; one waiting on the user first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
-        ;; The menu takes them as it opens.
+        ;; The menu takes them as it opens, the only way M-x offers.
+        (should-not (funcall (get 'romacs-agent-log-actions-map-popup 'completion-predicate)
+                             'romacs-agent-log-actions-map-popup (current-buffer)))
         (cl-letf (((symbol-function 'romacs-agent-log-actions-map-popup) #'ignore))
           (romacs-agent-log-actions))
         (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))

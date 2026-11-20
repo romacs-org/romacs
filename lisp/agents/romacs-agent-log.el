@@ -1455,7 +1455,9 @@ A character typed on it goes to the composer."
   "M-p" #'romacs-agent-log-history-previous
   "M-n" #'romacs-agent-log-history-next)
 
-(put 'romacs-agent-log-actions-map-popup 'command-modes '(romacs-agent-log-mode))
+;; The menu opens through `romacs-agent-log-actions', which takes its
+;; workers first: M-x offers that, not the popup's own launcher.
+(put 'romacs-agent-log-actions-map-popup 'completion-predicate #'ignore)
 
 (define-derived-mode romacs-agent-log-mode fundamental-mode "Agent"
   "An agent session's chat: its transcript, and below, the composer.
