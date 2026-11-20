@@ -177,3 +177,14 @@ fn a_unibyte_name_and_its_raw_bytes_are_two_symbols_and_its_name_stays_unibyte_a
                                     (multibyte-string-p (symbol-name (make-symbol u))) (string= (make-symbol u) u)))");
     assert_eq!(vm.display(got).unwrap(), "(nil nil t nil t nil t)");
 }
+
+/// A unibyte name's first character is escaped as any name's is: `?'
+/// starts a character, so `prin1' writes `\?' and the name reads back as a
+/// symbol. Pinned GNU: `(t "\\?" 3)`.
+#[test]
+fn a_unibyte_name_prints_its_first_character_escaped_as_gnu() {
+    let mut vm = Vm::new();
+    let got = run(&mut vm, "(let* ((s (intern (unibyte-string 63 233))) (p (prin1-to-string s))) \
+                              (list (symbolp (car (read-from-string p))) (substring p 0 2) (length p)))");
+    assert_eq!(vm.display(got).unwrap(), "(t \"\\\\?\" 3)");
+}

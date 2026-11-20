@@ -551,6 +551,8 @@ impl Vm {
         }
         if let Some(text) = self.marker_text(value, true) { return Ok(text); }
         if let Some(name) = value.index_if(7).and_then(|n| n.checked_sub(1)).and_then(|n| self.symbol_names.get(n)) {
+            // A unibyte name's characters, its first one escaped as any is.
+            let name = crate::symkey::printed_name(name);
             let prefix = if options.gensym && self.printed_as_gensym(value) { "#:" } else { "" };
             if name.is_empty() { return Ok(if prefix.is_empty() { "##" } else { prefix }.into()); }
             if !quoted { return Ok(format!("{prefix}{name}")); }

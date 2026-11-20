@@ -65,7 +65,8 @@ pub(crate) fn unibyte_key(bytes: &[u8]) -> String {
     key
 }
 
-/// The bytes of the unibyte name KEY stands for, or None when it is not one.
+/// The bytes of the unibyte name KEY stands for, or None when it is not
+/// one: what follows its mark must be ASCII and raw-byte characters.
 pub(crate) fn unibyte_name(key: &str) -> Option<Vec<u8>> {
     let rest = key.strip_prefix(ESC)?.strip_prefix(UNIBYTE)?;
     let internal = to_internal(rest).unwrap_or_else(|| rest.as_bytes().to_vec());
@@ -74,10 +75,20 @@ pub(crate) fn unibyte_name(key: &str) -> Option<Vec<u8>> {
     while at < internal.len() {
         let (code, width) = crate::lstring::string_char(&internal[at..]);
         // ASCII as itself, a raw-byte character as its byte.
-        bytes.push(if code < 0x80 { code as u8 } else { (code - 0x3F_FF00) as u8 });
+        bytes.push(match code {
+            0..0x80 => code as u8,
+            0x3F_FF80..=0x3F_FFFF => (code - 0x3F_FF00) as u8,
+            _ => return None,
+        });
         at += width;
     }
     Some(bytes)
+}
+
+/// KEY as the printer writes it: a unibyte name's characters without its
+/// mark, which text made from printer output would drop anyway.
+pub(crate) fn printed_name(key: &str) -> &str {
+    key.strip_prefix(ESC).and_then(|rest| rest.strip_prefix(UNIBYTE)).unwrap_or(key)
 }
 
 /// The Lisp name key text KEY stands for: its bytes and whether they are
