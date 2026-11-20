@@ -40,9 +40,17 @@ impl Vm {
                     } else {
                         match self.object_if(v) {
                             Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
-                            Some(data::Object::BoolVector(bits)) => prefix.extend(
-                                (0..bits.len).map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }),
-                            ),
+                            Some(data::Object::BoolVector(bits)) => {
+                                // Its bits a chunk at a time, polled between:
+                                // nothing is made from them yet.
+                                let len = bits.len;
+                                for start in (0..len).step_by(KERNEL_CHUNK) {
+                                    if start > 0 { self.native_poll_text()?; }
+                                    let Some(data::Object::BoolVector(bits)) = self.object_if(v) else { unreachable!("a bool-vector stays one") };
+                                    prefix.extend((start..(start + KERNEL_CHUNK).min(len))
+                                        .map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }));
+                                }
+                            }
                             _ => prefix.extend(self.list_values_polled(v)?),
                         }
                     }

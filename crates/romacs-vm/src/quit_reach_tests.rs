@@ -397,6 +397,7 @@ fn kernels_the_engine_runs_quit_per_chunk() {
     }
     for (p, args) in [(Append, "(list (make-list 50000 1) nil)"), (Append, "(list (make-string 50000 ?a) nil)"),
                       (Min, "(make-list 50000 1)"), (Max, "(make-list 50000 1)"), (Format, "(list \"%S\" (make-list 50000 'a))"),
+                      (Format, "(list \"%S\" (make-string 50000 ?a))"), (Append, "(list (make-bool-vector 50000 t) nil)"),
                       (DeepEqual, "(list (make-list 50000 1) (make-list 50000 1))")] {
         let (mut vm, signal) = busy_vm();
         let list = eval(&mut vm, args);
