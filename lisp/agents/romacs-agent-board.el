@@ -512,6 +512,9 @@ each window showing it keeps the row at its point and at its start."
                                   (romacs-agent-board--spot (window-start window))))
                           windows)))
       (let ((source romacs-agent-board-source))
+        ;; Its rows are no one's while they are drawn: a draw cut short
+        ;; leaves them so.
+        (setq romacs-agent-board--drawn-source nil)
         (romacs-agent-board--draw
          (romacs-agent-board-rows (romacs-agent-board--sessions)
                                   (and (not romacs-agent-board--settled) (romacs-agent-board-source-history source))
@@ -595,12 +598,13 @@ another buffer now runs the board's window hooks too."
 ;;; Commands
 
 (defvar-local romacs-agent-board--drawn-source nil
-  "The source whose sessions the board last drew (`romacs-agent-board-source').")
+  "The source whose sessions the board shows, drawn whole
+\(`romacs-agent-board-source'); nil while it is drawn, or never was.")
 
 (defun romacs-agent-board--acting ()
-  "Refuse, unless this editor acts on the sessions the board shows, as
-it drew them."
-  (unless (romacs-agent-log-source-commands-p (or romacs-agent-board--drawn-source romacs-agent-board-source))
+  "Refuse, unless this editor acts on the sessions the board shows, drawn
+whole."
+  (unless (and romacs-agent-board--drawn-source (romacs-agent-log-source-commands-p romacs-agent-board--drawn-source))
     (user-error "These sessions are another machine's: shown, not acted on from here")))
 
 (defun romacs-agent-board--session ()

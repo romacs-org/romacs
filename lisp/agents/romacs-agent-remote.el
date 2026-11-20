@@ -132,6 +132,7 @@ as its live events are drawn."
             (`(more ,units) (dolist (unit units) (romacs-agent-remote--draw-unit session unit t)))
             (`(row ,_) (romacs-agent-log--separator) (romacs-agent-log--header-show))
             (`(failed ,error)
+             (setq romacs-agent-remote--earlier nil)
              (romacs-agent-log--writing
                (romacs-agent-log--note nil (format "not followed: %s" (gethash "message" error)))))
             ('(ended)
@@ -153,8 +154,8 @@ the chat is killed."
     (romacs-agent-client-follow (romacs-agent-remote-client source) id romacs-agent-log-turns romacs-agent-log-records)))
 
 (defvar-local romacs-agent-remote--earlier nil
-  "Where the chat began when its earlier turns were asked for, while they
-are read.")
+  "While the chat's earlier turns are read, the read's own token: (END),
+END where the chat began when they were asked for.")
 
 (cl-defmethod romacs-agent-log-source-earlier ((source romacs-agent-remote) session)
   "Draw SESSION's turns before those the chat shows, read from its service:
@@ -166,26 +167,27 @@ begins where it did; its history gone, the chat is drawn afresh."
     (when romacs-agent-remote--earlier (user-error "Its earlier turns are being read"))
     (unless (and client (romacs-agent-client-live-p client))
       (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
-    (setq romacs-agent-remote--earlier end)
-    (unless (condition-case err
-                (romacs-agent-client-earlier
-                 client id (1- end) romacs-agent-log-turns romacs-agent-log-records
-                 (lambda (result)
-                   (when (buffer-live-p buffer)
-                     (with-current-buffer buffer
-                       (let ((current (and (eql romacs-agent-remote--earlier romacs-agent-log--from)
-                                           (eq client (romacs-agent-remote-client source)))))
-                         (setq romacs-agent-remote--earlier nil)
-                         (pcase result
-                           (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
-                           ('(reset) (when current (romacs-agent-client-open client id)))
-                           (`(,units ,from)
-                            (when current
-                              (romacs-agent-log--draw-above
-                               session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
-              (error (setq romacs-agent-remote--earlier nil) (signal (car err) (cdr err))))
-      (setq romacs-agent-remote--earlier nil)
-      (user-error "This chat is not followed: open it again"))))
+    (let ((token (list end)))
+      (setq romacs-agent-remote--earlier token)
+      (unless (condition-case err
+                  (romacs-agent-client-earlier
+                   client id (1- end) romacs-agent-log-turns romacs-agent-log-records
+                   (lambda (result)
+                     (when (and (buffer-live-p buffer) (eq (buffer-local-value 'romacs-agent-remote--earlier buffer) token))
+                       (with-current-buffer buffer
+			 (let ((current (and (eql end romacs-agent-log--from)
+                                             (eq client (romacs-agent-remote-client source)))))
+                           (setq romacs-agent-remote--earlier nil)
+                           (pcase result
+                             (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
+                             ('(reset) (when current (romacs-agent-client-open client id)))
+                             (`(,units ,from)
+                              (when current
+				(romacs-agent-log--draw-above
+				 session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+		(error (setq romacs-agent-remote--earlier nil) (signal (car err) (cdr err))))
+	(setq romacs-agent-remote--earlier nil)
+	(user-error "This chat is not followed: open it again")))))
 
 (cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-remote))
   (romacs-agent-remote-chats source))
