@@ -4973,6 +4973,20 @@ they lag."
           (romacs-agent-events-tail session turns end begin))
     (romacs-agent--journal-file-tail session turns end begin budget)))
 
+(defun romacs-agent-tail-start (session turns records &optional end)
+  "Where a reader of SESSION's last TURNS turns before place END, its end
+by default, begins: the place of the TURNSth latest turn's start
+\(`romacs-agent--journal-tail'), nil for its start; but no more than
+RECORDS of SQLite's records before END (`romacs-agent-events-p'), within
+a turn longer than that.  A chat begins there, and so does the history
+the agents service reads for one."
+  (let ((from (car (romacs-agent--journal-tail session turns end))))
+    (if-let* (((romacs-agent-events-p session))
+              (end (or end (romacs-agent-events-end session)))
+              ((> (- end (or from 0)) records)))
+        (- end records)
+      from)))
+
 (defun romacs-agent--turns-tail (session turns &optional budget)
   "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
 record, from its turns' rows; nil when it has fewer rows than that, none

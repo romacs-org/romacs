@@ -194,8 +194,9 @@ request, as `romacs-agent-approvals' is.")
 
 (cl-defgeneric romacs-agent-log-source-send (source session text &optional when)
   "Send SESSION the user's TEXT through SOURCE: now, into the turn under
-way when one runs; WHEN `later', once that turn ends; `first', then, ahead
-of the messages waiting.")
+way when one runs; WHEN `later', once that turn ends; `interrupt', that
+turn interrupted, then first of the messages waiting (now when none runs).
+An empty TEXT is not sent.")
 
 (cl-defgeneric romacs-agent-log-source-interrupt (source session)
   "Interrupt SESSION's turn under way, through SOURCE.")
@@ -209,6 +210,25 @@ of the messages waiting.")
 
 (cl-defgeneric romacs-agent-log-source-seen (source session)
   "SESSION's chat has been shown to its end, through SOURCE.")
+
+(cl-defgeneric romacs-agent-log-source-chats (source)
+  "SOURCE's chat buffers, a table by session id.")
+
+(cl-defgeneric romacs-agent-log-source-answers-p (_source _session _event)
+  "Whether this editor answers SESSION's approval EVENT itself, by its
+policy, as SOURCE has it: no other source's requests."
+  nil)
+
+(cl-defgeneric romacs-agent-log-source-commands-p (_source)
+  "Whether this editor's session commands (its model, rename, fork, stop
+and the others of the chat's menu) act on SOURCE's sessions."
+  nil)
+
+(cl-defgeneric romacs-agent-log-source-saved (_source _session _draft)
+  "What a saved desktop keeps of a chat of SOURCE's SESSION, its composer
+holding DRAFT, to restore it by (`romacs-agent-log-desktop-restore'); nil
+when it is not restored."
+  nil)
 
 (defun romacs-agent-log--set-session (session)
   "Make SESSION the current chat's, named by its title."
@@ -571,7 +591,7 @@ key its block binds the command to."
   "Draw approval EVENT: a block at the end that waits on the user, unless
 Romacs answers it by its policy, which draws that answer and who gave it.
 Live, in a chat no window shows, the echo area says so too."
-  (unless (romacs-agent--auto-answer-p session event)
+  (unless (romacs-agent-log-source-answers-p romacs-agent-log--source session event)
     (romacs-agent-log--ask-block event)
     (when (and (romacs-agent--live-p session) (not (get-buffer-window (current-buffer) 'visible)))
       (message "%s %s waits on you: %s"
@@ -890,7 +910,7 @@ end, replayed into a copy so the session is not touched."
 
 (cl-defmethod romacs-agent-log-source-fill ((_source romacs-agent-log-local-source) session)
   "Draw SESSION's last `romacs-agent-log-turns' turns from its records."
-  (let* ((from (romacs-agent-log--start session (car (romacs-agent--journal-tail session romacs-agent-log-turns)))))
+  (let* ((from (romacs-agent-tail-start session romacs-agent-log-turns romacs-agent-log-records)))
     (setq romacs-agent-log--from from)
     (when from (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
     ;; From its start: an imported session's harness transcript first.
@@ -904,16 +924,6 @@ end, replayed into a copy so the session is not touched."
       (romacs-agent-log--close-stream))
     (romacs-agent-log--replay session from nil)
     (romacs-agent-log--sync-asks session)))
-
-(defun romacs-agent-log--start (session from)
-  "Where SESSION's chat begins drawing its records: FROM, a turn's start,
-unless more than `romacs-agent-log-records' records follow it in the
-store, then that many before its end."
-  (if-let* (((romacs-agent-events-p session))
-            (end (romacs-agent-events-end session))
-            ((> (- end (or from 0)) romacs-agent-log-records)))
-      (- end romacs-agent-log-records)
-    from))
 
 (defun romacs-agent-log--sync-asks (session)
   "What SESSION waits on now is what its chat shows waiting, whatever its
@@ -947,11 +957,7 @@ read as its harness's events read them."
 (cl-defmethod romacs-agent-log-source-earlier ((_source romacs-agent-log-local-source) session)
   "Draw SESSION's turns before those the chat shows from its records."
   (let* ((end romacs-agent-log--from)
-         (tail (and end (romacs-agent--journal-tail session romacs-agent-log-turns end)))
-         (from (let ((from (car tail)))
-                 (if (and (romacs-agent-events-p session) (> (- end (or from 0)) romacs-agent-log-records))
-                     (- end romacs-agent-log-records)
-                   from))))
+         (from (and end (romacs-agent-tail-start session romacs-agent-log-turns romacs-agent-log-records end))))
     (unless end (user-error "This chat shows the session from its start"))
     ;; Drawn into a buffer of its own, then put above: the live end is untouched.
     (let ((text (with-temp-buffer
@@ -980,18 +986,20 @@ read as its harness's events read them."
 records now, or with LATER when a window first shows it.  SOURCE is
 where the chat reads and acts on SESSION, this editor by default
 \(`romacs-agent-log--source')."
-  (let ((buffer (gethash (romacs-agent-id session) romacs-agent-log--chats)))
+  (let* ((source (or source romacs-agent-log-local))
+         (chats (romacs-agent-log-source-chats source))
+         (buffer (gethash (romacs-agent-id session) chats)))
     (unless (buffer-live-p buffer)
       (setq buffer (generate-new-buffer (romacs-agent-log--buffer-name session)))
       (with-current-buffer buffer
         (romacs-agent-log-mode)
-        (when source (setq romacs-agent-log--source source))
+        (setq romacs-agent-log--source source)
         (romacs-agent-log--set-session session)
         (setq romacs-agent-log--end (point-min-marker)
               romacs-agent-log--input (point-min-marker))
         (set-marker-insertion-type romacs-agent-log--end t)
         (romacs-agent-log--separator t)
-        (puthash (romacs-agent-id session) buffer romacs-agent-log--chats)
+        (puthash (romacs-agent-id session) buffer chats)
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))
     buffer))
@@ -1020,9 +1028,10 @@ after a batch of events remade sessions' states (their workers')."
 
 (add-hook 'romacs-agent-ui-changed-hook #'romacs-agent-log--headers-refresh)
 
-(defun romacs-agent-log-show (session &optional action)
-  "Show SESSION's chat, as `pop-to-buffer' does with ACTION."
-  (let ((buffer (romacs-agent-log-chat session)))
+(defun romacs-agent-log-show (session &optional action source)
+  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+session, this editor's by default."
+  (let ((buffer (romacs-agent-log-chat session nil source)))
     (pop-to-buffer buffer action)
     (goto-char (point-max))
     (recenter -1)
@@ -1033,8 +1042,8 @@ after a batch of events remade sessions' states (their workers')."
 ;; (desktop.el, warm-restart.el) carries which session it shows and the
 ;; composer's unsent text; its transcript is drawn from the records.
 (defun romacs-agent-log--desktop-save (_dirname)
-  (list :session (romacs-agent-id romacs-agent-log--session)
-        :draft (buffer-substring-no-properties romacs-agent-log--input (point-max))))
+  (romacs-agent-log-source-saved romacs-agent-log--source romacs-agent-log--session
+                                 (buffer-substring-no-properties romacs-agent-log--input (point-max))))
 
 (defun romacs-agent-log-desktop-restore (_file _name misc)
   "The chat of MISC's session with its draft, drawn when a window first
@@ -1062,9 +1071,15 @@ shows it; its session loaded only then, as its records are read."
   (romacs-agent-approvals session))
 
 (cl-defmethod romacs-agent-log-source-send ((_source romacs-agent-log-local-source) session text &optional when)
-  (if when
-      (romacs-agent-send-later (romacs-agent-log--loaded session) text (eq when 'first))
-    (romacs-agent-send (romacs-agent-log--loaded session) text)))
+  (let ((session (romacs-agent-log--loaded session)))
+    (pcase when
+      ((guard (string-empty-p text)) (when (and (eq when 'interrupt) (romacs-agent-log--running-p session))
+                                       (romacs-agent-interrupt session)))
+      ('later (romacs-agent-send-later session text))
+      ((and 'interrupt (guard (romacs-agent-log--running-p session)))
+       (romacs-agent-interrupt session)
+       (romacs-agent-send-later session text t))
+      (_ (romacs-agent-send session text)))))
 
 (cl-defmethod romacs-agent-log-source-interrupt ((_source romacs-agent-log-local-source) session)
   (romacs-agent-interrupt (romacs-agent-log--loaded session)))
@@ -1077,6 +1092,22 @@ shows it; its session loaded only then, as its records are read."
 
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-log-local-source) session)
   (romacs-agent-mark-seen session))
+
+(cl-defmethod romacs-agent-log-source-chats ((_source romacs-agent-log-local-source))
+  romacs-agent-log--chats)
+
+(cl-defmethod romacs-agent-log-source-answers-p ((_source romacs-agent-log-local-source) session event)
+  (romacs-agent--auto-answer-p session event))
+
+(cl-defmethod romacs-agent-log-source-commands-p ((_source romacs-agent-log-local-source))
+  t)
+
+(cl-defmethod romacs-agent-log-source-saved ((_source romacs-agent-log-local-source) session draft)
+  (list :session (romacs-agent-id session) :draft draft))
+
+(defun romacs-agent-log--commands-p ()
+  "Whether this editor's session commands act on the chat's session."
+  (romacs-agent-log-source-commands-p romacs-agent-log--source))
 
 (defun romacs-agent-log--act (function &rest args)
   "Call FUNCTION, a source's generic, with the chat's source, its session and ARGS."
@@ -1093,8 +1124,9 @@ shows it; its session loaded only then, as its records are read."
       (setq romacs-agent-log--recalled nil)
       (delete-region romacs-agent-log--input (point-max)))))
 
-(defun romacs-agent-log--running-p ()
-  (memq (romacs-agent-state romacs-agent-log--session) '(starting running waiting-approval)))
+(defun romacs-agent-log--running-p (&optional session)
+  "Whether SESSION, the chat's by default, runs a turn."
+  (memq (romacs-agent-state (or session romacs-agent-log--session)) '(starting running waiting-approval)))
 
 (defun romacs-agent-log-send ()
   "Send the composer's text: into the turn under way, when one runs."
@@ -1116,10 +1148,9 @@ shows it; its session loaded only then, as its records are read."
 (defun romacs-agent-log-interrupt-and-send ()
   "Interrupt the turn under way; the composer's text is sent once it ends."
   (interactive nil romacs-agent-log-mode)
-  (if (not (romacs-agent-log--running-p))
-      (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text)))
-    (romacs-agent-log--act #'romacs-agent-log-source-interrupt)
-    (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text 'first)))))
+  (if (string-empty-p (romacs-agent-log--draft))
+      (romacs-agent-log--act #'romacs-agent-log-source-send "" 'interrupt)
+    (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text 'interrupt)))))
 
 (defun romacs-agent-log--pending ()
   "The approvals this chat shows that the live session still waits on,
@@ -1324,14 +1355,14 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
-  :group "Runs on"
+  :group ("Runs on" :if #'romacs-agent-log--commands-p)
   "m" ("Model" romacs-agent-chat-model)
   "E" ("Effort" romacs-agent-chat-effort)
   "P" ("Plan mode on or off" romacs-agent-chat-plan)
   "H" ("Go on under another instance" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
   :row
-  :group "Session"
+  :group ("Session" :if #'romacs-agent-log--commands-p)
   "b" ("Agent board" romacs-agents)
   "n" ("New session" romacs-agent-chat-new)
   "R" ("Rename" romacs-agent-chat-rename)

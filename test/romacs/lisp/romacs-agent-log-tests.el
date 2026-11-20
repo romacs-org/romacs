@@ -436,9 +436,26 @@
     (draw :type 'tool-output :id "x" :text "line 2\n")
     (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
 
+(ert-deftest romacs-agent-log-interrupt-and-send-asks-the-live-session ()
+  ;; A restored chat shows its row, idle; its session, loaded, runs a
+  ;; turn: that turn is interrupted, the text sent first once it ends.
+  (romacs-agent-log-tests--with
+    (let ((live (romacs-agent--make :id "L" :harness 'claude :state 'running)) (calls nil))
+      (setf (romacs-agent-state session) 'idle)
+      (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
+                ((symbol-function 'romacs-agent-get) (lambda (_) live))
+                ((symbol-function 'romacs-agent-interrupt) (lambda (s) (push (list 'interrupt s) calls)))
+                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first) (push (list 'later s text first) calls)))
+                ((symbol-function 'romacs-agent-send) (lambda (s text &rest _) (push (list 'send s text) calls))))
+        (goto-char (point-max))
+        (insert "stop that")
+        (romacs-agent-log-interrupt-and-send))
+      (should (equal (reverse calls) (list (list 'interrupt live) (list 'later live "stop that" t)))))))
+
 ;; A chat's source.
 
-(cl-defstruct (romacs-agent-log-tests--source (:constructor romacs-agent-log-tests--source)) calls approvals)
+(cl-defstruct (romacs-agent-log-tests--source (:constructor romacs-agent-log-tests--source))
+  calls approvals (chats (make-hash-table :test #'equal)))
 
 (defun romacs-agent-log-tests--called (source &rest call)
   (push call (romacs-agent-log-tests--source-calls source)))
@@ -454,15 +471,18 @@
   (romacs-agent-log-tests--called source 'respond id allow reason))
 (cl-defmethod romacs-agent-log-source-seen ((source romacs-agent-log-tests--source) _session)
   (romacs-agent-log-tests--called source 'seen))
+(cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-log-tests--source))
+  (romacs-agent-log-tests--source-chats source))
 (cl-defmethod romacs-agent-log-source-approvals ((source romacs-agent-log-tests--source) _session)
   (romacs-agent-log-tests--source-approvals source))
 
 (ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
   ;; A chat of another source draws what it gives and acts through it
-  ;; alone: none of this editor's sessions is touched.
+  ;; alone: none of this editor's sessions is touched, its policy answers
+  ;; none of its requests, and its session commands are not offered.
   (let* ((source (romacs-agent-log-tests--source :approvals (make-hash-table :test #'equal)))
          (session (romacs-agent--make :id "S-remote" :harness 'claude :state 'running :title "far"))
-         (romacs-agent-approval-policy 'ask)
+         (romacs-agent-approval-policy 'allow)
          (buffer (romacs-agent-log-chat session nil source)))
     (unwind-protect
         (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (error "Sent here")))
@@ -472,6 +492,8 @@
                   ((symbol-function 'romacs-agent-mark-seen) (lambda (&rest _) (error "Seen here"))))
           (with-current-buffer buffer
             (should (string-match-p "from the source" (buffer-string)))
+            (should-not (romacs-agent-log--commands-p))
+            (should-not (romacs-agent-log--desktop-save nil))
             (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
               (type "now") (romacs-agent-log-send)
               (type "later") (romacs-agent-log-queue)
@@ -482,11 +504,18 @@
             (goto-char (point-max))
             (romacs-agent-log-allow)
             (romacs-agent-log-deny "no")
-            (romacs-agent-log-show session)
+            (romacs-agent-log-show session nil source)
             (should (equal (reverse (romacs-agent-log-tests--source-calls source))
-                           '((fill) (send "now" nil) (send "later" later) (interrupt) (interrupt) (send "after" first)
-                             (respond "r1" t nil) (respond "r1" nil "no") (seen))))))
-      (remhash "S-remote" romacs-agent-log--chats)
+                           '((fill) (send "now" nil) (send "later" later) (interrupt) (send "after" interrupt)
+                             (respond "r1" t nil) (respond "r1" nil "no") (seen)))))
+          ;; This editor's own session of the same id has a chat of its own.
+          (let ((local (romacs-agent-log-chat (romacs-agent--make :id "S-remote" :harness 'claude :state 'idle) t)))
+            (unwind-protect
+                (progn (should-not (eq local buffer))
+                       (should (eq (buffer-local-value 'romacs-agent-log--source local) romacs-agent-log-local))
+                       (should (with-current-buffer local (romacs-agent-log--commands-p))))
+              (remhash "S-remote" romacs-agent-log--chats)
+              (kill-buffer local))))
       (kill-buffer buffer))))
 
 (provide 'romacs-agent-log-tests)
