@@ -404,6 +404,34 @@
       (should (funcall dim 2))
       (should (funcall dim 9)))))
 
+(ert-deftest romacs-agent-log-a-rollback-waits-over-pages-between ()
+  ;; Its prompt two pages back: the page between is dimmed as it comes
+  ;; above, and the prompt's own page from the prompt on.
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 9))))
+    (setq romacs-agent-log--from 9)
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 7 :prompt "long ago")
+    (cl-flet ((page (from &rest requests)
+                (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) (list from)))
+                          ((symbol-function 'romacs-agent-events-p) #'ignore)
+                          ((symbol-function 'romacs-agent-log--replay)
+                           (lambda (s &rest _)
+                             (dolist (request requests)
+                               (romacs-agent-log-draw s (list :type 'input :text (format "p%d" request) :request request))))))
+                  (romacs-agent-log-earlier)))
+              (dim (request) (memq 'romacs-agent-log-note
+                                   (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end
+                                                                                      'romacs-agent-log-turn request)
+                                                                   'face)))))
+      (page 5 5 6)
+      (should (dim 5))
+      (should (dim 6))
+      (page nil 1 2)
+      (should-not (dim 1))
+      (should (dim 2))
+      (should-not romacs-agent-log-turns--rollbacks))))
+
 (ert-deftest romacs-agent-log-a-compaction-opens-whole ()
   (romacs-agent-log-tests--with
     (draw :type 'compacted :text (mapconcat #'number-to-string (number-sequence 1 30) "\n"))

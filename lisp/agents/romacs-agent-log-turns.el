@@ -74,16 +74,19 @@ readable, as the records keep them."
 
 (defun romacs-agent-log-turns--dim-above (end)
   "Earlier turns were put above, up to END: the rollbacks waiting for a
-prompt among them are dimmed from it, and those they draw whose prompt is
-still not drawn are dimmed from the new earlier turns' row, and wait."
+prompt among them are dimmed from it; those still waiting, and those the
+new turns draw whose prompt is not drawn, are dimmed from the new earlier
+turns' row, and wait."
   (romacs-agent-log--writing
-    (setq romacs-agent-log-turns--rollbacks
-          (seq-remove (lambda (pending)
-                        (when-let* ((start (romacs-agent-log-turns--prompt-before (car pending) end)))
-                          (romacs-agent-log-turns--dim start (cdr pending))
-                          (set-marker (cdr pending) nil)
-                          t))
-                      romacs-agent-log-turns--rollbacks))
+    (let ((row-end (and (get-text-property (point-min) 'romacs-agent-log-earlier)
+                        (next-single-property-change (point-min) 'romacs-agent-log-earlier nil end))))
+      (setq romacs-agent-log-turns--rollbacks
+            (seq-remove (lambda (pending)
+                          (let ((found (romacs-agent-log-turns--prompt-before (car pending) end)))
+                            (when-let* ((start (or found row-end))) (romacs-agent-log-turns--dim start (cdr pending)))
+                            ;; Found: done waiting.
+                            (when found (set-marker (cdr pending) nil) t)))
+                        romacs-agent-log-turns--rollbacks)))
     (let ((pos (point-min)))
       (while (setq pos (text-property-not-all pos end 'romacs-agent-log-rolled-back nil))
         (let ((to (get-text-property pos 'romacs-agent-log-rolled-back)))
