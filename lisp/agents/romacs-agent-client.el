@@ -267,7 +267,8 @@ history is read, against the open's."
 (defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
 with PARAMS: upto, after or turns), every page of it; CALLBACK is called
-with (UNITS CURSOR RESET), UNITS the record units in order, or with
+with (UNITS CURSOR RESET FROM), UNITS the record units in order, FROM
+the seq they begin at when earlier records are not read, or with
 \=(error ERROR).  With EXPECT, the cursor (a table) the history already
 held was read under, a reply of another epoch or adapter is a reset: its
 units are not to be joined to that history."
@@ -282,7 +283,8 @@ units are not to be joined to that history."
                              (reset (or (eq (gethash "reset" result) t)
                                         (and expect (not (and (equal (gethash "epoch" cursor) (gethash "epoch" expect))
                                                               (equal (gethash "adapter" cursor) (gethash "adapter" expect))))))))
-                        (funcall callback (list (and (not reset) units) cursor reset)))))))
+                        (funcall callback (list (and (not reset) units) cursor reset
+                                                (and (integerp (gethash "from" result)) (gethash "from" result)))))))))
       (let ((request (copy-hash-table params)))
         (puthash "id" id request)
         (romacs-agent-client-request client "agents/session.history" request #'part)))))

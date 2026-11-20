@@ -340,18 +340,18 @@ the board; its children are counted where the rows are kept."
 
 (defun romacs-agent-service--whole-rows ()
   "Every session this machine's board shows, as rows by id, their keys the
-board's own (`romacs-agent-board--key'), from the board's own sessions
-\(`romacs-agent-board--sessions').  Its view of the unloaded ones is the
+board's own of this editor's sessions (`romacs-agent-board-source-key',
+`romacs-agent-board-source-sessions').  Its view of the unloaded ones is the
 service's own, kept for the rows made before the next whole pass: the
 board's stays the board's, as the rows it shows hold its sessions."
   (let ((romacs-agent-board--unloaded nil))
-    (let* ((sessions (romacs-agent-board--sessions))
+    (let* ((sessions (romacs-agent-board-source-sessions romacs-agent-log-local))
            (rows (make-hash-table :test #'equal :size (length sessions))))
       (setq romacs-agent-service--unloaded romacs-agent-board--unloaded)
       (dolist (session sessions)
         (let ((id (romacs-agent-id session)))
           (unless (gethash id rows)
-            (puthash id (romacs-agent-service-row session (romacs-agent-board--key session)) rows))))
+            (puthash id (romacs-agent-service-row session (romacs-agent-board-source-key romacs-agent-log-local session)) rows))))
       rows)))
 
 (defun romacs-agent-service--session (id)
@@ -393,7 +393,7 @@ batch is looked up before any key is made, as a key reads others."
       (mapcar (lambda (id)
                 (let ((session (gethash id sessions)))
                   (cons id (and (not (eq session :gone))
-                                (romacs-agent-service-row session (romacs-agent-board--key session))))))
+                                (romacs-agent-service-row session (romacs-agent-board-source-key romacs-agent-log-local session))))))
               (nreverse order)))))
 
 (defun romacs-agent-service--apply (list updates)
@@ -788,9 +788,10 @@ a session not loaded stays so."
   "The most records a history read after a place spans: further behind,
 it is `reset'.")
 
-(defconst romacs-agent-service--turn-reach 20000
-  "The most records before a history read's start a turn's start is looked
-for in, and folded from: further back, the read is `reset'.")
+(defconst romacs-agent-service--records 20000
+  "The most records a read from the end spans before UPTO, and how many
+when its client asks for no fewer: a turn starting further back is read
+from within it.")
 
 (defconst romacs-agent-service--history-bytes (* 8 1024 1024)
   "The most bytes of units one history reply collects: past them, it stops
@@ -801,14 +802,19 @@ where it is, its cursor saying so.")
 
 (defun romacs-agent-service--history (rpc params)
   "`agents/session.history': session ID's record units with AFTER < seq
-<= UPTO, or, with no AFTER, those of its last TURNS turns up to UPTO
-\(`romacs-agent-service--turn-start'); replayed from the start of the turn
+<= UPTO, or, with no AFTER, those of its last TURNS turns up to UPTO,
+no more than RECORDS, where its chat would begin
+\(`romacs-agent-tail-start'); replayed from the start of the turn
 the first is in, so each
 unit's events are as live they were, between the editor's other work.
 Bounded in records folded and bytes kept; `reset' when its epoch moves
 meanwhile, or a read after a place would fold too many."
   (let* ((id (gethash "id" params)) (upto (gethash "upto" params)) (after (gethash "after" params))
          (turns (let ((turns (gethash "turns" params))) (if (and (integerp turns) (> turns 0)) (min turns 50) 3)))
+         (records (let ((records (gethash "records" params)))
+                    (if (and (integerp records) (> records 0))
+                        (min records romacs-agent-service--records)
+                      romacs-agent-service--records)))
          (session (and (stringp id) (or (romacs-agent-loaded id) (romacs-agent-store-row-session id)))))
     (unless session (romacs-agent-service--fail -32010 "unknown-session" "No such session"))
     (unless (and (integerp upto) (or (null after) (and (integerp after) (<= after upto))))
@@ -816,14 +822,18 @@ meanwhile, or a read after a place would fold too many."
     (unless (romacs-agent-events-p session)
       (romacs-agent-service--fail -32013 "unsupported" "This session's records are in a journal: it has no history served"))
     (let* ((epoch (romacs-agent-events-epoch id))
-           (cut (if after (1+ after) upto))
-           ;; A turn's start, looked for within its reach: the replay folds
-           ;; from there, never mid-turn (a message's text would come twice).
-           (begin (max 0 (- cut romacs-agent-service--turn-reach)))
-           (from (and (not (and after (> (- upto after) romacs-agent-service--catch-up)))
-                      (romacs-agent-service--turn-start session (if after 1 turns) (1+ cut) begin))))
+           ;; A catch-up folds from its turn's start, however far back (the
+           ;; client holds what is before AFTER: a message's text must not
+           ;; come twice).  A read from the end begins where a chat of
+           ;; those turns begins, within a turn longer than RECORDS.
+           (from (cond ((not after)
+                        (or (romacs-agent-tail-start session turns records
+                                                     (and (< (1+ upto) (romacs-agent-events-end session)) (1+ upto)))
+                            0))
+                       ((<= (- upto after) romacs-agent-service--catch-up)
+                        (or (romacs-agent-service--turn-start session (+ after 2)) 0)))))
       (if (null from)
-          (romacs-agent-service--history-reply rpc session upto epoch nil t)
+          (romacs-agent-service--history-reply rpc session upto epoch nil t nil)
         (lambda (respond)
           (romacs-agent-service--replay
            rpc session from upto (or after (1- from))
@@ -831,32 +841,32 @@ meanwhile, or a read after a place would fold too many."
              (funcall respond
                       (condition-case err
                           (romacs-agent-service--history-reply
-                           rpc session stopped epoch units (not (eql (romacs-agent-events-epoch id) epoch)))
+                           rpc session stopped epoch units (not (eql (romacs-agent-events-epoch id) epoch))
+                           (and (not after) (> from 0) from))
                         (error (list 'error -32603 "internal" (error-message-string err))))))
            (lambda (why) (funcall respond (list 'error -32603 "internal" why)))))))))
 
-(defun romacs-agent-service--turn-start (session turns end begin)
-  "The seq of a turn's start TURNS turns back from before seq END, fewer
-when the older start before seq BEGIN, out of reach; nil when none is in
-reach.  A turn starts at each row's first seq (romacs-agent-turns, each
+(defun romacs-agent-service--turn-start (session end)
+  "The seq of the start of the turn SESSION's records before seq END end
+in.  A turn starts at each row's first seq (romacs-agent-turns, each
 turn's kept exactly), and past the newest such row's end: records there,
 a turn under way or not yet written, begin with no turn under way; with
-no row before END, at the session's start.  The rows are read in one
-statement, one snapshot of them."
-  (let* ((rows (and-let* ((db (romacs-agent-turns--db)))
-                 (sqlite-select db (concat "select first_seq, last_seq from turns where session = ? and first_seq > 0"
-                                           " and first_seq < ? order by first_seq desc limit ?")
-                                (list (romacs-agent-id session) end turns))))
-         (after (if rows (1+ (or (cadr (car rows)) (caar rows))) 0))
-         (starts (seq-filter (lambda (seq) (>= seq begin))
-                             (append (and (< after end) (list after)) (mapcar #'car rows)))))
-    (car (last (seq-take starts turns)))))
+no row before END, at the session's start (nil).  The rows are read in
+one statement, one snapshot of them."
+  (when-let* ((row (car (and-let* ((db (romacs-agent-turns--db)))
+                          (sqlite-select db (concat "select first_seq, last_seq from turns where session = ? and first_seq > 0"
+                                                    " and first_seq < ? order by first_seq desc limit 1")
+                                         (list (romacs-agent-id session) end))))))
+    (let ((after (1+ (or (cadr row) (car row)))))
+      (if (< after end) after (car row)))))
 
-(defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
+(defun romacs-agent-service--history-reply (rpc session upto epoch units reset from)
   "A history reply of UNITS (each (SEQ . SENT)) through UPTO under EPOCH, or
-of none and `reset' when RESET: paged as every collection is."
+of none and `reset' when RESET: paged as every collection is.  FROM is
+the seq its records begin at, for a read from the end that does not
+begin at the session's start."
   (romacs-agent-service--units-page
-   rpc (list :cursor (romacs-agent-rpc-object "seq" upto "epoch" epoch
+   rpc (list :from from :cursor (romacs-agent-rpc-object "seq" upto "epoch" epoch
                                               "adapter" (romacs-agent-service--adapter (romacs-agent-harness session)))
              :reset reset
              :units (and (not reset)
@@ -870,17 +880,18 @@ of none and `reset' when RESET: paged as every collection is."
                                            units))))))
 
 (defun romacs-agent-service--units-page (rpc state)
-  "STATE, a history reply's (:cursor :reset :units), as one reply: whole
-units up to the budget, at least one, and a token continuing it."
+  "STATE, a history reply's (:from :cursor :reset :units), as one reply:
+whole units up to the budget, at least one, and a token continuing it."
   (let ((budget romacs-agent-service--unit-budget) (units (plist-get state :units)) (taken nil) (first t))
     (while (and units (let ((bytes (string-bytes (json-serialize (car units)))))
                         (when (or first (<= bytes budget)) (setq budget (- budget bytes) first nil) t)))
       (push (pop units) taken))
     (romacs-agent-rpc-object
      "cursor" (plist-get state :cursor) "reset" (if (plist-get state :reset) t :false)
+     "from" (or (plist-get state :from) :null)
      "units" (vconcat (nreverse taken))
      "more" (if units
-                (romacs-agent-service--token rpc (list :page #'romacs-agent-service--units-page
+                (romacs-agent-service--token rpc (list :page #'romacs-agent-service--units-page :from (plist-get state :from)
                                                        :cursor (plist-get state :cursor) :units units))
               :null))))
 

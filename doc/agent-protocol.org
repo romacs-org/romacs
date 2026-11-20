@@ -443,22 +443,23 @@ paging ever holds live delivery back.
   cannot be lost.
 
 ** Pages
-- *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
-  bounds =after < seq ≤ upto=:
+- *Method.*  =agents/session.history {id, upto, after?, turns?, records?}=,
+  its bounds =after < seq ≤ upto=:
   - without =after=, the last =turns= turns (3 by default, 50 at most)
-    ending at =upto=, fewer when they start further back than 20,000
-    records; a turn starts at its row's first record, or past the last
-    row's end;
+    ending at =upto=, from where a chat of them begins
+    (=romacs-agent-tail-start=): no more than =records= records (20,000,
+    also the most), within a turn longer than that;
     =upto= set to just before the first unit goes further back;
-  - with =after=, every record unit in the range.  A range over 4,000
-    records, or one whose turn starts further back than 20,000, answers
-    =reset=: the client draws the session afresh.
+  - with =after=, every record unit in the range, folded from its turn's
+    start however far back.  A range over 4,000 records answers =reset=:
+    the client draws the session afresh.
 - *Read as live.*  The service replays from the first record of the turn
   the range begins in, so each unit's events are those live delivery
   sent (a message's text never twice), between the editor's other work.
   A reply's units can begin mid-turn, after units the client holds.
 - *Reply.*  ={"cursor": {seq, epoch, adapter}, "units": [{seq, events}],
-  "reset", "more"}=, paged by units.  Past 8 MiB of units it stops, its
+  "from", "reset", "more"}=, paged by units; =from=, for a read without
+  =after=, is the seq its records begin at, =null= at the session's start.  Past 8 MiB of units it stops, its
   cursor's seq where: the client asks on from there.  The epoch is read
   before and after the replay: moved, the reply is =reset=.  A client
   compares a reply's epoch and adapter with those its history was read

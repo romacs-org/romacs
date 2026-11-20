@@ -547,21 +547,63 @@ a state root of its own, and a service of its own on `socket'."
         (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
       (let ((romacs-agent-service--catch-up 5))
         (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2)))))
-      ;; A turn starting in reach (14, the window from 13) is read from its
-      ;; start; one out of reach is a reset, never a read from mid-turn.
-      (let ((romacs-agent-service--turn-reach 6))
-        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
-                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
-      (let ((romacs-agent-service--turn-reach 6))
-        ;; More turns asked than reach: those in reach.
-        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 3))
-                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
-        ;; The last turn's row not written yet: it starts past the last row.
-        (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq = 14" (list id))
-        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
-                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
-      (let ((romacs-agent-service--turn-reach 3))
-        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))))))))
+      ;; Where a chat begins is read from the turns' rows, an end given
+      ;; or not: a running session's history read up to a seq before its
+      ;; end starts as its chat does.
+      (should (equal (romacs-agent-tail-start session 1 100) 14))
+      (should (equal (romacs-agent-tail-start session 1 100 20) 14))
+      (cl-letf (((symbol-function 'romacs-agent-events-tail) (lambda (&rest _) (error "Prompts scanned"))))
+        (should (equal (romacs-agent-tail-start session 1 100 14) 8)))
+      ;; A read from the end begins where a chat of its turns does
+      ;; (`romacs-agent-tail-start'): a turn within RECORDS of the end from
+      ;; its start (14, six records before 20), one longer from within it,
+      ;; its first records left out; a catch-up folds from its turn's start
+      ;; whatever RECORDS.
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1 "records" 6))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 3 "records" 6))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1 "records" 3))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 17)) live) nil)))
+      (should (equal (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 17)))
+                     (seq-filter (lambda (unit) (> (car unit) 17)) live))))))
+
+(ert-deftest romacs-agent-service-a-remote-chat-draws-as-the-local-one ()
+  ;; A chat of the session drawn through the service (another machine's,
+  ;; here this one's) is the chat this editor draws of it: its history,
+  ;; then a unit that comes live.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
+    (let* ((romacs-agent-remote--source nil)
+           (source (romacs-agent-remote-connect socket))
+           (local (romacs-agent-log-chat session))
+           (remote nil)
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max))))))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision (romacs-agent-remote-client source))))
+            (setq remote (romacs-agent-remote-chat id))
+            (should-not (eq remote local))
+            (should (wait (null (buffer-local-value 'romacs-agent-remote--held remote))))
+            (should (string-search "answer 3" (funcall text remote)))
+            (should (equal (funcall text remote) (funcall text local)))
+            (run-hook-with-args 'romacs-agent-event-functions session
+                                (list :type 'status :text "live now" :seq 20 :last t :time (float-time)))
+            (should (wait (string-search "live now" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            ;; Its board too: the rows, their keys the service's.
+            (require 'romacs-agent-board)
+            (cl-flet ((board (source)
+                        (let ((romacs-agent-board-source source) (buffer (romacs-agent-board--buffer)))
+                          (romacs-agent-board--render buffer 100)
+                          (funcall text buffer))))
+              (should (string-search "stored" (board source)))
+              (should (equal (board source) (board romacs-agent-log-local)))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
 
 (ert-deftest romacs-agent-service-history-stops-at-its-bound ()
   ;; Past its bytes' bound a reply stops, its cursor where; the client asks
