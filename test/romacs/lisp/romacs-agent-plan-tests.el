@@ -263,6 +263,14 @@
           (narrow-to-region (point-min) (1+ (point-min)))
           (should (romacs-agent-log--proceed-offered)))
         (romacs-agent-log-draw session '(:type rolled-back :to 1 :turns 1 :prompt "x"))
+        ;; Narrowed, C-c C-y proceeds and the separator says so.
+        (romacs-agent-set-plan session t)
+        (romacs-agent-log-draw session '(:type plan :text "4. last" :proceed t))
+        (save-restriction
+          (narrow-to-region (point-min) (1+ (point-min)))
+          (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
+        (should-not (romacs-agent-log--proceed-offered))
+        (should (string-match-p "idle" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
         (should-not (romacs-agent-log--proceed-offered))
         (should (equal (cdr (romacs-agent-log--doing session)) "idle"))
         (romacs-agent-set-plan session nil)))

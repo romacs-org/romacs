@@ -843,7 +843,7 @@ back in the mode it had, and the next message carries it out."
   (romacs-agent-set-plan (romacs-agent-menu--session) nil)
   ;; Switched: its row offers nothing more, nor the separator.
   (romacs-agent-log--retire-proceed)
-  (romacs-agent-log--separator))
+  (save-restriction (widen) (romacs-agent-log--separator)))
 
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
