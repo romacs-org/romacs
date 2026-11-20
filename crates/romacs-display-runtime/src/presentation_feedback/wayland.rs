@@ -1,13 +1,14 @@
 use romacs_display_protocol::frame_time::{EventTime, observe_platform_now};
 use std::{collections::VecDeque, fs, path::PathBuf, time::Duration};
 
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
-use wayland_client::protocol::{wl_registry, wl_surface};
-use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle};
+use wayland_client::protocol::wl_registry;
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
 use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
+use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
+
+use crate::wayland_guest::Guest;
 
 #[derive(Clone, Copy, Debug)]
 struct Submission {
@@ -207,7 +208,7 @@ impl Dispatch<wp_presentation_feedback::WpPresentationFeedback, Submission> for 
 }
 
 struct Session {
-    connection: Connection,
+    guest: Guest,
     queue: EventQueue<Receipts>,
     receipts: Receipts,
     presentation: wp_presentation::WpPresentation,
@@ -215,25 +216,16 @@ struct Session {
 }
 
 impl Session {
-    fn connect(window: &dyn Window, path: Option<PathBuf>) -> Result<Self, String> {
-        let RawDisplayHandle::Wayland(display) = window
-            .display_handle()
-            .map_err(|error| error.to_string())?
-            .as_raw()
-        else {
-            return Err("presentation receipts require a Wayland display".into());
-        };
-        // SAFETY: borrowed from a live winit Window on the render thread. The
-        // guest never disconnects the display and is shut down before winit.
-        let backend = unsafe { Backend::from_foreign_display(display.display.as_ptr().cast()) };
-        let connection = Connection::from_backend(backend);
+    fn connect(display: OwnedDisplayHandle, path: Option<PathBuf>) -> Result<Self, String> {
+        let guest =
+            Guest::new(display).ok_or("presentation receipts require a Wayland display")?;
         let (globals, queue) =
-            registry_queue_init::<Receipts>(&connection).map_err(|error| error.to_string())?;
+            registry_queue_init::<Receipts>(guest.connection()).map_err(|error| error.to_string())?;
         let presentation = globals
             .bind(&queue.handle(), 1..=1, ())
             .map_err(|error| error.to_string())?;
         Ok(Self {
-            connection,
+            guest,
             queue,
             receipts: Receipts {
                 path,
@@ -254,27 +246,8 @@ impl Session {
         size: (u32, u32),
         scale: f64,
     ) -> Result<(), String> {
-        let RawWindowHandle::Wayland(handle) = window
-            .window_handle()
-            .map_err(|error| error.to_string())?
-            .as_raw()
-        else {
-            return Err("presentation receipts require a Wayland surface".into());
-        };
-        // SAFETY: this surface belongs to the same live winit display. Borrow
-        // only to request feedback; never commit, destroy, or dispatch it.
-        let id = unsafe {
-            ObjectId::from_ptr(
-                wl_surface::WlSurface::interface(),
-                handle.surface.as_ptr().cast(),
-            )
-        }
-        .map_err(|error| error.to_string())?;
-        let surface = wl_surface::WlSurface::from_id(&self.connection, id)
-            .map_err(|error| error.to_string())?;
-        self.next_submission += 1;
         let submission = Submission {
-            serial: self.next_submission,
+            serial: self.next_submission + 1,
             draw_seq: romacs_display_protocol::present_trace::current_draw(),
             frame,
             layout,
@@ -282,11 +255,15 @@ impl Session {
             height: size.1,
             scale,
         };
-        self.receipts
-            .pending
-            .requested(submission.serial, observe_platform_now());
+        let surface = window
+            .cast_ref::<winit::platform::wayland::Window>()
+            .ok_or("presentation receipts require a Wayland window")?
+            .surface();
+        let requested = observe_platform_now();
         self.presentation
-            .feedback(&surface, &self.queue.handle(), submission);
+            .feedback(surface, &self.queue.handle(), submission);
+        self.next_submission = submission.serial;
+        self.receipts.pending.requested(submission.serial, requested);
         tracing::debug!(?submission, "requested native presentation feedback");
         Ok(())
     }
@@ -300,6 +277,8 @@ enum ObserverState {
 
 pub(crate) struct PresentationObserver {
     state: ObserverState,
+    /// Winit's display, once the event loop gives it (`attach`).
+    display: Option<OwnedDisplayHandle>,
 }
 
 fn initial_state(path: Option<PathBuf>, trace_enabled: impl FnOnce() -> bool) -> ObserverState {
@@ -317,7 +296,13 @@ impl PresentationObserver {
                 std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").map(PathBuf::from),
                 romacs_display_protocol::present_trace::enabled,
             ),
+            display: None,
         }
+    }
+
+    /// Where the session connects when the first frame presents.
+    pub(crate) fn attach(&mut self, display: OwnedDisplayHandle) {
+        self.display.get_or_insert(display);
     }
 
     pub(crate) fn before_present(
@@ -328,13 +313,15 @@ impl PresentationObserver {
         size: (u32, u32),
         scale: f64,
     ) {
-        if matches!(self.state, ObserverState::Uninitialized(_)) {
+        if matches!(self.state, ObserverState::Uninitialized(_))
+            && let Some(display) = self.display.clone()
+        {
             let ObserverState::Uninitialized(path) =
                 std::mem::replace(&mut self.state, ObserverState::Disabled)
             else {
                 unreachable!()
             };
-            match Session::connect(window, path) {
+            match Session::connect(display, path) {
                 Ok(session) => self.state = ObserverState::Active(session),
                 Err(error) => tracing::warn!(%error, "native presentation feedback unavailable"),
             }
@@ -369,19 +356,7 @@ impl PresentationObserver {
         {
             let _ = session.queue.dispatch_pending(&mut session.receipts);
             session.presentation.destroy();
-            let _ = session.connection.flush();
-        }
-    }
-}
-
-impl Drop for PresentationObserver {
-    fn drop(&mut self) {
-        // On abnormal winit teardown the foreign display may already be gone.
-        // Normal shutdown explicitly releases the guest while it is live.
-        if let ObserverState::Active(session) =
-            std::mem::replace(&mut self.state, ObserverState::Disabled)
-        {
-            std::mem::forget(session);
+            let _ = session.guest.connection().flush();
         }
     }
 }

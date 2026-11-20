@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/threaded_core/fail/legacy_of_a_constant.rs:11:22
+   |
+11 |         legacy(e, r, pc)
+   |         ------       ^^ expected `Pc<'_, Kernel>`, found `Pc<'_, Bytes>`
+   |         |
+   |         arguments to this function are incorrect
+   |
+   = note: expected struct `Pc<'_, Kernel>`
+              found struct `Pc<'f, audited::Bytes>`
+note: function defined here
+  --> tests/threaded_core/fail/../../../src/threaded_audited.rs
+   |
+   | pub(super) fn legacy<'f>(hot: Hot<'f, '_, '_>, r: Regs<'f>, pc: Pc<'f, Kernel>) -> Value {
+   |               ^^^^^^                                        ------------------

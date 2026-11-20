@@ -25,6 +25,7 @@ impl RenderApp {
 
 impl ApplicationHandler for RenderApp {
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.presentation_observer.attach(event_loop.owned_display_handle());
         self.handle_resumed(event_loop);
     }
 

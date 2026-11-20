@@ -1986,7 +1986,7 @@ impl GuiFrameWindowManager {
             match event_loop.create_window(attrs).map_err(|error| error.to_string()) {
                 Ok(window) => {
                     let window: Arc<dyn winit::window::Window> = Arc::from(window);
-                    window_icon.apply(window.as_ref());
+                    window_icon.apply(window.as_ref(), &event_loop.owned_display_handle());
                     let raw_scale_factor = window.scale_factor();
                     let scale_factor = effective_window_scale_factor(raw_scale_factor);
                     let phys =

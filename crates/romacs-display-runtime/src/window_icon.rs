@@ -109,8 +109,8 @@ impl WindowIconService {
         }
     }
 
-    /// Apply the Romacs window icon to a winit window.
-    pub(crate) fn apply(&mut self, window: &dyn Window) {
+    /// Apply the Romacs window icon to a winit window on DISPLAY.
+    pub(crate) fn apply(&mut self, window: &dyn Window, display: &winit::event_loop::OwnedDisplayHandle) {
         let Some(icon) = self.icon.as_ref() else {
             return;
         };
@@ -120,7 +120,7 @@ impl WindowIconService {
         }
 
         #[cfg(target_os = "linux")]
-        if let Err(error) = self.wayland.apply(window, icon) {
+        if let Err(error) = self.wayland.apply(window, display, icon) {
             tracing::warn!(%error, "failed to set native Wayland toplevel icon");
         }
     }

@@ -1596,6 +1596,14 @@ impl Vm {
         }).collect()
     }
 
+    /// Whether BUFFER has a `buffer-file-name' or `buffer-file-truename' of
+    /// its own: its kill then asks to save and unlocks the file.
+    pub(crate) fn buffer_names_a_file(&self, buffer: Value) -> bool {
+        let Some(locals) = buffer.index(0).ok().and_then(|i| i.checked_sub(1)).and_then(|i| self.per_buffer(i)) else { return false };
+        ["buffer-file-name", "buffer-file-truename"].into_iter().any(|name| {
+            matches!(Forwarded::lookup(name), Some(Fwd::Buffer(i)) if locals.get(i).is_some_and(|v| v != Value::NIL))
+        })
+    }
     /// The saved truename of BUFFER's visit, when BUFFER visits a file:
     /// one buffer's record, without walking the others (lock-buffer).
     pub(crate) fn visit_truename(&self, buffer: Value) -> Option<Vec<u8>> {
