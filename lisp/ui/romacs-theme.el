@@ -180,7 +180,8 @@ staircase, which no bisection can climb."
 
 (defun romacs-color-hex (color)
   "COLOR as #rrggbb: a #rrggbb as it is, a name as the frame resolves it;
-nil when it is no colour the frame knows."
+nil when it is no colour the frame knows, or in a launch with no frame
+colours (no `color-values')."
   (cond ((not (stringp color)) nil)
         ((string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" color) color)
         ((and (fboundp 'color-values) (color-values color))
@@ -192,7 +193,7 @@ face's, by default) at CONTRAST (WCAG's 4.5:1 for text, by default), its
 hue kept, as #rrggbb; nil when either is no colour the frame knows.
 Either may be named in any form the frame resolves."
   (let ((fg (romacs-color-hex color))
-        (bg (romacs-color-hex (or background (face-background 'default nil t)))))
+        (bg (romacs-color-hex (or background (and (fboundp 'face-background) (face-background 'default nil t))))))
     (and fg bg (romacs-color-floor fg bg (or contrast 4.5)))))
 
 ;;;; The palette

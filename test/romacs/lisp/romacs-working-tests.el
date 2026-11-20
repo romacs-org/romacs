@@ -126,7 +126,13 @@ background near black."
   ;; A name, as the frame resolves it; legible on a named background.
   (should (equal (romacs-color-hex "white") "#ffffff"))
   (should (stringp (romacs-color-legible "grey90" "white")))
-  (should-not (romacs-color-legible "no-such-colour" "white")))
+  (should-not (romacs-color-legible "no-such-colour" "white"))
+  ;; A launch with no faces or frame colours: #rrggbb still works, a
+  ;; name or an omitted background is unknown, never an error.
+  (cl-letf (((symbol-function 'face-background) nil) ((symbol-function 'color-values) nil))
+    (should (stringp (romacs-color-legible "#808080" "#ffffff")))
+    (should-not (romacs-color-legible "#808080"))
+    (should-not (romacs-color-legible "grey90" "#ffffff"))))
 
 (provide 'romacs-working-tests)
 ;;; romacs-working-tests.el ends here
