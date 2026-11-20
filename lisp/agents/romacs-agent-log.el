@@ -49,9 +49,9 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
-(declare-function romacs-color-floor "romacs-theme" (fg bg minimum))
 (declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-faces-output "romacs-agent-log-faces" (text))
+(declare-function romacs-agent-log-faces-drop "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-faces-end "romacs-agent-log-faces" (start at))
 (declare-function romacs-agent-ask-open "romacs-agent-ask" (session id questions &optional place))
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
@@ -104,9 +104,7 @@ A theme's or the user's own spec still wins."
     (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
                    'face-defface-spec))
   (let* ((key (face-foreground 'help-key-binding nil t))
-         (band (face-background 'header-line nil t))
-         (colour (and key band (fboundp 'romacs-color-floor) (color-defined-p key) (color-defined-p band)
-                      (romacs-color-floor key band 4.5))))
+         (colour (and key (romacs-working-readable key (face-background 'header-line nil t)))))
     (face-spec-set 'romacs-agent-log-header-key
                    (if colour `((t :foreground ,colour :weight bold)) '((t :inherit help-key-binding :weight bold)))
                    'face-defface-spec)))
@@ -1250,6 +1248,8 @@ where the chat reads and acts on SESSION, this editor by default
 (defun romacs-agent-log--clear ()
   "Empty the current chat's transcript, to draw its session afresh: what it
 drew forgotten, its markers let go, its composer kept."
+  ;; What streams is dropped, not faced: its text goes too.
+  (romacs-agent-log-faces-drop)
   (romacs-agent-log--close-stream)
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
