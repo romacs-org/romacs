@@ -1170,6 +1170,16 @@ def run(args):
                     # Column 0 is the window's text left (a row that starts
                     # with an empty column starts with a stretch, no glyph).
                     left = probe['text-left']
+                    # A title row's exit hint is aligned to the window's right
+                    # edge, not to its column in the string: painted right of
+                    # the title, past a gap of two columns at least.
+                    hint = re.search(r'\S+  (Dismiss menu|Back)\s*$', line_text) if [line_text, y] == list(starts[0]) else None
+                    if hint:
+                        title_end = left + len(line_text[:hint.start()].rstrip()) * column
+                        key = line_text[hint.start()]
+                        if not any(gx >= title_end + 2 * column - 1.5 and ch == key for gx, ch in row):
+                            raise AssertionError(f'title row {line_text!r}: exit hint {key!r} not painted right of the title (from x {title_end})')
+                        line_text = line_text[:hint.start()]
                     for start in (m.start() for m in re.finditer(r'(?<=  )\S', line_text)):
                         x = left + start * column
                         if not any(abs(gx - x) < 1.5 and ch == line_text[start] for gx, ch in row):
