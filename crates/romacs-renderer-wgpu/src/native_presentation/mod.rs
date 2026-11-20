@@ -1,5 +1,11 @@
 //! Opt-in Vulkan presentation observations. No target times or pacing changes.
 //! Native first-pixel output is distinct from physical display visibility.
+//!
+//! This module is the crate's one unsafe wrapper (`#![deny(unsafe_code)]`
+//! holds the rest). VK_EXT_present_timing and VK_KHR_present_id2 are newer
+//! than ash 0.38, the version wgpu-hal is built on, and wgpu reaches its
+//! Vulkan handles only through its unsafe `as_hal`: no crate in Cargo.lock
+//! makes these calls safely.
 mod abi;
 mod clock;
 mod query;
@@ -12,12 +18,12 @@ pub fn requested() -> bool {
     std::env::var_os("ROMACS_GUI_PRESENTATION_RECEIPT").is_some()
 }
 
-pub(crate) struct DeviceFeatures {
+struct DeviceFeatures {
     timing: abi::TimingFeatures,
     ids: abi::IdFeatures,
 }
 impl DeviceFeatures {
-    pub(crate) fn query(adapter: &vulkan::Adapter) -> Option<Self> {
+    fn query(adapter: &vulkan::Adapter) -> Option<Self> {
         if adapter.shared_instance().instance_api_version() < vk::API_VERSION_1_1 {
             return None;
         }
@@ -46,7 +52,9 @@ impl DeviceFeatures {
             ..Default::default()
         };
         // SAFETY: both extension structs and output feature storage remain live
-        // during this query on the adapter's own physical device.
+        // during this query on the adapter's own physical device, and the
+        // instance is Vulkan 1.1 (checked above), which has the query.
+        // UNSAFE(ash's raw Vulkan call; ash 0.38 has no present-timing features)
         unsafe {
             adapter
                 .shared_instance()
@@ -63,7 +71,7 @@ impl DeviceFeatures {
     }
 
     /// Storage must outlive vkCreateDevice, not just its setup callback.
-    pub(crate) fn enable(&mut self, args: &mut vulkan::CreateDeviceCallbackArgs<'_, '_, '_>) {
+    fn enable(&mut self, args: &mut vulkan::CreateDeviceCallbackArgs<'_, '_, '_>) {
         for extension in [abi::TIMING, abi::ID2, ash::khr::calibrated_timestamps::NAME] {
             if !args.extensions.contains(&extension) {
                 args.extensions.push(extension);
@@ -72,6 +80,42 @@ impl DeviceFeatures {
         self.ids.p_next = args.create_info.p_next.cast_mut();
         self.timing.p_next = (&mut self.ids as *mut abi::IdFeatures).cast();
         args.create_info.p_next = (&self.timing as *const abi::TimingFeatures).cast();
+    }
+}
+
+/// The renderer's device on ADAPTER for DESCRIPTOR, with the present-timing
+/// extensions enabled when the adapter supports them: wgpu has no safe way to
+/// enable a Vulkan device extension it does not know.
+pub(crate) fn request_device(
+    adapter: &wgpu::Adapter,
+    descriptor: &wgpu::DeviceDescriptor<'_>,
+) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    // SAFETY: `hal_adapter` is obtained from this exact wgpu adapter. The
+    // callback only adds extensions proven supported by `DeviceFeatures::query`,
+    // preserves all wgpu-required features and extensions, and chains feature
+    // storage (`timing`) that outlives the open. The resulting HAL device is
+    // immediately returned to the same adapter for wgpu-core ownership.
+    // UNSAFE(wgpu opens a device with extra extensions only through its HAL)
+    unsafe {
+        let hal_adapter = adapter
+            .as_hal::<Vulkan>()
+            .ok_or_else(|| "selected renderer adapter is not Vulkan".to_owned())?;
+        let mut timing = DeviceFeatures::query(&hal_adapter);
+        let hal_device = hal_adapter
+            .open_with_callback(
+                descriptor.required_features,
+                &descriptor.required_limits,
+                &descriptor.memory_hints,
+                Some(Box::new(|mut args| {
+                    if let Some(timing) = &mut timing {
+                        timing.enable(&mut args);
+                    }
+                })),
+            )
+            .map_err(|error| format!("failed to open Vulkan interop device: {error:?}"))?;
+        adapter
+            .create_device_from_hal(hal_device, descriptor)
+            .map_err(|error| format!("failed to adopt Vulkan interop device: {error}"))
     }
 }
 
@@ -87,12 +131,19 @@ fn enabled(device: &vulkan::Device) -> bool {
 /// Device and surface must originate from the same Vulkan instance, and the
 /// device must be the one used for the subsequent configure. Neither may be
 /// reconfigured or destroyed concurrently with this call.
+// UNSAFE(wgpu's &self configure lets only the caller pin device and surface)
 pub unsafe fn prepare_surface(device: &wgpu::Device, surface: &wgpu::Surface<'_>) -> bool {
     if !requested() {
         return false;
     }
     // SAFETY: immutable HAL guards borrow this live device/surface. No handle is
     // retained; native capability queries finish before either guard is dropped.
+    // The surface-capabilities query runs on the device's physical device and
+    // instance, which the caller promises the surface belongs to; its chained
+    // output structs live on this frame through the call. Enabling timing
+    // needs the device to carry both extensions (`enabled`) and the surface to
+    // report the first-pixel stage and present IDs, both checked first.
+    // UNSAFE(wgpu's as_hal, and present-timing calls ash 0.38 does not wrap)
     unsafe {
         let Some(device) = device.as_hal::<Vulkan>() else {
             return false;
