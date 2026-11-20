@@ -1,0 +1,21 @@
+[package]
+name = "romacs-relay"
+version = "0.0.20"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "The agent session protocol over a tailnet: WebSocket to the agents service and back"
+
+[[bin]]
+name = "romacs-relay"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+httparse = "1"
+# Blocking WebSocket, its TLS rustls on ring as the workspace's rustls builds.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"
+
+[lints.rust]
+unsafe_code = "forbid"
