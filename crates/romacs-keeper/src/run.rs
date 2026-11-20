@@ -1,9 +1,10 @@
 //! The keeper's command line, and how a session finds and starts one.
 //!
 //! `romacs-keeper --socket PATH [--foreground]` starts a keeper listening
-//! at PATH. Without `--foreground` it detaches first: its own session, no
-//! controlling terminal, directory `/`, an empty environment, and the
-//! starting process returns once the socket listens. Under systemd the
+//! at PATH. Without `--foreground` it detaches first: it starts itself
+//! again (`--detached`) in its own session, with no controlling terminal,
+//! directory `/` and an empty environment, and the starting process
+//! returns once the socket listens. Under systemd the
 //! session starts it `--foreground` in a transient user unit of its own, so
 //! the end of the session's unit does not take it along.
 //!
@@ -11,9 +12,9 @@
 //! keeper's life, and a second keeper for the same path exits at once.
 
 use std::io::{Read, Write};
-use std::os::fd::{OwnedFd, RawFd};
+use std::os::fd::{AsFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{ExitCode, Stdio};
 
 use crate::server::{fresh, Build, Keeper};
 use crate::table::Table;
@@ -31,46 +32,32 @@ fn lock(socket: &Path) -> std::io::Result<Option<OwnedFd>> {
     Ok(file.try_lock().is_ok().then(|| file.into()))
 }
 
-/// Leave the starting process: a new session, no terminal, directory `/`,
-/// no environment, no standard streams. Returns in the detached child with
-/// the pipe on which it reports that it listens; the parent waits for that
-/// report and exits.
-///
-/// `fork`, `clearenv` and `_exit` are direct calls: rustix has them only
-/// as unsafe runtime functions; std's `remove_var` is unsafe too, and
-/// std's `exit` runs the C library's exit handlers in a parent that
-/// shares them with the child.
-#[expect(unsafe_code, reason = "fork, clearenv and _exit: see the SAFETY comments")]
-fn detach() -> std::io::Result<std::fs::File> {
-    let (mut ready, report) = std::io::pipe()?;
-    // SAFETY: fork at startup, before any thread exists; the child goes on
-    // as the only thread of an ordinary process.
-    // UNSAFE(rustix's fork is an unsafe runtime function)
-    match unsafe { libc::fork() } {
-        -1 => Err(std::io::Error::last_os_error()),
-        0 => {
-            drop(ready);
-            let null = std::fs::OpenOptions::new().read(true).write(true).open("/dev/null")?;
-            let _ = rustix::process::setsid();
-            let _ = rustix::stdio::dup2_stdin(&null);
-            let _ = rustix::stdio::dup2_stdout(&null);
-            let _ = rustix::stdio::dup2_stderr(&null);
-            // SAFETY: clearenv in a single-threaded process: nothing else
-            // reads the environment while it is emptied.
-            // UNSAFE(std's remove_var is unsafe too)
-            unsafe { libc::clearenv() };
-            std::env::set_current_dir("/")?;
-            Ok(std::fs::File::from(OwnedFd::from(report)))
-        }
-        _ => {
-            drop(report);
-            let mut answer = String::new();
-            let _ = ready.read_to_string(&mut answer);
-            // SAFETY: _exit takes a status; the parent has nothing to flush.
-            // UNSAFE(std's exit runs exit handlers the child shares)
-            unsafe { libc::_exit(i32::from(answer != "ready")) }
-        }
-    }
+/// Leave the starting process: start this program again with ARGS and
+/// `--detached`, with no environment, directory `/` and no standard
+/// streams but its output, a pipe on which it reports that it listens.
+/// Returns once it has, or has died trying.
+fn detach(args: &[String]) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    let program = std::env::args_os().next().unwrap_or_else(|| "romacs-keeper".into());
+    let mut child = std::process::Command::new("/proc/self/exe").arg0(program).args(args).arg("--detached")
+        .env_clear().current_dir("/").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .spawn().map_err(|e| format!("cannot start a detached keeper: {e}"))?;
+    let mut answer = String::new();
+    let _ = child.stdout.take().map(|mut report| report.read_to_string(&mut answer));
+    if answer == "ready" { Ok(()) } else { Err("the detached keeper did not start".into()) }
+}
+
+/// In the process [`detach`] started: lead a new session, without a
+/// terminal, and take the standard output as the report pipe, leaving
+/// all three standard streams on one read-write `/dev/null`.
+fn detached() -> std::io::Result<std::fs::File> {
+    let _ = rustix::process::setsid();
+    let report = std::io::stdout().as_fd().try_clone_to_owned()?;
+    let null = std::fs::OpenOptions::new().read(true).write(true).open("/dev/null")?;
+    rustix::stdio::dup2_stdin(&null)?;
+    rustix::stdio::dup2_stdout(&null)?;
+    rustix::stdio::dup2_stderr(&null)?;
+    Ok(std::fs::File::from(report))
 }
 
 fn serve(table: Table, build: Build) -> Result<(), String> {
@@ -81,8 +68,8 @@ fn serve(table: Table, build: Build) -> Result<(), String> {
     Ok(())
 }
 
-fn start(socket: &Path, foreground: bool, idle_ms: Option<u64>, build: Build) -> Result<(), String> {
-    let mut report = if foreground { None } else { Some(detach().map_err(|e| e.to_string())?) };
+fn start(socket: &Path, detaching: bool, idle_ms: Option<u64>, build: Build) -> Result<(), String> {
+    let mut report = if detaching { Some(detached().map_err(|e| e.to_string())?) } else { None };
     let mut ready = || { if let Some(mut report) = report.take() { let _ = report.write_all(b"ready"); } };
     if let Some(parent) = socket.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let Some(lock) = lock(socket).map_err(|e| e.to_string())? else {
@@ -111,7 +98,12 @@ pub fn main(build: Build) -> ExitCode {
     } else if let Some(table) = fd("--resume") {
         crate::exec::resume(table, fd("--fallback"), build).and_then(|table| serve(table, build))
     } else if let Some(socket) = value("--socket") {
-        start(Path::new(&socket), args.iter().any(|a| a == "--foreground"), value("--idle-ms").and_then(|v| v.parse().ok()), build)
+        let flag = |name: &str| args.iter().any(|a| a == name);
+        if flag("--foreground") || flag("--detached") {
+            start(Path::new(&socket), flag("--detached"), value("--idle-ms").and_then(|v| v.parse().ok()), build)
+        } else {
+            detach(&args)
+        }
     } else {
         Err("usage: romacs-keeper --socket PATH [--foreground] [--idle-ms N]".into())
     };

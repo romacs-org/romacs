@@ -11,18 +11,23 @@
 //! resume execs back into the old executable, whose descriptor it was
 //! passed, with the same table.
 //!
-//! Four calls stay direct C library calls, as no crate in the lock file
-//! makes them safely: the exec itself (rustix's `execve` is an unsafe
-//! runtime function, and std's `CommandExt::exec` resets SIGPIPE in a
-//! keeper whose exec failed); the fallback's `execveat`, likewise, given
-//! the C library's `environ`, which std does not expose; and, in
-//! [`inherit`], `from_raw_fd` and `close_range`: only they own or close a
-//! descriptor this image did not open. Everything around them is checked
-//! first ([`unfit`]), so [`resume`] is safe to call.
+//! Both execs are std's `CommandExt::exec`, which keeps the signal mask
+//! (SIGCHLD stays blocked, and a change pending at the exec reaches the
+//! new image's signalfd). It sets SIGPIPE to its default before the exec;
+//! the new image ignores it again as std starts, and a keeper whose exec
+//! failed writes to sockets only with `MSG_NOSIGNAL`. The fallback execs
+//! the old executable through `/proc/self/fd`, as the file its path named
+//! may be gone.
+//!
+//! One function keeps direct C library calls, as no crate in the lock
+//! file makes them safely: [`inherit`], with `from_raw_fd` and
+//! `close_range`: only they own or close a descriptor this image did not
+//! open. Everything around them is checked first ([`unfit`]), so
+//! [`resume`] is safe to call.
 
 use std::io::{Read, Seek, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 
 use crate::server::{clear_cloexec, restore_cloexec, Build};
@@ -65,31 +70,15 @@ pub fn check(table: &Table, build: Build, path: &Path) -> Result<(), String> {
     }
 }
 
-#[expect(unsafe_code, reason = "the C library's environ: see the SAFETY comment")]
-// SAFETY: libc's own variable, declared with its C type.
-// UNSAFE(std does not expose the C library's `environ`)
-unsafe extern "C" {
-    static environ: *const *const libc::c_char;
-}
-
-fn c_string(bytes: &[u8]) -> std::ffi::CString { std::ffi::CString::new(bytes).unwrap_or_default() }
-
 /// Exec PATH over this process, carrying TABLE. Returns only if the exec
 /// failed, with every descriptor close-on-exec again.
-#[expect(unsafe_code, reason = "execv: see the SAFETY comment")]
 pub fn exec(table: &Table, build: Build, path: &Path) {
     let (bytes, fds) = export(table, build);
     let (Ok(file), Ok(old)) = (memfd(&bytes), std::fs::File::open("/proc/self/exe")) else { return };
-    let (carried, back) = (file.as_raw_fd(), old.as_raw_fd());
     let kept: Vec<BorrowedFd<'_>> = fds.into_iter().chain([file.as_fd(), old.as_fd()]).collect();
     clear_cloexec(&kept);
-    let words = [c_string(path.as_os_str().as_bytes()), c_string(b"--resume"), c_string(carried.to_string().as_bytes()),
-                c_string(b"--fallback"), c_string(back.to_string().as_bytes())];
-    let argv: Vec<_> = words.iter().map(|a| a.as_ptr()).chain([std::ptr::null()]).collect();
-    // SAFETY: argv is a null-terminated array of NUL-terminated strings
-    // alive across the call; the environment is this process's own.
-    // UNSAFE(rustix's execve is unsafe; std's exec resets SIGPIPE)
-    unsafe { libc::execv(argv[0], argv.as_ptr()) };
+    let _ = std::process::Command::new(path).arg("--resume").arg(file.as_raw_fd().to_string())
+        .arg("--fallback").arg(old.as_raw_fd().to_string()).exec();
     restore_cloexec(&kept);
 }
 
@@ -141,7 +130,6 @@ fn inherit(numbers: &[RawFd]) -> std::collections::HashMap<RawFd, OwnedFd> {
 ///
 /// # Errors
 /// The table's fault, when there is no way back.
-#[expect(unsafe_code, reason = "the fallback's execveat: see the SAFETY comment")]
 pub(crate) fn resume(table_fd: RawFd, fallback: Option<RawFd>, build: Build) -> Result<Table, String> {
     // Read through a fresh open, so the carrier itself stays unowned.
     let bytes = std::fs::read(format!("/proc/self/fd/{table_fd}")).map_err(|e| e.to_string());
@@ -159,14 +147,11 @@ pub(crate) fn resume(table_fd: RawFd, fallback: Option<RawFd>, build: Build) -> 
         }
         Err(error) => {
             let Some(old) = fallback else { return Err(error) };
-            let words = [c_string(b"romacs-keeper"), c_string(b"--resume"), c_string(table_fd.to_string().as_bytes())];
-            let argv: Vec<_> = words.iter().map(|a| a.as_ptr()).chain([std::ptr::null()]).collect();
-            // SAFETY: an empty path with AT_EMPTY_PATH execs the file OLD
-            // names; argv is null-terminated and alive across the call, and
-            // `environ` is read by this process's only thread.
-            // UNSAFE(rustix's execveat is unsafe, and std exposes no `environ`)
-            unsafe { libc::syscall(libc::SYS_execveat, old, c"".as_ptr(), argv.as_ptr(), environ, libc::AT_EMPTY_PATH) };
-            Err(format!("{error}; and the old keeper could not be resumed: {}", std::io::Error::last_os_error()))
+            // The old executable, by the descriptor it was passed: the
+            // file its path named may be gone or replaced.
+            let back = std::process::Command::new(format!("/proc/self/fd/{old}")).arg0("romacs-keeper")
+                .arg("--resume").arg(table_fd.to_string()).exec();
+            Err(format!("{error}; and the old keeper could not be resumed: {back}"))
         }
     }
 }
