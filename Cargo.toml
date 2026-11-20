@@ -91,7 +91,9 @@ crossbeam-deque = "0.8"
 
 # FFI / system
 libc = "0.2"
-rustix = { version = "1", features = ["event", "fs"] }
+# use-libc-auxv: aux values (the page size, the vDSO) from libc, not by
+# reading and checking the vDSO's header, which valgrind does not map.
+rustix = { version = "1", features = ["event", "fs", "use-libc-auxv"] }
 
 # Crypto
 sha2 = "0.11"
