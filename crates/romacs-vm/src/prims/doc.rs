@@ -1,8 +1,17 @@
 //! GNU doc.c: docstrings of primitives live in etc/DOC, named by byte
 //! offsets (Snarf-documentation); Lisp formats them through
-//! substitute-command-keys.
+//! substitute-command-keys. A primitive Romacs adds has no DOC record: its
+//! docstring is the comment above its defsubr!, which build.rs collects.
 use super::*;
 use crate::prim::leaf::Kind;
+
+include!(concat!(env!("OUT_DIR"), "/primitive_docs.rs"));
+
+/// The docstring of the Romacs primitive NAME, read in place from the table
+/// build.rs writes; None for a primitive DOC documents.
+fn romacs_doc(name: &str) -> Option<&'static str> {
+    PRIMITIVE_DOCS.binary_search_by_key(&name, |&(n, _)| n).ok().map(|i| PRIMITIVE_DOCS[i].1)
+}
 
 fn doc_file(cx: &mut Leaf<'_>) -> std::result::Result<Option<std::path::PathBuf>, Fault> {
     let (dir, file) = (cx.intern("doc-directory"), cx.intern("internal-doc-file-name"));
@@ -124,10 +133,12 @@ fn doc_variable_records(cx, filename: Value) {
 defsubr! { name = "internal-subr-documentation", gnu = "doc.c:383", effect = Reads,
 fn internal_subr_documentation(cx, function: Value) {
     if cx.kind(function) != Kind::Subr { return Ok(Value::TRUE); }
-    // XSUBR (function)->doc: 0 when DOC has no record for the primitive.
+    // XSUBR (function)->doc: 0 when DOC has no record for the primitive; a
+    // Romacs primitive's is its text, as a native subr's is a string in GNU.
     let name = crate::prim::name(function).unwrap_or("");
     let position = doc_file(cx)?.and_then(|path| cx.doc_file_read(&path))
         .and_then(|file| file.subr_position(name)).unwrap_or(0);
+    if position == 0 && let Some(doc) = romacs_doc(name) { return Ok(cx.string(doc)); }
     Ok(Value::integer(position as i64).map_err(Fault::Error)?)
 }}
 

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Per-key A/B: perkey_live's sessions of a base and a candidate binary, interleaved.
 
-A pair is one perkey_live session of the base binary, then one of the
-candidate: each a fresh private headless labwc and a fresh binary, typing
-the same keys into the same text, with the same options (any perkey_live
-option not named here is passed to both).  Pairs run back to back, so a
-load that drifts during the run drifts both arms alike.  Both arms read
+A pair is one perkey_live session of each binary: each a fresh private
+headless labwc and a fresh binary, typing the same keys into the same text,
+with the same options (any perkey_live option not named here is passed to
+both).  Pairs run back to back, so a load that drifts during the run drifts
+both arms alike, and they alternate which arm runs first: the base in the
+first pair, the candidate in the second, and so on (A B, B A, A B ...).  A
+session that reads a little higher for running second then raises the
+deltas of some pairs and lowers others, so it cannot make every pair rise
+while pairs of both orders count for a phase (a rejected session can leave
+only one).  Run an even number of pairs to cancel it in the median too,
+nearly: each delta is relative to its own pair's base.  Both arms read
 the same environment: set ROMACS_RUNTIME_ROOT to one runtime tree both
 binaries are compatible with, to compare the binaries alone.  Left unset,
 each binary finds its runtime tree as it normally does, and a delta can
@@ -25,10 +31,30 @@ NOISY: the arms' instruction ranges overlap, some base session reading as
 high as some candidate session or the reverse.  The delta is then within
 the sessions' own scatter, and only its median says which way it leans.
 
-The verdict of a phase: a regression when its median instruction delta is
-past --bound (percent) and it is not NOISY; inconclusive when it is past
-the bound but NOISY, or fewer than two pairs counted; otherwise flat or
-better.
+The verdict of a phase:
+- a regression when its median instruction delta is past --bound (percent)
+  and it is not NOISY;
+- a regression too at or under the bound, a consistent rise, when it rose and is
+  not NOISY (every candidate session counted more than every base session,
+  so every pair rose), the median delta is more than RISE_FLOOR (1.5) times
+  the wider of the two arms' spreads, and at least RISE_PAIRS (3) pairs
+  counted.  Such a rise with fewer pairs is inconclusive;
+- inconclusive when it is past the bound but NOISY, or fewer than two pairs
+  counted;
+- otherwise flat or better.  A flat phase whose every pair rose says so in
+  its reason: "every pair rose, inside the floor" when the arms stand apart
+  but the median delta is not past the floor, "every pair rose, the arms
+  overlap" when some sessions of the two arms read alike.  It leans up by
+  less than the sessions' scatter shows: a quieter run, with smaller
+  spreads, would decide it.
+
+A consistent rise lands on every key, so the bound does not excuse it; the
+floor and the pair count keep noise from reading as one.  One binary against
+itself gives three pairs that all rose 1 time in 8.  Simulated (independent
+sessions, normal scatter), it reads as a consistent rise about 1 phase in 120
+at 3 pairs and 1 in 1,100 at 4; at a floor of 1 times the spread it would be
+1 in 40 at 3 pairs.  Phases share sessions, so a run's rate is at most three
+times a phase's (four with --populate's region phase).
 
 Information only, never in the verdict: wall time per key, from
 --latency-pairs pairs of perkey_live's latency sessions (key enqueue to
@@ -53,6 +79,8 @@ import statistics
 import perkey_live as pk
 
 ARMS = ('base', 'candidate')
+RISE_FLOOR = 1.5
+RISE_PAIRS = 3
 
 
 # Pure parts: the verdict of two arms' counts, and the report's text.
@@ -66,16 +94,26 @@ def compare(base, candidate, bound):
         pairs = [(b, c) for b, c in zip(base.get(name, []), candidate.get(name, []))
                  if b is not None and c is not None and b > 0 and c > 0]
         if len(pairs) < 2:
-            report[name] = {'pairs': len(pairs), 'verdict': 'inconclusive', 'noisy': None}
+            report[name] = {'pairs': len(pairs), 'verdict': 'inconclusive', 'reason': 'fewer than 2 pairs',
+                            'rise_floor_pct': None, 'noisy': None}
             continue
         bs, cs = [b for b, _ in pairs], [c for _, c in pairs]
+        arms = {'base': pk.spread(bs), 'candidate': pk.spread(cs)}
         deltas = [100 * (c - b) / b for b, c in pairs]
         delta = statistics.median(deltas)
         noisy = min(cs) <= max(bs) and min(bs) <= max(cs)
-        verdict = ('inconclusive' if noisy else 'regression') if delta > bound else 'flat or better'
-        report[name] = {'pairs': len(pairs), 'base': pk.spread(bs), 'candidate': pk.spread(cs),
-                        'delta_pct': delta, 'delta_range_pct': [min(deltas), max(deltas)],
-                        'noisy': noisy, 'verdict': verdict}
+        floor = 100 * RISE_FLOOR * max(arm['spread'] for arm in arms.values())
+        if delta > bound:
+            verdict, reason = ('inconclusive' if noisy else 'regression'), 'past the bound'
+        elif not noisy and delta > floor:
+            verdict, reason = (('regression', 'consistent rise') if len(pairs) >= RISE_PAIRS
+                               else ('inconclusive', f'consistent rise, under {RISE_PAIRS} pairs'))
+        elif min(deltas) > 0:
+            verdict, reason = 'flat or better', f"every pair rose, {'the arms overlap' if noisy else 'inside the floor'}"
+        else:
+            verdict, reason = 'flat or better', None
+        report[name] = {'pairs': len(pairs), **arms, 'delta_pct': delta, 'delta_range_pct': [min(deltas), max(deltas)],
+                        'rise_floor_pct': floor, 'noisy': noisy, 'verdict': verdict, 'reason': reason}
     return report
 
 
@@ -87,16 +125,18 @@ def exit_code(report):
 
 def table(report, bound, pairs):
     """The report as text, a line a phase, of PAIRS pairs run."""
-    lines = [f"perkey A/B: base then candidate, {pairs} pairs run; instructions per key, median [spread]; "
-             f"delta median [range]; regression past +{bound}%"]
+    lines = [f"perkey A/B: {pairs} pairs run, the arms alternately first; instructions per key, median [spread]; "
+             f"delta median [range]; regression past +{bound}%, or a consistent rise (arms apart, past "
+             f"{RISE_FLOOR}x the wider spread, {RISE_PAIRS} pairs or more)"]
     for name, p in report.items():
         if 'delta_pct' not in p:
-            lines.append(f"  {name:12} {p['pairs']} pairs counted: inconclusive")
+            lines.append(f"  {name:12} {p['pairs']} pairs counted, floor -: inconclusive ({p['reason']})")
             continue
         b, c = p['base'], p['candidate']
         lines.append(f"  {name:12} {b['median'] / 1e6:7.3f}M [{100 * b['spread']:.1f}%]  {c['median'] / 1e6:7.3f}M "
                      f"[{100 * c['spread']:.1f}%]  {p['delta_pct']:+.2f}% [{p['delta_range_pct'][0]:+.2f} .. "
-                     f"{p['delta_range_pct'][1]:+.2f}]  {p['pairs']} pairs  {p['verdict']}{' NOISY' if p['noisy'] else ''}")
+                     f"{p['delta_range_pct'][1]:+.2f}]  floor {p['rise_floor_pct']:.2f}%  {p['pairs']} pairs  {p['verdict']}"
+                     f"{f' ({reason})' if (reason := p['reason']) else ''}{' NOISY' if p['noisy'] else ''}")
     return '\n'.join(lines)
 
 
@@ -113,6 +153,12 @@ def wall_table(walls, load):
 
 
 # The run: interleaved perkey_live sessions.
+
+def first(index):
+    """The arms in the order pair INDEX runs them: the base first in an even
+    pair, the candidate first in an odd one."""
+    return ARMS if index % 2 == 0 else ARMS[::-1]
+
 
 def arguments(argv=None):
     """Our options, and each arm's perkey_live arguments."""
@@ -152,14 +198,14 @@ def main(argv=None):
     found = {arm: [] for arm in ARMS}
     rejected = {}
     for index in range(args.pairs):
-        for arm in ARMS:
+        for arm in first(index):
             result, per_phase = counts(arms[arm], index)
             found[arm].append(per_phase or {})
             if per_phase is None:
                 rejected[f'{arm}-{index}'] = pk.invalid(result)
     timed = {arm: [] for arm in ARMS}
     for index in range(args.latency_pairs):
-        for arm in ARMS:
+        for arm in first(index):
             result = pk.session(arms[arm], index, True)
             if why := pk.invalid(result):
                 rejected[f'{arm}-latency-{index}'] = why
@@ -173,7 +219,8 @@ def main(argv=None):
     walls = {arm: pk.latencies(timed[arm]) for arm in ARMS}
     summary = {arm: {'binary': str(arms[arm].binary), 'sha256': hashlib.sha256(arms[arm].binary.read_bytes()).hexdigest()}
                for arm in ARMS}
-    summary |= {'pairs': args.pairs, 'latency_pairs': args.latency_pairs, 'bound_pct': args.bound, 'load': load,
+    summary |= {'pairs': args.pairs, 'first': [first(index)[0] for index in range(args.pairs)],
+                'latency_pairs': args.latency_pairs, 'bound_pct': args.bound, 'load': load,
                 'keys_per_phase': arms['base'].keys, 'phases': report, 'wall_ms_information_only': walls,
                 'rejected': rejected, 'counts': by_phase, 'exit': exit_code(report)}
     (args.output / 'report.json').write_text(json.dumps(summary, indent=1) + '\n')
