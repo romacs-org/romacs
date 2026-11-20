@@ -138,6 +138,26 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
+(defvar romacs-agent-log--closes-deferred nil
+  "Non-nil while a source's history is drawn whole, what it waits on now
+said only after: an ask open at a turn's end is said to have ended once
+the history is drawn, unless an answer in it settles it.")
+
+(defvar-local romacs-agent-log--ended-asks nil
+  "Asks open when their turn ended or harness exited, still listed as
+waited on by their source, each (ID ENTRY . AT): ENTRY, saying why, is
+put AT the place it ended, a marker, once the source lets the ask go
+\(`romacs-agent-log--sync-asks'), as another machine's does after.")
+
+(defun romacs-agent-log--drop-ended (id)
+  "Forget what is owed for ask ID's end, and return it: (ENTRY . AT)."
+  (when-let* ((ended (assoc id romacs-agent-log--ended-asks)))
+    (setq romacs-agent-log--ended-asks (delq ended romacs-agent-log--ended-asks))
+    (prog1 (cons (cadr ended) (marker-position (cddr ended)))
+      (set-marker (cddr ended) nil))))
+(defvar romacs-agent-log--replaying nil
+  "While a replay draws, the copy of the session its records are read
+into: what the session waited on then, not now.")
 (defvar-local romacs-agent-log--state nil "What the separator last said.")
 (defvar-local romacs-agent-log--width nil "The columns the separator was last made for.")
 (defvar-local romacs-agent-log--prompts nil
@@ -646,43 +666,88 @@ Live, in a chat no window shows, the echo area says so too."
         (when-let* ((keys (text-property-any start end 'romacs-agent-log-keys t)))
           (delete-region keys (or (next-single-property-change keys 'romacs-agent-log-keys nil end) end)))
         (add-face-text-property start end 'romacs-agent-log-note)
-        (remove-text-properties start end '(keymap nil))
+        ;; It answers nothing any more: no keys, no request to answer.
+        (remove-text-properties start end '(keymap nil romacs-agent-log-request nil))
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 
-(defun romacs-agent-log--answer-text (by decision scope reason &optional answers)
-  "Who answered, and how: BY `user' or `policy', DECISION allow or deny;
+(defun romacs-agent-log--close-asks (session event how)
+  "SESSION's turn ended or its harness exited (HOW, `turn-end' or `exit',
+at EVENT) with approvals drawn open: each it no longer waits on (then,
+in a replay) settled, and said why.  One answered was not delivered: a
+recorded answer settles its block."
+  (let ((approvals (if romacs-agent-log--replaying (romacs-agent-approvals romacs-agent-log--replaying)
+                     (romacs-agent-log-source-approvals romacs-agent-log--source session))))
+    (dolist (ask romacs-agent-log--asks)
+      (let* ((id (car ask))
+             (why (cond ((member id romacs-agent-log--attributed) "an answer not delivered: the harness never took it")
+                        ((eq how 'exit) "the harness exited with it unanswered")
+                        (t "the turn ended with it unanswered"))))
+        (cond ((and (not (gethash id approvals)) (not romacs-agent-log--closes-deferred))
+               (romacs-agent-log--settle-ask id)
+               (romacs-agent-log--note event why)
+               (romacs-agent-log--drop-ended id))
+              ;; Still listed by a source that says so later, or drawn
+              ;; from a source's history before what it waits on now:
+              ;; said, where it first ended, once it lets it go, unless
+              ;; an answer settles it.  A later turn's end is not its.
+              ((and (not romacs-agent-log--replaying) (not (assoc id romacs-agent-log--ended-asks)))
+               (romacs-agent-log--close-stream)
+               (push (cons id (cons (romacs-agent-log--entry (propertize (concat "· " why) 'face 'romacs-agent-log-note)
+                                                             'note event)
+                                    (copy-marker romacs-agent-log--end)))
+                     romacs-agent-log--ended-asks)))))))
+
+(defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
+  "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
+\"harness\" or \"unknown\"), :login and :client; DECISION allow or deny;
 ANSWERS, a table of question to answer, what was answered: a question's
-answer says what was chosen, never that a tool was allowed."
-  (if (and (hash-table-p answers) (equal decision "allow"))
-      (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
-              (if (equal by "user") "answered: " "answered by Romacs: ")
-              ;; One question: its answer; more: each question with its own.
-              (let ((one (= (hash-table-count answers) 1)))
-                (mapconcat (lambda (question)
-                             (if one (format "%s" (gethash question answers))
-                               (format "%s → %s" question (gethash question answers))))
-                           (hash-table-keys answers) " · ")))
-  (let ((allowed (equal decision "allow")))
-    (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
-            (pcase by ("user" (if allowed "allowed by you" "denied by you"))
-                   ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
-                   (_ (if allowed "allowed" "denied")))
-            (if (equal scope "session") " for this session" "")
-            (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")
-            ""))))
+answer says what was chosen, never that a tool was allowed.  An answer
+from a client other than this editor says which."
+  (let* ((by (plist-get actor :kind))
+         (client (plist-get actor :client))
+         (via (if (and client (not (equal client "editor"))) (format " (via %s)" client) ""))
+         (allowed (equal decision "allow")))
+    (if (and (hash-table-p answers) allowed)
+        (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
+                (pcase by ("user" "answered: ") ("policy" "answered by Romacs: ")
+                       ("harness" "answered by the harness: ") (_ "answered: "))
+                ;; One question: its answer; more: each question with its own.
+                (let ((one (= (hash-table-count answers) 1)))
+                  (mapconcat (lambda (question)
+                               (if one (format "%s" (gethash question answers))
+                                 (format "%s → %s" question (gethash question answers))))
+                             (hash-table-keys answers) " · "))
+                via)
+      (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
+              (pcase by
+                ("user" (if allowed "allowed by you" "denied by you"))
+                ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
+                ("harness" (if allowed "allowed by the harness" "denied by the harness"))
+                (_ (if allowed "allowed" "denied")))
+              via
+              (if (equal scope "session") " for this session" "")
+              (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")))))
 
 (defun romacs-agent-log--answered (event)
   "Draw answer EVENT, from the harness's records: its block settled, and,
 unless a note said who gave it, that it was answered."
   (let ((id (plist-get event :request-id)))
     (romacs-agent-log--settle-ask id)
+    ;; Settled: no longer left to say its turn ended with it open.
+    (romacs-agent-log--drop-ended id)
+    ;; Settled by the harness over an answer it never took.
+    (when (and (eq (plist-get event :how) 'harness) (member id romacs-agent-log--attributed))
+      (romacs-agent-log--note event "an answer not delivered: the harness settled it first"))
     (unless (member id romacs-agent-log--attributed)
       (romacs-agent-log--line event 'answer
                               (pcase (plist-get event :behavior)
                                 ("allow" (concat (propertize "✔ " 'face 'romacs-agent-log-allowed) "allowed (who: not recorded)"))
                                 ("deny" (concat (propertize "✘ " 'face 'romacs-agent-log-denied) "denied (who: not recorded)"))
-                                (_ (propertize "· settled: the harness no longer asks" 'face 'romacs-agent-log-note)))))))
+                                (_ (propertize (if (eq (plist-get event :how) 'harness)
+                                                   "· settled by the harness: no longer asked"
+                                                 "· settled: the harness no longer asks")
+                                               'face 'romacs-agent-log-note)))))))
 
 (defun romacs-agent-log--prompt (event)
   "Draw input EVENT: the user's message, or one from another session."
@@ -743,13 +808,17 @@ unless a note said who gave it, that it was answered."
     ;; Who answered: said, the block settled once its answer is written.
     ('attributed (push (plist-get event :request-id) romacs-agent-log--attributed)
                  (romacs-agent-log--line event 'answer
-                                         (romacs-agent-log--answer-text (plist-get event :by) (plist-get event :decision)
+                                         ;; A service older than :actor says who alone.
+                                         (romacs-agent-log--answer-text (or (plist-get event :actor)
+                                                                            (list :kind (or (plist-get event :by) "unknown")))
+                                                                        (plist-get event :decision)
                                                                         (plist-get event :scope) (plist-get event :reason)
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))
     ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
                                                        (plist-get event :text))))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event))
     ('error (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "error")) 'romacs-agent-log-denied))
     ('unstarted (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "never started"))
@@ -762,6 +831,7 @@ unless a note said who gave it, that it was answered."
                                                       (car (romacs-agent-log--lines (plist-get event :text)
                                                                                     romacs-agent-log-output-lines)))))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
+           (romacs-agent-log--close-asks session event 'exit)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
              (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
@@ -945,7 +1015,8 @@ end, replayed into a copy so the session is not touched."
     (let ((romacs-agent-event-functions
            (list (lambda (_ event)
                    (with-current-buffer buffer
-                     (romacs-agent-log-draw session event)
+                     (let ((romacs-agent-log--replaying scratch))
+                       (romacs-agent-log-draw session event))
                      (when-let* ((seq (plist-get event :seq))) (setq romacs-agent-log--seq (max romacs-agent-log--seq seq))))))))
       (romacs-agent--read-journal session (lambda (record) (romacs-agent-replay-record scratch record)) from end))
     (romacs-agent-log--close-stream)))
@@ -979,7 +1050,12 @@ end, replayed into a copy so the session is not touched."
 records drew: a block no longer waited on settled, one waited on drawn."
   (let ((approvals (romacs-agent-log-source-approvals romacs-agent-log--source session)))
     (dolist (ask romacs-agent-log--asks)
-      (unless (gethash (car ask) approvals) (romacs-agent-log--settle-ask (car ask))))
+      (unless (gethash (car ask) approvals)
+        (romacs-agent-log--settle-ask (car ask))
+        ;; Said where it ended: what streams since goes on unbroken.
+        (when-let* ((ended (romacs-agent-log--drop-ended (car ask))))
+          (romacs-agent-log--writing
+            (save-excursion (goto-char (cdr ended)) (insert (romacs-agent-log--sealed (car ended))))))))
     (maphash (lambda (id request)
                (unless (assoc id romacs-agent-log--asks)
                  (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
@@ -1009,6 +1085,10 @@ FROM, nil at the session's start."
                 (set-marker-insertion-type romacs-agent-log--end t)
                 (funcall draw)
                 (romacs-agent-log--close-stream)
+                ;; No approval here offers its keys: one settled later
+                ;; is settled, and one still waited on has its block at
+                ;; the chat's end (`romacs-agent-log--sync-asks').
+                (dolist (ask romacs-agent-log--asks) (romacs-agent-log--settle-ask (car ask)))
                 (buffer-substring (point-min) romacs-agent-log--end))))
     (romacs-agent-log--writing
       (save-excursion
@@ -1058,9 +1138,11 @@ drew forgotten, its markers let go, its composer kept."
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
+  (pcase-dolist (`(,_ ,_ . ,at) romacs-agent-log--ended-asks) (set-marker at nil))
   (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
-        romacs-agent-log--attributed nil romacs-agent-log--prompts nil romacs-agent-log--seq 0
+        romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
+        romacs-agent-log--prompts nil romacs-agent-log--seq 0
         romacs-agent-log--from nil))
 
 (defun romacs-agent-log--ensure-filled ()
