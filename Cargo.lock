@@ -3457,7 +3457,6 @@ dependencies = [
 name = "romacs-renderer-wgpu"
 version = "0.0.20"
 dependencies = [
- "ash",
  "bytemuck",
  "cosmic-text",
  "enum_dispatch",
