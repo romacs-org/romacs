@@ -78,6 +78,25 @@ fn char_tables_round_trip() {
     assert!(expected.starts_with("(low \"e\" (face . 1) dflt unit-test-ct nil extra dflt from-parent "), "{expected}");
 }
 
+/// Char-tables are mutable: two equal ones stay two through a unit, one
+/// stays one. A table runs cannot keep is not stored: a literal whose
+/// ASCII slot is not its root's, and one whose parent is no char-table.
+#[test]
+fn char_tables_keep_identity_and_refuse_what_runs_cannot_keep() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-test-a (make-char-table 'unit-test-ct) unit-test-b (make-char-table 'unit-test-ct))").unwrap();
+    assert_eq!(through_unit(&mut vm, "`(let ((x ',unit-test-a) (y ',unit-test-b) (z ',unit-test-a)) (list (equal x y) (eq x y) (eq x z)))"),
+               "(t nil t)");
+    let slots = " nil".repeat(64);
+    for (literal, why) in [(format!("#^[nil nil test 7{slots}]"), "ASCII slot"), (format!("#^[nil 5 test nil{slots}]"), "parent")] {
+        let datum = vm.eval_source_raw(&format!("(list 'quote (car (read-from-string {:?})))", literal)).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+    }
+}
+
 /// A closure constant materialized from a unit is charged its captures,
 /// which are filled in after the funnel made it empty: a constant closing
 /// over nine variables costs eight Values more than one closing over one.

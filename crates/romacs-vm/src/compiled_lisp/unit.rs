@@ -319,9 +319,19 @@ impl<'a> Encoder<'a> {
                 out.data(&b.bytes);
             }
             // A char-table: its subtype, default, parent and extra slots,
-            // and its own values as runs. A Unicode property table, whose
-            // blocks decode through its extra slots, is left to source.
+            // and its own values as runs. Not stored, and so its file is
+            // loaded as source: a Unicode property table, whose blocks
+            // decode through its extra slots; one whose ASCII slot is not
+            // its root's (a literal's detached slot), which runs cannot
+            // keep; and one whose parent is no char-table, which no table
+            // made from the runs could have.
             Object::CharTable(t) if !self.vm.is_uniprop_table(&t) => {
+                if t.validate_mapping().is_err() {
+                    return Err("a constant that cannot be serialised: a char-table whose ASCII slot is not its root's".into());
+                }
+                if t.parent() != Value::NIL && !matches!(self.vm.object(t.parent()), Ok(Object::CharTable(_))) {
+                    return Err("a constant that cannot be serialised: a char-table whose parent is not a char-table".into());
+                }
                 out.byte(NODE_CHAR_TABLE);
                 for field in [t.purpose(), t.default(), t.parent()] {
                     let r = self.value(field)?;
@@ -344,7 +354,8 @@ impl<'a> Encoder<'a> {
     /// A constant of the function being encoded: an earlier constant of
     /// that function `equal-including-properties' to V when there is one.
     fn constant(&mut self, consts: &mut Vec<Value>, v: Value) -> Result<Ref> {
-        if matches!(v.tag(), 0 | 3) && v != Value::NIL {
+        // A char-table is mutable, and two equal ones stay two: by identity.
+        if matches!(v.tag(), 0 | 3) && v != Value::NIL && !matches!(self.vm.object(v), Ok(Object::CharTable(_))) {
             for &earlier in consts.iter() {
                 if earlier != v && self.vm.equal_including_properties(earlier, v).unwrap_or(false) {
                     return self.value(earlier);
