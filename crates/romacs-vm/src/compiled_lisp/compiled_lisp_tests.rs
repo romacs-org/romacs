@@ -56,6 +56,47 @@ fn units_round_trip() {
     }
 }
 
+/// A char-table constant round-trips: its subtype, default, parent, extra
+/// slots and own values, the default not baked into them, so
+/// `map-char-table' sees what the original holds.
+#[test]
+fn char_tables_round_trip() {
+    let mut vm = Vm::new();
+    vm.eval_source("(put 'unit-test-ct 'char-table-extra-slots 2)").unwrap();
+    vm.eval_source("(setq unit-test-parent (make-char-table 'unit-test-ct 'from-parent))").unwrap();
+    vm.eval_source("(setq unit-test-table (let ((c (make-char-table 'unit-test-ct)))
+      (set-char-table-range c '(?a . ?z) 'low) (aset c ?é \"e\") (aset c #x1F600 '(face . 1))
+      (set-char-table-range c nil 'dflt) (set-char-table-extra-slot c 1 'extra)
+      (set-char-table-parent c unit-test-parent) c))").unwrap();
+    let probe = "(list (aref c ?b) (aref c ?é) (aref c #x1F600) (aref c ?A) (char-table-subtype c)
+                       (char-table-extra-slot c 0) (char-table-extra-slot c 1) (char-table-range c nil)
+                       (aref (char-table-parent c) ?A)
+                       (let ((n 0)) (map-char-table (lambda (_k _v) (setq n (1+ n))) c) n))";
+    let expected = vm.eval_source_raw(&format!("(let ((c unit-test-table)) {probe})")).unwrap();
+    let expected = vm.display(expected).unwrap();
+    assert_eq!(through_unit(&mut vm, &format!("`(let ((c ',unit-test-table)) {probe})")), expected);
+    assert!(expected.starts_with("(low \"e\" (face . 1) dflt unit-test-ct nil extra dflt from-parent "), "{expected}");
+}
+
+/// Char-tables are mutable: two equal ones stay two through a unit, one
+/// stays one. A table runs cannot keep is not stored: a literal whose
+/// ASCII slot is not its root's, and one whose parent is no char-table.
+#[test]
+fn char_tables_keep_identity_and_refuse_what_runs_cannot_keep() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-test-a (make-char-table 'unit-test-ct) unit-test-b (make-char-table 'unit-test-ct))").unwrap();
+    assert_eq!(through_unit(&mut vm, "`(let ((x ',unit-test-a) (y ',unit-test-b) (z ',unit-test-a)) (list (equal x y) (eq x y) (eq x z)))"),
+               "(t nil t)");
+    let slots = " nil".repeat(64);
+    for (literal, why) in [(format!("#^[nil nil test 7{slots}]"), "ASCII slot"), (format!("#^[nil 5 test nil{slots}]"), "parent")] {
+        let datum = vm.eval_source_raw(&format!("(list 'quote (car (read-from-string {:?})))", literal)).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+    }
+}
+
 /// A closure constant materialized from a unit is charged its captures,
 /// which are filled in after the funnel made it empty: a constant closing
 /// over nine variables costs eight Values more than one closing over one.
@@ -157,7 +198,7 @@ fn damaged_artifacts_are_deleted_on_lookup() {
     let store = base.join(format!("compiled-lisp-unit-{}", std::process::id()));
     std::fs::create_dir_all(&store).unwrap();
     let key = [7; 32];
-    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new("/x.el"), &[], &[], &[]);
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, "/x.el", &[], &[], &[]);
     let path = store::publish(&store, &key, &inputs, &bytes).unwrap();
     assert!(store::lookup(&store, &key, |_| true).is_some_and(|(found, _)| found == path));
     let mut damaged = bytes.clone();
@@ -166,6 +207,54 @@ fn damaged_artifacts_are_deleted_on_lookup() {
     assert!(store::lookup(&store, &key, |_| true).is_none());
     assert!(!path.exists());
     std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A file of the installation's tree is named relative to it, in a key and
+/// in an artifact's observed inputs, and only a whole component of the
+/// tree's path counts: so a copy of the tree elsewhere names it alike, and
+/// a check puts the tree it runs in back.
+#[test]
+fn files_of_the_tree_are_named_relative_to_it() {
+    let root = Path::new("/opt/romacs");
+    assert_eq!(store::rooted_path(Some(root), Path::new("/opt/romacs/lisp/subr.el")), "\0/lisp/subr.el");
+    assert_eq!(store::rooted_path(Some(root), Path::new("/opt/romacs-2/lisp/subr.el")), "/opt/romacs-2/lisp/subr.el");
+    assert_eq!(store::rooted_path(None, Path::new("/opt/romacs/lisp/subr.el")), "/opt/romacs/lisp/subr.el");
+    let record = serde_json::json!({"kind": "probe", "path": "/opt/romacs/etc/charsets", "probe": "access 4",
+                                    "result": ["/opt/romacs", "/opt/romacsy/x", 3]});
+    let kept = store::rooted(&record, Some(root));
+    assert_eq!(kept["path"], "\0/etc/charsets");
+    assert_eq!(kept["result"][0], "\0");
+    assert_eq!(kept["result"][1], "/opt/romacsy/x");
+    assert_eq!(store::unrooted(&kept, Some(Path::new("/srv/tree")))["path"], "/srv/tree/etc/charsets");
+    assert_eq!(store::unrooted(&kept, Some(root)), record);
+    assert_eq!(store::rooted(&record, None), record);
+}
+
+/// A unit that captured a path of the tree binds its artifact to that tree,
+/// so a copy elsewhere compiles its own; one that captured none serves any.
+#[test]
+fn a_unit_holding_the_trees_path_binds_its_artifact_to_the_tree() {
+    let root = Path::new("/opt/romacs");
+    assert!(store::root_record(Some(root), [b"(defconst x 1)".as_slice()].into_iter()).is_none());
+    let bound = store::root_record(Some(root), [b"..".as_slice(), b"\x05/opt/romacs/lisp/erc/erc.el".as_slice()].into_iter()).unwrap();
+    assert_eq!((bound["kind"].as_str(), bound["path"].as_str()), (Some("root"), Some("/opt/romacs")));
+    assert!(store::root_record(None, [b"/opt/romacs".as_slice()].into_iter()).is_none());
+    // A symbol interned from the path is in the name table, which is scanned as the units are.
+    let names = ["car".to_owned(), "/opt/romacs/lisp/x.el".to_owned()];
+    assert!(store::root_record(Some(root), names.iter().map(String::as_bytes)).is_some());
+}
+
+/// A copy of the tree keys its files alike; a file outside it keys by its
+/// path, a user's package as any.
+#[test]
+fn a_copy_of_the_tree_keys_alike() {
+    let digest = [3; 32];
+    let a = store::key("env", Some(Path::new("/a/tree")), Path::new("/a/tree/lisp/x.el"), &digest);
+    let b = store::key("env", Some(Path::new("/b/c/tree")), Path::new("/b/c/tree/lisp/x.el"), &digest);
+    assert_eq!(a, b);
+    let outside = store::key("env", Some(Path::new("/a/tree")), Path::new("/home/u/pkg/x.el"), &digest);
+    assert_ne!(a, outside);
+    assert_ne!(a, store::key("other env", Some(Path::new("/a/tree")), Path::new("/a/tree/lisp/x.el"), &digest));
 }
 
 /// A private store directory for one test, named NAME.
@@ -183,7 +272,7 @@ fn publish_sized(store: &Path, n: u32, size: usize) -> PathBuf {
     let mut key = [0; 32];
     key[..4].copy_from_slice(&n.to_le_bytes());
     let units = [(0, 0, 0, 1, vec![n as u8; size])];
-    let (bytes, inputs) = store::encode(&store::Status::Compiled, Path::new(&format!("/f{n}.el")), &[], &[], &units);
+    let (bytes, inputs) = store::encode(&store::Status::Compiled, &format!("/f{n}.el"), &[], &[], &units);
     store::publish(store, &key, &inputs, &bytes).unwrap()
 }
 
@@ -191,7 +280,7 @@ fn publish_sized(store: &Path, n: u32, size: usize) -> PathBuf {
 fn a_failed_compile_is_told_from_a_refused_one() {
     let store = test_store("status");
     for status in [store::Status::Source("no-byte-compile".into()), store::Status::Error("line 3: void".into())] {
-        let (bytes, inputs) = store::encode(&status, Path::new("/x.el"), &[], &[], &[]);
+        let (bytes, inputs) = store::encode(&status, "/x.el", &[], &[], &[]);
         let path = store::publish(&store, &[1; 32], &inputs, &bytes).unwrap();
         let read = store::open(&path).unwrap().status;
         assert!(match (&status, &read) {
@@ -280,4 +369,52 @@ fn tree_workers_overlap() {
     });
     assert_eq!(done.len(), 4);
     assert_eq!(most.load(Ordering::SeqCst), 4, "the workers ran one at a time");
+}
+
+/// A tree's compile decides a file whose artifact holds without a compile
+/// process, on the `load-path' a compile process searches, and leaves to a
+/// process what does not hold or what it cannot tell.
+#[test]
+fn a_tree_decides_held_artifacts_itself() {
+    let store = test_store("held");
+    let lib = store.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let source = lib.join("a.el");
+    std::fs::write(&source, "(require 'b)\n").unwrap();
+    std::fs::write(lib.join("b.el"), "(provide 'b)\n").unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, identity: std::sync::OnceLock::new(),
+    };
+    // A's artifact, published as its compile would, having resolved NAME.
+    let publish = |name: &str| {
+        let digest = store::source_digest(&store, &source).unwrap();
+        let key = store::key("env", None, &source, &digest);
+        let record = json!({"kind": "resolved", "name": name, "nosuffix": false, "path": lib.join("b.el").to_string_lossy()});
+        let (bytes, inputs) = store::encode(&store::Status::Compiled, &source.to_string_lossy(), &[record], &[], &[]);
+        store::publish(&store, &key, &inputs, &bytes).unwrap()
+    };
+    let load_path = [lib.to_string_lossy().into_owned()];
+    let held = |load_path: &[String]| match tree::held(&configured, &source, load_path) {
+        Some(tree::Outcome::Published { artifact, held: true, status: store::Status::Compiled }) => Some(artifact),
+        _ => None,
+    };
+    let published = publish("b");
+    assert_eq!(held(&load_path), Some(published.clone()), "held on the load-path it was compiled on");
+    assert_eq!(held(&[store.join("elsewhere").to_string_lossy().into_owned()]), None, "B resolves nowhere");
+    // A second b.el in a directory searched first shadows the one A was
+    // compiled against: the tree's process leaves A to a compile process.
+    let first = store.join("first");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::write(first.join("b.el"), "(provide 'b)\n").unwrap();
+    assert_eq!(held(&[first.to_string_lossy().into_owned(), load_path[0].clone()]), None, "B is shadowed");
+    assert_eq!(held(&load_path), Some(published.clone()), "and holds again where it was resolved");
+    std::fs::remove_file(&published).unwrap();
+    publish("~/b");
+    assert_eq!(held(&load_path), None, "a name under ~ is the compile process's to resolve");
+    publish("b");
+    std::fs::write(&source, "(require 'b) ; changed\n").unwrap();
+    assert_eq!(held(&load_path), None, "a changed source compiles again");
+    std::fs::remove_dir_all(&store).unwrap();
 }

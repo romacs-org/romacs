@@ -46,6 +46,22 @@ fn expressions() -> Vec<String> {
             }
         }
     }
+    // The decoder takes an ASCII run whole and stops it at a CR under dos:
+    // CRs at a run's start and end, doubled, before LF, before a multibyte
+    // character and a raw byte, and a long run with CRs inside it and at its end.
+    for source in [
+        "(unibyte-string 97 98 13 10 99 100)", "(unibyte-string 13 10 97 98 13 13 10 99)", "(unibyte-string 97 13 97 13 10 97)",
+        "(unibyte-string 97 98 99 13)", "(unibyte-string 97 13 195 169 13 10 98)", "(unibyte-string 97 13 255 98 13 10)",
+        "(unibyte-string 13 13 13 10 10 97)", "(string 97 98 13 10 233 13 10 99)",
+    ] {
+        for coding in ["'coding-string-utf8-dos", "'coding-string-utf8", "'coding-string-utf8-unix"] {
+            cases.push(format!("(let ((result (decode-coding-string {source} {coding}))) (list (vconcat result) last-coding-system-used))"));
+        }
+    }
+    let long = "(apply #'unibyte-string (append (make-list 20000 97) '(13 10) (make-list 20000 98) '(13 13 10 99) (make-list 5 100) '(13)))";
+    for coding in ["'coding-string-utf8-dos", "'coding-string-utf8", "'coding-string-utf8-unix"] {
+        cases.push(format!("(let ((result (decode-coding-string {long} {coding}))) (list (length result) (vconcat (substring result 19995 20010)) (vconcat (substring result -14)) last-coding-system-used))"));
+    }
     cases.extend([
         r#"(let ((inhibit-eol-conversion t)) (list (vconcat (decode-coding-string "λ\r\n" 'coding-string-utf8)) last-coding-system-used))"#,
         r#"(let ((source (propertize "a" 'p t))) (list (get-text-property 0 'p (encode-coding-string source nil)) (get-text-property 0 'p (decode-coding-string source 'no-conversion))))"#,

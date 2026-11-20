@@ -127,7 +127,7 @@ A worker that cannot start (no world, the pool full) is simply not there:
 the commands then run GNU's definitions."
   (when (romacs-project--isolate-available-p project)
     (condition-case nil
-        (isolate-warm (romacs-project--features project) (eq isolate-boot 'source))
+        (isolate-warm (romacs-project--features project))
       (error nil))))
 
 (defun romacs-project--warm-when-idle (project)

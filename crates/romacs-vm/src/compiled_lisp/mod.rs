@@ -49,7 +49,9 @@ pub struct Config {
     /// Empty when this process compiles nothing: it loads what is
     /// compiled already, and source otherwise.
     pub compiler: Vec<OsString>,
-    /// A compile process's whole environment.
+    /// A compile process's whole environment, compiled Lisp on in it
+    /// (ROMACS_COMPILED_LISP=on), but for what each compile adds
+    /// (`compile_command`).
     pub environment: Vec<(OsString, OsString)>,
     /// The variables of ENVIRONMENT that come from the session starting
     /// the compile: a compile's reads of them are observed inputs. The
@@ -71,6 +73,11 @@ pub struct Config {
     /// The installation's Lisp trees, whose files have a compiled form as
     /// GNU's installed `.elc` files do.
     pub runtime: Vec<PathBuf>,
+    /// The installation's tree (`lisp/`, `etc/`), by its true name: what an
+    /// artifact names files of relative to (`store::rooted`), so a copy of
+    /// the tree elsewhere, a candidate install say, reuses its artifacts.
+    /// None: every file by its path.
+    pub root: Option<PathBuf>,
 }
 
 /// The configuration, with what this process read of its environment
@@ -195,7 +202,6 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
         (CHAIN.into(), format!("{}{name}\n", configured.chain).into()),
         (LOAD_PATH.into(), load_path.join("\n").into()),
         (PARENT.into(), host::pid().to_string().into()),
-        ("ROMACS_COMPILED_LISP".into(), "on".into()),
     ]);
     if configured.no_prune {
         environment.push((NO_PRUNE.into(), "1".into()));
@@ -295,12 +301,17 @@ fn input_memo(text: &str, path_seed: u64) -> u128 {
     twox_hash::XxHash3_128::oneshot_with_seed(seed, text.as_bytes())
 }
 
-impl Vm {
 /// Whether every observed input of ARTIFACT holds now. A library
 /// resolution holds on the `load-path' in force, LOAD_PATH, which keys
-/// its memo. Records held already are not parsed again.
-fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &str) -> bool {
+/// its memo, and RESOLVE finds a library there: None when it cannot tell,
+/// which holds nothing. Records held already are not parsed again.
+fn inputs_hold(store: &Path, artifact: &store::Artifact, load_path: &str,
+               mut resolve: impl FnMut(&str, bool) -> Option<Option<PathBuf>>) -> bool {
     let path_seed = twox_hash::XxHash3_128::oneshot(load_path.as_bytes()) as u64;
+    // Records name files of the installation's tree relative to it
+    // (`store::rooted`): checked against this process's tree.
+    let root = configured().and_then(|c| c.config.root.clone());
+    let root = root.as_deref();
     let unknown: Vec<(&str, u128)> = {
         let mut held = HOLDING.lock().unwrap();
         let held = held.get_or_insert_default();
@@ -312,20 +323,22 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     };
     unknown.into_iter().all(|(text, memo)| {
         let Ok(record) = serde_json::from_str::<Json>(text) else { return false };
-        let record = &record;
+        let record = &store::unrooted(&record, root);
         let holds = match record["kind"].as_str() {
+            // Held by this tree only (`store::root_record').
+            Some("root") => root.is_some_and(|root| record["path"] == json!(root.display().to_string())),
             Some("loaded") => record["path"].as_str().is_some_and(|path| {
                 store::source_digest(store, Path::new(path)).is_ok_and(|d| record["sha256"] == store::hex(&d))
             }),
             Some("resolved") => record["name"].as_str().is_some_and(|name| {
                 let nosuffix = record["nosuffix"].as_bool().unwrap_or(false);
-                self.source_path(name, nosuffix).ok().is_some_and(|found| {
-                    json!(found.map(|(p, _)| p.to_string_lossy().into_owned())) == record["path"]
+                resolve(name, nosuffix).is_some_and(|found| {
+                    json!(found.map(|p| p.to_string_lossy().into_owned())) == record["path"]
                 })
             }),
             _ => {
                 let now = host::replay(record);
-                let holds = now.as_ref() == Some(record);
+                let holds = now.as_ref().is_some_and(|now| host::same_fact(record, now));
                 if !holds && configured().is_some_and(|c| c.trace) {
                     crate::host::event_line("romacs-compiled-lisp", &json!({"stale": record, "now": now}));
                 }
@@ -336,6 +349,15 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             HOLDING.lock().unwrap().get_or_insert_default().insert(memo);
         }
         holds
+    })
+}
+
+impl Vm {
+/// Whether every observed input of ARTIFACT holds now in this session,
+/// a library resolved on its `load-path', LOAD_PATH.
+fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &str) -> bool {
+    inputs_hold(store, artifact, load_path, |name, nosuffix| {
+        self.source_path(name, nosuffix).ok().map(|found| found.map(|(path, _)| path))
     })
 }
 
@@ -415,7 +437,7 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         let digest = store::source_digest(&config.store, path)?;
         let joined = load_path.join("\n");
         Ok(configured.identity().and_then(|identity| {
-            let key = store::key(identity, path, &digest);
+            let key = store::key(identity, config.root.as_deref(), path, &digest);
             store::lookup(&config.store, &key, |artifact| self.inputs_hold(&config.store, artifact, &joined))
         }))
     }
@@ -453,6 +475,18 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
         Arc::new(artifact.names.iter().map(|name| self.slot(artifact.text(name))).collect())
     }
 
+    /// The `load-path' a compile process searches, as its compiles record
+    /// library resolutions on it: what a tree's compile (`tree`) checks the
+    /// artifacts it finds against.
+    ///
+    /// # Errors
+    ///
+    /// When `load-path` is not a list of strings and nils, or expanding a
+    /// relative entry against `default-directory` signals.
+    pub fn compile_load_path(&mut self) -> Result<Vec<String>> {
+        self.load_path_roots()
+    }
+
     /// The compile process: compile SOURCE, publish its artifact in the
     /// configured store and say where on standard output, with whether an
     /// artifact whose inputs hold was there already (then nothing compiles).
@@ -469,7 +503,8 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
             return Ok((held, true));
         }
         let digest = store::source_digest(&config.store, &source).map_err(|e| e.to_string())?;
-        let key = store::key(identity, &source, &digest);
+        let root = config.root.as_deref();
+        let key = store::key(identity, root, &source, &digest);
         host::enter_record();
         let mut names = unit::Names::default();
         let walked = self.compile_walk(&source, &mut names);
@@ -480,7 +515,9 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 !path.is_some_and(|p| p.starts_with(&config.store) || p == source)
             })
             .filter(|r| r["kind"] != "env" || r["name"].as_str().is_some_and(|name| config.inherited.contains(&name)))
+            .map(|r| store::rooted(&r, root))
             .collect();
+        let mut inputs = inputs;
         let (status, units) = match walked {
             Ok(Ok(units)) => (store::Status::Compiled, units),
             Ok(Err(reason)) => {
@@ -492,7 +529,15 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
                 (store::Status::Error(reason.to_string()), vec![])
             }
         };
-        let (bytes, inputs_digest) = store::encode(&status, &source, &inputs, &names.names, &units);
+        // A unit that kept a path of the tree (`macroexp-file-name' under
+        // `eval-when-compile', say), as a string or as a symbol's name in the
+        // artifact's name table, holds this tree's name: it serves this tree
+        // only (`store::root_record').
+        let captured = units.iter().map(|u| u.4.as_slice()).chain(names.names.iter().map(String::as_bytes));
+        if let Some(record) = store::root_record(root, captured) {
+            inputs.push(record);
+        }
+        let (bytes, inputs_digest) = store::encode(&status, &store::rooted_path(root, &source), &inputs, &names.names, &units);
         let path = store::publish(&config.store, &key, &inputs_digest, &bytes).map_err(|e| e.to_string())?;
         if !configured.no_prune
             && let Ok(removed) = store::prune(&config.store, store::BUDGET, &Default::default())

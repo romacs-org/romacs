@@ -65,7 +65,7 @@ impl Leaf<'_> {
         match self.kind(value) {
             Kind::Symbol => {
                 let name = if value == Value::NIL { "nil" } else if value == Value::TRUE { "t" } else {
-                    self.vm.symbol_names[self.symbol_slot_of(value).ok()?].as_str()
+                    self.vm.symbol_names[self.symbol_slot(value).ok()?].as_str()
                 };
                 let rest = name.char_indices().nth(from).map_or("", |(at, _)| &name[at..]);
                 Some(StrView { bytes: rest.as_bytes(), chars: rest.chars().count(), multibyte: true })

@@ -12,6 +12,8 @@
 use romacs_display_protocol::face::BoxVerticalEdges;
 #[path = "offscreen_frame/fade_edges_test.rs"]
 mod fade_edges_test;
+#[path = "offscreen_frame/gl33_test.rs"]
+mod gl33_test;
 #[path = "offscreen_frame/indent_guides_test.rs"]
 mod indent_guides_test;
 #[path = "offscreen_frame/menu_test.rs"]
@@ -60,7 +62,10 @@ struct Harness {
 }
 
 fn try_harness() -> Option<Harness> {
-    let renderer = romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok()?;
+    Some(harness_on(romacs_renderer_wgpu::gpu_policy::test_gpu::renderer(W, H).ok()?))
+}
+
+fn harness_on(renderer: WgpuRenderer) -> Harness {
     let mut atlas = WgpuGlyphAtlas::new(renderer.device());
     let initial_frame = FrameGlyphBuffer::default();
     atlas.set_current_frame_fonts(initial_frame.font_bindings());
@@ -82,12 +87,12 @@ fn try_harness() -> Option<Harness> {
         view_formats: &[],
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    Some(Harness {
+    Harness {
         renderer,
         atlas,
         target,
         view,
-    })
+    }
 }
 
 fn mapping_for(frame: &FrameGlyphBuffer, width: u32, height: u32) -> PresentMapping {
@@ -489,6 +494,10 @@ fn offscreen_frame_renders_background_and_cursor() {
         eprintln!("SKIP: no GPU adapter");
         return;
     };
+    renders_background_and_cursor(&mut h);
+}
+
+fn renders_background_and_cursor(h: &mut Harness) {
     let frame = frame_with_cursor(Color::rgb(1.0, 0.0, 0.0));
     h.renderer.render_frame_glyphs(
         &h.view,
@@ -501,7 +510,7 @@ fn offscreen_frame_renders_background_and_cursor() {
         None,
         None,
     );
-    let buf = read_back(&h);
+    let buf = read_back(h);
     // A corner pixel is background (dark blue-ish), definitely not the red cursor.
     let corner = px(&buf, W - 2, H - 2);
     assert!(
@@ -528,7 +537,10 @@ fn primary_frame_inline_image_samples_only_its_source_slice() {
         eprintln!("SKIP: no GPU adapter");
         return;
     };
+    inline_image_samples_only_its_source_slice(&mut h);
+}
 
+fn inline_image_samples_only_its_source_slice(h: &mut Harness) {
     const IMAGE_ID: u32 = 701;
     let image_id = ImageId::new(IMAGE_ID);
     const IMAGE_WIDTH: u32 = 8;
@@ -601,7 +613,7 @@ fn primary_frame_inline_image_samples_only_its_source_slice() {
         None,
         None,
     );
-    let rendered = read_back(&h);
+    let rendered = read_back(h);
     let sampled = px(&rendered, 24, 24);
     assert!(
         sampled[2] > 180 && sampled[2] > sampled[0] + 80,

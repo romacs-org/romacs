@@ -1,5 +1,6 @@
 //! Isolates on the full GNU Lisp chain: a batch session boots from source
-//! and spawns workers that boot from source too (`:allow-source-boot t`),
+//! and spawns workers that boot from source too, as every worker of a VM
+//! with no world does,
 //! so a worker can run `make-process` and the project commands. Covers
 //! what the bare-worker tests (romacs-vm `tests/isolates.rs`) cannot: child
 //! reporting with pidfds and retirement, the kill reaching a reported
@@ -74,7 +75,7 @@ fn process_exists(pid: i64) -> bool {
 #[test]
 fn a_killed_workers_reported_child_is_reached_and_a_reaped_one_is_retired() {
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (id (romacs--isolate-id iso))
              (child (isolate-await (isolate-spawn '(lambda () (process-id (make-process :name \"sleeper\" :command '(\"sleep\" \"30\") :connection-type 'pipe))) :isolate iso)))
              (reaped (isolate-await (isolate-spawn '(lambda () (let ((p (make-process :name \"quick\" :command '(\"true\") :connection-type 'pipe))) (while (process-live-p p) (accept-process-output p 0.1)) (process-id p))) :isolate iso))))
@@ -105,7 +106,7 @@ fn a_worker_killed_from_outside_has_its_reported_child_reached() {
     // Sol r1 S7: a death the parent did not cause still signals the groups
     // of the children the worker reported.
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (id (romacs--isolate-id iso))
              (child (isolate-await (isolate-spawn '(lambda () (process-id (make-process :name \"sleeper\" :command '(\"sleep\" \"30\") :connection-type 'pipe))) :isolate iso)))
              (events nil))
@@ -146,7 +147,7 @@ fn the_project_commands_give_the_synchronous_results() {
         (prin1 (list 'files (length sync-files) (equal sync-files iso-files)
                      'matches (length sync-matches) (equal (mapcar summary sync-matches) (mapcar summary iso-matches))
                      'ready (list before preparing ready (romacs-project--warm pr))
-                     'boot (isolate-await (isolate-spawn '(lambda () isolate-boot) :allow-source-boot t))))
+                     'boot (isolate-await (isolate-spawn '(lambda () isolate-boot)))))
         (isolate-kill-all)))", dir = project.display().to_string() + "/", module = root.join("lisp/progmodes/romacs-project.el").display().to_string());
     let (ok, out, err) = batch(&script, &project);
     assert!(ok, "batch failed: {err}");
@@ -289,7 +290,7 @@ fn a_snapshot_carries_the_text_and_its_worker_buffer_refuses_text_edits() {
                                                              (condition-case nil (progn (insert \"x\") 'inserted) (buffer-read-only 'refused))
                                                              (condition-case nil (progn (put-text-property 1 3 'face 'bold) 'put) (buffer-read-only 'refused))
                                                              (let ((inhibit-read-only t)) (put-text-property 1 3 'face 'bold) (get-text-property 1 'face)))))
-                                                  s1 :allow-source-boot t)))
+                                                  s1)))
               (edited (condition-case err
                           (isolate-await (isolate-spawn '(lambda (s) (with-snapshot-buffer s (let ((inhibit-read-only t)) (insert \"y\")) t)) s1))
                         (error (error-message-string err)))))
@@ -351,7 +352,7 @@ fn a_workers_fontification_is_the_sessions() {
                 (puthash token owner romacs-fontify--jobs)
                 ;; Start the walk mid-buffer, as a window showing it there would.
                 (let ((done (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 20000
-                                                          :require (nth 2 spec) :allow-source-boot t))))
+                                                          :require (nth 2 spec)))))
                   (romacs--isolate-pump 0.2)
                   (let ((blocks (romacs-fontify--covering (point-min) (point-max))))
                     (when blocks (romacs-fontify--apply (point-min) (point-max) blocks))
@@ -376,7 +377,7 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     // The GUI's worker waits on its evaluator thread while the main thread
     // joins it; SIGTERM may land on either, so the handler wakes the wait.
     let script = format!("(progn {PREAMBLE}
-      (let* ((iso (isolate-create :allow-source-boot t))
+      (let* ((iso (isolate-create))
              (isolate-kill-timeout 10))
         (isolate-await (isolate-spawn '(lambda () t) :isolate iso))
         (let ((t0 (float-time)))
@@ -385,6 +386,59 @@ fn an_idle_worker_ends_on_sigterm_without_waiting_for_sigkill() {
     let (ok, out, err) = batch(&script, Path::new("/"));
     assert!(ok, "batch failed: {err}");
     assert_eq!(out.trim(), "(quick t live nil)", "{err}");
+}
+
+/// A worker handed the batch world, whose carry is not the GUI's, refuses
+/// it: once restored as the GUI's carry it read bytes past the VM as one.
+/// Its job settles with `isolate-world-unavailable` naming both carries and
+/// the world, `isolate-error-functions` hears the same, the world is
+/// forgotten, and the job's retry and the next worker boot from source and
+/// answer; with zygotes, the zygote refuses and its waiting job runs from
+/// source. The store is a linked copy of the installation's, so the worker
+/// takes the path of any store (`world::adopt`), not the installation's.
+#[test]
+fn a_worker_handed_the_batch_world_refuses_it_and_the_next_boots_from_source() {
+    let exe = Path::new(installed::romacs());
+    let installed = exe.with_file_name("romacs-vm-gui.worlds");
+    // Beside the installation: a hard link stays on its filesystem.
+    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("isolates-gnu-{}-batch-world", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(scratch.join("home")).unwrap();
+    // This build's batch world, by the key its preparation reports: the
+    // installation may keep an earlier build's beside it.
+    let prepared = Command::new(exe).arg("--world-store").arg(&installed).args(["--world-build", "--batch"])
+        .env("HOME", scratch.join("home")).env("XDG_CACHE_HOME", scratch.join("home/cache"))
+        .env("XDG_CONFIG_HOME", scratch.join("home/config")).env("XDG_STATE_HOME", scratch.join("home/state"))
+        .env_remove("ROMACS_WORLD").env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY")
+        .output().expect("world build");
+    let report = String::from_utf8_lossy(&prepared.stderr).into_owned();
+    let key = report.lines().filter_map(|l| l.strip_prefix("romacs-world: "))
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|e| e["mode"] == "prepared").and_then(|e| e["key"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("no prepared batch world: {report}"));
+    let store = scratch.join("worlds");
+    let linked = Command::new("cp").arg("-al").arg(&installed).arg(&store).status().expect("cp");
+    assert!(linked.success(), "linking {}", installed.display());
+    let want = r#"isolate world unavailable: {"image":"made for the carry (); this process needs romacs_vm_gui::world::Carry"}"#;
+    for zygotes in ["nil", "t"] {
+        let script = format!("(progn {PREAMBLE}
+          (let ((world (cons {store:?} {key:?})) (heard nil))
+            (push (lambda (_iso event data) (when (eq event 'isolate-world-unavailable) (push (car data) heard))) isolate-error-functions)
+            (setq isolate-boot 'world isolate-world world isolate-zygotes {zygotes})
+            (prin1 (list (condition-case e (isolate-await (isolate-spawn '+ 1 2) 60)
+                           (isolate-error (list (car e) (equal (nth 2 e) (list {want:?} world)))))
+                         isolate-world
+                         (progn (romacs--isolate-pump 0.5) (equal heard (list (list {want:?} world))))
+                         (isolate-await (isolate-spawn '+ 1 2) 120)))
+            (isolate-kill-all)))", store = store.display().to_string());
+        let (ok, out, err) = batch(&script, Path::new("/"));
+        assert!(ok, "batch failed (zygotes {zygotes}): {err}");
+        // Without zygotes the job's own worker refused; with them the zygote
+        // did, and the job waiting on its fork ran from source.
+        let first = if zygotes == "nil" { "(isolate-world-unavailable t)" } else { "3" };
+        assert_eq!(out.trim(), format!("({first} nil t 3)"), "zygotes {zygotes}: {err}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
 }
 
 #[test]
@@ -408,7 +462,7 @@ fn results_wait_for_a_widened_buffer_and_a_changed_setup_refuses_them() {
           (narrow-to-region 1 100)
           ;; From 9000: the block it began in is delivered twice.
           (let ((done (condition-case err
-                          (progn (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 9000 :allow-source-boot t))
+                          (progn (isolate-await (isolate-spawn romacs-fontify--job snapshot token romacs-fontify--block 9000))
                                  (romacs--isolate-pump 0.2) 'delivered)
                         (error err))))
             (widen)

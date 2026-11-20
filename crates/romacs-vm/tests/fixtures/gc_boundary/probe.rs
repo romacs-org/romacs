@@ -20,5 +20,7 @@ fn vm2_gc_probe_leaf_field(cx, list: Value) {
 defsubr! { name = "vm2-gc-probe-unsafe-body", gnu = "none", effect = Pure,
 fn vm2_gc_probe_unsafe_body(cx, list: Value) {
     let p: *const Value = &list;
+    // UNSAFE(the probe's point: unsafe code the forbid on src/prims must refuse)
+    // SAFETY: never built; the compiler must reject this body before it runs.
     Ok(unsafe { *p })
 }}

@@ -13,7 +13,7 @@
 #[path = "support/gnu_batch.rs"]
 mod gnu_batch;
 use romacs_vm::Vm;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::Path;
 #[path = "support/gnu_lisp.rs"]
 mod gnu_lisp;
@@ -145,18 +145,13 @@ fn processes_match_pinned_gnu() {
 /// is dropped, so it stays in progress. Returns the listener, the queued
 /// connections and the port.
 fn saturated_listener() -> (OwnedFd, Vec<std::net::TcpStream>, u16) {
-    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
-    assert!(fd >= 0);
-    let listener = unsafe { OwnedFd::from_raw_fd(fd) };
-    let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-    sin.sin_family = libc::AF_INET as libc::sa_family_t;
-    sin.sin_addr = libc::in_addr { s_addr: u32::from_ne_bytes([127, 0, 0, 1]) };
-    let mut len = size_of::<libc::sockaddr_in>() as libc::socklen_t;
-    let sa = (&mut sin as *mut libc::sockaddr_in).cast::<libc::sockaddr>();
-    assert_eq!(unsafe { libc::bind(fd, sa, len) }, 0);
-    assert_eq!(unsafe { libc::listen(fd, 0) }, 0);
-    assert_eq!(unsafe { libc::getsockname(fd, sa, &mut len) }, 0);
-    let port = u16::from_be(sin.sin_port);
+    use rustix::net::{AddressFamily, SocketFlags, SocketType};
+    let listener = rustix::net::socket_with(AddressFamily::INET, SocketType::STREAM, SocketFlags::CLOEXEC, None).unwrap();
+    rustix::net::bind(&listener, &std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    // A backlog of none, which std's listener does not offer.
+    rustix::net::listen(&listener, 0).unwrap();
+    let bound = std::net::SocketAddrV4::try_from(rustix::net::getsockname(&listener).unwrap()).unwrap();
+    let port = bound.port();
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     // Fill the queue until a connection is no longer answered.
     let mut queued = Vec::new();
@@ -256,8 +251,7 @@ fn dropped_vm_children_share_one_reaper() {
     let base = scratch("reaper");
     std::fs::create_dir_all(&base).unwrap();
     let fifo = base.join("release");
-    let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
-    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    rustix::fs::mknodat(rustix::fs::CWD, &fifo, rustix::fs::FileType::Fifo, rustix::fs::Mode::from_raw_mode(0o600), 0).unwrap();
     // Held open for writing, so each child's open of the FIFO returns.
     let release = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
     let mut vm = gnu_lisp(&[]);

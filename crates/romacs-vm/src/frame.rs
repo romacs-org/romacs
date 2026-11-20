@@ -178,7 +178,7 @@ impl Vm {
         Ok(self.frame(root)?.alpha_background)
     }
     pub(super) fn frame_mut(&mut self, value: Value) -> Result<&mut Frame> {
-        match self.objects.get_entry_mut(value.index(0)?.saturating_sub(1)) {
+        match value.object_index_if().and_then(|index| self.objects.get_entry_mut(index)) {
             Some(Object::Frame(f)) => Ok(f),
             _ => Err("frame required".into()),
         }

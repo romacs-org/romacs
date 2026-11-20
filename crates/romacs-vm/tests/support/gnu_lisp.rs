@@ -21,22 +21,39 @@ use std::path::{Path, PathBuf};
 /// path under the checkout) loaded after it.
 pub fn gnu_lisp(then: &[&str]) -> Vm {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut vm = restored(&root).unwrap_or_else(|| booted(&root, false));
+    let mut vm = gnu_lisp_with("");
     for name in then {
         load(&mut vm, &root, name);
     }
     vm
 }
 
-/// The boot from its world, when this process can map one
-/// (`World::for_test`): in the `gnu` target, one test a process.
-fn restored(root: &Path) -> Option<Vm> {
+/// GNU batch's VM as `gnu_lisp` gives it, with SOURCE evaluated after the
+/// boot and before its world is captured: in the `gnu` target, where this
+/// process can map one (`World::for_test`, one test a process), a world of
+/// its own that holds what SOURCE made, restored; elsewhere the boot from
+/// source, SOURCE then evaluated.
+pub fn gnu_lisp_with(source: &str) -> Vm {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let store = Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-lisp-worlds");
-    let recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
-    World::for_test(store, &recipe, || {
+    let mut recipe = vec!["romacs-vm tests gnu_lisp".into(), format!("lisp {}", root.display())];
+    if !source.is_empty() {
+        recipe.push(format!("then {source}"));
+    }
+    let evaluated = |mut vm: Vm| {
+        if !source.is_empty() {
+            vm.eval_source(source).map_err(|error| format!("{source}: {error}"))?;
+        }
+        Ok::<_, String>(vm)
+    };
+    let restored = World::for_test(store, &recipe, || {
         romacs_vm::host::end_at_dump_point();
-        Ok((booted(root, true), ()))
-    }).map(|(vm, ())| vm)
+        Ok((evaluated(booted(&root, true))?, ()))
+    });
+    match restored {
+        Some((vm, ())) => vm,
+        None => evaluated(booted(&root, false)).unwrap(),
+    }
 }
 
 /// The boot from source, recording for a world when WORLD.

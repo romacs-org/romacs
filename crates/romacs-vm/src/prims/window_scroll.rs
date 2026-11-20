@@ -5,8 +5,6 @@
 //! of `eval' the first time one runs, as message.rs installs its half.
 use super::*;
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/window-scroll.el");
-
 /// Call HELPER of the Lisp half with ARGS, installing the half first;
 /// then, when FOLLOW is a window, move its old point to its point
 /// (`finish').
@@ -15,9 +13,7 @@ fn enter(cx: &mut Leaf<'_>, helper: &str, args: Vec<Value>, follow: Value) -> Ne
     if cx.symbol_function(f)? != Value::NIL {
         return Ok(Step::Call { f, args, then: finish, saved: vec![follow] });
     }
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/window-scroll.el")?;
     let saved = [follow, f].into_iter().chain(args).collect();
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then: installed, saved })
 }
@@ -56,6 +52,11 @@ fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
     cx.window_recenter_start(window, arg.integer_value(), (lines(margin)?, lines(height)?))
 }}
 
+// The new window start for scrolling the selected window a whole screen from position
+// START, toward the end of the buffer when FORWARD is non-nil, else toward its start, by
+// the screen's whole lines less CONTEXT, at least one, in the frame's line height, over the
+// rows a host lays out, as `scroll-up' and `scroll-down' do.  nil without a layout,
+// while the window is scrolled vertically, or in a unibyte buffer.
 defsubr! { name = "romacs--scroll-start", gnu = "romacs:display", effect = Reads,
 fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     let window = cx.vm_selected_window()?;
@@ -63,6 +64,9 @@ fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     cx.window_scroll_start(window, number(start)?, forward != Value::NIL, number(context)?)
 }}
 
+// How many whole rows the selected window's text area shows from position START; nil
+// without a layout, or in a unibyte buffer.  A START that is no fixnum signals
+// `wrong-type-argument'.
 defsubr! { name = "romacs--rows-shown-from", gnu = "romacs:display", effect = Reads,
 fn rows_shown_from(cx, start: Value) {
     let window = cx.vm_selected_window()?;

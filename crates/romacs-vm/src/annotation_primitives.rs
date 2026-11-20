@@ -524,7 +524,7 @@ impl Vm {
     /// deletion empties the overlays of every buffer sharing the text
     /// (adjust_overlays_for_delete, buffer.c:3621).
     pub(super) fn evaporate_overlays_at(&mut self, buffer: Value, bytes: std::ops::Range<ByteOffset>) -> Result<()> {
-        let family = self.text_family(buffer.index(0)? - 1);
+        let family = self.text_family(buffer.object_index()?);
         let buffers: Vec<Value> = if family.is_empty() { vec![buffer] }
             else { family.into_iter().map(|i| Value::reference(i + 1, 0)).collect() };
         let mut expired = Vec::new();

@@ -418,7 +418,7 @@ def main():
             ctrl('x', 'e')
             time.sleep(1)
             shot('scene-eval-error')
-            # keymap-popup's menu as Romacs's bottom panel.
+            # keymap-popup's menu as Romacs's floating panel.
             keymap = notes / 'keymap.json'
             wait(keymap.exists, args.timeout, 'keymap', proc)
             time.sleep(1.5)

@@ -16,8 +16,6 @@ use super::child_frames::ChildFrameManager;
 use super::cursor::CursorState;
 use super::transitions::TransitionState;
 use romacs_display_protocol::frame_glyphs::FrameGlyphBuffer;
-#[cfg(feature = "video")]
-use romacs_display_protocol::types::VideoId;
 use romacs_renderer_wgpu::{FullFrameTexture, RendererFrameEffects, WgpuGlyphAtlas};
 
 mod child_frames;
@@ -39,8 +37,6 @@ pub(crate) struct FrameCompositor {
     /// Video identities present in the root or any accepted child
     /// presentation. Rebuilt only when editor presentation data changes, so
     /// decoder wakeups do not rescan every glyph at video frame rate.
-    #[cfg(feature = "video")]
-    visible_videos: HashSet<VideoId>,
     /// Unique generation of the composed editor scene. Frame replacement and
     /// renderer-owned terminal replacement both advance it, so face
     /// aggregation and retained-static rendering cannot observe stale state.
@@ -190,8 +186,6 @@ impl FrameCompositor {
         Self {
             current_frame: None,
             text_animations: Default::default(),
-            #[cfg(feature = "video")]
-            visible_videos: HashSet::new(),
             current_scene_generation: 0,
             child_frames: ChildFrameManager::new(),
             hidden_child_frames: HashSet::new(),

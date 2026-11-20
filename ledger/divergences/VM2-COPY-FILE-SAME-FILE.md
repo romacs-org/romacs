@@ -1,0 +1,5 @@
+## Observable by a package: files
+
+| # | Scope | GNU | VM2 | Reason / evidence |
+|---|---|---|---|---|
+| VM2-COPY-FILE-SAME-FILE | `copy-file` onto an existing NEWNAME that is FILE itself through a link, and `rename-file` across filesystems onto one (its copy step) | `Fcopy_file` opens an existing NEWNAME with `O_TRUNC` (fileio.c:2393) and only then compares its device and inode with FILE's: the check signals `(file-error "Input and output files are the same" FILE NEWNAME)`, but FILE is already empty. Through `rename-file` across filesystems, a destination that is a symlink back to the source loses the source's bytes the same way. | NEWNAME is opened without truncating, compared with FILE, and truncated only once they differ: the same signal, and FILE keeps its bytes. Every other case is GNU's, truncation included. | A GNU data-loss bug, kept out (Sol 6f2d7891 S1). Test: `crates/romacs-vm/tests/rename_across_devices.rs` (`a_destination_aliasing_the_source_keeps_its_bytes`: `rename-file` across filesystems and `copy-file` both ways). | <!-- symbols: copy-file, rename-file -->

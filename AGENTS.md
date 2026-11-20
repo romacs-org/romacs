@@ -20,6 +20,30 @@ measure for a text-terminal display. Romacs *contains* a terminal emulator
 program. Pinned GNU may be run `-nw` as an oracle when no GUI comparison is
 possible; say so where you do.
 
+## Ownership and sequential semantics
+
+- Elisp's sequential semantics is the machine's guarantee, and its parallelism is
+  built on it. Any mechanism that runs Lisp in parallel keeps it: what runs in
+  parallel is indistinguishable from some sequential order a Lisp programmer could
+  have written, and Lisp never observes a data race. A new such mechanism must also
+  give the guarantee's debugging, which today's worker VMs predate: its runs can be
+  replayed, the order things ran in can be asked for, and a conflict or an abort is
+  reported in Lisp terms (this buffer, this variable, this form). Weakening the
+  guarantee is a change to this rule, never a trade one design makes on its own,
+  and only for a design that wins by a wide margin on everything else.
+- The direction is ownership: state has one owner at a time. A buffer, with its
+  text, properties, locals, markers and processes, belongs to one owner, and a turn
+  (a command, a filter or sentinel call, a timer, a fontify chunk) runs on the
+  owner of the state it writes; code, options, faces and keymaps are the world
+  every owner reads. Today every live editor buffer belongs to the main VM; a
+  worker VM owns only the local buffers it rebuilds from snapshots, and hands
+  results back (`doc/performance.org`). New work moves toward owners, not away
+  from them.
+- A stuck owner never takes the rest of Romacs with it, and a stall is a defect: a
+  block of the main VM past a second, a Rust loop that quit cannot reach
+  (`native_poll`), a pause whose cost grows with the session's history. Measure a
+  stall in instructions and CPU time under load, not in wall time alone.
+
 ## Where a rule goes
 
 - A rule that holds across the repository goes in this file.
@@ -61,6 +85,10 @@ possible; say so where you do.
   a primitive's Rust file. What a caller should know of a function is put on the
   function, beside the better path's definition, and the lint tells each caller:
   `(put 'FUNCTION 'romacs-lint-hint "...")`.
+- Every public definition and every command in Romacs's own Lisp (as
+  `lisp/bundled.json` lays it out) has a docstring that says what its body
+  does, read from the body, not guessed from the name; the lint holds new ones
+  to it.
 - Ask the machine what it offers before writing Lisp for it: `(romacs-dev-guide
   "QUERY")`, or the MCP tool `romacs_dev_guide`, describes a function (a
   primitive's effect class and Rust file, what callers are told of it) or
@@ -144,7 +172,7 @@ possible; say so where you do.
 - A compatibility shim exists so old code does not error; it never preserves the
   defect beneath it.
 - Keep one mechanism per job. A second mechanism for the same job is debt, even
-  when both are new.
+  when both are new: one scheduler, one quit path, one busy tracker.
 - When a mechanism moves to Rust, keep the policy users customize reachable from
   Lisp.
 - Back structural and performance claims with measurements on the development
@@ -248,8 +276,10 @@ The other commands:
 - Lisp lint on a prebuilt or installed host: `python3 tools/romacs-lint FILE ...`,
   what the change adds since its merge-base with beta. `--all` shows older findings
   too, `--binary` names the host; an installed host answers in about a second.
-- Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
-  `--test`, `--match`, file arguments, and `--core` option support smaller checks.
+- Romacs's own `romacs-test` files (`romacs-deftest`, in `test/romacs/romacs-test/`)
+  on a prebuilt host: `python3 tools/test-elisp`. Its `--test`, `--match`, file
+  arguments, and `--core` (the bare VM) support smaller checks. ERT files run with
+  `tools/test-ert`.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
   `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
   (`make check-list` names the modules: a package like `gnosis`, or one library),

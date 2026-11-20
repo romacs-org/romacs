@@ -95,17 +95,16 @@ journals what its harness writes."
 
 (ert-deftest romacs-agent-codex-resume-ends-a-cut-turn ()
   ;; Its last run ended mid-turn: Codex does not take that turn up, so its
-  ;; resume ends it, and what waited goes.
+  ;; resume ends it, and what waited goes as it is ready: its turn under way.
   (romacs-agent-codex-tests--with (:harness-session "01dd" :interrupted t :input-seq 3)
-    (romacs-agent--enqueue session (list "waited" nil nil))
+    (romacs-agent--enqueue session (romacs-agent-item "waited"))
     (let ((resume (romacs-agent-codex-tests--handshake session #'last-written #'echo #'out)))
       (echo)
       (out "id" (gethash "id" resume) "result" (romacs-mcp--object "thread" (romacs-mcp--object "id" "01dd"))))
     (should-not (romacs-agent-interrupted session))
     (should (romacs-agent-failed session))
-    (should (eq (romacs-agent-state session) 'idle))
-    ;; The queue goes at the turn's end, a moment later.
-    (romacs-agent--settle session)
+    (should (eq (romacs-agent-state session) 'running))
+    (should (= (romacs-agent-queue-length session) 0))
     (should (equal (gethash "text" (aref (gethash "input" (gethash "params" (last-written))) 0)) "waited"))))
 
 (defun romacs-agent-codex-tests--ready (session)
@@ -456,9 +455,10 @@ journals what its harness writes."
       (should (equal (gethash "effort" params) "high")))))
 
 (ert-deftest romacs-agent-codex-replay-passes-over-output-deltas ()
-  ;; A call's output as it streams draws nothing: a replay passes over
-  ;; it unparsed.  Its end, a request, and an older line without its
-  ;; time are each still read as they were.
+  ;; A call's output as it streams is shown only while it runs, its end's
+  ;; whole output in its place: a replay passes over it unparsed.  Its
+  ;; end, a request, and an older line without its time are each still
+  ;; read as they were.
   (let* ((session (romacs-agent--make :id "c" :harness 'codex))
          (lines '(("{\"out\":{\"emittedAtMs\":1,\"method\":\"item/commandExecution/outputDelta\",\"params\":{\"delta\":\"a \\\"b\\\"\\n\",\"itemId\":\"exec-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":5,\"t\":1.0}" . t)
                   ("{\"out\":{\"method\":\"item/fileChange/outputDelta\",\"params\":{\"delta\":\"ok\",\"itemId\":\"p-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":6,\"t\":1.0}" . t)
@@ -472,10 +472,11 @@ journals what its harness writes."
         (erase-buffer)
         (insert (car line))
         (should (eq (and (funcall skip (point-min) (point-max)) t) (cdr line)))
-        ;; What it passes over, read, would have drawn nothing.
+        ;; What it passes over, read, is at most a running call's output.
         (when (cdr line)
           (let ((record (json-parse-string (car line) :object-type 'hash-table)))
-            (should-not (romacs-agent--codex-events session (gethash "out" record)))))))))
+            (should (cl-every (lambda (event) (eq (plist-get event :type) 'tool-output))
+                              (romacs-agent--codex-events session (gethash "out" record))))))))))
 
 (provide 'romacs-agent-codex-tests)
 ;;; romacs-agent-codex-tests.el ends here

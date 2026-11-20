@@ -63,5 +63,40 @@ class AddedTest(unittest.TestCase):
                          'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abcdef012345 (3 older not shown; --all shows them)')
 
 
+
+class JudgedTest(unittest.TestCase):
+    """One file the host gives no result for leaves the others judged (romacs#334), and the run incomplete."""
+    A, B = 'lisp/session/a.el', 'lisp/session/b.el'
+    DIED = 'exit 255'
+
+    def test_a_file_with_no_result_here_and_at_the_base_is_quiet_and_the_others_are_judged(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], self.DIED],
+                                                           {self.A: [OLD], self.B: 'timeout'})
+        self.assertEqual((shown, older, quiet, broken, unbased), ([NEW], 1, [self.B], [], []))
+
+    def test_a_file_the_base_gives_no_result_for_has_every_finding_new(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD], [HINT]], {self.A: [OLD], self.B: self.DIED})
+        self.assertEqual((shown, older, quiet, broken, unbased), ([HINT], 1, [], [], [self.B]))
+
+    def test_no_result_here_for_a_file_the_base_lints_or_lacks_is_broken(self):
+        self.assertEqual(lint.judged([self.A], [self.DIED], {self.A: [OLD]})[3], [self.A])
+        self.assertEqual(lint.judged([self.A], [self.DIED], {})[3], [self.A])
+
+    def test_with_no_base_every_file_without_a_result_is_broken(self):
+        self.assertEqual(lint.judged([self.A, self.B], [[NEW], self.DIED], None), ([NEW], 0, [], [self.B], []))
+
+    def test_an_unjudged_file_leaves_the_run_incomplete_never_passed(self):
+        # The contract (tools/AGENTS.md): a stage that could not run is incomplete, never passed.
+        self.assertEqual(lint.verdict([HINT], 1), 2)
+        self.assertEqual(lint.verdict([HINT], 0), 0)
+        # A real finding still fails, whatever was left unjudged.
+        self.assertEqual(lint.verdict([NEW], 1), 1)
+
+    def test_the_summary_counts_the_files_left_unjudged(self):
+        self.assertEqual(lint.summary(1, [], 'abcdef0123456789', 2, 1),
+                         'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abcdef012345 '
+                         '(2 older not shown; --all shows them); 1 more gave no result, so the lint is incomplete')
+
+
 if __name__ == '__main__':
     unittest.main()

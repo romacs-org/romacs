@@ -145,6 +145,19 @@ handle whose peer has gone answers nothing."
     (while pairs (puthash (pop pairs) (pop pairs) object))
     object))
 
+(defun romacs-mcp-write-private (file insert)
+  "Write FILE, readable only by the user, atomically: what INSERT, called
+in an empty buffer, puts there, through a temporary file of this write's
+own beside FILE, so two processes writing FILE at once never take each
+other's.  An error leaves FILE as it was, and no temporary behind."
+  (let ((temporary (make-temp-file (concat file ".") nil ".tmp")))
+    (condition-case err
+        (progn
+          (with-temp-file temporary (funcall insert))
+          (set-file-modes temporary #o600)
+          (rename-file temporary file t))
+      (error (ignore-errors (delete-file temporary)) (signal (car err) (cdr err))))))
+
 (defun romacs-mcp--fail (code message &optional data)
   "Signal protocol CODE with MESSAGE and optional DATA."
   (signal 'romacs-mcp-protocol-error (list code message data)))
@@ -1060,11 +1073,7 @@ on the local socket."
                    :filter #'romacs-mcp--filter :sentinel #'romacs-mcp--sentinel
                    :log #'romacs-mcp--accept)))
     (setq romacs-mcp--listener listener romacs-mcp--token token)
-    (let ((temporary (concat file ".tmp")))
-      (with-temp-file temporary
-        (insert (format "%d\n" (process-contact listener :service))))
-      (set-file-modes temporary #o600)
-      (rename-file temporary file t))
+    (romacs-mcp-write-private file (lambda () (insert (format "%d\n" (process-contact listener :service)))))
     (add-hook 'kill-emacs-hook #'romacs-mcp-stop)
     (romacs-mcp-identity)))
 

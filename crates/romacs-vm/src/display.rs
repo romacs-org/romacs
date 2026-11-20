@@ -102,12 +102,14 @@ impl WindowFaces {
 
 /// What laying a window out from its start established, in its buffer's
 /// bytes: where its last displayed row ends, where its fully visible rows
-/// end (MAX: through the end of its text) and its text area's height.
+/// end (MAX: through the end of its text), its text area's height, and
+/// where point showed, at the byte it was then, when a row held it.
 #[derive(Clone, Copy, Debug, PartialEq, romacs_snapshot::Snapshot)]
 pub(crate) struct Laid {
     pub end: usize,
     pub visible_end: usize,
     pub body_height: f32,
+    pub point: Option<(usize, romacs_layout_input::PointPlace)>,
 }
 
 /// A window's text as a snapshot publishes it (`Vm::window_text`): byte
@@ -335,6 +337,20 @@ impl DisplayState {
             self.version = self.version.wrapping_add(1);
         }
     }
+    /// Whether no window's layout is recorded: an image holds none, as
+    /// what a layout found is this process's (`world_quiescent`).
+    pub(crate) fn laid_empty(&self) -> bool {
+        self.laid.is_empty()
+    }
+    /// A layout record of no window: what an image must refuse.
+    #[cfg(test)]
+    pub(crate) fn record_laid_for_test(&mut self) {
+        let key = ShownKey { collections: 0, overlays: 0, hosted: false, buffer: Value::NIL, shows: 0, selected_id: 0, selected: Value::NIL,
+            modiff: 0, accessible: (0, 0), start: 0, mark: Value::NIL, terminal: None, geometry: (0, 0, 0, 0, 0), min_hscroll: 0,
+            suspended: false, chrome: ([0; 2], [0; 2], false, false), root: (0, 0), metrics: (0, 0), faces: 0, table: 0,
+            variables: vec![], header: Value::NIL };
+        self.laid.insert(0, (key, Laid { end: 0, visible_end: 0, body_height: 0.0, point: None }));
+    }
     /// Republish window ID in full next time (force-window-update).
     pub(super) fn repaint_window(&mut self, id: u64) {
         self.previous.remove(&id);
@@ -362,6 +378,17 @@ impl DisplayState {
     /// The buffer byte window ID's last publication starts at.
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
+    }
+    /// The byte window ID's last published text shows buffer byte BYTE at,
+    /// or None where that text does not show it.
+    pub(super) fn published_byte(&self, id: u64, byte: usize) -> Option<usize> {
+        match self.segments(id) {
+            None => byte.checked_sub(self.base(id)),
+            // Half open, as the echo area maps its text: a byte at a
+            // string's position is the text after the string.
+            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte < s.buffer + s.len)
+                .map(|s| s.display + (byte - s.buffer)),
+        }
     }
     /// Window END.id's last publication was painted as END reports, ending
     /// at buffer byte BYTE.
@@ -456,6 +483,19 @@ enum Plain {
     First,
 }
 
+/// What fontifying a window's text ahead of its layout did
+/// (`Vm::fontify_ahead`).
+#[derive(Clone, Copy)]
+enum Ahead {
+    /// Nothing: the window fontifies after its layout.
+    Not,
+    /// The window's text from START to END is fontified, the window
+    /// reading STATE after (`Vm::window_text_state`).
+    Done { start: usize, end: usize, state: (u64, u64, Value) },
+    /// Its Lisp deleted the window.
+    Gone,
+}
+
 /// What a window's last full snapshot read, besides its point, its cursor
 /// and its mode line's Lisp: while this is unchanged, so are the window's
 /// text, faces and start (GNU redisplay's test that a window needs no
@@ -508,6 +548,11 @@ impl ShownKey {
     /// its start, size, scroll and faces), whatever Lisp ran between.
     fn same_size(&self, other: &Self) -> bool {
         self.geometry == other.geometry
+    }
+    /// OTHER shows the same buffer from the same start in the same size and
+    /// scroll: its text, and so where it ends, may have changed.
+    fn same_view(&self, other: &Self) -> bool {
+        (self.shows, self.start, self.geometry) == (other.shows, other.start, other.geometry)
     }
     fn same_display(&self, other: &Self) -> bool {
         (self.shows, self.modiff, self.accessible, self.start, self.overlays, self.geometry, self.min_hscroll, self.suspended)
@@ -642,7 +687,7 @@ impl Vm {
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
     /// where it is) or `still' (motion is off: its still frame).  KIND is
-    /// (logo CELL-ASPECT EPOCH).
+    /// (logo CELL-ASPECT EPOCH) or (working WORK EPOCH FACE BEATS).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     /// The block's row in WINDOW is counted here, from the window start
@@ -656,6 +701,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let working = self.intern("working");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -667,9 +713,14 @@ impl Vm {
             };
             if !shown { continue; }
             let rows = natural(rows)? as u32;
+            // A marker of the caller's, read as this frame freezes: one
+            // detached or in another buffer places nothing.
             let start = match start.integer_value() {
                 Some(n) => n,
-                None => self.marker_position_value(start)?.integer_value().ok_or("text animation start")?,
+                None => {
+                    if self.marker(start)?.buffer != buffer { continue; }
+                    match self.marker_position_value(start)?.integer_value() { Some(n) => n, None => continue }
+                }
             };
             let (top, in_view) = self.text_animation_row(window, start, rows)?;
             let kind = match self.list_values(kind)?[..] {
@@ -686,14 +737,42 @@ impl Vm {
                     };
                     TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
                 }
+                // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
+                // thread, in FACE's foreground.
+                [head, work, epoch, face, beats] if head == working => {
+                    use romacs_logo::working::Work;
+                    let work = match self.symbol_name_of(work).as_deref() {
+                        Some("running") => Work::Running,
+                        Some("waiting") => Work::Waiting,
+                        Some("failed") => Work::Failed,
+                        _ => Work::Idle,
+                    };
+                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                    TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
+                                                 colour: self.display_face(&face)?.foreground,
+                                                 bead: self.display_face("default")?.foreground }
+                }
                 _ => return Err("bad text animation kind".into()),
             };
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
+            // A working thread is placed by the host on the row its layout
+            // lays START on: START as a byte of the text it published.
+            let anchor = match kind {
+                TextAnimationKind::Working { .. } => {
+                    let byte = self.shown_text(buffer).ok().and_then(|b| {
+                        let pos = (start.max(1) as usize - 1).min(b.len_chars());
+                        b.byte_of_char(coordinates::CharOffset(pos)).ok().map(|o| o.0)
+                    });
+                    match byte.and_then(|byte| self.display_state.published_byte(window, byte)) { Some(a) => Some(a), None => continue }
+                }
+                _ => None,
+            };
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows,
-                fps: natural(fps)? as u32, moving: in_view && moving != Value::NIL && moving != still, still: moving == still, kind,
+                window, top, cols: natural(cols)? as u32, rows, anchor, rise: None,
+                fps: natural(fps)? as u32, moving: (anchor.is_some() || in_view) && moving != Value::NIL && moving != still,
+                still: moving == still, kind,
             }));
         }
         Ok(animations)
@@ -1600,9 +1679,38 @@ impl Vm {
         let byte = shown.base + end.end;
         let b = self.shown_text(self.window(window)?.buffer)?;
         let byte = shown.segments.as_ref().map_or(byte, |segments| shown_end(segments, end.end, b.len_bytes(), |at| b.newline_at(at)));
-        let laid = laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref());
+        let point = self.window_point_byte(window)?;
+        let laid = Laid { point: end.point.zip(point).map(|(place, at)| (at, place)),
+                          ..laid(&end, byte, shown.base, shown.text.utf8.len(), shown.at_zv, shown.segments.as_deref()) };
         self.display_state.laid.insert(id, (key, laid));
         Ok(Some(laid))
+    }
+    /// The buffer byte of WINDOW's point, within its accessible text, as
+    /// `hscroll_window` reads it; none for a buffer not shown as text.
+    fn window_point_byte(&mut self, window: Value) -> Result<Option<usize>> {
+        let point = self.window_point_value(window)?.as_integer()?;
+        let Ok(b) = self.shown_text(self.window(window)?.buffer) else { return Ok(None) };
+        let accessible = b.accessible();
+        let byte = b.byte_of_char(coordinates::CharOffset(usize::try_from(point.max(1) - 1).unwrap_or(0)))?.0;
+        Ok(Some(byte.clamp(accessible.start.0, accessible.end.0)))
+    }
+    /// Where point shows in WINDOW's recorded layout (`window_layout`),
+    /// while what that read holds, point is still at the byte given, and
+    /// its line was laid out from its start (the window's start is not
+    /// inside it); none otherwise. Lays nothing out.
+    pub(crate) fn laid_point(&mut self, window: Value, point_byte: usize) -> Result<Option<romacs_layout_input::PointPlace>> {
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        let (id, buffer, start) = (w.id, w.buffer, w.start);
+        let Some(place) = self.display_state.laid.get(&id).filter(|(known, _)| *known == key)
+            .and_then(|(_, laid)| laid.point).filter(|&(at, _)| at == point_byte).map(|(_, place)| place) else { return Ok(None) };
+        let start = usize::try_from(self.marker_position_value(start)?.integer_value().unwrap_or(1)).unwrap_or(1).max(1);
+        let Ok(b) = self.shown_text(buffer) else { return Ok(None) };
+        let begv = b.accessible().start.0;
+        let start = b.byte_of_char(coordinates::CharOffset(start - 1))?.0;
+        let line = b.as_str()[begv..point_byte].rfind('\n').map_or(begv, |newline| begv + newline + 1);
+        Ok((start <= line).then_some(place))
     }
     /// The height of WINDOW's text area as painting lays it out now: its
     /// recorded layout's while its key holds, else its size less its bands
@@ -2466,7 +2574,9 @@ impl Vm {
     }
     fn redisplay_window_inner(&mut self, root: usize, buffer_slot: usize, height: u32, layout: bool) -> Result<Bands> {
         if self.window(self.slots[root].value)?.mini {
-            return if layout { self.redisplay_window_fontify(root, buffer_slot, height).map(|_| Bands::default()) } else { Ok(Bands::default()) };
+            if !layout { return Ok(Bands::default()); }
+            let plan = self.fontify_plan(root, buffer_slot)?;
+            return self.redisplay_window_fontify(root, buffer_slot, height, plan, Ahead::Not).map(|_| Bands::default());
         }
         // Convert before entering Lisp: neither traversal tails nor environments
         // are retained as untraced heap Values across a collecting :eval. An
@@ -2481,8 +2591,15 @@ impl Vm {
         let band_height = self.window_state.line * (u32::from(format.is_some()) + u32::from(header.is_some()));
         let text_height = height.saturating_sub(band_height);
         if layout {
+            // What the window showed from its start is fontified before it
+            // is laid out again, as GNU's iterator fontifies what it lays
+            // out: one layout then serves point's visibility and the range
+            // shown.
+            let plan = self.fontify_plan(root, buffer_slot)?;
+            let ahead = match plan { Some(Plain::No) => self.fontify_ahead(root, buffer_slot)?, _ => Ahead::Not };
+            if matches!(ahead, Ahead::Gone) { return Ok(Bands::default()); }
             self.keep_point_visible(self.slots[root].value, text_height)?;
-            if !self.redisplay_window_fontify(root, buffer_slot, text_height)? {
+            if !self.redisplay_window_fontify(root, buffer_slot, text_height, plan, ahead)? {
                 return Ok(Bands::default());
             }
         }
@@ -2560,10 +2677,16 @@ impl Vm {
     /// (`romacs--redisplay-fontify`, lisp/vm/prelude.el), so nothing
     /// is held across them; a signal is logged there and never ends
     /// redisplay, and any other failure becomes a display diagnostic. False
-    /// when `fontification-functions` is nil, so no Lisp ran.
+    /// when `fontification-functions` is nil or the walk finds nowhere to
+    /// call it (`fontify_next`), so no Lisp ran.
     fn fontify_range(&mut self, window: Value, start: usize, end: usize) -> Result<bool> {
         let functions = self.slot("fontification-functions");
         if self.variable_value(functions)? == Value::NIL {
+            return Ok(false);
+        }
+        // Nothing to call at: no Lisp runs.
+        let at = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+        if matches!(crate::prim::fontify_next(self, window, at(start), at(end)), Ok(None)) {
             return Ok(false);
         }
         let args = [window, Value::integer(start as i64)?, Value::integer(end as i64)?];
@@ -2582,20 +2705,23 @@ impl Vm {
     /// smaller face): that text is fontified as GNU's iterator fontifies
     /// what it reaches, while the end keeps growing, which point-max bounds.
     /// False if Lisp deleted the window.
-    fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32) -> Result<bool> {
-        let functions = self.slot("fontification-functions");
-        if self.variable_value(functions)? == Value::NIL {
-            return Ok(true);
-        }
-        match self.treesit_parse_pending(root, buffer_slot)? {
-            Plain::No => {}
-            Plain::Kept => return Ok(true),
-            Plain::First => {
+    /// PLAN is the window's `fontify_plan`; AHEAD, what `fontify_ahead`
+    /// walked, its first pass: what follows walks only what the layout shows
+    /// past it.
+    fn redisplay_window_fontify(&mut self, root: usize, buffer_slot: usize, text_height: u32, plan: Option<Plain>, ahead: Ahead) -> Result<bool> {
+        match plan {
+            None | Some(Plain::Kept) => return Ok(true),
+            Some(Plain::First) => {
                 self.treesit_stopgap(root, text_height)?;
                 return Ok(true);
             }
+            Some(Plain::No) => {}
         }
         let mut range = self.displayed_range(self.slots[root].value, text_height)?;
+        if let (Ahead::Done { start, end, state }, Some((from, to))) = (ahead, range)
+            && from == start && self.window_text_state(root)? == state {
+            range = (to > end).then_some((end, to));
+        }
         let mut tries = 1;
         while let Some((start, end)) = range {
             let shown = self.window_text_state(root)?;
@@ -2623,6 +2749,55 @@ impl Vm {
             };
         }
         Ok(true)
+    }
+    /// How the window in ROOT fontifies this frame, decided once a frame
+    /// (`treesit_parse_pending` keeps count): None when
+    /// `fontification-functions` is nil.
+    fn fontify_plan(&mut self, root: usize, buffer_slot: usize) -> Result<Option<Plain>> {
+        let functions = self.slot("fontification-functions");
+        if self.variable_value(functions)? == Value::NIL { return Ok(None); }
+        self.treesit_parse_pending(root, buffer_slot).map(Some)
+    }
+    /// Fontify ahead of its layout the text the window in ROOT showed when
+    /// last laid out (its record, `Laid`) from the same start of the same
+    /// buffer in the same size, through that layout's end, where a layout
+    /// will answer (`may_lay_out`) and the start stands: forced, or point
+    /// within that text. The layout that follows reads the faces it paints
+    /// with, so one serves point's visibility and the range shown alike;
+    /// with no such record the window fontifies after its layout.
+    fn fontify_ahead(&mut self, root: usize, buffer_slot: usize) -> Result<Ahead> {
+        let window = self.slots[root].value;
+        if !self.may_lay_out(window)? { return Ok(Ahead::Not); }
+        let (width, height) = self.window_body_size(window)?;
+        let key = self.shown_key(window, width, height)?;
+        let w = self.window(window)?;
+        let (id, buffer, forced) = (w.id, w.buffer, w.force_start);
+        let Some(end) = self.display_state.laid.get(&id).filter(|(known, _)| known.same_view(&key)).map(|(_, laid)| laid.end) else {
+            return Ok(Ahead::Not);
+        };
+        let Ok(b) = self.shown_text(buffer) else { return Ok(Ahead::Not) };
+        let start = usize::try_from(key.start).unwrap_or(1).max(1);
+        // A byte of the text the record laid out: an edit since can leave
+        // it inside a character.
+        let mut byte = end.min(b.accessible().end.0);
+        while !b.as_str().is_char_boundary(byte) { byte -= 1; }
+        let end = b.char_of_byte(ByteOffset(byte))?.0 + 1;
+        let point = usize::try_from(self.window_point_value(window)?.as_integer()?).unwrap_or(0);
+        if start >= end || !(forced || (start..=end).contains(&point)) { return Ok(Ahead::Not); }
+        let before = self.window_text_state(root)?;
+        self.fontify_range(window, start, end)?;
+        // Its Lisp may have collected and moved the window and its buffer:
+        // only ROOT's and BUFFER_SLOT's traced copies are current.
+        let w = self.window(self.slots[root].value)?;
+        if !w.live() { return Ok(Ahead::Gone); }
+        let (shown, switched) = (w.buffer, w.buffer != self.slots[buffer_slot].value);
+        self.slots[buffer_slot].value = shown;
+        self.slots[self.buffer_slot].value = shown;
+        let after = self.window_text_state(root)?;
+        // A walk whose Lisp showed another buffer, or changed the text or
+        // the start, is no first pass: the range shown is walked afresh.
+        if switched || (after.1, after.2) != (before.1, before.2) { return Ok(Ahead::Not); }
+        Ok(Ahead::Done { start, end, state: after })
     }
     /// The window in ROOT, waiting for its first parse, takes the stopgap
     /// faces of the rows it shows (`romacs-treesit--stopgap`,
@@ -3710,8 +3885,11 @@ fn shown_byte(segments: &[mini_window::Segment], display: usize) -> usize {
     buffer_of(segments, display, end)
 }
 
+/// The record of END, a layout of LEN display bytes ending at the buffer
+/// byte given, with no point placed: where a display byte is a buffer one
+/// is ambiguous at a hidden stretch's edge, so `window_layout` places it.
 fn laid(end: &romacs_layout_input::WindowEnd, byte_end: usize, base: usize, len: usize, at_zv: bool, segments: Option<&[mini_window::Segment]>) -> Laid {
     let byte = |display: usize| segments.map_or(base + display, |s| shown_byte(s, display));
     let visible_end = match end.visible_end > len { true if at_zv => usize::MAX, true => byte(len), false => byte(end.visible_end) };
-    Laid { end: byte_end, visible_end, body_height: end.body_height }
+    Laid { end: byte_end, visible_end, body_height: end.body_height, point: None }
 }

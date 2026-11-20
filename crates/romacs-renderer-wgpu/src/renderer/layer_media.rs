@@ -3,8 +3,6 @@
 
 use romacs_display_protocol::frame_glyphs::FrameGlyph;
 use romacs_display_protocol::types::Rect;
-#[cfg(feature = "video")]
-use romacs_display_protocol::types::VideoId;
 
 use super::super::vertex::{GlyphVertex, RectVertex};
 use super::WgpuRenderer;
@@ -18,50 +16,7 @@ pub(super) struct MediaQuad<Id> {
     pub(super) vertices: [GlyphVertex; 6],
 }
 
-#[cfg(feature = "video")]
-pub(super) struct PreparedInlineVideos<'a> {
-    pub(super) draws: crate::video_cache::PreparedVideoDraws<'a>,
-    pub(super) quads: Vec<MediaQuad<VideoId>>,
-}
 
-#[cfg(feature = "video")]
-impl PreparedInlineVideos<'_> {
-    pub(super) fn upload(
-        &self,
-        arena: &mut super::dynamic_buffer::FrameVertexArena<GlyphVertex>,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Option<super::dynamic_buffer::VertexUpload> {
-        let vertices: Vec<_> = self
-            .quads
-            .iter()
-            .flat_map(|quad| quad.vertices.iter().copied())
-            .collect();
-        arena.upload(device, queue, &vertices)
-    }
-
-    pub(super) fn draw(
-        &self,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        upload: &super::dynamic_buffer::VertexUpload,
-        packed_pipeline: &wgpu::RenderPipeline,
-        bi_planar_pipeline: &wgpu::RenderPipeline,
-    ) {
-        render_pass.set_vertex_buffer(0, upload.buffer_slice());
-        for (index, quad) in self.quads.iter().enumerate() {
-            if let Some(frame) = self.draws.get(quad.id) {
-                render_pass.set_pipeline(match frame.sample_kind() {
-                    romacs_video::VideoSampleKind::Packed => packed_pipeline,
-                    romacs_video::VideoSampleKind::BiPlanar => bi_planar_pipeline,
-                });
-                render_pass.set_bind_group(1, frame.bind_group(), &[]);
-                render_pass.draw((index * 6) as u32..(index * 6 + 6) as u32, 0..1);
-            }
-        }
-        // Later media phases intentionally inherit the canonical image path.
-        render_pass.set_pipeline(packed_pipeline);
-    }
-}
 
 pub(super) struct ClippedMediaRect {
     pub(super) draw_x: f32,
@@ -173,105 +128,14 @@ pub(super) fn textured_quad_vertices_uv(
     ]
 }
 
-#[cfg(feature = "video")]
-pub(super) fn video_quad_vertices(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    texture: romacs_video::VideoTextureCoordinates,
-    opacity: f32,
-) -> [GlyphVertex; 6] {
-    let white = [1.0, 1.0, 1.0, opacity.clamp(0.0, 1.0)];
-    let texture = texture.triangle_list();
-    let positions = [
-        [x, y],
-        [x + width, y],
-        [x + width, y + height],
-        [x, y],
-        [x + width, y + height],
-        [x, y + height],
-    ];
-    std::array::from_fn(|index| GlyphVertex {
-        position: positions[index],
-        tex_coords: texture[index],
-        color: white,
-    })
-}
 
 /// Resolve scene geometry and native sampling metadata together from one
 /// immutable preparation. Root and child-frame paths share this operation so
 /// neither re-queries video state between vertex generation and binding.
-#[cfg(feature = "video")]
-pub(super) fn collect_prepared_video_quads(
-    glyphs: &[FrameGlyph],
-    offset_x: f32,
-    offset_y: f32,
-    draws: &crate::video_cache::PreparedVideoDraws<'_>,
-) -> Vec<MediaQuad<VideoId>> {
-    glyphs
-        .iter()
-        .filter_map(|glyph| {
-            let FrameGlyph::Video {
-                video_id,
-                x,
-                y,
-                width,
-                height,
-                clip_rect,
-                opacity,
-                ..
-            } = glyph
-            else {
-                return None;
-            };
-            let frame = draws.get(*video_id)?;
-            let x = *x + offset_x;
-            let y = *y + offset_y;
-            let translated_clip = clip_rect.map(|clip| Rect {
-                x: clip.x + offset_x,
-                y: clip.y + offset_y,
-                ..clip
-            });
-            let clipped = clipped_media_rect(x, y, *width, *height, translated_clip.as_ref())?;
-            Some(MediaQuad {
-                id: *video_id,
-                vertices: video_quad_vertices(
-                    clipped.draw_x,
-                    clipped.draw_y,
-                    clipped.draw_width,
-                    clipped.draw_height,
-                    frame.sampling_transform().coordinates_for_destination_rect(
-                        clipped.u_min,
-                        clipped.u_max,
-                        clipped.v_min,
-                        clipped.v_max,
-                    ),
-                    *opacity,
-                ),
-            })
-        })
-        .collect()
-}
 
 /// One canonical preparation for root and child inline-video passes. It owns
 /// ID discovery, generation-checked frame preparation, clipping, and native
 /// sampling transforms so the two render targets cannot drift.
-#[cfg(feature = "video")]
-pub(super) fn prepare_inline_videos<'a>(
-    cache: &'a crate::video_cache::VideoCache,
-    glyphs: &[FrameGlyph],
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<PreparedInlineVideos<'a>> {
-    let ids = glyphs.iter().filter_map(|glyph| match glyph {
-        FrameGlyph::Video { video_id, .. } => Some(*video_id),
-        _ => None,
-    });
-    let draws = cache.prepare_draws(ids)?;
-    let quads = collect_prepared_video_quads(glyphs, offset_x, offset_y, &draws);
-    (!quads.is_empty()).then_some(PreparedInlineVideos { draws, quads })
-}
 
 impl WgpuRenderer {
     /// Draw inline images on top of text.
@@ -462,31 +326,6 @@ impl WgpuRenderer {
 
     /// Draw inline videos (inherits the image pipeline set by the inline
     /// image phase).
-    #[cfg(feature = "video")]
-    pub(super) fn draw_inline_videos(&mut self, ctx: &mut FramePassCtx<'_, '_>) -> Vec<VideoId> {
-        let frame_glyphs = ctx.params.frame_glyphs;
-        let Some(prepared) =
-            prepare_inline_videos(&self.caches.video, &frame_glyphs.glyphs, 0.0, 0.0)
-        else {
-            return Vec::new();
-        };
-        self.media_budget.touch(
-            crate::media_budget::MediaType::Video,
-            crate::video_cache::VIDEO_GPU_POOL_ACCOUNTING_ID,
-        );
-        let Some(upload) = prepared.upload(&mut self.arenas.image, &self.device, &self.queue)
-        else {
-            return Vec::new();
-        };
-        let submitted = prepared.quads.iter().map(|quad| quad.id).collect();
-        prepared.draw(
-            &mut ctx.pass,
-            &upload,
-            &self.pipelines.image,
-            &self.pipelines.bi_planar_video,
-        );
-        submitted
-    }
 
     /// Draw inline shader surfaces (image pipeline, alpha blended; a
     /// premultiplied surface through the composition pipeline). Also
@@ -631,5 +470,3 @@ impl WgpuRenderer {
     }
 }
 
-#[cfg(all(test, feature = "video"))]
-mod tests;

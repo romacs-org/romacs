@@ -15,10 +15,11 @@ impl Leaf<'_> {
         // enable-multibyte-characters is always local (buffer.c:5300).
         if slot == self.vm.multibyte_slot { return Ok(true); }
         if let Some(fwd) = self.vm.forwarding(slot) {
-            return Ok(matches!(fwd, Fwd::Buffer(i) if self.vm.per_buffer_local_p(buffer.index(0).unwrap() - 1, i)));
+            let Fwd::Buffer(i) = fwd else { return Ok(false) };
+            return Ok(self.vm.per_buffer_local_p(buffer.object_index().map_err(Fault::Error)?, i));
         }
-        let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? else { return Ok(false) };
-        Ok(self.vm.declaration_hash_get(table, buffer).map_err(Fault::Error)?.is_some())
+        let index = buffer.object_index().map_err(Fault::Error)?;
+        Ok(self.vm.per_buffer(index).is_some_and(|b| b.locals().contains(Value::reference(slot + 1, 7))))
     }
     /// data.c Flocal_variable_if_set_p: a buffer-forwarded or automatically
     /// local variable is local once set; any other localized one asks
@@ -27,12 +28,12 @@ impl Leaf<'_> {
         let Some(slot) = self.local_symbol(symbol)? else { return Ok(false) };
         if slot == self.vm.multibyte_slot { return Ok(true); }
         if let Some(fwd) = self.vm.forwarding(slot) { return Ok(matches!(fwd, Fwd::Buffer(_))); }
-        // truncate-lines and the case symbols are automatic locals whose
-        // table appears at their first lookup (variable_binding_slot).
-        if self.vm.local_table(slot).map_err(Fault::Error)?.is_none() {
+        // truncate-lines and the case symbols are automatic locals declared
+        // at their first lookup (`Vm::binding`).
+        if !self.vm.localized(slot) {
             return Ok(slot == self.vm.truncate_lines_slot || slot == self.vm.case_symbols_slot);
         }
-        if !self.vm.slots[slot].explicit_local { return Ok(true); }
+        if self.vm.slots[slot].localness == crate::Localness::Automatic { return Ok(true); }
         let buffer = self.decode_buffer(buffer)?;
         self.has_buffer_local(symbol, buffer)
     }
@@ -41,7 +42,7 @@ impl Leaf<'_> {
         let buffer = self.decode_buffer(Value::NIL)?;
         // Fkill_local_variable reports makunbound with the current buffer, for
         // a localized variable only (a plain or forwarded one returns first).
-        let localized = self.vm.forwarding(slot).is_none() && self.vm.local_table(slot).map_err(Fault::Error)?.is_some();
+        let localized = self.vm.forwarding(slot).is_none() && self.vm.localized(slot);
         if localized {
             self.write(NativeWrite { kind: WriteKind::ClearLocal, slot, value: Value::NIL })?;
         } else {
@@ -51,9 +52,12 @@ impl Leaf<'_> {
     }
     pub(in crate::prim) fn clear_local_slot(&mut self, slot: usize, buffer: Value) -> std::result::Result<(), Fault> {
         if let Some(fwd) = self.vm.forwarding(slot) {
-            if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.index(0).unwrap() - 1, i); }
-        } else if let Some(table) = self.vm.local_table(slot).map_err(Fault::Error)? {
-            self.vm.declaration_hash_remove(table, buffer).map_err(Fault::Error)?;
+            if let Fwd::Buffer(i) = fwd { self.vm.clear_forwarded_local(buffer.object_index().map_err(Fault::Error)?, i); }
+        } else {
+            let index = buffer.object_index().map_err(Fault::Error)?;
+            if let Some(at) = self.vm.local_at(index, slot) {
+                self.vm.store_local(index, slot, at, crate::variable_runtime::LocalStore::Kill);
+            }
         }
         Ok(())
     }
@@ -68,15 +72,15 @@ impl Leaf<'_> {
         } else { Ok(value) }
     }
     pub(crate) fn buffer_local_inventory(&mut self, buffer: Value) -> Out {
-        // Inherent locals appear even before their first Lisp lookup.
-        for name in ["major-mode", "mode-name", "buffer-file-name", "buffer-read-only", "buffer-file-format"] {
+        // The built-ins local in every buffer appear even before their first
+        // Lisp lookup, as GNU lists them all (buffer.c Fbuffer_local_variables).
+        for name in crate::forwarded::always_local_names() {
             self.intern(name);
         }
         // Snapshot slot IDs, not borrowed values, before allocating list cells.
-        let slots = self.vm.local_candidates(buffer.index(0).unwrap() - 1);
+        let slots = self.vm.local_candidates(buffer.object_index().map_err(Fault::Error)?);
         let mut entries = Vec::new();
         for slot in slots {
-            if self.vm.local_binding_slots.contains(&slot) { continue; }
             if self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if self.has_buffer_local(symbol, buffer)? {
@@ -90,13 +94,21 @@ impl Leaf<'_> {
         }
         Ok(self.vm.list_value(&entries))
     }
+    /// `change-major-mode-hook', the symbol, unless its current binding is
+    /// void or nil. The binding is `run-hooks''s own, found through any
+    /// variable alias.
+    pub(crate) fn change_major_mode_hook(&mut self) -> std::result::Result<Option<Value>, Fault> {
+        let hook = Value::reference(self.vm.change_major_mode_hook_slot + 1, 7);
+        Ok(self.variable_value(hook)?.filter(|&value| value != Value::NIL).map(|_| hook))
+    }
     pub(crate) fn reset_buffer_locals(&mut self, kill_permanent: Value) -> Out {
         let buffer = self.decode_buffer(Value::NIL)?;
-        let permanent = self.intern("permanent-local");
-        let permanent_hook = self.intern("permanent-local-hook");
-        let reset = self.intern("reset");
-        for slot in self.vm.local_candidates(buffer.index(0).unwrap() - 1) {
-            if self.vm.local_binding_slots.contains(&slot) || self.vm.indirect_variable(slot) != slot { continue; }
+        let permanent = Value::reference(self.vm.permanent_local_slot + 1, 7);
+        let permanent_hook = Value::reference(self.vm.permanent_local_hook_slot + 1, 7);
+        // Only what the buffer holds: a built-in it never set has nothing to
+        // reset, and one local in every buffer is reset below or never.
+        for slot in self.vm.held_local_slots(buffer.index(0).unwrap() - 1) {
+            if self.vm.indirect_variable(slot) != slot { continue; }
             let symbol = Value::reference(slot + 1, 7);
             if !self.has_buffer_local(symbol, buffer)? { continue; }
             let file_coding = self.vm.names.get("buffer-file-coding-system") == Some(&slot);
@@ -141,7 +153,7 @@ impl Leaf<'_> {
             }
         }
         let index = buffer.index(0).unwrap() - 1;
-        if kill_permanent == reset { self.vm.reset_forwarded_visit(index); }
+        if kill_permanent != Value::NIL && kill_permanent == self.intern("reset") { self.vm.reset_forwarded_visit(index); }
         let case_tables = self.standard_case_roots()?;
         match self.vm.objects.entry_mut(index) {
             Object::Buffer(b) => { b.local_keymap = Value::NIL; b.syntax_table = Value::NIL; b.category_table = Value::NIL; b.case_tables = case_tables; }

@@ -2,6 +2,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;; Maintainer: Thanos Apollo <public@thanosapollo.org>
 (require 'ert)
+(require 'romacs-agent-test-stored)
 (require 'cl-lib)
 (require 'romacs-mcp)
 (let ((romacs-mcp-call-function romacs-mcp-call-function)
@@ -62,21 +63,24 @@ its own, its records in its journal and `records' them all."
            (let ((session (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root :title "rows"
                                               :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
              (puthash id session romacs-agent--sessions)
+             ;; Its records in SQLite, as a chat finds them.
+             (remhash id romacs-agent-events--imported)
+             (romacs-agent-events-import session t)
              ,@body))
        (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
        (delete-directory root t))))
 
 (defun romacs-agent-chat-rows-tests--drawn (session &optional records-only)
   "SESSION's chat transcript as a first show draws it (5 turns), from its
-records alone with RECORDS-ONLY, and the buffer."
-  (let ((buffer (romacs-agent-ui--make-chat session)))
-    (with-current-buffer buffer
-      (setq romacs-agent-ui--turns 5)
-      (cl-letf (((symbol-function 'romacs-agent-turns-page)
-                 (if records-only #'ignore (symbol-function 'romacs-agent-turns-page))))
-        (romacs-agent-ui--fill buffer))
-      (setf (romacs-agent-buffer session) nil)
-      (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer))))
+records as they were drawn live with RECORDS-ONLY
+\(`romacs-agent-test-drawn-live'), and the buffer."
+  (if records-only (romacs-agent-test-drawn-live session 5)
+    (let ((buffer (romacs-agent-ui--make-chat session)))
+      (with-current-buffer buffer
+        (setq romacs-agent-ui--turns 5)
+        (romacs-agent-ui--fill buffer)
+        (setf (romacs-agent-buffer session) nil)
+        (cons (buffer-substring-no-properties (point-min) romacs-agent-ui--end) buffer)))))
 
 (defun romacs-agent-chat-rows-tests--keep (session)
   "Keep each of SESSION's turn rows drawn, as the worker that writes them does."
@@ -104,8 +108,8 @@ records alone with RECORDS-ONLY, and the buffer."
       (should (equal (car from-rows) (car from-records)))
       (should (string-search "answer 12" (car from-rows)))
       (should-not (string-search "answer 7" (car from-rows)))
-      ;; Only what comes after the rows was read: from the journal's end.
-      (should (equal reads (list (cons (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" dir))) nil))))
+      ;; Its records are in SQLite: its journal is never read.
+      (should-not reads)
       ;; The long output is read from the row's pointer when opened: its
       ;; call's records alone.
       (with-current-buffer (cdr from-rows)
@@ -117,10 +121,8 @@ records alone with RECORDS-ONLY, and the buffer."
                       (funcall read session function from end skip))))
           (should (equal (romacs-agent-ui--payload-output (romacs-agent-ui--payload-at "u12" (romacs-agent-ui--tool-mark "u12")))
                          romacs-agent-chat-rows-tests--long)))
-        ;; Its start (the whole input) and its end (the output), each a
-        ;; bounded read.
-        (should (<= 1 (length reads) 2))
-        (should (cl-every (lambda (read) (and (> (car read) 0) (integerp (cdr read)))) reads)))
+        ;; Read through its turn's row, from SQLite: no journal.
+        (should-not reads))
       (kill-buffer (cdr from-rows))
       (kill-buffer (cdr from-records)))
     ;; A turn ended after its row was written: drawn from its records,

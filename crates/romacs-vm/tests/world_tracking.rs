@@ -534,3 +534,62 @@ fn a_binding_across_startups_end_stays_tracked_in_backtraces() {
     assert_eq!(seen, "\"(((tracking-a . new)) ((transient-mark-mode . outer) (tracking-a . \\\"/outer/\\\") (tracking-a . inner)))\"");
     assert_eq!(seen, off.eval_source(shown).and_then(|v| v.display()).unwrap());
 }
+
+/// A tracked variable that is buffer-local reads and writes as without
+/// the tracking in two buffers: a buffer's own local, the default the
+/// other sees, a `let' of each, and `buffer-local-value' across them.
+#[test]
+fn a_tracked_buffer_local_reads_alike_in_two_buffers() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables '(tracking-local))
+(defvar-local tracking-local nil)
+(put 'tracking-local 'standard-value (list \"std\"))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (set-default 'tracking-local (car (get 'tracking-local 'standard-value)))
+           (setq custom-delayed-init-variables t))
+  (romacs--startup-phase nil))
+";
+    let probes = "\
+(setq ta (get-buffer-create \"tracked-a\") tb (get-buffer-create \"tracked-b\"))
+(setq r1 (save-current-buffer (set-buffer ta) (setq tracking-local 'in-a) (list tracking-local (local-variable-p 'tracking-local))))
+(setq r2 (save-current-buffer (set-buffer tb) (list tracking-local (local-variable-p 'tracking-local) (buffer-local-value 'tracking-local ta))))
+(setq r3 (save-current-buffer (set-buffer ta) (list (let ((tracking-local 'let-a)) (list tracking-local (buffer-local-value 'tracking-local tb))) tracking-local)))
+(setq r4 (save-current-buffer (set-buffer tb) (list (let ((tracking-local 'let-b)) (list tracking-local (default-value 'tracking-local) (buffer-local-value 'tracking-local ta))) tracking-local)))
+";
+    let show = "(list r1 r2 r3 r4 (default-value 'tracking-local))";
+    let (mut off, none) = run_with("local-off", bootstrap, probes, false);
+    assert!(none.is_none());
+    let (mut on, _) = run_with("local-on", bootstrap, probes, true);
+    let off = off.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    let on = on.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(off, "((in-a t) (\"std\" nil in-a) ((let-a \"std\") in-a) ((let-b let-b in-a) \"std\") \"std\")");
+    assert_eq!(on, off);
+}
+
+/// `truncate-lines' is declared automatically local at its first lookup. A
+/// build's startup tracks it when its redirect was resolved before startup;
+/// its first set in a buffer, inside startup, still makes that buffer's
+/// local, and leaves other buffers the default, with the tracking on as
+/// off.
+#[test]
+fn a_tracked_built_in_automatic_local_is_made_local_at_its_first_set() {
+    let bootstrap = "\
+(defvar custom-delayed-init-variables nil)
+(setq tl-seen (default-value 'truncate-lines))
+(setq tl-a (get-buffer-create \"tl-a\") tl-b (get-buffer-create \"tl-b\"))
+(unwind-protect
+    (progn (romacs--startup-phase t)
+           (save-current-buffer (set-buffer tl-a) (setq truncate-lines t))
+           (setq custom-delayed-init-variables t))
+  (romacs--startup-phase nil))
+";
+    let show = "(list (buffer-local-value 'truncate-lines tl-a) (buffer-local-value 'truncate-lines tl-b) (local-variable-p 'truncate-lines tl-a) (default-value 'truncate-lines))";
+    let (mut off, none) = run_with("tl-off", bootstrap, "", false);
+    assert!(none.is_none());
+    let (mut on, _) = run_with("tl-on", bootstrap, "", true);
+    let off = off.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    let on = on.eval_source(show).and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(off, "(t nil t nil)");
+    assert_eq!(on, off);
+}

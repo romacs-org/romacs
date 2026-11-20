@@ -67,7 +67,16 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 (vm, "source")
             }
             Boot::World(store, key) => {
-                let (vm, _carry) = super::world::adopt(store, key).map_err(|reason| format!("isolate world unavailable: {reason}"))?;
+                let (vm, _carry) = match super::world::adopt(store, key) {
+                    Ok(adopted) => adopted,
+                    Err(reason) => {
+                        // Said to the spawner, which settles this worker's
+                        // jobs with it and boots no more from the world.
+                        let reason = format!("isolate world unavailable: {reason}");
+                        romacs_vm::isolate_refuse(socket, &reason)?;
+                        return Err(reason);
+                    }
+                };
                 let mut vm = *vm;
                 vm.world_reinit();
                 vm.eval_source("(romacs-world-restart)")?;

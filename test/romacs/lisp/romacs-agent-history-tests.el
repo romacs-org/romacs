@@ -148,3 +148,38 @@
                           "--eval" "(princ (list (featurep 'romacs-history-test-helper) (featurep 'romacs-history-test-good)))")
             (should (string-search "(t t)" (buffer-string)))))
       (delete-directory root t))))
+
+(ert-deftest romacs-agent-history-a-waited-listing-reads-what-the-scan-wrote ()
+  ;; A listing that waits for the scan aside reads the rows the scan wrote,
+  ;; its process ended whether or not its sentinel has run yet.
+  (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
+  (let* ((root (make-temp-file "romacs-history-" t))
+         (config (expand-file-name "claude" root))
+         (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")) process-environment))
+         (romacs-agent-store--db nil) (romacs-agent-history--made nil)
+         (romacs-agent-history--listing nil) (romacs-agent-history--descriptions (make-hash-table :test #'equal)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-history--places) (lambda () (list (list config 'claude "claude" config)))))
+          (make-directory (romacs-agent--state-root) t)
+          (romacs-agent-history-tests--transcript config romacs-agent-history-tests--id "hello there")
+          (let ((noninteractive nil) (romacs-agent-writer-queued nil))
+            ;; The scan aside: it writes the rows and has ended, its
+            ;; sentinel, which would read them, not run.
+            (cl-letf (((symbol-function 'romacs-agent-history-index-soon) (lambda () (romacs-agent-history-index)))
+                      ((symbol-function 'romacs-agent-history-indexing-p) #'ignore))
+              (romacs-agent-history-list t)))
+          (should (equal (mapcar (lambda (item) (plist-get item :title)) romacs-agent-history--listing) '("hello there"))))
+      (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+      (delete-directory root t))))
+
+(ert-deftest romacs-agent-history-the-scan-aside-waits-out-the-lock ()
+  ;; The batch scan writes its rows past another's lock on the store: one
+  ;; refused for it is done again until written, with the long wait.
+  (let ((tries 0) (patience nil))
+    (cl-letf (((symbol-function 'romacs-agent-history-index)
+               (lambda ()
+                 (setq patience romacs-agent-store-patience)
+                 (if (< (cl-incf tries) 3) (signal 'sqlite-locked-error '("database is locked")) 4))))
+      (should (string-search "4 transcripts" (with-output-to-string (romacs-agent-history-index-batch)))))
+    (should (= tries 3))
+    (should (= patience romacs-agent-store-patient))))

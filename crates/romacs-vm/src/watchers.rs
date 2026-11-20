@@ -258,8 +258,8 @@ impl Vm {
     /// automatically buffer-local variable, or a per-buffer C variable.
     fn local_if_set(&mut self, base: usize) -> Result<bool> {
         if matches!(self.forwarding(base), Some(crate::forwarded::Fwd::Buffer(_))) { return Ok(true); }
-        if self.variable_binding_slot(base, false)? != base { return Ok(true); }
-        Ok(self.local_table(base)?.is_some() && !self.slots[base].explicit_local)
+        if matches!(self.binding(base, false)?, crate::variable_runtime::Binding::Local(_)) { return Ok(true); }
+        Ok(self.localized(base) && self.slots[base].localness == crate::Localness::Automatic)
     }
     /// calln (FUNCTION, ARGS...) at a write point (a variable watcher, a
     /// `defalias-fset-function'); the engine grows its code cache for

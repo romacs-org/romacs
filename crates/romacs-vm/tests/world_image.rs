@@ -94,6 +94,7 @@ fn act_in_role() -> bool {
     let store = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_STORE").map(PathBuf::from);
     match std::env::var(ROLE).as_deref() {
         Ok("launch") => launch(&store.unwrap()),
+        Ok("launch-other") => launch_world(&store.unwrap(), "consumer world-image-test, another world"),
         Ok("open-launch") => {
             // As a user whose umask lets everyone write: the builder this
             // spawns inherits it.
@@ -101,13 +102,17 @@ fn act_in_role() -> bool {
             launch(&store.unwrap())
         }
         Ok("probe") => probe(),
+        Ok("probe-race") => probe_race(),
         Ok("launch-reserved") => launch_reserved(&store.unwrap()),
         Ok("pages") => pages(&store.unwrap()),
         Ok("heap") => heap(&store.unwrap()),
+        Ok("image-frees") => image_frees(&store.unwrap()),
+        Ok("image-blocks") => image_blocks(&store.unwrap()),
         Ok("heap-file") => heap_file(&store.unwrap()),
         Ok("trim") => trim(),
         Ok("alone") => alone(),
         Ok("census") => census(&store.unwrap()),
+        Ok("other-carry") => other_carry(&store.unwrap()),
         Ok("guard") => guard(&store.unwrap()),
         #[cfg(target_arch = "x86_64")]
         Ok("stray") => stray(&store.unwrap()),
@@ -185,8 +190,13 @@ extern "C" fn count_fork() {
 /// as fork runs every library's atfork handlers while the launch's GPU
 /// thread may be unloading a driver (`World::start_builder`).
 fn launch(store: &Path) {
+    launch_world(store, "consumer world-image-test");
+}
+
+/// `launch`, of the world of RECIPE.
+fn launch_world(store: &Path, recipe: &str) {
     unsafe { libc::pthread_atfork(Some(count_fork), None, None) };
-    let world = match World::new(store.to_owned(), vec!["consumer world-image-test".into()]) {
+    let world = match World::new(store.to_owned(), vec![recipe.into()]) {
         Ok(world) => world,
         Err(error) => {
             println!("WORLD-IMAGE {}", json!({"mode": "source", "reason": error.to_string()}));
@@ -256,6 +266,25 @@ fn probe() {
     let first = format!("{:?}", arena::adopt(&file));
     let again = format!("{:?}", arena::adopt(&file));
     println!("WORLD-IMAGE {}", json!({"restore": first, "again": again, "failure": arena::map_failure(),
+                                       "kept": arena::mapped_image().is_some()}));
+}
+
+/// Adopt the file the parent named from two threads at once: one maps it,
+/// the other finds it adopted, and the image stays the process's.
+fn probe_race() {
+    let path = std::env::var_os("ROMACS_WORLD_IMAGE_TEST_FILE").unwrap();
+    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let threads: Vec<_> = (0..2).map(|_| {
+        let (path, start) = (path.clone(), start.clone());
+        std::thread::spawn(move || {
+            let file = std::fs::File::open(path).unwrap();
+            start.wait();
+            format!("{:?}", arena::adopt(&file))
+        })
+    }).collect();
+    let mut outcomes: Vec<String> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    outcomes.sort();
+    println!("WORLD-IMAGE {}", json!({"outcomes": outcomes, "restore": format!("{:?}", arena::restore_outcome()),
                                        "kept": arena::mapped_image().is_some()}));
 }
 
@@ -344,6 +373,9 @@ fn stray(store: &Path) {
     println!("WORLD-IMAGE {}", json!({"guard": format!("{guard:?}")}));
     std::io::stdout().flush().unwrap();
     if guard == arena::Guard::Reserved {
+        // The fault is the test's: no core for it. Every run otherwise
+        // hands the system's core dumper this process whole.
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable).unwrap();
         // SAFETY: a load, in assembly, from a page this process reserved
         // inaccessible: it faults, which is what the parent expects. Rust
         // code never reads the address, and the instruction writes nothing.
@@ -475,6 +507,36 @@ fn a_world_restores_randomized_and_refuses_a_damaged_image() {
     // Adopted once per process: a second adoption is refused, says so, and
     // the first image stays the process's.
     assert_eq!(probe_file(&store, &whole), r#"{"again":"Map","failure":["adopted already",0,false],"kept":true,"restore":"Mapped"}"#);
+    // Two threads adopting at once: one maps the image, the other is told
+    // it is adopted, and what became of the first stays said.
+    assert_eq!(outcome(child("probe-race", &store).env("ROMACS_WORLD_IMAGE_TEST_FILE", &whole)),
+               r#"{"kept":true,"outcomes":["Map","Mapped"],"restore":"Mapped"}"#);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// A worker's restore of the world in STORE (`World::restore_only`) as
+/// another carry than the u64 it was made with: what it said. An i64, so a
+/// restore that let it through reads a number, not an owner of nothing.
+fn other_carry(store: &Path) {
+    let refused = world(store).restore_only::<i64>().map(|(_, carry)| carry);
+    println!("WORLD-IMAGE {}", refused.unwrap_err());
+}
+
+const OTHER_CARRY: &str = "a_world_restored_as_another_carry_is_refused";
+
+/// A world restored as another carry than its builder's is refused, as one
+/// for another key is: read as another type, the carry is garbage its
+/// restorer would drop. A worker isolate restores its spawner's world as the
+/// carry it knows; it once read a batch world's `()` as the GUI's carry.
+#[test]
+fn a_world_restored_as_another_carry_is_refused() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(OTHER_CARRY);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(OTHER_CARRY, "other-carry", &store)), json!({"image": "made for the carry u64; this process needs i64"}).to_string());
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
@@ -563,6 +625,95 @@ fn heap(store: &Path) {
     drop(block);
     drop(vm);
     println!("WORLD-IMAGE {}", json!({"outside": outside, "used_kept": arena::census().unwrap().used == used}));
+}
+
+/// After a restore, the VM dropped: its blocks are the image's, and no
+/// block of an adopted image is handed out again, so freeing them links
+/// none into the image's free lists (`image_census`).
+fn image_frees(store: &Path) {
+    let Launch::Restored { vm, .. } = world(store).launch::<u64>(Vec::new, true, |_| {}) else {
+        println!("WORLD-IMAGE {}", json!({"mode": "not restored"}));
+        return;
+    };
+    let census = arena::image_census().unwrap();
+    drop(vm);
+    let after = arena::image_census().unwrap();
+    println!("WORLD-IMAGE {}", json!({"linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept)}));
+}
+
+/// The kernel's page: what a discard drops whole, and what
+/// `/proc/self/pagemap` has an entry for.
+fn page() -> usize {
+    rustix::param::page_size()
+}
+
+/// The bytes of each of the first two of an image's carried blocks, side by
+/// side: three kernel pages and a bit. The third is five pages.
+fn block() -> usize {
+    3 * page() + 100
+}
+
+/// The whole kernel pages within the LEN bytes at AT, by number.
+fn whole_pages(at: usize, len: usize) -> std::ops::Range<usize> {
+    at.next_multiple_of(page()) / page()..(at + len) / page()
+}
+
+/// How many of the whole kernel pages within the LEN bytes at AT are this
+/// process's private copies, from `/proc/self/pagemap`: present, and no
+/// file's page (bit 61 clear).
+fn private_pages(at: usize, len: usize) -> usize {
+    use std::os::unix::fs::FileExt;
+    let pagemap = std::fs::File::open("/proc/self/pagemap").unwrap();
+    whole_pages(at, len).filter(|number| {
+        let mut entry = [0u8; 8];
+        pagemap.read_exact_at(&mut entry, (number * 8) as u64).unwrap();
+        let entry = u64::from_le_bytes(entry);
+        entry >> 63 == 1 && (entry >> 61) & 1 == 0
+    }).count()
+}
+
+/// A world whose carry is three blocks of the image: built, or restored.
+/// Restored, each block is written whole (a private copy of each page),
+/// then the first is freed and the third shrunk to 100 bytes: the freed
+/// block's whole pages and the shrunk one's tail go back to the file, its
+/// neighbour and the shrunk one's head keep what was written, and the
+/// image's free lists take nothing.
+fn image_blocks(store: &Path) {
+    let world = World::new(store.to_owned(), vec!["consumer world-image-blocks".into()]).unwrap();
+    match world.launch::<Vec<Vec<u8>>>(|| std::env::args_os().skip(1).collect(), true, |_| {}) {
+        Launch::Build => {
+            world.begin_build().unwrap();
+            let built = world.build(|| {
+                let mut vm = Vm::new();
+                vm.world_begin();
+                Ok((vm, vec![vec![1u8; block()], vec![2u8; block()], vec![3u8; 5 * page()]], json!({})))
+            });
+            std::process::exit(i32::from(built.is_err()));
+        }
+        Launch::Restored { carry: mut blocks, .. } => {
+            for block in &mut blocks { block.fill(0xab); }
+            let census = arena::image_census().unwrap();
+            let freed = std::mem::take(&mut blocks[0]);
+            let (block, tail_len) = (block(), 5 * page() - 100);
+            let (at, written) = (freed.as_ptr() as usize, private_pages(freed.as_ptr() as usize, block));
+            drop(freed);
+            let (head, tail) = (blocks[2].as_ptr() as usize, private_pages(blocks[2].as_ptr() as usize + 100, tail_len));
+            blocks[2].truncate(100);
+            blocks[2].shrink_to_fit();
+            let after = arena::image_census().unwrap();
+            println!("WORLD-IMAGE {}", json!({
+                // Every whole page of each was copied by the writes, and
+                // there are some.
+                "written": written == whole_pages(at, block).len() && written >= 2
+                    && tail == whole_pages(head + 100, tail_len).len() && tail >= 3,
+                "freed_released": private_pages(at, block) == 0,
+                "tail_released": blocks[2].as_ptr() as usize == head && private_pages(head + 100, tail_len) == 0,
+                "kept": blocks[1].iter().all(|&b| b == 0xab) && blocks[2].iter().all(|&b| b == 0xab),
+                "linked": (after.small_free, after.runs_kept) != (census.small_free, census.runs_kept),
+            }));
+        }
+        _ => println!("WORLD-IMAGE {}", json!({"mode": "not restored"})),
+    }
 }
 
 /// In a process whose heap is its first arena: a large block freed at the
@@ -718,7 +869,8 @@ fn pages(scratch: &Path) {
     unsafe { std::ptr::write_volatile(block.as_mut_ptr(), 0) };
     block[PAGE..2 * PAGE].fill(0xab);
     let out = std::fs::File::create(scratch.join("pages.rwi")).unwrap();
-    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32] };
+    let fields = arena::ImageFields { len: 0, root: block.as_ptr() as usize, counters: [0; 4], executable: 0, key: [0; 32], carry: 0,
+                                      carry_name: [0; arena::CARRY_NAME] };
     let len = unsafe { arena::write_image(&out, fields) }.unwrap();
     let bytes = std::fs::read(scratch.join("pages.rwi")).unwrap();
     assert_eq!(bytes.len(), len);
@@ -924,6 +1076,55 @@ fn concurrent_first_launches_share_one_builder_and_say_they_wait() {
     let later = child_of(CONCURRENT, "launch", &store).output().unwrap();
     let text = String::from_utf8_lossy(&later.stdout);
     assert!(text.contains(&format!("WORLD-IMAGE {}", restored())) && !text.contains("WAITING-FOR-BUILD"), "{text}");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const IMAGE_FREES: &str = "a_restored_images_frees_link_nothing_and_dirty_no_image_page";
+
+/// The restored VM's drop frees thousands of the image's blocks: none is
+/// linked into the image arena's free lists. And a freed or shrunk block
+/// of the image, written first, gives its whole pages back to the file
+/// while its neighbour keeps what was written. A free that linked them
+/// wrote an image page each, which every owner of the image then copied.
+#[test]
+fn a_restored_images_frees_link_nothing_and_dirty_no_image_page() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(IMAGE_FREES);
+    let store = scratch.join("store");
+    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "launch", &store)), restored());
+    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-frees", &store)), json!({"linked": false}).to_string());
+    assert_eq!(outcome(&mut child_of(IMAGE_FREES, "image-blocks", &store)),
+               json!({"written": true, "freed_released": true, "tail_released": true, "kept": true, "linked": false}).to_string());
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+const TWO_WORLDS: &str = "two_worlds_first_launched_at_once_in_a_fresh_store_both_restore";
+
+/// The first launches of two worlds in one fresh store, at once: each
+/// starts a builder, and each builder makes the store's shared directories
+/// (`World::pinned_dir`) or finds them made by the other. Both build and
+/// restore; neither boots from source because the other made a directory
+/// first, as one once did with "File exists". Rounds of fresh stores, as the
+/// collision is a matter of timing.
+#[test]
+fn two_worlds_first_launched_at_once_in_a_fresh_store_both_restore() {
+    if act_in_role() {
+        return;
+    }
+    let scratch = scratch(TWO_WORLDS);
+    for round in 0..4 {
+        let store = scratch.join(format!("store-{round}"));
+        let spawn = |role| child_of(TWO_WORLDS, role, &store).stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let pair = [spawn("launch"), spawn("launch-other")];
+        for child in pair {
+            let output = child.wait_with_output().unwrap();
+            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+            assert!(text.contains(&format!("WORLD-IMAGE {}", restored())), "round {round}: {text}{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
     let _ = std::fs::remove_dir_all(&scratch);
 }
 

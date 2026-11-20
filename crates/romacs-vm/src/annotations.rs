@@ -695,12 +695,11 @@ impl Vm {
     }
     /// `annotation_variable` of the variable at SLOT.
     fn annotation_slot_value(&self, slot: usize) -> Value {
-        let table = self.slots[slot].local;
-        let local = (table != Value::NIL)
-            .then(|| self.eq_hash_get(table, self.slots[self.buffer_slot].value))
-            .flatten()
-            .and_then(|binding| binding.index(7).ok());
-        let value = self.slots[local.map_or(slot, |index| index - 1)].value;
+        // Nil current is the `*scratch*' not yet made, which has no locals.
+        let local = self.slots[self.buffer_slot].value.object_index_if()
+            .and_then(|index| self.per_buffer(index))
+            .and_then(|b| b.locals().get(Value::reference(slot + 1, 7)));
+        let value = local.unwrap_or(self.slots[slot].value);
         if value == Value::UNBOUND { Value::NIL } else { value }
     }
     pub(super) fn annotation_plist(&self, mut plist: Value, key: Value) -> Result<Option<Value>> {
@@ -1164,6 +1163,17 @@ mod tests {
         let f = vm.compile(&Form::from_json(v).unwrap()).unwrap();
         vm.execute_raw(f).unwrap()
     }
+    /// With no buffer current (nil, index 0) a property lookup reads the
+    /// variable's default: there are no buffer-local values to read.
+    #[test]
+    fn a_property_variable_reads_its_default_when_no_buffer_is_current() {
+        let mut vm = Vm::new();
+        run(&mut vm, serde_json::json!(["set-default", ["quote", "char-property-alias-alist"], ["quote", [["p", "q"]]]]));
+        let current = std::mem::replace(&mut vm.slots[vm.buffer_slot].value, Value::NIL);
+        let read = vm.annotation_variable("char-property-alias-alist");
+        vm.slots[vm.buffer_slot].value = current;
+        assert_eq!(vm.display(read).unwrap(), "((p q))");
+    }
     #[test]
     fn category_alias_default_order_and_explicit_nil_match_gnu() {
         let mut vm = Vm::new();
@@ -1390,18 +1400,19 @@ impl AnnotatedBuffer {
     /// Every Value the buffer holds; of its text's properties, what READING
     /// says (`BodyProperties`).
     pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, f: &mut impl FnMut(&mut Value)) {
-        self.visit_values_but(reading, None, f);
+        self.visit_values_but(reading, None, true, f);
     }
     /// A live buffer's undo list is weak, unless it is its base's and so not in
     /// its slot; a dead buffer's is held like the rest of it (`mark_buffer`).
     pub(crate) fn owns_undo_list(&self) -> bool {
         self.state.live && self.base == Value::NIL
     }
-    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`).
-    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, f: &mut impl FnMut(&mut Value)) {
+    /// `visit_values`, passing over per-buffer slot SKIP (`Vm::undo_round`),
+    /// and over the Lisp locals unless LOCALS (`PerBuffer::visit_values_but`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, locals: bool, f: &mut impl FnMut(&mut Value)) {
         f(&mut self.local_keymap);
         for root in &mut self.case_tables { f(root); }
-        self.per_buffer.visit_values_but(skip, f);
+        self.per_buffer.visit_values_but(skip, locals, f);
         self.text.visit_view_values(f);
         // An indirect buffer holds its base alive; the text they share is
         // the base's to visit, once, as collection rewrites what it visits.
@@ -1426,6 +1437,7 @@ impl AnnotatedBuffer {
         };
         shared
             + self.text.state.storage_bytes(capacity)
+            + self.per_buffer.locals_storage_bytes(capacity)
             + self.indirect.capacity() * size_of::<Value>()
             + self.intervals.storage_bytes(capacity)
             + (if capacity {

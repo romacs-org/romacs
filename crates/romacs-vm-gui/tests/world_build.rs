@@ -85,6 +85,7 @@ fn a_gui_world_serves_a_session_however_it_was_started() {
         .find(|event| event["mode"] == "prepared" && event["recipe"][0] == "consumer romacs-vm-gui");
     let prepared = prepared.unwrap_or_else(|| panic!("no prepared GUI world: {said}"));
     assert!(prepared["key"].as_str().is_some_and(|key| key.len() == 64), "{prepared}");
+    assert_eq!(prepared["lisp_errors"], serde_json::json!([]), "the tree's Romacs Lisp failed in the build: {prepared}");
     assert!(!prepared["recipe"].to_string().contains("Monospace"), "the launch font keys the world: {prepared}");
     let session = |args: &[&str]| command(args).env_remove("ROMACS_GUI_FONT").env_remove("ROMACS_GUI_FONT_SIZE")
         .env_remove("SHELL").env_remove("ROMACS_RUNTIME_ROOT").output().unwrap();
@@ -302,4 +303,40 @@ fn an_installed_gui_world_serves_any_home_without_asking_its_records() {
     let census = command(&c).args(["--loadup", "--world-census"]).output().unwrap();
     assert!(census.status.success(), "the user's world did not serve: {}", String::from_utf8_lossy(&census.stderr));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A world built over a tree whose Romacs Lisp signals is built, and its
+/// preparation says each error with its file and line (`lisp_errors`), for
+/// an installer to refuse.
+#[test]
+fn a_world_built_over_broken_lisp_says_which_file_and_line() {
+    let home = std::env::temp_dir().join(format!("romacs-world-lisp-errors-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let tree = home.join("tree");
+    std::fs::create_dir_all(&tree).unwrap();
+    let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    for dir in ["lisp", "etc"] {
+        let linked = std::process::Command::new("cp").arg("-as").arg(checkout.join(dir)).arg(tree.join(dir)).status().unwrap();
+        assert!(linked.success(), "a tree of links to the checkout's {dir}");
+    }
+    let popup = tree.join("lisp/ui/romacs-popup.el");
+    let text = std::fs::read_to_string(&popup).unwrap();
+    std::fs::remove_file(&popup).unwrap();
+    std::fs::write(&popup, format!("{text}\n(error \"broken on purpose\")\n")).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_romacs-vm-gui"))
+        .args(["--loadup", "--world-store"]).arg(home.join("worlds")).arg("--world-build")
+        .env("HOME", &home).env("XDG_CACHE_HOME", home.join("cache")).env("ROMACS_RUNTIME_ROOT", &tree)
+        .env_remove("ROMACS_WORLD").env_remove("ROMACS_LISP_DIR").env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY")
+        .output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+    let prepared = said.lines().filter_map(|line| line.strip_prefix("romacs-world: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["mode"] == "prepared" && event["recipe"][0] == "consumer romacs-vm-gui");
+    let prepared = prepared.unwrap_or_else(|| panic!("no prepared GUI world: {said}"));
+    let errors = prepared["lisp_errors"].as_array().unwrap_or_else(|| panic!("{prepared}"));
+    assert_eq!(errors.len(), 1, "{prepared}");
+    let named = tree.canonicalize().unwrap().join("lisp/ui/romacs-popup.el");
+    assert_eq!(errors[0]["file"], named.to_string_lossy().as_ref(), "{prepared}");
+    assert!(errors[0]["line"].as_u64().is_some_and(|line| line > 1), "{prepared}");
+    let _ = std::fs::remove_dir_all(&home);
 }

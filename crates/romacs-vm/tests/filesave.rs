@@ -104,7 +104,7 @@ fn filesave_writable_and_modes() {
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o400)).unwrap();
     // This host's pinned GNU oracle runs as non-root; do not pretend mode bits
     // alone determine access when the suite is deliberately run as root.
-    if unsafe { libc::geteuid() } != 0 {
+    if !rustix::process::geteuid().is_root() {
         assert_eq!(
             eval(&mut vm, &format!("(file-writable-p {})", q(&file))),
             "nil",

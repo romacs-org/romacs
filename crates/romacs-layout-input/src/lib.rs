@@ -817,6 +817,8 @@ pub struct WindowEnd {
     /// The rows laid out from the window start, top to bottom, through the
     /// first that reaches the text area's bottom.
     pub rows: Vec<Row>,
+    /// The text area's top in the frame, which the rows' Y count from.
+    pub origin_y: f32,
     /// Where point shows, when a laid-out row holds it.
     pub point: Option<PointPlace>,
 }
@@ -829,7 +831,7 @@ pub struct WindowEnd {
 /// line's start; GUTTER, the line number's width before the text; whether
 /// the row is TRUNCATED on the LEFT (scrolled) or RIGHT; and whether point
 /// is AT_EOL, on its line's newline or the text's end.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, romacs_snapshot::Snapshot)]
 pub struct PointPlace {
     pub x: f32,
     pub line_x: f32,

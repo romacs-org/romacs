@@ -106,7 +106,7 @@ impl Vm {
         // GNU `u.s.plist`: each symbol object's own property list, by slot.
         let mut plists = Vec::new();
         for (i, slot) in self.slots.iter().enumerate() {
-            if slot.local != Value::NIL {
+            if slot.localness != Localness::Never {
                 return Err("code image cannot publish buffer-local bindings".into());
             }
             if slot.plist != Value::NIL {
@@ -759,6 +759,30 @@ mod image_alias_tests {
         assert_eq!(loaded.display(value).unwrap(), "(\"kkkk\" 7)");
         let called = loaded.eval_source("(image-f)").unwrap();
         assert_eq!(called.display().unwrap(), "3");
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    /// A condition's property restored from a code image is copied into
+    /// the private heap, young, and named by the registry alone: the first
+    /// minor, before any full, reads it as it is now (`Registry::changed`).
+    #[test]
+    fn a_restored_condition_property_survives_a_first_minor() {
+        let path = std::env::temp_dir().join(format!("image-condition-minor-{}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        let mut source = Vm::new();
+        source.eval_source("(setq image-condition-owner nil image-condition-value (list 'restored 7))").unwrap();
+        let owner = conditions::SymbolId::new(Value::reference(source.names["image-condition-owner"] + 1, 7)).unwrap();
+        let message = source.slots[source.names["image-condition-value"]].value;
+        source.conditions.put(owner, Value::TRUE, message);
+        // The registry alone names it.
+        source.eval_source("(setq image-condition-value nil)").unwrap();
+        let entry = source.compile(&Form::Int(0)).unwrap();
+        let key = source.publish_code_image(&path, entry, [64; 32]).unwrap();
+        let image = ImageRegion::open(&path, &key).unwrap();
+        let (mut loaded, _) = Vm::from_code_image(image, [64; 32]).unwrap();
+        loaded.set_gc_verify(true);
+        assert!(loaded.collect_minor(&[]));
+        let value = loaded.conditions.entries[&owner].properties[0].1;
+        assert_eq!(loaded.display(value).unwrap(), "(restored 7)");
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]

@@ -429,9 +429,19 @@ transaction.  How many rows it holds."
         (error (ignore-errors (sqlite-execute db "rollback")) (signal (car err) (cdr err))))
       (length items))))
 
+(defvar romacs-agent-store-patience)
+(defvar romacs-agent-store-patient)
+
 (defun romacs-agent-history-index-batch ()
-  "`romacs-agent-history-index' in a batch process, its count printed."
-  (princ (format "romacs-agent-history: %d transcripts\n" (romacs-agent-history-index))))
+  "`romacs-agent-history-index' in a batch process, its count printed.
+Off the editor, it waits long for the store's lock, and is done again
+until the lock lets it: a listing left unwritten lists nothing."
+  (require 'romacs-agent-store)
+  (let ((romacs-agent-store-patience romacs-agent-store-patient) (count nil))
+    (while (not count)
+      (condition-case nil (setq count (or (romacs-agent-history-index) 0))
+        (sqlite-locked-error nil)))
+    (princ (format "romacs-agent-history: %d transcripts\n" count))))
 
 (defvar romacs-agent-history--indexing nil "The batch process scanning the transcripts, while it runs.")
 
@@ -527,7 +537,10 @@ started after this call, up to WAIT seconds (t: 30)."
           (dotimes (_ (if earlier 2 1))
             (romacs-agent-history-index-soon)
             (while (and (romacs-agent-history-indexing-p) (< (float-time) end))
-              (accept-process-output romacs-agent-history--indexing 0.05)))))
+              (accept-process-output romacs-agent-history--indexing 0.05)))
+          ;; Ended, its sentinel may not have run yet: what it wrote is read
+          ;; here, not left to it.
+          (romacs-agent-history--from-rows)))
     (setq romacs-agent-history--listing (romacs-agent-history--scan))))
 
 (defun romacs-agent-history-find (harness config-dir id)
@@ -660,8 +673,9 @@ buffer, for SESSION: its end, from a prompt on."
   (setq buffer-read-only t))
 
 ;;;###autoload
-(defun romacs-agent-history-open (item)
-  "Show the transcript ITEM (one of `romacs-agent-history-items') read-only."
+(defun romacs-agent-history-open (item &optional action)
+  "Show the transcript ITEM (one of `romacs-agent-history-items') read-only,
+as `pop-to-buffer' does with ACTION."
   (let ((buffer (cl-find-if (lambda (buffer) (equal (plist-get (buffer-local-value 'romacs-agent-history--item buffer) :path)
                                                     (plist-get item :path)))
                             (buffer-list))))
@@ -677,19 +691,20 @@ buffer, for SESSION: its end, from a prompt on."
               romacs-agent-ui--messages (make-hash-table :test #'equal)
               romacs-agent-ui--end (point-marker)))
       ;; Shown first: its rules fit its window.
-      (pop-to-buffer buffer)
+      (pop-to-buffer buffer action)
       (with-current-buffer buffer
         (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))
         (romacs-agent-ui--header-show)))
-    (pop-to-buffer buffer)
+    (pop-to-buffer buffer action)
     (goto-char (point-max))
     (recenter -1)
     buffer))
 
-(defun romacs-agent-history-resume (item)
+(defun romacs-agent-history-resume (item &optional action)
   "Go on with the transcript ITEM as a Romacs session, through its
-harness's own resume, and show its chat: the session already going on
-with it, when there is one, attached or resumed."
+harness's own resume, and show its chat, as `pop-to-buffer' does with
+ACTION: the session already going on with it, when there is one,
+attached or resumed."
   (let* ((id (plist-get item :id))
          (known (romacs-agent--native-session (plist-get item :harness) (plist-get item :config-dir) id))
          (session (if known (romacs-agent--continue known)
@@ -697,7 +712,7 @@ with it, when there is one, attached or resumed."
                                          (plist-get item :cwd) (plist-get item :title)
                                          (plist-get item :provider) (plist-get item :config-dir)))))
     (romacs-agent-ui--batch)
-    (romacs-agent-show session)))
+    (romacs-agent-show session action)))
 
 (defun romacs-agent-history-resume-this ()
   "Go on with this transcript as a Romacs session."

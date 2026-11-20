@@ -10,17 +10,31 @@
 
 ;;; Code:
 
-(defvar romacs-process-handlers nil)
+(defvar romacs-process-handlers nil
+  "The background commands still owed their callback: (ID . CALLBACK) for
+each `romacs-process-start' started and neither
+`romacs-process-dispatch-ready' nor `romacs-process-forget' retired.")
 
 (defun romacs-process-start (argv input directory timeout callback)
   "Start ARGV with INPUT in DIRECTORY, bounded by TIMEOUT seconds.
-CALLBACK receives (STATUS STDOUT STDERR ERROR) on evaluator-side completion."
+Once it completes, `romacs-process-dispatch-ready' calls CALLBACK on the
+evaluator with one argument, the list (STATUS STDOUT STDERR ERROR):
+STATUS its exit code or nil, STDOUT and STDERR decoded as UTF-8 with
+invalid bytes replaced, and ERROR a string saying why it failed (for
+example, it did not start, ran past TIMEOUT, or its output overflowed) or
+nil.  A non-nil
+value from CALLBACK says it changed what is shown.  TIMEOUT is a whole
+number of seconds, 1 to 120; a request the runtime refuses signals here.  A
+command `romacs-process-forget' retires first is never called back.  The
+command's id."
   (let ((id (romacs--process-start argv input directory timeout)))
     (setq romacs-process-handlers (cons (cons id callback) romacs-process-handlers))
     id))
 
 (defun romacs-process-forget (id)
-  "Retire ID and its callback.  This never retries an external effect."
+  "Retire ID and its callback.  This never retries an external effect.
+A command still running is asked to stop; an ID unknown or already
+retired signals an error."
   (let ((entry (assq id romacs-process-handlers)))
     (setq romacs-process-handlers (delq entry romacs-process-handlers)))
   (romacs--process-forget id))

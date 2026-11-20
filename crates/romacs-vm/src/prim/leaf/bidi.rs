@@ -9,7 +9,7 @@ impl Leaf<'_> {
     /// the paragraph at or before its point; left to right when
     /// `bidi-display-reordering' is nil or the buffer is unibyte.
     pub(crate) fn current_bidi_paragraph_direction(&mut self, buffer: Value) -> super::super::Out {
-        let buffer = if buffer == Value::NIL { self.vm.slots[self.vm.buffer_slot].value } else { buffer };
+        let buffer = if buffer == Value::NIL { self.current_buffer()? } else { buffer };
         if !matches!(self.vm.object_if(buffer), Some(Object::Buffer(_) | Object::ByteBuffer(_))) {
             return Err(Fault::Wrong("bufferp", buffer));
         }

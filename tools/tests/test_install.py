@@ -67,6 +67,15 @@ class InstallTests(unittest.TestCase):
         entry = (self.home / '.local/share/applications/romacs.desktop').read_text()
         self.assertEqual(entry, f'Exec="{self.home}/.local/bin/romacs" %F\n')
 
+    def test_agents_sessions_move_to_their_store_at_install(self):
+        # An earlier release's agent sessions: moved to their SQLite store
+        # by the new binary, once, before any Romacs starts.
+        (self.home / '.local/state/romacs/agents').mkdir(parents=True)
+        run = self.run_script()
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((self.home / 'romacs-calls').read_text(),
+                         '--batch -l romacs-agent -f romacs-agent-events-migrate-batch\n')
+
     def test_a_reinstall_leaves_nothing_of_the_old_tree(self):
         self.run_script('--no-compile')
         (self.prefix / 'stale').write_text('old\n')

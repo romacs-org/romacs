@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 const MAGIC: &[u8] = b"RLC4\n";
 /// What a key binds besides its inputs: this format and the compiler.
-const FORMAT: &str = concat!("romacs-compiled-lisp 5\n", env!("VM2_COMPILER_ID"));
+const FORMAT: &str = concat!("romacs-compiled-lisp 6\n", env!("VM2_COMPILER_ID"));
 /// The default cap on the store's artifacts, in bytes.
 pub(super) const BUDGET: u64 = 256 << 20;
 
@@ -32,19 +32,78 @@ pub(super) fn generation(store: &Path) -> PathBuf {
     store.join(&hex(&Sha256::digest(FORMAT.as_bytes()))[..16])
 }
 
-/// The key of SOURCE (its resolved path and content DIGEST) compiled in
-/// the environment ENV. `load-path' is not keyed: the compile's library
-/// resolutions are observed inputs, checked on the `load-path' of the load.
-pub(super) fn key(env: &str, source: &Path, digest: &[u8; 32]) -> [u8; 32] {
+/// The key of SOURCE (its resolved path, `rooted` under ROOT, and content
+/// DIGEST) compiled in the environment ENV. `load-path` is not keyed: the
+/// compile's library resolutions are observed inputs, checked on the
+/// `load-path` of the load.
+pub(super) fn key(env: &str, root: Option<&Path>, source: &Path, digest: &[u8; 32]) -> [u8; 32] {
     let mut hash = Sha256::new();
     hash.update(FORMAT.as_bytes());
     hash.update([0]);
     hash.update(env.as_bytes());
     hash.update([1]);
-    hash.update(source.as_os_str().as_encoded_bytes());
+    hash.update(rooted_path(root, source).as_bytes());
     hash.update([0]);
     hash.update(digest);
     hash.finalize().into()
+}
+
+/// Where a rooted name's root was: a NUL, which no path holds.
+const ROOT: char = '\0';
+
+/// PATH as an artifact names it: under ROOT, the installation's tree,
+/// relative to it behind `ROOT` (`\0/lisp/subr.el`), so a copy of the tree
+/// elsewhere names it alike; any other file by its path, a user's package
+/// as a library of the tree by one rule.
+pub(super) fn rooted_path(root: Option<&Path>, path: &Path) -> String {
+    match root.and_then(|root| path.strip_prefix(root).ok()) {
+        Some(rest) => format!("{ROOT}/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// RECORD, an observed input, with every string naming a file under ROOT
+/// `rooted_path`ed: what an artifact keeps, so its inputs, and the name of
+/// its inputs file, are the same wherever the tree was.
+pub(super) fn rooted(record: &Json, root: Option<&Path>) -> Json {
+    let Some(root) = root else { return record.clone() };
+    let prefix = root.display().to_string();
+    map_strings(record, &|s: &str| {
+        let rest = s.strip_prefix(&prefix)?;
+        (rest.is_empty() || rest.starts_with('/')).then(|| format!("{ROOT}{rest}"))
+    })
+}
+
+/// RECORD as `rooted` kept it, with ROOT, this process's tree, put back:
+/// the record a check replays here.
+pub(super) fn unrooted(record: &Json, root: Option<&Path>) -> Json {
+    let Some(root) = root else { return record.clone() };
+    let prefix = root.display().to_string();
+    map_strings(record, &|s: &str| s.strip_prefix(ROOT).map(|rest| format!("{prefix}{rest}")))
+}
+
+/// The observed input that binds an artifact to ROOT when one of its
+/// encoded units, or a name in its name table (CAPTURED, both), holds ROOT's
+/// path: a constant a compile captured from the
+/// tree (a file name), which a copy of the tree elsewhere must not see. None
+/// when none does, so the artifact serves any copy. Kept as written, never
+/// `rooted`.
+pub(super) fn root_record<'a>(root: Option<&Path>, mut captured: impl Iterator<Item = &'a [u8]>) -> Option<Json> {
+    let root = root?;
+    let name = root.display().to_string();
+    let needle = name.as_bytes();
+    captured.any(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+        .then(|| serde_json::json!({"kind": "root", "path": name}))
+}
+
+/// VALUE with each string F maps replaced, the others kept.
+fn map_strings(value: &Json, f: &dyn Fn(&str) -> Option<String>) -> Json {
+    match value {
+        Json::String(s) => f(s).map_or_else(|| value.clone(), Json::String),
+        Json::Array(items) => Json::Array(items.iter().map(|v| map_strings(v, f)).collect()),
+        Json::Object(map) => Json::Object(map.iter().map(|(k, v)| (k.clone(), map_strings(v, f))).collect()),
+        _ => value.clone(),
+    }
 }
 
 /// Why an artifact's file loads as source, or that it is compiled: the
@@ -84,7 +143,7 @@ impl Artifact {
 }
 
 /// An artifact's bytes, its inputs part's digest naming it.
-pub(super) fn encode(status: &Status, source: &Path, inputs: &[Json], names: &[String],
+pub(super) fn encode(status: &Status, source: &str, inputs: &[Json], names: &[String],
                      units: &[(usize, usize, usize, usize, Vec<u8>)]) -> (Vec<u8>, [u8; 32]) {
     let mut body = Writer::default();
     match status {
@@ -101,7 +160,7 @@ pub(super) fn encode(status: &Status, source: &Path, inputs: &[Json], names: &[S
             body.str(reason);
         }
     }
-    body.str(&source.to_string_lossy());
+    body.str(source);
     // In one order, so concurrent compiles of a file that saw the same
     // inputs publish the same artifact.
     let mut inputs_text: Vec<String> = inputs.iter().map(Json::to_string).collect();

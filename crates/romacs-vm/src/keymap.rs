@@ -130,7 +130,7 @@ impl Vm {
     fn resolve_keymap_as(&self, mut value: Value, keymap: Value) -> Option<Value> {
         for _ in 0..=self.slots.len() {
             // The tag first: a failed `cons_pair' formats its error.
-            if value.tag() == 3 {
+            if value.tag_is(3) {
                 let (head, _) = self.cons_pair(value).ok()?;
                 return (head == keymap).then_some(value);
             }
@@ -145,10 +145,10 @@ impl Vm {
     /// translations `[(48)]' and `[(control 48)]' are `[48]' and `[C-0]'.
     fn keyboard_macro_definition(&mut self, value: Value) -> Result<Value> {
         let Some(Object::Vector(events)) = self.object_if(value) else { return Ok(value) };
-        if events.first().is_none_or(|event| event.tag() != 3) { return Ok(value); }
+        if events.first().is_none_or(|event| !event.tag_is(3)) { return Ok(value); }
         let mut events = events.clone();
         for event in events.iter_mut() {
-            if event.tag() == 3 && self.lucid_event_type_list_p(*event) { *event = self.key_event_from_list(*event)?; }
+            if event.tag_is(3) && self.lucid_event_type_list_p(*event) { *event = self.key_event_from_list(*event)?; }
         }
         Ok(self.allocate_object(Object::Vector(events)))
     }
@@ -223,7 +223,7 @@ impl Vm {
         let limit = self.list_limit();
         for _ in 0..=limit {
             if tail == Value::NIL { return self.keymap_prefixes(found, &prefixes).or(fallback).map(|v| self.keymap_definition(v)).transpose(); }
-            if tail.tag() != 3 {
+            if !tail.tag_is(3) {
                 let parent = self.resolve_keymap_as(tail, keymap).ok_or("keymap parent required")?;
                 tail = parent;
             }
@@ -244,8 +244,8 @@ impl Vm {
                 None
             } else if let Some(submap) = self.resolve_keymap_as(entry, keymap) {
                 self.keymap_entry_at(submap, event, inherit, defaults, depth + 1)?
-            } else if let Some((key, value)) = (entry.tag() == 3).then(|| self.cons_pair(entry).ok()).flatten() {
-                let range_match = (key.tag() == 3).then(|| self.cons_pair(key).ok()).flatten().and_then(|(lo,hi)| Some((lo.integer_value()?,hi.integer_value()?,event.integer_value()?))).is_some_and(|(lo,hi,event)| lo <= event && event <= hi);
+            } else if let Some((key, value)) = (entry.tag_is(3)).then(|| self.cons_pair(entry).ok()).flatten() {
+                let range_match = (key.tag_is(3)).then(|| self.cons_pair(key).ok()).flatten().and_then(|(lo,hi)| Some((lo.integer_value()?,hi.integer_value()?,event.integer_value()?))).is_some_and(|(lo,hi,event)| lo <= event && event <= hi);
                 if key == event || (range_match && found.is_none()) { Some(value) }
                 else {
                     if defaults && key == Value::TRUE && fallback.is_none() { fallback = Some(value); }
@@ -429,7 +429,7 @@ impl Vm {
     pub(crate) fn cache_event_symbol_elements(&mut self, symbol: Value) -> Result<()> {
         let (mask_key, elements_key) = (self.keymap_symbol("event-symbol-element-mask"), self.keymap_symbol("event-symbol-elements"));
         let plist = self.symbol_plist(symbol)?;
-        if self.plist_lookup(plist, mask_key).tag() == 3 { return Ok(()); }
+        if self.plist_lookup(plist, mask_key).tag_is(3) { return Ok(()); }
         let name = self.key_event_name(symbol).ok_or("symbol event required")?.to_owned();
         let (modifiers, start) = parse_event_modifiers(name.as_bytes());
         let base = self.intern(&name[start..]);
@@ -514,7 +514,7 @@ impl Vm {
         for _ in 0..=self.list_limit() {
             match self.cons_pair(tail) {
                 Ok((element, rest)) => {
-                    if element.integer_value().is_none() && element.tag() != 7 && element != Value::NIL && element != Value::TRUE { return false; }
+                    if element.integer_value().is_none() && !element.tag_is(7) && element != Value::NIL && element != Value::TRUE { return false; }
                     tail = rest;
                 }
                 Err(_) => return tail == Value::NIL,
@@ -531,7 +531,7 @@ impl Vm {
         }};
         let mut events = vec![];
         for (input_index, mut event) in raw.into_iter().enumerate() {
-            if event.tag() == 3 {
+            if event.tag_is(3) {
                 // keymap.c: a modifier list (lucid_event_type_list_p) is
                 // converted; a (FROM . TO) character range stays as it is
                 // for store_in_keymap; another list, such as a mouse click,
@@ -545,7 +545,7 @@ impl Vm {
                     event = self.cons_pair(event)?.0;
                 }
             }
-            if event.tag() == 7 {
+            if event.tag_is(7) {
                 event = self.canonical_key_event_symbol(event)?;
             }
             if let Some(mut c) = event.integer_value() {
@@ -557,7 +557,7 @@ impl Vm {
                     c &= !meta;
                 }
                 event = Value::integer(c)?;
-            } else if event.tag() != 7 && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
+            } else if !event.tag_is(7) && event != Value::NIL && event != Value::TRUE && self.str_view(event).is_none() {
                 return Err("integer or symbol event required".into());
             }
             events.push(KeyEvent { value: event, input_index });
@@ -582,7 +582,7 @@ impl Vm {
     }
     /// EVENT_HEAD of a range: lookups use its first character.
     fn event_head(&self, event: Value) -> Value {
-        if event.tag() == 3 { self.cons_pair(event).map_or(event, |(head, _)| head) } else { event }
+        if event.tag_is(3) { self.cons_pair(event).map_or(event, |(head, _)| head) } else { event }
     }
     fn define_keymap_key(&mut self, map: Value, events: &[KeyEvent], value: Value, remove: bool) -> Result<Value> {
         let mut map = self.resolve_keymap(map).ok_or("keymap required")?;
@@ -590,7 +590,7 @@ impl Vm {
             let event = event.value;
             if i + 1 == events.len() { self.keymap_store(map, event, value, remove)?; return Ok(value); }
             // Fdefine_key: a range must be a leaf.
-            if event.tag() == 3 { return Err("Key sequence contains invalid event".into()); }
+            if event.tag_is(3) { return Err("Key sequence contains invalid event".into()); }
             let binding = self.keymap_entry(map, event, false, false)?.unwrap_or(Value::NIL);
             map = if binding == Value::NIL {
                 let prefix = self.sparse_keymap(Value::NIL);
@@ -603,7 +603,7 @@ impl Vm {
     fn lookup_keymap_key(&mut self, map: Value, events: &[KeyEvent], defaults: bool) -> Result<Value> {
         // lookup_key_1: a cons is searched as it is, so a list of keymaps
         // acts as their composition; nil is an empty keymap.
-        let is_list = map == Value::NIL || map.tag() == 3;
+        let is_list = map == Value::NIL || map.tag_is(3);
         if events.is_empty() && is_list { return Ok(map); }
         let mut map = match self.resolve_keymap(map) {
             Some(map) => map,

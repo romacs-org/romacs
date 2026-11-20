@@ -765,6 +765,22 @@ waiting (and reading output) while the channel is full."
   (romacs--send-process (romacs--get-process process) string)
   nil)
 
+(defun romacs-process-send-nowait (process &optional string)
+  "Send PROCESS STRING, or with STRING nil what it holds unsent, never
+waiting: t when all of it is written, else nil, the rest held by its
+channel and written as its peer reads (`romacs--proc-send').  A caller
+that must not wait on its peer (a server with many clients) sends
+through this and holds what follows until it says t again (romacs#324).
+A network PROCESS still connecting is waited for, as for any send: call
+it on an accepted or connected one."
+  (let ((proc (romacs--get-process process)))
+    (if (eq (process-type proc) 'network) (romacs--wait-while-connecting proc))
+    (romacs--proc-send proc (if (and string (multibyte-string-p string))
+                                (let ((coding (romacs--complement-process-encoding-system (romacs--proc-get proc 'encode))))
+                                  (romacs--proc-set proc 'encode coding)
+                                  (encode-coding-string string coding t))
+                              string))))
+
 (defun process-send-region (process start end)
   "Send current contents of region as input to PROCESS.  GNU process.c Fprocess_send_region."
   (let ((proc (romacs--get-process process)))

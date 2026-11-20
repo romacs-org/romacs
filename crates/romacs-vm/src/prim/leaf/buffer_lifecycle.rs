@@ -2,6 +2,9 @@ use super::*;
 use crate::prim::Out;
 use crate::data::Object;
 
+/// The `replace-buffer-in-windows` window.el defined (`note_window_replacer`).
+const WINDOW_REPLACER: &str = "#:vm2-window-replacer";
+
 impl Vm {
     pub(crate) fn live_buffer_value(&self, value: Value) -> bool {
         matches!(self.object_if(value), Some(Object::Buffer(b)) if b.state.live)
@@ -77,6 +80,38 @@ impl Leaf<'_> {
             .map(|slot| self.vm.slots[*slot].value)
             .filter(|v| *v != Value::UNBOUND)
             .unwrap_or(Value::NIL))
+    }
+    /// Whether a kill of BUFFER calls `replace-buffer-in-windows`
+    /// (buffer.c:2044): it is defined, and a window has named BUFFER
+    /// (`BufferState::window_named`) or the function cell holds anything but
+    /// the definition window.el made. Advice or a redefinition expects every kill, as
+    /// GNU calls it at each; window.el's own does nothing for a buffer no
+    /// window names but walk the windows.
+    pub fn windows_may_name(&mut self, buffer: Value) -> bool {
+        let symbol = self.intern("replace-buffer-in-windows");
+        let function = self.symbol_function(symbol).unwrap_or(Value::NIL);
+        if function == Value::NIL { return false; }
+        let slot = self.vm.slot(WINDOW_REPLACER);
+        function != self.vm.slots[slot].value
+            || self.vm.buffer_state(buffer).is_ok_and(|s| s.window_named)
+    }
+    /// DEFINITION, window.el's own `replace-buffer-in-windows`, recorded as
+    /// window.el makes it: the function a kill may skip while the cell holds
+    /// exactly it, not advice around it.
+    pub fn note_window_replacer(&mut self, definition: Value) {
+        let slot = self.vm.slot(WINDOW_REPLACER);
+        self.vm.slots[slot].value = definition;
+    }
+    /// buffer.c candidate_buffer: B can be `other-buffer''s choice against
+    /// BUFFER, being a live buffer other than BUFFER whose name does not
+    /// start with a space.
+    pub fn other_buffer_candidate(&self, b: Value, buffer: Value) -> bool {
+        b != buffer && self.vm.buffer_state(b).is_ok_and(|s| s.live && !s.name.as_deref().is_some_and(|n| n.starts_with(' ')))
+    }
+    /// The buffer list's order as it stands, dead buffers not yet dropped
+    /// included.
+    pub fn buffer_order(&self) -> Vec<Value> {
+        self.vm.buffer_order_snapshot()
     }
     /// buffer-list: the live buffers in the buffer list's order.
     pub fn lifecycle_list(&mut self) -> Value {

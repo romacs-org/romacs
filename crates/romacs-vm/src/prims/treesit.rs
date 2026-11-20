@@ -7,8 +7,6 @@
 use super::*;
 use crate::prim::leaf::treesit::Next as TsNext;
 
-const LISP_HALF: &str = include_str!("../../../../lisp/vm/treesit.el");
-
 fn flag(b: bool) -> Value {
     if b { Value::TRUE } else { Value::NIL }
 }
@@ -19,9 +17,7 @@ fn with_half(cx: &mut Leaf<'_>, helper: &str, then: Then, saved: Vec<Value>) -> 
     if cx.symbol_function(helper)? != Value::NIL {
         return then(cx, Value::NIL, &saved);
     }
-    let source = cx.string(LISP_HALF);
-    let form = cx.read_from_string(source, Value::NIL, Value::NIL)?;
-    let (form, _) = cx.pair(form).expect("read-from-string returns (OBJECT . POSITION)");
+    let form = super::lisp_half(cx, "vm/treesit.el")?;
     Ok(Step::Call { f: cx.intern("eval"), args: vec![form, Value::TRUE], then, saved })
 }
 
@@ -123,6 +119,8 @@ fn treesit_grammar_location(cx, language: Value) {
     cx.ts_grammar_location(language)
 }}
 
+// The tree-sitter grammars linked into the executable, each a plist (:name LANGUAGE
+// :url URL :commit COMMIT :abi VERSION), LANGUAGE a symbol.
 defsubr! { name = "romacs-treesit-bundled-grammars", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_bundled_grammars(cx) {
     cx.ts_bundled_grammars()
@@ -204,11 +202,20 @@ fn treesit_parser_create(cx, language: Value; optional buffer: Value, no_reuse: 
     cx.ts_parser_create(language, buffer, no_reuse, tag)
 }}
 
+// Start the first parse of the current buffer's accessible text for LANGUAGE, a
+// symbol, on another thread; t when it started.  Nothing starts, and the answer is nil, in
+// a buffer that has parsers or an early parse already, when LANGUAGE's grammar cannot be
+// loaded, or when no thread is free.  LANGUAGE nil drops the buffer's early parse, whose
+// thread may still finish, and returns nil.  In a unibyte buffer, or one past 4 GB, it
+// signals an error.
 defsubr! { name = "romacs--treesit-parse-early", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
+// Whether the current buffer still awaits a background parse's result: its early
+// parse, or a parser's parse ahead.  A result it has dropped, as after many edits, is not
+// awaited, though its thread may still run.
 defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_parsing_p(cx) {
     cx.ts_parsing_p()
@@ -440,6 +447,16 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // (treesit.el), run here. Lisp is called, in GNU's order, for each face written,
 // for function captures, and for an override other than nil or t.
 
+// Fontify REGION, a cons (START . END), from every capture of the matches of the
+// query in COMBINED within NODE that meet BEG to END, or anywhere in NODE when either is nil:
+// a capture of such a match can lie outside that range.  COMBINED is a cons (QUERY . SPANS):
+// SPANS is a vector of the font-lock settings QUERY joins, each (FIRST-PATTERN . OVERRIDE),
+// its first pattern's index and its `override'.  A capture naming a face puts it on its
+// node's part of REGION, the only text it writes: with OVERRIDE nil only when no part of
+// that has a face yet, with OVERRIDE t over any, and with another OVERRIDE through
+// `treesit-fontify-with-override'.  A capture naming a function calls it with the captured
+// node, OVERRIDE, START and END.  The query's predicates run as `treesit-query-capture'
+// runs them.  Returns nil.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
     let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;
@@ -457,6 +474,9 @@ fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Val
 // One query for a run of font-lock settings of one language
 // (romacs-treesit-font-lock.el): their patterns in order, and where each
 // setting's begin with its override, as `romacs--treesit-fontify' takes them.
+// It combines its queries as they were compiled: the text each compiled
+// query keeps, never its source read again, so a source edited after its
+// query compiled takes effect only once that query is compiled again.
 defsubr! { name = "romacs--treesit-query-combine", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_query_combine(cx, language: Value, queries: Value, overrides: Value) {
     let (queries, overrides) = (cx.ts_proper_list(queries)?, cx.ts_proper_list(overrides)?);

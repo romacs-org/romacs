@@ -67,8 +67,9 @@ fn take_collections(cx) {
 
 // Where the last completed collection's time went: ((PHASE . SECONDS)...), the
 // phases in order, then (marked CONSES CLOSURES CELLS OBJECTS) and (entries
-// ...), what it kept of what it found (`Vm::gc_phases'). `gc-elapsed' holds
-// the total.
+// ...), what it kept of what it found, then (image ...), the restored world
+// image's entries, and (remembered ...), those of them the last full read
+// (`Vm::gc_phases'). `gc-elapsed' holds the total.
 defsubr! { name = "romacs--gc-phases", gnu = "alloc.c:6004", effect = Global,
 fn gc_phases(cx) {
     Ok(cx.gc_phases())

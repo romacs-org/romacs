@@ -641,6 +641,16 @@ whether it has rows before this page's."
             :after (romacs-agent-turns--last session)
             :more (> (length rows) limit)))))
 
+(defun romacs-agent-turns-first-after (session seq)
+  "SESSION's earliest turn after seq SEQ, as a row of
+`romacs-agent-turns-page' gives it, or nil with none."
+  (when-let* ((db (romacs-agent-turns--db))
+              (row (car (sqlite-select db (concat "select " romacs-agent-turns--page-columns
+                                                  " from turns where session = ? and first_seq > ? and first_seq > 0"
+                                                  " order by first_seq limit 1")
+                                       (list (romacs-agent-id session) seq)))))
+    (romacs-agent-turns--page-row row)))
+
 (defun romacs-agent-turns--tool (session id)
   "SESSION's tool item ID, from its turns' rows, or nil."
   (when-let* ((db (romacs-agent-turns--db))
@@ -711,9 +721,13 @@ A failure signals, rolled back: the writer sees it."
              (signal (car err) (cdr err))))))
 
 (defun romacs-agent-turns-fold (id)
-  "The session ID's folded state as kept, or nil."
+  "The session ID's folded state as kept, or nil.  Looked for from its
+latest turn back, where it is kept (`romacs-agent-turns-fold-put'): a
+row's fold is its last column, read past its turn's text, so a walk from
+its first turn would read every turn it has."
   (when-let* ((db (romacs-agent-turns--db)))
-    (caar (sqlite-select db "select fold from turns where session = ? and fold is not null limit 1" (list id)))))
+    (caar (sqlite-select db "select fold from turns where session = ? and fold is not null order by first_seq desc limit 1"
+                         (list id)))))
 
 (provide 'romacs-agent-turns)
 ;;; romacs-agent-turns.el ends here

@@ -33,18 +33,11 @@ pub(crate) struct UndoLimits {
 }
 
 /// A collection's reading of those limits, taken once before it marks: what
-/// every buffer sees, and what a buffer with a local value of one of them does.
-/// Most collections find no local value, and so look at no table but to see
-/// that it is not there.
+/// every buffer sees, and the variables' symbols, whose local values a buffer
+/// keeps in its own store.
 pub(crate) struct UndoView {
     default: UndoLimits,
-    local: HashMap<usize, UndoLimits>,
-}
-
-impl UndoView {
-    fn of(&self, buffer: usize) -> UndoLimits {
-        self.local.get(&buffer).copied().unwrap_or(self.default)
-    }
+    symbols: [Value; 4],
 }
 
 /// `truncate_undo_list`'s decision on one list.
@@ -234,7 +227,7 @@ impl Vm {
             return Ok(None);
         }
         if !changed { return Ok(Some((buffer, list))); }
-        let cut = self.undo_cut(list, view.of(buffer), Some(key)).ok_or(KeyPressed)?;
+        let cut = self.undo_cut(list, self.undo_limits_of(view, buffer), Some(key)).ok_or(KeyPressed)?;
         edits.push(if matches!(cut, UndoCut::Offer) { UndoEdit::Offer } else { UndoEdit::Compacted(buffer) });
         match cut {
             UndoCut::Keep | UndoCut::Offer => {}
@@ -312,17 +305,20 @@ impl Vm {
             outer: self.undo_outer_limit(outer),
             offers: function != Value::NIL,
         };
-        let mut local = HashMap::default();
-        for name in UNDO_LIMITS {
-            let table = self.names.get(name).map_or(Value::NIL, |&slot| self.slots[slot].local);
-            let Some(Object::HashTable(table)) = self.object_if(table) else { continue };
-            for (_, buffer, binding) in table.entries() {
-                let (Ok(buffer), Ok(binding)) = (buffer.index(0), binding.index(7)) else { continue };
-                let limits = local.entry(buffer - 1).or_insert(default);
-                self.set_undo_limit(limits, name, self.slots[binding - 1].value);
+        let symbols = UNDO_LIMITS.map(|name| self.names.get(name).map_or(Value::NIL, |&slot| Value::reference(slot + 1, 7)));
+        UndoView { default, symbols }
+    }
+    /// The limits the buffer at object INDEX sees in VIEW: its local values,
+    /// else every buffer's.
+    fn undo_limits_of(&self, view: &UndoView, index: usize) -> UndoLimits {
+        let mut limits = view.default;
+        let Some(per_buffer) = self.per_buffer(index) else { return limits };
+        for (name, &symbol) in UNDO_LIMITS.iter().zip(&view.symbols) {
+            if let Some(value) = per_buffer.locals().get(symbol) {
+                self.set_undo_limit(&mut limits, name, value);
             }
         }
-        UndoView { default, local }
+        limits
     }
 
     fn undo_outer_limit(&self, value: Value) -> Option<i64> {

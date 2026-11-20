@@ -68,7 +68,7 @@ macroexpand.rs macroexpand_steps autoload_do_load 1 rooted  # FORM and ENVIRONME
 macroexpand.rs macroexpand_steps call_macro_expander 1 rooted  # FORM and ENVIRONMENT are a frame, read back each step
 mode_line.rs decode_mode_spec eval_datum_raw 2 clean  # constant forms (%@, %s); the window and buffer are #: slots (display.rs); %s reads only the result
 mode_line.rs mode_line_element eval_datum_raw 1 rooted  # elements are forms with rooted objects; the window and buffer are #: slots (display.rs)
-prim.rs install_lisp_prelude_raw eval_source_raw 6 boundary  # VM setup: no caller Values
+prim.rs install_lisp_prelude_raw eval_source_raw 1 boundary  # VM setup: no caller Values
 prim.rs safe_call safe_call 1 held  # a leaf: its engine is not suspended
 prim/leaf/graphics.rs land_images call_prepared_source_propagating 1 clean  # each message string is only the call's argument; nothing heap from before it is used after
 prim.rs write write_from_native 1 held  # a native writer: queued for its engine's completion, or, with no engine to complete it, its watchers hold collection (rooted_write unset)

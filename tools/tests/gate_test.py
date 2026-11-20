@@ -411,7 +411,7 @@ class BuildAndRun(unittest.TestCase):
                 started[0].kill()
                 started[0].wait()
 
-    def test_gate_config_and_linux_video_apply_to_combined_build_and_reuse(self):
+    def test_gate_config_applies_to_combined_build_and_reuse(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
         calls = []
         def listing(argv, **kw):
@@ -438,10 +438,7 @@ class BuildAndRun(unittest.TestCase):
             config = pathlib.Path(configs[0]).read_text()
             self.assertNotIn('romacs-core', config)
             self.assertIn('slow-timeout', config)
-            self.assertEqual('--features' in calls[0], platform == 'linux')
-            if platform == 'linux':
-                self.assertEqual(calls[0][calls[0].index('--features') + 1],
-                                 'romacs-display-runtime/video')
+            self.assertNotIn('--features', calls[0])
 
     def test_combined_build_failure_starts_no_tests(self):
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))

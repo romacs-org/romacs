@@ -51,8 +51,10 @@ const FIELDS: &[(&str, Class)] = &[
     ("resolved_buffer", Cache), ("buffer_resolutions", Free),
     ("variable_read_probes", Free), ("speculative_hits", Free), ("inline_hits", Free), ("disable_inline", Free), ("speculative_misses", Free),
     ("regexp", Free),
-    // A pattern's syntax table goes at every collection (`clear_regexp_cache`).
+    // A pattern's syntax table goes at every collection (`forget_table_bound_patterns`).
     ("regexp_cache", Cache),
+    // Compiled tree-sitter queries by grammar and text: no Value (`treesit::query_memo`).
+    ("treesit_queries", Free),
     // Copies of char tables' entries, dropped at every collection
     // (`clear_collection_caches`) and every char-table write.
     ("flat_tables", Cache),
@@ -96,21 +98,26 @@ const FIELDS: &[(&str, Class)] = &[
     // (frozen.rs), so no store.
     ("regions", Rescanned),
     ("region_free", Free), ("region_collect", Free), ("isolates", Free), ("keeper", Free), ("inotify", Free),
-    ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("defun_start_epoch", Free),
+    ("buffer_slot", Free), ("multibyte_slot", Free), ("truncate_lines_slot", Free), ("obarray_slot", Free),
+    ("permanent_local_slot", Free), ("permanent_local_hook_slot", Free), ("change_major_mode_hook_slot", Free),
+    ("defun_start_epoch", Free),
     // An alias names a symbol slot, a Value in all but type.
     ("variable_redirects", Owed),
     ("forwarded", Root),
-    ("fixnum_slots", Free), ("textget_slots", Free), ("local_binding_slots", Free), ("free_local_binding_slots", Free),
+    ("fixnum_slots", Free), ("textget_slots", Free),
     ("gc_stats", Free), ("gc_times", Free), ("gc_census", Free), ("collection_log", Free), ("gc_retained", Free), ("gc_payload_bytes", Free),
     ("gc_retained_slots", Free), ("gc_code", Free), ("gc_floor", Free), ("job_budget", Free), ("gc_retained_payload", Free),
     ("gc_holds", Free), ("running_engines", Free), ("rooted_write", Free), ("gc_stress", Free), ("allocation", Free),
+    // The restored image's symbols of obarrays of their own, by slot: roots of
+    // every full (a minor reclaims no symbol); the rest of it holds no Value.
+    ("world_image", Root),
     ("names", Free), ("initial_obarray", Free), ("symbol_names", Free),
     // Read for the symbols marked, which own-obarray ones are only if reached.
     ("obarray_symbol_names", Rescanned),
     ("permanent_symbol_names", Root),
     // What that map took since the last collection: a minor's roots for it,
     // a full reading the map; emptied at every collection.
-    ("permanent_names_added", Root),
+    ("names_added", Root),
     // Object indices and call-cache ids, as a minor reads them (gc.rs).
     ("shared_holders", Free), ("caches_filled", Free), ("payload_settled", Free),
     // Weak references to nodes the case tables own.
@@ -129,7 +136,7 @@ const FIELDS: &[(&str, Class)] = &[
     ("cell_pairs", Owed),
     ("random", Free), ("tracking", Free), ("mktime_offset", Free), ("tz_rule_dstoff", Free),
     ("local_zone", Free), ("recent_keys", Free), ("lossage_limit", Free),
-    ("referrers", Cache), ("local_owners", Cache),
+    ("referrers", Cache),
     ("completion_walks", Free), ("command_set", Free), ("completion_case_memo", Free),
     ("caches", Cache),
     // Every register file: the current, the suspended and the kernel's
@@ -289,7 +296,7 @@ fn a_new_name_and_a_stale_name_are_both_refused() {
 /// is that file's to answer for.
 const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
     ("collector_entries_mut", collector), ("collector_compact", collector), ("collector_prepend", collector),
-    ("hash_mut", |file| file == "table.rs" || file == "hash.rs"),
+    ("hash_mut", |file| ["table.rs", "table_tests.rs", "hash.rs"].contains(&file)),
     ("collector_visit_node", char_table_collector), ("collector_visit_values", char_table_collector),
 ];
 
@@ -297,7 +304,7 @@ const PAST_THE_BARRIER: &[(&str, MayCall)] = &[
 type MayCall = fn(&str) -> bool;
 
 fn collector(file: &str) -> bool {
-    ["table.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
+    ["table.rs", "table_tests.rs", "table_image_tests.rs", "gc.rs", "gc_mark.rs", "gc_check.rs"].contains(&file)
 }
 
 /// The collector, and the char table and keymap cursor files that give it

@@ -183,3 +183,16 @@ fn a_search_follows_its_variables() {
         ("(progn (setq parse-sexp-ignore-comments nil) FORM)", "35"),
     ]);
 }
+
+/// A store into a declaration table no buffer owns (print-circle's number
+/// table, as faces, coding and json tables are stored) leaves the places
+/// standing: only a buffer's locals and a collection move them.
+#[test]
+fn a_declaration_table_store_keeps_the_places() {
+    let mut vm = code_buffer();
+    let print = "(let ((print-circle t) (x (list 1))) (prin1-to-string (list x x)))";
+    let (_, alone) = repeated(&mut vm, print);
+    let (value, both) = repeated(&mut vm, &format!(r#"(progn {print} (string-match "B" "abc"))"#));
+    assert_eq!(value, "nil");
+    assert!(both.variables - alone.variables <= ONCE, "the search read its variables again: {alone:?} against {both:?}");
+}

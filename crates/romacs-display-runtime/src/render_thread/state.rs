@@ -854,17 +854,11 @@ pub(super) struct RenderApp {
     /// Native decoder workers signal this callback after replacing a latest
     /// frame or publishing control state. Production installs a winit proxy;
     /// tests deliberately retain the no-op callback.
-    #[cfg(feature = "video")]
-    pub(super) video_wake: romacs_video::VideoWake,
     /// Native browser callbacks wake winit after publishing lifecycle, script,
     /// or frame work. Production replaces the no-op test value before run.
     /// Device generation attached to every imported native video surface.
-    #[cfg(feature = "video")]
-    pub(super) video_gpu_generation: romacs_video::GpuGeneration,
     /// GPU-independent playback intent parked while a lost device and its
     /// renderer-owned VideoSystem are rebuilt.
-    #[cfg(feature = "video")]
-    pub(super) pending_video_recovery: Vec<romacs_renderer_wgpu::VideoRecoveryManifest>,
     pub(super) backend_profile: RenderBackendProfile,
     pub(super) render_policy: RenderQualityPolicy,
 
@@ -1095,12 +1089,6 @@ impl RenderApp {
             frame_opacity: Default::default(),
             menu_bar: crate::menu_bar::MenuBar::default(),
             renderer: None,
-            #[cfg(feature = "video")]
-            video_wake: romacs_video::VideoWake::noop(),
-            #[cfg(feature = "video")]
-            video_gpu_generation: romacs_video::GpuGeneration::INITIAL,
-            #[cfg(feature = "video")]
-            pending_video_recovery: Vec::new(),
             backend_profile,
             render_policy,
             device_lost: super::device_loss::DeviceLossDetector::new(),

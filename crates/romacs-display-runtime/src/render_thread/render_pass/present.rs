@@ -102,8 +102,6 @@ impl RenderApp {
                     scale_factor: window_state.scale_factor(),
                 });
         }
-        #[cfg(feature = "video")]
-        renderer.begin_video_surface_render();
         window_state
             .render
             .compositor
@@ -146,8 +144,6 @@ impl RenderApp {
                 rendered
             }
             Err(failure) => {
-                #[cfg(feature = "video")]
-                renderer.cancel_video_surface_render();
                 let result = failure.submission_result();
                 if result == SubmissionResult::Occluded {
                     // Not showing: it leaves every model's showing set.
@@ -285,8 +281,6 @@ impl RenderApp {
             }
             window_state.render.publish_submitted_projection(projection);
         }
-        #[cfg(feature = "video")]
-        renderer.finish_submitted_video_surface();
         frame_stats::note_submission(romacs_display_protocol::frame_time::observe_platform_now());
         self.note_models_frame_submitted(emacs_frame_id, &models, blends_older);
 

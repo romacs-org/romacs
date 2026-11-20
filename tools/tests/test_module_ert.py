@@ -44,7 +44,7 @@ class ModuleERT(unittest.TestCase):
         # (romacs#54).
         file_timeout, run_timeout = ('300', 600) if make else ('120', 240)
         env.update(MODULE='', SELECTOR='t', TEST_FILES='', EMACS_TEST_TIMEOUT=file_timeout,
-                   ROMACS_TEST_BINARY=str(binary or self.binary))
+                   ROMACS_TEST_BINARY=str(binary or self.binary), ROMACS_TEST_STORE=str(self.home / 'store'))
         if make:
             command = ['make', '--no-print-directory', 'check-gnosis-agent-romacs', *args]
         else:
@@ -143,6 +143,18 @@ time.sleep(30 if {hang!r} else 0)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
 
+    def test_a_file_runs_in_its_private_home_not_the_source_tree(self):
+        # A test that visits, locks or writes a relative file name must not
+        # reach the tree another run is using.
+        self.fixture.write_text(f"""(require 'ert)
+(ert-deftest fixture-where ()
+  (should (file-equal-p default-directory (getenv "HOME")))
+  (should-not (file-in-directory-p default-directory {json.dumps(str(ROOT))})))
+""")
+        result = self.invoke('--selector', 'fixture-where')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('selected=1 started=1 completed=1 passed=1', result.stdout)
+
     def test_each_file_runs_in_its_own_process(self):
         first = self.home / 'first.el'
         first.write_text("""(require 'ert)
@@ -180,7 +192,8 @@ time.sleep(30 if {hang!r} else 0)
         fake.write_text(f'''#!{sys.executable}
 import json, os, pathlib, sys
 with open({str(record)!r}, 'a') as runs:
-    runs.write(json.dumps([sys.argv[1:], os.environ.get('ROMACS_WORLD')]) + '\\n')
+    runs.write(json.dumps([sys.argv[1:], os.environ.get('ROMACS_WORLD'),
+                           os.environ.get('ROMACS_COMPILED_LISP')]) + '\\n')
 if {builds!r} and '--world-build' in sys.argv:
     (pathlib.Path(sys.argv[sys.argv.index('--world-store') + 1]) / 'w.rwi').write_text('')
 ''')
@@ -189,22 +202,39 @@ if {builds!r} and '--world-build' in sys.argv:
 
     def test_files_restore_the_world_the_run_prepares(self):
         fake, record = self.recording_host(builds=True)
-        result = self.invoke(binary=fake)
+        result = self.invoke('--compiled', binary=fake)
         self.assertIn('ERT batch world: prepared', result.stdout)
-        (prepare, world), (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        (prepare, world, _), (run, run_world, compiled) = [json.loads(line) for line in record.read_text().splitlines()]
         store = prepare[prepare.index('--world-store') + 1]
         self.assertEqual(prepare[-2:], ['--world-build', '--batch'])
         self.assertEqual(run[:4], ['--world-store', store, '-Q', '--batch'])
         self.assertEqual((world, run_world), (None, None))
-        self.assertFalse(Path(store).exists(), 'the run removes its store')
+        self.assertEqual(compiled, 'on', 'files load compiled Lisp through the store')
+
+    def test_the_store_persists_for_the_next_run(self):
+        # Artifacts are keyed by what they are computed from, so a later run,
+        # or another build of the same sources, reuses what this one compiled.
+        fake, record = self.recording_host(builds=True)
+        self.invoke(binary=fake)
+        self.invoke(binary=fake)
+        prepares = [json.loads(line)[0] for line in record.read_text().splitlines() if '--world-build' in line]
+        stores = {argv[argv.index('--world-store') + 1] for argv in prepares}
+        self.assertEqual(stores, {str(self.home / 'store' / 'worlds')})
+        self.assertTrue((self.home / 'store' / 'worlds').is_dir(), 'the store outlives the run')
+        fake.unlink()
+        record.unlink()
+        fake, record = self.recording_host(builds=True)
+        self.invoke(binary=fake)
+        _, (_, _, compiled) = [json.loads(line) for line in record.read_text().splitlines()]
+        self.assertEqual(compiled, 'off', 'files load source unless asked to load compiled Lisp')
 
     def test_files_boot_from_source_when_no_world_is_built(self):
         fake, record = self.recording_host(builds=False)
         result = self.invoke(binary=fake)
         self.assertIn('ERT batch world: none', result.stdout)
-        _, (run, run_world) = [json.loads(line) for line in record.read_text().splitlines()]
+        _, (run, run_world, compiled) = [json.loads(line) for line in record.read_text().splitlines()]
         self.assertEqual(run[:2], ['-Q', '--batch'])
-        self.assertEqual(run_world, 'off')
+        self.assertEqual((run_world, compiled), ('off', 'off'))
 
     def test_timeout_kills_the_process_group(self):
         fake = self.home / 'hanging-host'

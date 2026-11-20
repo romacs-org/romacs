@@ -328,3 +328,88 @@ fn files_of_bundled_languages_open_in_their_ts_modes() {
         r#"(("rs" rust-ts-mode (rust)) ("py" python-mode nil) ("c" c-mode nil) ("json" js-json-mode nil))"#,
     ]);
 }
+
+/// An interactive session writes no `.#NAME` lock file beside a file it
+/// edits: not at the first change, a save, a kill, or a warm restore's
+/// relock (`create-lockfiles' nil). A buffer that turns `lock-file-mode'
+/// on gets GNU's lock; another editor's lock is still read by
+/// `file-locked-p', and is left in place; nil asks nothing, as in GNU.
+#[test]
+fn an_edited_file_gets_no_lock_file_beside_it() {
+    let report = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let (mut vm, home) = session("locks", false);
+        let dir = home.join("edited");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] { std::fs::write(dir.join(name), "text\n").unwrap(); }
+        vm.eval_source(&format!("(progn (require 'warm-restart) (require 'cl-lib)
+            (setq oob-dir {})
+            (defun oob-locks () (directory-files oob-dir nil \"\\\\`\\\\.#\"))
+            (defun oob-file (name) (expand-file-name name oob-dir))
+            ;; Kill the current buffer, modified or not, answering the interactive
+            ;; session's question (`kill-buffer--possibly-save') yes.
+            (defun oob-kill ()
+              (cl-letf (((symbol-function 'kill-buffer--possibly-save) #'always)) (kill-buffer)))
+            ;; The lock files present right after each `lock-file' call.
+            (defvar oob-seen nil)
+            (advice-add 'lock-file :after (lambda (&rest _) (push (oob-locks) oob-seen)))
+            ;; `lock-file' ran, and no lock file was there after any call.
+            (defun oob-none-seen () (and oob-seen (cl-every #'null oob-seen) t)))", quoted(&format!("{}/", dir.display())))).unwrap();
+        let steps = [
+            "(default-value 'create-lockfiles)",
+            // The first change of a.txt, then its save; `lock-file' is the
+            // Lisp call both make, so its advice sees the directory right
+            // after each lock would have been made, mid-write for the save.
+            "(progn (setq oob-seen nil)
+               (with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (goto-char (point-max)) (insert \"x\"))
+               (list (oob-locks) (oob-none-seen)))",
+            "(progn (setq oob-seen nil)
+               (with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (save-buffer))
+               (list (oob-locks) (oob-none-seen)))",
+            // A modified buffer killed, and dead.
+            "(let ((b (find-file-noselect (oob-file \"a.txt\"))))
+               (setq oob-seen nil)
+               (with-current-buffer b (insert \"y\"))
+               (with-current-buffer b (oob-kill))
+               (list (oob-locks) (oob-none-seen) (buffer-live-p b)))",
+            // A warm restore relocks every modified file it restores. The
+            // fixture is made modified with `create-lockfiles' bound nil, so
+            // its own `lock-file' call (`set-buffer-modified-p' makes one)
+            // writes no lock. Its file then changes on disk: the default
+            // relock still runs the supersession check, so it names that
+            // change, and writes no lock; the same path with locks on writes
+            // the lock (the control), and unlocking removes it.
+            "(let ((b (find-file-noselect (oob-file \"b.txt\"))))
+               (with-current-buffer b (let ((create-lockfiles nil)) (set-buffer-modified-p t)))
+               (write-region \"changed on disk\\n\" nil (oob-file \"b.txt\") nil 'quiet)
+               (setq warm-restart-last-report nil)
+               (warm-restart--lock (list b))
+               (list (oob-locks)
+                     (mapcar (lambda (p) (plist-get p :reason)) (plist-get warm-restart-last-report :locks))
+                     (let ((create-lockfiles t))
+                       (warm-restart--lock (list b))
+                       (prog1 (oob-locks) (with-current-buffer b (unlock-buffer))))))",
+            // `lock-file-mode' turns GNU's lock on for one buffer; saving unlocks.
+            "(with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (lock-file-mode 1) (insert \"w\")
+               (prog1 (oob-locks) (save-buffer)))",
+            "(oob-locks)",
+            // Another editor's lock, on another host so no liveness check applies:
+            // read, never asked about under nil, left in place.
+            "(let (asked)
+               (make-symbolic-link \"someone@elsewhere.1:0\" (oob-file \".#c.txt\"))
+               (cl-letf (((symbol-function 'ask-user-about-lock) (lambda (_file who) (push who asked) t)))
+                 (with-current-buffer (find-file-noselect (oob-file \"c.txt\")) (insert \"q\") (oob-kill)))
+               (list (file-locked-p (oob-file \"c.txt\")) asked (file-symlink-p (oob-file \".#c.txt\")) (oob-locks)))",
+        ];
+        steps.iter().map(|form| printed(&mut vm, form)).collect::<Vec<_>>()
+    }).unwrap().join().unwrap();
+    assert_eq!(report, [
+        "nil",
+        "(nil t)",
+        "(nil t)",
+        "(nil t nil)",
+        "(nil (\"changed on disk since it was read; saving asks first\") (\".#b.txt\"))",
+        "(\".#a.txt\")",
+        "nil",
+        "(\"someone\" nil \"someone@elsewhere.1:0\" (\".#c.txt\"))",
+    ]);
+}

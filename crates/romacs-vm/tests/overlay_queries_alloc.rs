@@ -1,35 +1,10 @@
 //! One-test process: exact allocator counters cannot race unrelated tests.
 use romacs_vm::{Form, Vm, coordinates::ByteOffset};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-struct Count;
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-unsafe impl GlobalAlloc for Count {
-    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        let p = unsafe { System.alloc(l) };
-        if !p.is_null() {
-            ALLOCS.fetch_add(1, Relaxed);
-            LIVE.fetch_add(l.size(), Relaxed);
-        }
-        p
-    }
-    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        LIVE.fetch_sub(l.size(), Relaxed);
-        unsafe { System.dealloc(p, l) }
-    }
-    unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-        let q = unsafe { System.realloc(p, l, n) };
-        if !q.is_null() {
-            ALLOCS.fetch_add(1, Relaxed);
-            LIVE.fetch_add(n, Relaxed);
-            LIVE.fetch_sub(l.size(), Relaxed);
-        }
-        q
-    }
-}
+#[path = "support/counting_alloc.rs"]
+mod counting_alloc;
+use counting_alloc::{Counting, measure};
 #[global_allocator]
-static A: Count = Count;
+static A: Counting = Counting;
 #[test]
 fn native_queries_at_notmuch_scale_allocate_no_lists_or_cons_cells() {
     let mut vm = Vm::new();
@@ -42,8 +17,7 @@ fn native_queries_at_notmuch_scale_allocate_no_lists_or_cons_cells() {
             ["current-buffer"]]]);
     let function = vm.compile(&Form::from_json(source).unwrap()).unwrap();
     let buffer = vm.execute(function).unwrap();
-    let (allocs, live) = (ALLOCS.load(Relaxed), LIVE.load(Relaxed));
-    for i in 0..6673 {
+    let ((), _, allocs, live) = measure(|| for i in 0..6673 {
         let p = ByteOffset(i * 100 + 25);
         let mut hits = 0;
         buffer.visit_overlays_at(p, |_, range| {
@@ -60,7 +34,7 @@ fn native_queries_at_notmuch_scale_allocate_no_lists_or_cons_cells() {
             buffer.next_overlay_change_byte(p).unwrap(),
             ByteOffset(i * 100 + 50)
         );
-    }
-    assert_eq!(ALLOCS.load(Relaxed), allocs, "native query allocated");
-    assert_eq!(LIVE.load(Relaxed), live, "native query retained heap");
+    });
+    assert_eq!(allocs, 0, "native query allocated");
+    assert_eq!(live, 0, "native query retained heap");
 }

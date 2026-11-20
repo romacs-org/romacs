@@ -7,6 +7,13 @@ pub(crate) struct BufferState {
     pub(crate) name: Option<String>,
     pub(crate) live: bool,
     pub(crate) inhibit_buffer_hooks: bool,
+    /// A window has named this buffer: shown it, held it in its previous or
+    /// next buffers, or in a `quit-restore` parameter (`Vm::note_window_named`).
+    /// Deliberately sticky: never cleared, so a buffer once named takes the
+    /// full `replace-buffer-in-windows` at its kill, a conservative choice.
+    /// A kill that skips that walk for an unnamed buffer is safe only while no
+    /// other Rust path makes a window name a buffer.
+    pub(crate) window_named: bool,
     /// Shared with the buffer's indirect buffers, as GNU's MODIFF and
     /// SAVE_MODIFF are in their shared text.
     // CELL(Plain)
@@ -19,7 +26,7 @@ pub(crate) struct BufferState {
 }
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, window_named: false, modification: Default::default(), defun_start: None, terminal: None }
     }
 }
 impl BufferState {
@@ -149,6 +156,7 @@ impl ByteBuffer {
     /// The byte at AT is now BYTE: no marker moves.
     pub(crate) fn set_byte(&mut self, at: usize, byte: u8) -> Result<()> {
         self.bytes[at] = byte;
+        self.edited(at..at + 1, 1);
         let Some(mirror) = &mut self.mirror else { return Ok(()) };
         let range = mirror.range(&(ByteOffset(at)..ByteOffset(at + 1)))?;
         mirror.text.rewrite_character(range, &crate::text::octets_to_multibyte(&[byte]))
@@ -157,6 +165,7 @@ impl ByteBuffer {
     pub(crate) fn fill(&mut self, bytes: &[u8]) -> Result<()> {
         debug_assert!(self.bytes.is_empty());
         self.bytes = bytes.to_vec();
+        self.edited(0..0, bytes.len());
         self.point = ByteOffset(0);
         self.restriction = ByteOffset(0)..ByteOffset(bytes.len());
         match &mut self.mirror {
@@ -242,6 +251,7 @@ impl ByteBuffer {
         })..shift(old.end);
         self.bytes
             .splice(r.start.0..r.end.0, inserted.iter().copied());
+        self.edited(r.start.0..r.end.0, inserted.len());
         if let Some(mirror) = &mut self.mirror { mirror.replace(&r, inserted, before_markers)?; }
         // adjust_markers_for_insert for an insertion; for a replacement,
         // adjust_markers_for_replace: a marker at its end follows the new
@@ -258,6 +268,17 @@ impl ByteBuffer {
         }
         Ok(())
     }
+    /// The one report of every edit of the bytes, made by each editor
+    /// (`replace_with_bias`, `set_byte`, `fill`) as soon as the bytes
+    /// change: the bytes that were at OLD are now the INSERTED bytes from
+    /// its start, as `Text::ts_record` reports a multibyte edit. It is where
+    /// crash-recovery capture of unibyte text goes, as `ts_record` is for
+    /// multibyte text.
+    fn edited(&self, old: Range<usize>, inserted: usize) {
+        debug_assert!(old.start + inserted <= self.bytes.len(), "an edit past the end: {old:?}+{inserted}");
+        #[cfg(test)]
+        tests::report(old.clone(), &self.bytes[old.start..old.start + inserted]);
+    }
     /// insert_before_markers: INSERTED at point, after every marker there
     /// (adjust_markers_for_insert with BEFORE_MARKERS).
     pub fn insert_before_markers(&mut self, inserted: &[u8]) -> Result<()> {
@@ -265,19 +286,20 @@ impl ByteBuffer {
         self.replace_with_bias(at..at, inserted, true)
     }
     pub(crate) fn visit_values(&mut self, reading: crate::properties::Reading, visit: &mut impl FnMut(&mut Value)) {
-        self.visit_values_but(reading, None, visit);
+        self.visit_values_but(reading, None, true, visit);
     }
     /// A live buffer's undo list is weak (`Vm::undo_round`).
     pub(crate) fn owns_undo_list(&self) -> bool {
         self.state.live
     }
-    /// `visit_values`, passing over per-buffer slot SKIP.
-    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
+    /// `visit_values`, passing over per-buffer slot SKIP, and over the Lisp
+    /// locals unless LOCALS (`PerBuffer::visit_values_but`).
+    pub(crate) fn visit_values_but(&mut self, reading: crate::properties::Reading, skip: Option<u16>, locals: bool, visit: &mut impl FnMut(&mut Value)) {
         visit(&mut self.syntax_table);
         visit(&mut self.category_table);
         for root in &mut self.case_tables { visit(root); }
         visit(&mut self.local_keymap);
-        self.per_buffer.visit_values_but(skip, visit);
+        self.per_buffer.visit_values_but(skip, locals, visit);
         if let Some(held) = &mut self.held { held.visit_values(reading, visit); }
         if let Some(mirror) = &mut self.mirror { mirror.text.visit_values(reading, visit); }
         for props in self.properties.values_mut() {
@@ -285,7 +307,7 @@ impl ByteBuffer {
         }
     }
     pub fn storage_bytes(&self, capacity: bool) -> usize {
-        self.state.storage_bytes(capacity) + self.anchors.storage_bytes(capacity) + (if capacity {
+        self.state.storage_bytes(capacity) + self.anchors.storage_bytes(capacity) + self.per_buffer.locals_storage_bytes(capacity) + (if capacity {
             self.bytes.capacity()
         } else {
             self.bytes.len()
@@ -298,5 +320,59 @@ impl ByteBuffer {
                     + p.len() * (size_of::<crate::properties::Key>() + size_of::<Value>())
             })
             .sum::<usize>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BufferState, ByteBuffer};
+    use crate::{coordinates::ByteOffset, forwarded::PerBuffer};
+    use std::{cell::RefCell, ops::Range};
+
+    thread_local! {
+        /// What `ByteBuffer::edited` reported on this thread.
+        static REPORTS: RefCell<Vec<(Range<usize>, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn report(old: Range<usize>, inserted: &[u8]) {
+        REPORTS.with(|r| r.borrow_mut().push((old, inserted.to_vec())));
+    }
+
+    /// Replaying what the editors reported onto the bytes as they were
+    /// gives the bytes as they are: no editor changes them unreported.
+    fn replayed(before: &[u8]) -> Vec<u8> {
+        let mut bytes = before.to_vec();
+        for (old, inserted) in REPORTS.with(|r| std::mem::take(&mut *r.borrow_mut())) {
+            bytes.splice(old, inserted);
+        }
+        bytes
+    }
+
+    #[test]
+    fn every_edit_of_the_bytes_is_reported() {
+        type Editor = fn(&mut ByteBuffer);
+        /// What an editor must report: (OLD, INSERTED).
+        type Report = (Range<usize>, &'static [u8]);
+        let edits: [(Editor, Report); 5] = [
+            // As `fileio_fill_raw` does: the markers grow to the bytes first.
+            (|b| { assert!(b.anchors.grow(7)); b.fill(b"abc\xffdef").unwrap(); }, (0..0, b"abc\xffdef")),
+            (|b| b.set_byte(1, 0x80).unwrap(), (1..2, b"\x80")),
+            (|b| b.replace(ByteOffset(2)..ByteOffset(5), b"\x00\x01").unwrap(), (2..5, b"\x00\x01")),
+            (|b| b.replace(ByteOffset(0)..ByteOffset(1), b"").unwrap(), (0..1, b"")),
+            (|b| { b.point = ByteOffset(2); b.insert_before_markers(b"zz").unwrap(); }, (2..2, b"zz")),
+        ];
+        for mirrored in [false, true] {
+            let mut b = ByteBuffer::empty(BufferState::default(), PerBuffer::default());
+            if mirrored { b.mirror_now().unwrap(); }
+            REPORTS.with(|r| r.borrow_mut().clear());
+            for (edit, (old, inserted)) in &edits {
+                let before = b.bytes.clone();
+                edit(&mut b);
+                let reports = REPORTS.with(|r| r.borrow().clone());
+                assert_eq!(reports, [(old.clone(), inserted.to_vec())], "mirrored: {mirrored}");
+                assert_eq!(replayed(&before), b.bytes, "mirrored: {mirrored}");
+            }
+            assert_eq!(b.bytes, b"\x80\x00zz\x01ef");
+        }
     }
 }

@@ -3,8 +3,6 @@
 
 use super::super::image_cache::ImageCache;
 use super::super::shader_surface_cache::ShaderSurfaceCache;
-#[cfg(feature = "video")]
-use super::super::video_cache::VideoCache;
 use super::deferred_resource::DeferredResource;
 use super::dynamic_buffer::FrameVertexArena;
 use super::full_frame_texture::FullFrameTexture;
@@ -35,10 +33,6 @@ pub(crate) struct Pipelines {
     pub(crate) composition: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) crossfade_add: DeferredResource<wgpu::RenderPipeline>,
     pub(super) picture_interpolate: DeferredResource<wgpu::RenderPipeline>,
-    #[cfg(feature = "video")]
-    pub(crate) bi_planar_video: DeferredResource<wgpu::RenderPipeline>,
-    #[cfg(feature = "video")]
-    pub(crate) bi_planar_video_copy: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) opaque_image: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_background_rect: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_background_rounded_rect: DeferredResource<wgpu::RenderPipeline>,
@@ -49,8 +43,6 @@ pub(crate) struct Pipelines {
     pub(crate) stencil_subpixel_glyph: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_image: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_composition: DeferredResource<wgpu::RenderPipeline>,
-    #[cfg(feature = "video")]
-    pub(crate) stencil_bi_planar_video: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_opaque_image: DeferredResource<wgpu::RenderPipeline>,
     pub(crate) stencil_write: DeferredResource<wgpu::RenderPipeline>,
 }
@@ -126,8 +118,6 @@ impl StencilTargets {
 /// Texture/media caches.
 pub(crate) struct RenderCaches {
     pub(crate) image: ImageCache,
-    #[cfg(feature = "video")]
-    pub(crate) video: VideoCache,
     pub(crate) surface: ShaderSurfaceCache,
 }
 
@@ -234,13 +224,6 @@ mod deferred_tests {
                 "picture_interpolate",
                 &renderer.pipelines.picture_interpolate,
             ),
-            #[cfg(feature = "video")]
-            ("bi_planar_video", &renderer.pipelines.bi_planar_video),
-            #[cfg(feature = "video")]
-            (
-                "bi_planar_video_copy",
-                &renderer.pipelines.bi_planar_video_copy,
-            ),
             ("opaque_image", &renderer.pipelines.opaque_image),
             (
                 "stencil_background_rect",
@@ -269,11 +252,6 @@ mod deferred_tests {
             ),
             ("stencil_image", &renderer.pipelines.stencil_image),
             ("stencil_composition", &renderer.pipelines.stencil_composition),
-            #[cfg(feature = "video")]
-            (
-                "stencil_bi_planar_video",
-                &renderer.pipelines.stencil_bi_planar_video,
-            ),
             (
                 "stencil_opaque_image",
                 &renderer.pipelines.stencil_opaque_image,

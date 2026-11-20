@@ -84,12 +84,18 @@ fn install_command_module_activates_during_initialize() {
         return;
     }
     let root = std::env::temp_dir().join(format!("romacs-install-seam-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    // A runtime tree of links to this checkout's lisp/ and etc/, which the
+    // workspace loads its Lisp from, of this build's generation.
+    let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for dir in ["lisp", "etc"] {
+        let linked = std::process::Command::new("cp").arg("-as").arg(checkout.join(dir).canonicalize().unwrap())
+            .arg(root.join(dir)).status().unwrap();
+        assert!(linked.success(), "a tree of links to the checkout's {dir}");
+    }
     let modules = root.join("lisp/session/romacs-gui-extensions");
-    std::fs::create_dir_all(root.join("lisp")).unwrap();
     std::fs::create_dir_all(&modules).unwrap();
-    // A runtime tree of this build's generation, as the executable requires of the tree it is given.
-    std::fs::create_dir_all(root.join("etc")).unwrap();
-    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../etc/romacs-runtime-epoch"), root.join("etc/romacs-runtime-epoch")).unwrap();
     std::fs::write(modules.join("10-setup.el"), "(setq romacs-gui-module-text \"module\")").unwrap();
     std::fs::write(modules.join("20-probe.el"), "(romacs-gui-install-command [24 57345] '(defun romacs-gui-module-probe () (interactive) (insert romacs-gui-module-text)))").unwrap();
     std::fs::write(modules.join("ignored.txt"), "(error \"must not load\")").unwrap();

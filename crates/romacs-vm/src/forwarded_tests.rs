@@ -123,6 +123,22 @@ fn a_restored_process_reads_its_host_name_again() {
     assert_eq!(vm.display(now).unwrap(), vm.display(built).unwrap());
 }
 
+/// A restored process starts every live buffer in its startup directory
+/// (GNU's `init_buffer`), the current one and the others alike, and the
+/// current buffer stays current.
+#[test]
+fn a_restored_process_starts_its_buffers_in_its_startup_directory() {
+    let mut vm = Vm::new();
+    let startup = vm.eval_source_raw("default-directory").unwrap();
+    let startup = vm.display(startup).unwrap();
+    vm.eval_source_raw("(progn (setq default-directory \"/elsewhere/\") \
+        (set-buffer (get-buffer-create \"reinit\")) (setq default-directory \"/elsewhere/\"))").unwrap();
+    vm.world_reinit();
+    let seen = vm.eval_source_raw("(list (buffer-name) default-directory \
+        (progn (set-buffer \"*scratch*\") default-directory))").unwrap();
+    assert_eq!(vm.display(seen).unwrap(), format!("(\"reinit\" {startup} {startup})"));
+}
+
 #[test]
 fn system_name_is_materialised_lazily_once() {
     let mut vm = Vm::new();

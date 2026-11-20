@@ -146,7 +146,6 @@ toast that outlasts their typing."
   (isolate-spawn 'romacs-package--job command (mapcar #'romacs-package--crossing args)
                  :name (symbol-name command)
                  :require '(romacs-package package-vc)
-                 :allow-source-boot t
                  :bindings (cons (cons 'current-prefix-arg prefix)
                                  (cl-loop for s in romacs-package--settings
                                           when (boundp s) collect (cons s (symbol-value s))))))

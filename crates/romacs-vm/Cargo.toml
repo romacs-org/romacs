@@ -25,7 +25,7 @@ stacker.workspace = true
 libc.workspace = true
 # The safe system-call layer host.rs calls through; host/sys.rs holds the
 # C library calls it lacks.
-rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "pty", "system", "termios", "thread", "time"] }
+rustix = { workspace = true, features = ["event", "fs", "net", "param", "pipe", "process", "mm", "pty", "rand", "system", "termios", "thread", "time"] }
 sha2 = "0.11"
 # xxh3: the fast content hash of mapped library segments (world::arena).
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128", "std"] }
@@ -69,6 +69,8 @@ tree-sitter = "=0.27.0"
 tree-sitter-language.workspace = true
 # dlopen of grammar libraries (treesit/native.rs), as GNU dynlib.c.
 libloading = "0.8"
+# A world image's header read from its bytes (world/arena.rs).
+bytemuck = { workspace = true, features = ["min_const_generics"] }
 # Read-only maps of the code-image store's entries (image.rs).
 memmap2.workspace = true
 # errno around wcscoll_l, which reports through it alone (locale_info.rs).
@@ -78,14 +80,15 @@ errno = "0.3"
 sha2 = "0.11"
 
 [features]
-# Test-only hooks of the world store (world::store::pause_for_test). Only
-# test targets enable it, through the dev-dependency on this crate below.
-world-test-hooks = []
+# Test-only hooks: the world store's pause (world::store::pause_for_test)
+# and the count of stores into shared declaration tables
+# (`declaration_stores`). Only test targets enable it, through the
+# dev-dependency on this crate below.
+test-hooks = []
 
 [dev-dependencies]
 # This crate with its test hooks, for its own tests.
-romacs-vm = { path = ".", features = ["world-test-hooks"] }
-romacs-coordinate-contract = { path = "../romacs-coordinate-contract" }
+romacs-vm = { path = ".", features = ["test-hooks"] }
 # For tests that must drive the REAL producer chain: VM to frame_snapshot to
 # layout_frame to display_apply_layout to (window-end). A dev-dependency keeps
 # this out of the shipped graph. Without it such a test can only live outside

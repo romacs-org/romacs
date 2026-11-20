@@ -14,6 +14,9 @@ pub(super) struct Window {
     pub id: u64,
     pub frame: Value,
     pub combination_limit: Value,
+    // A buffer is stored here only by `show` and `new`, reached through
+    // `Vm::show_in_window` and `Vm::allocate_window`, which record it as
+    // named (`BufferState::window_named`); any other write stores nil.
     pub buffer: Value,
     pub point: Value,
     pub start: Value,
@@ -89,9 +92,11 @@ pub(super) struct Window {
     pub force_start: bool,
 }
 impl Window {
-    /// BUFFER is what the window shows now.
-    pub(crate) fn show(&mut self, buffer: Value) {
+    /// BUFFER is what the window shows now. Private to the window module:
+    /// elsewhere `Vm::show_in_window`, which records the buffer as named.
+    fn show(&mut self, buffer: Value) {
         if self.buffer != buffer { self.shows += 1; }
+        // Named by `Vm::show_in_window`, this function's only caller.
         self.buffer = buffer;
     }
     fn new(id: u64, buffer: Value) -> Self {
@@ -99,6 +104,7 @@ impl Window {
             id,
             frame: Value::NIL,
             combination_limit: Value::NIL,
+            // Named by `Vm::allocate_window`, this function's only caller.
             buffer,
             point: Value::NIL,
             start: Value::NIL,
@@ -205,7 +211,7 @@ impl Vm {
         }
     }
     pub(super) fn window_mut(&mut self, v: Value) -> Result<&mut Window> {
-        match self.objects.get_entry_mut(v.index(0)?.saturating_sub(1)) {
+        match v.object_index_if().and_then(|index| self.objects.get_entry_mut(index)) {
             Some(Object::Window(w)) => Ok(w),
             _ => Err("window required".into()),
         }
@@ -281,9 +287,55 @@ impl Vm {
         self.set_marker_object(v, position, buffer)?;
         Ok(v)
     }
+    /// A window comes to name BUFFER (`BufferState::window_named`): every
+    /// Rust path that puts a buffer in a window's buffer, its previous or
+    /// next buffers or its `quit-restore` parameters calls this. A value that
+    /// is not a buffer is ignored.
+    pub(crate) fn note_window_named(&mut self, buffer: Value) {
+        if let Ok(state) = self.buffer_state_mut(buffer) { state.window_named = true; }
+    }
+    /// `note_window_named` for each buffer a window's previous-buffers
+    /// alist or next-buffers list names, as an element or an element's car.
+    /// A circular list ends the walk where it comes round (Floyd: the tail
+    /// steps one cell, a second pointer one cell every other step), after
+    /// every cell has been seen.
+    pub(crate) fn note_window_history(&mut self, list: Value) {
+        let (mut tail, mut slow, mut odd) = (list, list, false);
+        while let Ok((element, rest)) = self.cons_pair(tail) {
+            self.note_window_named(element);
+            if let Ok((car, _)) = self.cons_pair(element) { self.note_window_named(car); }
+            tail = rest;
+            if odd { slow = self.cons_pair(slow).map_or(Value::NIL, |(_, rest)| rest); }
+            odd = !odd;
+            if tail == slow { break; }
+        }
+    }
+    /// `note_window_named` for the buffers window parameter KEY's VALUE
+    /// names, where a kill's discard looks (`discard_buffer`): the fourth
+    /// element of a `quit-restore` or `quit-restore-prev` value, and the car
+    /// of its second. Every write of those two parameters calls this: the
+    /// setter and the configuration restore.
+    pub(crate) fn note_window_parameter(&mut self, key: Value, value: Value) {
+        if key != self.intern("quit-restore") && key != self.intern("quit-restore-prev") { return; }
+        let mut items = [Value::NIL; 4];
+        let mut tail = value;
+        for item in &mut items {
+            let Ok((element, rest)) = self.cons_pair(tail) else { break };
+            (*item, tail) = (element, rest);
+        }
+        self.note_window_named(items[3]);
+        if let Ok((car, _)) = self.cons_pair(items[1]) { self.note_window_named(car); }
+    }
+    /// Window V shows BUFFER now, named by it.
+    pub(crate) fn show_in_window(&mut self, v: Value, buffer: Value) -> Result<()> {
+        self.window_mut(v)?.show(buffer);
+        self.note_window_named(buffer);
+        Ok(())
+    }
     pub(super) fn allocate_window(&mut self, buffer: Value) -> Result<Value> {
         let id = self.window_state.next;
         self.window_state.next += 1;
+        self.note_window_named(buffer);
         let mut w = Window::new(id, buffer);
         if self.frame_value_peek() != Value::UNBOUND {
             w.frame = self.frame_value_peek();
@@ -449,8 +501,8 @@ impl Vm {
             self.set_marker_bias(old, bias)?;
         }
         self.discard_buffer_from_window(buffer, v)?;
+        self.show_in_window(v, buffer)?;
         let w = self.window_mut(v)?;
-        w.show(buffer);
         w.end_distance = 0;
         w.end_valid = false;
         self.display_state.version += 1;
@@ -1645,6 +1697,7 @@ impl Vm {
                 .map(|(_, v)| *v)
                 .unwrap_or(Value::NIL),
             SetWindowParameter => {
+                self.note_window_parameter(b, c);
                 let w = self.window_mut(v)?;
                 if let Some((_, value)) = w.parameters.iter_mut().find(|(k, _)| *k == b) {
                     *value = c;
@@ -2454,13 +2507,11 @@ impl<'a> Windows<'a> {
         }
     }
     pub(crate) fn set_terminal_params(&mut self, terminal: Value, params: Value) -> std::result::Result<(), Fault> {
-        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) { t.params = params; }
+        if let Some(Object::Terminal(t)) = terminal.object_index_if().and_then(|index| self.vm.objects.get_entry_mut(index)) { t.params = params; }
         Ok(())
     }
     pub(crate) fn set_terminal_coding(&mut self, terminal: Value, keyboard: bool, coding: Value) -> std::result::Result<(), Fault> {
-        let index = terminal.index(0).map_err(internal)?.saturating_sub(1);
-        if let Some(Object::Terminal(t)) = self.vm.objects.get_entry_mut(index) {
+        if let Some(Object::Terminal(t)) = terminal.object_index_if().and_then(|index| self.vm.objects.get_entry_mut(index)) {
             if keyboard { t.keyboard_coding = coding; } else { t.terminal_coding = coding; }
         }
         Ok(())
@@ -2613,6 +2664,7 @@ impl<'a> Windows<'a> {
     /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
     pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
         let v = self.live(window)?;
+        self.vm.note_window_history(buffers);
         let w = self.get_mut(v)?;
         if next { w.next_buffers = buffers } else { w.prev_buffers = buffers }
         Ok(buffers)
@@ -2674,9 +2726,39 @@ impl<'a> Windows<'a> {
         if let Some(at) = windows.iter().position(|&w| w == selected) {
             windows.rotate_left(at);
         }
-        Ok(windows.into_iter().find(|&w| {
-            self.get(w).is_ok_and(|w| w.live() && w.buffer == buffer && (!w.mini || self.vm.names.get("romacs--minibuf-level").is_some_and(|&i| self.vm.slots[i].value.integer_value().is_some_and(|depth| depth > 0))))
-        }).unwrap_or(Value::NIL))
+        let active = self.minibuffer_active();
+        Ok(windows.into_iter().find(|&w| self.counted_buffer(w, active) == Some(buffer)).unwrap_or(Value::NIL))
+    }
+    /// The buffers `get-buffer-window' finds a window for with ALL-FRAMES
+    /// `visible' (window_loop's live windows of the visible frames), in one
+    /// walk, for a scan that asks it of many buffers (`other-buffer'). A
+    /// buffer may be named more than once.
+    pub(crate) fn visible_buffers(&mut self) -> std::result::Result<Vec<Value>, Fault> {
+        self.vm.ensure_windows().map_err(internal)?;
+        let mut windows = vec![];
+        for frame in self.vm.frames() {
+            if self.vm.frame(frame).map_err(internal)?.visible { self.frame_windows(frame, &mut windows)?; }
+        }
+        let active = self.minibuffer_active();
+        Ok(windows.into_iter().filter_map(|w| self.counted_buffer(w, active)).collect())
+    }
+    /// Whether a minibuffer is active, its window then counting as showing
+    /// its buffer.
+    fn minibuffer_active(&self) -> bool {
+        self.vm.names.get("romacs--minibuf-level").is_some_and(|&i| self.vm.slots[i].value.integer_value().is_some_and(|depth| depth > 0))
+    }
+    /// The buffer window W counts as showing for `get-buffer-window': a
+    /// live window's, the mini-window's only while a minibuffer is ACTIVE.
+    fn counted_buffer(&self, w: Value, active: bool) -> Option<Value> {
+        self.get(w).ok().filter(|w| w.live() && (!w.mini || active)).map(|w| w.buffer)
+    }
+    /// FRAME's stored parameter KEY (nil when unset), without copying its
+    /// parameter list: `other-buffer''s `buffer-predicate'.
+    pub(crate) fn stored_frame_parameter(&mut self, frame: Value, key: Value) -> Out {
+        self.live_frame(frame)?;
+        let frame = if frame == Value::NIL { self.frame() } else { frame };
+        let parameters = &self.vm.frame(frame).map_err(internal)?.parameters;
+        Ok(parameters.iter().find(|(k, _)| *k == key).map_or(Value::NIL, |(_, v)| *v))
     }
     /// GNU window.c:748.
     pub(crate) fn set_window_combination_limit(&mut self, window: Value, limit: Value) -> Out {
@@ -2797,13 +2879,16 @@ impl<'a> Windows<'a> {
     /// on the frame that owns it (the root's `next`).
     fn all_windows(&self) -> std::result::Result<Vec<Value>, Fault> {
         let mut out = vec![];
-        for frame in self.vm.frames() {
-            let f = self.vm.frame(frame).map_err(internal)?;
-            let (root, mini) = (f.root, f.minibuffer);
-            self.leaves(root, &mut out)?;
-            if self.get(mini)?.frame == frame { out.push(mini); }
-        }
+        for frame in self.vm.frames() { self.frame_windows(frame, &mut out)?; }
         Ok(out)
+    }
+    /// FRAME's leaf windows, then its own mini-window, onto OUT.
+    fn frame_windows(&self, frame: Value, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
+        let f = self.vm.frame(frame).map_err(internal)?;
+        let (root, mini) = (f.root, f.minibuffer);
+        self.leaves(root, out)?;
+        if self.get(mini)?.frame == frame { out.push(mini); }
+        Ok(())
     }
     fn leaves(&self, v: Value, out: &mut Vec<Value>) -> std::result::Result<(), Fault> {
         let w = self.get(v)?;

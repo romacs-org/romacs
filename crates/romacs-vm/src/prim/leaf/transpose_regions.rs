@@ -80,7 +80,7 @@ impl Leaf<'_> {
                 let text = text.into_iter().collect::<crate::Result<Vec<_>>>().map_err(Fault::Error)?.concat();
                 let pieces = [b2..f2, f1..b2, b1..f1].map(|r| (r.end.0 - r.start.0, b.properties.slice(r)));
                 let point = b.char_of_byte(b.point).map_err(Fault::Error)?.0 as i64 + 1;
-                b.overwrite(b1..f2, &text).map_err(Fault::Error)?;
+                b.overwrite_moving(b1..f2, &text).map_err(Fault::Error)?;
                 b.properties.clear(b1..f2);
                 let mut at = b1.0;
                 for (len, properties) in &pieces {

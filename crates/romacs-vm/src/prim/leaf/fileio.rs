@@ -318,12 +318,15 @@ impl Leaf<'_> {
                 }
                 let mut b = t.binary();
                 b.state = t.state.clone();
-                b.per_buffer = t.per_buffer.clone();
                 b.case_tables = t.case_tables;
                 b.local_keymap = t.local_keymap;
                 // Its markers, all at its start, live in the unibyte buffer
-                // meanwhile; the held buffer keeps its overlays.
+                // meanwhile; the held buffer keeps its overlays. Its
+                // per-buffer values and Lisp locals live only in the unibyte
+                // buffer, which the toggle back takes them from: a copy held
+                // aside would keep alive what a local then dropped.
                 let mut held = t.clone();
+                b.per_buffer = std::mem::take(&mut held.per_buffer);
                 b.anchors = std::mem::replace(&mut *held.anchors, crate::anchors::AnchorTree::new(0));
                 b.held = Some(held);
                 data::Object::ByteBuffer(Box::new(b))

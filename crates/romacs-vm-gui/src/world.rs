@@ -236,7 +236,10 @@ pub fn prepare(world: &World) -> Result<(), String> {
     let building = |reason: &serde_json::Value| romacs_vm::host::event_line("romacs-world", &json!({"event": "world-build", "reason": reason}));
     match world.prepare(|| builder_args(world), building) {
         Ok(manifest) => {
-            romacs_vm::host::event_line("romacs-world", &json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe}));
+            // Romacs's Lisp that failed in the world's build (`lisp_errors`,
+            // each with its file and line), which an installer refuses.
+            romacs_vm::host::event_line("romacs-world", &json!({"mode": "prepared", "key": manifest["key"], "recipe": world.recipe,
+                                                               "lisp_errors": manifest["events"]["lisp_errors"]}));
             Ok(())
         }
         Err(reason) => Err(format!("world not prepared: {reason}")),
@@ -282,7 +285,10 @@ fn build_world(dir: &std::path::Path) -> Result<(Vm, Carry, serde_json::Value), 
     // A world holds no launch font (`LaunchFont`).
     let loadup = startup::initialize_chain(&mut vm, startup::Launch::Loadup, None, dir)?;
     startup::install_session_definitions(&mut vm, startup::Launch::Loadup, dir)?;
-    Ok((vm, Carry { loadup }, json!({})))
+    // Romacs's Lisp that failed in the build, for the manifest: each session
+    // restored from the world shows the same errors itself.
+    let events = json!({"lisp_errors": startup::noted_lisp_errors(&mut vm)?});
+    Ok((vm, Carry { loadup }, events))
 }
 
 #[cfg(test)]

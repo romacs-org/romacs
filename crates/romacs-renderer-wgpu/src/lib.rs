@@ -10,8 +10,6 @@ pub mod cost;
 pub mod diagnostics;
 pub(crate) mod frame_post;
 pub mod glyph_atlas;
-#[cfg(feature = "video")]
-mod gpu_frame_timing;
 pub mod image_cache;
 pub use romacs_imaging::{
     image_bands, image_probe, image_scale, image_sequence, svg, svg_animation, xbm, xpm,
@@ -32,8 +30,6 @@ pub use image_bands::{BandPlacement, DecodedBand, RasterBand, RowRange, TextureR
 pub use svg::SvgResourceContext;
 pub mod vertex;
 
-#[cfg(feature = "video")]
-pub(crate) mod video_cache;
 
 pub use gpu_policy::{choose_adapter, new_instance, request_renderer_device};
 pub use image_cache::{FilledRows, ImageCache, ImageCacheEvent, ImageMetadata, ImageState};
@@ -48,8 +44,6 @@ pub use shader_surface::{
     validate_surface_wgsl,
 };
 pub use vertex::{Uniforms};
-#[cfg(feature = "video")]
-pub use video_cache::VideoRecoveryManifest;
 pub use glyph_atlas::{WgpuGlyphAtlas, allocator, pages, types};
 pub use shader_surface_cache::ShaderSurfaceCache;
 

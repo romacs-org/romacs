@@ -39,14 +39,14 @@ frozen snapshots.
 | Layout | `crates/romacs-layout-input` (owned input), `crates/romacs-layout` (the pass) |
 | Faces, themes, fonts | `crates/romacs-face`, `crates/romacs-font`, `crates/romacs-font-materializer` |
 | Drawing | `crates/romacs-display-runtime` (the render thread), `romacs-renderer-wgpu`, `romacs-scene` |
-| Images and video | `crates/romacs-imaging`, `crates/romacs-video`, `crates/romacs-video-model` |
+| Images | `crates/romacs-imaging` |
 | Agents (MCP relay, sessions) | `crates/romacs-mcp`, `lisp/agents/` |
 | The Lisp | `lisp/` by subsystem, ours (GNU's files at GNU's paths; GNU's later changes: `tools/lisp-upstream`); Romacs's own directories and `lisp/packages/` in `lisp/bundled.json` |
 | What a session loads, in order | `lisp/session/romacs-loadup-bootstrap.el` |
 | Runtime data Lisp reads (`data-directory`) | `etc/` |
 | Fonts, icons, desktop entry, branding | `assets/` |
 | GNU's test suite, pinned | `test/gnu/` (pin and exclusions in `ledger/`); its runner crate `crates/romacs-gnu-tests` |
-| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`tools/test-elisp`) |
+| Romacs's own test suites | `test/romacs/`: `lisp/` (ERT, `make check-MODULE`), `src/` (ERT on primitives), `romacs-test/` (`romacs-deftest`, `tools/test-elisp`) |
 | Bundled packages' test suites | `test/packages/<name>/` (`make check`) |
 | Benchmark inputs | `test/bench/` |
 | Scripts and tools, with their tests | `tools/` (commands), `tools/lib/` (modules), `tools/tests/` |

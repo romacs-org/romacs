@@ -157,7 +157,7 @@ fn child_marks(vm: &mut Vm, roots: &[Value]) -> Result<Vec<u8>, String> {
         vm.clear_marks();
         let rooted: Vec<Value> = roots.iter().chain(&extras).copied().collect();
         let set = vm.mark_only(&rooted, true);
-        let more = table_walk_extras(vm, &set.obarray_symbols_live);
+        let more = table_walk_extras(vm);
         if more.is_empty() {
             break (set, rooted);
         }
@@ -239,10 +239,9 @@ fn bound(vm: &mut Vm, rooted: &[Value], twin: &[Vec<bool>; 4]) -> Result<u64, St
 }
 
 /// M8: what a table walk can return from what the mark reached, and the mark
-/// did not: each marker and overlay anchored in a reached buffer, and each
-/// private symbol with a local binding in one. A buffer of the world image is
-/// never freed, so it counts as reached.
-fn table_walk_extras<S: std::hash::BuildHasher>(vm: &mut Vm, symbols_live: &std::collections::HashSet<usize, S>) -> Vec<Value> {
+/// did not: each marker and overlay anchored in a reached buffer. A buffer
+/// of the world image is never freed, so it counts as reached.
+fn table_walk_extras(vm: &mut Vm) -> Vec<Value> {
     let reached = |vm: &Vm, buffer: Value| buffer.tag() == 0 && buffer != Value::NIL
         && (Vm::image_value(buffer) || buffer.index_if(0).and_then(|i| i.checked_sub(1)).is_some_and(|i| vm.objects.marked(i)));
     let mut extras = Vec::new();
@@ -254,15 +253,6 @@ fn table_walk_extras<S: std::hash::BuildHasher>(vm: &mut Vm, symbols_live: &std:
         };
         if !vm.objects.marked(i) && reached(vm, buffer) {
             extras.push(Value::reference(i + 1, 0));
-        }
-    }
-    for (slot, s) in vm.slots.iter().enumerate() {
-        if !vm.obarray_symbol_names.contains_key(&slot) || symbols_live.contains(&slot) {
-            continue;
-        }
-        let Some(Object::HashTable(table)) = vm.object_if(s.local) else { continue };
-        if table.entries().any(|(_, buffer, _)| reached(vm, buffer)) {
-            extras.push(Value::reference(slot + 1, 7));
         }
     }
     extras

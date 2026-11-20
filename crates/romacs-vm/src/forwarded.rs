@@ -37,6 +37,7 @@
 use super::*;
 use crate::prim::Fault;
 use crate::world::Access;
+use crate::local_vars::LocalVars;
 
 /// GNU `Lisp_Fwd` kinds (lisp.h). The payload indexes the matching vector
 /// of [`Forwarded`]. `Lisp_Fwd_Kboard_Obj` is not modelled (no variable the
@@ -891,14 +892,11 @@ pub(crate) struct Forwarded {
     object_vars: Vec<usize>,
     buffer_vars: Vec<usize>,
     /// `max-lisp-eval-depth''s symbol slot once a buffer may bind it
-    /// locally, else usize::MAX; and the current buffer's local binding as
-    /// last found (`Vm::eval_limit_local'): the buffer's bits, its private
-    /// slot or usize::MAX, and the `local_epoch' it was found at.
+    /// locally, else `usize::MAX` (`Vm::eval_limit_local`).
     pub(super) eval_limit_symbol: usize,
-    pub(super) eval_limit_cache: (u64, usize, u64),
-    /// Advanced by every change of a local-binding table and by collection,
-    /// which moves buffers and reclaims bindings.
-    pub(super) local_epoch: u64,
+    /// Advanced by every collection, which may move buffers: what a cache
+    /// that names a buffer by its Value (`Places`) holds under.
+    pub(super) collection_epoch: u64,
 }
 
 impl Default for Forwarded {
@@ -911,8 +909,7 @@ impl Default for Forwarded {
             ints: vec![],
             eval_limit_index: 0,
             eval_limit_symbol: usize::MAX,
-            eval_limit_cache: (0, usize::MAX, u64::MAX),
-            local_epoch: 0,
+            collection_epoch: 0,
             gc_cons: (0, 0),
             gc_done: (0, 0),
             defaults: vec![],
@@ -942,6 +939,36 @@ impl Default for Forwarded {
         store.gc_done = (done as usize, elapsed as usize);
         store
     }
+}
+
+/// The per-buffer built-ins GNU gives no `local_flags` bit (`PER_BUFFER_IDX`
+/// -1): local in every buffer, so `PER_BUFFER_VALUE_P` holds for them always.
+const ALWAYS_LOCAL_NAMES: &[&str] = &["buffer-invisibility-spec", "default-directory", "buffer-file-name",
+    "buffer-file-truename", "buffer-read-only", "buffer-file-format", "local-minor-modes", "major-mode", "mode-name",
+    "mark-active", "buffer-undo-list", "buffer-auto-save-file-name", "buffer-backed-up", "buffer-saved-size",
+    "point-before-scroll", "buffer-auto-save-file-format", "buffer-display-count", "buffer-display-time"];
+
+/// Whether the per-buffer built-in at each forwarded index is always local:
+/// a function of `C_VARIABLES` alone, in `Forwarded::buffer_vars`' order.
+static ALWAYS_LOCAL: std::sync::LazyLock<Vec<bool>> = std::sync::LazyLock::new(|| {
+    C_VARIABLES.iter().filter(|var| matches!(var.kind, Kind::PerBuffer { .. }))
+        .map(|var| ALWAYS_LOCAL_NAMES.contains(&var.name)).collect()
+});
+
+/// The forwarded indices of the per-buffer built-ins local in every buffer.
+pub(crate) fn always_local_indices() -> impl Iterator<Item = usize> {
+    ALWAYS_LOCAL.iter().enumerate().filter_map(|(i, &always)| always.then_some(i))
+}
+
+/// The places of `major-mode' and `mode-name', which every
+/// `kill-all-local-variables' resets.
+static MODE_PLACES: std::sync::LazyLock<[u16; 2]> = std::sync::LazyLock::new(|| {
+    ["major-mode", "mode-name"].map(|name| match Forwarded::lookup(name) { Some(Fwd::Buffer(i)) => i, _ => unreachable!("per-buffer") })
+});
+
+/// The names of the per-buffer built-ins local in every buffer.
+pub(crate) fn always_local_names() -> &'static [&'static str] {
+    ALWAYS_LOCAL_NAMES
 }
 
 /// Where each forwarded variable's storage is, by name: its kind's
@@ -1038,9 +1065,10 @@ impl Forwarded {
 /// and a `local_flags` bit each). `None`, or an index past the end, is "not
 /// local here": the buffer sees the default. Beside them, the visited
 /// file's modification time, identity and truename bytes, the mark marker,
-/// and the labeled restrictions (`prim/leaf/labeled_restrictions.rs`).
+/// the labeled restrictions (`prim/leaf/labeled_restrictions.rs`), and the
+/// buffer's Lisp locals (`local_vars.rs`).
 #[derive(Clone, Default, romacs_snapshot::Snapshot)]
-pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>);
+pub(crate) struct PerBuffer(Vec<Option<Value>>, pub(crate) VisitedModtime, Option<(u64, u64)>, Option<Vec<u8>>, Option<Value>, Option<Value>, LocalVars);
 impl PerBuffer {
     /// How many per-buffer variables it has a slot for, each at its
     /// forwarded place (`Fwd::Buffer`).
@@ -1066,6 +1094,12 @@ pub(crate) fn file_identity(path: impl AsRef<std::path::Path>) -> Option<(u64, u
 
 impl PerBuffer {
     pub(crate) fn editor_mark(&self) -> Option<Value> { self.4 }
+    /// Its Lisp locals.
+    pub(crate) fn locals(&self) -> &LocalVars { &self.6 }
+    /// The bytes its Lisp locals take (`LocalVars::storage_bytes`).
+    pub(crate) fn locals_storage_bytes(&self, capacity: bool) -> usize { self.6.storage_bytes(capacity) }
+    /// Its Lisp locals to change: only `Vm::store_local` does.
+    pub(super) fn locals_mut(&mut self) -> &mut LocalVars { &mut self.6 }
     /// Forget the visited file's identity and modification time, as a
     /// buffer that visits nothing has them.
     pub(crate) fn reset_visit(&mut self) {
@@ -1092,6 +1126,12 @@ impl PerBuffer {
     pub(crate) fn get(&self, i: u16) -> Option<Value> {
         self.0.get(i as usize).copied().flatten()
     }
+    /// The forwarded indices it holds a value for. The scan covers every
+    /// slot allocated so far, which reach the highest index ever stored in
+    /// this buffer: at most the 58 per-buffer built-ins, whatever it holds now.
+    pub(crate) fn set_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.0.iter().enumerate().filter_map(|(i, value)| value.is_some().then_some(i))
+    }
     fn set(&mut self, i: u16, value: Value) {
         let i = i as usize;
         if self.0.len() <= i {
@@ -1099,11 +1139,13 @@ impl PerBuffer {
         }
         self.0[i] = Some(value);
     }
-    /// Forget every binding but those at KEPT, keeping the visit metadata.
+    /// Forget every binding but those at KEPT, and every Lisp local,
+    /// keeping the visit metadata.
     pub(crate) fn retain_locals(&mut self, kept: &[u16]) {
         for (i, value) in self.0.iter_mut().enumerate() {
             if !kept.contains(&(i as u16)) { *value = None; }
         }
+        self.6.clear();
     }
     /// Forget one binding without disturbing the other values or visit metadata.
     /// Absence is the local flag: removing the value also removes that flag.
@@ -1112,10 +1154,13 @@ impl PerBuffer {
             *value = None;
         }
     }
-    /// Every Value it holds, passing over slot SKIP.
-    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, visit: &mut impl FnMut(&mut Value)) {
+    /// Every Value it holds, passing over slot SKIP, and over the Lisp
+    /// locals unless LOCALS (a minor's read of a buffer nothing stored into
+    /// since the last collection: each store into them marks the buffer).
+    pub(crate) fn visit_values_but(&mut self, skip: Option<u16>, locals: bool, visit: &mut impl FnMut(&mut Value)) {
         if let Some(marker) = &mut self.4 { visit(marker); }
         if let Some(list) = &mut self.5 { visit(list); }
+        if locals { self.6.visit_values(visit); }
         let skip = skip.map(usize::from);
         for (_, v) in self.0.iter_mut().enumerate().filter(|&(i, _)| Some(i) != skip) {
             if let Some(v) = v { visit(v); }
@@ -1181,15 +1226,16 @@ impl Vm {
             self.forwarded.objects[i as usize] = Value::UNBOUND;
         }
     }
+    /// The interned slot of the per-buffer built-in (DEFVAR_PER_BUFFER) at
+    /// forwarded index I, the place a `Fwd::Buffer' names, once its symbol
+    /// exists.
+    pub(crate) fn per_buffer_slot(&self, i: usize) -> Option<usize> {
+        self.names.get(C_VARIABLES[self.forwarded.buffer_vars[i]].name).copied()
+    }
     /// GNU `SYMBOL_FORWARDED`: the forwarding of interned SLOT, if it names a
     /// built-in variable. Initialises and caches SLOT's lazy redirect.
     /// A tracked built-in variable is the forwarding the tracking keeps; a
     /// tracked plain one is `Fwd::Tracked`.
-    /// The interned slots of the per-buffer built-ins (DEFVAR_PER_BUFFER),
-    /// the only ones a `Fwd::Buffer' forwards.
-    pub(crate) fn per_buffer_slots(&self) -> Vec<usize> {
-        self.forwarded.buffer_vars.iter().filter_map(|&v| self.names.get(C_VARIABLES[v].name).copied()).collect()
-    }
     pub(super) fn forwarding(&mut self, slot: usize) -> Option<Fwd> {
         self.resolve_redirect(slot);
         match self.variable_redirects.get(slot).copied().flatten() {
@@ -1236,8 +1282,8 @@ impl Vm {
         }
     }
     /// The C storage of a localized global built-in (GNU's blv over its
-    /// forwarding): its default lives there, its buffer-local values in the
-    /// local-binding table.
+    /// forwarding): its default lives there, its buffer-local values in each
+    /// buffer's own store.
     pub(super) fn localized_forwarded(&self, slot: usize) -> Option<Fwd> {
         match self.kept_redirect(slot) {
             Some(VariableRedirect::LocalizedForwarded(fwd @ (Fwd::Bool(_) | Fwd::Int(_) | Fwd::Obj(_)))) => Some(fwd),
@@ -1280,9 +1326,7 @@ impl Vm {
         }
         // GNU's syms_of_* call Fmake_variable_buffer_local on these.
         if AUTOMATICALLY_LOCAL.contains(&name) {
-            self.slots[slot].explicit_local = false;
-            let table = self.allocate_object(data::Object::HashTable(Box::new(hash::HashTable::new_local_bindings())));
-            self.install_local_table(slot, table, false);
+            self.declare_local(slot, Localness::Automatic);
         }
     }
     /// The C variables GNU sets from the environment at every start
@@ -1426,9 +1470,7 @@ impl Vm {
     }
     /// GNU `PER_BUFFER_VALUE_P (buf, idx)`.
     pub(super) fn per_buffer_always_local(&self, i: u16) -> bool {
-        matches!(C_VARIABLES[self.forwarded.buffer_vars[i as usize]].name,
-            "buffer-invisibility-spec" | "default-directory" | "buffer-file-name" | "buffer-file-truename" | "buffer-read-only" | "buffer-file-format" | "local-minor-modes" | "major-mode" | "mode-name" | "mark-active" | "buffer-undo-list" | "buffer-auto-save-file-name"
-            | "buffer-backed-up" | "buffer-saved-size" | "point-before-scroll" | "buffer-auto-save-file-format" | "buffer-display-count" | "buffer-display-time")
+        ALWAYS_LOCAL[i as usize]
     }
     pub(super) fn clear_forwarded_local(&mut self, buffer: usize, i: u16) {
         if !self.per_buffer_always_local(i) {
@@ -1445,8 +1487,7 @@ impl Vm {
         } else { self.per_buffer_default(i) }
     }
     pub(super) fn reset_forwarded_modes(&mut self, buffer: usize) {
-        for name in ["major-mode", "mode-name"] {
-            let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) else { unreachable!() };
+        for &i in MODE_PLACES.iter() {
             self.per_buffer_mut(buffer).expect("buffer").clear_local(i);
             self.forwarded_buffer_value(buffer, i);
         }
@@ -1496,21 +1537,25 @@ impl Vm {
         self.undo_list_slot
     }
     /// The directory a new buffer starts with: the current buffer's
-    /// (reset_buffer), or before any buffer exists the process directory as
-    /// a directory name (init_buffer). init_buffer makes it unibyte and GNU's
-    /// startup.el later decodes it; VM2 runs no such startup, so it is
-    /// decoded here: unibyte when ASCII (as GNU's decoding leaves it),
-    /// multibyte when other UTF-8, else its raw bytes. No file
-    /// name handler exists yet when the first buffer is made, so
-    /// init_buffer's `/:' quoting never applies.
+    /// (reset_buffer), or before any buffer exists (nil current, the
+    /// `*scratch*' not yet made) the startup directory.
     pub(crate) fn inherited_directory(&mut self) -> Value {
         let Some(Fwd::Buffer(i)) = Forwarded::lookup("default-directory") else { unreachable!("declared") };
         let current = self.slots[self.buffer_slot].value;
-        if let Some(buffer) = current.index_if(0).and_then(|n| n.checked_sub(1))
+        if let Some(buffer) = current.object_index_if()
             && self.per_buffer(buffer).is_some()
         {
             return self.forwarded_buffer_value(buffer, i);
         }
+        self.startup_directory_value()
+    }
+    /// The process directory as a directory name (init_buffer). init_buffer
+    /// makes it unibyte and GNU's startup.el later decodes it; VM2 runs no
+    /// such startup, so it is decoded here: unibyte when ASCII (as GNU's
+    /// decoding leaves it), multibyte when other UTF-8, else its raw bytes.
+    /// No file name handler exists yet when the first buffer is made, so
+    /// init_buffer's `/:' quoting never applies.
+    pub(crate) fn startup_directory_value(&mut self) -> Value {
         // init_buffer starts from emacs_wd, a symlinked PWD's spelling kept.
         match crate::environment::startup_directory() {
             Some(dir) => {
@@ -1670,7 +1715,7 @@ impl Vm {
     /// while BUFFER was current is in effect.
     fn let_shadows_buffer_binding(&self, slot: usize, buffer: Value) -> bool {
         // HOST(dynamic:saved): reads the bound variable, owner or flag, not the saved value
-        self.dynamic.iter().any(|&(bound, _, owner, let_default)| bound == slot && let_default && owner == buffer)
+        self.dynamic.iter().any(|&(bound, _, owner, kind)| bound == slot && kind == Let::Default && owner == buffer)
     }
     /// GNU `set_internal` (data.c:1806): setting per-buffer variable I with
     /// no local value in BUFFER, within a `let' of its default made there,
@@ -1719,7 +1764,7 @@ impl Vm {
     /// binding it records, (SLOT OLD OWNER LET-DEFAULT). A per-buffer
     /// variable with no local value here, or a localized Boolean, binds its
     /// default (SPECPDL_LET_DEFAULT).
-    pub(super) fn forwarded_binding(&mut self, slot: usize, fwd: Fwd) -> std::result::Result<(usize, Value, Value, bool), Fault> {
+    pub(super) fn forwarded_binding(&mut self, slot: usize, fwd: Fwd) -> std::result::Result<(usize, Value, Value, Let), Fault> {
         let old = self.forwarded_value(fwd).map_err(Fault::Error)?;
         let owner = self.slots[self.buffer_slot].value;
         // Only a per-buffer variable needs the current buffer; binding any
@@ -1731,13 +1776,14 @@ impl Vm {
             }
             _ => false,
         };
-        Ok((slot, old, owner, let_default))
+        let kind = if let_default { Let::Default } else if matches!(fwd, Fwd::Buffer(_)) { Let::Local } else { Let::Plain };
+        Ok((slot, old, owner, kind))
     }
     /// GNU `do_specbind`'s store for a forwarded SLOT, once its binding is
     /// recorded: a failed store leaves that binding to restore OLD.
-    pub(super) fn store_forwarded_binding(&mut self, slot: usize, fwd: Fwd, value: Value, let_default: bool) -> std::result::Result<(), Fault> {
+    pub(super) fn store_forwarded_binding(&mut self, slot: usize, fwd: Fwd, value: Value, kind: Let) -> std::result::Result<(), Fault> {
         let value = match self.localized_forwarded(slot) { Some(localized) => Self::localized_value(localized, value)?, None => value };
-        if let_default {
+        if kind == Let::Default {
             self.set_forwarded_default(slot, fwd, value, SetFlag::Bind)
         } else {
             self.set_forwarded(slot, fwd, value, SetFlag::Bind)
@@ -1751,7 +1797,8 @@ impl Vm {
     /// OWNER still has its local value. A watcher's signal leaves the value
     /// unrestored, as does a saved integer that set-default-toplevel-value
     /// replaced with a non-integer, which signals once the watchers ran.
-    pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, let_default: bool) -> Result<()> {
+    pub(super) fn unbind_forwarded(&mut self, slot: usize, fwd: Fwd, old: Value, owner: Value, kind: Let) -> Result<()> {
+        let let_default = kind == Let::Default;
         let mut local = owner.index_if(0).and_then(|n| n.checked_sub(1));
         if let Fwd::Buffer(i) = fwd && !let_default && !local.is_some_and(|buffer| self.per_buffer_local_p(buffer, i)) {
             return Ok(());
@@ -1898,14 +1945,10 @@ impl Vm {
     pub(crate) fn set_per_buffer_of(&mut self, index: usize, name: &str, value: Value) {
         if let Some(Fwd::Buffer(i)) = Forwarded::lookup(name) {
             if let Some(locals) = self.per_buffer_mut(index) { locals.set(i, value); }
-        } else if let Some(&slot) = self.names.get(name) {
-            let (table, buffer) = (self.slots[slot].local, Value::reference(index + 1, 0));
-            if table != Value::NIL
-                && let Some(binding) = self.declaration_hash_get(table, buffer).ok().flatten()
-                && let Ok(local) = binding.index(7)
-            {
-                self.slots[local - 1].value = value;
-            }
+        } else if let Some(&slot) = self.names.get(name)
+            && let Some(at) = self.local_at(index, slot)
+        {
+            self.store_local(index, slot, at, crate::variable_runtime::LocalStore::Set(value));
         }
     }
     /// data.c check_fwd_predicate's FWDPRED_Qfraction: VALUE is a number

@@ -31,7 +31,7 @@ class WorkspaceInventory(unittest.TestCase):
 
     def test_oracle_suites_are_not_excluded(self):
         names = ['romacs-vm', 'romacs-display-runtime',
-                 'romacs-video', 'new-vm2-oracle-tests']
+                 'romacs-renderer-wgpu', 'new-vm2-oracle-tests']
         metadata = {'workspace_members': names, 'packages': [dict(id=n, name=n) for n in names]}
         suites = gate.workspace_suites(metadata)
         self.assertEqual(set(sum(suites.values(), [])), set(names))

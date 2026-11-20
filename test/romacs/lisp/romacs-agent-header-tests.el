@@ -293,7 +293,7 @@ string, an overlay."
                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
           (should (eq (romacs-agent-ui--state-key session) 'completed))
           (cl-letf (((symbol-function 'romacs-agent--manifest-put) #'ignore))
-            (setq buffer (romacs-agent-show session)))
+            (setq buffer (romacs-agent-ui--show-chat session)))
           (should (eq (romacs-agent-ui--state-key session) 'idle))
           (with-current-buffer buffer
             (should (stringp header-line-format))
