@@ -29,12 +29,12 @@
 
 ;;; Code:
 
+;; Raw bytes, which its conversions turn to and from Devanagari through
+;; ind-util.el's IS 13194 table (ledger/divergences/VM2-ISCII-RAW-BYTES.md).
 (define-coding-system 'in-is13194-devanagari
   "8-bit encoding for ASCII (MSB=0) and IS13194-Devanagari (MSB=1)."
-  :coding-type 'iso-2022
+  :coding-type 'raw-text
   :mnemonic ?D
-  :designation [ascii indian-is13194 nil nil]
-  :charset-list '(ascii indian-is13194)
   :post-read-conversion 'in-is13194-post-read-conversion
   :pre-write-conversion 'in-is13194-pre-write-conversion)
 
@@ -549,7 +549,9 @@ environment."))
 	 (if slot
 	     (set-char-table-range
 	      composition-function-table key
-	      (list (vector (cdr slot) 0 #'font-shape-gstring))))))
+	      ;; The shaper by name, called when text is composed: the
+	      ;; display defines it (as indonesian.el names it).
+	      (list (vector (cdr slot) 0 'font-shape-gstring))))))
    char-script-table))
 
 ;; Brahmi composition rules
