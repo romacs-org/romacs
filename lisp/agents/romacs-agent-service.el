@@ -209,7 +209,9 @@ message, `agents/transport'.  Any other first message closes it."
     (let ((lines (romacs-agent-rpc-lines rpc chunk)))
       (if (eq lines 'over)
           (romacs-agent-rpc-close rpc)
-        (dolist (line lines) (romacs-agent-service--handle rpc line))))))
+        ;; No more of them once one closed it.
+        (while (and lines (romacs-agent-rpc-live-p rpc))
+          (romacs-agent-service--handle rpc (pop lines)))))))
 
 (defconst romacs-agent-service--methods
   '(("agents/hello" . romacs-agent-service--hello)
