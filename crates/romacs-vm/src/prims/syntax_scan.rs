@@ -52,6 +52,11 @@ fn parse_partial_sexp(cx, from: Value, to: Value; optional targetdepth: Value, s
     start(cx, Op::ParsePartialSexp, &[from, to, targetdepth, stopbefore, oldstate, commentstop])
 }}
 
+// Counters of the current buffer's syntax summaries, the index a syntax scan carries
+// its state across, as a plist: `:served', `:declined' (an alist of the reasons a scan was
+// not served, with counts), `:leaves', `:leaf-scans', `:plain-leaves', `:composed',
+// `:context-switches', `:log-overflows', `:bytes' and `:char-table-writes'.  nil in a
+// unibyte buffer.
 defsubr! { name = "romacs-syntax-summaries-stats", gnu = "romacs:syntax-summaries", effect = Reads,
 fn romacs_syntax_summaries_stats(cx) { cx.syntax_summaries_stats() }}
 

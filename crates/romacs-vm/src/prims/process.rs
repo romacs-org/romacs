@@ -330,12 +330,20 @@ fn internal_default_signal_process(cx, process: Value, sigcode: Value; optional 
 
 // Internal leaves for lisp/vm/subprocess.el.
 
+// The process NAME stands for: a process, a process's or buffer's name, a buffer (its
+// process), or nil for the current buffer's.  Signals an error when there is none.
 defsubr! { name = "romacs--get-process", gnu = "romacs:process", effect = Reads,
 fn romacs_get_process(cx, name: Value) { get_process(cx, name) }}
 
+// Make a new running process named NAME, made unique, with the default filter and
+// sentinel, and push it onto the process list.  For subprocess.el.
 defsubr! { name = "romacs--proc-make", gnu = "romacs:process", effect = Global,
 fn proc_make(cx, name: Value) { cx.make_process(name) }}
 
+// PROCESS's FIELD, a symbol: one of `name', `command', `filter', `sentinel', `log',
+// `buffer', `childp', `plist', `type', `mark', `status', `decode', `encode', `stderrproc' and
+// `tty-name', or a numeric field (`pid', `alive', `nbytes-read', `infd', `outfd' and the flags
+// `romacs--proc-set' sets).  The status is brought up to date first.  For subprocess.el.
 defsubr! { name = "romacs--proc-get", gnu = "romacs:process", effect = Reads,
 fn proc_get(cx, process: Value, field: Value) {
     // GNU reads p->status only after update_status.
@@ -346,6 +354,9 @@ fn proc_get(cx, process: Value, field: Value) {
     }
 }}
 
+// Set PROCESS's FIELD, a symbol, to VALUE: one of the fields `romacs--proc-get' reads,
+// or the flags `kill-without-query', `inherit-coding', `pty-in' and `pty-out', or `reading'
+// to start or stop reading PROCESS's output.  Returns VALUE.  For subprocess.el.
 defsubr! { name = "romacs--proc-set", gnu = "romacs:process", effect = Global,
 fn proc_set(cx, process: Value, field: Value, value: Value) {
     match slot_of(cx, field)? {
@@ -404,6 +415,8 @@ fn proc_network(cx, process: Value, server: Value, nowait: Value, host: Value, s
 defsubr! { name = "romacs--proc-accept", gnu = "process.c:5000", effect = Global,
 fn proc_accept(cx, server: Value) { cx.process_accept(server) }}
 
+// Give PROCESS the accepted network connection CONNECTION, a serial number, in place
+// of the channel it had.  For subprocess.el's servers.
 defsubr! { name = "romacs--proc-attach", gnu = "romacs:process", effect = Global,
 fn proc_attach(cx, process: Value, connection: Integer) { cx.process_attach(process, connection.0) }}
 
@@ -423,6 +436,8 @@ fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optio
     cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL)
 }}
 
+// How many waits for process output have found something ready, since startup: a
+// caller compares two readings to tell whether any process had output in between.
 defsubr! { name = "romacs--proc-activity", gnu = "romacs:process", effect = Reads,
 fn proc_activity(cx) { Value::integer(cx.process_activity() as i64).map_err(Fault::Error) }}
 
@@ -450,6 +465,8 @@ fn proc_changed(cx, process: Value) {
     Ok(if cx.process_changed(process) { Value::TRUE } else { Value::NIL })
 }}
 
+// Mark PROCESS's status as changed, as GNU's `p->tick = ++process_tick' does: the next
+// status notification reports it.  Returns nil.
 defsubr! { name = "romacs--proc-tick", gnu = "romacs:process", effect = Global,
 fn proc_tick(cx, process: Value) { check_process(cx, process)?; cx.process_tick(process); Ok(Value::NIL) }}
 
@@ -530,6 +547,8 @@ fn call_process_run(cx, argv: Value, env: Value, dir: Value, infile: Value, outp
     cx.call_process_run(&argv, &env, &dir, &infile, output, error, wait != Value::NIL)
 }}
 
+// The wait status STATUS, an integer from `waitpid', as (exit . CODE) for a process
+// that exited or (signal . NUMBER) for one a signal killed.
 defsubr! { name = "romacs--wait-status", gnu = "romacs:process", effect = Pure,
 fn wait_status(_cx, status: Integer) {
     // (signal . N) or (exit . N), from a wait status.

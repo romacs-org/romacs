@@ -24,6 +24,9 @@ fn test_completion(cx, string: Value, collection: Value; optional predicate: Val
     prepare(cx, Mode::Test, string, collection, predicate)
 }}
 
+// The symbols `commandp' may accept, in the initial obarray's order: a superset that
+// callers still filter with `commandp'.  Brings the command set up to date first, judging
+// each symbol whose definition, interning or plist changed since the last call.
 defsubr! { name = "romacs-command-symbols", gnu = "romacs:commands", effect = Reads,
 fn romacs_command_symbols(cx) {
     // A verdict that only Lisp can give, or an error `commandp' would
@@ -34,6 +37,9 @@ fn romacs_command_symbols(cx) {
     }
     Ok(cx.command_set_symbols())
 }}
+// A number that grows whenever a definition, an interning or a command's plist
+// changes what `romacs-command-symbols' may return: a cache keyed by it stays valid while
+// the number stays the same.
 defsubr! { name = "romacs-command-epoch", gnu = "romacs:commands", effect = Reads,
 fn romacs_command_epoch(cx) {
     let epoch = i64::try_from(cx.command_set_epoch()).map_err(|_| Fault::Error("command epoch overflow".into()))?;

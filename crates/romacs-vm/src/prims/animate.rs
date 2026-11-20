@@ -10,10 +10,6 @@ use super::*;
 defsubr! { name = "romacs--display-animates", gnu = "romacs:display", effect = Reads,
 fn display_animates(cx) { cx.display_animates() }}
 
-// The host frame's native window, for a server session whose window comes
-// and goes (lisp/session/romacs-server.el): ACTION `show' makes it anew when it was
-// closed and asks for the focus, `hide' closes it and keeps the session,
-// `query' only asks. t when a window shows after the request.
 // What startup is doing: STAGE a symbol or string naming the step (`init',
 // `agents', `restore'), LABEL what it is at, or nil, for the screen a
 // launch shows until its first frame (nothing once that frame shows, or
@@ -37,7 +33,13 @@ fn startup_progress(cx, stage: Value; optional label: Value, state: Value) -> St
     Ok(Step::Call { f: view, args: vec![shown], then: shown_by_view, saved: vec![shown] })
 }}
 fn shown_by_view(_: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next { Ok(Step::Done(saved[0])) }
+// Where the pointer is over the host frame, in pixels: (X . Y), as GNU's
+// `mouse_position_hook' finds it; nil with no pointer over the frame, or no display.
 defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
 fn pointer(cx) { cx.pointer() }}
+// The host frame's native window, for a server session whose window comes
+// and goes (lisp/session/romacs-server.el): ACTION `show' makes it anew when it was
+// closed and asks for the focus, `hide' closes it and keeps the session,
+// `query' only asks. t when a window shows after the request.
 defsubr! { name = "romacs--native-window", gnu = "romacs:display", effect = Global,
 fn native_window(cx, action: Value) { cx.native_window(action) }}

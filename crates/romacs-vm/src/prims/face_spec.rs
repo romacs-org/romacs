@@ -583,6 +583,8 @@ pub(crate) fn declare(cx: &mut Leaf<'_>, face: Value, spec: Value) -> std::resul
     Ok(())
 }
 
+// The work of `face-spec-recalc': recompute FACE on FRAME from its specs (its
+// `defface' spec, the enabled themes' specs and `face-override-spec'), as faces.el does.
 defsubr! { name = "romacs--face-spec-recalc", gnu = "romacs:faces", effect = Global,
 fn romacs_face_spec_recalc(cx, face: Value, frame: Value) { recalc(cx, face, frame) }}
 
@@ -602,6 +604,8 @@ fn recalc_themed(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value) -> std::result
     Ok(())
 }
 
+// The work of `custom-theme-recalc-face': recompute FACE, or the face it is an alias
+// of, on every frame, after a theme changed its specs.  Returns nil.
 defsubr! { name = "romacs--custom-theme-recalc-face", gnu = "romacs:faces", effect = Global,
 fn romacs_custom_theme_recalc_face(cx, face: Value) {
     let keys = cx.face_keys();
@@ -624,6 +628,10 @@ fn assq_delete_all(cx: &mut Leaf<'_>, key: Value, mut alist: Value) -> Out {
     Ok(alist)
 }
 
+// `enable-theme''s loop over SETTINGS, a run of THEME's settings: push each face
+// setting's spec onto its face's `theme-face' stack, in place of THEME's earlier one, and
+// recompute the face.  Returns the tail from the first setting that is not a face's, for
+// Lisp to take, or nil when every one was.
 defsubr! { name = "romacs--theme-enable-faces", gnu = "romacs:faces", effect = Global,
 fn romacs_theme_enable_faces(cx, theme: Value, settings: Value) {
     // `enable-theme''s loop over a run of face settings: the tail from
@@ -647,6 +655,10 @@ fn romacs_theme_enable_faces(cx, theme: Value, settings: Value) {
     Ok(Value::NIL)
 }}
 
+// `disable-theme''s loop over SETTINGS, a run of THEME's settings: remove THEME's
+// spec from each face's `theme-face' stack, and the `saved-face' spec THEME gave it, then
+// recompute the face.  Returns the tail from the first setting that is not a face's, for
+// Lisp to take, or nil when every one was.
 defsubr! { name = "romacs--theme-disable-faces", gnu = "romacs:faces", effect = Global,
 fn romacs_theme_disable_faces(cx, theme: Value, settings: Value) {
     // `disable-theme''s loop over a run of face settings, as above.
@@ -671,6 +683,9 @@ fn romacs_theme_disable_faces(cx, theme: Value, settings: Value) {
     Ok(Value::NIL)
 }}
 
+// Revert a theme preview: set FACE on FRAME (nil for new frames' defaults) back to the
+// attribute vector SAVED, writing each attribute that differs as a recomputation writes it.
+// Returns nil.
 defsubr! { name = "romacs--face-restore", gnu = "romacs:faces", effect = Global,
 fn romacs_face_restore(cx, face: Value, frame: Value, saved: Value) {
     // A theme preview's revert: FACE on FRAME (nil, new frames' defaults)
@@ -701,6 +716,10 @@ fn romacs_face_restore(cx, face: Value, frame: Value, saved: Value) {
     Ok(Value::NIL)
 }}
 
+// `face-set-after-frame-default''s loop: recompute every face on FRAME, `default'
+// first, and merge in its global attributes.  An invalid spec is skipped, so it cannot
+// prevent the frame's creation; a frame showing another frame's faces is left alone.
+// Returns nil.
 defsubr! { name = "romacs--recalc-all-faces", gnu = "romacs:faces", effect = Global,
 fn romacs_recalc_all_faces(cx, frame: Value) {
     // `face-set-after-frame-default''s loop, `default' first: an invalid
@@ -751,6 +770,9 @@ fn locally_modified(cx: &mut Leaf<'_>, keys: &FaceKeys, class: &Class, face: Val
     Ok(!result)
 }
 
+// `frame-set-background-mode''s scan: the faces that no longer match their specs on
+// FRAME, so were set there directly; a change of background mode leaves them alone.  nil for
+// a frame showing another frame's faces.
 defsubr! { name = "romacs--faces-modified-on", gnu = "romacs:faces", effect = Reads,
 fn romacs_faces_modified_on(cx, frame: Value) {
     // `frame-set-background-mode''s scan: faces that don't match their
@@ -775,6 +797,8 @@ fn romacs_faces_modified_on(cx, frame: Value) {
     Ok(modified)
 }}
 
+// `frame-set-background-mode''s recalculation: recompute every face on FRAME except
+// those in the list MODIFIED, in `face-list' order.  Returns nil.
 defsubr! { name = "romacs--recalc-faces-except", gnu = "romacs:faces", effect = Global,
 fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
     // `frame-set-background-mode''s recalculation, in `face-list' order.
@@ -796,6 +820,8 @@ fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
     Ok(Value::NIL)
 }}
 
+// The work of `face-spec-choose': the attributes the face spec SPEC gives FRAME (nil
+// for the selected frame), or NO-MATCH-RETVAL when no display clause of SPEC matches.
 defsubr! { name = "romacs--face-spec-choose", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_spec_choose(cx, spec: Value; optional frame: Value, no_match_retval: Value) {
     let keys = cx.face_keys();
@@ -804,6 +830,8 @@ fn romacs_face_spec_choose(cx, spec: Value; optional frame: Value, no_match_retv
     Ok(choose(cx, &keys, &class, spec, frame)?.unwrap_or(no_match_retval))
 }}
 
+// The work of `face-spec-set-match-display': t when the display requirement DISPLAY
+// of a face spec matches FRAME, else nil.
 defsubr! { name = "romacs--face-spec-set-match-display", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_spec_set_match_display(cx, display: Value, frame: Value) {
     let keys = cx.face_keys();
@@ -834,6 +862,8 @@ fn attrs_match(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, attrs: Value, fr
     Ok(true)
 }
 
+// The work of `face-attr-match-p': t when FACE's attributes on FRAME (nil for the
+// selected frame) are those the plist ATTRS gives, else nil.
 defsubr! { name = "romacs--face-attr-match-p", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_attr_match_p(cx, face: Value, attrs: Value; optional frame: Value) {
     let keys = cx.face_keys();
@@ -841,6 +871,8 @@ fn romacs_face_attr_match_p(cx, face: Value, attrs: Value; optional frame: Value
     Ok(if attrs_match(cx, &keys, face, attrs, frame)? { Value::TRUE } else { Value::NIL })
 }}
 
+// Every face defined for new frames, the most recently defined first: the work of
+// `face-list'.
 defsubr! { name = "romacs--face-list", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_list(cx) {
     let mut faces = cx.face_ids()?;

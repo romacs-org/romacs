@@ -119,6 +119,8 @@ fn treesit_grammar_location(cx, language: Value) {
     cx.ts_grammar_location(language)
 }}
 
+// The tree-sitter grammars linked into the executable, each a plist (:name LANGUAGE
+// :url URL :commit COMMIT :abi VERSION), LANGUAGE a symbol.
 defsubr! { name = "romacs-treesit-bundled-grammars", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_bundled_grammars(cx) {
     cx.ts_bundled_grammars()
@@ -200,11 +202,16 @@ fn treesit_parser_create(cx, language: Value; optional buffer: Value, no_reuse: 
     cx.ts_parser_create(language, buffer, no_reuse, tag)
 }}
 
+// Start the first parse of the current buffer's accessible text for LANGUAGE, a
+// symbol, on another thread; t when it started.  LANGUAGE nil abandons one.  Nothing starts
+// in a buffer that has parsers already.
 defsubr! { name = "romacs--treesit-parse-early", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
+// Whether the current buffer's early parse has not given a tree yet, so asking for
+// one now would wait for it.
 defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_parsing_p(cx) {
     cx.ts_parsing_p()
@@ -436,6 +443,10 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // (treesit.el), run here. Lisp is called, in GNU's order, for each face written,
 // for function captures, and for an override other than nil or t.
 
+// Fontify REGION, a cons (START . END), from the captures in NODE between BEG and END
+// of the query in COMBINED, a cons (QUERY . SPANS) where SPANS names the font-lock settings
+// each part of QUERY belongs to.  The query's predicates run as `treesit-query-capture'
+// runs them.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
     let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;

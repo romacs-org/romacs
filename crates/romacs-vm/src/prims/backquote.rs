@@ -36,6 +36,10 @@ fn walk(cx: &mut Leaf<'_>) -> std::result::Result<Walk, Fault> {
               backquote: marker("backquote-backquote-symbol", backquote)?, bare })
 }
 
+// Expand the backquoted STRUCTURE at nesting LEVEL (nil for 0), as `backquote-process'
+// does, under the current `backquote-unquote-symbol', `backquote-splice-symbol' and
+// `backquote-backquote-symbol'.  Returns (TAG . FORM): TAG 0 when FORM is a constant, 1 when
+// it computes the value, 2 when its value is spliced into the enclosing list.
 defsubr! { name = "romacs--backquote-process", gnu = "romacs:backquote", effect = Pure,
 fn romacs_backquote_process(cx, structure: Value; optional level: Value) {
     let level = if level == Value::NIL { 0 } else { level.as_integer().map_err(|_| Fault::Wrong("integerp", level))? };

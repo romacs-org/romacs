@@ -52,6 +52,9 @@ fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
     cx.window_recenter_start(window, arg.integer_value(), (lines(margin)?, lines(height)?))
 }}
 
+// The new window start for scrolling the selected window a whole screen from position
+// START, down when FORWARD is non-nil, keeping CONTEXT lines of the old screen: what
+// `scroll-up' and `scroll-down' do over rows a host lays out.  nil without a layout.
 defsubr! { name = "romacs--scroll-start", gnu = "romacs:display", effect = Reads,
 fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     let window = cx.vm_selected_window()?;
@@ -59,6 +62,8 @@ fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     cx.window_scroll_start(window, number(start)?, forward != Value::NIL, number(context)?)
 }}
 
+// How many whole rows the selected window's text area shows from position START; nil
+// without a layout.
 defsubr! { name = "romacs--rows-shown-from", gnu = "romacs:display", effect = Reads,
 fn rows_shown_from(cx, start: Value) {
     let window = cx.vm_selected_window()?;

@@ -40,10 +40,15 @@ fn backtrace_frame_internal(cx, function: Value, nframes: Value, base: Value) ->
     Ok(Step::Call { f: function, args, then: frame_result, saved: vec![] })
 }}
 fn frame_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
+// The current call stack as bounded JSON text, a string: what an inspect request
+// answers with (inspect.rs).
 defsubr! { name = "romacs--inspect-frames", gnu = "romacs:inspect", effect = Reads,
 fn romacs_inspect_frames(cx) -> Step {
     Ok(Step::Done(cx.inspect_frames()))
 }}
+// Listen for inspect requests on DIRECTORY/inspect.sock, keeping each snapshot in
+// the directory STORE when it is non-nil.  DIRECTORY must be private to this user; a socket
+// there that no one answers on is a dead session's and is replaced.  Returns nil.
 defsubr! { name = "romacs--inspect-listen", gnu = "romacs:inspect", effect = Global,
 fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
     let directory = cx.string_text(directory)?;
@@ -66,6 +71,8 @@ fn romacs_take_stalls(cx; optional ending: Value) {
     let dropped = Value::integer(i64::try_from(dropped).unwrap_or(i64::MAX)).unwrap_or(Value::NIL);
     Ok(cx.cons(dropped, list))
 }}
+// Stop listening for inspect requests: the listener's threads end and its socket is
+// removed, if it is still this session's.  Returns nil.
 defsubr! { name = "romacs--inspect-stop", gnu = "romacs:inspect", effect = Global,
 fn romacs_inspect_stop(_cx) {
     crate::host::inspect_stop();
@@ -75,7 +82,7 @@ defsubr! { name = "backtrace-debug", gnu = "eval.c:4035", effect = Global,
 fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) -> Step {
     cx.backtrace_debug(level, flag, base).map(Step::Done)
 }}
-// Every frame with its locals in one walk, for `backtrace-get-frames`
+// Every frame with its locals in one walk, for `backtrace-get-frames'
 // (lisp/emacs-lisp/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
 defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
 fn backtrace_frames_and_locals(cx; optional base: Value) -> Step {
