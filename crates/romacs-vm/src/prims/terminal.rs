@@ -1,10 +1,11 @@
 use super::*;
 
 // Start a terminal running SHELL in DIRECTORY, bound to the current buffer, COLUMNS
-// wide and ROWS tall, or with both nil the size of the window that controls the buffer.
-// Returns the session number the other `romacs--term-' functions take.  Signals an error
-// when the buffer is not shown in a window or that window is too small, when the buffer
-// already owns a terminal, or when no terminal host is attached.
+// wide and ROWS tall, both positive integers, or with both nil the size of the window that
+// controls the buffer.  Returns the session number the other `romacs--term-' functions take.
+// Signals an error when a size is invalid or the host refuses it, when with both nil the
+// buffer is not shown in a window or that window is too small, when the buffer already owns
+// a terminal, or when no terminal host is attached.
 defsubr! { name = "romacs--term-create", gnu = "romacs:terminal", effect = Global,
 fn terminal_create(cx, shell: Value, directory: Value; optional columns: Value, rows: Value) {
     cx.terminal_create(shell, directory, columns, rows)
@@ -31,14 +32,17 @@ fn terminal_transport_counts(cx, session: Integer) {
 }}
 
 // Send BYTES, a string, to terminal SESSION as input.  Signals
-// `romacs-terminal-not-running' once its program has ended.  Returns nil.
+// `romacs-terminal-not-running' once its program has ended, and an error for an unknown
+// SESSION.  Returns nil.
 defsubr! { name = "romacs--term-send", gnu = "romacs:terminal", effect = Global,
 fn terminal_send(cx, session: Integer, bytes: Value) {
     cx.terminal_send(session.0, bytes)
 }}
 
-// Make WINDOW (nil for the selected window) follow terminal SESSION again at once when
-// FOLLOW is non-nil, or stop following it when FOLLOW is nil.  Returns FOLLOW.
+// Make WINDOW (nil for the selected window) follow terminal SESSION again when FOLLOW
+// is non-nil, moving it to the terminal's cursor and screen at once when it shows the
+// terminal's buffer and a screen has been published; or stop following it when FOLLOW is
+// nil.  An unknown SESSION signals an error.  Returns FOLLOW.
 defsubr! { name = "romacs--term-follow", gnu = "romacs:terminal", effect = Global,
 fn terminal_follow(cx, session: Integer, follow: Value; optional window: Value) {
     cx.terminal_follow(session.0, follow, window)
@@ -56,36 +60,40 @@ fn terminal_track(cx) {
 // Paste the string TEXT into terminal SESSION as Alacritty does: between bracketed
 // paste marks, less ESC and C-c so the text can neither end the paste nor interrupt, when
 // the program asked for them; else with each line end a carriage return, as a typed RET
-// is.  Signals `romacs-terminal-not-running' as `romacs--term-send' does.
+// is.  Signals as `romacs--term-send' does.  Returns nil.
 defsubr! { name = "romacs--term-paste", gnu = "romacs:terminal", effect = Global,
 fn terminal_paste(cx, session: Integer, text: Value) {
     cx.terminal_paste(session.0, text)
 }}
 
-// Close terminal SESSION: its program is ended and its buffer no longer owns a
-// terminal.  Returns nil.
+// Close terminal SESSION: its buffer no longer owns a terminal, and the host is asked
+// to end its program, without waiting for it to end.  A SESSION closed already, or never
+// opened, is left alone; a negative one signals an error.  Returns nil.
 defsubr! { name = "romacs--term-close", gnu = "romacs:terminal", effect = Global,
 fn terminal_close(cx, session: Integer) {
     cx.terminal_close(session.0)
 }}
 
-// Whether the program in terminal SESSION still runs.
+// Whether the program in terminal SESSION still runs.  An unknown SESSION signals an
+// error.
 defsubr! { name = "romacs--term-running-p", gnu = "romacs:terminal", effect = Reads,
 fn terminal_running(cx, session: Integer) {
     cx.terminal_running(session.0)
 }}
 
-// The bytes a terminal sends for the input EVENT, a unibyte string, empty for an event
-// that sends none; cursor keys in application-cursor mode when APPLICATION-CURSOR is
-// non-nil.
+// The bytes a terminal sends for the input EVENT, a unibyte string: empty for an event
+// with none, such as a lone modifier or a mouse event; cursor keys in application-cursor
+// mode when APPLICATION-CURSOR is non-nil.  A key with a Super, Hyper or Alt modifier, or an
+// invalid character, signals an error.
 defsubr! { name = "romacs--term-encode-event", gnu = "romacs:terminal", effect = Reads,
 fn terminal_encode_event(cx, event: Value; optional application_cursor: Value) {
     cx.terminal_encode_event(event, application_cursor != Value::NIL)
 }}
 
 // Send the input EVENT to terminal SESSION as the bytes a terminal sends for it, in
-// the cursor mode the terminal is in now; an event with no bytes sends nothing.  Signals
-// `romacs-terminal-not-running' as `romacs--term-send' does.  Returns nil.
+// the cursor mode the terminal is in now; an event with no bytes sends nothing, without
+// looking at the program.  Signals as `romacs--term-encode-event' does for EVENT, and as
+// `romacs--term-send' does for SESSION.  Returns nil.
 defsubr! { name = "romacs--term-send-event", gnu = "romacs:terminal", effect = Global,
 fn terminal_send_event(cx, session: Integer, event: Value) {
     cx.terminal_send_event(session.0, event)
@@ -94,7 +102,7 @@ fn terminal_send_event(cx, session: Integer, event: Value) {
 // Terminal SESSION's state as a plist: `:running', `:alternate', `:bracketed-paste',
 // `:application-cursor', `:following' (for the selected window), `:shell-foreground', and,
 // once the terminal has published a screen, `:cursor' and `:screen-start', positions in
-// its buffer.
+// its buffer.  An unknown SESSION signals an error.
 defsubr! { name = "romacs--term-state", gnu = "romacs:terminal", effect = Reads,
 fn terminal_state(cx, session: Integer) {
     cx.terminal_state(session.0)

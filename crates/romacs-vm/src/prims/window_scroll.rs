@@ -53,10 +53,10 @@ fn recenter_start(cx, arg: Value, margin: Value, height: Value) {
 }}
 
 // The new window start for scrolling the selected window a whole screen from position
-// START, toward the end of the buffer when FORWARD is non-nil, else toward its start,
-// keeping CONTEXT lines of the old screen: what `scroll-up' and `scroll-down' do over rows
-// a host lays out.  nil without a layout, while the window is scrolled vertically, or in a
-// unibyte buffer.
+// START, toward the end of the buffer when FORWARD is non-nil, else toward its start, by
+// the screen's whole lines less CONTEXT, at least one, in the frame's line height, over the
+// rows a host lays out, as `scroll-up' and `scroll-down' do.  nil without a layout,
+// while the window is scrolled vertically, or in a unibyte buffer.
 defsubr! { name = "romacs--scroll-start", gnu = "romacs:display", effect = Reads,
 fn scroll_start(cx, start: Value, forward: Value, context: Value) {
     let window = cx.vm_selected_window()?;

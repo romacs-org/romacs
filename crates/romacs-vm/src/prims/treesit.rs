@@ -203,15 +203,18 @@ fn treesit_parser_create(cx, language: Value; optional buffer: Value, no_reuse: 
 }}
 
 // Start the first parse of the current buffer's accessible text for LANGUAGE, a
-// symbol, on another thread; t when it started.  LANGUAGE nil abandons one.  Nothing starts
-// in a buffer that has parsers already.
+// symbol, on another thread; t when it started.  Nothing starts, and the answer is nil, in
+// a buffer that has parsers or an early parse already, when LANGUAGE's grammar cannot be
+// loaded, or when no thread is free.  LANGUAGE nil drops the buffer's early parse, whose
+// thread may still finish, and returns nil.  In a unibyte buffer, or one past 4 GB, it
+// signals an error.
 defsubr! { name = "romacs--treesit-parse-early", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
-// Whether a parse of the current buffer has not given its tree yet, so asking for one
-// now would wait for it: its early parse, or a parser's parse ahead.
+// Whether a parse of the current buffer's text is still under way on another thread:
+// its early parse, or a parser's parse ahead.
 defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_parsing_p(cx) {
     cx.ts_parsing_p()
@@ -444,11 +447,12 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // for function captures, and for an override other than nil or t.
 
 // Fontify REGION, a cons (START . END), from the captures in NODE between BEG and END
-// of the query in COMBINED, a cons (QUERY . SPANS) where SPANS names the font-lock settings
-// each part of QUERY belongs to.  A capture naming a face puts it on its node's part of
-// REGION: with no OVERRIDE only where no face is yet, with OVERRIDE t over any, and with
-// another OVERRIDE through `treesit-fontify-with-override'.  A capture naming a function
-// calls it with NODE, OVERRIDE, START and END.  The query's predicates run as
+// of the query in COMBINED, a cons (QUERY . SPANS): SPANS is a vector of the font-lock
+// settings QUERY joins, each (FIRST-PATTERN . OVERRIDE), its first pattern's index and its
+// `override'.  A capture naming a face puts it on its node's part of REGION: with OVERRIDE
+// nil only when no part of that has a face yet, with OVERRIDE t over any, and with another
+// OVERRIDE through `treesit-fontify-with-override'.  A capture naming a function calls it
+// with the captured node, OVERRIDE, START and END.  The query's predicates run as
 // `treesit-query-capture' runs them.  Returns nil.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {

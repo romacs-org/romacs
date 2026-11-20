@@ -40,18 +40,19 @@ fn backtrace_frame_internal(cx, function: Value, nframes: Value, base: Value) ->
     Ok(Step::Call { f: function, args, then: frame_result, saved: vec![] })
 }}
 fn frame_result(_: &mut Leaf<'_>, value: Value, _: &[Value]) -> Next { Ok(Step::Done(value)) }
-// The current call stack as bounded JSON text, a string: what an inspect request
-// answers with (inspect.rs).
+// The current call stack as bounded JSON text, a string: the snapshot an inspect
+// request's answer carries (inspect.rs).
 defsubr! { name = "romacs--inspect-frames", gnu = "romacs:inspect", effect = Reads,
 fn romacs_inspect_frames(cx) -> Step {
     Ok(Step::Done(cx.inspect_frames()))
 }}
-// Listen for inspect requests on DIRECTORY/inspect.sock, a socket only this user may
-// use, after stopping this session's earlier listener.  The caller checks that DIRECTORY
-// is private to this user (`romacs-mcp-start' does).  A socket there that refuses a
-// connection is a dead session's and is replaced; one that answers signals an error.
-// With STORE non-nil, the newest 8 snapshots are kept in that directory, made with mode
-// 0700 when missing; a STORE that is not this user's private directory keeps none.
+// Listen for inspect requests on DIRECTORY/inspect.sock, DIRECTORY a directory name,
+// on a socket only this user may use, after stopping this session's earlier listener.  The
+// caller checks that DIRECTORY is private to this user (`romacs-mcp-start' does).  A socket
+// there that refuses a connection is a dead session's and is replaced; one that answers, or
+// a listener that cannot be set up, signals an error.  With STORE, a directory name, the
+// newest snapshots, up to 8, are saved there as they come, when they can be: it is made with
+// mode 0700 when missing, and a STORE that is not this user's private directory keeps none.
 // Returns nil.
 defsubr! { name = "romacs--inspect-listen", gnu = "romacs:inspect", effect = Global,
 fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
@@ -86,8 +87,10 @@ defsubr! { name = "backtrace-debug", gnu = "eval.c:4035", effect = Global,
 fn backtrace_debug(cx, level: Value, flag: Value; optional base: Value) -> Step {
     cx.backtrace_debug(level, flag, base).map(Step::Done)
 }}
-// Every frame with its locals in one walk, for `backtrace-get-frames'
-// (lisp/emacs-lisp/romacs-backtrace.el), where GNU calls `backtrace--locals' per frame.
+// Every frame from BASE's outward in one walk, each (EVALD FUNCTION ARGS FLAGS
+// LOCALS), for `backtrace-get-frames' (lisp/emacs-lisp/romacs-backtrace.el), where GNU calls
+// `backtrace--locals' per frame.  The first frame's LOCALS is nil.  nil when BASE is not on
+// the stack.
 defsubr! { name = "backtrace--frames-and-locals", gnu = "romacs:backtrace", effect = Reads,
 fn backtrace_frames_and_locals(cx; optional base: Value) -> Step {
     cx.backtrace_frames_and_locals(base).map(Step::Done)

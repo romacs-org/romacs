@@ -11,19 +11,20 @@ fn process_start(cx, argv: Value, input: Value, directory: Value, seconds: Integ
 }}
 
 // The result of background command ID once it has finished: (STATUS STDOUT STDERR
-// ERROR), STATUS its exit code or nil, STDOUT and STDERR its output as strings, ERROR a
-// string when it could not run, timed out or was cancelled, else nil.  nil while it still
-// runs.  The result stays until `romacs--process-forget'; an unknown ID signals an error.
+// ERROR), STATUS its exit code or nil, STDOUT and STDERR its output as strings, decoded as
+// UTF-8 and each cut at 4 MiB, ERROR a string when it could not run, timed out, was
+// cancelled or wrote more than 4 MiB to either stream, else nil.  nil while it still runs.
+// The result stays until `romacs--process-forget'; an unknown ID signals an error.
 defsubr! { name = "romacs--process-result", gnu = "romacs:process", effect = Global,
 fn process_result(cx, id: Integer) { cx.process_result(id.0) }}
 
-// The ids of the background commands that have finished and that no earlier call
-// reported, in the order they started: each id is reported once.
+// The ids of the background commands still kept that have finished and that no
+// earlier call reported, in the order they started: each id is reported at most once.
 defsubr! { name = "romacs--process-ready", gnu = "romacs:process", effect = Global,
 fn process_ready(cx) { cx.process_ready() }}
 
-// Whether a background command has finished since `romacs--process-ready' last ran.
-// Takes nothing.
+// Whether a background command may have finished since `romacs--process-ready' last
+// ran: a hint for waking, which `romacs--process-ready' answers exactly.  Takes nothing.
 defsubr! { name = "romacs--process-pending-p", gnu = "romacs:process", effect = Reads,
 fn process_pending_p(cx) { cx.process_pending_p() }}
 
@@ -34,6 +35,7 @@ fn process_forget(cx, id: Integer) { cx.process_forget(id.0) }}
 
 // Parse the JSON text SOURCE, a string: an object as an alist with string keys, an
 // array as a list, null as `json-null', false as `json-false', true as t, and a number as
-// an integer or a float.  Signals an error on invalid JSON.
+// an integer or a float.  Signals an error on invalid JSON, and on an integer too large for
+// a fixnum.
 defsubr! { name = "romacs-json-read", gnu = "romacs:json", effect = Pure,
 fn process_json_read(cx, source: Value) { cx.process_json_read(source) }}

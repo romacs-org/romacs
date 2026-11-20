@@ -536,9 +536,11 @@ defsubr! { name = "romacs--host-minibuffer", gnu = "romacs:frame", effect = Glob
 fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
 }}
-// The window the selected frame's status bar shows: the selected window while it is
-// one of the top-level frame's ordinary windows, else that frame's own selected window, or,
-// when that is its minibuffer window, the ordinary window selected last.
+// The window the selected frame's status bar shows: the selected window, or while it
+// is the minibuffer window of an active minibuffer the window that minibuffer was entered
+// from, while that is one of the top-level frame's ordinary windows; else that frame's own
+// selected window, or, when that is its minibuffer window, the ordinary window selected
+// last.
 defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_window(cx) {
     cx.windows().status_bar_window()
@@ -549,16 +551,16 @@ defsubr! { name = "romacs-status-bar-height", gnu = "romacs:frame", effect = Rea
 fn romacs_status_bar_height(cx) {
     Ok(Value::integer(i64::from(cx.windows().status_bar_height())).unwrap())
 }}
-// For the status bar's shown character COLUMN, (WINDOW STRING COLUMN): the window
-// whose line it is, and the bar's text as it was last painted, a string with the properties
+// For the status bar's character COLUMN, counted from 0, (WINDOW STRING COLUMN): the
+// window whose line it is, and the bar's text as last expanded, a string with the properties
 // a click reads.  nil past the end of its line, or with no status bar.
 defsubr! { name = "romacs--status-bar-target", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_target(cx, column: Value) {
     cx.windows().status_bar_target(column)
 }}
 // The text the status bar shows, placed as the painter places it, with the widths the
-// host measures (a column each with no host); nil while it shows none.  Expands the bar's
-// mode line now.
+// host measures (with no host, as many columns as each character's width); nil while it shows
+// none.  Expands the bar's mode line now, unless the last expansion is still current.
 defsubr! { name = "romacs--status-bar-text", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_text(cx) {
     cx.windows().status_bar_text()

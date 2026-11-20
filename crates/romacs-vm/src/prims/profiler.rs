@@ -40,8 +40,9 @@ fn function_equal(cx, f1: Value, f2: Value) {
     Ok(truth(cx.function_equal(f1, f2)))
 }}
 
-// The user-space instructions the evaluating thread has run, from its hardware
-// counter; nil without a counter.  Subtract two readings to count what ran between them.
+// The user-space instructions the evaluating thread has run since its first reading,
+// from its hardware counter; nil without a counter.  Subtract two readings to count what ran
+// between them.
 defsubr! { name = "romacs-instructions", gnu = "romacs:profiler", effect = Reads,
 fn romacs_instructions(_cx) {
     // The evaluating thread's user-space instructions, nil without a counter.
@@ -64,8 +65,9 @@ fn romacs_native_stack_room(_cx) {
 }}
 
 // Microseconds the first redisplay after the last mark took on the evaluator: the
-// frame's snapshot, its layout and the submission of its paint (a prompt's paint waits for
-// its render too); nil before one ran, or with no mark.  With MARK non-nil, set a new mark.
+// frame's snapshot, its layout and, when it has one, the submission of its paint (a
+// prompt's paint waits for its render too); nil before one ran, or with no mark.  With MARK
+// non-nil, return that and set a new mark.
 defsubr! { name = "romacs--redisplay-since-mark", gnu = "romacs:profiler", effect = Global,
 fn romacs_redisplay_since_mark(cx; optional mark: Value) {
     // Microseconds the first redisplay after the last mark took on the

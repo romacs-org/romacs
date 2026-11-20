@@ -20,7 +20,8 @@ fn display_animates(cx) { cx.display_animates() }}
 // the first frame does (romacs-progress-view.el).  t when the launch screen
 // showed it, its counts and failure as a bar of its own; with a STATE,
 // `romacs-gui-loadup--progress-view' is told, when it is defined (the card
-// past the screen; a failure there is said, and startup goes on).
+// past the screen; a failure there is said, and startup goes on), unless
+// the launch screen showed it and its :status is other than `running'.
 defsubr! { name = "romacs-startup-progress", gnu = "romacs:display", effect = Global,
 fn startup_progress(cx, stage: Value; optional label: Value, state: Value) -> Step {
     let shown = cx.startup_progress(stage, label, state)?;

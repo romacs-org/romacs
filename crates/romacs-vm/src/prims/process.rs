@@ -335,8 +335,9 @@ fn internal_default_signal_process(cx, process: Value, sigcode: Value; optional 
 defsubr! { name = "romacs--get-process", gnu = "romacs:process", effect = Reads,
 fn romacs_get_process(cx, name: Value) { get_process(cx, name) }}
 
-// Make a new running process named NAME, made unique, with the default filter and
-// sentinel, push it onto the process list and return it.  For subprocess.el.
+// Make a new process object named NAME, made unique, with status `run', the default
+// filter and sentinel, and no child or channel yet; push it onto the process list and
+// return it.  For subprocess.el.
 defsubr! { name = "romacs--proc-make", gnu = "romacs:process", effect = Global,
 fn proc_make(cx, name: Value) { cx.make_process(name) }}
 
@@ -442,8 +443,9 @@ fn proc_select(cx, wait_proc: Value, just_this_one: Value, seconds: Value; optio
     cx.process_select(wait_proc, just_this_one != Value::NIL, seconds, read_kbd != Value::NIL)
 }}
 
-// How many waits for process output have found something ready, since startup: a
-// caller compares two readings to tell whether any process had output in between.
+// How many waits on processes have found something to handle since startup (output,
+// a status change, a finished connection, room to write): a caller compares two readings to
+// tell whether any wait found anything in between.
 defsubr! { name = "romacs--proc-activity", gnu = "romacs:process", effect = Reads,
 fn proc_activity(cx) { Value::integer(cx.process_activity() as i64).map_err(Fault::Error) }}
 
