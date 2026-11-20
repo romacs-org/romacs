@@ -60,9 +60,9 @@ session's full title comes with the session.")
 (defconst romacs-agent-service--whole-every 60
   "Seconds between passes that make every row again, whatever said so.")
 
-(defvar romacs-agent-service--listener nil)
-(defvar romacs-agent-service--socket nil)
-(defvar romacs-agent-service--socket-identity nil "The listening socket's node, deleted only while it is ours.")
+(defvar romacs-agent-service--listeners nil
+  "Each listener and its socket's node, (PROCESS SOCKET . NODE): the local
+clients' and the relay's; a socket is deleted only while it is ours.")
 (defvar romacs-agent-service--peers nil "The connections, as `romacs-agent-rpc's.")
 (defvar romacs-agent-service--generation nil "This service's generation: a UUID made at its start.")
 
@@ -101,30 +101,19 @@ the agents' runtime directory, its user's alone."
 ;;;###autoload
 (defun romacs-agent-service-start (&optional socket)
   "Serve the agent session protocol on SOCKET (`romacs-agent-service-socket'
-by default), in a directory of this user's alone, replacing only a socket
+by default), and to the relay (`romacs-relay') on `service-relay.sock'
+beside it, in a directory of this user's alone, replacing only a socket
 of this user's that nothing answers at."
   (interactive)
-  (when romacs-agent-service--listener (user-error "The agents service already runs"))
+  (when romacs-agent-service--listeners (user-error "The agents service already runs"))
   (let ((socket (or socket (romacs-agent-service-socket))))
-    (server-ensure-safe-dir (file-name-directory socket))
-    (when (or (file-exists-p socket) (file-symlink-p socket))
-      (let ((stale (romacs-mcp--stale-socket-id socket)))
-        (unless stale (user-error "%s is there and is no stale socket of yours" socket))
-        (unless (equal stale (romacs-mcp--owned-socket-snapshot socket))
-          (user-error "%s changed while the service started" socket))
-        (let (delete-by-moving-to-trash) (delete-file socket))))
     (condition-case err
         (progn
           (setq romacs-agent-service--generation (romacs-agent--uuid)
-                romacs-agent-service--list (romacs-agent-service--list-make)
-                romacs-agent-service--socket socket
-                romacs-agent-service--listener
-                (make-network-process :name "romacs-agent-service" :family 'local :service socket
-                                      :server t :noquery t :coding 'no-conversion
-                                      :filter #'romacs-agent-service--filter
-                                      :sentinel #'romacs-agent-service--sentinel
-                                      :log #'romacs-agent-service--accept)
-                romacs-agent-service--socket-identity (romacs-mcp--socket-id socket))
+                romacs-agent-service--list (romacs-agent-service--list-make))
+          (romacs-agent-service--listen socket #'romacs-agent-service--accept)
+          (romacs-agent-service--listen (expand-file-name "service-relay.sock" (file-name-directory socket))
+                                        #'romacs-agent-service--accept-relayed)
           (setq romacs-agent-service--store-place
                 (and romacs-agent-rows-since (cdr (funcall romacs-agent-rows-since nil))))
           (romacs-agent-service--refresh t)
@@ -135,8 +124,25 @@ of this user's that nothing answers at."
       (error (romacs-agent-service-stop) (signal (car err) (cdr err))))
     socket))
 
+(defun romacs-agent-service--listen (socket accept)
+  "Listen on SOCKET, its connections made by ACCEPT, in a directory of this
+user's alone, replacing only a stale socket of this user's."
+  (server-ensure-safe-dir (file-name-directory socket))
+  (when (or (file-exists-p socket) (file-symlink-p socket))
+    (let ((stale (romacs-mcp--stale-socket-id socket)))
+      (unless stale (user-error "%s is there and is no stale socket of yours" socket))
+      (unless (equal stale (romacs-mcp--owned-socket-snapshot socket))
+        (user-error "%s changed while the service started" socket))
+      (let (delete-by-moving-to-trash) (delete-file socket))))
+  (let ((process (make-network-process :name "romacs-agent-service" :family 'local :service socket
+                                       :server t :noquery t :coding 'no-conversion
+                                       :filter #'romacs-agent-service--filter
+                                       :sentinel #'romacs-agent-service--sentinel
+                                       :log accept)))
+    (push (cons process (cons socket (romacs-mcp--socket-id socket))) romacs-agent-service--listeners)))
+
 (defun romacs-agent-service-stop ()
-  "Stop serving: close every connection, and the socket while it is ours."
+  "Stop serving: close every connection, and the sockets while they are ours."
   (interactive)
   (remove-hook 'romacs-agent-event-functions #'romacs-agent-service--event)
   (remove-hook 'romacs-agent-loaded-functions #'romacs-agent-service--loaded)
@@ -145,11 +151,11 @@ of this user's that nothing answers at."
                        romacs-agent-service--idle-timer))
     (when (timerp timer) (cancel-timer timer)))
   (mapc #'romacs-agent-rpc-close romacs-agent-service--peers)
-  (when (process-live-p romacs-agent-service--listener) (delete-process romacs-agent-service--listener))
-  (when (and romacs-agent-service--socket romacs-agent-service--socket-identity
-             (equal (romacs-mcp--socket-id romacs-agent-service--socket) romacs-agent-service--socket-identity))
-    (let (delete-by-moving-to-trash) (delete-file romacs-agent-service--socket)))
-  (setq romacs-agent-service--listener nil romacs-agent-service--socket nil romacs-agent-service--socket-identity nil
+  (pcase-dolist (`(,process ,socket . ,node) romacs-agent-service--listeners)
+    (when (process-live-p process) (delete-process process))
+    (when (and node (equal (romacs-mcp--socket-id socket) node))
+      (let (delete-by-moving-to-trash) (delete-file socket))))
+  (setq romacs-agent-service--listeners nil
         romacs-agent-service--peers nil romacs-agent-service--refresh-timer nil romacs-agent-service--poll-timer nil
         romacs-agent-service--list nil romacs-agent-service--dirty nil romacs-agent-service--unloaded nil
         romacs-agent-service--whole-at 0 romacs-agent-service--idle-timer nil)
@@ -170,6 +176,24 @@ by id of `romacs-agent-service--subscription's)."
                                                                                "login" (user-login-name))))))
     (process-put process 'romacs-agent-rpc rpc)
     (push rpc romacs-agent-service--peers)))
+
+(defun romacs-agent-service--accept-relayed (_listener process _message)
+  "A connection from the relay: who called is its first message's to say
+\(`agents/transport'), before anything else is served it."
+  (let ((rpc (romacs-agent-rpc-make process (romacs-agent-service--peer-make))))
+    (process-put process 'romacs-agent-rpc rpc)
+    (push rpc romacs-agent-service--peers)))
+
+(defun romacs-agent-service--transport (rpc message)
+  "Bind RPC, a relay's connection, to the caller MESSAGE names: its first
+message, `agents/transport'.  Any other first message closes it."
+  (let ((params (gethash "params" message)))
+    (if (and (equal (gethash "method" message) "agents/transport") (hash-table-p params)
+             (stringp (gethash "login" params)))
+        (setf (romacs-agent-service--peer-identity (romacs-agent-rpc-data rpc))
+              (romacs-agent-rpc-object "via" "tailnet" "login" (gethash "login" params)
+                                       "peer" (let ((peer (gethash "peer" params))) (if (stringp peer) peer :null))))
+      (romacs-agent-rpc-close rpc))))
 
 (defun romacs-agent-service--sentinel (process _event)
   (unless (process-live-p process)
@@ -234,6 +258,9 @@ from a client, of which none is defined, is ignored."
          (id (and message (gethash "id" message :none)))
          (method (and message (gethash "method" message))))
     (cond
+     ;; A relay's connection says who called first.
+     ((null (romacs-agent-service--peer-identity (romacs-agent-rpc-data rpc)))
+      (if message (romacs-agent-service--transport rpc message) (romacs-agent-rpc-close rpc)))
      ((null message)
       (romacs-agent-rpc-send rpc (romacs-agent-rpc-error nil -32700 "parse-error" "Not a JSON object")))
      ((eq id :none))
