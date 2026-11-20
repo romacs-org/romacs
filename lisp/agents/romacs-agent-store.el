@@ -638,11 +638,12 @@ was, or (error ERR).  One of KEY kept before SINCE has expired: let go of."
         t
       (car (sqlite-select db "select digest, outcome, at from commands where key = ?" (list key))))))
 
-(defun romacs-agent-store-command-put (key digest outcome &optional done)
+(defun romacs-agent-store-command-put (key digest outcome &optional done at)
   "Keep the command KEY names, of params DIGEST, its OUTCOME the JSON of
-its result, by the writer: DONE, when given, called with (ok VALUE) or
-\(error ERR) once it is kept, or not."
-  (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (float-time)) done (list 'command key)))
+its result, as of time AT (now by default), by the writer: DONE, when
+given, called with (ok VALUE) or (error ERR) once it is kept, or not."
+  (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (or at (float-time))) done
+                      (list 'command key)))
 
 (defun romacs-agent-store--command-row (key digest outcome at)
   "Keep a command's row: t once it is, an error when it is not."

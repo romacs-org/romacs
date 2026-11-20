@@ -855,13 +855,16 @@ result was kept), is never run again: its state is unknown."
                    (let ((json (json-serialize
                                 (if (eq (car-safe result) 'error)
                                     (romacs-agent-rpc-object "refused" (vconcat (cdr result)))
-                                  result))))
+                                  result)))
+                         (at (float-time)))
                      (romacs-agent-store-command-put
                       key digest json
                       (lambda (written)
-                        ;; Not kept: answered all the same, a repeat finding
-                        ;; it as admitted, unknown.
-                        (if (equal written '(ok t)) (answer result (float-time) json) (answer result))))))
+                        ;; Not kept: said so, as a repeat finds it admitted,
+                        ;; its end unknown.
+                        (if (equal written '(ok t)) (answer result at json)
+                          (answer (list 'error -32603 "internal" "How the command ended was not kept: its state is unknown"))))
+                      at)))
                  (failed (err)
                    (if (eq (car err) 'romacs-agent-service-error)
                        (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text))
@@ -871,11 +874,7 @@ result was kept), is never run again: its state is unknown."
                        (let* ((romacs-agent-service--progress
                                ;; What it reached, kept for a repeat after a stop.
                                (lambda (outcome &optional done)
-                                 (let ((json (json-serialize outcome)))
-                                   ;; Answered already (a start queued): kept here too.
-                                   (unless (eq (car-safe (cddr entry)) 'waiting)
-                                     (setcdr entry (cons (float-time) json)))
-                                   (romacs-agent-store-command-put key digest json done))))
+                                 (romacs-agent-store-command-put key digest (json-serialize outcome) done)))
                               (result (funcall effect)))
                          (if (functionp result)
                              (funcall result (lambda (result) (complete result)))
@@ -901,10 +900,16 @@ result was kept), is never run again: its state is unknown."
 
 (defun romacs-agent-service--kept-result (json)
   "The result JSON, a kept command's, says: unknown when it says none,
-\(error CODE KIND MESSAGE) when it was refused."
+\(error CODE KIND MESSAGE) when it was refused.  A start kept queued is
+its session's as it is now: run, refused, or queued still."
   (let ((result (ignore-errors (json-parse-string json :null-object :null :false-object :false))))
     (cond ((null result) (romacs-agent-rpc-object "state" "unknown"))
           ((vectorp (gethash "refused" result)) (cons 'error (append (gethash "refused" result) nil)))
+          ((and (equal (gethash "state" result) "queued") (stringp (gethash "id" result)))
+           (let ((session (romacs-agent-loaded (gethash "id" result))))
+             (pcase (and session (romacs-agent-service--launch-state session))
+               ((or 'nil 'waiting) result)
+               (outcome outcome))))
           (t result))))
 
 (defun romacs-agent-service--kept (key)
@@ -1054,26 +1059,23 @@ repeat after the service stops names it."
                                                              (and (funcall get "parent") (list :parent (funcall get "parent")))))))
                                        ;; Its host started, or waited for: answered as its
                                        ;; launch comes out.
-                                       (romacs-agent-service--launched session finish (+ (float-time) romacs-agent-start-deadline)
-                                                                       progress)
+                                       (romacs-agent-service--launched session finish (+ (float-time) romacs-agent-start-deadline))
                                        'later)
                                    (user-error (list 'error -32602 "bad-params" (error-message-string err)))
                                    ((error quit) (list 'error -32603 "internal" (error-message-string err)))))))
                         (unless (eq result 'later) (funcall finish result)))))))))))
 
-(defun romacs-agent-service--launched (session finish deadline progress)
+(defun romacs-agent-service--launched (session finish deadline)
   "Call FINISH with how SESSION's start came out: written once its host
 runs (a per-turn session's at once), refused once it is unstarted, still
-queued at DEADLINE.  Queued, it is watched on, what it comes to kept by
-PROGRESS for its repeats, an hour at most."
-  (let ((id (romacs-agent-id session)))
-    (pcase (romacs-agent-service--launch-state session)
-      ('waiting
-       (if (> (float-time) deadline)
-           (progn (funcall finish (romacs-agent-rpc-object "state" "queued" "id" id))
-                  (run-at-time 1 nil #'romacs-agent-service--launch-kept session progress (+ (float-time) 3600)))
-         (run-at-time 0.2 nil #'romacs-agent-service--launched session finish deadline progress)))
-      (outcome (funcall finish outcome)))))
+queued at DEADLINE (a repeat then reads it again,
+`romacs-agent-service--kept-result')."
+  (pcase (romacs-agent-service--launch-state session)
+    ('waiting
+     (if (> (float-time) deadline)
+         (funcall finish (romacs-agent-rpc-object "state" "queued" "id" (romacs-agent-id session)))
+       (run-at-time 0.2 nil #'romacs-agent-service--launched session finish deadline)))
+    (outcome (funcall finish outcome))))
 
 (defun romacs-agent-service--launch-state (session)
   "How SESSION's start comes out: written, refused, or `waiting'."
@@ -1085,14 +1087,7 @@ PROGRESS for its repeats, an hour at most."
                  (format "Session %s did not start: %s" id (or (romacs-agent-reply session) "its host did not"))))
           (t 'waiting))))
 
-(defun romacs-agent-service--launch-kept (session progress until)
-  "Keep, by PROGRESS, how SESSION's start came out once it does, a queued
-start's answered already; watched until UNTIL."
-  (pcase (romacs-agent-service--launch-state session)
-    ('waiting (when (< (float-time) until)
-                (run-at-time 1 nil #'romacs-agent-service--launch-kept session progress until)))
-    (`(error . ,refused) (funcall progress (romacs-agent-rpc-object "refused" (vconcat refused))))
-    (outcome (funcall progress outcome))))
+
 
 (defun romacs-agent-service--projects-list (_rpc _params)
   "`agents/projects.list': each directory sessions worked in, the last
