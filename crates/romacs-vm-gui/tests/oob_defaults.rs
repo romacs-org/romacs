@@ -348,17 +348,41 @@ fn an_edited_file_gets_no_lock_file_beside_it() {
             ;; Kill the current buffer, modified or not, answering the interactive
             ;; session's question (`kill-buffer--possibly-save') yes.
             (defun oob-kill ()
-              (cl-letf (((symbol-function 'kill-buffer--possibly-save) #'always)) (kill-buffer))))", quoted(&format!("{}/", dir.display())))).unwrap();
+              (cl-letf (((symbol-function 'kill-buffer--possibly-save) #'always)) (kill-buffer)))
+            ;; The lock files present right after each `lock-file' call.
+            (defvar oob-seen nil)
+            (advice-add 'lock-file :after (lambda (&rest _) (push (oob-locks) oob-seen)))
+            ;; `lock-file' ran, and no lock file was there after any call.
+            (defun oob-none-seen () (and oob-seen (cl-every #'null oob-seen) t)))", quoted(&format!("{}/", dir.display())))).unwrap();
         let steps = [
             "(default-value 'create-lockfiles)",
-            // The first change, then the save, of a.txt.
-            "(with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (goto-char (point-max)) (insert \"x\") (oob-locks))",
-            "(with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (save-buffer) (oob-locks))",
-            // A modified buffer killed.
-            "(with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (insert \"y\") (oob-kill) (oob-locks))",
-            // A warm restore relocks every modified file it restores.
+            // The first change of a.txt, then its save; `lock-file' is the
+            // Lisp call both make, so its advice sees the directory right
+            // after each lock would have been made, mid-write for the save.
+            "(progn (setq oob-seen nil)
+               (with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (goto-char (point-max)) (insert \"x\"))
+               (list (oob-locks) (oob-none-seen)))",
+            "(progn (setq oob-seen nil)
+               (with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (save-buffer))
+               (list (oob-locks) (oob-none-seen)))",
+            // A modified buffer killed, and dead.
+            "(let ((b (find-file-noselect (oob-file \"a.txt\"))))
+               (setq oob-seen nil)
+               (with-current-buffer b (insert \"y\"))
+               (with-current-buffer b (oob-kill))
+               (list (oob-locks) (oob-none-seen) (buffer-live-p b)))",
+            // A warm restore relocks every modified file it restores. The
+            // fixture is made modified with no lock attempt of its own; the
+            // relock records no problem; the same path with locks on writes
+            // the lock (the control), and unlocking removes it.
             "(let ((b (find-file-noselect (oob-file \"b.txt\"))))
-               (with-current-buffer b (set-buffer-modified-p t)) (warm-restart--lock (list b)) (oob-locks))",
+               (with-current-buffer b (let ((create-lockfiles nil)) (set-buffer-modified-p t)))
+               (setq warm-restart-last-report nil)
+               (warm-restart--lock (list b))
+               (list (oob-locks) (plist-get warm-restart-last-report :locks)
+                     (let ((create-lockfiles t))
+                       (warm-restart--lock (list b))
+                       (prog1 (oob-locks) (with-current-buffer b (unlock-buffer))))))",
             // `lock-file-mode' turns GNU's lock on for one buffer; saving unlocks.
             "(with-current-buffer (find-file-noselect (oob-file \"a.txt\")) (lock-file-mode 1) (insert \"w\")
                (prog1 (oob-locks) (save-buffer)))",
@@ -375,10 +399,10 @@ fn an_edited_file_gets_no_lock_file_beside_it() {
     }).unwrap().join().unwrap();
     assert_eq!(report, [
         "nil",
-        "nil",
-        "nil",
-        "nil",
-        "nil",
+        "(nil t)",
+        "(nil t)",
+        "(nil t nil)",
+        "(nil nil (\".#b.txt\"))",
         "(\".#a.txt\")",
         "nil",
         "(\"someone\" nil \"someone@elsewhere.1:0\" (\".#c.txt\"))",

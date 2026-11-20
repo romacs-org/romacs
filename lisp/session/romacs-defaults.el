@@ -111,8 +111,9 @@
      (list (cons "." (expand-file-name "backups/" user-emacs-directory))))
     ;; No `.#NAME' lock file beside an edited file: the supersession check
     ;; at a first change and at a save still runs, `file-locked-p' still
-    ;; reads another editor's lock, and `lock-file-mode' turns locks on
-    ;; for one buffer.
+    ;; reads another editor's lock on a local file (Tramp's gives nil while
+    ;; this is nil), and `lock-file-mode' turns locks on for one buffer.
+    ;; Shadowfile and Type Break no longer see a second Romacs session.
     (create-lockfiles nil)
     ;; GNU's transforms first: a remote file's auto-save stays local, in
     ;; `temporary-file-directory'.
