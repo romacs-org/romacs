@@ -112,3 +112,14 @@ fn plain_kill_eligibility() {
           (advice-remove 'romacs--kill-buffer count)))"#),
         "(0 0 1 1 1 1 1 1 1 1 1 1 0)");
 }
+
+/// Before the windows exist, a kill takes the Lisp half, whose
+/// `(minibuffer-window)` makes them and gives the mini-window its buffer:
+/// killing ` *Minibuf-0*` then keeps it, as beta's half did (Sol K3 r1 S1).
+#[test]
+fn plain_kill_waits_for_the_windows() {
+    let mut vm = romacs_vm::Vm::new();
+    let printed = vm.eval_source(r#"(prin1-to-string (let ((b (get-buffer-create " *Minibuf-0*" t))) (kill-buffer b) (list (buffer-live-p b) (eq b (window-buffer (minibuffer-window))))))"#)
+        .and_then(romacs_vm::Local::display).unwrap();
+    assert_eq!(printed, r#""(t t)""#);
+}
