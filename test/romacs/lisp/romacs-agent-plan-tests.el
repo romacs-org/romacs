@@ -119,19 +119,19 @@
     (should-not (plist-get (romacs-agent-options session) :plan))
     (should (eq (romacs-agent--claude-next session) :ready))))
 
-(ert-deftest romacs-agent-plan-tool-calls-in-plan-mode-ask-the-user ()
+(ert-deftest romacs-agent-plan-tool-calls-in-plan-mode-go-through-the-policy ()
+  ;; Plan mode is the harness's own: Romacs answers its tool calls as it
+  ;; answers any, under its policy; a presented plan stays the user's.
   (romacs-agent-plan-tests--with 'claude
     (let ((romacs-agent-approval-policy 'allow))
       (setf (romacs-agent-options session) '(:plan t))
       (puthash "e1" t (romacs-agent-approvals session))
       (romacs-agent--raise session '(:type approval :request-id "e1" :tool "Edit"))
-      ;; Romacs denies nothing on the user's behalf: the user is asked.
-      (should-not answered)
-      (should (member "e1" (romacs-agent-asks session)))
-      (should (eq (romacs-agent-state session) 'waiting-approval))
-      ;; Nor on catching up.
-      (romacs-agent--allow-tool-calls session)
-      (should-not answered))))
+      (should (equal answered (list (list "e1" t nil 'policy))))
+      (puthash "p1" t (romacs-agent-approvals session))
+      (romacs-agent--raise session '(:type approval :request-id "p1" :tool "ExitPlanMode" :plan t :user t))
+      (should (equal (length answered) 1))
+      (should (member "p1" (romacs-agent-asks session))))))
 
 (ert-deftest romacs-agent-plan-tool-calls-out-of-plan-mode-are-allowed-by-romacs ()
   (romacs-agent-plan-tests--with 'claude

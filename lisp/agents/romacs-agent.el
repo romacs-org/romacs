@@ -364,9 +364,8 @@ loading it would undo that one's changes; merge it first")
   ;; none), both kept in its manifest.
   permission-mode context-used context-window last-time turn-start
   title-auto (seen-seq 0) settled-seq
-  ;; The seq of the prompt whose turn presented a plan, and the tool its
-  ;; running turn called last.
-  planned-seq activity
+  ;; The tool its running turn called last.
+  activity
   ;; The harness's own transcript this session continues, when it was
   ;; imported from the harness's history: (:path PATH :size BYTES), the
   ;; bytes the harness had written before this session went on with it.
@@ -454,12 +453,11 @@ now (its driver's :plan), else at its next launch."
 
 (defun romacs-agent--answer-unasked (session id)
   "Allow SESSION's request ID that no user is asked, under the `allow'
-policy, out of plan mode: only while it still waits.  Romacs denies
-nothing on its user's behalf: what it does not allow waits on the user."
+policy: only while it still waits.  Romacs denies nothing on its user's
+behalf: what it does not allow waits on the user."
   (when (and (romacs-agent--live-p session) (gethash id (romacs-agent-approvals session))
              (not (member id (romacs-agent-asks session)))
-             (eq romacs-agent-approval-policy 'allow)
-             (not (plist-get (romacs-agent-options session) :plan)))
+             (eq romacs-agent-approval-policy 'allow))
     (condition-case err
         (romacs-agent-respond session id t nil 'policy)
       (error (message "Romacs could not answer %s: %s" id (error-message-string err))))))
@@ -481,13 +479,12 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
-(defun romacs-agent--auto-answer-p (session event)
-  "Whether Romacs answers SESSION's approval EVENT itself: a tool call,
-under the `allow' policy, out of plan mode.  A plan presented, a question,
-or any call in plan mode is the user's to answer."
+(defun romacs-agent--auto-answer-p (_session event)
+  "Whether Romacs answers a session's approval EVENT itself: a tool call,
+under the `allow' policy, in plan mode as out of it (plan mode is the
+harness's own).  A plan presented or a question is the user's to answer."
   (and (eq romacs-agent-approval-policy 'allow)
-       (not (plist-get event :user)) (not (plist-get event :plan))
-       (not (plist-get (romacs-agent-options session) :plan))))
+       (not (plist-get event :user)) (not (plist-get event :plan))))
 
 (defun romacs-agent--live-p (session)
   "Whether SESSION's records are its live ones: the registered session,
@@ -1652,14 +1649,10 @@ on whatever becomes of this server."
             (unless (plist-get event :own)
               (setf (romacs-agent-brief session) nil)
               (when (romacs-agent-title-auto session) (romacs-agent--title-from session (plist-get event :text)))))
-    ;; A plan presented: captured, its call told to stop (T3 Code's way);
-    ;; the plan is the user's to take up.  A tool call the policy answers
-    ;; waits on no one: its answer goes now, or on catching up.
-    ('approval (when (plist-get event :plan)
-                 (setf (romacs-agent-driver-state session)
-                       (plist-put (romacs-agent-driver-state session) :plans
-                                  (cons (plist-get event :request-id) (plist-get (romacs-agent-driver-state session) :plans)))))
-               (cond
+    ;; A plan presented or a question is the user's to answer.  A tool
+    ;; call the policy answers waits on no one: its answer goes now, or on
+    ;; catching up.
+    ('approval (cond
                 ((romacs-agent--auto-answer-p session event)
                  (when (romacs-agent--live-p session)
                    (run-at-time 0 nil #'romacs-agent--answer-unasked session (plist-get event :request-id))))
@@ -1671,8 +1664,6 @@ on whatever becomes of this server."
     ('mode (romacs-agent--mode-seen session (plist-get event :permission-mode)))
     ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
              (setf (romacs-agent-activity session) (plist-get event :name))))
-    ;; A plan presented, by any harness: its turn's.
-    ('plan (setf (romacs-agent-planned-seq session) (romacs-agent-input-seq session)))
     ;; Its harness would not go into plan mode: the session is not in it.
     ('plan-refused (when (romacs-agent--live-p session)
                      (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
@@ -4401,10 +4392,7 @@ an actor, a plist of :kind (`user' or `policy'), :login and :client.  A
 note says so in SESSION's records first, so every view shows who decided
 (doc/agent-protocol.org, Attribution)."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
-         ;; A plan is proceeded with once: no rule for the session.
-         (allow (if (and plan allow) t allow))
-         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when-let* ((actor (romacs-agent--actor by)))
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name (plist-get actor :kind))
@@ -4416,11 +4404,7 @@ note says so in SESSION's records first, so every view shows who decided
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)
-    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
-    ;; agent goes on to implement it.
-    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
-      (romacs-agent-set-plan session nil))))
+    (romacs-agent--line session line)))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))

@@ -149,10 +149,10 @@
     (let ((romacs-agent-approval-policy 'allow))
       (draw :type 'approval :request-id "p" :tool "Edit")
       (should-not (string-match-p "⚠" (romacs-agent-log-tests--transcript)))
-      ;; In plan mode the user is asked.
+      ;; In plan mode too: plan mode is the harness's own.
       (setf (romacs-agent-options session) '(:plan t))
       (draw :type 'approval :request-id "q" :tool "Edit")
-      (should (string-match-p "⚠ The agent wants to run Edit" (romacs-agent-log-tests--transcript))))))
+      (should-not (string-match-p "⚠" (romacs-agent-log-tests--transcript))))))
 
 (ert-deftest romacs-agent-log-point-moves-freely-while-a-turn-runs ()
   (romacs-agent-log-tests--with
@@ -713,24 +713,6 @@
       (should-not (string-match-p "hand-back\\|agentId\\|usage" text)))
     (romacs-agent-log--separator)
     (should (string-match-p "working" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))))
-
-(ert-deftest romacs-agent-log-proceeding-with-a-plan-leaves-plan-mode ()
-  (let ((session (romacs-agent--make :id "P" :harness 'claude :options '(:plan t)
-                                     :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
-        (request (make-hash-table :test #'equal))
-        planned)
-    (puthash "tool_name" "ExitPlanMode" request)
-    (puthash "p" request (romacs-agent-approvals session))
-    (romacs-agent--raise session '(:type approval :request-id "p" :tool "ExitPlanMode" :plan t :user t))
-    (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
-              ((symbol-function 'romacs-agent--note) #'ignore)
-              ((symbol-function 'romacs-agent-set-plan) (lambda (_s on) (push on planned))))
-      ;; Kept planning: still in plan mode.
-      (romacs-agent-respond session "p" nil "more" 'user)
-      (should-not planned)
-      ;; Proceeding, however answered (here, the board's way): out of it.
-      (romacs-agent-respond session "p" t nil 'user)
-      (should (equal planned '(nil))))))
 
 (ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
   (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0

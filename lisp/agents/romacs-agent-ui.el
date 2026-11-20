@@ -69,8 +69,6 @@ colour, which no theme's syntax faces can make read as an error.")
   "A settled mark.")
 (defface romacs-agent-approval '((t :inherit romacs-working-waiting :weight bold))
   "An approval the harness waits for.")
-(defface romacs-agent-plan '((t :inherit font-lock-constant-face))
-  "A plan presented, waiting to be taken up." :group 'romacs-agent)
 (defface romacs-agent-error '((t :inherit error))
   "A failed tool call or turn.")
 (defface romacs-agent-model '((t :inherit font-lock-type-face))
@@ -485,7 +483,6 @@ failed...) where the frame can draw it: the word shows on hover."
      (failed "❗" "Failed" romacs-agent-error)
      (working "🤖" "Working" romacs-agent-running)
      (waiting "⏳" "Waiting on its workers" romacs-agent-running)
-     (plan "📋" "Plan ready" romacs-agent-plan)
      (completed "✅" "Completed" romacs-agent-done)
      ;; Nothing to say: no glyph.
      (idle nil "Idle" romacs-agent-dim)
@@ -510,13 +507,6 @@ RANK), RANK its place here.  The states ranked before `idle' are news.")
 (defun romacs-agent-ui--news-p (key)
   "Whether state KEY says something to the user."
   (< (romacs-agent-ui--rank key) (romacs-agent-ui--rank 'idle)))
-
-(defun romacs-agent-ui--plan-ready-p (session)
-  "Whether SESSION's last turn, in plan mode, presented a plan and ended."
-  (and (plist-get (romacs-agent-options session) :plan)
-       (romacs-agent-planned-seq session)
-       (eql (romacs-agent-planned-seq session) (romacs-agent-input-seq session))
-       (not (romacs-agent-failed session))))
 
 (defun romacs-agent-ui--workers-live-p (session)
   "Whether one of SESSION's workers still goes on.  Its rows are ranked
@@ -546,7 +536,6 @@ completion went to its parent: not news to the user."
           ((romacs-agent-cancelled session) 'ended)
           ((eq state 'detached) 'detached)
           ((eq state 'unstarted) 'unstarted)
-          ((romacs-agent-ui--plan-ready-p session) 'plan)
           ((and (romacs-agent-unseen-p session) (not (romacs-agent-failed session))
                 (not (plist-get (romacs-agent-options session) :parent)))
            'completed)
@@ -630,7 +619,7 @@ agents says it by.")
 user, `failed', `working', `done' finished well and unseen, `idle' says
 nothing more."
   (pcase key
-    ((or 'approval 'question 'plan) 'you)
+    ((or 'approval 'question) 'you)
     ((or 'failed 'unstarted) 'failed)
     ((or 'working 'waiting) 'working)
     ('completed 'done)
@@ -753,7 +742,7 @@ display clipping the band where the window ends."
                  (concat (propertize (or (romacs-agent-ui--instance nil harness model nil) "...")
                                      'face 'romacs-agent-model 'help-echo (and provider (format "account %s" provider)))
                          (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
-                 (cond ((eq mode 'plan) (propertize "plan" 'face 'warning))
+                 (cond ((eq mode 'plan) (propertize "plan" 'face 'bold))
                        ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
                  (and resume (propertize (format-time-string "⏰%H:%M" resume) 'face 'warning
