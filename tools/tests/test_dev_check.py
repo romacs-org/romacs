@@ -485,6 +485,27 @@ class EpochHistory(unittest.TestCase):
         self.git('merge', '-q', '--no-ff', '-m', 'land reverted', 'reverted')
         self.assertIn('raise it to 4', self.stage()[2][0])
 
+    def test_a_carriage_return_in_the_file_fails_as_a_second_spelling(self):
+        self.git('checkout', '-q', '-b', 'crlf', 'beta')
+        self.commit('crlf', {check.EPOCH: '3\r\n'})
+        self.assertIn('no leading zero', self.stage()[2][0])
+
+    def test_a_missing_epoch_file_fails(self):
+        self.git('checkout', '-q', '-b', 'gone', 'beta')
+        self.git('rm', '-q', check.EPOCH)
+        self.git('commit', '-q', '-m', 'gone')
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_a_commit_with_a_directory_at_the_path_holds_no_generation(self):
+        self.git('checkout', '-q', '-b', 'dir', 'beta')
+        self.git('rm', '-q', check.EPOCH)
+        (self.repo / check.EPOCH).mkdir(parents=True)
+        self.commit('a directory', {check.EPOCH + '/x': 'x\n'})
+        self.git('rm', '-q', '-r', check.EPOCH)
+        (self.repo / 'etc').mkdir(exist_ok=True)
+        self.commit('restored above the trunk', {check.EPOCH: '4\n'})
+        self.assertEqual(self.stage()[0], 'ok')
+
     def test_a_second_spelling_fails_and_its_fix_raises_nothing(self):
         self.git('checkout', '-q', '-b', 'spelled', 'beta')
         self.commit('leading zero', {check.EPOCH: '03\n'})
