@@ -16,6 +16,7 @@ members = [
     "crates/romacs-logo",
     "crates/romacs-regex",
     "crates/romacs-mcp",
+    "crates/romacs-relay",
     "crates/romacs-allocator",
     "crates/romacs-display-protocol",
     "crates/romacs-display-runtime",
