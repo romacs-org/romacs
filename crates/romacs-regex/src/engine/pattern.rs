@@ -94,8 +94,8 @@ pub struct CompiledPattern {
     pub(crate) uses_categories: bool,
 
     /// True if matching reads the syntax table: a syntax class, a word or
-    /// symbol boundary, or a bracket class that reads it (`[:space:]',
-    /// `[:word:]', `[:punct:]'). Unlike `uses_syntax', which every bracket
+    /// symbol boundary, or a bracket class that reads it (`[:space:]`,
+    /// `[:word:]`, `[:punct:]`). Unlike `uses_syntax`, which every bracket
     /// class sets, this is exact.
     pub(crate) reads_table: bool,
 

@@ -1,5 +1,5 @@
 //! A string search of a cached pattern that reads no syntax or category
-//! table (`reads_lookup') skips the syntax a search would prepare. Each
+//! table (`reads_lookup`) skips the syntax a search would prepare. Each
 //! input that preparation reads is changed between two searches here: the
 //! plain pattern answers alike and prepares nothing, and a pattern that
 //! reads the table still sees the change.
@@ -37,7 +37,7 @@ fn the_syntax_table_and_modify_syntax_entry() {
     eval(&mut vm, r#"(progn (string-match "a-c" "a-c") (string-match "\\w" "-"))"#);
     eval(&mut vm, r#"(modify-syntax-entry ?- "w" (standard-syntax-table))"#);
     assert_eq!(eval(&mut vm, r#"(list (string-match "a-c" "xa-c") (string-match "\\w" "-"))"#), "(1 0)");
-    // The current buffer's own table, `a' punctuation in it.
+    // The current buffer's own table, `a` punctuation in it.
     assert_eq!(
         eval(&mut vm, &format!(r#"(let ((table {NEW_TABLE})) (modify-syntax-entry ?a "." table) (set-syntax-table table) (list (string-match "a-c" "xa-c") (string-match "\\w" "a")))"#)),
         "(1 nil)"
@@ -61,7 +61,7 @@ fn case_fold_search_and_the_case_table() {
     assert_eq!(eval(&mut vm, r#"(let ((case-fold-search nil)) (list (string-match "ab" "xAB") (string-match "ab" "xAB")))"#), "(nil nil)");
     assert_eq!(eval(&mut vm, r#"(let ((case-fold-search t)) (list (string-match "ab" "xAB") (string-match "ab" "xAB")))"#), "(1 1)");
     assert_eq!(eval(&mut vm, r#"(let ((case-fold-search nil)) (string-match "ab" "xAB"))"#), "nil");
-    // `[:upper:]' and `[:lower:]' read the case table, not syntax: plain, and
+    // `[:upper:]` and `[:lower:]` read the case table, not syntax: plain, and
     // still folded by case-fold-search (pinned GNU: ((0 0) (nil nil))), cached
     // or not, either order.
     let classes = r#"(list (let ((case-fold-search t)) (list (string-match "[[:upper:]]" "a") (string-match "[[:lower:]]" "A"))) (let ((case-fold-search nil)) (list (string-match "[[:upper:]]" "a") (string-match "[[:lower:]]" "A"))))"#;

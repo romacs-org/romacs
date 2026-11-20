@@ -232,7 +232,7 @@ pub(crate) fn compile_charset(
     // syntax table at run time for `[[:word:]]` and `[[:space:]]`.
     if class_bits != 0 {
         buf.uses_syntax = true;
-        // Only `[:space:]', `[:word:]' and `[:punct:]' read the table.
+        // Only `[:space:]`, `[:word:]` and `[:punct:]` read the table.
         buf.reads_table |= crate::engine::class::posix_class_bits_read_syntax(class_bits);
         // GNU regex-emacs.c:2096-2101: only RECC_SPACE and RECC_WORD
         // hardcode syntax-table content into the compiled pattern (for
