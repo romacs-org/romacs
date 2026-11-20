@@ -487,7 +487,7 @@ renderer's, else its name and the brief of its input."
                     ;; One line of it: RET shows all of it.
                     (let ((brief (truncate-string-to-width
                                   (car (split-string (romacs-agent-rows--brief input) "\n"))
-                                  100 nil nil (truncate-string-ellipsis))))
+                                  60 nil nil (truncate-string-ellipsis))))
                       (if (string-empty-p brief) "" (concat "(" brief ")")))))))
 
 (defun romacs-agent-log--one-line (text)
