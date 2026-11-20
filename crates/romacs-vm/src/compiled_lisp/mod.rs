@@ -29,6 +29,7 @@
 //! as a GNU installation without `.elc` files.
 mod background;
 mod codec;
+mod stats;
 mod tree;
 pub(crate) mod store;
 mod unit;
@@ -38,6 +39,7 @@ mod compiled_lisp_tests;
 use crate::*;
 pub(crate) use background::{note_idle, start as start_background, stop as stop_background};
 pub use tree::compile_tree;
+use stats::{Miss, Outcome};
 use serde_json::{Value as Json, json};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -134,6 +136,14 @@ pub fn configure(config: Config) {
         });
     }
     let _ = CONFIG.set(Configured { config, chain, trace, no_prune, identity: std::sync::OnceLock::new() });
+}
+
+/// This process's compiled loads so far (`stats`), with the store and the
+/// compile identity that keyed them: None while unknown (no store, or no
+/// load has asked the identity yet).
+pub(crate) fn stats() -> (stats::Stats, Option<&'static Path>, Option<&'static str>) {
+    let identity = configured().and_then(|c| c.identity.get()).map(String::as_str);
+    (stats::snapshot(), store_dir(), identity)
 }
 
 /// Whether this process may compile Lisp: it loads compiled Lisp and runs
@@ -396,36 +406,40 @@ fn inputs_hold(&mut self, store: &Path, artifact: &store::Artifact, load_path: &
     /// up this compile's chain (a cycle: gnus-sum's compile requires
     /// gnus-art, which requires gnus-sum), whatever the store holds, so a
     /// compile's result never depends on whether another one published
-    /// first.
+    /// first. Each load is counted by what it took (`stats`).
     pub(crate) fn compiled_load(&mut self, path: &Path) -> Result<Option<Compiled>> {
-        let Some(configured) = configured() else { return Ok(None) };
+        let (outcome, compiled) = self.compiled_load_outcome(path)?;
+        stats::note(path, outcome);
+        Ok(compiled)
+    }
+
+    /// `compiled_load`'s answer, with what it took (`stats`).
+    fn compiled_load_outcome(&mut self, path: &Path) -> Result<(Outcome, Option<Compiled>)> {
+        let Some(configured) = configured() else { return Ok((Outcome::Off, None)) };
         let config = &configured.config;
         if configured.chain.lines().any(|file| Path::new(file) == path) {
-            return Ok(None);
+            return Ok((Outcome::Miss(Miss::Chain), None));
         }
         let load_path = self.load_path_roots()?;
-        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok(None) };
-        let (artifact, data) = match found {
-            Some(found) => found,
+        let Ok(found) = self.stored(configured, path, &load_path) else { return Ok((Outcome::Miss(Miss::Unreadable), None)) };
+        let (outcome, artifact, data) = match found {
+            Some((artifact, data)) => (Outcome::Taken, artifact, data),
+            None if config.compiler.is_empty() => return Ok((Outcome::Miss(Miss::ReadOnly), None)),
             None if config.defer_misses => {
-                if !config.compiler.is_empty() {
-                    background::note_miss(path, &load_path);
-                }
-                return Ok(None);
+                background::note_miss(path, &load_path);
+                return Ok((Outcome::Miss(Miss::Deferred), None));
             }
-            None => match self.compile_now(config, path, &load_path)? {
-                Some(artifact) => match store::open(&artifact) {
-                    Ok(data) => (artifact, data),
-                    Err(_) => return Ok(None),
-                },
-                None => return Ok(None),
+            None => match self.compile_now(config, path, &load_path)?
+                .and_then(|artifact| store::open(&artifact).ok().map(|data| (artifact, data))) {
+                Some((artifact, data)) => (Outcome::Compiled, artifact, data),
+                None => return Ok((Outcome::Miss(Miss::Failed), None)),
             },
         };
         if !matches!(data.status, store::Status::Compiled) {
-            return Ok(None);
+            return Ok((Outcome::Miss(Miss::NotCompiled), None));
         }
         store::note_use(&config.store, &artifact, path);
-        Ok(Some(Compiled { artifact, artifact_data: data }))
+        Ok((outcome, Some(Compiled { artifact, artifact_data: data })))
     }
 
     /// PATH's stored artifact whose inputs hold on LOAD_PATH, if any; Err
