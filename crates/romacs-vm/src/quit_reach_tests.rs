@@ -185,6 +185,11 @@ fn sqlite_interrupts_a_long_statement() {
     let query = "\"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<200000) SELECT count(*) FROM c\"";
     reaches("sqlite-select", setup, &format!("(list db {query})"), "t");
     reaches("sqlite-execute", setup, &format!("(list db {query})"), "t");
+    // A statement that writes and returns rows: its quit rolls the write
+    // back, and the table holds none of its rows.
+    let setup = "(progn (setq db (sqlite-open)) (sqlite-execute db \"CREATE TABLE t (x)\"))";
+    let insert = "\"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<200000) INSERT INTO t SELECT x FROM c RETURNING x\"";
+    reaches("sqlite-execute", setup, &format!("(list db {insert})"), "(equal (sqlite-select db \"SELECT count(*) FROM t\") '((0)))");
 }
 
 #[test]

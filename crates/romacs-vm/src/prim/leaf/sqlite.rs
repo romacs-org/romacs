@@ -275,10 +275,12 @@ impl Leaf<'_> {
         let probe = self.native_stop();
         match self.sqlite_step(&mut statement, &probe)? {
             Step::Row => {
+                // No poll between rows: a statement that writes (INSERT ...
+                // RETURNING) dropped here would commit its write as it is
+                // finalized. Its quit comes only through its steps, which
+                // SQLite interrupts and rolls back (`sqlite_step`).
                 let mut rows = vec![self.sqlite_row(&statement)?];
-                let mut steps = super::quit_poll::Steps::default();
                 while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
-                    if steps.tick() { self.native_poll()?; }
                     rows.push(self.sqlite_row(&statement)?);
                 }
                 Ok(self.sqlite_list(rows))
