@@ -223,6 +223,19 @@ impl Vm {
         self.escape_pending().map_err(|_| ESCAPED.into())
     }
 
+    /// A gated kernel's poll at one of its chunk boundaries, which a call
+    /// shorter than a chunk never reaches. SCOPED when the engine's own
+    /// call target called the kernel, which raises the poll's escape as it
+    /// raises a scope's (`primitive_value`): the scope is granted here, at
+    /// the first poll, rather than around every call, since no poll comes
+    /// earlier. Otherwise the poll is `native_poll_text`'s in whatever scope
+    /// the caller holds.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn kernel_poll<const SCOPED: bool>(&mut self) -> crate::Result<()> {
+        if SCOPED { self.inside_quit_scope(Self::native_poll_text) } else { self.native_poll_text() }
+    }
+
     /// BODY outside any quit scope, the caller's restored after. A scope is
     /// granted only at a primitive's own entry (`Leaf::quittable`) and ends
     /// at any entry below it: Lisp its native code runs (`execute_args`, the

@@ -3961,7 +3961,7 @@ impl Vm {
                     tails::TailEnd::Circular(_) => Err("circular list".into()),
                 }
             }
-            Nreverse => self.core_nreverse(a[0]),
+            Nreverse => self.core_nreverse::<false>(a[0]),
             _ => Err("primitive requires executor adapter".into()),
         }
     }

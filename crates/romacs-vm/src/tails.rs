@@ -141,7 +141,37 @@ impl Vm {
         }
     }
 
-    pub(super) fn core_nreverse(&mut self, seq: Value) -> Result<Value> {
+    /// The rest of `core_nreverse`'s walk, from a restart of Brent's check
+    /// that set SLOW to FAST with a power of KERNEL_CHUNK: the same steps,
+    /// polled each KERNEL_CHUNK of them (`Vm::kernel_poll`), which writes
+    /// nothing. Ok at the walk's end or at the cycle it found.
+    #[cold]
+    #[inline(never)]
+    fn brent_polled<const SCOPED: bool>(&mut self, seq: Value, mut slow: Value, mut fast: Value) -> Result<()> {
+        let (mut power, mut lam) = (crate::quit::KERNEL_CHUNK, 0usize);
+        while fast.tag_is(3) {
+            if Self::image_value(fast) {
+                return Err(self.refuse_read_only(seq));
+            }
+            fast = self.conses[fast.index(3)?].1;
+            lam += 1;
+            if fast == slow {
+                break;
+            }
+            // Every power is a multiple of KERNEL_CHUNK: one compare a step.
+            if lam.is_multiple_of(crate::quit::KERNEL_CHUNK) {
+                if lam == power {
+                    (slow, power, lam) = (fast, power * 2, 0);
+                }
+                self.kernel_poll::<SCOPED>()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// fns.c Fnreverse. SCOPED: called by the engine's own call target
+    /// (`Vm::kernel_poll`).
+    pub(super) fn core_nreverse<const SCOPED: bool>(&mut self, seq: Value) -> Result<Value> {
         if seq == Value::NIL {
             return Ok(seq);
         }
@@ -152,11 +182,6 @@ impl Vm {
             // at the first image cons; Brent's walk finds it, a private end or
             // a private cycle in bounded steps without mutating.
             let (mut slow, mut fast, mut power, mut lam) = (seq, seq, 1usize, 0usize);
-            // Polled inside its own call target's scope as this walk goes,
-            // which writes nothing: Brent's one compare a step is against
-            // the nearer of its restart and the next poll.
-            let mut poll_at = crate::quit::KERNEL_CHUNK;
-            let mut stop = power.min(poll_at);
             while fast.tag_is(3) {
                 if Self::image_value(fast) {
                     return Err(self.refuse_read_only(seq));
@@ -166,16 +191,13 @@ impl Vm {
                 if fast == slow {
                     break;
                 }
-                if lam == stop {
-                    if lam == poll_at {
-                        self.native_poll_text()?;
-                        poll_at += crate::quit::KERNEL_CHUNK;
+                if lam == power {
+                    (slow, power, lam) = (fast, power * 2, 0);
+                    // A walk past a chunk goes on polled.
+                    if power == crate::quit::KERNEL_CHUNK {
+                        self.brent_polled::<SCOPED>(seq, slow, fast)?;
+                        break;
                     }
-                    if lam == power {
-                        (slow, power, lam) = (fast, power * 2, 0);
-                        poll_at -= power / 2;
-                    }
-                    stop = power.min(poll_at);
                 }
             }
             let mut prev = Value::NIL;

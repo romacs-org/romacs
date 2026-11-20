@@ -4297,7 +4297,7 @@ unsafe fn t2_enter_closure(
 }
 // Resolve the ordinary primitive family once per call site. Each cached call
 // enters its Rust kernel directly instead of walking Vm::primitive's chain.
-fn primitive_target(p: Primitive) -> PrimitiveCall {
+pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
     use Primitive::*;
     match p {
         ClosureMetadata | ClosureDocument | MakeInterpretedClosure => Vm::interpreted_closure_primitive,
@@ -4327,7 +4327,9 @@ fn primitive_target(p: Primitive) -> PrimitiveCall {
         Sub | Mul | Div | Abs | Less | Equal | Inc | Dec => Vm::numeric_primitive,
         Vector | Aref | Aset => Vm::data_primitive,
         CopySequence => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.data_primitive(p, start, n)),
-        Nreverse => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.primitive(p, start, n)),
+        // Its own entry, granting its quit scope at its first chunk
+        // boundary (`Vm::kernel_poll`): a shorter call never enters one.
+        Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },
         CacheStats | CacheClear | CacheEntries => |vm, p, _, n| vm.cache_primitive(p, n),
         ProcessLines => |vm, _, start, n| vm.process_lines(start, n),
         Format => |vm, _, start, n| vm.inside_quit_scope(|vm| vm.format_polled(start, n)),

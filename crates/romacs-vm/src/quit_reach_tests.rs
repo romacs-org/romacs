@@ -675,3 +675,77 @@ fn base64_encoding_quits_between_slices() {
     reaches("base64-encode-string", "(setq s (make-string 100000 ?a))", "(list s)", "t");
     reaches("base64url-encode-string", "(setq s (make-string 100000 ?a))", "(list s)", "t");
 }
+
+/// The values the list FORM evaluates to, made before any press.
+fn values_of(vm: &mut Vm, form: &str) -> Vec<Value> {
+    let list = eval(vm, form);
+    let cx = Leaf::new(vm);
+    let mut values = Vec::new();
+    let mut tail = list;
+    while let Some((car, cdr)) = cx.pair(tail) {
+        values.push(car);
+        tail = cdr;
+    }
+    values
+}
+
+/// P called on ARGS through the engine's call target for it when ENGINE,
+/// else through `Vm::primitive`, which grants no scope, as the source
+/// cache's direct tier calls it.
+fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -> crate::Result<Value> {
+    let start = vm.stack.len();
+    vm.stack.extend_from_slice(args);
+    let outcome = if engine { crate::threaded::primitive_target(p)(vm, p, start, args.len()) } else { vm.primitive(p, start, args.len()) };
+    vm.stack.truncate(start);
+    outcome
+}
+
+/// The kernels gated at their first chunk (`Vm::kernel_poll`), each with
+/// the form making its arguments, N elements long. A press counted: through
+/// the engine's call target three chunks' worth quits at a poll, and one
+/// short of a chunk ends with a value, never polled, the press pending;
+/// through `Vm::primitive`, outside any scope, three chunks end with a
+/// value too.
+#[test]
+fn gated_kernels_take_their_scope_at_their_first_chunk() {
+    use crate::Primitive::Nreverse;
+    const K: usize = crate::quit::KERNEL_CHUNK;
+    let kernels: [(crate::Primitive, fn(usize) -> String); 1] = [(Nreverse, |n| format!("(list (make-list {n} 1))"))];
+    for (p, form) in kernels {
+        for (n, engine) in [(3 * K, true), (K - 1, true), (3 * K, false)] {
+            let (mut vm, signal) = busy_vm();
+            let args = values_of(&mut vm, &form(n));
+            assert!(signal.interrupt(), "a busy evaluator takes the press");
+            let outcome = call_kernel(&mut vm, p, &args, engine);
+            if engine && n > K {
+                assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?} of {n}: no quit at its poll");
+                let quit = vm.intern("quit");
+                assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
+            } else {
+                assert!(outcome.is_ok(), "{p:?} of {n} (engine {engine}): the call ends with a value");
+                assert!(signal.due(), "{p:?} of {n} (engine {engine}): the press stays pending");
+            }
+        }
+    }
+}
+
+/// `nreverse`'s walk hands off to its polled continuation once Brent's
+/// power reaches KERNEL_CHUNK, after KERNEL_CHUNK - 1 steps: on either side
+/// of that, and across it, a proper list comes back reversed, and a list
+/// whose cycle the walk finds before the hand-off or after it signals
+/// `circular-list' with the list itself, as fns.c's Fnreverse does.
+#[test]
+fn nreverse_is_one_walk_across_its_hand_off() {
+    const K: usize = crate::quit::KERNEL_CHUNK;
+    let (mut vm, _signal) = busy_vm();
+    for n in [1, 2, K - 2, K - 1, K, K + 1, 2 * K - 1, 2 * K, 3 * K + 5] {
+        let form = format!("(let (l r) (dotimes (i {n}) (push (- {n} i) l) (push (1+ i) r)) (equal (nreverse l) r))");
+        assert_eq!(eval(&mut vm, &form), Value::TRUE, "{form}");
+    }
+    // (LENGTH, BACK): the last cons's cdr is the BACKth.
+    for (length, back) in [(1, 0), (100, 50), (K - 1, 0), (K, 3), (K + 1, K), (3 * K, 0), (3 * K, K + 7)] {
+        let form = format!("(let (l) (dotimes (i {length}) (push i l)) (setcdr (nthcdr (1- {length}) l) (nthcdr {back} l)) \
+                            (condition-case e (progn (nreverse l) 'returned) (circular-list (eq (car (cdr e)) l))))");
+        assert_eq!(eval(&mut vm, &form), Value::TRUE, "{form}");
+    }
+}
