@@ -411,7 +411,7 @@ pub(super) fn with_signals_blocked<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// pthread_sigmask(SIG_SETMASK) of this thread to MASK, or to every signal
+/// `pthread_sigmask(SIG_SETMASK)` of this thread to MASK, or to every signal
 /// when None: the mask before.
 fn set_signal_mask(mask: Option<&libc::sigset_t>) -> libc::sigset_t {
     // Zeroed: libc's sigset_t is 128 bytes, of which the kernel's mask that
@@ -424,12 +424,11 @@ fn set_signal_mask(mask: Option<&libc::sigset_t>) -> libc::sigset_t {
     // bytes, a valid sigset_t, before pthread_sigmask writes the old mask
     // into it, so it is initialized whatever the call wrote.
     unsafe {
-        let mask = match mask {
-            Some(mask) => std::ptr::from_ref(mask),
-            None => {
-                libc::sigfillset(all.as_mut_ptr());
-                all.as_ptr()
-            }
+        let mask = if let Some(mask) = mask {
+            std::ptr::from_ref(mask)
+        } else {
+            libc::sigfillset(all.as_mut_ptr());
+            all.as_ptr()
         };
         libc::pthread_sigmask(libc::SIG_SETMASK, mask, old.as_mut_ptr());
         old.assume_init()
@@ -518,7 +517,7 @@ mod tests {
 
     #[test]
     fn passwd_finds_root_and_misses_a_stranger() {
-        let root = passwd(Ok(0), 16384).ok().expect("uid 0 has an entry");
+        let root = passwd(Ok(0), 16384).expect("uid 0 has an entry");
         assert_eq!((root.uid, root.name.as_deref()), (0, Some(&b"root"[..])));
         assert_eq!(passwd(Err(c"romacs-no-such-user"), 16384).err(), Some(0));
         assert_eq!(group(Ok(0), 16384), Ok((Some(b"root".to_vec()), 0)));
