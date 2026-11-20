@@ -4459,13 +4459,13 @@ its policy, or another machine's through its service."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
   (when (member request-id (plist-get (romacs-agent-driver-state session) :answered))
     (user-error "That request is answered"))
-  ;; Claimed before anything is written, which may wait on the host:
-  ;; let go of only should its answer not be written.
-  (setf (romacs-agent-driver-state session)
-        (plist-put (romacs-agent-driver-state session) :answered
-                   (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
   (let ((plan (when-let* ((plan-p (romacs-agent--harness-get session :presented-plan-p)))
                 (funcall plan-p session request-id))))
+    ;; Claimed before anything is written, which may wait on the host:
+    ;; let go of only should its answer not be written.
+    (setf (romacs-agent-driver-state session)
+          (plist-put (romacs-agent-driver-state session) :answered
+                     (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
     (condition-case err
         (romacs-agent--answer session request-id (if (and plan allow) t allow) message by)
       ((error quit)
