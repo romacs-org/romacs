@@ -1189,9 +1189,9 @@ say, and who answered it, its note's (kept since it came):
                  ((cl-find 'done events :key (lambda (event) (plist-get event :type))) "turn-end")
                  (t "harness"))
      "actor" (let ((actor (plist-get attributed :actor)))
-               (romacs-agent-rpc-object "kind" (cond ((null answered) (if attributed "user" "harness"))
-                                                     ((member (plist-get actor :kind) '("user" "policy")) (plist-get actor :kind))
-                                                     (attributed "user")
+               ;; Who answered as recorded, else who settled it.
+               (romacs-agent-rpc-object "kind" (cond ((plist-get actor :kind))
+                                                     ((null answered) "harness")
                                                      ((plist-get answered :behavior) "unknown")
                                                      (t "harness"))
                                         "login" (or (plist-get actor :login) :null)

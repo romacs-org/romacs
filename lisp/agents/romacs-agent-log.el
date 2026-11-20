@@ -138,6 +138,10 @@ NEWLINES the line breaks it ended in so far, held until text follows.")
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
   "Request ids whose answer was drawn with who gave it.")
+(defvar-local romacs-agent-log--ended-asks nil
+  "Asks open when their turn ended or harness exited, still listed as
+waited on by their source, each (ID . WHY): said once the source lets
+them go (`romacs-agent-log--sync-asks'), as another machine's does after.")
 (defvar romacs-agent-log--replaying nil
   "While a replay draws, the copy of the session its records are read
 into: what the session waited on then, not now.")
@@ -659,14 +663,20 @@ Live, in a chat no window shows, the echo area says so too."
 at EVENT) with approvals drawn open: each it no longer waits on (then,
 in a replay) settled, and said why.  One answered was not delivered: a
 recorded answer settles its block."
-  (dolist (ask romacs-agent-log--asks)
-    (when-let* ((id (car ask))
-                ((not (gethash id (romacs-agent-approvals (or romacs-agent-log--replaying session))))))
-      (romacs-agent-log--settle-ask id)
-      (romacs-agent-log--note event (cond ((member id romacs-agent-log--attributed)
-                                           "an answer not delivered: the harness never took it")
-                                          ((eq how 'exit) "the harness exited with it unanswered")
-                                          (t "the turn ended with it unanswered"))))))
+  (let ((approvals (if romacs-agent-log--replaying (romacs-agent-approvals romacs-agent-log--replaying)
+                     (romacs-agent-log-source-approvals romacs-agent-log--source session))))
+    (dolist (ask romacs-agent-log--asks)
+      (let* ((id (car ask))
+             (why (cond ((member id romacs-agent-log--attributed) "an answer not delivered: the harness never took it")
+                        ((eq how 'exit) "the harness exited with it unanswered")
+                        (t "the turn ended with it unanswered"))))
+        (cond ((not (gethash id approvals))
+               (romacs-agent-log--settle-ask id)
+               (romacs-agent-log--note event why)
+               (setq romacs-agent-log--ended-asks (assoc-delete-all id romacs-agent-log--ended-asks)))
+              ;; Still listed by a source that says so later: said then.
+              ((not romacs-agent-log--replaying)
+               (setf (alist-get id romacs-agent-log--ended-asks nil nil #'equal) why)))))))
 
 (defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
   "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
@@ -1015,7 +1025,11 @@ end, replayed into a copy so the session is not touched."
 records drew: a block no longer waited on settled, one waited on drawn."
   (let ((approvals (romacs-agent-log-source-approvals romacs-agent-log--source session)))
     (dolist (ask romacs-agent-log--asks)
-      (unless (gethash (car ask) approvals) (romacs-agent-log--settle-ask (car ask))))
+      (unless (gethash (car ask) approvals)
+        (romacs-agent-log--settle-ask (car ask))
+        (when-let* ((ended (assoc (car ask) romacs-agent-log--ended-asks)))
+          (setq romacs-agent-log--ended-asks (delq ended romacs-agent-log--ended-asks))
+          (romacs-agent-log--writing (romacs-agent-log--note nil (cdr ended))))))
     (maphash (lambda (id request)
                (unless (assoc id romacs-agent-log--asks)
                  (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
@@ -1100,7 +1114,8 @@ drew forgotten, its markers let go, its composer kept."
   (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
   (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
-        romacs-agent-log--attributed nil romacs-agent-log--prompts nil romacs-agent-log--seq 0
+        romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
+        romacs-agent-log--prompts nil romacs-agent-log--seq 0
         romacs-agent-log--from nil))
 
 (defun romacs-agent-log--ensure-filled ()

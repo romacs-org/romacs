@@ -383,7 +383,26 @@
     (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
     (draw :type 'exit :status 1)
     (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
-    (should-not romacs-agent-log--asks)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-ask-let-go-after-its-exit-says-so ()
+  ;; Another machine's service sends the exit before it lets the ask go:
+  ;; said once it does, not lost.
+  (romacs-agent-log-tests--with
+    (puthash "d" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "d" :tool "Bash")
+    (draw :type 'exit :status 1)
+    (should-not (string-match-p "exited with it unanswered" (romacs-agent-log-tests--transcript)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("d")))
+    (remhash "d" (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "the harness exited with it unanswered" text))
+      (should (= 1 (how-many "exited with it unanswered" (point-min) (point-max)))))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
 
 (ert-deftest romacs-agent-log-earlier-turns-draw-no-live-asks ()
   ;; An approval in the earlier turns whose settling the shown ones hold.

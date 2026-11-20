@@ -764,7 +764,7 @@ a state root of its own, and a service of its own on `socket'."
   (require 'romacs-agent-remote)
   (romacs-agent-service-tests--with-stored
     (romacs-agent-service-start socket)
-    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask) (calls nil)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask) (calls nil) (notes nil)
            (romacs-agent-service--commands (make-hash-table :test #'equal))
            (romacs-agent-service--answering (make-hash-table :test #'equal))
            (source (romacs-agent-remote-connect socket)) (client (romacs-agent-remote-client source))
@@ -780,7 +780,7 @@ a state root of its own, and a service of its own on `socket'."
                 ;; Answered as the harness is written to: its line.
                 ((symbol-function 'romacs-agent--line)
                  (lambda (_s line &rest _) (push (list 'line (if (stringp line) line (json-serialize line))) calls)))
-                ((symbol-function 'romacs-agent--note) #'ignore))
+                ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note notes))))
         (unwind-protect
             (progn
               (should (wait (romacs-agent-client-revision client)))
@@ -816,6 +816,9 @@ a state root of its own, and a service of its own on `socket'."
                                                                                                        "decision" "allow")))))
                                "request-gone"))
                 (should (equal (gethash "state" (car (funcall answer "c2"))) "written"))
+                ;; Credited to its caller: its login and its client's instance.
+                (should (equal (gethash "login" (car notes)) (user-login-name)))
+                (should (equal (gethash "client" (car notes)) (romacs-agent-client--instance)))
                 (should (eq (car (car calls)) 'line))
                 (should (string-search "Coffee" (cadr (car calls))))
                 (should (equal (gethash "kind" (gethash "data" (cadr (funcall answer "c3")))) "request-gone")))
