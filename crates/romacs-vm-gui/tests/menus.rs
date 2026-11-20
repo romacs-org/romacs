@@ -43,13 +43,6 @@ fn menus_share_one_look_and_motion() {
         vm.set_layout_host(Some(Box::new(measure::Host { engine: engine.clone() })));
         vm.set_echo_area_host(true);
         let mut report = vec![];
-        // A key grid: blocks aligned on their widest key, side by side while
-        // they fit, the next band below; faces on keys, titles, descriptions.
-        report.push(printed(&mut vm, "(let ((g (romacs-popup-key-grid
-                  '((\"Navigate\" (\"n\" . \"Next\") (\"RET\" . \"Open\")) (\"Chats\" (\"c\" . \"New chat\")) (\"Tools\" (\"b\" . \"Browse\")))
-                  24)))
-            (list (string-to-multibyte (substring-no-properties g)) (get-text-property 0 'face g)
-                  (get-text-property (string-search \"RET\" g) 'face g) (get-text-property (string-search \"Open\" g) 'face g)))"));
         // which-key's custom popup is a `panel': glass, slide, floating a
         // margin above the bottom.
         report.push(printed(&mut vm, "(progn (setq which-key--buffer (get-buffer-create \" *which-key*\"))
@@ -346,7 +339,6 @@ fn menus_share_one_look_and_motion() {
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
     assert_eq!(report, [
-        "(\"Navigate    Chats\\nn    Next   c  New chat\\nRET  Open\\n\\nTools\\nb  Browse\" romacs-popup-title romacs-popup-key romacs-popup-description)",
         "(t t panel 8 10 slide bottom t)",
         "nil",
         "(t t)",
@@ -453,8 +445,8 @@ fn key_hint_cards() {
                   (use-local-map map)
                   (mapcar (lambda (e) (cons (string-to-multibyte (car e)) (string-to-multibyte (substring-no-properties (nth 1 e))))) (romacs-popup--card-entries [f11])))
               (use-global-map old)))"));
-        // Pages: one when they fit; else pages whose last row says how many
-        // more and the help key; none when a page holds no entry.
+        // Pages: one when they fit; else pages whose last row says which
+        // page it is and the help key; none when a page holds no entry.
         report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) (format \"command-%d\" i) nil 'global i)) (number-sequence 0 29))))
             (list (length (romacs-popup--card-pages (seq-take entries 4) 5 40))
                   (let ((pages (romacs-popup--card-pages entries 5 40)))
@@ -563,11 +555,14 @@ fn key_hint_cards() {
         named(&mut vm, vec![CommandEvent::Character(24), CommandEvent::Character(8 | (1 << 25))]);
         report.push(printed(&mut vm, "(list card-help-keys card-took
             (let ((unread-command-events (list 24 (+ 8 (ash 1 25))))) (read-key-sequence nil)))"));
-        // Geometry: a page's footer is inside its rows; a key wider than the
-        // room gives no layout (the frame's corner, then no card).
+        // Geometry: what fits a row shares it; a page's footer, below a
+        // blank row, is inside its rows; a key wider than the room gives no layout (the frame's
+        // corner, then no card).
         report.push(printed(&mut vm, "(let ((entries (mapcar (lambda (i) (list (format \"%c\" (+ ?a i)) \"cmd\" nil 'global i)) (number-sequence 0 9))))
             (list (romacs-popup--card-pages (seq-take entries 4) 1 70)
-                  (seq-max (mapcar (lambda (p) (length (split-string p \"\\n\"))) (romacs-popup--card-pages entries 2 70)))
+                  (let ((pages (romacs-popup--card-pages entries 3 20)))
+                    (list (length pages) (seq-max (mapcar (lambda (p) (length (split-string p \"\\n\"))) pages))
+                          (car (last (split-string (car pages) \"\\n\")))))
                   (romacs-popup--card-pages (list (list \"<XF86AudioLowerVolume>\" \"lower\" nil 'global 0) (list \"a\" \"b\" nil 'global 1)) 1 10)))"));
         report
     }).unwrap().join().unwrap();
@@ -575,11 +570,15 @@ fn key_hint_cards() {
     assert_eq!(report, [
         "((\"p\" \"prefix\" t global) (\"d\" \"undo\" nil mode) (\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global))",
         "((\"4\" . \"other-window\") (\"m\" . \"Do the menu thing\") (\"r\" . \"copy\") (\"w\" . \"card-thing\"))",
-        "(1 (4 \"... 22 more · C-h\") nil)",
+        // Pages of near-even columns, each saying where it is and where
+        // the help key goes.
+        "(1 (5 \"1/5 · C-h next\") nil)",
         "((\"ESC\" . \"meta\") (\"8\" . \"char\") (\"v\" . \"vc\") (\"4\" . \"other-window\") (\"r\" . \"register\"))",
         "(t nil)",
         "(card t \"C-x\" t t t t t t)",
         "(nil [24] nil)",
+        // C-x's card in three pages within half the pane's lines and 70% of
+        // its columns.
         "((1 2 0 1) t)",
         "(nil nil)",
         "(t t t)",
@@ -596,6 +595,7 @@ fn key_hint_cards() {
         // GNU 32 (a keyboard macro, then `read-key-sequence'): the
         // command's keys [24 8], its event and the sequence shifted.
         "(([24 8] 33554440) nil [24 33554440])",
-        "(nil 2 nil)",
+        // Four short keys fit one row of a one-row room: one page.
+        "((\"a  cmd   b  cmd   c  cmd   d  cmd\") (5 3 \"1/5 · C-h next\") nil)",
     ]);
 }

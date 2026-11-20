@@ -339,6 +339,23 @@ struct PrimitiveRow {
     gate: Option<&'static str>,
     arity: usize,
     max: Option<usize>,
+    doc: Option<String>,
+}
+
+/// The docstring of the primitive whose defsubr! is at 1-based LINE of
+/// LINES: the run of `//` comment lines directly above it, each less its
+/// `//` and the one space after, joined by newlines. `///` and `//!` lines
+/// end the run, as does a line that is no comment. None without one, or
+/// when the run holds no text: `documentation` would show nothing.
+fn doc_above(lines: &[&str], line: usize) -> Option<String> {
+    let comment = |text: &str| {
+        let text = text.trim_start();
+        (text.starts_with("//") && !text.starts_with("///") && !text.starts_with("//!"))
+            .then(|| text[2..].strip_prefix(' ').unwrap_or(&text[2..]).trim_end().to_owned())
+    };
+    let mut doc: Vec<String> = lines[..line - 1].iter().rev().map_while(|l| comment(l)).collect();
+    doc.reverse();
+    doc.iter().any(|line| !line.is_empty()).then(|| doc.join("\n"))
 }
 
 fn declaration(path: &Path, ts: &[Token], pos: usize, module: &str, source: &str) -> PrimitiveRow {
@@ -437,6 +454,7 @@ fn declaration(path: &Path, ts: &[Token], pos: usize, module: &str, source: &str
         gate: source_gate(source),
         arity,
         max: (!many).then_some(arity + optional),
+        doc: None,
     }
 }
 
@@ -528,7 +546,9 @@ fn generate_primitives(root: &Path, out: &Path) {
                 "duplicate primitive module {module}"
             );
         }
-        let ts = tokens(path, &fs::read_to_string(path).unwrap());
+        let text = fs::read_to_string(path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        let ts = tokens(path, &text);
         for (i, token) in ts.iter().enumerate() {
             if token.text == "static"
                 || (token.text == "thread_local" && ts.get(i + 1).is_some_and(|t| t.text == "!"))
@@ -540,7 +560,19 @@ fn generate_primitives(root: &Path, out: &Path) {
                 );
             }
             if token.text == "defsubr" && ts.get(i + 1).is_some_and(|t| t.text == "!") {
-                rows.push(declaration(path, &ts, i, &module, &source));
+                let mut row = declaration(path, &ts, i, &module, &source);
+                // A primitive Romacs adds has no record in GNU's DOC: the
+                // comment above its defsubr! is its docstring, and one
+                // without that comment is refused here.
+                if row.gnu.starts_with("romacs:") {
+                    row.doc = doc_above(&lines, token.line);
+                    if row.doc.is_none() {
+                        primitive_error(path, token.line, &format!(
+                            "{} is a Romacs primitive with no docstring: write what it takes and returns in a \
+                             `//` comment directly above its defsubr!", row.name));
+                    }
+                }
+                rows.push(row);
             }
         }
     }
@@ -631,6 +663,13 @@ fn generate_primitives(root: &Path, out: &Path) {
     let manifest: Vec<_> = rows.iter().filter(|r| r.gate.is_none()).map(|r| format!(
         "{{\"name\":{},\"rust\":{},\"ident\":{},\"gnu\":{},\"effect\":{},\"min\":{},\"max\":{}}}",
         json_string(&r.name), json_string(&format!("{}:{}", r.source, r.line)), json_string(&r.ident), json_string(&r.gnu), json_string(&r.effect), r.arity, r.max.map_or_else(|| json_string("many"), |n| n.to_string()))).collect();
+    let mut docs: Vec<(&str, &str)> = rows.iter()
+        .filter_map(|r| r.doc.as_deref().map(|doc| (r.name.as_str(), doc))).collect();
+    docs.sort_unstable();
+    let docs: String = docs.iter().map(|(name, doc)| format!("    ({name:?}, {doc:?}),\n")).collect();
+    fs::write(out.join("primitive_docs.rs"), format!(
+        "/// Each Romacs primitive's docstring by name, sorted (build.rs `doc_above`).\n\
+         pub(crate) const PRIMITIVE_DOCS: &[(&str, &str)] = &[\n{docs}];\n")).unwrap();
     fs::write(out.join("prims_mods.rs"), modules).unwrap();
     fs::write(
         out.join("generated_prims.rs"),
