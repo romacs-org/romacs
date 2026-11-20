@@ -67,7 +67,7 @@ its lines their meaning, in Lisp.
   - =:events= and =:input-events= turn records into normalized events:
     =session=, =input=, =delta=, =message-end=, =thinking=, =tool=,
     =approval=, =answered=, =plan=, =status=, =error=, =compacted=,
-    =usage=, =rate-limit=, =done=, =exit=, =suggestion=, ...;
+    =usage=, =rate-limit=, =done=, =exit=, ...;
   - =:input=, =:respond=, =:interrupt= and =:select= compose the lines
     written back.
 - *The fold.* =romacs-agent--record= and =romacs-agent--raise=
