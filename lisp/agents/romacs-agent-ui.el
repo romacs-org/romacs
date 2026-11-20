@@ -3854,7 +3854,7 @@ and changes nothing; its plan comes as a card to implement."
 (defun romacs-agent-ui--plan-label ()
   (if (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))
       (concat "Plan mode: " (propertize "on" 'face 'bold))
-    "Plan mode: off"))
+    (concat "Plan mode: " (propertize "off" 'face 'bold))))
 
 (defun romacs-agent-chat-new ()
   "Start a new session, in this one's directory."
