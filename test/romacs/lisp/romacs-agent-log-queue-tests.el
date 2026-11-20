@@ -235,6 +235,28 @@
       (should-not romacs-agent-log-queue--editing)
       (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "gone soon")))))
 
+;;; What it keeps of the store's windows
+
+(ert-deftest romacs-agent-log-queue-a-stale-order-loses-nothing ()
+  ;; The worst the queue view leaves: a restore's order write that failed,
+  ;; retried after the user moved a message, lands last.  It puts places
+  ;; back as they were; every message, as last said, is still kept.
+  (romacs-agent-test-with-store
+    (make-directory (file-name-directory (romacs-agent-store--file)) t)
+    (should (romacs-agent-store--open))
+    (let* ((id "c8c8c8c8-0000-4000-8000-000000000000")
+           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running) t)))
+      (romacs-agent-send-later session "a" nil nil nil nil t)
+      (romacs-agent-send-later session "b" nil nil nil nil t)
+      (let ((stale (mapcar (lambda (item) (cons (romacs-agent-item-id item) (romacs-agent-item-position item)))
+                           (romacs-agent-queue session))))
+        (should (romacs-agent-queue-move session (car (romacs-agent-queue session)) 1))
+        (should (romacs-agent-queue-edit session (car (romacs-agent-queue session)) "b, said anew"))
+        (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("b, said anew" "a")))
+        ;; The stale order lands after.
+        (romacs-agent-store--queued-places id stale)
+        (should (equal (sort (mapcar #'car (romacs-agent-store-queued id)) #'string<) '("a" "b, said anew")))))))
+
 (ert-deftest romacs-agent-log-queue-keys-run-in-the-chat ()
   ;; Its row's keys and the menu's rows run commands of this mode.
   (dolist (key '("n" "p" "e" "RET" "d" "M-p" "M-n"))
