@@ -156,7 +156,7 @@ warning; one long word, and the argument line, are not."
 (defun romacs-lint-tests--tree-lint (files)
   "Lint FILES, ((PATH . LINES)...), written into a tree of their own with
 a lisp/bundled.json; return ((PATH . FINDINGS)...), each finding
-\"LEVEL: TEXT\"."
+\"LINE LEVEL: TEXT\"."
   (let ((root (make-temp-file "romacs-lint-tree-" t)))
     (unwind-protect
         (let ((romacs-lint-root nil))
@@ -171,7 +171,7 @@ a lisp/bundled.json; return ((PATH . FINDINGS)...), each finding
               (with-temp-file file (insert (string-join lines "\n") "\n"))))
           (mapcar (lambda (result)
                     (cons (file-relative-name (car result) root)
-                          (mapcar (lambda (finding) (format "%s: %s" (nth 1 finding) (nth 2 finding)))
+                          (mapcar (lambda (finding) (format "%d %s: %s" (nth 0 finding) (nth 1 finding) (nth 2 finding)))
                                   (cdr result))))
                   (romacs-lint-files (mapcar (lambda (entry) (expand-file-name (car entry) root)) files))))
       (delete-directory root t))))
@@ -191,7 +191,16 @@ for a variable GNU documents pass."
                     "(defvar kill-ring nil)"
                     "(defface romacs-lint-tests-face '((t)) \"A face.\")"
                     "(defvar-keymap romacs-lint-tests-map :doc \"Keys.\" \"a\" #'ignore)"
-                    "(define-minor-mode romacs-lint-tests-mode nil)"))
+                    "(define-minor-mode romacs-lint-tests-mode nil)"
+                    "(defvar-local romacs-lint-tests-local 1)"
+                    "(defgroup romacs-lint-tests-group nil nil)"
+                    "(defvar-keymap romacs-lint-tests-bare-map \"b\" #'ignore)"
+                    "(cl-defstruct romacs-lint-tests-struct a)"
+                    "(cl-defstruct (romacs-lint-tests-told-struct (:copier nil)) \"A record.\" a)"
+                    "(progn"
+                    "  (defvar romacs-lint-tests-wrapped 1))"
+                    "(defun romacs-lint-tests-lone () \"value\")"
+                    "(cl-defgeneric romacs-lint-tests-generic (x) (:documentation \"Told.\"))"))
          (results (romacs-lint-tests--tree-lint
                    `(("lisp/agents/romacs-lint-tests-a.el" ,@own)
                      ("lisp/romacs-lint-tests-b.el" ,@own)
@@ -199,10 +208,16 @@ for a variable GNU documents pass."
                      ("lisp/lint-tests-gnu.el" ,@own)
                      ("lisp/packages/p/romacs-lint-tests-d.el" ,@own)
                      ("lisp/textmodes/romacs-borrowed.el" ,@own))))
-         (expected '("warning: in romacs-lint-tests-bare: public definition has no docstring; fix: say what it does, as its body does it"
-                     "warning: in romacs-lint-tests--command: public definition has no docstring; fix: say what it does, as its body does it"
-                     "warning: in romacs-lint-tests-valued: public definition has no docstring; fix: say what it does, as its body does it"
-                     "warning: in romacs-lint-tests-mode: public definition has no docstring; fix: say what it does, as its body does it")))
+         (expected '("2 warning: in romacs-lint-tests-bare: public definition has no docstring; fix: say what it does, as its body does it"
+                     "5 warning: in romacs-lint-tests--command: public definition has no docstring; fix: say what it does, as its body does it"
+                     "8 warning: in romacs-lint-tests-valued: public definition has no docstring; fix: say what it does, as its body does it"
+                     "12 warning: in romacs-lint-tests-mode: public definition has no docstring; fix: say what it does, as its body does it"
+                     "13 warning: in romacs-lint-tests-local: public definition has no docstring; fix: say what it does, as its body does it"
+                     "14 warning: in romacs-lint-tests-group: public definition has no docstring; fix: say what it does, as its body does it"
+                     "15 warning: in romacs-lint-tests-bare-map: public definition has no docstring; fix: say what it does, as its body does it"
+                     "16 warning: in romacs-lint-tests-struct: public definition has no docstring; fix: say what it does, as its body does it"
+                     "19 warning: in romacs-lint-tests-wrapped: public definition has no docstring; fix: say what it does, as its body does it"
+                     "20 warning: in romacs-lint-tests-lone: public definition has no docstring; fix: say what it does, as its body does it")))
     (dolist (path '("lisp/agents/romacs-lint-tests-a.el" "lisp/romacs-lint-tests-b.el" "lisp/vm/lint-tests-c.el"))
       (should (equal (cons path (cdr (assoc path results))) (cons path expected))))
     (dolist (path '("lisp/lint-tests-gnu.el" "lisp/packages/p/romacs-lint-tests-d.el" "lisp/textmodes/romacs-borrowed.el"))

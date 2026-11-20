@@ -406,14 +406,23 @@ what decides where an instance keeps each slot."
 
 ;;;; Docstrings
 
+(defconst romacs-lint--documented
+  '(defun defmacro defsubst cl-defun cl-defmacro define-inline cl-defgeneric
+    defvar defvar-local defconst defcustom defface defgroup defvar-keymap
+    define-minor-mode define-derived-mode cl-defstruct)
+  "Heads of the top-level definitions that carry a docstring.")
+
 (defun romacs-lint--docstring (form)
   "Top-level FORM's docstring, or nil: a function's, a variable's, a face's,
-a group's, a keymap's or a mode's."
+a group's, a keymap's, a mode's or a structure's.  A function whose body
+is one string returns it, and has none."
   (let ((doc (pcase (car-safe form)
-               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro 'define-inline 'cl-defgeneric)
-                (nth 3 form))
+               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro 'define-inline)
+                (and (nthcdr 4 form) (nth 3 form)))
+               ('cl-defgeneric
+                (if (stringp (nth 3 form)) (nth 3 form) (cadr (assq :documentation (nthcdr 3 form)))))
                ((or 'defvar 'defconst 'defcustom 'defface 'defvar-local 'defgroup) (nth 3 form))
-               ('define-minor-mode (nth 2 form))
+               ((or 'define-minor-mode 'cl-defstruct) (nth 2 form))
                ('define-derived-mode (nth 4 form))
                ('defvar-keymap (plist-get (cddr form) :doc)))))
     (and (stringp doc) doc)))
@@ -433,17 +442,39 @@ Public is a name with no `--', or a command, which M-x offers whatever
 its name.  A `defvar' with no value declares, and defines nothing; one
 of a variable the machine has documented (GNU's, given a value before
 GNU's file loads) needs no second docstring."
-  (let ((name (romacs-lint--name form))
+  (let ((name (romacs-lint--name form romacs-lint--documented))
         (variable (memq (car-safe form) '(defvar defvar-local defconst defcustom))))
-    (and (symbolp name)
-         (memq (car form) '(defun defmacro defsubst cl-defun cl-defmacro define-inline cl-defgeneric
-                             defvar defvar-local defconst defcustom defface defgroup defvar-keymap
-                             define-minor-mode define-derived-mode))
+    (and (symbolp name) name
          (not (and (memq (car form) '(defvar defvar-local)) (null (cddr form))))
          (or (not (string-search "--" (symbol-name name))) (romacs-lint--command-p form))
          (not (romacs-lint--docstring form))
          (not (and variable (get name 'variable-documentation)))
          name)))
+
+(defun romacs-lint--definitions (forms text)
+  "FORMS, TEXT's top-level forms as (LINE . FORM), with each file-level
+`progn' opened into the forms it holds, each at the line its definition
+starts on."
+  (with-temp-buffer
+    (insert text)
+    (cl-labels ((walk (line form)
+                  (if (eq (car-safe form) 'progn)
+                      (mapcan (lambda (inner) (walk (romacs-lint--line-of inner line) inner)) (cdr form))
+                    (list (cons line form)))))
+      (mapcan (lambda (entry) (walk (car entry) (cdr entry))) forms))))
+
+(defun romacs-lint--line-of (form line)
+  "The line, at or after LINE of the current buffer, that definition FORM
+starts on; LINE when it is no definition or is not found."
+  (let ((name (romacs-lint--name form romacs-lint--documented)))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (if (and name (re-search-forward (format "(%s[ \t\n]+(?%s\\_>" (regexp-quote (symbol-name (car form)))
+                                               (regexp-quote (symbol-name name)))
+                                       nil t))
+          (line-number-at-pos (match-beginning 0))
+        line))))
 
 (defun romacs-lint--own-file-p (file root)
   "Non-nil when FILE is Romacs's own Lisp, which documents every public
@@ -613,7 +644,7 @@ revision its struct layouts are held to."
                    when untrue collect (list line 'error untrue))
           (and base (romacs-lint--layout-changes (car (romacs-lint--read base)) forms))
           (and (romacs-lint--own-file-p file root)
-               (cl-loop for (line . form) in forms
+               (cl-loop for (line . form) in (romacs-lint--definitions forms text)
                         for name = (romacs-lint--undocumented form)
                         when name
                         collect (list line 'warning
