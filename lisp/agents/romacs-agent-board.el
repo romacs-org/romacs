@@ -761,6 +761,7 @@ where it is answered."
 (defun romacs-agent-board-resume ()
   "Resume this thread, or go on with this transcript as a thread."
   (interactive nil romacs-agent-board-mode)
+  (romacs-agent-board--acting)
   (let ((row (romacs-agent-board--row)))
     (if (eq (plist-get row :kind) 'history)
         (romacs-agent-history-resume (plist-get row :item) romacs-agent-board--here)

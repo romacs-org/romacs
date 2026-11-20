@@ -162,32 +162,36 @@ END where the chat began when they were asked for.")
 once, through the chat's own source, and only while the chat still
 begins where it did; its history gone, the chat is drawn afresh."
   (let* ((end romacs-agent-log--from) (buffer (current-buffer)) (id (romacs-agent-id session))
-         (client (romacs-agent-remote-client source)))
+         (client (romacs-agent-remote-client source)) (token (list end)) (sent nil))
     (unless end (user-error "This chat shows the session from its start"))
     (when romacs-agent-remote--earlier (user-error "Its earlier turns are being read"))
     (unless (and client (romacs-agent-client-live-p client))
       (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
-    (let ((token (list end)))
-      (setq romacs-agent-remote--earlier token)
-      (unless (condition-case err
-                  (romacs-agent-client-earlier
-                   client id (1- end) romacs-agent-log-turns romacs-agent-log-records
-                   (lambda (result)
-                     (when (and (buffer-live-p buffer) (eq (buffer-local-value 'romacs-agent-remote--earlier buffer) token))
-                       (with-current-buffer buffer
-			 (let ((current (and (eql end romacs-agent-log--from)
-                                             (eq client (romacs-agent-remote-client source)))))
-                           (setq romacs-agent-remote--earlier nil)
-                           (pcase result
-                             (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
-                             ('(reset) (when current (romacs-agent-client-open client id)))
-                             (`(,units ,from)
-                              (when current
-				(romacs-agent-log--draw-above
-				 session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
-		(error (setq romacs-agent-remote--earlier nil) (signal (car err) (cdr err))))
-	(setq romacs-agent-remote--earlier nil)
-	(user-error "This chat is not followed: open it again")))))
+    (setq romacs-agent-remote--earlier token)
+    ;; Its token is let go of however this exits, a quit too, until the
+    ;; read is sent: then its reply's.
+    (unwind-protect
+        (setq sent (romacs-agent-client-earlier
+                    client id (1- end) romacs-agent-log-turns romacs-agent-log-records
+                    (lambda (result) (romacs-agent-remote--earlier-read buffer source client session token result))))
+      (unless sent (when (eq romacs-agent-remote--earlier token) (setq romacs-agent-remote--earlier nil))))
+    (unless sent (user-error "This chat is not followed: open it again"))))
+
+(defun romacs-agent-remote--earlier-read (buffer source client session token result)
+  "RESULT, of the earlier turns BUFFER's read TOKEN asked for, drawn while
+TOKEN is still its read, its chat beginning where it did and SOURCE's
+client still CLIENT."
+  (when (and (buffer-live-p buffer) (eq (buffer-local-value 'romacs-agent-remote--earlier buffer) token))
+    (with-current-buffer buffer
+      (let ((current (and (eql (car token) romacs-agent-log--from) (eq client (romacs-agent-remote-client source)))))
+        (setq romacs-agent-remote--earlier nil)
+        (pcase result
+          (`(error ,error) (message "Earlier turns not read: %s" (gethash "message" error)))
+          ('(reset) (when current (romacs-agent-client-open client (romacs-agent-id session))))
+          (`(,units ,from)
+           (when current
+             (romacs-agent-log--draw-above
+              session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit)))))))))))
 
 (cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-remote))
   (romacs-agent-remote-chats source))
