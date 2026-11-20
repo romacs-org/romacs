@@ -45,6 +45,12 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
         let mut vm = Vm::new();
         vm.set_frame_geometry(1000, 700, 20, 10)?;
         super::startup::initialize_files_from_sources(&mut vm, &[], &root)?;
+        // A file of Romacs's Lisp that signalled, which a session goes on
+        // without, fails a headless run: each, with its file and line.
+        let noted = super::startup::noted_lisp_errors(&mut vm)?;
+        if !noted.is_empty() {
+            return Err(noted.iter().filter_map(|error| error["error"].as_str()).collect::<Vec<_>>().join("\n"));
+        }
         if let Some(path) = init {
             if !super::user_init::load(&mut vm, &path)? {
                 return Err(format!("Explicit init file does not exist: {}", path.display()));
@@ -181,6 +187,21 @@ pub fn configure_worker_compiled_lisp(store: PathBuf) {
     configure_store(store, false, true);
 }
 
+/// The installation's Lisp trees, every directory of it a session loads
+/// Lisp from by name: DIR, its lisp/ (canonical), with its bundled
+/// `load-path' (each walked whole), and the installation's themes,
+/// `custom-theme-load-path''s `t': the themes/ of `data-directory', the
+/// etc/ of RUNTIME_ROOT (forwarded.rs), which every session loads its stock
+/// theme from, wherever ROMACS_LISP_DIR puts lisp/. Canonical, as DIR is and
+/// as a load names its file, through a symlinked runtime root too.
+fn installation_lisp(dir: &Path, runtime_root: &Path) -> Vec<PathBuf> {
+    let mut trees = vec![dir.to_owned()];
+    trees.extend(super::startup::bundled_load_path(dir).unwrap_or_default());
+    let themes = romacs_vm::host::canonicalize(runtime_root.join("etc/themes"));
+    trees.extend(themes.ok().filter(|themes| themes.is_dir()));
+    trees
+}
+
 /// Load compiled Lisp from STORE; COMPILES when this process may compile
 /// into it; DEFER_MISSES when no load may wait for a compile.
 fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
@@ -193,8 +214,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     // its files relative to it (`compiled_lisp::Config::root`). A Lisp tree
     // with no such tree around it: every file by its path.
     let root = tree_root(&dir);
-    let mut runtime = vec![dir.clone()];
-    runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
+    let runtime = installation_lisp(&dir, &romacs_vm::host::runtime_root());
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
     let worlds = store.join("worlds");
@@ -527,6 +547,21 @@ fn command_line_options(args: Vec<String>, mut quick: bool) -> (bool, Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A runtime root reached through a symlink names its themes by their
+    /// true path, as a load of a theme names its file.
+    #[test]
+    fn the_installations_themes_are_named_by_their_true_path() {
+        let root = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("romacs-installation-lisp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real/etc/themes")).unwrap();
+        std::fs::create_dir_all(root.join("real/lisp")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        let trees = installation_lisp(&root.join("real/lisp"), &root.join("link"));
+        assert!(trees.contains(&root.join("real/etc/themes")), "{trees:?}");
+        assert!(!trees.iter().any(|tree| tree.starts_with(root.join("link"))), "{trees:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A compile process keys by the manifest of the world it restored,
     /// whatever was published since; any other process, or one that

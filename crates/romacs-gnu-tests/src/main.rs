@@ -257,16 +257,7 @@ fn integer_of(vm: &mut Vm, source: &str) -> Result<usize, String> {
 /// stay ordered and are streamed even if the supervisor later kills a test.
 #[cfg(unix)]
 fn native_output_to_stdout() -> std::io::Result<()> {
-    unsafe extern "C" {
-        fn dup2(oldfd: std::ffi::c_int, newfd: std::ffi::c_int) -> std::ffi::c_int;
-    }
-    // SAFETY: dup2 takes integer descriptors, no pointers; stdout/stderr are
-    // process-owned and this single-threaded adapter calls it before VM startup.
-    if unsafe { dup2(1, 2) } == -1 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    rustix::stdio::dup2_stderr(std::io::stdout()).map_err(std::io::Error::from)
 }
 #[cfg(not(unix))]
 fn native_output_to_stdout() -> std::io::Result<()> {
