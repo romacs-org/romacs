@@ -29,14 +29,18 @@ struct Functions {
     past: abi::GetPast,
 }
 impl Functions {
-    /// # Safety
-    /// DEVICE must be a live Vulkan device whose instance supports the
-    /// present-timing extension these entry points come from.
-    unsafe fn load(device: &wgpu::hal::vulkan::Device) -> Option<Self> {
+    /// The entry points on DEVICE, or None unless DEVICE was opened with the
+    /// present-timing extensions they come from.
+    fn load(device: &wgpu::hal::vulkan::Device) -> Option<Self> {
+        if !super::enabled(device) {
+            return None;
+        }
         let instance = device.shared_instance().raw_instance();
         let raw = device.raw_device().handle();
-        // SAFETY: extension support is checked before loading; each symbol has
-        // the canonical Vulkan-Headers signature declared in abi.rs.
+        // SAFETY: DEVICE is borrowed live and was opened with the extensions
+        // (checked above); a null address returns None; each symbol has the
+        // canonical Vulkan-Headers signature declared in abi.rs.
+        // UNSAFE(ash 0.38 has no loader for VK_EXT_present_timing)
         unsafe {
             Some(Self {
                 set_size: std::mem::transmute::<unsafe extern "system" fn(), abi::SetQueueSize>(
@@ -64,12 +68,19 @@ impl SwapchainTiming {
     /// # Safety
     /// The surface must currently be configured with this device; the caller
     /// owns reconfiguration and assigns a unique generation to every configure.
+    // UNSAFE(wgpu's &self configure lets only the caller pin the configuration)
     pub unsafe fn new(
         device: &wgpu::Device,
         surface: &wgpu::Surface<'_>,
         generation: u64,
     ) -> Option<Self> {
         // SAFETY: queries operate synchronously under live device/surface guards.
+        // The swapchain is the surface's current one, made by DEVICE (the
+        // caller's contract) with present timing enabled (checked). Domain
+        // outputs are bounded to 16 entries, checked before and after the
+        // filling call. Calibration uses a domain the swapchain reported, and
+        // CLOCK_MONOTONIC once the physical device lists it.
+        // UNSAFE(wgpu's as_hal, and present-timing calls ash 0.38 does not wrap)
         unsafe {
             let device = device.as_hal::<Vulkan>()?;
             let surface = surface.as_hal::<Vulkan>()?;
@@ -145,6 +156,7 @@ impl SwapchainTiming {
     pub fn matches(&self, surface: &wgpu::Surface<'_>, generation: u64) -> bool {
         self.generation == generation
             // SAFETY: read-only identity lookup; no raw operation on saved handles.
+            // UNSAFE(wgpu reaches the swapchain handle only through its as_hal)
             && unsafe { surface.as_hal::<Vulkan>() }
                 .is_some_and(|surface| surface.raw_native_swapchain() == Some(self.swapchain))
     }
@@ -152,6 +164,7 @@ impl SwapchainTiming {
     /// # Safety
     /// The surface and generation must identify the current configuration of
     /// the same surface/device passed to new, without concurrent reconfigure.
+    // UNSAFE(wgpu's &self configure lets only the caller pin the swapchain)
     pub unsafe fn request(
         &mut self,
         surface: &wgpu::Surface<'_>,
@@ -165,7 +178,9 @@ impl SwapchainTiming {
             return false;
         }
         // SAFETY: new() verified the domain and allocated bounded queue capacity;
-        // the caller prepared this surface before configure. IDs only increase.
+        // the caller prepared this surface before configure. IDs only increase,
+        // and at most CAPACITY requests are outstanding (both checked above).
+        // UNSAFE(wgpu's as_hal, and the fork's unsafe present-timing request)
         let accepted = unsafe { surface.as_hal::<Vulkan>() }.is_some_and(|surface| unsafe {
             surface.set_next_present_timing_ext(
                 wgpu::hal::vulkan::present_timing::PresentTimingRequest {
@@ -185,6 +200,7 @@ impl SwapchainTiming {
     /// # Safety
     /// DEVICE must be the device this swapchain timing was created on, with
     /// the swapchain still alive.
+    // UNSAFE(the swapchain handle is raw; its owner cannot be checked here)
     unsafe fn calibrate(&self, device: &wgpu::hal::vulkan::Device) -> Option<Calibration> {
         let mut local = abi::SwapchainTimestamp {
             swapchain: self.swapchain,
@@ -205,6 +221,7 @@ impl SwapchainTiming {
         );
         // SAFETY: both clock domains were queried; chained swapchain info lives
         // through the call, and the surface is borrowed by our caller.
+        // UNSAFE(ash's raw Vulkan call; ash 0.38 has no swapchain-local domain)
         let (times, uncertainty_ns) = unsafe { fun.get_calibrated_timestamps(&infos) }.ok()?;
         let calibration = Calibration {
             monotonic: times[0],
@@ -220,6 +237,7 @@ impl SwapchainTiming {
     /// # Safety
     /// Device, surface and generation must describe their current shared
     /// configuration, without concurrent destruction or reconfiguration.
+    // UNSAFE(wgpu's &self configure lets only the caller keep the swapchain alive)
     pub unsafe fn poll(
         &mut self,
         device: &wgpu::Device,
@@ -233,7 +251,10 @@ impl SwapchainTiming {
             return Some(Vec::new());
         }
         // SAFETY: all C outputs have fixed, bounded capacity and stay stationary
-        // throughout the synchronous call under live HAL guards.
+        // throughout the synchronous call under live HAL guards. The swapchain
+        // is the surface's current one (checked) on the device new() saw (the
+        // caller's contract), so calibrate's precondition holds.
+        // UNSAFE(wgpu's as_hal, and present-timing calls ash 0.38 does not wrap)
         unsafe {
             let device = device.as_hal::<Vulkan>()?;
             let surface_guard = surface.as_hal::<Vulkan>()?;

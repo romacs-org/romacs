@@ -72,6 +72,18 @@
   "N strings PREFIX-0 ... PREFIX-(N-1)."
   (let (names) (dotimes (i n) (push (format "%s-%d" prefix i) names)) (nreverse names)))
 
+(defun scaling--card-order ()
+  "Sort key-hint cards as an interactive session does, by Romacs's
+`which-key-sort-order' (romacs-defaults sets it; a probe's session may
+not run them)."
+  (require 'which-key)
+  (setq which-key-sort-order #'romacs-popup-key-order))
+
+(defun scaling--card-command (i)
+  "A command of its own, the I-th: a key-hint card shows one row for each
+key bound to it, where keys bound to one command share a row."
+  (defalias (intern (format "scaling-card-%d" i)) #'forward-char))
+
 (defun scaling--lines-buffer (name n)
   "A buffer NAME of N numbered lines of prose."
   (with-current-buffer (get-buffer-create name)

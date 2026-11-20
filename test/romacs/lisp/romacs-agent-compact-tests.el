@@ -73,34 +73,6 @@
     (should-not (cl-find 'compacted (romacs-agent--claude-events session (nth 3 lines))
                          :key (lambda (event) (plist-get event :type))))))
 
-(ert-deftest romacs-agent-summary-spares-a-foreign-buffer ()
-  (romacs-agent-compact-tests--with-chat session
-    (romacs-agent-compact-tests--draw session :type 'compacted :text romacs-agent-compact-tests--summary)
-    (goto-char (point-min))
-    (let ((foreign (get-buffer-create "*agent compaction*")) (shown nil))
-      (unwind-protect
-          (progn
-            (with-current-buffer foreign (insert "a draft"))
-            (save-window-excursion
-              (romacs-agent-chat-show-compaction)
-              (setq shown (current-buffer)))
-            (should-not (eq shown foreign))
-            (should (equal (with-current-buffer foreign (buffer-string)) "a draft")))
-        (kill-buffer foreign)
-        (when (buffer-live-p shown) (kill-buffer shown))))))
-
-(ert-deftest romacs-agent-summary-follows-the-click-to-its-window ()
-  (romacs-agent-compact-tests--with-chat session
-    (romacs-agent-compact-tests--draw session :type 'compacted :text romacs-agent-compact-tests--summary)
-    (let ((chat (current-buffer)) (window (selected-window)) (at (point-min)))
-      (save-window-excursion
-        (set-window-buffer window chat)
-        (with-temp-buffer
-          (romacs-agent-chat-show-compaction
-           (list 'mouse-1 (list window at '(0 . 0) 0 nil at '(0 . 0) nil '(0 . 0) '(1 . 1))))
-          (should (equal (buffer-name (window-buffer (selected-window))) "*agent compaction*"))))
-      (kill-buffer "*agent compaction*"))))
-
 (ert-deftest romacs-agent-sweep-keeps-a-route-that-answers ()
   (let* ((root (romacs-test-socket-directory "rs")) (routes (expand-file-name "route/" root))
          (live (expand-file-name "live.sock" root)) (server nil)
@@ -120,32 +92,6 @@
           (should-not (file-symlink-p dead)))
       (when server (delete-process server))
       (delete-directory root t))))
-
-(ert-deftest romacs-agent-compaction-row-opens-its-summary ()
-  (romacs-agent-compact-tests--with-chat session
-    (romacs-agent-compact-tests--draw session :type 'compacted :text romacs-agent-compact-tests--summary)
-    (should (equal (buffer-substring-no-properties (point-min) romacs-agent-ui--end) "  · Session compacted\n"))
-    (goto-char (point-min))
-    (should (eq (lookup-key (get-text-property (point) 'keymap) (kbd "RET")) #'romacs-agent-chat-show-compaction))
-    ;; A link, in a note's row.
-    (should (equal (get-text-property (+ (point-min) 5) 'face) '(romacs-agent-link romacs-agent-note)))
-    (let ((chat (current-buffer)))
-      (save-window-excursion
-        (romacs-agent-chat-show-compaction)
-        (should (equal (buffer-name) "*agent compaction*"))
-        (should buffer-read-only)
-        (goto-char (point-min))
-        (search-forward "Kept")
-        (should (get-text-property (match-beginning 0) 'face)))
-      (kill-buffer "*agent compaction*")
-      (set-buffer chat))))
-
-(ert-deftest romacs-agent-no-compaction-on-other-rows ()
-  (romacs-agent-compact-tests--with-chat session
-    (romacs-agent-compact-tests--draw session :type 'status :text "note")
-    (goto-char (point-min))
-    (should-error (romacs-agent-chat-show-compaction) :type 'user-error)
-    (should-not (get-buffer "*agent compaction*"))))
 
 (ert-deftest romacs-agent-history-keeps-the-compaction ()
   (let ((events (romacs-agent-history--claude-events

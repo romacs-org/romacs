@@ -274,7 +274,7 @@ affixation it saw pushed on the list in cell ASKED."
         (goto-char (point-max))
         (romacs-agent-board-new)
         (should (equal offered (expand-file-name "repository/" root))))
-      (let ((romacs-agent-ui--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
+      (let ((romacs-agent-log--session (romacs-agent--make :id "s" :cwd (directory-file-name sub))))
         (setq offered nil)
         (romacs-agent-chat-new)
         (should (equal offered sub))))))

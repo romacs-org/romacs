@@ -1421,26 +1421,37 @@ the continuation glyph (`window-max-chars-per-line')."
       (funcall room)
     (cons (and window (max 1 (window-max-chars-per-line window))) nil)))
 
-(defun keymap-popup--footer (buf page pages columns)
-  "BUF's footer line: its exit key and what it does, its label where an
-entry's label starts (the key right-aligned in the column one-key
-entries leave it), then, when there is more than one page, PAGE of
-PAGES and the key to each page there is (next, previous); nil when
-there is nothing to say.  Past COLUMNS (nil for no limit) the words go
-first, the keys and the page count last.  It describes navigation, not
-a source binding, so it carries no mouse properties.  C-u's prefix
-override also shadows any exit below that prefix."
-  (let* ((exit (keymap-popup--active-get buf :exit-key))
-         (exit (and exit (not (eq (car (keymap-popup--key-events exit)) ?\C-u))
-                    (substring-no-properties exit)))
+(defun keymap-popup--exit-key (buf)
+  "BUF's exit key as a string, or nil: none, or one C-u's prefix override
+shadows."
+  (let ((exit (keymap-popup--active-get buf :exit-key)))
+    (and exit (not (eq (car (keymap-popup--key-events exit)) ?\C-u))
+         (substring-no-properties exit))))
+
+(defun keymap-popup--exit-hint (buf)
+  "BUF's exit key and what it does, `KEY  Dismiss menu' (`Back' in a
+submenu), or nil when it has none."
+  (when-let* ((exit (keymap-popup--exit-key buf)))
+    (concat (propertize exit 'face 'keymap-popup-key) "  "
+            (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu"))))
+
+(defun keymap-popup--footer (buf page pages columns &optional exit-shown)
+  "BUF's footer line: its exit key and what it does, unless EXIT-SHOWN
+\(the title row shows it), its label where an entry's label starts (the
+key right-aligned in the column one-key entries leave it), then, when
+there is more than one page, PAGE of PAGES and the key to each page
+there is (next, previous); nil when there is nothing to say.  Past
+COLUMNS (nil for no limit) the words go first, the keys and the page
+count last.  It describes navigation, not a source binding, so it
+carries no mouse properties."
+  (let* ((exit (and (not exit-shown) (keymap-popup--exit-key buf)))
          (key (lambda (k) (propertize k 'face 'keymap-popup-key)))
-         (hint (keymap-popup--paging-hint exit))
+         (hint (keymap-popup--paging-hint (keymap-popup--exit-key buf)))
          (next (and (< (1+ page) pages) (car hint)))
          (previous (and (> page 0) (cadr hint)))
          (count (and (> pages 1) (format "%d/%d" (1+ page) pages)))
          (full (delq nil (list (and exit (concat (make-string (max 0 (- 3 (string-width exit))) ?\s)
-                                                 (funcall key exit) "  "
-                                                 (if (keymap-popup--session-get buf :stack) "Back" "Dismiss menu")))
+                                                 (keymap-popup--exit-hint buf)))
                                ;; The page and the ways off it, one group.
                                (and count (concat count " · "
                                                   (string-join (delq nil (list (and next (concat (funcall key next) " next"))
@@ -1473,7 +1484,15 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
          (title (and (or (plist-get (keymap-popup--session-get buf :backend) :title)
                          (and window (zerop (window-mode-line-height window))))
                      (keymap-popup--title buf)))
-         (title (and title (romacs-grid-cut title (or columns most-positive-fixnum))))
+         ;; With a title, the exit hint goes right-aligned in its row
+         ;; where the row holds both (the title at least 10 columns, or
+         ;; whole), and the footer is only for paging.
+         (hint (and title (keymap-popup--exit-hint buf)))
+         (hint (and hint (or (null columns)
+                             (>= (- columns 3 (string-width hint)) (min (string-width title) 10)))
+                    hint))
+         (title (and title (romacs-grid-cut title (if columns (- columns (if hint (+ 3 (string-width hint)) 0))
+                                                     most-positive-fixnum))))
          ;; The chrome a page shares its rows with: the title and a blank
          ;; line, a blank line and the footer.
          (chrome (+ (if title 2 0) 2))
@@ -1485,20 +1504,32 @@ page's size, (COLUMNS . LINES), as the session's `:pages' and `:size'."
          (page (if (eq menu (keymap-popup--session-get buf :page-menu))
                    (min (or (keymap-popup--session-get buf :page) 0) (1- (length pages)))
                  0))
-         (footer (keymap-popup--footer buf page (length pages) columns)))
+         (footer (keymap-popup--footer buf page (length pages) columns hint))
+         ;; The widest footer any page has, so turning a page never
+         ;; resizes the card.
+         (width (apply #'max (romacs-grid-width pages)
+                       (if title (+ (string-width title) (if hint (+ 3 (string-width hint)) 0)) 0)
+                       (mapcar (lambda (p) (string-width (or (keymap-popup--footer buf p (length pages) columns hint) "")))
+                               (number-sequence 0 (1- (length pages)))))))
     (keymap-popup--set-session buf :page-menu menu :page page :pages (length pages)
-                               ;; The widest footer any page has, so turning a
-                               ;; page never resizes the card.
-                               :size (cons (apply #'max (romacs-grid-width pages)
-                                                  (if title (string-width title) 0)
-                                                  (mapcar (lambda (p) (string-width (or (keymap-popup--footer buf p (length pages) columns) "")))
-                                                          (number-sequence 0 (1- (length pages)))))
+                               :size (cons width
                                            (+ (apply #'max (mapcar #'length pages))
                                               (if title 2 0) (if footer 2 0))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (when title (insert title "\n\n"))
+        (when title
+          (insert title)
+          ;; The hint at the text's right edge, short of the column a
+          ;; fringe-less window keeps for its continuation glyph: wherever
+          ;; the backend's window ends, however wide the card grew for a
+          ;; row painted wider than its cells; two spaces first, so a title
+          ;; painted wide still leaves a gap.
+          (when hint
+            (insert "  " (propertize (make-string (max 1 (- width (string-width title) (string-width hint) 2)) ?\s)
+                                     'display `(space :align-to (- right ,(1+ (string-width hint)))))
+                    hint))
+          (insert "\n\n"))
         ;; Every page as tall as the tallest, so the footer stays put.
         (insert (string-join (nth page pages) "\n") "\n"
                 (make-string (- (apply #'max (mapcar #'length pages)) (length (nth page pages))) ?\n))

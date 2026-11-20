@@ -50,6 +50,21 @@ pub fn list(family: Option<&str>) -> Vec<Entity> {
     faces.into_iter().map(entity).collect()
 }
 
+/// What the catalog lists, as a generation that moves when Fontconfig's own
+/// refresh reloads its configuration (at most once per rescan interval, when
+/// a font directory or configuration file changed) and when a font is added
+/// to the application set, the bundled fonts again after a reload included.
+/// A listing kept from an equal catalog still holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Catalog(u64);
+
+impl Catalog {
+    /// The current catalog, None without Fontconfig.
+    pub fn current() -> Option<Self> {
+        crate::fontconfig_catalog::generation().map(Self)
+    }
+}
+
 /// Every installed family name, as GNU's `font-family-list' reads them:
 /// Fontconfig's distinct family sets, the first name of each, scalable or
 /// not, in listing order.
