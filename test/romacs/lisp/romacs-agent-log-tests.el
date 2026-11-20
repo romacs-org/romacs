@@ -1366,6 +1366,11 @@ none when dropped.")
     (draw :type 'input :text (concat "<romacs-message id=\"m-3\" kind=\"parent\" from=\"lead\">\nThird\n</romacs-message>\n"
                                      "Reply to this message with romacs_task_reply(messageId=\"m-3\", text=...)."))
     (should (string-match-p "┃ Again\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
+    ;; A line cut short: RET shows the rest.
+    (let ((romacs-agent-log-output-width 20))
+      (draw :type 'input :text (concat "<romacs-message id=\"m-4\" kind=\"parent\" from=\"lead\">\n" (make-string 40 ?x) "\n</romacs-message>\n"
+                                       "Reply to this message with romacs_task_reply(messageId=\"m-4\", text=...).")))
+    (should (string-match-p "┃ x+…\n┃ … [^\n]* shows all" (romacs-agent-log-tests--transcript)))
     (goto-char (point-min))
     (search-forward "Go on")
     (should (equal (filter-buffer-substring (line-beginning-position) (line-end-position)) "Go on"))))

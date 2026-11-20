@@ -98,10 +98,12 @@ not the user's; its first lines dim, RET shows all."
                                     (concat bar (propertize (truncate-string-to-width line width nil nil (truncate-string-ellipsis))
                                                             'face 'romacs-agent-log-other)))
                                   shown "\n")
-                       (if (> more 0)
+                       ;; Whatever it leaves out, lines or the ends of lines,
+                       ;; RET shows.
+                       (if (or (> more 0) (seq-some (lambda (line) (> (string-width line) width)) shown))
                            (concat "\n" bar
-                                   (propertize (format "… %d more line%s · %s shows all" more (if (= more 1) "" "s")
-                                                       (romacs-agent-log--key 'romacs-agent-log-open))
+                                   (propertize (concat (if (> more 0) (format "… %d more line%s · " more (if (= more 1) "" "s")) "… ")
+                                                       (romacs-agent-log--key 'romacs-agent-log-open) " shows all")
                                                'face 'romacs-agent-log-note))
                          "")
                        ;; Apart from what the agent says to it; under a
