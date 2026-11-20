@@ -178,9 +178,10 @@ impl Vm {
                     stop = power.min(poll_at);
                 }
             }
-            // The reversal is unpolled, bounded by the walk above.
             let mut prev = Value::NIL;
             let mut tail = seq;
+            // NOPOLL: the list's length, which the polled walk above bounded; the reversal writes as it goes,
+            // and GNU's Fnreverse stops it only at rarely_quit.
             while tail.tag_is(3) {
                 let i = tail.index(3)?;
                 let next = self.conses[i].1;
@@ -225,6 +226,8 @@ impl Vm {
             return Ok(seq);
         }
         if let Some(data::Object::BoolVector(bits)) = index.and_then(|i| self.objects.get_entry_mut(i)) {
+            // NOPOLL: half the bool-vector's length, swapped in place: a quit halfway would leave it half
+            // reversed (a3 REPORT C8, known list).
             for i in 0..bits.len / 2 {
                 let j = bits.len - 1 - i;
                 let left = bits.get(i).unwrap();
