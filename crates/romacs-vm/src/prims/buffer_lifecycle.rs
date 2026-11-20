@@ -64,6 +64,21 @@ fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> 
     lifecycle_lisp(cx, "romacs--other-buffer", vec![buffer, visible_ok, frame])
 }}
 
+// The kill's question before `replace-buffer-in-windows` (buffer.c:2044):
+// t when it must call it for BUFFER (`windows_may_name').
+defsubr! { name = "romacs--windows-may-name-p", gnu = "buffer.c:2044", effect = Reads,
+fn windows_may_name_p(cx, buffer: Value) {
+    Ok(if cx.windows_may_name(buffer) { Value::TRUE } else { Value::NIL })
+}}
+// window.el, right after defining `replace-buffer-in-windows', which
+// window.c's replace_buffer_in_windows calls by name: the definition a kill
+// may skip for a buffer no window names.
+defsubr! { name = "romacs--window-replacer-defined", gnu = "window.c:3722", effect = Global,
+fn window_replacer_defined(cx) {
+    cx.note_window_replacer();
+    Ok(Value::NIL)
+}}
+
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,
 fn make_indirect_buffer(cx, base_buffer: Value, name: Value; optional clone: Value, inhibit_buffer_hooks: Value) -> Step {
     let inhibit = inhibit_buffer_hooks != Value::NIL;

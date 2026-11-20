@@ -251,8 +251,8 @@ impl Vm {
             self.set_marker_object(point_marker, point, buffer)?;
             point_marker
         };
+        self.show_in_window(window, buffer)?;
         let w = self.window_mut(window)?;
-        w.show(buffer);
         w.end_valid = false;
         w.start = start_marker;
         w.point = point_marker;

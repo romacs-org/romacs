@@ -7,6 +7,13 @@ pub(crate) struct BufferState {
     pub(crate) name: Option<String>,
     pub(crate) live: bool,
     pub(crate) inhibit_buffer_hooks: bool,
+    /// A window has named this buffer: shown it, held it in its previous or
+    /// next buffers, or in a `quit-restore` parameter (`Vm::note_window_named`).
+    /// Deliberately sticky: never cleared, so a buffer once named takes the
+    /// full `replace-buffer-in-windows` at its kill, a conservative choice.
+    /// A kill that skips that walk for an unnamed buffer is safe only while no
+    /// other Rust path makes a window name a buffer.
+    pub(crate) window_named: bool,
     /// Shared with the buffer's indirect buffers, as GNU's MODIFF and
     /// SAVE_MODIFF are in their shared text.
     // CELL(Plain)
@@ -19,7 +26,7 @@ pub(crate) struct BufferState {
 }
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, modification: Default::default(), defun_start: None, terminal: None }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, window_named: false, modification: Default::default(), defun_start: None, terminal: None }
     }
 }
 impl BufferState {

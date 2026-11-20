@@ -750,10 +750,10 @@ impl Vm {
                 let (pt, start) = (self.window(window)?.point, self.window(window)?.start);
                 self.set_marker_object(pt, point, replacement)?;
                 self.set_marker_object(start, Value::integer(1)?, replacement)?;
+                self.show_in_window(window, replacement)?;
                 let w = self.window_mut(window)?;
                 // replace_buffer_in_windows_safely undedicates the window.
                 w.dedicated = Value::NIL;
-                w.show(replacement);
                 w.end_distance = 0;
                 w.end_valid = false;
                 w.vscroll_px = 0;

@@ -2,6 +2,9 @@ use super::*;
 use crate::prim::Out;
 use crate::data::Object;
 
+/// The `replace-buffer-in-windows` window.el defined (`note_window_replacer`).
+const WINDOW_REPLACER: &str = "#:vm2-window-replacer";
+
 impl Vm {
     pub(crate) fn live_buffer_value(&self, value: Value) -> bool {
         matches!(self.object_if(value), Some(Object::Buffer(b)) if b.state.live)
@@ -79,6 +82,27 @@ impl Leaf<'_> {
             .unwrap_or(Value::NIL))
     }
     /// buffer-list: the live buffers in the buffer list's order.
+    /// Whether a kill of BUFFER calls `replace-buffer-in-windows`
+    /// (buffer.c:2044): it is defined, and a window has named BUFFER
+    /// (`BufferState::window_named`) or the function is no longer the one
+    /// window.el defined. Advice or a redefinition expects every kill, as
+    /// GNU calls it at each; window.el's own does nothing for a buffer no
+    /// window names but walk the windows.
+    pub fn windows_may_name(&mut self, buffer: Value) -> bool {
+        let symbol = self.intern("replace-buffer-in-windows");
+        let function = self.symbol_function(symbol).unwrap_or(Value::NIL);
+        if function == Value::NIL { return false; }
+        let slot = self.vm.slot(WINDOW_REPLACER);
+        function != self.vm.slots[slot].value
+            || self.vm.buffer_state(buffer).is_ok_and(|s| s.window_named)
+    }
+    /// window.el's `replace-buffer-in-windows`, recorded as it defines it.
+    pub fn note_window_replacer(&mut self) {
+        let symbol = self.intern("replace-buffer-in-windows");
+        let function = self.symbol_function(symbol).unwrap_or(Value::NIL);
+        let slot = self.vm.slot(WINDOW_REPLACER);
+        self.vm.slots[slot].value = function;
+    }
     pub fn lifecycle_list(&mut self) -> Value {
         let order: Vec<Value> = self.vm.buffer_order().into_iter()
             .filter(|&b| self.vm.buffer_state(b).is_ok_and(|s| s.live)).collect();

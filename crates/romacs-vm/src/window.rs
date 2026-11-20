@@ -14,6 +14,9 @@ pub(super) struct Window {
     pub id: u64,
     pub frame: Value,
     pub combination_limit: Value,
+    // A buffer is stored here only by `show` and `new`, reached through
+    // `Vm::show_in_window` and `Vm::allocate_window`, which record it as
+    // named (`BufferState::window_named`); any other write stores nil.
     pub buffer: Value,
     pub point: Value,
     pub start: Value,
@@ -89,9 +92,11 @@ pub(super) struct Window {
     pub force_start: bool,
 }
 impl Window {
-    /// BUFFER is what the window shows now.
-    pub(crate) fn show(&mut self, buffer: Value) {
+    /// BUFFER is what the window shows now. Private to the window module:
+    /// elsewhere `Vm::show_in_window`, which records the buffer as named.
+    fn show(&mut self, buffer: Value) {
         if self.buffer != buffer { self.shows += 1; }
+        // Named by `Vm::show_in_window`, this function's only caller.
         self.buffer = buffer;
     }
     fn new(id: u64, buffer: Value) -> Self {
@@ -99,6 +104,7 @@ impl Window {
             id,
             frame: Value::NIL,
             combination_limit: Value::NIL,
+            // Named by `Vm::allocate_window`, this function's only caller.
             buffer,
             point: Value::NIL,
             start: Value::NIL,
@@ -281,9 +287,34 @@ impl Vm {
         self.set_marker_object(v, position, buffer)?;
         Ok(v)
     }
+    /// A window comes to name BUFFER (`BufferState::window_named`): every
+    /// Rust path that puts a buffer in a window's buffer, its previous or
+    /// next buffers or its `quit-restore` parameters calls this. A value that
+    /// is not a buffer is ignored.
+    pub(crate) fn note_window_named(&mut self, buffer: Value) {
+        if let Ok(state) = self.buffer_state_mut(buffer) { state.window_named = true; }
+    }
+    /// `note_window_named` for each buffer LIST names, as an element or as
+    /// an element's car: a previous-buffers alist, a next-buffers list, a
+    /// `quit-restore` parameter (whose second element's car may be one).
+    pub(crate) fn note_window_names_in(&mut self, list: Value) {
+        let mut tail = list;
+        while let Ok((element, rest)) = self.cons_pair(tail) {
+            self.note_window_named(element);
+            if let Ok((car, _)) = self.cons_pair(element) { self.note_window_named(car); }
+            tail = rest;
+        }
+    }
+    /// Window V shows BUFFER now, named by it.
+    pub(crate) fn show_in_window(&mut self, v: Value, buffer: Value) -> Result<()> {
+        self.window_mut(v)?.show(buffer);
+        self.note_window_named(buffer);
+        Ok(())
+    }
     pub(super) fn allocate_window(&mut self, buffer: Value) -> Result<Value> {
         let id = self.window_state.next;
         self.window_state.next += 1;
+        self.note_window_named(buffer);
         let mut w = Window::new(id, buffer);
         if self.frame_value_peek() != Value::UNBOUND {
             w.frame = self.frame_value_peek();
@@ -449,8 +480,8 @@ impl Vm {
             self.set_marker_bias(old, bias)?;
         }
         self.discard_buffer_from_window(buffer, v)?;
+        self.show_in_window(v, buffer)?;
         let w = self.window_mut(v)?;
-        w.show(buffer);
         w.end_distance = 0;
         w.end_valid = false;
         self.display_state.version += 1;
@@ -1645,6 +1676,9 @@ impl Vm {
                 .map(|(_, v)| *v)
                 .unwrap_or(Value::NIL),
             SetWindowParameter => {
+                if b == self.intern("quit-restore") || b == self.intern("quit-restore-prev") {
+                    self.note_window_names_in(c);
+                }
                 let w = self.window_mut(v)?;
                 if let Some((_, value)) = w.parameters.iter_mut().find(|(k, _)| *k == b) {
                     *value = c;
@@ -2611,6 +2645,7 @@ impl<'a> Windows<'a> {
     /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
     pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
         let v = self.live(window)?;
+        self.vm.note_window_names_in(buffers);
         let w = self.get_mut(v)?;
         if next { w.next_buffers = buffers } else { w.prev_buffers = buffers }
         Ok(buffers)
