@@ -334,8 +334,9 @@ GENERATION of its open, the CURSOR the open answered (its epoch and
 adapter what history must be read under), the SEQ of the last record
 drawn, the requests it waits on (PENDING, by handle id), and while
 history is read (PULLING), the live notices HELD, newest first, each
-\(KIND . PARAMS)."
-  turns records (generation 0) cursor (seq 0) (pending (make-hash-table :test #'equal)) pulling held)
+\(KIND . PARAMS), and how many opens in a row found what it waits on
+STALE before it was read."
+  turns records (generation 0) cursor (seq 0) (pending (make-hash-table :test #'equal)) pulling held (stale 0))
 
 (defun romacs-agent-client-follow (client id turns records)
   "Follow session ID on CLIENT, drawn from its last TURNS turns, no more
@@ -386,10 +387,12 @@ from where a reply stopped asks no more at a time.")
              (error
               ;; Its pages gone (a token that expired): opened again; else
               ;; not followed.
-              (if (let ((data (gethash "data" error))) (and (hash-table-p data) (equal (gethash "kind" data) "stale")))
+              (if (and (let ((data (gethash "data" error))) (and (hash-table-p data) (equal (gethash "kind" data) "stale")))
+                       (< (cl-incf (romacs-agent-client--follow-stale follow)) 3))
                   (romacs-agent-client-open client id)
                 (romacs-agent-client--end-follow client id error)))
              (t
+              (setf (romacs-agent-client--follow-stale follow) 0)
               (let ((pending (romacs-agent-client--follow-pending follow)))
                 (clrhash pending)
                 (dolist (request requests) (puthash (gethash "id" (gethash "handle" request)) request pending))
