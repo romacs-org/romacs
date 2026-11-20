@@ -97,7 +97,9 @@ fn kill_all_resets_what_the_buffer_holds_as_gnu_does() {
     check("(with-temp-buffer (setq fill-column 33 tab-width 3 truncate-lines t) (kill-all-local-variables) (list fill-column tab-width truncate-lines (local-variable-p 'fill-column) (local-variable-p 'tab-width) (local-variable-p 'truncate-lines)))", "(70 8 t nil nil t)");
     // Afterwards the buffer holds the built-ins local in every buffer, and nothing else.
     check("(with-temp-buffer (setq fill-column 33) (set (make-local-variable 'kl-x) 1) (kill-all-local-variables) (let ((n 0) (gone t)) (dolist (e (buffer-local-variables)) (setq n (1+ n)) (when (memq (if (consp e) (car e) e) '(kl-x fill-column)) (setq gone nil))) (list n gone (local-variable-p 'enable-multibyte-characters))))", "(19 t t)");
-    // The hook is found through a variable alias, as `run-hooks' finds it.
+    // A Romacs regression check, not a GNU value: GNU's `change-major-mode-hook'
+    // is a forwarded variable, which `defvaralias' refuses there (eval.c). Here
+    // the hook is found through the alias, as `run-hooks' finds it.
     check("(progn (defvar kl-ran nil) (defvar kl-my-hook nil) (defvaralias 'change-major-mode-hook 'kl-my-hook) (setq kl-my-hook (list (lambda () (setq kl-ran t)))) (with-temp-buffer (kill-all-local-variables)) kl-ran)", "t");
     // KILL-PERMANENT `reset' clears permanent locals and the visit's built-ins too.
     check("(with-temp-buffer (setq fill-column 33 buffer-read-only t) (set (make-local-variable 'kl-y) 2) (put 'kl-y 'permanent-local t) (kill-all-local-variables 'reset) (list fill-column buffer-read-only (local-variable-p 'kl-y)))", "(70 nil nil)");
