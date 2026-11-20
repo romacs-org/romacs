@@ -90,25 +90,31 @@ row, when there is none.  The row's digit then opens what it showed."
 
 ;;; The session's commands, as the menu offers them
 
+(defun romacs-agent-menu--session ()
+  "The chat's session, loaded, for a command of this menu: a chat whose
+source takes this editor's commands only (`romacs-agent-log--commands-p')."
+  (unless (romacs-agent-log--commands-p) (user-error "This chat's session takes no commands from here"))
+  (romacs-agent-log--loaded romacs-agent-log--session))
+
 (defun romacs-agent-chat-stop ()
   "Stop the session."
   (interactive nil romacs-agent-log-mode)
-  (when (yes-or-no-p "Stop this agent session? ") (romacs-agent-stop (romacs-agent-log--loaded))))
+  (when (yes-or-no-p "Stop this agent session? ") (romacs-agent-stop (romacs-agent-menu--session))))
 
-(defun romacs-agent-chat-resume () "Resume the session." (interactive nil romacs-agent-log-mode) (romacs-agent-resume (romacs-agent-log--loaded)))
+(defun romacs-agent-chat-resume () "Resume the session." (interactive nil romacs-agent-log-mode) (romacs-agent-resume (romacs-agent-menu--session)))
 
 (defun romacs-agent-chat-fork ()
   "Go on from this session's conversation in a new session, its own chat;
 this one goes on too (`romacs-agent-fork')."
   (interactive nil romacs-agent-log-mode)
-  (romacs-agent-show (romacs-agent-fork (romacs-agent-log--loaded))))
+  (romacs-agent-show (romacs-agent-fork (romacs-agent-menu--session))))
 
 (defun romacs-agent-chat-renew ()
   "Go on in a new conversation of this session's harness, its next message
 carrying a brief of this one (`romacs-agent-renew'): its context is freed,
 the session stays."
   (interactive nil romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (romacs-agent-renew session "by hand"
                         (lambda (outcome)
                           (run-at-time 0 nil (lambda ()
@@ -118,9 +124,9 @@ the session stays."
 
 (defun romacs-agent-chat-rename (title)
   "Name this session TITLE."
-  (interactive (list (read-string "Title: " (romacs-agent-title (romacs-agent-log--loaded))))
+  (interactive (list (read-string "Title: " (romacs-agent-title (romacs-agent-menu--session))))
                romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
     ;; Its views drawn again now, and once its row says it: those of a
     ;; session not loaded read the row.
@@ -133,11 +139,11 @@ the session stays."
   "Run this session at reasoning EFFORT from its next turn on, its model
 kept; nil leaves it to the harness."
   (interactive
-   (let* ((session (romacs-agent-log--loaded))
+   (let* ((session (romacs-agent-menu--session))
           (efforts (or (romacs-agent--efforts session) (user-error "This model offers no effort"))))
      (list (romacs-agent--read-effort efforts (plist-get (romacs-agent--wanted session) :effort))))
    romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (unless (romacs-agent-select session (plist-get (romacs-agent--wanted session) :model) effort)
       (message "Effort is already %s" (or effort "the harness's")))))
 
@@ -146,7 +152,7 @@ kept; nil leaves it to the harness."
 at EFFORT: the effort it runs at when MODEL takes it, else MODEL's default;
 with a prefix argument, asked for."
   (interactive
-   (let* ((session (romacs-agent-log--loaded))
+   (let* ((session (romacs-agent-menu--session))
           (instance (romacs-agent--instance (romacs-agent-provider session) (romacs-agent-harness session)))
           (fields (cdr (romacs-agent--pick-row
                         (romacs-agent--instance-rows instance (romacs-agent--harness-display (romacs-agent-harness session)) nil))))
@@ -156,7 +162,7 @@ with a prefix argument, asked for."
           (fitting (if (member now efforts) now (plist-get fields :default-effort))))
      (list model (if (and current-prefix-arg efforts) (romacs-agent--read-effort efforts fitting) fitting)))
    romacs-agent-log-mode)
-  (unless (romacs-agent-select (romacs-agent-log--loaded) model effort)
+  (unless (romacs-agent-select (romacs-agent-menu--session) model effort)
     (message "Already on %s" (romacs-agent-ui--selection-label (list :model model :effort effort)))))
 
 (defun romacs-agent-menu--model-label ()
@@ -183,10 +189,10 @@ a brief of the thread, to do NEXT, and its chat opens."
    (let* ((fields (cdr (romacs-agent--pick-row (romacs-agent--picker-rows))))
           (provider (plist-get fields :provider)))
      (list provider (plist-get fields :model)
-           (unless (romacs-agent-menu--moves-p (romacs-agent-log--loaded) provider)
+           (unless (romacs-agent-menu--moves-p (romacs-agent-menu--session) provider)
              (read-string "Go on with: " nil nil "Go on from where this thread left off."))))
    romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (if (and (symbolp provider) (romacs-agent-menu--moves-p session provider))
         (romacs-agent-chat-next-account)
       (if (romacs-agent-menu--moves-p session provider)
@@ -200,7 +206,7 @@ a brief of the thread, to do NEXT, and its chat opens."
   "Go on under the next account of this session's harness with room, its
 conversation as is (`romacs-agent-move-on')."
   (interactive nil romacs-agent-log-mode)
-  (let* ((session (romacs-agent-log--loaded)) (to (romacs-agent-move-on session)))
+  (let* ((session (romacs-agent-menu--session)) (to (romacs-agent-move-on session)))
     (message "%s goes on under %s, its conversation as is%s" (romacs-agent-title session) to
              (if (memq (romacs-agent-state session) '(starting running waiting-approval)) ", once this turn ends" ""))))
 
@@ -224,7 +230,7 @@ to do NEXT."
   "Put this session in plan mode, or take it out: in plan mode it plans
 and changes nothing; its plan comes as a card to implement."
   (interactive nil romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (romacs-agent-set-plan session (not (plist-get (romacs-agent-options session) :plan)))))
 
 (defun romacs-agent-menu--plan-label ()
@@ -236,7 +242,7 @@ and changes nothing; its plan comes as a card to implement."
   "Start a new session, in this one's directory."
   (interactive nil romacs-agent-log-mode)
   (apply #'funcall-interactively #'romacs-agent-start
-         (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd (romacs-agent-log--loaded))))))
+         (romacs-agent--start-arguments (file-name-as-directory (romacs-agent-cwd (romacs-agent-menu--session))))))
 
 (defun romacs-agent-menu--effort-label ()
   "The effort entry: the effort running, and the one to come if it differs."
@@ -261,7 +267,7 @@ turn has a checkpoint.  Without one, offer the conversation alone.  Files
 changed meanwhile by something else are named, and restored only when
 you say so."
   (interactive "P" romacs-agent-log-mode)
-  (let* ((session (romacs-agent-log--loaded))
+  (let* ((session (romacs-agent-menu--session))
          (request (or (cond (last (romacs-agent-menu--last-prompt session))
                             ;; From the composer, only the last turn, asked for.
                             ((>= (point) romacs-agent-log--end)
@@ -298,7 +304,7 @@ you say so."
 from the composer) in `diff-mode', in another window; with a prefix
 argument ALL, what every turn of the session did."
   (interactive "P" romacs-agent-log-mode)
-  (let ((session (romacs-agent-log--loaded)))
+  (let ((session (romacs-agent-menu--session)))
     (romacs-agent-diff-turn session (unless all (or (and (< (point) romacs-agent-log--end) (romacs-agent-log-turns-here))
                                                     (romacs-agent-diff-current session)
                                                     (user-error "No turn yet"))))))
@@ -306,7 +312,7 @@ argument ALL, what every turn of the session did."
 (defun romacs-agent-chat-cancel-resume ()
   "This session no longer resumes by itself when its limit resets."
   (interactive nil romacs-agent-log-mode)
-  (romacs-agent-tools--cancel-resume (romacs-agent-log--loaded) "cancelled by hand"))
+  (romacs-agent-tools--cancel-resume (romacs-agent-menu--session) "cancelled by hand"))
 
 (defun romacs-agent-chat-attach (file)
   "Put FILE's path in the composer: the agent reads it where it is, no
@@ -335,7 +341,7 @@ the session, the view."
   "u" ("Roll back this turn (C-u: last)" romacs-agent-chat-rollback
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
   "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)
-  :group "Runs on"
+  :group ("Runs on" :if #'romacs-agent-log--commands-p)
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
   "P" (#'romacs-agent-menu--plan-label romacs-agent-chat-plan)
@@ -359,7 +365,7 @@ the session, the view."
                     (and (> n 9) (format "All %d at work" n))))
        romacs-agent-menu-workers)
   :row
-  :group "Session"
+  :group ("Session" :if #'romacs-agent-log--commands-p)
   "b" ("Agent board" romacs-agents)
   "n" ("New session" romacs-agent-chat-new)
   "R" ("Rename" romacs-agent-chat-rename)

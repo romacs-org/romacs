@@ -40,7 +40,11 @@ runs one file.
 ## Source and agent requests
 
 `romacs-vm --source` evaluates UTF-8 source on stdin, sequentially by top-level
-form. `--source --dump-ir` prints readable optimized IR without executing it.
+form, on the VM's Lisp prelude (`mapcar` and the rest). The prelude's runtime
+tree must be discoverable: a build in its target directory or an installed
+binary finds it; a copied binary needs `ROMACS_RUNTIME_ROOT=TREE`, the checkout's
+root. `--source --dump-ir` prints readable optimized IR without executing it,
+on the bare VM, so it shows the form's functions alone.
 `Vm::read_source`, `Vm::compile_source` and `Vm::eval_source` expose these paths.
 The historical already-read JSON form transport remains available; JSON numbers
 may be integers or floats, strings denote symbols, arrays denote lists, and
