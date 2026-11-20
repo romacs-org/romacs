@@ -1461,8 +1461,9 @@ specified by `text-quoting-style'.
 into the output, \\\\==\\[ puts \\[ into the output, and \\\\==\\=` puts \\=` into the
 output.
 
-Return the original STRING if no substitutions are made.
-Otherwise, return a new string."
+Return a new multibyte string, keeping STRING's text properties, even
+when no substitutions are made; an empty result may be shared.  Return
+nil if STRING is nil."
   (if (help--substitute-nothing-p string)
       ;; What the full loop returns when it substitutes nothing: a
       ;; multibyte copy with STRING's properties, made without its
