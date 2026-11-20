@@ -16,9 +16,9 @@
 //! depend on any evaluator. Layout and rendering both depend on it, which is
 //! why the renderer's font helpers live here too.
 //!
-//! Foreign calls stay in their safe wrappers: `fc` (Fontconfig),
-//! `probe::variations` (FreeType's variation calls) and `probe`'s font file
-//! map. Unsafe code anywhere else fails the build.
+//! Foreign calls stay in their safe wrappers, `fc` (Fontconfig) and
+//! `probe::variations` (FreeType's variation calls); unsafe code anywhere
+//! else fails the build.
 
 #![deny(unsafe_code)]
 

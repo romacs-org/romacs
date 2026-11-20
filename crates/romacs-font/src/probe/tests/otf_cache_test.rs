@@ -75,11 +75,11 @@ fn counted(
 ) -> Option<OtfCapability> {
     otf_capability_in(cache, file, face, |path| {
         *reads += 1;
-        std::fs::read(path)
+        std::fs::read(path).map(|data| otf_capability_from_bytes(&data, face))
     })
 }
 fn read(cache: &OtfCapabilityCache, file: &str, face: u32) -> Option<OtfCapability> {
-    otf_capability_in(cache, file, face, mapped)
+    otf_capability_in(cache, file, face, |path| read_capability(path, face))
 }
 
 #[test]
@@ -135,6 +135,61 @@ fn collection_faces_keep_distinct_capabilities() {
     assert_eq!(reads, 2, "a collection face must have its own observation");
 }
 
+/// Reading only the directory and the tables a face needs answers as
+/// parsing the whole file does: a collection's face far into the file or at
+/// a round offset, and a table past the end of the file, included.
+#[test]
+fn reading_tables_answers_as_the_whole_file_does() {
+    let collection = |gap: usize| {
+        let first = sfnt(20, b"liga");
+        let second_offset = 20 + first.len() + gap;
+        let mut bytes = b"ttcf\0\x01\0\0\0\0\0\x02".to_vec();
+        bytes.extend(20u32.to_be_bytes());
+        bytes.extend((second_offset as u32).to_be_bytes());
+        bytes.extend(first);
+        bytes.extend(vec![0; gap]);
+        bytes.extend(sfnt(second_offset, b"calt"));
+        bytes
+    };
+    let liga = sfnt(0, b"liga");
+    let fixtures = [
+        Fixture::new(&liga),
+        Fixture::new(&collection(0)),
+        Fixture::new(&collection(100_000)),
+        Fixture::new(&collection(4096 - 20 - liga.len())),
+        Fixture::new(&liga[..liga.len() - 2]),
+        Fixture::new(b""),
+        Fixture::new(b"not a font at all"),
+    ];
+    let real = [romacs_test_fonts::noto_sans_mono_variable().to_path_buf(), romacs_test_fonts::bundled_iosevka()[0].clone()];
+    let paths = fixtures.iter().map(|fixture| fixture.path().to_owned()).chain(real.iter().map(|path| path.to_str().unwrap().to_owned()));
+    let mut found = 0;
+    for path in paths {
+        let whole = std::fs::read(&path).unwrap();
+        for face in 0..3 {
+            let read = read_capability(&path, face).unwrap();
+            assert_eq!(read, otf_capability_from_bytes(&whole, face), "{path} face {face}");
+            found += usize::from(read.is_some());
+        }
+    }
+    assert_eq!(found, 9, "one face of each whole font, two of each collection");
+}
+
+/// A layout table declared larger than any font's, in a sparse file that
+/// holds it, is absent rather than read.
+#[test]
+fn an_oversized_layout_table_is_not_read() {
+    let mut bytes = sfnt(0, b"liga");
+    // GSUB's is the first record: tag, checksum, offset, length.
+    let gsub_offset = u64::from(u32::from_be_bytes(bytes[20..24].try_into().unwrap()));
+    bytes[24..28].copy_from_slice(&0xF000_0000u32.to_be_bytes());
+    let font = Fixture::new(&bytes);
+    std::fs::OpenOptions::new().write(true).open(font.path()).unwrap().set_len(gsub_offset + 0xF000_0000).unwrap();
+    let capability = read_capability(font.path(), 0).unwrap().expect("the face parses");
+    assert!(capability.gsub.is_empty());
+    assert_eq!(capability.gpos[0].lang_syses[0].features, ["kern"]);
+}
+
 #[test]
 fn replacement_in_place_changes_and_failures_do_not_pin_stale_metadata() {
     let font = Fixture::new(&sfnt(0, b"liga"));
@@ -183,7 +238,7 @@ fn failed_read_is_retryable_and_cache_is_bounded() {
     let font = Fixture::new(&bytes);
     let cache = new_cache();
     assert_eq!(
-        otf_capability_in(&cache, font.path(), 0, |_| Err::<Vec<u8>, _>(
+        otf_capability_in(&cache, font.path(), 0, |_| Err::<Option<OtfCapability>, _>(
             std::io::ErrorKind::PermissionDenied.into()
         )),
         None
@@ -193,7 +248,7 @@ fn failed_read_is_retryable_and_cache_is_bounded() {
     let old = otf_capability_in(&cache, font.path(), 0, |path| {
             let data = std::fs::read(path)?;
             std::fs::write(path, sfnt(0, b"calt"))?;
-            Ok(data)
+            Ok(otf_capability_from_bytes(&data, 0))
         })
         .unwrap();
     let current = read(&cache, font.path(), 0).unwrap();

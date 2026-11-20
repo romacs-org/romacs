@@ -473,36 +473,97 @@ pub fn probe_font_px_metrics(
 /// unchanged file. A malformed but readable file caches `None`; a read
 /// error stays retryable.
 pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
-    otf_capability_in(otf_capability_cache(), file, face_index, mapped)
+    otf_capability_in(otf_capability_cache(), file, face_index, |file| read_capability(file, face_index))
 }
 
-/// FILE mapped, not copied: a font collection runs to tens of megabytes,
-/// of which the layout tables are a small part. FreeType maps font files
-/// the same way.
-#[expect(unsafe_code, reason = "memmap2's map is unsafe by contract")]
-fn mapped(file: &str) -> std::io::Result<memmap2::Mmap> {
+/// The largest layout table `read_capability` reads: a font's run to a few
+/// megabytes, and a larger one (a sparse file's, say) is not allocated.
+const LAYOUT_TABLE_LIMIT: u64 = 64 << 20;
+
+/// The capability of FILE[FACE_INDEX], read table by table rather than
+/// whole: a font collection runs to tens of megabytes, of which the table
+/// directory and the tables a face needs are a small part. Ok(None) for a
+/// face ttf-parser refuses, as `otf_capability_from_bytes` would.
+fn read_capability(file: &str, face_index: u32) -> std::io::Result<Option<OtfCapability>> {
+    use std::os::unix::fs::FileExt;
     let file = std::fs::File::open(file)?;
-    // SAFETY: memmap2's contract is that nothing changes the file while it
-    // is mapped. Nothing in this crate writes a font file; the map is read-only
-    // and lives only while `otf_capability_in` parses it with ttf-parser,
-    // which bounds-checks every read. Another process rewriting the file in
-    // that window is the hazard every reader of a mapped font accepts
-    // (FreeType maps font files too); it is not excluded here.
-    // UNSAFE(memmap2 is the mapping crate and its map is unsafe by contract;
-    // reading the file instead copies tens of megabytes per collection)
-    unsafe { memmap2::Mmap::map(&file) }
+    let len = file.metadata()?.len();
+    // The first NEED of FILE's LENGTH bytes at OFFSET; None where the
+    // LENGTH bytes run past its end.
+    let read = |offset: u64, length: u64, need: u64| -> std::io::Result<Option<Vec<u8>>> {
+        if offset.checked_add(length).is_none_or(|end| end > len) {
+            return Ok(None);
+        }
+        let mut data = vec![0; usize::try_from(length.min(need)).map_err(std::io::Error::other)?];
+        file.read_exact_at(&mut data, offset)?;
+        Ok(Some(data))
+    };
+    let be32 = |bytes: &[u8], at: usize| u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+    // Where the face's directory starts, as `RawFace::parse` finds it: a
+    // collection's face at its offset, which follows the whole offset array.
+    let Some(header) = read(0, 12, 12)? else { return Ok(None) };
+    let start = if &header[..4] == b"ttcf" {
+        let faces = be32(&header, 8);
+        let first = 12 + 4 * u64::from(faces);
+        if face_index >= faces || first > len {
+            return Ok(None);
+        }
+        let Some(offset) = read(12 + 4 * u64::from(face_index), 4, 4)? else { return Ok(None) };
+        let offset = u64::from(be32(&offset, 0));
+        if offset < first {
+            return Ok(None);
+        }
+        offset
+    } else if face_index == 0 {
+        0
+    } else {
+        return Ok(None);
+    };
+    // The face's directory alone; its records hold offsets in the file.
+    let Some(face_header) = read(start, 12, 12)? else { return Ok(None) };
+    if &face_header[..4] == b"ttcf" {
+        return Ok(None);
+    }
+    let records = u64::from(u16::from_be_bytes([face_header[4], face_header[5]]));
+    let directory_length = 12 + 16 * records;
+    let Some(directory) = read(start, directory_length, directory_length)? else { return Ok(None) };
+    let Ok(raw) = ttf_parser::RawFace::parse(&directory, 0) else { return Ok(None) };
+    // The first NEED bytes of each table as `Face::parse` collects it from
+    // the whole file: the directory's last record of the tag, absent when it
+    // runs past the end. head, hhea and maxp are parsed from their first 54,
+    // 36 and 6 bytes; a layout table is read whole, and one larger than any
+    // font's (a sparse file's, say) is absent rather than allocated.
+    let record = |tag: &[u8; 4]| {
+        let record = raw.table_records.into_iter().filter(|record| &record.tag.to_bytes() == tag).last()?;
+        Some((u64::from(record.offset), u64::from(record.length)))
+    };
+    let prefix = |tag, need| record(tag).map_or(Ok(None), |(offset, length)| read(offset, length, need));
+    let whole = |tag| match record(tag) {
+        Some((offset, length)) if length <= LAYOUT_TABLE_LIMIT => read(offset, length, length),
+        _ => Ok(None),
+    };
+    let (Some(head), Some(hhea), Some(maxp)) = (prefix(b"head", 54)?, prefix(b"hhea", 36)?, prefix(b"maxp", 6)?) else {
+        return Ok(None);
+    };
+    let (gsub, gpos) = (whole(b"GSUB")?, whole(b"GPOS")?);
+    let tables = ttf_parser::RawFaceTables {
+        head: &head,
+        hhea: &hhea,
+        maxp: &maxp,
+        gsub: gsub.as_deref(),
+        gpos: gpos.as_deref(),
+        ..Default::default()
+    };
+    Ok(ttf_parser::Face::from_raw_tables(tables).ok().map(|face| capability_of(&face)))
 }
 
-fn otf_capability_in<D: AsRef<[u8]>>(
+fn otf_capability_in(
     cache: &OtfCapabilityCache,
     file: &str,
     face_index: u32,
-    read: impl FnOnce(&str) -> std::io::Result<D>,
+    read: impl FnOnce(&str) -> std::io::Result<Option<OtfCapability>>,
 ) -> Option<OtfCapability> {
-    observe_file(cache, file, face_index, || {
-        read(file).ok().map(|data| otf_capability_from_bytes(data.as_ref(), face_index))
-    })
-    .flatten()
+    observe_file(cache, file, face_index, || read(file).ok()).flatten()
 }
 
 #[cfg(test)]
@@ -510,12 +571,15 @@ fn otf_capability_in<D: AsRef<[u8]>>(
 mod otf_cache_tests;
 
 pub fn otf_capability_from_bytes(data: &[u8], face_index: u32) -> Option<OtfCapability> {
-    let face = ttf_parser::Face::parse(data, face_index).ok()?;
+    ttf_parser::Face::parse(data, face_index).ok().map(|face| capability_of(&face))
+}
+
+fn capability_of(face: &ttf_parser::Face) -> OtfCapability {
     let tables = face.tables();
-    Some(OtfCapability {
+    OtfCapability {
         gsub: tables.gsub.map(otf_table_scripts).unwrap_or_default(),
         gpos: tables.gpos.map(otf_table_scripts).unwrap_or_default(),
-    })
+    }
 }
 
 fn otf_table_scripts(table: ttf_parser::opentype_layout::LayoutTable) -> Vec<OtfScript> {

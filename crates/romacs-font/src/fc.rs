@@ -10,8 +10,9 @@
 //! (`FcConfigReference`, `FcInitBringUptoDate`), and cannot add a language
 //! set to a pattern, read a boolean, ask a pattern's charset for a
 //! character, or reach the application font set or the configuration's
-//! file lists. Its handles cannot mix with these, so the catalog's whole
-//! chain stays here, each call beside why it is sound.
+//! file lists. Handing its patterns to those calls would go through its
+//! raw pointers all the same, so the catalog's whole chain stays here, one
+//! owner per handle, each call beside why it is sound.
 
 use fontconfig_sys as sys;
 use std::ffi::{CStr, c_int};
@@ -129,8 +130,8 @@ impl ObjectSet {
         let set = Owned::new(unsafe { sys::FcObjectSetCreate() }, sys::FcObjectSetDestroy)?;
         for key in keys {
             // UNSAFE(fontconfig 0.11 asks only the current configuration: module doc)
-            // SAFETY: the set is live; KEY is NUL-terminated and, being a
-            // Fontconfig object name, static.
+            // SAFETY: the set is live and KEY NUL-terminated; Fontconfig
+            // copies the name.
             if unsafe { sys::FcObjectSetAdd(set.get(), key.as_ptr()) } == 0 {
                 return None;
             }
