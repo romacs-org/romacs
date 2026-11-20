@@ -1,5 +1,6 @@
 ;;; clipboard-test.el --- Shared kill ring and interprogram clipboard -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs simple.el's kill ring and yank commands)
 
 (defvar interprogram-paste-function nil)
 (defvar interprogram-cut-function nil)

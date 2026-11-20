@@ -6,8 +6,9 @@
 ;; Romacs's menus are layers (romacs-layer.el) of four kinds, each a
 ;; placement and a look from one table, `romacs-popup-look':
 ;;
-;; `panel'    a key menu across the frame's bottom, above the status bar
-;;            (which-key, keymap-popup);
+;; `panel'    a key menu floating over the frame, centred above the status
+;;            bar, sized to its text (which-key, keymap-popup); its room,
+;;            `romacs-popup-room', is the frame's;
 ;; `cursor'   a chip or short menu after a buffer position (eval results);
 ;; `palette'  a centred prompt and list (romacs-complete's panel);
 ;; `hints'    the keys of an active transient map;
@@ -36,16 +37,49 @@
   "A menu's text and background.")
 
 (defface romacs-popup-key '((t :inherit romacs-layer-glow))
-  "A key in a menu.")
+  "A key in a menu: the theme's accent, made legible on the menu's glass
+\(`romacs-popup--key-spec').")
 
 (defface romacs-popup-title '((t :inherit bold))
-  "A menu's title and its groups' titles.")
+  "A menu's title.")
+
+(defface romacs-popup-group-title '((t :inherit bold))
+  "A group's title in a menu: the text's own colour, bold, above its
+keys' labels in plain weight; dim is for what cannot be used.")
 
 (defface romacs-popup-description '((t))
   "What a key in a menu does.")
 
 (defface romacs-popup-dim '((t :inherit shadow))
   "A menu's secondary text.")
+
+(declare-function romacs-color-floor-on "romacs-theme" (fg backgrounds minimum))
+
+(defconst romacs-popup-key-contrast 4.5
+  "The contrast a menu's keys keep on its glass, WCAG AA for text.")
+
+(defun romacs-popup--key-spec (&rest _)
+  "Make `romacs-popup-key' the theme's accent (`romacs-layer-glow') moved
+in lightness until it reads on the menu's glass at
+`romacs-popup-key-contrast'; a theme whose accent is a grey (a
+monochrome one) gives its keys the text's colour instead.  Run from
+`romacs-chrome-faces-functions', once the glow and glass are set."
+  (let* ((accent (face-foreground 'romacs-layer-glow nil t))
+         ;; A grey accent (a monochrome theme's) has no hue to set keys
+         ;; apart: they take the text's own colour, which their weight
+         ;; sets apart from labels.
+         (accent (if (romacs-chrome--chromatic accent) accent (face-foreground 'default nil t)))
+         (glass (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))
+         (legible (and (fboundp 'romacs-color-floor-on) (stringp accent) (stringp glass)
+                       (color-defined-p accent) (color-defined-p glass)
+                       (romacs-color-floor-on (romacs-chrome--hex accent) (list (romacs-chrome--hex glass))
+                                              romacs-popup-key-contrast)))
+         (spec `((t :inherit romacs-layer-glow ,@(and legible (list :foreground legible))))))
+    (unless (equal spec (get 'romacs-popup-key 'face-defface-spec))
+      (face-spec-set 'romacs-popup-key spec 'face-defface-spec))))
+
+;; Whenever the chrome has derived the glow and the glass.
+(add-hook 'romacs-chrome-faces-functions #'romacs-popup--key-spec)
 
 (defconst romacs-popup-look
   '((panel :radius 8 :padding 10 :motion slide :edge bottom)
@@ -87,7 +121,7 @@ MAX-LINES lines (by default the kind's); FACE paints its background."
     (set-window-hscroll (frame-root-window frame) 0)
     (prog1 (romacs-layer-show buffer
                               :position (pcase kind
-                                          ('panel 'bottom)
+                                          ('panel 'float)
                                           ('palette (if anchor `(pixel ,(car anchor) ,(cdr anchor)) 'center))
                                           ('viewer 'center)
                                           ('cursor `(at ,(car anchor) ,(cdr anchor)))
@@ -100,6 +134,7 @@ MAX-LINES lines (by default the kind's); FACE paints its background."
                               ;; a card is laid out to fit already.
                               :max-lines (cond (max-lines)
                                                ((memq kind '(card viewer)) lines)
+                                               ((and lines (eq kind 'panel)) lines)
                                                ((eq kind 'panel)
                                                 (max romacs-layer-max-lines
                                                      (- (frame-text-lines (romacs-layer--root-frame)) 4)))))
@@ -495,7 +530,7 @@ as hints at the bottom of the selected window, after a pause."
 ;; and the like) keep its pages in the `panel'.  Design: popup-layers.md
 ;; §19.2.
 
-(defface romacs-popup-group '((t :inherit font-lock-keyword-face))
+(defface romacs-popup-group '((t :inherit romacs-popup-key))
   "A prefix's name in a key-hint card: `+name'.")
 
 (defcustom romacs-popup-prefix-names
@@ -913,8 +948,11 @@ macro plays, or one of which-key's explicit panels shows."
 
 
 (defun romacs-popup-which-key-show (dimensions)
-  "Show which-key's buffer as a `panel' menu; DIMENSIONS is (LINES . COLUMNS)."
-  (romacs-popup-show 'panel which-key--buffer :lines (car dimensions)))
+  "Show which-key's buffer as a `panel' menu as wide as its text, with
+the column a fringe-less window keeps for its continuation glyph;
+DIMENSIONS is (LINES . COLUMNS)."
+  (romacs-popup-show 'panel which-key--buffer :lines (car dimensions)
+                     :columns (1+ (car (romacs-layer--text-size which-key--buffer)))))
 
 (defun romacs-popup-which-key-hide ()
   "Hide which-key's panel or card: which-key is done with the prefix."
@@ -923,15 +961,26 @@ macro plays, or one of which-key's explicit panels shows."
   (when (buffer-live-p which-key--buffer)
     (romacs-popup-hide which-key--buffer)))
 
-(defun romacs-popup-panel-columns ()
-  "The columns a `panel' menu's text can fill: the root frame's text
-width less the panel's padding both sides, in its columns, less the one
-a fringe-less window keeps for its continuation glyph."
+(defun romacs-popup-room (kind)
+  "The room a KIND menu floating over the root frame has for its text,
+\(COLUMNS . ROWS): the frame's text area below its top chrome and above
+`romacs-chrome-bottom', less the kind's padding each side and
+`romacs-layer-margin' (above it `romacs-layer-float-gap'), in the
+frame's columns and lines."
   (let* ((root (romacs-layer--root-frame))
          (padding (if romacs-layer-glass
-                      (plist-get (alist-get 'panel romacs-popup-look) :padding)
-                    (alist-get 'child-frame-border-width romacs-layer-frame-parameters))))
-    (max 1 (1- (/ (- (frame-text-width root) (* 2 padding)) (frame-char-width root))))))
+                      (plist-get (alist-get kind romacs-popup-look) :padding)
+                    (alist-get 'child-frame-border-width romacs-layer-frame-parameters)))
+         (inset (* 2 (+ padding romacs-layer-margin))))
+    (cons (max 1 (/ (- (frame-text-width root) inset) (frame-char-width root)))
+          (max 1 (/ (- (romacs-chrome-bottom root) (romacs-chrome-top root)
+                       (* 2 padding) romacs-layer-margin (romacs-layer-float-gap root))
+                    (frame-char-height root))))))
+
+(defun romacs-popup-panel-columns ()
+  "The columns a `panel' menu's text can fill (`romacs-popup-room'),
+less the one a fringe-less window keeps for its continuation glyph."
+  (max 1 (1- (car (romacs-popup-room 'panel)))))
 
 (defun romacs-popup-which-key-max-dimensions (_selected-window-width)
   "The most which-key's panel shows, as (LINES . COLUMNS)."

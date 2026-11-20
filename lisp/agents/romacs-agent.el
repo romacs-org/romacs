@@ -495,6 +495,19 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
+(defun romacs-agent-request-event (id request)
+  "An approval event for request ID, REQUEST as its harness asked it: a
+table (Claude Code's), else (WIRE METHOD PARAMS) (Codex's); its questions
+read as its harness's events read them."
+  (if (hash-table-p request)
+      (let ((tool (gethash "tool_name" request)) (input (gethash "input" request)))
+        (list :type 'approval :request-id id :tool tool :input input
+              :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
+              :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))
+    (pcase-let ((`(,_ ,method ,params) request))
+      (list :type 'approval :request-id id :tool method :input params
+            :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
+
 (defun romacs-agent--auto-answer-p (session event)
   "Whether Romacs answers SESSION's approval EVENT itself: a tool call,
 under the `allow' policy, out of plan mode.  A plan presented, a question,
@@ -2079,6 +2092,10 @@ goes."
           ;; Nothing written (or its write failed): idle, said once.
           (when (and idle (eq (romacs-agent-state session) 'idle)) (romacs-agent--changed session))))))))
 
+(defvar romacs-agent--copies (make-hash-table :test #'eq :weakness 'key)
+  "The copies of sessions replays fold into (`romacs-agent--scratch'): what
+is folded there acts on nothing of the live session's.")
+
 (defun romacs-agent--scratch (session)
   "A copy of SESSION to replay its journal into: it parses as SESSION does,
 and changes nothing of SESSION's, writes nothing to its harness, and sends
@@ -2099,7 +2116,31 @@ nothing that waits."
           ;; The live session's: a confirmation replayed here is not this copy's.
           (romacs-agent-pending-selection scratch) nil (romacs-agent-models-request scratch) nil
           (romacs-agent-driver-state scratch) nil (romacs-agent-startup-pending scratch) nil)
+    (puthash scratch t romacs-agent--copies)
     scratch))
+
+(declare-function romacs-agent-events-note-seq "romacs-agent-events" (session type end))
+
+(defun romacs-agent-replay-copy (session from)
+  "A copy of SESSION to replay its records from place FROM into
+\(`romacs-agent--scratch'), its harness's run as it was at FROM: the
+seq of the last run note before it in the store, else the live
+session's.  Every reader of a session's history replays into one."
+  (let ((scratch (romacs-agent--scratch session)))
+    (setf (romacs-agent-driver-state scratch)
+          (list :run (or (and from (romacs-agent-events-p session) (romacs-agent-events-note-seq session "run" from))
+                         (plist-get (romacs-agent-driver-state session) :run)))
+          ;; No turn under way at FROM, a turn's start: its first prompt
+          ;; is no steer, whatever the live session is doing.
+          (romacs-agent-input-seq scratch) 0 (romacs-agent-completed-seq scratch) 0)
+    scratch))
+
+(defun romacs-agent-replay-record (copy record)
+  "Fold RECORD into COPY (`romacs-agent-replay-copy'), as a view's replay
+does: nothing of the live session's is written (its manifest), nor, as
+for any copy, let go (`romacs-agent--held-echoed')."
+  (let ((romacs-agent--manifest-frozen t))
+    (romacs-agent--record copy record)))
 
 (defconst romacs-agent--events-page 2000
   "The seqs of SQLite's records `romacs-agent-events' reads at a time: each
@@ -3401,8 +3442,10 @@ attachment, and let go once its record of the note comes back
 
 (defun romacs-agent--held-echoed (session record)
   "RECORD, SESSION's, is a held note come back from its supervisor: let
-it go."
-  (when-let* ((note (gethash "note" record))
+it go.  Never for a replay's copy (`romacs-agent--copies'): it shares
+the session's id, and an old note there may share a held one's."
+  (when-let* (((not (gethash session romacs-agent--copies)))
+              (note (gethash "note" record))
               ((hash-table-p note))
               (id (gethash "romacsNote" note))
               (held (gethash (romacs-agent-id session) romacs-agent--held-notes)))
@@ -3883,7 +3926,8 @@ goes: nil drops it.  MESSAGES: from other sessions (`romacs-agent--input')."
 
 (defconst romacs-agent--option-keys
   '((:model . "model") (:effort . "effort") (:role . "role") (:parent . "parent") (:request . "clientRequestId")
-    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom"))
+    (:wake . "wake") (:worktree . "worktree") (:branch . "branch") (:plan . "plan") (:plan-from . "planFrom") (:fork . "forkedFrom")
+    (:tracked . "tracked"))
   "A session's start options and their manifest names.")
 
 (defun romacs-agent--options-object (options)
@@ -4004,6 +4048,10 @@ to it."
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
+      ;; A session the agents service started is tracked, or not started:
+      ;; said as a launch that failed is.
+      (when (plist-get (romacs-agent-options session) :tracked)
+        (error "Session %s is not started: no user unit could be made for its host" (romacs-agent-title session)))
       (let ((coding-system-for-write 'utf-8-unix)
             (process-environment (romacs-agent--harness-environment)))
         (apply #'call-process "setsid" nil 0 nil "--fork" command))
@@ -4064,7 +4112,8 @@ instance's model and effort (the effort only when it fits the model)."
 PROVIDER (a name in `romacs-agent-providers', by default
 `romacs-agent-default-provider'), sending PROMPT when given.  OPTIONS is a plist: :model and :effort for
 the harness, :role, :parent (the delegating session's id) and :request
-\(its client request id) for the record.  KNOWN, when given, is called
+\(its client request id) for the record, :id its id when it is made
+before it.  KNOWN, when given, is called
 with the session before its harness starts.  Return the session.
 Interactively, open the chat without sending an initial prompt."
   (interactive (romacs-agent--start-arguments (romacs-agent--project-default)))
@@ -4073,8 +4122,9 @@ Interactively, open the chat without sending an initial prompt."
          (name (plist-get instance :name))
          (session (progn
                     (romacs-agent--create
-                     :id (romacs-agent--uuid) :harness (plist-get instance :harness) :provider name
-                     :options (romacs-agent--instance-options instance options)
+                     :id (or (plist-get options :id) (romacs-agent--uuid)) :harness (plist-get instance :harness) :provider name
+                     :options (romacs-agent--instance-options instance (cl-loop for (key value) on options by #'cddr
+                                                                                unless (eq key :id) append (list key value)))
                      :config-dir (romacs-agent--config-dir instance) :cwd (expand-file-name cwd)
                      ;; The project's name until the first prompt names it.
                      :title (or title (file-name-nondirectory (directory-file-name (expand-file-name cwd))))
@@ -4429,12 +4479,35 @@ takes it, allows (t, or a plist of :answers or :always), else it is denied
 with MESSAGE.  BY is who answered: `user' or `policy' (this editor's), or
 an actor, a plist of :kind (`user' or `policy'), :login and :client.  A
 note says so in SESSION's records first, so every view shows who decided
-(doc/agent-protocol.org, Attribution)."
+\(doc/agent-protocol.org, Attribution).  A request is
+answered once in its run, by whoever answers first: an editor's user,
+its policy, or another machine's through its service."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
-         ;; A plan is proceeded with once: no rule for the session.
-         (allow (if (and plan allow) t allow))
-         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (when (member request-id (plist-get (romacs-agent-driver-state session) :answered))
+    (user-error "That request is answered"))
+  ;; Claimed before anything is written, which may wait on the host:
+  ;; let go of only should its answer not be written.
+  (setf (romacs-agent-driver-state session)
+        (plist-put (romacs-agent-driver-state session) :answered
+                   (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
+  (let ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans))))
+    (condition-case err
+        (romacs-agent--answer session request-id (if (and plan allow) t allow) message by)
+      ((error quit)
+       (setf (romacs-agent-driver-state session)
+             (plist-put (romacs-agent-driver-state session) :answered
+                        (delete request-id (plist-get (romacs-agent-driver-state session) :answered))))
+       (signal (car err) (cdr err))))
+    ;; Written: whatever follows, it stays answered.  Proceeding with a
+    ;; plan leaves plan mode, as Claude Code's does: the agent goes on to
+    ;; implement it.
+    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
+      (romacs-agent-set-plan session nil))))
+
+(defun romacs-agent--answer (session request-id allow message by)
+  "Write SESSION's answer ALLOW (MESSAGE) to REQUEST-ID, BY's note first.
+A plan is proceeded with once: its ALLOW is t, no rule for the session."
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when-let* ((actor (romacs-agent--actor by)))
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name (plist-get actor :kind))
@@ -4446,11 +4519,7 @@ note says so in SESSION's records first, so every view shows who decided
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)
-    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
-    ;; agent goes on to implement it.
-    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
-      (romacs-agent-set-plan session nil))))
+    (romacs-agent--line session line)))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
@@ -4953,21 +5022,36 @@ find it.  A journal's tail is read from its end, within BUDGET: its rows
 would only name a seq to search the same bytes for, further back when
 they lag."
   (if (romacs-agent-events-p session)
-      (or (and (not end) (not begin) (romacs-agent--turns-tail session turns budget))
+      (or (and (not begin) (romacs-agent--turns-tail session turns budget end))
           (romacs-agent-events-tail session turns end begin))
     (romacs-agent--journal-file-tail session turns end begin budget)))
 
-(defun romacs-agent--turns-tail (session turns &optional budget)
+(defun romacs-agent-tail-start (session turns records &optional end)
+  "Where a reader of SESSION's last TURNS turns before place END, its end
+by default, begins: the place of the TURNSth latest turn's start
+\(`romacs-agent--journal-tail'), nil for its start; but no more than
+RECORDS of SQLite's records before END (`romacs-agent-events-p'), within
+a turn longer than that.  A chat begins there, and so does the history
+the agents service reads for one."
+  (let ((from (car (romacs-agent--journal-tail session turns end))))
+    (if-let* (((romacs-agent-events-p session))
+              (end (or end (romacs-agent-events-end session)))
+              ((> (- end (or from 0)) records)))
+        (- end records)
+      from)))
+
+(defun romacs-agent--turns-tail (session turns &optional budget before)
   "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
-record, from its turns' rows; nil when it has fewer rows than that, none
-earlier (all of it is then drawn), or for a journal when it begins more
-than BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
+record, from its turns' rows (those before seq BEFORE when given, of
+SQLite's records); nil when it has fewer rows than that, none earlier
+\(all of it is then drawn), or for a journal when it begins more than
+BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
 by default; `none', no bound)."
   ;; Bounded as the journal's own tail is (`none', not at all): looked for
   ;; only within the bound's bytes.
   (let ((bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes))))
     (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
-                (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+                (seqs (romacs-agent-turns-first-seqs session (1+ turns) before))
                 ;; One turn more than drawn: what is before it is earlier turns.
                 ((> (length seqs) turns))
                 (seq (nth (1- turns) seqs))
