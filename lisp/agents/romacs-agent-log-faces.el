@@ -121,7 +121,9 @@ have failed, a line under it that says why."
 
 (defcustom romacs-agent-log-faces-output-patterns
   '(("\\(?:^\\|[ (\"'`]\\)\\([~.]?[[:alnum:]_./-]*[[:alnum:]_-]\\.[[:alnum:]]+:[0-9]+\\(?::[0-9]+\\)?\\)" 1 link)
-    ("\\_<\\(?:error\\|ERROR\\|failed\\|FAILED\\|FAIL\\|panicked\\|fatal\\)\\_>.*" 0 error)
+    ;; A diagnostic, `tool: what: why', or a line that says it failed:
+    ;; all of the line, never one word of it.
+    ("^.*\\(?:\\_<\\(?:error\\|ERROR\\|failed\\|FAILED\\|FAIL\\|panicked\\|fatal\\)\\_>\\|No such file\\|[Cc]annot \\|can't \\|[Pp]ermission denied\\|not found\\).*" 0 error)
     ("\\_<\\(?:warning\\|WARNING\\|warn\\)\\_>" 0 warning)
     ("\\_<\\(?:ok\\|OK\\|PASS\\|passed\\|done\\)\\_>" 0 success)
     ("\\_<[0-9a-f]\\{7,40\\}\\_>" 0 font-lock-constant-face))

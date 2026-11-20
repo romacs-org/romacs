@@ -1278,5 +1278,21 @@ none when dropped.")
               (should (file-exists-p path))))
         (delete-directory dir t)))))
 
+;;; A command's output
+
+(ert-deftest romacs-agent-log-output-lines-are-one-row-each ()
+  ;; A long line is cut to the width with an ellipsis, never wrapped.
+  (let* ((romacs-agent-log-output-width 20)
+         (shown (car (romacs-agent-log--lines (concat (make-string 50 ?x) "\nshort") 5))))
+    (should (equal (split-string shown "\n")
+                   (list (truncate-string-to-width (make-string 50 ?x) 20 nil nil (truncate-string-ellipsis)) "short")))))
+
+(ert-deftest romacs-agent-log-output-faces-a-diagnostic-whole ()
+  ;; All of a diagnostic line, from its first character; a plain line none.
+  (let ((text (romacs-agent-log-faces-output "sed: can't read x.el: No such file or directory\nrg: a: IO error (os error 2)\nplain")))
+    (dolist (at '(0 5 48 52))
+      (should (memq 'error (ensure-list (get-text-property at 'face text)))))
+    (should-not (memq 'error (ensure-list (get-text-property (- (length text) 2) 'face text))))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

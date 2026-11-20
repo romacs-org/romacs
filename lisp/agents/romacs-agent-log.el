@@ -73,6 +73,12 @@
 under its call; RET on it shows all of it."
   :type 'natnum :group 'romacs-agent)
 
+(defcustom romacs-agent-log-output-width 96
+  "How many columns of each line of a tool's output a chat shows under
+its call, a longer one cut with an ellipsis: a line a screen row in a
+window of ordinary width.  RET on it shows all of it."
+  :type 'natnum :group 'romacs-agent)
+
 (defcustom romacs-agent-log-records 4000
   "The most of a session's latest records its chat draws as it opens,
 whatever turns they are: a turn longer than that opens at its end."
@@ -447,11 +453,14 @@ and its usage after it).  RET still shows all of it."
     (string-trim report)))
 
 (defun romacs-agent-log--lines (text limit &optional tail)
-  "TEXT's first LIMIT lines, or with TAIL its last, and how many it has:
+  "TEXT's first LIMIT lines, or with TAIL its last, each cut to
+`romacs-agent-log-output-width' columns, and how many it has:
 \(SHOWN . COUNT)."
   (let* ((lines (split-string (string-trim-right (or text "")) "\n"))
          (count (length lines)))
-    (cons (string-join (if tail (last lines limit) (seq-take lines limit)) "\n") count)))
+    (cons (mapconcat (lambda (line) (truncate-string-to-width line romacs-agent-log-output-width nil nil (truncate-string-ellipsis)))
+                     (if tail (last lines limit) (seq-take lines limit)) "\n")
+          count)))
 
 (defun romacs-agent-log--output (output face full &optional tail)
   "OUTPUT under its call, `⎿' first, its first lines in FACE, then how
@@ -472,7 +481,7 @@ on it shows."
                          shown
                          (if (and more (not tail)) (concat "\n    " more) "")
                          "\n")))
-      (propertize text 'romacs-agent-log-full full 'wrap-prefix "    "))))
+      (propertize text 'romacs-agent-log-full full))))
 
 (defun romacs-agent-log--json (value)
   "VALUE, a tool's input, as indented JSON text."
@@ -508,12 +517,10 @@ renderer's, else its name and the brief of its input."
 (defun romacs-agent-log--call (event)
   "The first line of tool call EVENT, its mark first."
   (let ((input (plist-get event :input)))
-    ;; A row that wraps hangs under its text, not the margin.
-    (propertize (concat (propertize "● " 'face 'romacs-agent-log-tool)
-                        (romacs-agent-log--one-line
-                         (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
-                                                     (if (hash-table-p input) input (make-hash-table :test #'equal)))))
-                'wrap-prefix "  ")))
+    (concat (propertize "● " 'face 'romacs-agent-log-tool)
+            (romacs-agent-log--one-line
+             (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
+                                         (if (hash-table-p input) input (make-hash-table :test #'equal)))))))
 
 (defun romacs-agent-log--ended-row (block output)
   "BLOCK's row, its call ended well with OUTPUT, rewritten to say what came
@@ -535,8 +542,7 @@ of it (`romacs-agent-rows-ended'), after its mark."
             (let* ((mark (match-beginning 0))
                    (properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
                                      'romacs-agent-log-full (get-text-property mark 'romacs-agent-log-full)
-                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool)
-                                     'wrap-prefix "  ")))
+                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool))))
               (romacs-agent-log--writing
                 (delete-region (point) end)
                 (insert (romacs-agent-log--sealed (apply #'propertize ended properties)))))))))))
