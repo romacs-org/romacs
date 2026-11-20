@@ -80,8 +80,9 @@ its lines their meaning, in Lisp.
     schedule);
   - runs startup steps and keeps the folded state;
   - answers requests nobody was asked about (=romacs-agent--answer-unasked=):
-    under =romacs-agent-approval-policy= =allow= it allows tool calls, and
-    it denied tool calls in plan mode and denied presented plans.
+    under =romacs-agent-approval-policy= =allow= it allows tool calls.  It
+    once denied tool calls in plan mode and presented plans; the chat
+    rebuild removed that, and plan mode is now the harness's own.
 
   None of those answers was drawn.  That path plausibly explains approvals
   reported rejected that the user never saw; the affected records would

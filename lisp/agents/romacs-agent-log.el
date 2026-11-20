@@ -565,6 +565,7 @@ Live, in a chat no window shows, the echo area says so too."
                                          'romacs-agent-log-request id
                                          'romacs-agent-log-full (list input)
                                          'romacs-agent-log-questions questions
+                                         'romacs-agent-log-plan plan
                                          'keymap romacs-agent-log-ask-map))
       (push (cons id (cons start (copy-marker romacs-agent-log--end))) romacs-agent-log--asks))))
 
@@ -1210,6 +1211,10 @@ the session.  Questions open their answering layer."
   (let* ((id (romacs-agent-log--ask-here))
          (questions (get-text-property (point) 'romacs-agent-log-questions)))
     (cond (questions (romacs-agent-ask-open (romacs-agent-log--loaded) id questions))
+          ;; A plan is proceeded with, or not: no rule for the session.
+          ((and always (get-text-property (point) 'romacs-agent-log-plan))
+           (user-error (substitute-command-keys
+                        "A plan is proceeded with once: \\[romacs-agent-log-allow] proceeds")))
           (t (romacs-agent-respond (romacs-agent-log--loaded) id (if always (list :always t) t) nil 'user)))))
 
 (defun romacs-agent-log-allow-always ()

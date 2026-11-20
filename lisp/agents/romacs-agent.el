@@ -417,23 +417,35 @@ loading it would undo that one's changes; merge it first")
   (cl-loop for (key value) on options by #'cddr unless (memq key keys) append (list key value)))
 
 (defun romacs-agent--mode-seen (session mode)
-  "SESSION's harness says it is in permission MODE.  Live only (on a
-replay the options are already the last word): gone into plan mode of
-its own, the session is in plan mode; in plan mode, the mode to go back
-to is first known."
+  "SESSION's harness says it is in permission MODE.  Plan mode is the
+harness's own, and the session's option follows it.  Live: gone into plan
+mode of its own, the session is in plan mode; in plan mode, the mode to
+go back to is first known.  Live or catching up on the records it has
+not seen: gone out of plan mode of its own (it said plan, now another),
+the session is out of it, kept so, and a next launch puts it back in no
+plan mode.  Another mode said while a switch into plan mode is still on
+its way is the mode to go back to.  A copy replayed changes nothing."
   (let ((before (romacs-agent-permission-mode session)) (options (romacs-agent-options session)))
     (setf (romacs-agent-permission-mode session) mode)
-    (when (romacs-agent--live-p session)
-      (cond ((and (equal mode "plan") (not (plist-get options :plan)))
-             (romacs-agent--set-options
-              session (append (list :plan t) (and before (not (equal before "plan")) (list :plan-from before)) options)))
-            ((and (plist-get options :plan) (not (plist-get options :plan-from)) mode (not (equal mode "plan")))
-             (romacs-agent--set-options session (append (list :plan-from mode) options)))))))
+    (cond ((and (equal before "plan") mode (not (equal mode "plan")) (plist-get options :plan)
+                (eq (romacs-agent-loaded (romacs-agent-id session)) session))
+           (romacs-agent--set-options session (romacs-agent--without options '(:plan :plan-from)))
+           ;; Said in its records when it happens live; caught up on, the
+           ;; records already say the mode.
+           (when (romacs-agent--live-p session)
+             (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" :false))))
+          ((not (romacs-agent--live-p session)))
+          ((and (equal mode "plan") (not (plist-get options :plan)))
+           (romacs-agent--set-options
+            session (append (list :plan t) (and before (not (equal before "plan")) (list :plan-from before)) options)))
+          ((and (plist-get options :plan) (not (plist-get options :plan-from)) mode (not (equal mode "plan")))
+           (romacs-agent--set-options session (append (list :plan-from mode) options))))))
 
 (defun romacs-agent-set-plan (session on)
-  "Put SESSION in plan mode when ON, else back in the mode it had: it plans
-and changes nothing until told to implement.  A harness running takes it
-now (its driver's :plan), else at its next launch."
+  "Put SESSION in its harness's own plan mode when ON, else back in the
+mode it had: what plan mode lets it do is the harness's to say.  A
+harness running takes it now (its driver's :plan), else at its next
+launch."
   (let* ((options (romacs-agent-options session))
          (now (romacs-agent-permission-mode session))
          ;; The mode to go back to: never plan itself, unknown till the

@@ -207,7 +207,10 @@
       (romacs-agent-settle session)
       (should (equal heard '((:type settled))))
       (should (romacs-agent-ui--state-event-p (car heard))))
-    (should (romacs-agent-ui--state-event-p '(:type status :text "plan mode off")))))
+    (should (romacs-agent-ui--state-event-p '(:type status :text "detached")))
+    ;; Plan mode is the harness's: its text and its switch move no state.
+    (should-not (romacs-agent-ui--state-event-p '(:type status :text "plan mode off")))
+    (should-not (romacs-agent-ui--state-event-p '(:type plan :text "1. do it")))))
 
 (ert-deftest romacs-agent-state-a-grandchild-reaches-the-top ()
   ;; lead -> worker -> its own worker: the last ending makes the worker

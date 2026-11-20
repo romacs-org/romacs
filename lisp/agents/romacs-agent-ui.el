@@ -313,12 +313,12 @@ new turn starts, and last turn's failures have been seen."
     (romacs-agent-ui--children-changed session)))
 
 (defconst romacs-agent-ui--state-statuses
-  '("detached" "attached" "stopped" "supervisor not reachable" "cancelled" "plan mode" "plan mode off")
+  '("detached" "attached" "stopped" "supervisor not reachable" "cancelled")
   "The `status' events that change what a session's state reads.")
 
 (defun romacs-agent-ui--state-event-p (event)
   "Whether EVENT may change its session's state (`romacs-agent-ui--state')."
-  (or (memq (plist-get event :type) '(run session input approval answered plan done exit unstarted settled))
+  (or (memq (plist-get event :type) '(run session input approval answered done exit unstarted settled))
       (and (eq (plist-get event :type) 'status) (member (plist-get event :text) romacs-agent-ui--state-statuses))))
 
 (defvar romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key)

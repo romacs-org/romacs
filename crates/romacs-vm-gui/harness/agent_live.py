@@ -2930,16 +2930,28 @@ def chat_log(args, base):
         # A plan, in plan mode: asked of the user, who proceeds by a key.
         a.eval(f'(progn (romacs-agent-set-plan {a.s(sid)} t) t)')
         a.eval(f'(progn (romacs-agent-send {a.s(sid)} {lisp_text(PLAN_PROMPT)}) t)')
-        a.until(sid, lambda: pending(sid) > 0, 300, 'a plan asked')
+        # The presented plan itself (its ExitPlanMode request), not any
+        # request waiting.
+        def plan_request():
+            found = a.eval(f'(let ((s {a.s(sid)})) (seq-find (lambda (id) (let ((request (gethash id (romacs-agent-approvals s)))) '
+                           '(and (hash-table-p request) (equal (gethash "tool_name" request) "ExitPlanMode")))) '
+                           '(hash-table-keys (romacs-agent-approvals s))))')
+            return None if found == 'nil' else found
+        a.until(sid, lambda: plan_request() is not None, 300, 'a plan asked')
+        plan_id = plan_request()
         at_end()
         shot('plan')
-        result['plan_asked'] = pending(sid) > 0
+        result['plan_asked'] = plan_id is not None
         if result['plan_asked']:
             a.keys(*(ctrl('c') + ctrl('y')))
-            a.until(sid, lambda: pending(sid) == 0, 60, 'the plan answered')
+            a.until(sid, lambda: a.eval(f'(gethash {plan_id} (romacs-agent-approvals {a.s(sid)}))') == 'nil', 60, 'the plan answered')
             time.sleep(2)
             at_end()
             shot('plan-answered')
+            # Its answer is the user's, said under the plan.
+            chat_now = a.chat(sid)
+            after = chat_now.split('presents its plan', 1)[1] if 'presents its plan' in chat_now else ''
+            result['plan_answered_by_user'] = '✔ allowed by you' in after
         a.idle(sid, 300)
         text = a.chat(sid)
 
@@ -2976,7 +2988,7 @@ def chat_log(args, base):
             result['codex'] = repr(error)[:300]
         result.update({'shots': shots, 'denied_by_romacs': 'denied by Romacs' in text,
                        'shows': {word: word in text for word in ('seq 1', 'notes.txt', '∴', '⎿', 'allowed by you', '✻')}})
-        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result['codex'] is True
+        result['ok'] = (result['moved_up'] and result['question_asked'] and result['plan_asked'] and result.get('plan_answered_by_user') and result['codex'] is True
                         and not result['denied_by_romacs'] and all(result['shows'].values()))
         return result
     finally:

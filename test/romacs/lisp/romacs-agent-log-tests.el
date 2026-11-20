@@ -555,6 +555,17 @@
     (draw :type 'answered :request-id "live")
     (should-not (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-keys t))))
 
+(ert-deftest romacs-agent-log-a-plan-takes-no-rule-for-the-session ()
+  (romacs-agent-log-tests--with
+    (puthash "p" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "p" :tool "ExitPlanMode" :plan t :user t)
+    (let (answered)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (lambda (&rest args) (push args answered))))
+        (should-error (romacs-agent-log-allow-always) :type 'user-error)
+        (should-not answered)
+        (romacs-agent-log-allow)
+        (should (equal (nth 2 (car answered)) t))))))
+
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
     (puthash "q" t (romacs-agent-approvals session))

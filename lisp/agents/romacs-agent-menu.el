@@ -221,8 +221,9 @@ to do NEXT."
                                                         provider model next)))))
 
 (defun romacs-agent-chat-plan ()
-  "Put this session in plan mode, or take it out: in plan mode it plans
-and changes nothing; its plan comes as a card to implement."
+  "Put this session in its harness's plan mode, or take it out: what plan
+mode lets it do is the harness's; a plan it presents asks you whether to
+proceed."
   (interactive nil romacs-agent-log-mode)
   (let ((session (romacs-agent-log--loaded)))
     (romacs-agent-set-plan session (not (plist-get (romacs-agent-options session) :plan)))))
