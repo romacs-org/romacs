@@ -995,7 +995,9 @@ where the chat reads and acts on SESSION, this editor by default
       (with-current-buffer buffer
         (romacs-agent-log-mode)
         (setq romacs-agent-log--source source)
-        (unless (romacs-agent-log-source-restorable-p source) (setq-local desktop-save-buffer nil))
+        (unless (romacs-agent-log-source-restorable-p source)
+          (setq-local desktop-save-buffer nil
+                      warm-restart-left-out "another source's chat: open it again from its board"))
         (romacs-agent-log--set-session session)
         (setq romacs-agent-log--end (point-min-marker)
               romacs-agent-log--input (point-min-marker))
@@ -1058,6 +1060,7 @@ shows it; its session loaded only then, as its records are read."
     buffer))
 
 (defvar desktop-buffer-mode-handlers)
+(defvar warm-restart-left-out)
 (add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-log-mode . romacs-agent-log-desktop-restore))
 
 ;;; Commands

@@ -495,6 +495,7 @@
             (should-not (romacs-agent-log--commands-p))
             (should-not romacs-agent-ui--session)
             (should-not desktop-save-buffer)
+            (should (stringp warm-restart-left-out))
             (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
               (type "now") (romacs-agent-log-send)
               (type "later") (romacs-agent-log-queue)
