@@ -28,6 +28,7 @@
 (require 'cl-lib)
 (require 'romacs-agent)
 (require 'romacs-icons)
+(require 'romacs-lexical)
 
 (defvar romacs-agent-rows (make-hash-table :test #'equal)
   "Each tool's renderer, by the tool's name (`romacs-agent-rows-define').")
@@ -263,19 +264,9 @@ known."
 
 ;;; Lisp
 
-(defvar romacs-agent-rows--lisp-buffer nil
-  "The hidden buffer forms are coloured in: one, its mode made once.")
-
 (defun romacs-agent-rows-lisp (code)
-  "CODE coloured as `emacs-lisp-mode' colours it."
-  (unless (buffer-live-p romacs-agent-rows--lisp-buffer)
-    (setq romacs-agent-rows--lisp-buffer (generate-new-buffer " *romacs-agent-lisp*"))
-    (with-current-buffer romacs-agent-rows--lisp-buffer (delay-mode-hooks (emacs-lisp-mode))))
-  (with-current-buffer romacs-agent-rows--lisp-buffer
-    (erase-buffer)
-    (insert code)
-    (font-lock-ensure)
-    (buffer-string)))
+  "CODE coloured by its lexical classes, as Emacs Lisp (romacs-lexical.el)."
+  (romacs-lexical-string 'emacs-lisp code))
 
 (romacs-agent-rows-define
  "romacs_eval"

@@ -961,3 +961,31 @@
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
+
+;;; A reply's faces as it streams
+
+(ert-deftest romacs-agent-log-a-reply-is-faced-as-it-streams ()
+  ;; Each batch faces what came; the turn's end the rest.
+  (romacs-agent-log-tests--with
+    (draw :type 'delta :text "Some **bold** words.\n\n```elisp\n(message \"hi\")\n")
+    (romacs-agent-log-faces--batch (current-buffer))
+    (goto-char (point-min))
+    (search-forward "bold")
+    (should (memq 'romacs-markdown-strong (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "\"hi")
+    (should (memq 'font-lock-string-face (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (draw :type 'delta :text "```\n\nAnd *more*.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "more")
+    (should (memq 'romacs-markdown-emphasis (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-a-reply-whose-faces-fail-says-so ()
+  ;; Its text stays; a line under it says why.
+  (romacs-agent-log-tests--with
+    (cl-letf (((symbol-function 'romacs-markdown-fontify-region) (lambda (&rest _) (error "Parser broke"))))
+      (draw :type 'delta :text "Some text.")
+      (draw :type 'done :time 0))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Some text\\." text))
+      (should (string-match-p "⚠ shown without its faces: Parser broke" text)))))

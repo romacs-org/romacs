@@ -49,7 +49,9 @@
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
-(declare-function romacs-markdown-fontify-region "romacs-markdown" (beg end &optional from))
+(declare-function romacs-color-floor "romacs-theme" (fg bg minimum))
+(declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
+(declare-function romacs-agent-log-faces-end "romacs-agent-log-faces" (start at))
 (declare-function romacs-agent-ask-open "romacs-agent-ask" (session id questions &optional place))
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
 (declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session))
@@ -88,17 +90,29 @@ syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
 
-(defun romacs-agent-log--derive-output (&rest _)
+(defface romacs-agent-log-header-key '((t :inherit help-key-binding :weight bold))
+  "A key the header names: the theme's key colour, bold, readable on the
+header line.")
+
+(defun romacs-agent-log--derive (&rest _)
   "Make a tool's output the theme's dim colour raised to 4.5:1 on its
-background, as its default spec: read, never hidden.  A theme's or the
-user's own spec still wins."
+background, read, never hidden; and a key the header names the theme's
+key colour raised to 4.5:1 on the header line: each as its default spec.
+A theme's or the user's own spec still wins."
   (let ((colour (romacs-working-readable (face-foreground 'shadow nil t))))
     (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
+                   'face-defface-spec))
+  (let* ((key (face-foreground 'help-key-binding nil t))
+         (band (face-background 'header-line nil t))
+         (colour (and key band (fboundp 'romacs-color-floor) (color-defined-p key) (color-defined-p band)
+                      (romacs-color-floor key band 4.5))))
+    (face-spec-set 'romacs-agent-log-header-key
+                   (if colour `((t :foreground ,colour :weight bold)) '((t :inherit help-key-binding :weight bold)))
                    'face-defface-spec)))
 
-(add-hook 'enable-theme-functions #'romacs-agent-log--derive-output)
-(add-hook 'disable-theme-functions #'romacs-agent-log--derive-output)
-(romacs-agent-log--derive-output)
+(add-hook 'enable-theme-functions #'romacs-agent-log--derive)
+(add-hook 'disable-theme-functions #'romacs-agent-log--derive)
+(romacs-agent-log--derive)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
@@ -322,9 +336,7 @@ else (nil . 0), at the end."
   (when romacs-agent-log--stream
     (pcase-let ((`(,kind ,start ,at ,_) romacs-agent-log--stream))
       (setq romacs-agent-log--stream nil)
-      (when (and (eq kind 'text) (fboundp 'romacs-markdown-fontify-region))
-        (romacs-agent-log--writing
-          (ignore-errors (romacs-markdown-fontify-region start romacs-agent-log--end))))
+      (when (eq kind 'text) (romacs-agent-log-faces-end start at))
       (set-marker start nil)
       (set-marker at nil))))
 
@@ -386,6 +398,7 @@ parent call."
               (save-excursion
                 (goto-char (nth 2 romacs-agent-log--stream))
                 (insert (romacs-agent-log--sealed chunk))))
+            (when (eq kind 'text) (romacs-agent-log-faces-soon))
             (setcar (nthcdr 3 romacs-agent-log--stream) trail)))))))
 
 (defun romacs-agent-log--under (block kind text depth)
@@ -1001,7 +1014,7 @@ how long the turn has run."
                 (concat " read-only · "
                         (propertize (substitute-command-keys
                                      "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
-                                    'face 'help-key-binding)
+                                    'face 'romacs-agent-log-header-key)
                         " resumes")
               "")
             (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
@@ -1620,4 +1633,6 @@ On the transcript's text:
 (provide 'romacs-agent-log)
 ;; Its turns' place in the transcript, which needs it loaded.
 (require 'romacs-agent-log-turns)
+;; Its replies' faces as they stream.
+(require 'romacs-agent-log-faces)
 ;;; romacs-agent-log.el ends here
