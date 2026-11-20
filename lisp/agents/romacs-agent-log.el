@@ -87,6 +87,18 @@ line above them brings earlier ones."
 syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
+
+(defun romacs-agent-log--derive-output (&rest _)
+  "Make a tool's output the theme's dim colour raised to 4.5:1 on its
+background, as its default spec: read, never hidden.  A theme's or the
+user's own spec still wins."
+  (let ((colour (romacs-working-readable (face-foreground 'shadow nil t))))
+    (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
+                   'face-defface-spec)))
+
+(add-hook 'enable-theme-functions #'romacs-agent-log--derive-output)
+(add-hook 'disable-theme-functions #'romacs-agent-log--derive-output)
+(romacs-agent-log--derive-output)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
@@ -103,6 +115,9 @@ syntax face's, which a theme may draw as red as an error.")
 (defvar-local romacs-agent-log--session nil "The session this chat shows.")
 (defvar-local romacs-agent-log--end nil
   "Marker: the transcript's end, where events are drawn; the separator follows it.")
+(defvar-local romacs-agent-log--text-map nil
+  "The keys of this buffer's transcript text, when not a chat's
+\(`romacs-agent-log-transcript-map'): a view with no composer has its own.")
 (defvar-local romacs-agent-log--input nil
   "Marker: the composer's start, after the separator.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
@@ -264,7 +279,7 @@ passing nothing to what is typed after it."
     (let ((position 0))
       (while (setq position (text-property-any position (length text) 'keymap nil text))
         (let ((end (next-single-property-change position 'keymap text (length text))))
-          (put-text-property position end 'keymap romacs-agent-log-transcript-map text)
+          (put-text-property position end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map) text)
           (setq position end))))
     text))
 
@@ -668,7 +683,7 @@ Live, in a chat no window shows, the echo area says so too."
         (add-face-text-property start end 'romacs-agent-log-note)
         ;; It answers nothing any more: no keys, no request to answer.
         (remove-text-properties start end '(keymap nil romacs-agent-log-request nil))
-        (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
+        (put-text-property start end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map))))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 
 (defun romacs-agent-log--close-asks (session event how)
@@ -759,12 +774,18 @@ unless a note said who gave it, that it was answered."
                      (messages (propertize "✉ " 'face 'romacs-agent-log-note))
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
     (romacs-agent-log--line event 'prompt
-                            (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
-                                    head
-                                    (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
-                                    (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
-                                                           'face 'romacs-agent-log-note)
-                                      "")))))
+                            (let ((line (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
+                                                head
+                                                (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
+                                                (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
+                                                                       'face 'romacs-agent-log-note)
+                                                  ""))))
+                              ;; The turn it starts, by its request, on all of it
+                              ;; (where prompt motion lands too): a diff or a
+                              ;; rollback of the turn at point reads it.
+                              (if-let* ((request (plist-get event :request)))
+                                  (propertize line 'romacs-agent-log-turn request)
+                                line)))))
 
 (defun romacs-agent-log--done (event)
   "Draw turn end EVENT: a rule with its time, cost and why it failed."
@@ -776,7 +797,8 @@ unless a note said who gave it, that it was answered."
                                                     (and (plist-get event :interrupted) "interrupted")
                                                     (when-let* ((s (plist-get event :duration))) (format "%ds" (round s)))
                                                     (when-let* ((c (plist-get event :cost))) (format "$%.2f" c))
-                                                    (format-time-string "%H:%M" (plist-get event :time))))
+                                                    ;; A transcript's turns may not say when they ended.
+                                                    (when-let* ((time (plist-get event :time))) (format-time-string "%H:%M" time))))
                                     " · "))
                        'face 'romacs-agent-log-rule))))
 
@@ -827,9 +849,20 @@ unless a note said who gave it, that it was answered."
     ('status (when-let* ((text (plist-get event :text))
                          ((not (member text '("requesting" "selection armed")))))
                (romacs-agent-log--note event text)))
-    ('compacted (romacs-agent-log--note event (concat "context compacted\n"
-                                                      (car (romacs-agent-log--lines (plist-get event :text)
-                                                                                    romacs-agent-log-output-lines)))))
+    ('compacted (let* ((summary (or (plist-get event :text) ""))
+                       (lines (romacs-agent-log--lines summary romacs-agent-log-output-lines)))
+                  ;; Its first lines, and the whole summary on RET, from
+                  ;; anywhere in the entry.
+                  (romacs-agent-log--line event 'note
+                                          (propertize
+                                           (concat "· context compacted\n" (car lines)
+                                                   (if (> (cdr lines) romacs-agent-log-output-lines)
+                                                       (format "\n… %d more lines · %s shows all"
+                                                               (- (cdr lines) romacs-agent-log-output-lines)
+                                                               (romacs-agent-log--key 'romacs-agent-log-open))
+                                                     ""))
+                                           'romacs-agent-log-full (cons nil summary))
+                                          'romacs-agent-log-note)))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'exit)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
@@ -837,7 +870,7 @@ unless a note said who gave it, that it was answered."
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
-    ('rolled-back (romacs-agent-log--note event (format "rolled back %s turn(s)" (or (plist-get event :turns) "?"))))
+    ('rolled-back (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
     ('selection (cl-flet ((label (selection)
                             (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
@@ -962,6 +995,15 @@ how long the turn has run."
                 (propertize (format "  ⚠ %d wait%s on you" pending (if (= pending 1) "s" ""))
                             'face 'romacs-agent-log-ask)
               "")
+            ;; A harness's transcript, shown: it is read, not typed at.
+            (if (eq (romacs-agent-state session) 'history)
+                ;; The header's own colour, read first: what this view is.
+                (concat " read-only · "
+                        (propertize (substitute-command-keys
+                                     "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
+                                    'face 'help-key-binding)
+                        " resumes")
+              "")
             (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
                 (propertize (format "  %ds · %s stops" (round (- (float-time) start))
                                     (substitute-command-keys "\\<romacs-agent-log-mode-map>\\[romacs-agent-log-interrupt]"))
@@ -1028,20 +1070,29 @@ end, replayed into a copy so the session is not touched."
                        "\n")
                'romacs-agent-log-earlier from 'romacs-agent-log-entry 'earlier)))
 
+(defun romacs-agent-log-draw-imported (session imported)
+  "Draw the harness transcript IMPORTED names (:path, :size) for SESSION
+at the transcript's end: its end, from a prompt on
+\(`romacs-agent-history-events').  Return the events drawn."
+  (require 'romacs-agent-history)
+  (let* ((path (plist-get imported :path))
+         (read (romacs-agent-history-events (romacs-agent-harness session) imported)))
+    (if (null read)
+        (romacs-agent-log--line nil 'error (format "✘ %s is gone" (abbreviate-file-name path)) 'romacs-agent-log-denied)
+      (when (cdr read)
+        (romacs-agent-log--note nil (format "earlier turns are in %s" (abbreviate-file-name path))))
+      (dolist (event (car read)) (romacs-agent-log-draw session event))
+      (romacs-agent-log--close-stream))
+    (car read)))
+
 (cl-defmethod romacs-agent-log-source-fill ((_source romacs-agent-log-local-source) session)
   "Draw SESSION's last `romacs-agent-log-turns' turns from its records."
   (let* ((from (romacs-agent-tail-start session romacs-agent-log-turns romacs-agent-log-records)))
     (setq romacs-agent-log--from from)
     (when from (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
     ;; From its start: an imported session's harness transcript first.
-    (when-let* (((null from))
-                (imported (romacs-agent-imported session))
-                ((require 'romacs-agent-history nil t))
-                (read (romacs-agent-history-events (romacs-agent-harness session) imported)))
-      (when (cdr read)
-        (romacs-agent-log--note nil (format "earlier turns are in %s" (abbreviate-file-name (plist-get imported :path)))))
-      (dolist (event (car read)) (romacs-agent-log-draw session event))
-      (romacs-agent-log--close-stream))
+    (when-let* (((null from)) (imported (romacs-agent-imported session)))
+      (romacs-agent-log-draw-imported session imported))
     (romacs-agent-log--replay session from nil)
     (romacs-agent-log--sync-asks session)))
 
@@ -1095,7 +1146,9 @@ FROM, nil at the session's start."
         (goto-char (point-min))
         (let ((line-end (line-beginning-position 2)))
           (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
-        (insert (if from (romacs-agent-log--earlier-line from) "") text))))
+        (insert (if from (romacs-agent-log--earlier-line from) "") text)
+        ;; A rollback either side of the new page's start reaches over it.
+        (romacs-agent-log-turns--dim-above (point)))))
   (setq romacs-agent-log--from from))
 
 ;;; The chat
@@ -1191,6 +1244,11 @@ session, this editor's by default."
     (romacs-agent-log-source-seen romacs-agent-log--source session)
     buffer))
 
+
+(defun romacs-agent-show (session &optional action source)
+  "Show SESSION's chat, as `pop-to-buffer' does with ACTION; SOURCE's
+session, this editor's by default."
+  (romacs-agent-log-show session action source))
 ;; A session outlives the editor in its supervisor: a restored chat
 ;; (desktop.el, warm-restart.el) carries which session it shows and the
 ;; composer's unsent text; its transcript is drawn from the records.
@@ -1211,6 +1269,10 @@ shows it; its session loaded only then, as its records are read."
 (defvar desktop-buffer-mode-handlers)
 (defvar warm-restart-left-out)
 (add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-log-mode . romacs-agent-log-desktop-restore))
+;; A desktop or warm-restart image saved before the old chat view went
+;; names its mode: its session and draft come back in this chat.
+(define-obsolete-function-alias 'romacs-agent-chat-mode #'romacs-agent-log-mode "0.0.21")
+(add-to-list 'desktop-buffer-mode-handlers '(romacs-agent-chat-mode . romacs-agent-log-desktop-restore))
 
 ;;; Commands
 
@@ -1556,4 +1618,6 @@ On the transcript's text:
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))
 
 (provide 'romacs-agent-log)
+;; Its turns' place in the transcript, which needs it loaded.
+(require 'romacs-agent-log-turns)
 ;;; romacs-agent-log.el ends here

@@ -67,7 +67,7 @@ its lines their meaning, in Lisp.
   - =:events= and =:input-events= turn records into normalized events:
     =session=, =input=, =delta=, =message-end=, =thinking=, =tool=,
     =approval=, =answered=, =plan=, =status=, =error=, =compacted=,
-    =usage=, =rate-limit=, =done=, =exit=, =suggestion=, ...;
+    =usage=, =rate-limit=, =done=, =exit=, ...;
   - =:input=, =:respond=, =:interrupt= and =:select= compose the lines
     written back.
 - *The fold.* =romacs-agent--record= and =romacs-agent--raise=
@@ -88,7 +88,7 @@ its lines their meaning, in Lisp.
   confirm it.  The chat rebuild removes both deny arms and records who
   answered each request.
 - *Store writes.* The host writes =events=.  The editor's writer worker VM
-  writes =sessions=, =turns=, =turn_drawn= and the folded state.
+  writes =sessions=, =turns= and the folded state.
 - *Harness tools.* Each harness runs =romacs-mcp --reconnect= as its Romacs
   MCP server.  Its route link (=route/ID.sock=) leads to the attached
   editor.  The reconnect helper answers discovery and

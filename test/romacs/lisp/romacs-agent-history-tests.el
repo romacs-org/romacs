@@ -93,6 +93,74 @@
                 (romacs-agent-history--settings))))
     (should-not (string-search "romacs-agent-t3-settings" form))))
 
+(ert-deftest romacs-agent-history-view-is-a-read-only-chat ()
+  ;; A transcript is drawn as a chat's; its text's keys read it, and r
+  ;; goes on with it: nothing typed goes to a composer it has not.
+  (let ((file (make-temp-file "romacs-history" nil ".jsonl")) (buffer nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "{\"type\":\"user\",\"message\":{\"content\":\"hello there\"}}\n"))
+          (save-window-excursion
+            (setq buffer (romacs-agent-history-open (list :path file :title "h" :harness 'claude :id "h1" :cwd "/"))))
+          (with-current-buffer buffer
+            (should buffer-read-only)
+            (should-not romacs-agent-log--input)
+            ;; Not a chat's mode: none of its composing commands applies.
+            (should-not (derived-mode-p 'romacs-agent-log-mode))
+            (should (string-match-p "hello there" (buffer-string)))
+            (let ((map (get-text-property (point-min) 'keymap)))
+              (should (eq map romacs-agent-history-text-map))
+              (should (eq (lookup-key map "r") #'romacs-agent-history-resume-this))
+              (should (eq (lookup-key map [remap self-insert-command]) #'undefined))
+              (should (eq (lookup-key map "n") #'romacs-agent-log-next)))
+            ;; As opened, point past the text: its keys still read it.
+            (goto-char (point-max))
+            (should (eq (key-binding "p") #'romacs-agent-log-previous))
+            (should (eq (key-binding "r") #'romacs-agent-history-resume-this))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest romacs-agent-history-reads-a-transcript-however-spaced ()
+  ;; A transcript written again by another JSON writer, spaced: read as one
+  ;; the harness wrote compactly.
+  (let ((file (make-temp-file "romacs-history-spaced" nil ".jsonl")) (buffer nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"spaced words\"}}\n"
+                    "{\"type\" : \"assistant\", \"message\": {\"id\": \"m1\", \"content\": [{\"type\": \"text\", \"text\": \"spaced reply\"}]}}\n"))
+          (save-window-excursion
+            (setq buffer (romacs-agent-history-open (list :path file :title "s" :harness 'claude :id "s1" :cwd "/"))))
+          (with-current-buffer buffer
+            (should (string-match-p "spaced words" (buffer-string)))
+            (should (string-match-p "spaced reply" (buffer-string))))
+          ;; Codex's kept lines, spaced, are kept too.
+          (with-temp-file file
+            (insert "{\"type\": \"response_item\", \"payload\": {\"type\": \"message\", \"role\": \"user\"}}\n"
+                    "{\"type\": \"event_msg\", \"payload\": {\"type\": \"item_completed\", \"item\": {\"type\": \"UserMessage\"}}}\n"
+                    "{\"type\": \"event_msg\", \"payload\": {\"type\": \"agent_reasoning\"}}\n"))
+          (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
+                                                         #'romacs-agent-history--codex-keep))
+                     2))
+          ;; Its keys in any order, and the last line without its newline.
+          (with-temp-file file
+            (insert "{\"payload\": {\"item\": {\"content\": [], \"type\": \"UserMessage\"}, \"type\": \"item_completed\"}, \"type\": \"event_msg\"}\n"
+                    "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}"))
+          (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
+                                                         #'romacs-agent-history--codex-keep))
+                     2))
+          ;; A read ending after a whole object, before its newline and the
+          ;; file's end, leaves it out: the line may go on.
+          (with-temp-file file
+            (insert "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"
+                    "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"))
+          (should (= (length (romacs-agent-history--read file 0 (1- (file-attribute-size (file-attributes file)))
+                                                         #'romacs-agent-history--codex-keep))
+                     1)))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
+
 (provide 'romacs-agent-history-tests)
 ;;; romacs-agent-history-tests.el ends here
 

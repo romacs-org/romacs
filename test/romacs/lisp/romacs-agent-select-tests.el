@@ -170,32 +170,6 @@
     (should-not (romacs-agent-pending-selection session))
     (should-not (gethash "switch" (romacs-agent--read-json (expand-file-name "manifest.json" dir))))))
 
-(ert-deftest romacs-agent-select-replay-leaves-the-live-selection ()
-  ;; A chat replaying the journal meets the confirmation before the live
-  ;; session's filter does: the live session's waiting stands.
-  (romacs-agent-select-tests--with (:state 'idle :options '(:model "a") :buffer nil)
-    (let ((switch (list :state 'applying :waiting '("x") :model "b" :effort nil)))
-      (setf (romacs-agent-pending-selection session) switch)
-      (let ((coding-system-for-write 'utf-8-unix))
-        (write-region (concat (romacs-agent--json
-                               (romacs-mcp--object
-                                "seq" 1 "t" 1.0
-                                "out" (romacs-mcp--object
-                                       "type" "control_response"
-                                       "response" (romacs-mcp--object "subtype" "success" "request_id" "x"))))
-                              "\n")
-                      nil (expand-file-name "journal.jsonl" dir) nil 'silent))
-      (with-temp-buffer
-        (romacs-agent-chat-mode)
-        (let ((inhibit-read-only t))
-          (setq romacs-agent-ui--session session
-                romacs-agent-ui--messages (make-hash-table :test #'equal)
-                romacs-agent-ui--end (point-marker))
-          (romacs-agent-ui--replay session)))
-      (should (eq (romacs-agent-pending-selection session) switch))
-      (should (equal (plist-get (romacs-agent-pending-selection session) :waiting) '("x")))
-      (should (equal (plist-get (romacs-agent-options session) :model) "a")))))
-
 (ert-deftest romacs-agent-select-armed-while-a-turn-runs ()
   (dolist (state '(running waiting-approval))
     (romacs-agent-select-tests--with (:state state)
@@ -290,8 +264,8 @@
           (asked nil))
       (cl-letf (((symbol-function 'romacs-agent--models-kept) #'ignore))
        (with-temp-buffer
-        (setq romacs-agent-ui--session session)
-        (should (equal (romacs-agent-ui--effort-label) "Effort: low"))
+        (setq romacs-agent-ui--session session romacs-agent-log--session session)
+        (should (equal (romacs-agent-menu--effort-label) "Effort: low"))
         ;; The efforts of the model it runs, what runs offered first.
         (cl-letf (((symbol-function 'completing-read)
                    (lambda (prompt table &rest _)
@@ -302,13 +276,13 @@
         (should (equal (cadr (car asked)) '("low" "high")))
         ;; No harness runs: in effect at once, the model kept.
         (should (equal (romacs-agent--selection session) '(:model "a" :effort "high" :provider "claude")))
-        (should (equal (romacs-agent-ui--effort-label) "Effort: high"))
+        (should (equal (romacs-agent-menu--effort-label) "Effort: high"))
         ;; One armed behind a turn shows what is to come.
         (setf (romacs-agent-pending-selection session) (list :state 'armed :model "b" :effort "max"))
-        (should (equal (romacs-agent-ui--effort-label) "Effort: high → max"))
+        (should (equal (romacs-agent-menu--effort-label) "Effort: high → max"))
         ;; The menu's values in one style, never a level's colour there
         ;; (max's would read as an error); the header keeps each level's.
-        (let ((label (romacs-agent-ui--effort-label)))
+        (let ((label (romacs-agent-menu--effort-label)))
           (should (eq (get-text-property 8 'face label) 'bold))
           (should (eq (get-text-property (1- (length label)) 'face label) 'bold)))
         (should (eq (get-text-property 0 'face (romacs-agent-ui--effort "high")) 'romacs-agent-effort-high))

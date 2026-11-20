@@ -80,43 +80,6 @@ failed, Grep (whose row counts what it found)."
       (delete-directory root t)
       (delete-directory run t))))
 
-(ert-deftest romacs-agent-lazy-outputs-parse-and-draw-when-opened ()
-  (romacs-agent-lazy-tests--with-chat
-   (lambda (session)
-     (let* ((parsed nil)
-            (parse (symbol-function 'json-parse-string)))
-       (cl-letf (((symbol-function 'json-parse-string)
-                  (lambda (string &rest args)
-                    (when (string-search "tool_result" string) (push string parsed))
-                    (apply parse string args))))
-         (romacs-agent-ui--fill (current-buffer)))
-       ;; Kept as drawn: no result is parsed to open it, Grep's row counts
-       ;; what it found all the same.
-       (should-not parsed)
-       (let ((text (buffer-string)))
-         (should (string-search "⌕ x · 2 lines" text))
-         ;; The Bash outputs are not in the chat until opened.
-         (should-not (string-search "alpha" text))
-         (should-not (string-search "exit 1" text)))
-       ;; TAB on a row opens its output, read through its turn's row now.
-       (goto-char (point-min))
-       (search-forward "$ ls")
-       (romacs-agent-chat-toggle)
-       (let ((text (buffer-string)))
-         (should (string-search "alpha é\nbeta" text))
-         (should-not (string-search "exit 1" text)))
-       (should-not (memq 'romacs-agent-output
-                         (ensure-list (get-text-property (1+ (string-search "alpha" (buffer-string))) 'invisible))))
-       ;; Again, it folds as any output does.
-       (goto-char (point-min))
-       (search-forward "$ ls")
-       (romacs-agent-chat-toggle)
-       (should (memq 'romacs-agent-output
-                     (ensure-list (get-text-property (1+ (string-search "alpha" (buffer-string))) 'invisible))))
-       ;; Expand all draws the rest.
-       (romacs-agent-chat-expand-all)
-       (should (string-search "exit 1" (buffer-string)))))))
-
 (ert-deftest romacs-agent-lazy-results-told-from-text ()
   ;; A result's own text blocks (an MCP tool's) are its; a block of the
   ;; message's own beside the results is not a result: that line parses.
@@ -167,22 +130,5 @@ failed, Grep (whose row counts what it found)."
          (results (with-temp-buffer (insert line) (romacs-agent--claude-result-summary 1 (1- (point-max))))))
     (should (equal (mapcar (lambda (r) (list (plist-get r :id) (plist-get r :failed) (plist-get r :parent))) results)
                    '(("t1" nil "toolu_p"))))))
-
-(ert-deftest romacs-agent-lazy-copy-trim-and-expand ()
-  (romacs-agent-lazy-tests--with-chat
-   (lambda (_session)
-     (romacs-agent-ui--fill (current-buffer))
-     ;; Copying the turn copies outputs not yet opened, as before.
-     (goto-char (point-min))
-     (search-forward "$ ls")
-     (romacs-agent-chat-copy)
-     (should (string-search "alpha é" (current-kill 0)))
-     ;; Drawn so, the outputs are no edit to undo: they stay.
-     (should-not (and (listp buffer-undo-list) (seq-some #'identity buffer-undo-list)))
-     ;; Opened, every row's payload is drawn and none is left to open.
-     (romacs-agent-ui--open-payloads-in (point-min) (point-max))
-     (should-not (romacs-agent-ui--payload-ids (point-min) (point-max)))
-     ;; A call with no row has nothing to open: its payload went with it.
-     (should-not (romacs-agent-ui--open-payload "x")))))
 
 ;;; romacs-agent-lazy-tests.el ends here

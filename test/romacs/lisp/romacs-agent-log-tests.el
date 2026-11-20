@@ -307,8 +307,8 @@
             (setf (romacs-agent-state (car children)) 'running)
             (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
         ;; Its values read as values, never dim as a command it cannot run.
-        (let ((romacs-agent-ui--session session))
-          (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
+        (let ((romacs-agent-log--session session))
+          (dolist (label (list (romacs-agent-menu--effort-label) (romacs-agent-menu--model-label)))
             (should (string-match-p "default" label))
             (should-not (memq 'romacs-agent-effort-default
                               (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))
@@ -322,6 +322,142 @@
           (with-temp-buffer
             (should-not (eq (romacs-agent-menu--slots) one))
             (should-not (eq (romacs-agent-menu--slots) shared))))))))
+
+(ert-deftest romacs-agent-log-a-turn-that-says-no-time-shows-none ()
+  ;; A transcript's turn may not say when it ended: never the clock now.
+  (romacs-agent-log-tests--with
+    (draw :type 'done :duration 9)
+    (should (string-match-p "✻ 9s\n" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-a-turn-at-point-is-its-prompts ()
+  ;; Each prompt says the turn it starts: a diff or a rollback of the turn
+  ;; at point reads it; the attach puts a file's path in the composer.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 4)
+    (draw :type 'delta :text "reply one")
+    (draw :type 'done :time 0)
+    (draw :type 'input :text "second" :request 7)
+    (draw :type 'delta :text "reply two")
+    (goto-char (point-min))
+    (should (equal (romacs-agent-log-turns-here) 4))
+    (search-forward "reply one")
+    (should (equal (romacs-agent-log-turns-here) 4))
+    (search-forward "reply two")
+    (should (equal (romacs-agent-log-turns-here) 7))
+    (let (asked)
+      (cl-letf (((symbol-function 'romacs-agent-diff--checkpoints) #'ignore)
+                ((symbol-function 'y-or-n-p) #'always)
+                ((symbol-function 'romacs-agent-rollback) (lambda (_s request &rest _) (setq asked request))))
+        (search-backward "reply one")
+        (romacs-agent-chat-rollback))
+      (should (equal asked 4)))
+    (romacs-agent-chat-attach "/tmp/shot one.png")
+    (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "/tmp/shot one.png"))))
+
+(ert-deftest romacs-agent-log-prompt-motion-lands-on-its-turn ()
+  ;; Prompt motion lands on a prompt's first character, its leading blank
+  ;; line: the turn there is that prompt's.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 4)
+    (draw :type 'done :time 0)
+    (draw :type 'input :text "second" :request 7)
+    (goto-char romacs-agent-log--end)
+    (romacs-agent-log-previous-prompt 1)
+    (should (equal (romacs-agent-log-turns-here) 7))
+    (should (equal (romacs-agent-log-turns-text 7) "❯ second"))
+    ;; Rolled back to before it: from there on dimmed, and said.
+    (draw :type 'rolled-back :to 7 :turns 1 :prompt "second" :files t)
+    (should (memq 'romacs-agent-log-note (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn 7) 'face))))
+    (should (string-match-p "↶ rolled back 1 turn and their files to before: second" (romacs-agent-log-tests--transcript)))
+    ;; From the composer, a rollback asks for the turn.
+    (goto-char (point-max))
+    (should-error (romacs-agent-chat-rollback) :type 'user-error)))
+
+(ert-deftest romacs-agent-log-a-rollback-before-the-drawn-turns-dims-them-all ()
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 3))))
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 3 :prompt "long ago")
+    (let ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn 9)))
+      (should (memq 'romacs-agent-log-note (ensure-list (get-text-property at 'face)))))))
+
+(ert-deftest romacs-agent-log-a-rollback-reaches-over-earlier-turns-put-above ()
+  ;; The rollback is drawn on the page shown; the prompt it went back to
+  ;; before is on the page put above it later: from there on, dimmed.
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 5))))
+    (setq romacs-agent-log--from 5)
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 3 :prompt "long ago")
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _)
+                 (romacs-agent-log-draw s '(:type input :text "before it" :request 1))
+                 (romacs-agent-log-draw s '(:type input :text "long ago" :request 2)))))
+      (romacs-agent-log-earlier))
+    (let ((dim (lambda (request) (memq 'romacs-agent-log-note
+                                       (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end
+                                                                                          'romacs-agent-log-turn request)
+                                                                       'face))))))
+      (should-not (funcall dim 1))
+      (should (funcall dim 2))
+      (should (funcall dim 9)))))
+
+(ert-deftest romacs-agent-log-a-rollback-waits-over-pages-between ()
+  ;; Its prompt two pages back: the page between is dimmed as it comes
+  ;; above, and the prompt's own page from the prompt on.
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 9))))
+    (setq romacs-agent-log--from 9)
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 7 :prompt "long ago")
+    (cl-flet ((page (from &rest requests)
+                (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) (list from)))
+                          ((symbol-function 'romacs-agent-events-p) #'ignore)
+                          ((symbol-function 'romacs-agent-log--replay)
+                           (lambda (s &rest _)
+                             (dolist (request requests)
+                               (romacs-agent-log-draw s (list :type 'input :text (format "p%d" request) :request request))))))
+                  (romacs-agent-log-earlier)))
+              (dim (request) (memq 'romacs-agent-log-note
+                                   (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end
+                                                                                      'romacs-agent-log-turn request)
+                                                                   'face)))))
+      (page 5 5 6)
+      (should (dim 5))
+      (should (dim 6))
+      (page nil 1 2)
+      (should-not (dim 1))
+      (should (dim 2))
+      (should-not romacs-agent-log-turns--rollbacks))))
+
+(ert-deftest romacs-agent-log-a-compaction-opens-whole ()
+  (romacs-agent-log-tests--with
+    (draw :type 'compacted :text (mapconcat #'number-to-string (number-sequence 1 30) "\n"))
+    ;; From where entry motion lands, its first character.
+    (goto-char (point-min))
+    (should (equal (cdr (get-text-property (point) 'romacs-agent-log-full)) (mapconcat #'number-to-string (number-sequence 1 30) "\n")))
+    (should (string-match-p "more lines" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-an-old-chat-s-desktop-comes-back-here ()
+  (should (eq (cdr (assq 'romacs-agent-chat-mode desktop-buffer-mode-handlers)) #'romacs-agent-log-desktop-restore))
+  (should (eq (indirect-function 'romacs-agent-chat-mode) (indirect-function 'romacs-agent-log-mode))))
+
+(ert-deftest romacs-agent-log-a-command-acts-on-the-registered-session ()
+  ;; A restored chat shows its session's row until used: a command acts
+  ;; on the session itself, loaded.
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (let ((registered (romacs-agent--make :id "L" :harness 'claude :state 'idle
+                                          :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+          stopped)
+      (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
+                ((symbol-function 'romacs-agent-get) (lambda (_) registered))
+                ((symbol-function 'yes-or-no-p) #'always)
+                ((symbol-function 'romacs-agent-stop) (lambda (s) (setq stopped s))))
+        (romacs-agent-chat-stop))
+      (should (eq stopped registered)))))
 
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))

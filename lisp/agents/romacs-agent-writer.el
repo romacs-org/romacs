@@ -59,7 +59,7 @@ batch process's answer."
 
 (defvar romacs-agent-writer-features
   '(romacs-agent romacs-agent-claude romacs-agent-codex romacs-agent-events romacs-agent-turns
-                 romacs-agent-store romacs-agent-drawn romacs-agent-history romacs-agent-writer cl-extra help-mode)
+                 romacs-agent-store romacs-agent-history romacs-agent-writer cl-extra help-mode)
   "The features the writer loads: those defining what it is asked to run.")
 
 (defvar romacs-agent-writer-bindings-function nil
