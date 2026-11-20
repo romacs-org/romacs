@@ -27,6 +27,8 @@
   "A message waiting for the turn under way to end.")
 (defface romacs-agent-log-queued-mark '((t :inherit romacs-working-waiting :weight bold))
   "A queued message's place: the theme's colour for what waits.")
+(defface romacs-agent-log-queued-label '((t :inherit default :weight bold))
+  "The label over a chat's queue: what it is, read first.")
 (defface romacs-agent-log-queued-held '((t :inherit romacs-working-waiting :slant italic))
   "The queued message in the composer to edit, and its line.")
 
@@ -72,10 +74,12 @@ a `user-error' when it went meanwhile, sent or dropped."
   "M-n" #'romacs-agent-log-queue-later)
 
 (defun romacs-agent-log-queue--hint (&rest pairs)
-  "PAIRS of COMMAND and WORD, each the key its row binds the command to
-then the word, dim: what a queued row's keys do."
+  "PAIRS of COMMANDS and WORD, the keys a row binds the commands to, then
+the word, dim: what a queued row's keys do."
   (mapconcat (lambda (pair)
-               (concat (propertize (romacs-agent-log--key (car pair) 'romacs-agent-log-queue-map) 'face 'help-key-binding)
+               (concat (mapconcat (lambda (command)
+                                    (propertize (romacs-agent-log--key command 'romacs-agent-log-queue-map) 'face 'help-key-binding))
+                                  (car pair) "/")
                        " " (propertize (cadr pair) 'face 'romacs-agent-log-queued)))
              (seq-partition pairs 2) (propertize " · " 'face 'romacs-agent-log-queued)))
 
@@ -88,12 +92,12 @@ EDITING, the one the composer holds, is marked, and a line under the
 rows says how it goes back."
   (if (null items) ""
     (concat
-     (propertize (concat "  " (propertize (format "%d queued, next first" (length items)) 'face 'romacs-agent-log-queued)
-                         (propertize " · " 'face 'romacs-agent-log-queued)
-                         (romacs-agent-log-queue--hint 'romacs-agent-log-queue-next "move"
-                                                       'romacs-agent-log-queue-edit "edit"
-                                                       'romacs-agent-log-queue-drop "drop"
-                                                       'romacs-agent-log-queue-sooner "sooner")
+     (propertize (concat "  " (propertize (format "%d queued, next first" (length items)) 'face 'romacs-agent-log-queued-label)
+                         (propertize " · on a row: " 'face 'romacs-agent-log-queued)
+                         (romacs-agent-log-queue--hint '(romacs-agent-log-queue-next romacs-agent-log-queue-previous) "move"
+                                                       '(romacs-agent-log-queue-edit) "edit"
+                                                       '(romacs-agent-log-queue-drop) "drop"
+                                                       '(romacs-agent-log-queue-sooner romacs-agent-log-queue-later) "order")
                          "\n")
                  'romacs-agent-log-queue-label t)
      (let ((place 0))
@@ -113,8 +117,9 @@ rows says how it goes back."
                         'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
         items ""))
      (if editing
-         (propertize (concat "  " (propertize "» in the composer: " 'face 'romacs-agent-log-queued-held)
-                             (propertize "RET puts it back, an empty one as it was" 'face 'romacs-agent-log-queued)
+         (propertize (concat "  " (propertize (format "» editing %d" (1+ (or (cl-position editing items) 0)))
+                                              'face 'romacs-agent-log-queued-held)
+                             (propertize " · RET saves it in its place · an empty RET keeps it as it was" 'face 'romacs-agent-log-queued)
                              "\n")
                      'romacs-agent-log-queue-label t)
        ""))))
