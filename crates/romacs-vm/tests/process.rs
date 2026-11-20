@@ -216,40 +216,61 @@ fn local_sockets_match_pinned_gnu() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// C-g during call-process's wait, once its child has written 128 KiB and
-/// gone to sleep: the output read is in the buffer, as GNU's `call_process`
-/// inserts each block it reads (callproc.c) before the quit unwinds it. The
-/// press lands once the child's marker file exists, and the call must end
-/// within 100 ms of it.
-#[test]
-fn a_quit_in_call_process_keeps_the_output_read() {
-    use std::time::{Duration, Instant};
-    // The boot first: a missing world is built by this test run again,
-    // which ends inside `gnu_lisp`, before any of the test's own setup.
+/// A busy VM with GNU's Lisp, the signal its host's input thread holds,
+/// and a private scratch directory NAME. The boot first: a missing world is
+/// built by the test run again, which ends inside `gnu_lisp`, before any
+/// of the test's own setup.
+fn busy_gnu_vm(name: &str) -> (Vm, std::sync::Arc<romacs_vm::QuitSignal>, std::path::PathBuf) {
     let mut vm = gnu_lisp(&[]);
-    let base = scratch("quit");
+    let base = scratch(name);
     std::fs::create_dir_all(&base).unwrap();
-    let marker = base.join("written");
     let signal = std::sync::Arc::new(romacs_vm::QuitSignal::new());
     vm.share_quit_signal(signal.clone());
     vm.enter_busy();
-    let presser = {
-        let (signal, marker) = (signal.clone(), marker.clone());
-        std::thread::spawn(move || {
-            let start = Instant::now();
-            while !marker.exists() {
-                assert!(start.elapsed() < Duration::from_mins(1), "the child never wrote its marker");
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            assert!(signal.interrupt(), "a busy evaluator takes the press");
-            Instant::now()
-        })
-    };
-    let script = "head -c 131072 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30";
+    (vm, signal, base)
+}
+
+/// C-g on SIGNAL, from another thread, once a child has written its file
+/// MARKER and everything it wrote to its standard output has been read: the
+/// child's pid is in PIDFILE, and its stdout, a pipe, is opened through
+/// /proc to ask how much it holds unread (never to read it). The press so
+/// lands in call-process's wait, after its last read. The press's moment.
+fn press_once_drained(signal: &std::sync::Arc<romacs_vm::QuitSignal>, marker: &Path, pidfile: &Path) -> std::thread::JoinHandle<std::time::Instant> {
+    use std::time::{Duration, Instant};
+    let (signal, marker, pidfile) = (signal.clone(), marker.to_path_buf(), pidfile.to_path_buf());
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        while !marker.exists() {
+            assert!(start.elapsed() < Duration::from_mins(1), "the child never wrote its marker");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let pid: u32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        let stdout = std::fs::File::open(format!("/proc/{pid}/fd/1")).unwrap();
+        while rustix::io::ioctl_fionread(&stdout).unwrap() > 0 {
+            assert!(start.elapsed() < Duration::from_mins(1), "the child's output was never read");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(signal.interrupt(), "a busy evaluator takes the press");
+        Instant::now()
+    })
+}
+
+/// C-g during call-process's wait, once its child has written 128 KiB, all
+/// of it read, and gone to sleep: the output read is in the buffer, the
+/// whole of it here (callproc.c inserts only each full block it read, a
+/// partial one lost to the quit: ledger VM2-CALLPROC-QUIT-OUTPUT). The call
+/// must end within 100 ms of the press.
+#[test]
+fn a_quit_in_call_process_keeps_the_output_read() {
+    use std::time::{Duration, Instant};
+    let (mut vm, signal, base) = busy_gnu_vm("quit");
+    let (marker, pidfile) = (base.join("written"), base.join("pid"));
+    let presser = press_once_drained(&signal, &marker, &pidfile);
+    let script = "echo $$ > \"$2\"; head -c 131072 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30";
     let value = vm.eval_source(&format!(r#"(progn (setq default-directory "/")
         (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
-          (list (condition-case nil (call-process "sh" nil t nil "-c" {script:?} "sh" {:?}) (quit 'quit)) (buffer-size)))))"#,
-        marker.display().to_string())).and_then(romacs_vm::Local::display);
+          (list (condition-case nil (call-process "sh" nil t nil "-c" {script:?} "sh" {:?} {:?}) (quit 'quit)) (buffer-size)))))"#,
+        marker.display().to_string(), pidfile.display().to_string())).and_then(romacs_vm::Local::display);
     let ended = Instant::now();
     let pressed_at = presser.join().unwrap();
     std::fs::remove_dir_all(&base).unwrap();
