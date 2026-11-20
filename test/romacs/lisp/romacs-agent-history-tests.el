@@ -150,7 +150,11 @@
           (should (= (length (romacs-agent-history--read file 0 (file-attribute-size (file-attributes file))
                                                          #'romacs-agent-history--codex-keep))
                      2))
-          ;; A read ending before the file's end leaves a cut line out.
+          ;; A read ending after a whole object, before its newline and the
+          ;; file's end, leaves it out: the line may go on.
+          (with-temp-file file
+            (insert "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"
+                    "{\"payload\": {\"type\": \"message\"}, \"type\": \"response_item\"}\n"))
           (should (= (length (romacs-agent-history--read file 0 (1- (file-attribute-size (file-attributes file)))
                                                          #'romacs-agent-history--codex-keep))
                      1)))

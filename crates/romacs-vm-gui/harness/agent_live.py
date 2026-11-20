@@ -3157,11 +3157,20 @@ drawn as a chat's transcript, across UI_THEMES."""
             # Its frame drawn in this theme, the view the window shows.
             until(lambda: a.eval(f'(progn (redisplay t) (and (memq (quote {theme}) custom-enabled-themes) '
                                  '(derived-mode-p (quote romacs-agent-history-mode)) t))') == 't', 15, f'{theme} shown')
-            time.sleep(.4)
             texts[theme] = parity_live.read_sexp(a.eval('(with-current-buffer (window-buffer (selected-window)) '
                                                         '(buffer-substring-no-properties (point-min) (point-max)))'))
+            # Painted: two shots alike, and unlike the theme before's.
             path_png = base / f'{theme}-history.png'
-            subprocess.run([f'{args.tools}/grim', str(path_png)], env=a.env, check=True, timeout=30)
+            last = None
+            for _ in range(20):
+                subprocess.run([f'{args.tools}/grim', str(path_png)], env=a.env, check=True, timeout=30)
+                now = path_png.read_bytes()
+                if now == last and (not shots or now != Path(shots[-1]).read_bytes()):
+                    break
+                last = now
+                time.sleep(.3)
+            else:
+                raise RuntimeError(f'{theme}: the frame never settled in its theme')
             shots.append(str(path_png))
         text = texts[UI_THEMES[0]]
         return {'ok': all('list the files here' in t and 'three' in t and 'a.txt' in t for t in texts.values()),
