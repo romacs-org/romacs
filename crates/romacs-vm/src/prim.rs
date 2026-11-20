@@ -625,7 +625,7 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            if let Some(name) = self.symbol_text(v) { return Ok(f(&mut name.chars().map(u32::from))); }
+            if let Some(name) = self.symbol_name_text(v) { return Ok(f(&mut name.view().chars())); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
         }
@@ -633,16 +633,33 @@ mod leaf {
         /// its name: the same character count, byte count and bytes, read in
         /// place, with nothing copied.
         pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
-            let text = |v| match self.symbol_text(v) {
-                Some(name) => Ok((name.chars().count(), name.as_bytes())),
-                None => self.vm.str_view(v).map(|s| (s.chars, s.bytes)).ok_or(Fault::Wrong("stringp", v)),
+            let text = |v| match self.symbol_name_text(v) {
+                Some(name) => Ok(name),
+                None => self.vm.str_view(v).map(crate::lstring::Text::Viewed).ok_or(Fault::Wrong("stringp", v)),
             };
-            Ok(text(v)? == text(w)?)
+            let (v, w) = (text(v)?, text(w)?);
+            let (v, w) = (v.view(), w.view());
+            Ok((v.chars, v.bytes) == (w.chars, w.bytes))
         }
-        /// V's name when it is a symbol (`nil' and `t' too), borrowed.
-        fn symbol_text(&self, v: Value) -> Option<&str> {
-            if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
+        /// V's name when it is a symbol (`nil' and `t' too), as Lisp reads it:
+        /// the symbol's key where it lies when the key holds no U+FDD0, as
+        /// nearly every name's does, else the name decoded from the key
+        /// (`symkey'), which escapes U+FDD0 and characters that are not
+        /// Unicode scalars.  One pass over the key either way.
+        pub(crate) fn symbol_name_text(&self, v: Value) -> Option<crate::lstring::Text<'_>> {
+            use crate::lstring::{OwnedStr, StrView, Text};
+            let key = if v == Value::NIL { "nil" } else if v == Value::TRUE { "t" }
+                else { self.vm.symbol_names[self.symbol_slot(v).ok()?].as_str() };
+            let mut chars = 0;
+            for c in key.chars() {
+                if c == crate::symkey::ESC {
+                    let bytes = crate::symkey::to_internal(key).expect("a key with an escape decodes");
+                    let chars = StrView { bytes: &bytes, chars: 0, multibyte: true }.chars().count();
+                    return Some(Text::Owned(OwnedStr { bytes, chars, multibyte: true }));
+                }
+                chars += 1;
+            }
+            Some(Text::Viewed(StrView { bytes: key.as_bytes(), chars, multibyte: true }))
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.

@@ -3,7 +3,7 @@
 //! folded through the buffer's upcase table read flat, and neither text is
 //! copied.
 use super::{Fault, Kind, Leaf, Value};
-use crate::lstring::{BYTE8_OFFSET, StrView};
+use crate::lstring::{BYTE8_OFFSET, StrView, Text};
 use std::cmp::Ordering;
 
 /// The characters START..END of a string or of a symbol's name, END the
@@ -59,18 +59,13 @@ fn parting(a: impl Iterator<Item = u32>, b: impl Iterator<Item = u32>, fold: imp
 }
 
 impl Leaf<'_> {
-    /// The text a comparison reads of VALUE from character FROM: a
-    /// string's, or a symbol's name (minibuf.c `Fassoc_string`).
-    fn compared_text(&self, value: Value, from: usize) -> Option<StrView<'_>> {
+    /// The text a comparison reads of VALUE: a string's from character
+    /// FROM, or a symbol's whole name as Lisp reads it, with FROM
+    /// characters to skip (minibuf.c `Fassoc_string`).
+    fn compared_text(&self, value: Value, from: usize) -> Option<(Text<'_>, usize)> {
         match self.kind(value) {
-            Kind::Symbol => {
-                let name = if value == Value::NIL { "nil" } else if value == Value::TRUE { "t" } else {
-                    self.vm.symbol_names[self.symbol_slot(value).ok()?].as_str()
-                };
-                let rest = name.char_indices().nth(from).map_or("", |(at, _)| &name[at..]);
-                Some(StrView { bytes: rest.as_bytes(), chars: rest.chars().count(), multibyte: true })
-            }
-            Kind::String | Kind::Bytes => self.vm.str_view_from(value, from),
+            Kind::Symbol => Some((self.symbol_name_text(value)?, from)),
+            Kind::String | Kind::Bytes => Some((Text::Viewed(self.vm.str_view_from(value, from)?), 0)),
             _ => None,
         }
     }
@@ -85,10 +80,13 @@ impl Leaf<'_> {
         -> std::result::Result<(Ordering, usize, bool), Fault> {
         let text = |span: Span| {
             let from = span.start + skip;
-            let view = self.compared_text(span.text, from).ok_or(Fault::Wrong("stringp", span.text))?;
-            Ok(codes(view, span.end.saturating_sub(from)))
+            let (text, skipped) = self.compared_text(span.text, from).ok_or(Fault::Wrong("stringp", span.text))?;
+            Ok((text, skipped, span.end.saturating_sub(from)))
         };
-        let (order, matched, differ) = parting(text(a)?, text(b)?, fold)?;
+        let ((a, a_skip, a_count), (b, b_skip, b_count)) = (text(a)?, text(b)?);
+        let a = codes(a.view(), a_skip.saturating_add(a_count)).skip(a_skip);
+        let b = codes(b.view(), b_skip.saturating_add(b_count)).skip(b_skip);
+        let (order, matched, differ) = parting(a, b, fold)?;
         Ok((order, skip + matched, differ))
     }
 
