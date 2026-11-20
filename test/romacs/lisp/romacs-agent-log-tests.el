@@ -427,7 +427,7 @@
       (draw :type 'done))
     (romacs-agent-log--sync-asks session)
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "the harness exited with it unanswered" text))
+      (should (= 1 (how-many "the harness exited with it unanswered" (point-min) (point-max))))
       (should-not (string-match-p "the turn ended with it unanswered" text))
       (should (< (string-search "exited with it unanswered" text) (string-search "later run" text))))
     (should-not romacs-agent-log--ended-asks)))
