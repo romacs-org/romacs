@@ -10,7 +10,7 @@
 ;; blink, buffers that follow their files, relative line numbers in
 ;; programming buffers, tree-sitter modes for the languages whose
 ;; grammars Romacs ships, backups and auto-saves kept out of the
-;; directories being edited, VC logs of the whole history, which
+;; directories being edited and no lock files written there, VC logs of the whole history, which
 ;; C-g stops while they arrive, and secrets from the password store.
 ;; `romacs-defaults-settings' lists them.  ledger/divergences VM2-OOB-DEFAULTS.
 ;;
@@ -109,6 +109,11 @@
     (omarchy-mode (omarchy-detected-p) idle)
     (backup-directory-alist
      (list (cons "." (expand-file-name "backups/" user-emacs-directory))))
+    ;; No `.#NAME' lock file beside an edited file: the supersession check
+    ;; at a first change and at a save still runs, `file-locked-p' still
+    ;; reads another editor's lock, and `lock-file-mode' turns locks on
+    ;; for one buffer.
+    (create-lockfiles nil)
     ;; GNU's transforms first: a remote file's auto-save stays local, in
     ;; `temporary-file-directory'.
     (auto-save-file-name-transforms
