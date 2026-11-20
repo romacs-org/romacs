@@ -50,6 +50,10 @@
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
 (declare-function romacs-agent-log-faces-soon "romacs-agent-log-faces" ())
+(declare-function romacs-agent-log-rounds-you "romacs-agent-log-rounds" (text))
+(declare-function romacs-agent-log-rounds-incoming "romacs-agent-log-rounds" (event incoming))
+(declare-function romacs-agent-log-rounds-end "romacs-agent-log-rounds" ())
+(declare-function romacs-agent-incoming-of "romacs-agent-tools" (text))
 (declare-function romacs-agent-log-faces-output "romacs-agent-log-faces" (text))
 (declare-function romacs-agent-log-faces-drop "romacs-agent-log-faces" ())
 (declare-function romacs-agent-log-faces-end "romacs-agent-log-faces" (start at))
@@ -848,28 +852,43 @@ unless a note said who gave it, that it was answered."
                                                  "· settled: the harness no longer asks")
                                                'face 'romacs-agent-log-note)))))))
 
+(defun romacs-agent-log--incomings (event)
+  "What input EVENT brought from elsewhere, as plists of :from :state
+:text (`romacs-agent-log-rounds-incoming'), or nil for the user's own
+words: the messages Romacs delivered, else what its text says it is."
+  (if-let* ((messages (plist-get event :messages)))
+      (list (list :from (mapconcat (lambda (m) (or (plist-get (plist-get m :from) :name) "a session")) messages ", ")
+                  :state (plist-get (car messages) :kind) :text (plist-get event :text)))
+    (romacs-agent-incoming-of (plist-get event :text))))
+
 (defun romacs-agent-log--prompt (event)
-  "Draw input EVENT: the user's message, or one from another session."
-  (let* ((messages (plist-get event :messages))
-         (text (or (plist-get event :text) ""))
+  "Draw input EVENT: the user's message, opening a round, or what came
+from elsewhere, opening one of its own."
+  (if-let* ((incomings (romacs-agent-log--incomings event)))
+      (dolist (incoming incomings) (romacs-agent-log-rounds-incoming event incoming))
+    (romacs-agent-log--prompt-own event)))
+
+(defun romacs-agent-log--prompt-own (event)
+  "Draw input EVENT, the user's own message."
+  (let* ((text (or (plist-get event :text) ""))
          (images (plist-get event :images))
-         (_ (unless messages (push (string-trim text) romacs-agent-log--prompts)))
+         (_ (push (string-trim text) romacs-agent-log--prompts))
          (head (cond ((plist-get event :steer) (propertize "↪ " 'face 'romacs-agent-log-prompt))
-                     (messages (propertize "✉ " 'face 'romacs-agent-log-note))
                      (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
     (romacs-agent-log--line event 'prompt
-                            (let ((line (concat (if (and (null messages) (> romacs-agent-log--end (point-min))) "\n" "")
+                            (let ((line (concat (if (> romacs-agent-log--end (point-min)) "\n" "")
                                                 head
-                                                (propertize (string-trim text) 'face (if messages nil 'romacs-agent-log-prompt))
+                                                (propertize (string-trim text) 'face 'romacs-agent-log-prompt)
                                                 (if images (propertize (format "  [%d image%s]" (length images) (if (cdr images) "s" ""))
                                                                        'face 'romacs-agent-log-note)
                                                   ""))))
                               ;; The turn it starts, by its request, on all of it
                               ;; (where prompt motion lands too): a diff or a
                               ;; rollback of the turn at point reads it.
-                              (if-let* ((request (plist-get event :request)))
-                                  (propertize line 'romacs-agent-log-turn request)
-                                line)))))
+                              (let ((line (romacs-agent-log-rounds-you line)))
+                                (if-let* ((request (plist-get event :request)))
+                                    (propertize line 'romacs-agent-log-turn request)
+                                  line))))))
 
 (defun romacs-agent-log--done (event)
   "Draw turn end EVENT: a rule with its time, cost and why it failed."
@@ -893,6 +912,7 @@ unless a note said who gave it, that it was answered."
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
     ('input (romacs-agent-log--prompt event))
+    ('incoming (romacs-agent-log-rounds-incoming event event))
     ('incoming (romacs-agent-log--prompt event))
     ('delta (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'text text)))
     ('thinking (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'thinking text)))
@@ -925,7 +945,8 @@ unless a note said who gave it, that it was answered."
                                                        (plist-get event :text))))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
-           (romacs-agent-log--done event))
+           (romacs-agent-log--done event)
+           (romacs-agent-log-rounds-end))
     ('error (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "error")) 'romacs-agent-log-denied))
     ('unstarted (romacs-agent-log--line event 'error (concat "✘ " (or (plist-get event :text) "never started"))
                                         'romacs-agent-log-denied))
@@ -1710,4 +1731,6 @@ On the transcript's text:
 (require 'romacs-agent-log-turns)
 ;; Its replies' faces as they stream.
 (require 'romacs-agent-log-faces)
+;; Its rounds, told at a glance.
+(require 'romacs-agent-log-rounds)
 ;;; romacs-agent-log.el ends here

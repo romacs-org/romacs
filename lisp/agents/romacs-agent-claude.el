@@ -221,12 +221,32 @@ every replay."
   (when-let* ((stamp (romacs-agent--value (gethash "timestamp" line))))
     (ignore-errors (float-time (date-to-time stamp)))))
 
+(defun romacs-agent--claude-notification (text)
+  "TEXT, a user's turn Claude Code wrote itself, read as its notification
+of a background task (<task-notification>): (:from :state :text), or nil."
+  (when (and (stringp text) (string-match-p "\\`[ \t\n]*<task-notification>" text))
+    (let ((tag (lambda (name) (and (string-match (format "<%s>\\(\\(?:.\\|\n\\)*?\\)</%s>" name name) text)
+                                   (string-trim (match-string 1 text))))))
+      (list :from "background task" :state (funcall tag "status")
+            :text (or (funcall tag "summary") (funcall tag "result") "")))))
+
+(defun romacs-agent--claude-incoming (text)
+  "TEXT, a user's turn nobody typed, as what came from elsewhere: Claude
+Code's notification, another session's message or a task's wakes
+\(`romacs-agent-incoming-of'), each a plist; nil for none."
+  (if-let* ((notification (romacs-agent--claude-notification text)))
+      (list notification)
+    (romacs-agent-incoming-of text)))
+
 (defun romacs-agent--claude-injected (text parent)
-  "The events of TEXT, a local command's output nobody typed.  The compaction's
-own \"Compacted\" is already said by its row."
-  (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
-    (unless (member output '("" "Compacted"))
-      (list (list :type 'status :text output :parent parent)))))
+  "The events of TEXT, a turn nobody typed: what came from elsewhere, as
+`incoming' events, else a local command's output.  The compaction's own
+\"Compacted\" is already said by its row."
+  (or (mapcar (lambda (incoming) (append (list :type 'incoming :parent parent) incoming))
+              (romacs-agent--claude-incoming text))
+      (let ((output (string-trim (replace-regexp-in-string "</?local-command-\\(?:stdout\\|stderr\\)>" "" text))))
+        (unless (member output '("" "Compacted"))
+          (list (list :type 'status :text output :parent parent))))))
 
 (defun romacs-agent--claude-task (line)
   "LINE, a notice of work the harness runs under a tool call (a subagent,

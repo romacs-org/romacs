@@ -488,6 +488,27 @@ by counting characters from the start."
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
 
+(defun romacs-agent-incoming-of (text)
+  "TEXT, written to an agent as a user's turn, read as what came from
+elsewhere: another session's message (a <romacs-message> envelope,
+`romacs-agent--message-envelope') or a delegated task's wakes.  A list
+of plists of :from (whom it came from), :state (the message's kind, or
+the task's state) and :text (its body), one per message or wake; nil
+for the user's own words."
+  (cond ((not (stringp text)) nil)
+        ((string-match "\\`[ \t\n]*<romacs-message\\([^>]*\\)>\n?" text)
+         (let* ((attributes (match-string 1 text))
+                (rest (substring text (match-end 0)))
+                (body (if (string-match "\n?</romacs-message>" rest) (substring rest 0 (match-beginning 0)) rest))
+                (attribute (lambda (name)
+                             (and (string-match (format "%s=\"\\([^\"]*\\)\"" name) attributes)
+                                  (match-string 1 attributes)))))
+           (list (list :from (or (funcall attribute "from") "a session") :state (funcall attribute "kind") :text body))))
+        ((string-prefix-p "Delegated task " text)
+         (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)
+                                      :text (plist-get wake :result)))
+                 (romacs-agent-tools--wakes-parse text)))))
+
 (defun romacs-agent-tools--wake-parse (text)
   "TEXT read back as one wake (`romacs-agent-tools--wakes-parse'), or nil."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))

@@ -22,6 +22,7 @@
 
 (require 'cl-lib)
 (require 'romacs-agent)
+(declare-function romacs-agent--claude-incoming "romacs-agent-claude" (text))
 (require 'romacs-agent-ui)
 
 (defcustom romacs-agent-history-limit 50
@@ -159,7 +160,15 @@ project it was run, or nil."
             ("user"
              (let* ((content (gethash "content" (gethash "message" line)))
                     (prompt (romacs-agent-history--prompt content)))
-               (cond (prompt
+               (cond ((and (not (and (vectorp content)
+                                     (cl-some (lambda (b) (and (hash-table-p b) (equal (gethash "type" b) "tool_result"))) content)))
+                           (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                      ;; From elsewhere (a task's result, a message, a
+                      ;; notification): said as such, never as the user.
+                      (close)
+                      (dolist (incoming (romacs-agent--claude-incoming (romacs-agent--text-of content)))
+                        (push (append (list :type 'incoming) incoming) events)))
+                     (prompt
                       (close)
                       (setq turn (gethash "timestamp" line))
                       (push (list :type 'meta :permission-mode (gethash "permissionMode" line)) events)

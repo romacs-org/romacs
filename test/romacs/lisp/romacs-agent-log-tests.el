@@ -1078,3 +1078,46 @@
   (cl-letf (((symbol-function 'face-foreground) (lambda (&rest _) "grey90"))
             ((symbol-function 'face-background) (lambda (&rest _) "white")))
     (romacs-agent-log--derive)))
+
+;;; Rounds
+
+(ert-deftest romacs-agent-log-rounds-tell-the-user-from-elsewhere ()
+  (should (equal (romacs-agent-incoming-of "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\n</romacs-message>\nReply to this message with x.")
+                 '((:from "lead" :state "parent" :text "Go on"))))
+  (should-not (romacs-agent-incoming-of "my own words"))
+  (romacs-agent-log-tests--with
+    ;; The user's message: its gutter and its surface.
+    (draw :type 'input :text "do it" :request 1)
+    ;; A delegated task's result, written as a turn: from elsewhere.
+    (draw :type 'input :text (concat "Delegated task 19a4803e-9e10-44f0-bf91-824484dcfb8c (lane x) [completed, 4 chars]:\n"
+                                     "done\n\nReply to this result with romacs_task_reply(messageId=\"m-x\", text=...)."))
+    ;; Claude Code's own notice of a background task.
+    (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>Build done</summary>\n</task-notification>" nil))
+      (romacs-agent-log-draw session event))
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "❯ do it" text))
+      (should (string-match-p "✉ lane x · completed\ndone" text))
+      (should (string-match-p "✉ background task · completed\nBuild done" text))
+      (should-not (string-match-p "❯ Delegated" text)))
+    (goto-char (point-min))
+    (search-forward "do it")
+    (should (equal (substring-no-properties (get-text-property (match-beginning 0) 'line-prefix)) "▌ "))
+    (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "lane x")
+    (should (equal (substring-no-properties (get-text-property (match-beginning 0) 'line-prefix)) "┆ "))
+    (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-a-round-s-answer-stands-out ()
+  ;; Its end: the agent's words before its last recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "Looking first.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Here is the answer.")
+    (draw :type 'done :time 0)
+    (goto-char (point-min))
+    (search-forward "Looking")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
+    (search-forward "the answer")
+    (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
