@@ -99,6 +99,34 @@ fit, not down one column of a card sized for the first page."
     ;; D and E share a row on the last page.
     (should (string-match-p "D +E" (substring-no-properties (car (car (last pages))))))))
 
+(ert-deftest romacs-grid-balances-its-pages ()
+  "Pages share the blocks evenly: the fewest pages filling allows, each
+as short as that count lets them be, so the last is not a remnant."
+  (let* ((blocks (mapcar (lambda (n) (romacs-grid-tests--block (format "G%d" n) 4 10)) (number-sequence 1 6)))
+         ;; One column of 20 columns: two blocks (11 rows) a page fit 12.
+         (pages (romacs-grid-pages blocks 17 20)))
+    (should (= (length pages) 2))
+    (should (equal (mapcar #'length pages) '(17 17)))))
+
+(ert-deftest romacs-grid-balances-past-a-budget-that-needs-more-pages ()
+  "A fill's page count need not fall as its budget grows: the balance
+finds the least budget for the count, not one a halving search lands on."
+  (let* ((blocks (cl-mapcar (lambda (h w) (make-list h (make-string w ?x))) '(3 5 2 3 3) '(9 2 1 8 4)))
+         (pages (romacs-grid-pages blocks 15 13)))
+    (should (= (length pages) 2))
+    (should (<= (apply #'max (mapcar #'length pages)) 8))))
+
+(ert-deftest romacs-grid-pages-share-column-starts ()
+  "Every page puts its columns where the others do, so turning a page
+moves nothing sideways."
+  (let* ((blocks (list (romacs-grid-tests--block "Wide" 9 30) (romacs-grid-tests--block "B" 9 6)
+                       (romacs-grid-tests--block "Narrow" 9 4) (romacs-grid-tests--block "D" 9 6)))
+         (pages (romacs-grid-pages blocks 10 50))
+         (second-column (lambda (page) (let ((case-fold-search nil))
+                                         (string-match " \\(B\\|D\\)\\'" (substring-no-properties (car page)))))))
+    (should (= (length pages) 2))
+    (should (= (funcall second-column (car pages)) (funcall second-column (cadr pages))))))
+
 (ert-deftest romacs-grid-cuts-at-a-word ()
   "A line wider than the room is cut at a word, with the ellipsis; a
 word longer than half the room is cut where it must be."

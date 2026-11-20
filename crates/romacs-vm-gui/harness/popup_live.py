@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """A keymap popup sized by fit-window-to-buffer, in a private compositor.
 
+Run with no case named, as the gate runs it, it checks the cases in
+GATED, each in its own session: the side window below, --layer and
+--which-key.  Every run ends in one line per case: PASS, or FAIL with
+the check that failed and what it expected and found.
+
 A native --loadup session with a private HOME and init.el shows
 keymap_popup_fixture.el's menu with C-c p, dismisses it with q and shows
 it again.  keymap-popup displays its buffer in a bottom side window and
@@ -34,6 +39,7 @@ import json
 import re
 from pathlib import Path
 import subprocess
+import sys
 import time
 import traceback
 
@@ -313,8 +319,22 @@ WHICH_KEY_INIT = '''(require 'which-key)
                      (and xy (list (+ (nth 0 body) (car xy)) (+ (nth 1 body) (cdr xy)) (frame-char-width) (frame-char-height))))
             :pane (window-edges window t nil t)
             :chrome-bottom (romacs-chrome-bottom (romacs-layer--root-frame))
-            :command (and (symbolp last-command) (symbol-name last-command))))
+            :command (and (symbolp last-command) (symbol-name last-command))
+            :hides popup-live--hides))
      nil {state} nil (quote quiet))))
+;; How many times a shown card was hidden: the next card may follow
+;; within which-key's secondary delay, too soon for a scene to show none.
+(defvar popup-live--hides 0)
+(defun popup-live--card-visible ()
+  (let ((frame (and (buffer-live-p which-key--buffer) (romacs-layer--frame-of which-key--buffer))))
+    (and frame (frame-visible-p frame))))
+(advice-add 'romacs-popup--card-hide :around
+            (lambda (hide &rest args)
+              ;; A hide counts only when it takes a shown card away.
+              (let ((shown (popup-live--card-visible)))
+                (prog1 (apply hide args)
+                  (when (and shown (not (popup-live--card-visible)))
+                    (setq popup-live--hides (1+ popup-live--hides)))))))
 (advice-add 'romacs-popup--card-render :after #'popup-live--record)
 (advice-add 'romacs-popup--card-hide :after #'popup-live--record)
 (add-hook 'post-command-hook (lambda () (run-at-time 0.2 nil #'popup-live--record)) 90)
@@ -660,6 +680,13 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     def gone(what):
         fio.wait(lambda: not card_rows(), args.timeout, f'card gone after {what}', process)
 
+    def hidden(what, before):
+        # Hidden by the key though a card for the longer prefix follows
+        # within which-key's secondary delay, too soon for a scene to
+        # show none: the count of hides passed BEFORE, its count then.
+        fio.wait(lambda: (read().get('hides') or 0) > before, args.timeout,
+                 f'card hidden after {what} (hides stayed {before})', process)
+
     def placed(probe, corner='right'):
         (x, y), (width, height) = probe['position'], probe['size']
         left, top, right, bottom = probe['pane']
@@ -696,9 +723,9 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     gone('C-x C-h h')
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
     keys('-M', 'ctrl', 'x', '-m', 'ctrl')
-    card('C-x')
+    before = card('C-x').get('hides') or 0
     keys('4')
-    gone('C-x 4')
+    hidden('C-x 4', before)
     card('C-x 4')
     keys('-M', 'ctrl', 'g', '-m', 'ctrl')
     gone('C-g')
@@ -974,6 +1001,30 @@ def main():
     parser.add_argument('--prompts', action='store_true', help='read-from-minibuffer menus in the minibuffer layer')
     parser.add_argument('--theme', help='a theme loaded first (catppuccin-latte: a light one)')
     args = parser.parse_args()
+    cases = ('prompts', 'toasts', 'indicators', 'repeat', 'which_key', 'child_frame', 'layer')
+    if not any(getattr(args, case) for case in cases):
+        # No case named (the gate's run): every case it holds, each in its
+        # own session under OUTPUT/CASE, one verdict line each.
+        statuses = []
+        for case in GATED:
+            try:
+                statuses.append(run(argparse.Namespace(**{**vars(args), **{c: c == case for c in cases},
+                                                          'output': str(Path(args.output) / (case or 'side-window'))})))
+            except Exception as failed:  # noqa: BLE001 - one case failing to set up still leaves the others theirs
+                if not getattr(failed, 'reported', False):
+                    print(f"FAIL popup_live {case or 'side-window'}: setup: {failed!r}")
+                statuses.append(1)
+        return 0 if all(status == 0 for status in statuses) else 1
+    return run(args)
+
+
+# The cases a run that names none checks: keymap-popup's side window and
+# Romacs panel, and which-key's key-hint card.
+GATED = (None, 'layer', 'which_key')
+
+
+def run(args):
+    """One case of the harness, ARGS naming it (none: the side window)."""
     binary = Path(args.binary).resolve()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -1031,26 +1082,26 @@ def main():
                     time.sleep(1)
                     check_prompts(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 if args.toasts:
                     time.sleep(1)
                     check_toasts(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 if args.indicators:
                     check_indicators(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 if args.repeat:
                     time.sleep(1)
                     check_repeat(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 if args.which_key:
                     time.sleep(1)
                     check_which_key(args, output, report, env, process, state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 time.sleep(1)
                 report['captures'].append({'name': 'started', 'rows': text_rows(), 'mode_lines': mode_lines()})
                 show_popup(keys)
@@ -1059,7 +1110,7 @@ def main():
                     if args.layer:
                         check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs)
                     report['status'] = 'PASS'
-                    return
+                    return 0
                 # Shown, dismissed and shown again, refitting.
                 fio.wait(state.exists, args.timeout, 'first popup fit', process)
                 report['first_fit'] = state.read_text()
@@ -1158,7 +1209,13 @@ def main():
                 raise
     finally:
         # The verdict says which case ran and, failing, why: the error the
-        # check raised, and where its report and shots are.
+        # check raised, and where its report and shots are.  An error
+        # leaving this case is marked reported, so a caller prints no second.
+        if (raised := sys.exc_info()[1]) is not None:
+            # An error escaping the session (its teardown too) fails the case.
+            report['status'] = 'FAIL'
+            report.setdefault('error', repr(raised))
+            raised.reported = True
         print(f"{report['status']} popup_live {variant}" +
               ('' if report['status'] == 'PASS' else
                f": {report.get('failed_check', 'before any check')}: {report.get('error', 'no check completed')}"
