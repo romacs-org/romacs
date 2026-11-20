@@ -61,6 +61,7 @@
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
 (declare-function romacs-agent-ui--header-inputs "romacs-agent-ui" (session))
 (declare-function romacs-agents "romacs-agent-board" ())
+(declare-function romacs-agent-menu--session "romacs-agent-menu" ())
 (declare-function romacs-agent-events-p "romacs-agent-events" (session))
 (declare-function romacs-agent-events-end "romacs-agent-events" (session))
 (declare-function romacs-agent-events-note-seq "romacs-agent-events" (session type end))
@@ -807,6 +808,7 @@ Live, in a chat no window shows, the echo area says so too."
                                          'romacs-agent-log-request id
                                          'romacs-agent-log-full (list input)
                                          'romacs-agent-log-questions questions
+                                         'romacs-agent-log-plan plan
                                          'keymap romacs-agent-log-ask-map))
       (push (cons id (cons start (copy-marker romacs-agent-log--end))) romacs-agent-log--asks))))
 
@@ -962,6 +964,43 @@ from elsewhere, opening one of its own."
 (defun romacs-agent-log--note (event text)
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
 
+(defun romacs-agent-log--offers-proceed-p (session event)
+  "Whether plan EVENT of SESSION is offered to proceed with by leaving plan
+mode: its driver marks it :proceed (its plan is no request), SESSION is
+in plan mode, and the plan is live, not replayed."
+  (and (plist-get event :proceed) (plist-get (romacs-agent-options session) :plan)
+       (not romacs-agent-log--replaying)))
+
+(defun romacs-agent-log--retire-proceed ()
+  "The plan offered to proceed with is no more: its text offers nothing."
+  (save-restriction
+    (widen)
+    (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
+      (let ((end (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
+                     romacs-agent-log--end)))
+        (romacs-agent-log--writing
+          (remove-text-properties at end '(romacs-agent-log-proceed nil))
+          (put-text-property at end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map)))))))
+
+(defun romacs-agent-log--proceed-offered ()
+  "Where the chat offers to proceed with a plan by leaving plan mode, or
+nil; however the chat is narrowed."
+  (when romacs-agent-log--end
+    (save-restriction
+      (widen)
+      (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t))))
+
+(defun romacs-agent-log-proceed ()
+  "Proceed with the plan the chat offers: its session leaves plan mode,
+back in the mode it had, and the next message carries it out."
+  (interactive nil romacs-agent-log-mode)
+  (unless (romacs-agent-log--proceed-offered) (user-error "No plan to proceed with"))
+  (romacs-agent-set-plan (romacs-agent-menu--session) nil)
+  ;; Switched: its row offers nothing more, nor the separator.
+  (romacs-agent-log--retire-proceed)
+  (save-restriction (widen) (romacs-agent-log--separator))
+  (romacs-agent-log--header-show))
+
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
@@ -996,8 +1035,13 @@ from elsewhere, opening one of its own."
                                                                         (plist-get event :scope) (plist-get event :reason)
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))
-    ('plan (romacs-agent-log--line event 'plan (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt)
-                                                       (plist-get event :text))))
+    ('plan-switch (unless (plist-get event :on) (romacs-agent-log--retire-proceed)))
+    ('plan (let ((text (concat (propertize "📋 Plan\n" 'face 'romacs-agent-log-prompt) (plist-get event :text))))
+             ;; Offered: the plan's text takes y, the separator says so.
+             (when (romacs-agent-log--offers-proceed-p session event)
+               (romacs-agent-log--retire-proceed)
+               (setq text (propertize text 'romacs-agent-log-proceed t 'keymap romacs-agent-log-plan-map)))
+             (romacs-agent-log--line event 'plan text)))
     ('done (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'turn-end)
            (romacs-agent-log--done event)
@@ -1033,7 +1077,9 @@ from elsewhere, opening one of its own."
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
-    ('rolled-back (romacs-agent-log-turns-rolled-back event))
+    ;; A rollback takes the plan offered back with its turns.
+    ('rolled-back (romacs-agent-log--retire-proceed)
+                  (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
     ('selection (cl-flet ((label (selection)
                             (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
@@ -1059,7 +1105,15 @@ from elsewhere, opening one of its own."
 
 (defun romacs-agent-log--doing (session)
   "What SESSION does now, as the separator says it: (STATE . WORDS)."
-  (pcase (if (romacs-agent-log--pending) 'waiting-approval (romacs-agent-state session))
+  (pcase (cond ((romacs-agent-log--pending) 'waiting-approval)
+               ;; A plan offered waits on the user as a request does.
+               ((and (eq (romacs-agent-state session) 'idle) (not (romacs-agent-failed session))
+                     (romacs-agent-log--proceed-offered))
+                'plan-offered)
+               (t (romacs-agent-state session)))
+    ('plan-offered
+     (cons 'waiting (substitute-command-keys
+                     "⚠ plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning")))
     ('waiting-approval
      (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
                        (get-text-property (cadr ask) 'romacs-agent-log-questions))))
@@ -1132,13 +1186,25 @@ windows showing it leave, changed."
 (defvar-local romacs-agent-log--header-made nil
   "What the header was last made from: made again only when it differs.")
 
+(defun romacs-agent-log--header-inputs (session)
+  "What SESSION's header reads (`romacs-agent-ui--header-inputs'), as this
+chat shows it: a plan it offers waits on the user, as a request does."
+  (let ((inputs (romacs-agent-ui--header-inputs session)))
+    (if (and (romacs-agent-log--proceed-offered) (not (memq (plist-get inputs :state) '(approval question))))
+        (plist-put (copy-sequence inputs) :state 'approval)
+      inputs)))
+
+(defun romacs-agent-log--waiting-count ()
+  "How many things wait on the user here: its approvals, and a plan offered."
+  (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
+
 (defun romacs-agent-log--header-show ()
   "Make the header say what the session says now: a value, never a form,
 so a redisplay runs no Lisp for it; made only when what it reads changed."
   (let* ((session romacs-agent-log--session)
          (start (romacs-agent-turn-start session))
          (running (and (null romacs-agent-log--asks) (memq (romacs-agent-state session) '(starting running))))
-         (inputs (list (romacs-agent-ui--header-inputs session) (length romacs-agent-log--asks)
+         (inputs (list (romacs-agent-log--header-inputs session) (romacs-agent-log--waiting-count)
                        (and start running (round (- (float-time) start))))))
     (unless (equal inputs romacs-agent-log--header-made)
       (setq romacs-agent-log--header-made inputs)
@@ -1151,9 +1217,9 @@ so a redisplay runs no Lisp for it; made only when what it reads changed."
   "The header line: the session's own header, what waits on the user, and
 how long the turn has run."
   (let* ((session romacs-agent-log--session)
-         (pending (length romacs-agent-log--asks))
+         (pending (romacs-agent-log--waiting-count))
          (start (romacs-agent-turn-start session)))
-    (concat (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
+    (concat (romacs-agent-ui--header-text (romacs-agent-log--header-inputs session))
             (if (> pending 0)
                 (propertize (format "  ⚠ %d wait%s on you" pending (if (= pending 1) "s" ""))
                             'face 'romacs-agent-log-ask)
@@ -1557,20 +1623,35 @@ block is shown, and it is checked the session still waits on it."
          (pending (romacs-agent-log--pending))
          (ask (if at (assoc at pending) (car pending))))
     (unless ask (user-error (if at "That request is answered" "Nothing waits on you")))
+    ;; Shown where it is asked: point at it says which is answered.  One
+    ;; outside what a narrowed chat shows is not answered blind.
     (unless at
-      (goto-char (cadr ask))
-      (message "Answering: %s" (string-trim (buffer-substring-no-properties (cadr ask) (line-end-position)))))
+      (unless (<= (point-min) (cadr ask) (point-max))
+        (user-error "What waits on you is outside what the chat shows: widen it"))
+      (goto-char (cadr ask)))
     (car ask)))
 
 (defun romacs-agent-log-allow (&optional always)
   "Allow the request at point, else the oldest pending; with ALWAYS, for
 the session.  Questions open their answering layer."
   (interactive nil romacs-agent-log-mode)
+  (if (and (not always) (not (romacs-agent-log--pending)) (romacs-agent-log--proceed-offered))
+      ;; Nothing asked, a plan offered (a harness whose plan is no
+      ;; request): allowing is proceeding with it.
+      (romacs-agent-log-proceed)
+    (romacs-agent-log--allow-ask always)))
+
+(defun romacs-agent-log--allow-ask (always)
+  "Allow the request at point, else the oldest pending; with ALWAYS, for
+the session."
   (let* ((id (romacs-agent-log--ask-here))
          (questions (get-text-property (point) 'romacs-agent-log-questions)))
-    (if questions
-        (romacs-agent-log--act #'romacs-agent-log-source-ask id questions)
-      (romacs-agent-log--act #'romacs-agent-log-source-respond id (if always (list :always t) t) nil))))
+    (cond (questions (romacs-agent-log--act #'romacs-agent-log-source-ask id questions))
+          ;; A plan is proceeded with, or not: no rule for the session.
+          ((and always (get-text-property (point) 'romacs-agent-log-plan))
+           (user-error (substitute-command-keys
+                        "A plan is proceeded with once: \\[romacs-agent-log-allow] proceeds")))
+          (t (romacs-agent-log--act #'romacs-agent-log-source-respond id (if always (list :always t) t) nil)))))
 
 (defun romacs-agent-log-allow-always ()
   "Allow the request at point, else the oldest pending, for the session."
@@ -1753,6 +1834,11 @@ A character typed on it goes to the composer."
   "u" #'romacs-agent-chat-rollback
   "D" #'romacs-agent-chat-diff
   "g" #'romacs-agent-log-composer)
+
+(defvar-keymap romacs-agent-log-plan-map
+  :doc "Keys of a plan to proceed with by leaving plan mode."
+  :parent romacs-agent-log-transcript-map
+  "y" #'romacs-agent-log-proceed)
 
 (defvar-keymap romacs-agent-log-ask-map
   :doc "Keys of an approval waiting on the user."

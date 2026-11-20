@@ -1,28 +1,25 @@
 //! Native Wayland toplevel-icon integration.
 //!
 //! Winit 0.30 intentionally leaves `Window::set_window_icon` as a no-op on
-//! Wayland. Keep the staging protocol and its unsafe foreign-connection bridge
-//! inside this module so callers only express the application-level intent.
+//! Wayland. Keep the staging protocol inside this module, on a guest of
+//! winit's display, so callers only express the application-level intent.
 
-use std::ffi::c_void;
 use std::fs::File;
 use std::io::Write;
 use std::os::fd::AsFd;
-use std::ptr::NonNull;
 
-use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use rustix::fs::{MemfdFlags, memfd_create};
-use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::globals::{BindError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_buffer, wl_registry, wl_shm, wl_shm_pool};
-use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
-use wayland_protocols::xdg::shell::client::xdg_toplevel;
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
 use wayland_protocols::xdg::toplevel_icon::v1::client::{
     xdg_toplevel_icon_manager_v1, xdg_toplevel_icon_v1,
 };
+use winit::event_loop::OwnedDisplayHandle;
 use winit::platform::wayland::WindowExtWayland;
 use winit::window::Window;
 
+use crate::wayland_guest::Guest;
 use crate::window_icon::RasterizedWindowIcon;
 use crate::window_identity::ROMACS_APPLICATION;
 
@@ -61,8 +58,7 @@ delegate_noop!(ProtocolState: ignore xdg_toplevel_icon_manager_v1::XdgToplevelIc
 delegate_noop!(ProtocolState: ignore xdg_toplevel_icon_v1::XdgToplevelIconV1);
 
 struct WaylandIconSession {
-    display: NonNull<c_void>,
-    connection: Connection,
+    guest: Guest,
     event_queue: EventQueue<ProtocolState>,
     state: ProtocolState,
     manager: xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1,
@@ -71,26 +67,22 @@ struct WaylandIconSession {
 
 enum WaylandIconBackend {
     Protocol(WaylandIconSession),
-    DesktopEntryOnly { display: NonNull<c_void> },
+    DesktopEntryOnly { display: OwnedDisplayHandle },
 }
 
 impl WaylandIconBackend {
-    fn display(&self) -> NonNull<c_void> {
+    fn display(&self) -> &OwnedDisplayHandle {
         match self {
-            Self::Protocol(session) => session.display,
-            Self::DesktopEntryOnly { display } => *display,
+            Self::Protocol(session) => session.guest.display(),
+            Self::DesktopEntryOnly { display } => display,
         }
     }
 }
 
 impl WaylandIconSession {
-    fn connect(display: NonNull<c_void>) -> Result<WaylandIconBackend, ToplevelIconError> {
-        // SAFETY: the raw display comes from the live winit Window. The guest
-        // backend never disconnects it, and the session stays on the render
-        // thread where the Window outlives icon application.
-        let backend = unsafe { Backend::from_foreign_display(display.as_ptr().cast()) };
-        let connection = Connection::from_backend(backend);
-        let (globals, event_queue) = registry_queue_init::<ProtocolState>(&connection)
+    fn connect(display: OwnedDisplayHandle) -> Result<WaylandIconBackend, ToplevelIconError> {
+        let guest = Guest::new(display.clone()).ok_or(ToplevelIconError::DisplayHandle)?;
+        let (globals, event_queue) = registry_queue_init::<ProtocolState>(guest.connection())
             .map_err(|error| ToplevelIconError::Protocol(error.to_string()))?;
         let queue_handle = event_queue.handle();
         let manager: xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1 =
@@ -109,8 +101,7 @@ impl WaylandIconSession {
             .map_err(|error| ToplevelIconError::Protocol(error.to_string()))?;
 
         Ok(WaylandIconBackend::Protocol(Self {
-            display,
-            connection,
+            guest,
             event_queue,
             state: ProtocolState,
             manager,
@@ -120,7 +111,7 @@ impl WaylandIconSession {
 
     fn set_icon(
         &mut self,
-        raw_toplevel: NonNull<c_void>,
+        window: &dyn Window,
         icon_pixels: &RasterizedWindowIcon,
     ) -> Result<(), ToplevelIconError> {
         let width =
@@ -156,27 +147,17 @@ impl WaylandIconSession {
         protocol_icon.set_name(ROMACS_APPLICATION.icon_name().as_str().to_owned());
         protocol_icon.add_buffer(&buffer, 1);
 
-        // SAFETY: winit returned this pointer as the live xdg_toplevel for the
-        // same Window and display. We only borrow it to send set_icon; winit
-        // retains ownership and remains the sole event dispatcher.
-        let toplevel_id = unsafe {
-            ObjectId::from_ptr(
-                xdg_toplevel::XdgToplevel::interface(),
-                raw_toplevel.as_ptr().cast(),
-            )
-        }
-        .map_err(|error| ToplevelIconError::Protocol(error.to_string()))?;
-        let toplevel = xdg_toplevel::XdgToplevel::from_id(&self.connection, toplevel_id)
-            .map_err(|error| ToplevelIconError::Protocol(error.to_string()))?;
-
-        self.manager.set_icon(&toplevel, Some(&protocol_icon));
+        self.guest
+            .set_toplevel_icon(&self.manager, window, &protocol_icon)
+            .map_err(ToplevelIconError::Protocol)?;
 
         // set_icon snapshots the immutable icon. Destroying these temporary
         // protocol objects also makes their Rust/file resources deterministic.
         protocol_icon.destroy();
         buffer.destroy();
         pool.destroy();
-        self.connection
+        self.guest
+            .connection()
             .flush()
             .map_err(|error| ToplevelIconError::Protocol(error.to_string()))?;
         self.event_queue
@@ -198,34 +179,26 @@ impl WaylandToplevelIconService {
     pub(crate) fn apply(
         &mut self,
         window: &dyn Window,
+        display: &OwnedDisplayHandle,
         icon_pixels: &RasterizedWindowIcon,
     ) -> Result<(), ToplevelIconError> {
-        let Some(raw_toplevel) = window.xdg_toplevel() else {
+        if window.xdg_toplevel().is_none() {
             return Ok(());
-        };
-        let display = match window
-            .display_handle()
-            .map_err(|_| ToplevelIconError::DisplayHandle)?
-            .as_raw()
-        {
-            RawDisplayHandle::Wayland(handle) => handle.display,
-            _ => return Err(ToplevelIconError::DisplayHandle),
-        };
-
+        }
         if self
             .backend
             .as_ref()
             .is_none_or(|current| current.display() != display)
         {
             self.shutdown();
-            self.backend = Some(WaylandIconSession::connect(display)?);
+            self.backend = Some(WaylandIconSession::connect(display.clone())?);
         }
         match self
             .backend
             .as_mut()
             .expect("backend was initialized above")
         {
-            WaylandIconBackend::Protocol(session) => session.set_icon(raw_toplevel, icon_pixels),
+            WaylandIconBackend::Protocol(session) => session.set_icon(window, icon_pixels),
             WaylandIconBackend::DesktopEntryOnly { .. } => Ok(()),
         }
     }
@@ -238,19 +211,7 @@ impl WaylandToplevelIconService {
         if let WaylandIconBackend::Protocol(mut session) = backend {
             let _ = session.event_queue.dispatch_pending(&mut session.state);
             session.manager.destroy();
-            let _ = session.connection.flush();
-        }
-    }
-}
-
-impl Drop for WaylandToplevelIconService {
-    fn drop(&mut self) {
-        // Normal shutdown empties the session in RenderApp::handle_exiting.
-        // If winit exits abnormally, its foreign display may already be dead;
-        // leaking the tiny guest wrapper is safer than dereferencing it during
-        // Drop, and the OS reclaims it with the process.
-        if let Some(backend) = self.backend.take() {
-            std::mem::forget(backend);
+            let _ = session.guest.connection().flush();
         }
     }
 }
