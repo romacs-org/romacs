@@ -50,6 +50,10 @@ def check(text):
     """The report for the objdump -Cd TEXT: its records, and its violations
     with the required handlers it lacks."""
     records, violations = scan(text)
+    # A typed entry ends in its dispatch: one with no indirect jump returns
+    # to a caller instead, and a frame stays per instruction.
+    violations += [dict(handler=r["handler"], instruction="no dispatch jump") for r in records
+                   if r["handler"].startswith("audited::t_") and not r["indirect_jumps"]]
     missing = REQUIRED - {r["handler"] for r in records}
     if missing:
         violations.append(dict(missing=sorted(missing)))

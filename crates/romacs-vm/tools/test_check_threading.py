@@ -39,6 +39,10 @@ class ScanTest(unittest.TestCase):
                 + "\n0000000000002000 <romacs_vm::gc::collect>:\n  2000:\t00\tcall   *%rax")
         self.assertEqual(check_threading.scan(text), ([], []))
 
+    def test_a_typed_entry_that_returns_without_dispatch_fails(self):
+        report = check_threading.check(function("audited::t_mov", "movzbl 0x7c(%rdx),%eax", "ret"))
+        self.assertIn(dict(handler="audited::t_mov", instruction="no dispatch jump"), report["violations"])
+
     def test_a_missing_typed_handler_fails(self):
         report = check_threading.check(function("audited::t_mov", *TAIL))
         self.assertFalse(report["passed"])

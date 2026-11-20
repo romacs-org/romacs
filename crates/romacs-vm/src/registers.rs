@@ -47,6 +47,20 @@ impl Registers {
     pub(crate) const fn new() -> Self {
         Registers { current: Vec::new(), suspended: Vec::new(), kernel: Vec::new() }
     }
+    /// The current file's base, for the frames' raw pointers: the `Vec`'s
+    /// own, which materializes no reference to the slots, so a pointer taken
+    /// here stays valid across later borrows of the file (`Vec::as_mut_ptr`).
+    /// The slice's method, which `Deref` would otherwise reach, borrows the
+    /// whole file mutably and would end every pointer taken before it.
+    #[inline]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut Value {
+        self.current.as_mut_ptr()
+    }
+    /// The current file's base, as `as_mut_ptr`, for offsets.
+    #[inline]
+    pub(crate) fn as_ptr(&self) -> *const Value {
+        self.current.as_ptr()
+    }
     /// How many files are set aside beneath the current one.
     #[inline]
     pub(crate) fn depth(&self) -> usize {

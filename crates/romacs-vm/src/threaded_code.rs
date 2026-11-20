@@ -18,8 +18,11 @@ use std::fmt;
 use std::ops::Deref;
 
 /// A function's lowered instructions and the terminator after them; none
-/// at all before its first lowering.
-pub(super) struct Code(Box<[Inst]>);
+/// at all before its first lowering. A `Vec`, not a box: dispatch keeps raw
+/// pointers into it (`entry`) while the collector writes its Values in place
+/// through a borrow, and a `Vec`'s base pointer, unlike a box's, outlives
+/// such a borrow and the moves of the `Vec` itself (`Vec::as_ptr`).
+pub(super) struct Code(Vec<Inst>);
 
 /// Why lowered code was refused: AT is the instruction's index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,7 +98,7 @@ fn seal(
         };
     }
     body.push(k_inst(terminator));
-    Ok(Code(body.into_boxed_slice()))
+    Ok(Code(body))
 }
 
 /// Whether OP, instruction AT of FUNCTION, names only registers and sites
@@ -168,7 +171,7 @@ fn install_typed(inst: &mut Inst) -> bool {
         Op::Jump(_) => inst.handler = audited::t_jump,
         Op::Sealed(a, _, d, argc) => {
             let Some(typed) = typed_kernel(inst.value, argc) else { return false };
-            (inst.a, inst.d) = (a, d);
+            (inst.a, inst.d, inst.e) = (a, d, narrow(argc));
             return kernel_bytes(inst, typed);
         }
         _ => return false,
@@ -231,16 +234,22 @@ impl Code {
     }
     /// No code: its function was not lowered yet, or was released.
     pub(super) fn none() -> Code {
-        Code(Box::default())
+        Code(Vec::new())
     }
     /// Whether this is `none`.
     pub(super) fn is_none(&self) -> bool {
         self.0.is_empty()
     }
-    /// The first instruction, the terminator's if the body is empty.
+    /// The first instruction, the terminator's if the body is empty: the
+    /// `Vec`'s own base pointer, which materializes no reference.
     #[inline]
     pub(super) fn entry(&self) -> *const Inst {
-        self.0.as_ptr()
+        Vec::as_ptr(&self.0)
+    }
+    /// Instruction AT of the body, from the `Vec`'s own base as `entry`.
+    #[inline]
+    pub(super) fn at(&self, at: usize) -> Option<*const Inst> {
+        (at < self.len()).then(|| Vec::as_ptr(&self.0).wrapping_add(at))
     }
     /// Every Value the instructions hold, in place, for the collector.
     pub(super) fn visit_values(&mut self, visit: &mut impl FnMut(&mut Value)) {

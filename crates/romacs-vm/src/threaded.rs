@@ -1392,9 +1392,8 @@ fn route_escape<'a, 'b>(mut m: Orch<'_, 'b, 'a>, mut gc: Gc<'_, 'b>, (): ()) -> 
 /// instruction to resume at.
 fn routed(e: Eng<'_, '_>, landing: Option<usize>) -> Option<(*mut Value, *const Inst)> {
     let target = landing?;
-    let code = &e.code[e.function];
-    assert!(target < code.len(), "a landing inside its activation's code");
-    Some((e.regs, code[target..].as_ptr()))
+    let at = e.code[e.function].at(target).expect("a landing inside its activation's code");
+    Some((e.regs, at))
 }
 // This is argument-stack storage, not Lisp heap objects. Its capacity is reused
 // across calls and every live element is forwarded at the engine's safepoints.
