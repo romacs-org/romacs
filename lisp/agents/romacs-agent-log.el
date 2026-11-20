@@ -821,14 +821,19 @@ the plan is live, the latest: an older one's row goes."
 
 (defun romacs-agent-log--retire-proceed ()
   "The plan offered to proceed with is no more: its row goes."
-  (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
-    (romacs-agent-log--writing
-      (delete-region at (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
-                            romacs-agent-log--end)))))
+  (save-restriction
+    (widen)
+    (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
+      (romacs-agent-log--writing
+        (delete-region at (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
+                              romacs-agent-log--end))))))
 
 (defun romacs-agent-log--proceed-offered ()
-  "Where the chat offers to proceed with a plan by leaving plan mode, or nil."
-  (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t))
+  "Where the chat offers to proceed with a plan by leaving plan mode, or
+nil; however the chat is narrowed."
+  (save-restriction
+    (widen)
+    (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t)))
 
 (defun romacs-agent-log-proceed ()
   "Proceed with the plan the chat offers: its session leaves plan mode,
@@ -907,7 +912,9 @@ back in the mode it had, and the next message carries it out."
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"
                                                     (if-let* ((why (plist-get event :why))) (format " (%s)" why) ""))))
     ('forked (romacs-agent-log--note event (format "forked from %s" (or (plist-get event :title) (plist-get event :from)))))
-    ('rolled-back (romacs-agent-log-turns-rolled-back event))
+    ;; A rollback takes the plan offered back with its turns.
+    ('rolled-back (romacs-agent-log--retire-proceed)
+                  (romacs-agent-log-turns-rolled-back event))
     ('replied (romacs-agent-log--note event (format "replied to %s" (plist-get event :message))))
     ('selection (cl-flet ((label (selection)
                             (mapconcat #'identity (or (delq nil (list (plist-get selection :model) (plist-get selection :effort)))
