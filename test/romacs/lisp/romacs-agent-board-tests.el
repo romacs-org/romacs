@@ -252,7 +252,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
     (romacs-agent-board-tests--board
       (let ((answered nil))
         (cl-letf (((symbol-function 'romacs-agent-respond)
-                   (lambda (session id allow) (push (list (romacs-agent-id session) id allow) answered))))
+                   (lambda (session id allow &rest _) (push (list (romacs-agent-id session) id allow) answered))))
           (should (equal (romacs-agent-board-tests--at) "tool"))
           (romacs-agent-board-approve)
           (should (equal answered '(("tool" "r1" t))))

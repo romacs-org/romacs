@@ -455,9 +455,10 @@ journals what its harness writes."
       (should (equal (gethash "effort" params) "high")))))
 
 (ert-deftest romacs-agent-codex-replay-passes-over-output-deltas ()
-  ;; A call's output as it streams draws nothing: a replay passes over
-  ;; it unparsed.  Its end, a request, and an older line without its
-  ;; time are each still read as they were.
+  ;; A call's output as it streams is shown only while it runs, its end's
+  ;; whole output in its place: a replay passes over it unparsed.  Its
+  ;; end, a request, and an older line without its time are each still
+  ;; read as they were.
   (let* ((session (romacs-agent--make :id "c" :harness 'codex))
          (lines '(("{\"out\":{\"emittedAtMs\":1,\"method\":\"item/commandExecution/outputDelta\",\"params\":{\"delta\":\"a \\\"b\\\"\\n\",\"itemId\":\"exec-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":5,\"t\":1.0}" . t)
                   ("{\"out\":{\"method\":\"item/fileChange/outputDelta\",\"params\":{\"delta\":\"ok\",\"itemId\":\"p-1\",\"threadId\":\"t\",\"turnId\":\"u\"}},\"seq\":6,\"t\":1.0}" . t)
@@ -471,10 +472,11 @@ journals what its harness writes."
         (erase-buffer)
         (insert (car line))
         (should (eq (and (funcall skip (point-min) (point-max)) t) (cdr line)))
-        ;; What it passes over, read, would have drawn nothing.
+        ;; What it passes over, read, is at most a running call's output.
         (when (cdr line)
           (let ((record (json-parse-string (car line) :object-type 'hash-table)))
-            (should-not (romacs-agent--codex-events session (gethash "out" record)))))))))
+            (should (cl-every (lambda (event) (eq (plist-get event :type) 'tool-output))
+                              (romacs-agent--codex-events session (gethash "out" record))))))))))
 
 (provide 'romacs-agent-codex-tests)
 ;;; romacs-agent-codex-tests.el ends here

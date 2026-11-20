@@ -686,7 +686,7 @@ where it is answered."
   (let* ((session (romacs-agent-board--session))
          (asks (romacs-agent-asks session))
          (tool (car (seq-difference asks (romacs-agent-questions session)))))
-    (cond (tool (romacs-agent-respond session tool t))
+    (cond (tool (romacs-agent-respond session tool t nil 'user))
           (asks (romacs-agent-board--show-chat session))
           (t (user-error "%s waits on no approval" (romacs-agent-title session))))))
 

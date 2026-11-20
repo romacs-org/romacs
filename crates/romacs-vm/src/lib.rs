@@ -395,6 +395,18 @@ impl Value {
     fn index(self, tag: u64) -> Result<usize> {
         self.index_if(tag).ok_or_else(|| wrong_tag(tag))
     }
+    /// Whether this value has logical tag TAG; every caller passes a
+    /// constant. A tag that is its own three bits is one mask and compare,
+    /// as in `index_if`. `tag() == TAG` also pays the fixnum test, which
+    /// LLVM does not fold away: a cons test is 8 instructions against 3.
+    #[inline(always)]
+    fn tag_is(self, tag: u64) -> bool {
+        match tag {
+            0 | 3 | 4 | 6 | 7 => self.0 & 7 == tag,
+            1 => self.0 & 3 == 1,
+            _ => self.tag() == tag,
+        }
+    }
     /// The object table entry this object reference names: its index less
     /// one. Nil shares the tag with index 0 and names no object; taking its
     /// entry is the caller's bug, which a debug build stops at and a release
@@ -1588,6 +1600,9 @@ pub struct Vm {
     resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// The slot of `obarray`, the variable, kept from its making
+    /// (`Vm::slot`); `usize::MAX` until then (`Vm::initial_obarray`).
+    obarray_slot: usize,
     /// Owner of syntax.c's defun-start cache (`BufferState::defun_start`).
     defun_start_epoch: u64,
     variable_redirects: Vec<Option<VariableRedirect>>,
@@ -1903,6 +1918,7 @@ impl Vm {
             resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            obarray_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
             forwarded: forwarded::Forwarded::default(),
@@ -2174,7 +2190,11 @@ impl Vm {
         self.initialize_c_special(name, i);
         if name == "charset-list" { self.ensure_charsets(); }
         prim::initialize_coding_slot(self, name);
-        if name == "obarray" {
+        // The first `obarray' is the variable, its slot kept as GNU's
+        // `Vobarray' is its symbol's; one interned after it was uninterned
+        // is a plain symbol, as in GNU.
+        if name == "obarray" && self.obarray_slot == usize::MAX {
+            self.obarray_slot = i;
             self.slots[i].value = self.allocate_object(data::Object::Obarray(Box::new(obarray::Obarray::new(3, true))));
             self.specials.insert(name.to_owned());
         }
@@ -3972,7 +3992,7 @@ impl Vm {
                 data::Object::SubCharTable(_) => Ok("#<sub-char-table>".into()),
                 data::Object::MapKeymapCursor(_) => Err("private traversal cursor".into()),
                 data::Object::HashTable(t) => self.display_table(t, depth),
-                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", t.len())),
+                data::Object::Obarray(t) => Ok(format!("#<obarray n={}>", self.obarray_count(t))),
                 data::Object::Free => Err("invalid object reference".into()),
                 data::Object::Bytes(v) => Ok(format!(
                     "#u8({})",

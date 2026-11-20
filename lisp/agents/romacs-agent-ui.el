@@ -36,6 +36,7 @@
 (require 'romacs-markdown)
 (require 'romacs-agent-turns)
 (require 'romacs-agent-drawn)
+(require 'romacs-agent-log)
 
 ;;;###autoload
 (defvar romacs-agents-map
@@ -489,16 +490,29 @@ chip of the task's results arriving."
         (delete-region start (prop-match-end found))
         (romacs-agent-ui--insert-at start chip)))))
 
+(defun romacs-agent-ui--parent-of (id)
+  "The id of the session that delegated the one ID names, or nil, loading
+no session: from it loaded, its row, else its manifest (a row not filled
+yet, as an install draws turns before it fills rows).  A preview, held to
+its time, asks the loaded one alone."
+  (if-let* ((child (or (romacs-agent-loaded id)
+                       (and (not romacs-agent-ui--previewing) (romacs-agent-store-row-session id)))))
+      (plist-get (romacs-agent-options child) :parent)
+    (when-let* (((not romacs-agent-ui--previewing))
+                (manifest (romacs-agent--read-json
+                           (expand-file-name "manifest.json" (expand-file-name id (romacs-agent--state-root)))))
+                (options (gethash "options" manifest))
+                ((hash-table-p options)))
+      (romacs-agent--value (gethash "parent" options)))))
+
 (defun romacs-agent-ui--wakes (session text)
   "TEXT, a message to SESSION, as the wakes of tasks it delegated, or nil:
 what the user wrote stays theirs, whatever it looks like."
   (let ((wakes (romacs-agent-tools--wakes-parse text)))
     (and wakes
          (cl-every (lambda (wake)
-                     ;; A preview loads no session: a child loaded, or none.
-                     (when-let* ((child (if romacs-agent-ui--previewing (romacs-agent-loaded (plist-get wake :id))
-                                          (romacs-agent-get (plist-get wake :id)))))
-                       (equal (plist-get (romacs-agent-options child) :parent) (romacs-agent-id session))))
+                     (when-let* ((id (plist-get wake :id)))
+                       (equal (romacs-agent-ui--parent-of id) (romacs-agent-id session))))
                    wakes)
          wakes)))
 
@@ -1399,7 +1413,7 @@ prompt's does."
                                 'romacs-agent-compaction (plist-get event :text)))
         ;; A tool call the policy answers asks no one: its card shows it; a
         ;; plan presented shows as its plan.
-        ((and 'approval (guard (or (plist-get event :plan) (romacs-agent--auto-p event)))) nil)
+        ((and 'approval (guard (romacs-agent--auto-answer-p session event))) nil)
         ('plan
          (romacs-agent-ui--line session event "── Proposed plan ──" 'face 'romacs-agent-section)
          (romacs-agent-ui--insert (concat (string-trim (or (plist-get event :text) "")) "\n"))
@@ -2526,8 +2540,13 @@ composer as it is."
      (romacs-agent-ui--fill (current-buffer)))))
 
 (defun romacs-agent-show (session &optional action)
-  "Show SESSION's chat buffer, made from its journal when new, as
-`pop-to-buffer' does with ACTION."
+  "Show SESSION's chat (romacs-agent-log.el), as `pop-to-buffer' does
+with ACTION."
+  (romacs-agent-log-show session action))
+
+(defun romacs-agent-ui--show-chat (session &optional action)
+  "Show SESSION's chat buffer of before, made from its journal when new, as
+`pop-to-buffer' does with ACTION: its tests', until it is deleted."
   (let ((buffer (romacs-agent-buffer session)))
     (unless (buffer-live-p buffer) (setq buffer (romacs-agent-ui--make-chat session)))
     ;; Shown first: its rules fit its window.
@@ -2646,56 +2665,61 @@ was open, loading no session; one is loaded when its chat is used
 (defun romacs-agent-ui--replay (session)
   "Draw SESSION's last `romacs-agent-ui--turns' turns into the current
 chat: its finished turns as they were kept drawn, the one under way
-from its records, by seq (`romacs-agent-ui--replay-rows').  A session
-whose records are not in SQLite yet is moved first, a row saying so
-and a preview of its last turns from its journal's tail meanwhile
-\(`romacs-agent-ui--preview'), drawn again from SQLite once it is
-\(`romacs-agent-ui--moved')."
+from its records, by seq (`romacs-agent-ui--replay-rows').  One whose
+records are still a journal is drawn from it
+\(`romacs-agent-ui--replay-journal')."
   (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
-    (romacs-agent-ui--wait-for-move session)))
+    (romacs-agent-ui--replay-journal session)))
 
-(defun romacs-agent-ui--wait-for-move (session)
-  "Show that SESSION's records are moving to SQLite, and wait for them
-\(`romacs-agent-events-then'), ahead of every other session: its chat is
-drawn once they are, or says it cannot be when they could not move."
-  (let ((buffer (current-buffer)) (now t))
-    (romacs-agent-events-then
-     session (lambda ()
-               (if now (setq now 'moved)
-                 (when (buffer-live-p buffer)
-                   (with-current-buffer buffer (romacs-agent-ui--moved session))))))
-    (if (eq now 'moved) (romacs-agent-ui--moved-here session)
-      (setq now nil)
-      ;; Its last turns meanwhile, read from its journal, under a row
-      ;; saying what they are.
-      ;; A position, not a marker: the preview's text is inserted before
-      ;; every marker at the transcript's end.
-      (let* ((start (marker-position romacs-agent-ui--end))
-             (preview (romacs-agent-ui--preview session)))
-        (romacs-agent-ui--insert-at
-         start
-         (propertize (concat (if (romacs-agent-events-migrating-p (romacs-agent-id session))
-                                 "⋯ moving this chat's records to the store"
-                               "⋯ waiting for this chat's records to move to the store")
-                             (if preview " · its last turns meanwhile\n" "\n"))
-                     'face 'romacs-agent-placeholder 'romacs-agent-moving (if preview 'preview t)))))))
+(defvar romacs-agent-ui--settled nil
+  "`settled' while a chat is drawn again once where its records are is
+settled (`romacs-agent-ui--replay-journal'): drawn as they are now.")
+
+(defun romacs-agent-ui--replay-journal (session)
+  "Draw SESSION, whose records are still a journal (an earlier build's
+session an install found running, until an install moves it: romacs#317),
+once where they are is settled (`romacs-agent-events-then': a stage of it
+the installer made, flipped): from SQLite when they are there now, else
+its last turns from its journal's tail (`romacs-agent-ui--preview'), or a
+row saying they are too long to draw here.  Until settled, a row says so,
+and the chat is drawn again once it is (`romacs-agent-ui--redrawn'),
+settled whether its flip or import was done or failed: not asked again."
+  (let ((buffer (current-buffer)) (now (or romacs-agent-ui--settled t)))
+    (unless (eq now 'settled)
+      (romacs-agent-events-then
+       session (lambda ()
+                 (if now (setq now 'settled)
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (let ((romacs-agent-ui--settled 'settled)) (romacs-agent-ui--redrawn))))))))
+    (cond ((not (eq now 'settled))
+           (setq now nil)
+           (romacs-agent-ui--insert-at romacs-agent-ui--end
+                                       (propertize "⋯ loading this chat's records\n" 'face 'romacs-agent-placeholder)))
+          ((romacs-agent-events-p session) (romacs-agent-ui--replay-rows session))
+          ((not (romacs-agent-ui--preview session))
+           (romacs-agent-ui--insert-at
+            romacs-agent-ui--end
+            (propertize "! this chat's records are in an earlier build's journal, its last turns too long to draw here: an install moves them\n"
+                        'face 'romacs-agent-error))))))
 
 (defvar romacs-agent-ui--previewing nil
   "Non-nil while a chat's preview is drawn (`romacs-agent-ui--preview'):
 what it draws loads no session.")
 
 (defconst romacs-agent-ui--preview-seconds 0.5
-  "The most a chat waiting for its records' move spends drawing their
-journal's tail meanwhile (`romacs-agent-ui--preview'): past it, the row
-saying they move is all it shows.  Half the one second a chat's whole
-open has: its fill, composer and first redisplay take the rest.")
+  "The most a chat on a session still in a journal spends drawing its
+tail (`romacs-agent-ui--preview'): past it, a row saying so is all it
+shows.  Half the one second a chat's whole open has: its fill, composer
+and first redisplay take the rest.")
 
 (defun romacs-agent-ui--preview (session)
   "Draw SESSION's last turns into the current chat from its journal's
-tail (its last `romacs-agent-journal-tail-bytes' at most), while its
-records move to SQLite: never blank, and redrawn from SQLite once they
-are (`romacs-agent-ui--moved').  It holds no place in the journal, so
-nothing keeps them from moving.  Nil, nothing left drawn, when there is
+tail (its last `romacs-agent-journal-tail-bytes' at most), its records
+still a journal (`romacs-agent-ui--replay-journal').  It holds no place
+in the journal, so nothing keeps an install from moving it.  The reader
+an install retires (romacs#317): no feature grows on it.  Nil, nothing
+left drawn, when there is
 nothing to draw or it would take past `romacs-agent-ui--preview-seconds'.
 The tail's bytes are read whole before its time is looked at: a cold
 cache on a slow disk can take it past.  Its rows hold no seqs: what acts
@@ -2725,46 +2749,19 @@ on one finds nothing kept for it."
                (romacs-agent-ui--reset)
                nil))))
 
-(defun romacs-agent-ui--moved-here (session)
-  "Draw SESSION in the current chat, its records' move over: from them
-when they are in SQLite, else a row saying they could not move."
-  (if (romacs-agent-events-p session) (romacs-agent-ui--replay-rows session)
-    (romacs-agent-ui--insert-at romacs-agent-ui--end (romacs-agent-ui--not-moved-row nil))))
-
-(defun romacs-agent-ui--not-moved-row (preview)
-  "The row a chat whose records could not move to the store shows, above
-the PREVIEW of its last turns it drew meanwhile, if any."
-  (propertize (concat "! this chat's records could not move to the store: shown in full once they do"
-                      (if preview " · its last turns, from its journal\n" "\n"))
-              'face 'romacs-agent-error))
-
-(defun romacs-agent-ui--moved (session)
-  "SESSION's records' move is over: the current chat, which waited for it,
-is drawn again from them; one they could not move says so in place of
-the row that said they were moving.  An edit to no undo."
-  (if (romacs-agent-events-p session)
-      ;; Where point and each window were, kept as far from the buffer's
-      ;; end as they were: the transcript above the composer is what changes.
-      (let ((at (- (point-max) (point)))
-            (windows (mapcar (lambda (window) (list window (- (point-max) (window-point window))
-                                                    (- (point-max) (window-start window))))
-                             (get-buffer-window-list nil nil t))))
-        (romacs-agent-ui--redraw)
-        (goto-char (max (point-min) (- (point-max) at)))
-        (pcase-dolist (`(,window ,from-end ,start-from-end) windows)
-          (set-window-start window (max (point-min) (- (point-max) start-from-end)) t)
-          (set-window-point window (max (point-min) (- (point-max) from-end)))))
-    (romacs-agent-ui--unrecorded
-     (lambda ()
-       (let ((inhibit-read-only t))
-         (save-excursion
-           (goto-char (point-min))
-           ;; Its waiting row, in its place, above the preview it heads;
-           ;; none, another wait of this chat said it already.
-           (when-let* ((found (text-property-search-forward 'romacs-agent-moving nil (lambda (_ v) v))))
-             (delete-region (prop-match-beginning found) (prop-match-end found))
-             (romacs-agent-ui--insert-at (prop-match-beginning found)
-                                         (romacs-agent-ui--not-moved-row (eq (prop-match-value found) 'preview))))))))))
+(defun romacs-agent-ui--redrawn ()
+  "Draw the current chat again, where its records now are: point and each
+window kept as far from the buffer's end as they were, the transcript
+above the composer what changes.  An edit to no undo."
+  (let ((at (- (point-max) (point)))
+        (windows (mapcar (lambda (window) (list window (- (point-max) (window-point window))
+                                                (- (point-max) (window-start window))))
+                         (get-buffer-window-list nil nil t))))
+    (romacs-agent-ui--redraw)
+    (goto-char (max (point-min) (- (point-max) at)))
+    (pcase-dolist (`(,window ,from-end ,start-from-end) windows)
+      (set-window-start window (max (point-min) (- (point-max) start-from-end)) t)
+      (set-window-point window (max (point-min) (- (point-max) from-end))))))
 
 (defvar romacs-agent-ui--replayed nil
   "How many prompts the chat's replay from records drew, counted while a
@@ -3279,7 +3276,7 @@ PROPERTY: the previous one is the run point is in, past its start."
   (let* ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here")))
          (questions (plist-get (gethash id (romacs-agent-ui--asks)) :questions)))
     (if questions (romacs-agent-ask-open romacs-agent-ui--session id questions (romacs-agent-ui--asked-place id))
-      (romacs-agent-respond romacs-agent-ui--session id t))))
+      (romacs-agent-respond romacs-agent-ui--session id t nil 'user))))
 
 (defun romacs-agent-chat-answer ()
   "Answer the questions on this row, in their layer."
@@ -3361,14 +3358,14 @@ of the session; a question is answered instead."
   (interactive nil romacs-agent-chat-mode)
   (if (romacs-agent-ui--asking-p) (romacs-agent-chat-allow)
     (let ((id (or (romacs-agent-ui--approval-here) (user-error "No approval here"))))
-      (romacs-agent-respond romacs-agent-ui--session id (list :always t)))))
+      (romacs-agent-respond romacs-agent-ui--session id (list :always t) nil 'user))))
 
 (defun romacs-agent-chat-deny ()
   "Deny the tool call the harness asks about."
   (interactive nil romacs-agent-chat-mode)
   (let ((id (romacs-agent-ui--approval-here)))
     (unless id (user-error "No approval here"))
-    (romacs-agent-respond romacs-agent-ui--session id nil)))
+    (romacs-agent-respond romacs-agent-ui--session id nil nil 'user)))
 
 ;;; Chat actions
 
@@ -3656,7 +3653,9 @@ the session stays."
                romacs-agent-chat-mode)
   (let ((session romacs-agent-ui--session))
     (setf (romacs-agent-title session) title (romacs-agent-title-auto session) nil)
-    (romacs-agent--update-manifest session)
+    ;; Its views drawn again now, and once its row says it: those of a
+    ;; session not loaded read the row.
+    (romacs-agent--update-manifest session #'romacs-agent-ui--batch)
     (rename-buffer (format "*agent: %s*" title) t)
     (romacs-agent-ui--batch)))
 

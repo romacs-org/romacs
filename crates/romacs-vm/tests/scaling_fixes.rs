@@ -61,3 +61,18 @@ fn kill_buffer_does_not_walk_every_buffer() {
                                (list (mapcar #'buffer-name (romacs--indirect-buffers base)) (kill-buffer base) (mapcar #'buffer-live-p (list base one two)) (nreverse seen)))"),
         "((\"sk-one\" \"sk-two\") t (nil nil nil) (one two))");
 }
+
+/// `test-completion' rejects a name of another length before comparing it,
+/// as GNU does: 2,000 names one character longer than a long input cost
+/// the same whether the input has 64 characters or 4,096, where comparing
+/// first would cost 64 times more.
+#[test]
+fn test_completion_rejects_longer_names_before_comparing() {
+    let mut vm = Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let setup = |m: usize| format!("(setq sf-input (make-string {m} #x3b1) sf-names (make-list 2000 (concat sf-input \"x\")))");
+    let probe = "(dotimes (_ 10) (test-completion sf-input sf-names))";
+    let small = cost(&mut vm, &setup(64), probe);
+    let large = cost(&mut vm, &setup(4096), probe);
+    assert!(large < small * 3.0, "test-completion compares before its length check: {small} at 64 characters, {large} at 4,096");
+}
