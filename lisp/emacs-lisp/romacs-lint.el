@@ -415,10 +415,12 @@ what decides where an instance keeps each slot."
 (defun romacs-lint--docstring (form)
   "Top-level FORM's docstring, or nil: a function's, a variable's, a face's,
 a group's, a keymap's, a mode's or a structure's.  A function whose body
-is one string returns it, and has none."
+is one string returns it, and has none (but an inline one's is its doc)."
   (let ((doc (pcase (car-safe form)
-               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro 'define-inline)
+               ((or 'defun 'defmacro 'defsubst 'cl-defun 'cl-defmacro)
                 (and (nthcdr 4 form) (nth 3 form)))
+               ;; A leading string is always its docstring, its body then nil.
+               ('define-inline (nth 3 form))
                ('cl-defgeneric
                 (if (stringp (nth 3 form)) (nth 3 form) (cadr (assq :documentation (nthcdr 3 form)))))
                ((or 'defvar 'defconst 'defcustom 'defface 'defvar-local 'defgroup) (nth 3 form))
