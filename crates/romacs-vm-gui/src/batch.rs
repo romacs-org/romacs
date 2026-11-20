@@ -176,8 +176,6 @@ pub fn configure_worker_compiled_lisp(store: PathBuf) {
     configure_store(store, false, true);
 }
 
-/// Load compiled Lisp from STORE; COMPILES when this process may compile
-/// into it; DEFER_MISSES when no load may wait for a compile.
 /// The installation's Lisp trees, every directory of it a session loads
 /// Lisp from by name: DIR, its lisp/ (canonical), with its bundled
 /// `load-path' (each walked whole), and the installation's themes,
@@ -193,6 +191,8 @@ fn installation_lisp(dir: &Path, runtime_root: &Path) -> Vec<PathBuf> {
     trees
 }
 
+/// Load compiled Lisp from STORE; COMPILES when this process may compile
+/// into it; DEFER_MISSES when no load may wait for a compile.
 fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let Ok(dir) = super::startup::lisp_root(&super::startup::lisp_dir()) else { return };
     let Ok(exe) = std::env::current_exe() else { return };
