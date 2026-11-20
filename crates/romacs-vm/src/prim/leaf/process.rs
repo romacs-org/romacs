@@ -1223,7 +1223,7 @@ impl Leaf<'_> {
             // does, asked before each wait: one an `inhibit-quit' since
             // unbound held, or one whose wake ended the last wait.
             if let Some(quit) = self.vm.worker_quit() {
-                return Err(self.call_process_quit(pid, pidfd.as_ref(), quit));
+                return Err(self.call_process_quit(pid, pidfd.as_ref(), quit, Some(Self::WORKER_GRACE)));
             }
             let (fds, tick) = match (&reader, &pidfd) {
                 (Some(read), _) => (vec![(read.as_raw_fd(), libc::POLLIN)], None),
@@ -1237,7 +1237,7 @@ impl Leaf<'_> {
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
             if revents.first().is_none_or(|&r| r == 0) {
                 if let Err(quit) = self.native_poll() {
-                    return Err(self.call_process_quit(pid, pidfd.as_ref(), quit));
+                    return Err(self.call_process_quit(pid, pidfd.as_ref(), quit, None));
                 }
                 held = self.vm.quit.pressed();
                 continue;
@@ -1252,11 +1252,11 @@ impl Leaf<'_> {
     }
 
     /// QUIT, raised while call_process waits for child PID, once the child
-    /// is stopped (`call_process_stop`).
-    fn call_process_quit(&mut self, pid: i32, pidfd: Option<&OwnedFd>, quit: Fault) -> Fault {
+    /// is stopped (`call_process_stop`, GRACE as it takes it).
+    fn call_process_quit(&mut self, pid: i32, pidfd: Option<&OwnedFd>, quit: Fault, grace: Option<std::time::Duration>) -> Fault {
         // A4's abort offer reads this: HandedOff leaves a live child owned
         // by the reaper until `Table::owns` says not.
-        let end = self.call_process_stop(pid, pidfd);
+        let end = self.call_process_stop(pid, pidfd, grace);
         debug_assert!(end == ChildEnd::Reaped || self.vm.subprocesses.owns(pid), "a handed-off child has one owner");
         quit
     }
@@ -1270,20 +1270,36 @@ impl Leaf<'_> {
     /// deleted children (`reap_children`, the host's reaper once the VM
     /// goes), with no status made up for it: the quit returns either way.
     /// Without a pidfd (PIDFD None) the child's end is asked every
-    /// `CHILD_TICK`, so the wait still hears the stop. What became of the
-    /// child is the answer (`ChildEnd`).
-    pub(crate) fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>) -> ChildEnd {
-        if crate::host::kill(-pid, libc::SIGINT).is_err() { let _ = crate::host::kill(pid, libc::SIGINT); }
+    /// `CHILD_TICK`, so the wait still hears the stop. A worker's quit, which
+    /// no second C-g follows, gives GRACE ([`Self::WORKER_GRACE`]) for the
+    /// SIGINT before it sends SIGKILL by itself, as the second C-g would;
+    /// the main VM's quit gives None and waits for that C-g. What became of
+    /// the child is the answer (`ChildEnd`).
+    pub(crate) fn call_process_stop(&mut self, pid: i32, pidfd: Option<&OwnedFd>, grace: Option<std::time::Duration>) -> ChildEnd {
+        let kill = |signal| if crate::host::kill(-pid, signal).is_err() { let _ = crate::host::kill(pid, signal); };
+        kill(libc::SIGINT);
         let fds: Vec<_> = pidfd.map(|fd| (fd.as_raw_fd(), libc::POLLIN)).into_iter().collect();
         let tick = pidfd.is_none().then_some(Self::CHILD_TICK);
+        let deadline = grace.map(|grace| crate::host::monotonic() + grace);
         while !sp::exited(pid) {
-            match self.vm.poll_quittable(&fds, tick) {
+            let left = deadline.map(|end| end.saturating_duration_since(crate::host::monotonic()));
+            if left.is_some_and(|left| left.is_zero()) {
+                kill(libc::SIGKILL);
+                break;
+            }
+            let timeout = match (tick, left) { (Some(tick), Some(left)) => Some(tick.min(left)), (tick, left) => tick.or(left) };
+            match self.vm.poll_quittable(&fds, timeout) {
                 Ok(_) if self.call_process_stop_requested() => {
-                    if crate::host::kill(-pid, libc::SIGKILL).is_err() { let _ = crate::host::kill(pid, libc::SIGKILL); }
+                    kill(libc::SIGKILL);
                     break;
                 }
                 Ok(_) => {}
-                Err(_) => break,
+                // A wait that cannot go on: a stop with a grace leaves no
+                // child unkilled.
+                Err(_) => {
+                    if grace.is_some() { kill(libc::SIGKILL); }
+                    break;
+                }
             }
         }
         self.call_process_reap(pid, &fds, Self::KILL_GRACE)
@@ -1312,6 +1328,10 @@ impl Leaf<'_> {
     /// How long a quit waits for a killed child to end before it leaves
     /// the child to the reaper and returns.
     const KILL_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
+
+    /// How long a worker's quit gives its child's SIGINT before SIGKILL: well
+    /// inside `isolate-interrupt-timeout', the spawner's own escalation.
+    const WORKER_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
     /// How often a wait without a pidfd asks whether the child has ended.
     const CHILD_TICK: std::time::Duration = std::time::Duration::from_millis(10);

@@ -427,7 +427,7 @@ fn call_process_s_stop_without_a_pidfd_hears_the_second_press() {
             for _ in 0..presses { std::thread::sleep(std::time::Duration::from_millis(300)); assert!(signal.interrupt()); }
         }) };
         let started = std::time::Instant::now();
-        Leaf::new(&mut vm).call_process_stop(pid, None);
+        Leaf::new(&mut vm).call_process_stop(pid, None, None);
         presser.join().unwrap();
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "{script}: the stop outlasted the press");
         assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists(), "{script}: child {pid} still exists after the stop");
