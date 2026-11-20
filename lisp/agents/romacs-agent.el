@@ -419,42 +419,27 @@ loading it would undo that one's changes; merge it first")
 (defun romacs-agent--mode-seen (session mode)
   "SESSION's harness says it is in permission MODE.  Plan mode is the
 harness's own, and the session's option follows it.  Live: gone into plan
-mode of its own, the session is in plan mode; gone out of it (it said
-plan, now another), the session is out of it, kept so, and a next launch
-puts it back in no plan mode; in plan mode, another mode said (Romacs's
-switch on its way) is the mode to go back to.  Catching up, a leaving is
-only noted (:plan-left), Romacs's own switch into plan mode after it in
-the records unnoting it, and taken once caught up
-\(`romacs-agent--plan-caught-up'): the records' order decides, and a
-replay persists nothing."
+mode of its own, the session is in plan mode; in plan mode, the mode to
+go back to is first known.  Live or catching up on the records it has
+not seen: gone out of plan mode of its own (it said plan, now another),
+the session is out of it, kept so, and a next launch puts it back in no
+plan mode.  Another mode said while a switch into plan mode is still on
+its way is the mode to go back to.  A copy replayed changes nothing."
   (let ((before (romacs-agent-permission-mode session)) (options (romacs-agent-options session)))
     (setf (romacs-agent-permission-mode session) mode)
-    (cond ((and (equal before "plan") mode (not (equal mode "plan")))
-           (if (romacs-agent--live-p session)
-               (romacs-agent--leave-plan session)
-             (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :plan-left t))))
+    (cond ((and (equal before "plan") mode (not (equal mode "plan")) (plist-get options :plan)
+                (eq (romacs-agent-loaded (romacs-agent-id session)) session))
+           (romacs-agent--set-options session (romacs-agent--without options '(:plan :plan-from)))
+           ;; Said in its records when it happens live; caught up on, the
+           ;; records already say the mode.
+           (when (romacs-agent--live-p session)
+             (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" :false))))
           ((not (romacs-agent--live-p session)))
           ((and (equal mode "plan") (not (plist-get options :plan)))
            (romacs-agent--set-options
             session (append (list :plan t) (and before (not (equal before "plan")) (list :plan-from before)) options)))
           ((and (plist-get options :plan) (not (plist-get options :plan-from)) mode (not (equal mode "plan")))
            (romacs-agent--set-options session (append (list :plan-from mode) options))))))
-
-(defun romacs-agent--leave-plan (session)
-  "SESSION's harness left plan mode of its own: so does SESSION, said in its
-records."
-  (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :plan-left nil))
-  (when (plist-get (romacs-agent-options session) :plan)
-    (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))
-    (romacs-agent--note session (romacs-mcp--object "type" "plan" "on" :false))))
-
-(defun romacs-agent--plan-caught-up (session)
-  "SESSION caught up on its records: a leaving of plan mode they say came
-after Romacs's last switch into it is taken now, live."
-  (when (plist-get (romacs-agent-driver-state session) :plan-left)
-    (romacs-agent--leave-plan session)))
-
-(add-hook 'romacs-agent-caught-up-functions #'romacs-agent--plan-caught-up)
 
 (defun romacs-agent-set-plan (session on)
   "Put SESSION in its harness's own plan mode when ON, else back in the
@@ -1692,10 +1677,6 @@ on whatever becomes of this server."
     ('tool (when (and (eq (plist-get event :state) 'started) (not (plist-get event :parent)))
              (setf (romacs-agent-activity session) (plist-get event :name))))
     ;; Its harness would not go into plan mode: the session is not in it.
-    ;; Romacs's own switch into plan mode, in the records: a leaving
-    ;; before it is over (`romacs-agent--mode-seen').
-    ('status (when (equal (plist-get event :text) "plan mode")
-               (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :plan-left nil))))
     ('plan-refused (when (romacs-agent--live-p session)
                      (romacs-agent--set-options session (romacs-agent--without (romacs-agent-options session) '(:plan :plan-from)))))
     ('answered (romacs-agent--set-asks session (remove (plist-get event :request-id) (romacs-agent-asks session)))
