@@ -29,9 +29,10 @@ those removed, after its list changed.")
 
 (defvar romacs-agent-client-session-functions nil
   "Functions called with a client, a session's id, and what came of it:
-\=(opened REPLY), (event PARAMS) or (changed PARAMS), each in the order
-its revisions give, or (failed ERROR) when an open, the first or one to
-recover, is refused: nothing more comes of it until it is opened again.")
+\=(opening) as it is asked to open, (opened REPLY), (event PARAMS) or
+\(changed PARAMS), each in the order its revisions give, or (failed
+ERROR) when an open, the first or one to recover, is refused: nothing
+more comes of it until it is opened again.")
 
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
@@ -233,6 +234,7 @@ earlier one ignored, a later one (a gap) or a stale notice watched again."
 reach `romacs-agent-client-session-functions'."
   (let ((asked (list 'opening)))
     (puthash id asked (romacs-agent-client-sessions client))
+    (run-hook-with-args 'romacs-agent-client-session-functions client id '(opening))
     (romacs-agent-client-request
      client "agents/session.open" (romacs-agent-rpc-object "id" id)
      (lambda (result error)
@@ -333,10 +335,24 @@ than RECORDS records: `romacs-agent-client-follow-functions' is told."
 (defun romacs-agent-client--tell (client id notice)
   (run-hook-with-args 'romacs-agent-client-follow-functions client id notice))
 
+(defconst romacs-agent-client--catch-up 4000
+  "The most records the service reads after a place (Pages): a read on
+from where a reply stopped asks no more at a time.")
+
+(defun romacs-agent-client--end-follow (client id error)
+  "Following session ID on CLIENT ends with ERROR: its subscription closed."
+  (remhash id (romacs-agent-client-follows client))
+  (when (romacs-agent-client-live-p client) (romacs-agent-client-close-session client id))
+  (romacs-agent-client--tell client id (list 'failed error)))
+
 (defun romacs-agent-client--followed (client id notice)
   "What came of session ID's open on CLIENT, applied to its following."
   (when-let* ((follow (gethash id (romacs-agent-client-follows client))))
     (pcase notice
+      ('(opening)
+       ;; What the open before it reads is no longer drawn.
+       (cl-incf (romacs-agent-client--follow-generation follow))
+       (setf (romacs-agent-client--follow-pulling follow) t (romacs-agent-client--follow-held follow) nil))
       (`(opened ,reply)
        (let ((generation (cl-incf (romacs-agent-client--follow-generation follow))))
          (setf (romacs-agent-client--follow-cursor follow) (gethash "cursor" reply)
@@ -387,16 +403,16 @@ or adapter, opens it again."
      (when (and (eq (gethash id (romacs-agent-client-follows client)) follow)
                 (= generation (romacs-agent-client--follow-generation follow)))
        (pcase result
-         (`(error ,error)
-          (remhash id (romacs-agent-client-follows client))
-          (romacs-agent-client--tell client id (list 'failed error)))
+         (`(error ,error) (romacs-agent-client--end-follow client id error))
          (`(,_ ,_ t ,_) (romacs-agent-client-open client id))
          (`(,read ,cursor ,_ ,from)
           (let ((units (append (car earlier) read)) (from (if earlier (cdr earlier) from))
                 (stopped (gethash "seq" cursor)))
             (if (and (integerp stopped) (< stopped upto) read)
                 (romacs-agent-client--read client id follow generation kind upto
-                                           (romacs-agent-rpc-object "after" stopped "upto" upto) (cons units from))
+                                           (romacs-agent-rpc-object "after" stopped
+                                                                    "upto" (min upto (+ stopped romacs-agent-client--catch-up)))
+                                           (cons units from))
               (setf (romacs-agent-client--follow-seq follow) (max upto (romacs-agent-client--follow-seq follow)))
               (romacs-agent-client--tell client id (if (eq kind 'drawn) (list 'drawn units from) (list 'more units)))
               (romacs-agent-client--release client id follow)))))))
@@ -414,17 +430,31 @@ order, until one reads history again: those after it held for then."
 
 (defun romacs-agent-client-earlier (client id upto turns records callback)
   "Read session ID's TURNS turns up to seq UPTO, no more than RECORDS, on
-CLIENT, under the epoch it is followed by: CALLBACK is called with
-\(UNITS FROM), or (error ERROR), or (reset) when that history is gone."
-  (let ((follow (gethash id (romacs-agent-client-follows client))))
-    (romacs-agent-client-history
-     client id (romacs-agent-rpc-object "upto" upto "turns" turns "records" records)
-     (lambda (result)
-       (pcase result
-         (`(error ,_) (funcall callback result))
-         (`(,_ ,_ t ,_) (funcall callback '(reset)))
-         (`(,units ,_ ,_ ,from) (funcall callback (list units from)))))
-     (and follow (romacs-agent-client--follow-cursor follow)))))
+CLIENT, under the epoch it is followed by, a reply that stops short read
+on to UPTO: CALLBACK is called with (UNITS FROM), or (error ERROR), or
+\(reset) when that history is gone; with nothing, should the session be
+opened again meanwhile."
+  (when-let* ((follow (gethash id (romacs-agent-client-follows client))))
+    (let ((generation (romacs-agent-client--follow-generation follow)) (units nil) (from nil) (first t))
+      (cl-labels ((read (params)
+                    (romacs-agent-client-history
+                     client id params
+                     (lambda (result)
+                       (when (and (eq (gethash id (romacs-agent-client-follows client)) follow)
+                                  (= generation (romacs-agent-client--follow-generation follow)))
+                         (pcase result
+                           (`(error ,_) (funcall callback result))
+                           (`(,_ ,_ t ,_) (funcall callback '(reset)))
+                           (`(,read ,cursor ,_ ,read-from)
+                            (when first (setq from read-from first nil))
+                            (setq units (append units read))
+                            (let ((stopped (gethash "seq" cursor)))
+                              (if (and (integerp stopped) (< stopped upto) read)
+                                  (read (romacs-agent-rpc-object "after" stopped
+                                                                 "upto" (min upto (+ stopped romacs-agent-client--catch-up))))
+                                (funcall callback (list units from))))))))
+                     (romacs-agent-client--follow-cursor follow))))
+        (read (romacs-agent-rpc-object "upto" upto "turns" turns "records" records))))))
 
 (provide 'romacs-agent-client)
 ;;; romacs-agent-client.el ends here

@@ -506,6 +506,7 @@ count: slack, so a row's last column is not cut."
   "Draw BUFFER's board COLUMNS wide, by default as wide as its windows:
 each window showing it keeps the row at its point and at its start."
   (with-current-buffer buffer
+    (setq romacs-agent-board--drawn-source romacs-agent-board-source)
     (let* ((windows (romacs-agent-board--windows buffer))
            (spots (mapcar (lambda (window)
                             (list window (romacs-agent-board--spot (window-point window))
@@ -591,9 +592,13 @@ another buffer now runs the board's window hooks too."
 
 ;;; Commands
 
+(defvar-local romacs-agent-board--drawn-source nil
+  "The source whose sessions the board last drew (`romacs-agent-board-source').")
+
 (defun romacs-agent-board--acting ()
-  "Refuse, unless this editor acts on the sessions the board shows."
-  (unless (romacs-agent-board--own-p)
+  "Refuse, unless this editor acts on the sessions the board shows, as
+it drew them."
+  (unless (romacs-agent-log-source-commands-p (or romacs-agent-board--drawn-source romacs-agent-board-source))
     (user-error "These sessions are another machine's: shown, not acted on from here")))
 
 (defun romacs-agent-board--session ()

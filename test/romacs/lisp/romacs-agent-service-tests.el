@@ -288,7 +288,9 @@ and `wait' waiting until its form holds (5 s at most)."
   "What CLIENT hears of its sessions, oldest first, under its `log' property."
   (let ((log (list nil)))
     (add-hook 'romacs-agent-client-session-functions
-              (lambda (c id notice) (when (eq c client) (setcar log (append (car log) (list (cons id notice)))))))
+              (lambda (c id notice)
+                (when (and (eq c client) (not (equal notice '(opening))))
+                  (setcar log (append (car log) (list (cons id notice)))))))
     log))
 
 (ert-deftest romacs-agent-service-sends-a-session-s-record-units ()
@@ -609,14 +611,24 @@ a state root of its own, and a service of its own on `socket'."
                                    "Grep")))
               (should (string-search "Grep" (board source)))
               (should (equal (board source) (board romacs-agent-log-local)))
-              ;; Shown, not acted on: no command of this editor's reaches it.
+              ;; Shown, not acted on: no command of this editor's reaches it,
+              ;; nor once the board's source is this editor's again, until
+              ;; the board is drawn of its sessions.
               (let ((romacs-agent-board-source source))
                 (with-current-buffer (romacs-agent-board--buffer)
+                  (romacs-agent-board--render (current-buffer) 100)
                   (goto-char (point-min))
                   (romacs-agent-board-next 2)
                   (should-error (romacs-agent-board-settle) :type 'user-error)
                   (should-error (romacs-agent-board-settle-finished) :type 'user-error)
-                  (should-error (romacs-agent-board-new) :type 'user-error)))))
+                  (should-error (romacs-agent-board-new) :type 'user-error)))
+              (with-current-buffer (romacs-agent-board--buffer)
+                (should-error (romacs-agent-board-settle-finished) :type 'user-error))
+              ;; The rows it serves are its own board's, whatever its board shows.
+              (let ((romacs-agent-board-source source))
+                (should (equal (gethash "key" (gethash id (romacs-agent-service--whole-rows)))
+                               (let ((romacs-agent-board-source romacs-agent-log-local))
+                                 (gethash "key" (gethash id (romacs-agent-service--whole-rows)))))))))
         (romacs-agent-remote-disconnect)
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
@@ -637,13 +649,23 @@ a state root of its own, and a service of its own on `socket'."
       (unwind-protect
           (progn
             (should (wait (romacs-agent-client-revision client)))
-            (let ((romacs-agent-service--history-bytes 1))
+            ;; Read a unit a reply, on in ranges the service reads whole.
+            (let ((romacs-agent-service--history-bytes 1) (romacs-agent-service--catch-up 2)
+                  (romacs-agent-client--catch-up 2))
               (setq remote (romacs-agent-remote-chat id))
-              (should (wait (string-search "answer 3" (funcall text remote)))))
+              (should (wait (string-search "answer 3" (funcall text remote))))
+              ;; Opened again while it reads: drawn once, afresh.
+              (romacs-agent-client-open client id)
+              (romacs-agent-client-open client id)
+              (should (wait (let ((follow (gethash id (romacs-agent-client-follows client))))
+                              (and follow (not (romacs-agent-client--follow-pulling follow)))))))
             (should (string-search "earlier turns" (funcall text remote)))
             (should (equal (funcall text remote) (funcall text local)))
             (with-current-buffer local (romacs-agent-log-earlier))
-            (with-current-buffer remote (romacs-agent-log-earlier))
+            (with-current-buffer remote
+              (romacs-agent-log-earlier)
+              ;; Asked again while they are read: once.
+              (should-error (romacs-agent-log-earlier) :type 'user-error))
             (should (wait (string-search "answer 2" (funcall text remote))))
             (should (equal (funcall text remote) (funcall text local)))
             ;; The connection gone, the chat says so; connected again, it
