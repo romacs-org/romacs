@@ -33,7 +33,9 @@ fn lisp_files(dir: &Path, found: &mut HashSet<PathBuf>) {
 
 #[test]
 fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
-    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("compile-install-{}", std::process::id()));
+    // Outside the checkout, as an installation is: a compile's `normal-mode'
+    // reads the .dir-locals.el of every directory above a file.
+    let root = std::env::temp_dir().canonicalize().unwrap().join(format!("romacs-compile-install-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let (bin, home) = (root.join("bin"), root.join("home"));
     for dir in ["config", "cache", "data", "state", "runtime", "tmp"] {
@@ -49,6 +51,7 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     // nothing of the checkout around it (its .dir-locals.el files, its
     // sources) is in reach.
     let (checkout, share) = (Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap(), root.join("share/romacs"));
+    assert!(!root.starts_with(&checkout), "the installation {} is inside the checkout: set TMPDIR elsewhere", root.display());
     std::fs::create_dir_all(&share).unwrap();
     for dir in ["lisp", "etc"] {
         let copied = Command::new("cp").args(["-a", "--reflink=auto"]).arg(checkout.join(dir)).arg(&share).status().unwrap();
@@ -76,14 +79,18 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     let summary: serde_json::Value = serde_json::from_str(line).unwrap();
     assert!(summary["store"].as_str().is_some_and(|store| Path::new(store) == bin.join("romacs-vm-gui.lisp")),
             "the installation's store: {summary}");
-    let empty = |field: &str| summary[field].as_array().is_none_or(Vec::is_empty);
+    let empty = |field: &str| summary[field].as_array().is_some_and(Vec::is_empty);
     assert!(empty("failed") && empty("lost"), "files without a usable artifact: {summary}");
     // Every file of the runtime trees, lisp/ and the installation's themes,
     // was reached, and each has an outcome.
     let mut inventory = HashSet::new();
     lisp_files(&share.join("lisp"), &mut inventory);
     lisp_files(&share.join("etc/themes"), &mut inventory);
-    let count = |field: &str| summary[field].as_u64().or_else(|| summary[field].as_array().map(|list| list.len() as u64)).unwrap_or(0);
+    // The counters are numbers and the lists lists, or the summary is no tree compile's.
+    let count = |field: &str| match field {
+        "files" | "compiled" | "compiled_before" => summary[field].as_u64(),
+        _ => summary[field].as_array().map(|list| list.len() as u64),
+    }.unwrap_or_else(|| panic!("{field} malformed: {summary}"));
     assert_eq!(count("files"), inventory.len() as u64, "the run did not reach every file of the tree: {summary}");
     assert_eq!(["compiled", "compiled_before", "source_only", "errors", "failed"].iter().map(|field| count(field)).sum::<u64>(),
                count("files"), "a file without an outcome: {summary}");
@@ -106,6 +113,16 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
           (prin1 (list (featurep 'dired-x) (plist-get s :taken) (plist-get s :compiled)
                        (plist-get s :source-on-miss) (plist-get s :misses))
                  (current-buffer)))))";
+    // The store's use log names each load's source on an artifact hit: the
+    // stock theme and dired-x must each have one from the session.
+    let store = bin.join("romacs-vm-gui.lisp");
+    let uses = |name: &str| -> usize {
+        std::fs::read_dir(&store).into_iter().flatten().flatten()
+            .filter_map(|generation| std::fs::read_to_string(generation.path().join("use.log")).ok())
+            .map(|log| log.lines().filter(|line| line.ends_with(name)).count()).sum()
+    };
+    let (theme, dired) = ("/etc/themes/romacs-theme-rum.el", "/lisp/dired-x.el");
+    let before = (uses(theme), uses(dired));
     let mut session = Command::new(&exe);
     user(session.args(["-Q", "--batch", "--eval", form]));
     let output = session.env("ROMACS_COMPILED_LISP", "on").env("ROMACS_COMPILED_LISP_STORE", bin.join("romacs-vm-gui.lisp"))
@@ -124,6 +141,8 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     assert!(loaded, "the session did not load dired-x: {written}");
     assert_eq!(compiled, Some(0), "the session compiled what the tree did: {written}");
     assert!(taken.is_some_and(|n| n > 0), "the session took no artifact: {written}");
+    assert!(uses(theme) > before.0, "the session's stock theme ran no artifact: {written}");
+    assert!(uses(dired) > before.1, "the session's dired-x ran no artifact: {written}");
     // Each miss, (FILE . REASON), is a file the tree's compile refused; all
     // are listed (at most 32 are kept).
     let pairs: Vec<(&str, &str)> = misses.split("(\"").skip(1)
