@@ -34222,16 +34222,14 @@ The returned string has no composition information.
 (fn BEG END)" t)
 (autoload 'tibetan-decompose-region "tibet-util"
 "Decompose Tibetan text in the region FROM and TO.
-This is different from `decompose-region' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences.
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this removes the compositions `decompose-region' removes.
 
 (fn FROM TO)" t)
 (autoload 'tibetan-decompose-string "tibet-util"
 "Decompose Tibetan string STR.
-This is different from `decompose-string' because precomposed
-Tibetan characters are decomposed into normal Tibetan character
-sequences.
+Romacs keeps Tibetan text in Unicode, with no precomposed glyphs, so
+this is STR's characters without their compositions.
 
 (fn STR)")
 (autoload 'tibetan-decompose-buffer "tibet-util"
