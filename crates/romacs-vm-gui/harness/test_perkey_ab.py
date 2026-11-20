@@ -47,7 +47,7 @@ class Verdicts(unittest.TestCase):
 
     def test_pairs_straddling_zero_are_flat(self):
         report = ab.compare({'C-n': [1000, 1000, 1000]}, {'C-n': [1005, 998, 1004]}, 2.0)
-        self.assertEqual(report['C-n']['verdict'], 'flat or better')
+        self.assertEqual((report['C-n']['verdict'], report['C-n']['reason']), ('flat or better', None))
         self.assertEqual(ab.exit_code(report), 0)
 
     def test_a_rise_in_every_pair_inside_the_spread_is_flat(self):
@@ -57,7 +57,8 @@ class Verdicts(unittest.TestCase):
         phase = report['C-f']
         self.assertTrue(min(phase['delta_range_pct']) > 0 and not phase['noisy'])
         self.assertAlmostEqual(phase['rise_floor_pct'], 0.3, places=3)
-        self.assertEqual(phase['verdict'], 'flat or better')
+        self.assertEqual((phase['verdict'], phase['reason']), ('flat or better', 'every pair rose, inside the floor'))
+        self.assertEqual(ab.exit_code(report), 0)
 
     def test_a_rise_in_every_pair_past_the_floor_whose_arms_overlap_is_flat(self):
         # +1.2% in four pairs of five, past 1.5 times the wider spread (0.69%),
@@ -66,7 +67,7 @@ class Verdicts(unittest.TestCase):
         phase = report['C-f']
         self.assertTrue(min(phase['delta_range_pct']) > 0 and phase['delta_pct'] > phase['rise_floor_pct'])
         self.assertTrue(phase['noisy'])
-        self.assertEqual(phase['verdict'], 'flat or better')
+        self.assertEqual((phase['verdict'], phase['reason']), ('flat or better', 'every pair rose, the arms overlap'))
 
     def test_a_steady_rise_over_too_few_pairs_is_inconclusive(self):
         report = ab.compare({'C-n': [5.000e6, 5.002e6]}, {'C-n': [5.030e6, 5.032e6]}, 2.0)
@@ -105,6 +106,29 @@ class Verdicts(unittest.TestCase):
         report = ab.compare({'region': [1, 1]}, {}, 2.0)
         self.assertEqual(report['region']['verdict'], 'inconclusive')
         self.assertEqual(ab.exit_code({}), 2)
+
+
+class Order(unittest.TestCase):
+    def test_pairs_alternate_which_arm_runs_first(self):
+        self.assertEqual([ab.first(index) for index in range(4)],
+                         [('base', 'candidate'), ('candidate', 'base'), ('base', 'candidate'), ('candidate', 'base')])
+
+    def test_a_second_session_bias_cannot_make_every_pair_rise(self):
+        # One binary against itself on a host where a pair's second session
+        # reads 0.5% higher: in the old order (base first in every pair) every
+        # pair rose and the arms stood apart.
+        sessions = [5.000e6, 5.001e6, 4.999e6]
+        old = {'base': [], 'candidate': []}
+        new = {'base': [], 'candidate': []}
+        for index, count in enumerate(sessions):
+            for order, arms in ((ab.ARMS, old), (ab.first(index), new)):
+                arms[order[0]].append(count)
+                arms[order[1]].append(count * 1.005)
+        before = ab.compare({'C-n': old['base']}, {'C-n': old['candidate']}, 2.0)['C-n']
+        self.assertEqual((before['verdict'], before['reason']), ('regression', 'consistent rise'))
+        after = ab.compare({'C-n': new['base']}, {'C-n': new['candidate']}, 2.0)['C-n']
+        self.assertLess(after['delta_range_pct'][0], 0)
+        self.assertEqual((after['verdict'], after['reason']), ('flat or better', None))
 
 
 class Wall(unittest.TestCase):
