@@ -193,10 +193,25 @@ fn sqlite_interrupts_a_long_statement() {
     let setup = "(progn (setq db (sqlite-open)) (sqlite-execute db \"CREATE TABLE t (x)\"))";
     let insert = "\"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<200000) INSERT INTO t SELECT x FROM c RETURNING x\"";
     reaches("sqlite-execute", setup, &format!("(list db {insert})"), "(equal (sqlite-select db \"SELECT count(*) FROM t\") '((0)))");
+    // The same through sqlite-select, whose rows are polled only for a
+    // statement that writes nothing: it quits, and the table holds none of
+    // its rows, never both a quit and a committed write.
+    reaches("sqlite-select", setup, &format!("(list db {insert})"), "(equal (sqlite-select db \"SELECT count(*) FROM t\") '((0)))");
     // A set's interrupted step ends the set: the next call does not start
     // it over from its first row.
     let setup = format!("(setq db (sqlite-open) set (sqlite-select db {query} nil 'set))");
     reaches("sqlite-next", &setup, "(list set)", "(and (null (sqlite-next set)) (null (sqlite-more-p set)))");
+}
+
+/// sqlite-select polls between rows only a statement that writes nothing:
+/// SQLite says which, once the statement is prepared.
+#[test]
+fn sqlite_select_tells_a_read_from_a_write() {
+    let db = crate::sqlite::Connection::open(b":memory:", false, false, true).expect("an in-memory database");
+    assert!(db.exec(b"CREATE TABLE t (x)"));
+    let readonly = |sql: &[u8]| db.prepare(sql).unwrap_or_else(|_| panic!("{} prepares", String::from_utf8_lossy(sql))).readonly();
+    assert!(readonly(b"SELECT x FROM t"), "a select writes nothing");
+    assert!(!readonly(b"INSERT INTO t VALUES (1) RETURNING x"), "an insert returning rows writes");
 }
 
 #[test]

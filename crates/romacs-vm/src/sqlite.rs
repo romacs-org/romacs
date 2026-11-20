@@ -29,6 +29,10 @@ impl Drop for Connection {
 pub(crate) struct Statement {
     stmt: *mut ffi::sqlite3_stmt,
     connection: Arc<Connection>,
+    /// It writes nothing: a writing statement (INSERT ... RETURNING) quits
+    /// only through SQLite's own interrupt, which rolls it back, never
+    /// between its rows, where finalizing it would commit its write.
+    readonly: bool,
 }
 // SAFETY: a statement is used by one VM at a time; its database is serialized.
 unsafe impl Send for Statement {}
@@ -158,8 +162,12 @@ impl Connection {
     pub(crate) fn prepare(self: &Arc<Self>, sql: &[u8]) -> Result<Statement, PrepareError> {
         let mut stmt = std::ptr::null_mut();
         let length = c_int::try_from(sql.len()).unwrap_or(c_int::MAX);
-        // SAFETY: `db` is open; SQL is read for LENGTH bytes.
-        let code = unsafe { ffi::sqlite3_prepare_v2(self.db, sql.as_ptr().cast(), length, &mut stmt, std::ptr::null_mut()) };
+        // SAFETY: `db` is open; SQL is read for LENGTH bytes; a statement
+        // prepared without error is live when asked whether it writes.
+        let (code, readonly) = unsafe {
+            let code = ffi::sqlite3_prepare_v2(self.db, sql.as_ptr().cast(), length, &mut stmt, std::ptr::null_mut());
+            (code, code == ffi::SQLITE_OK && ffi::sqlite3_stmt_readonly(stmt) != 0)
+        };
         if code != ffi::SQLITE_OK {
             // SAFETY: finalizing null is a no-op; the error calls read `db`.
             unsafe { ffi::sqlite3_finalize(stmt) };
@@ -170,11 +178,15 @@ impl Connection {
                 extended: i64::from(unsafe { ffi::sqlite3_extended_errcode(self.db) }),
             });
         }
-        Ok(Statement { stmt, connection: self.clone() })
+        Ok(Statement { stmt, connection: self.clone(), readonly })
     }
 }
 
 impl Statement {
+    /// Whether the statement writes nothing (`sqlite3_stmt_readonly`).
+    pub(crate) fn readonly(&self) -> bool {
+        self.readonly
+    }
     pub(crate) fn address(&self) -> usize {
         self.stmt as usize
     }

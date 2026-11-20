@@ -303,10 +303,13 @@ impl Leaf<'_> {
         }
         let mut rows = vec![];
         let probe = self.native_stop();
-        // A step that fails ends the rows, as in GNU.
+        // A step that fails ends the rows, as in GNU. Polled between rows
+        // only when it writes nothing: a writing statement's quit comes only
+        // through its steps, as `sqlite_execute`'s does.
+        let polled = statement.readonly();
         let mut steps = super::quit_poll::Steps::default();
         while matches!(self.sqlite_step(&mut statement, &probe)?, Step::Row) {
-            if steps.tick() { self.native_poll()?; }
+            if polled && steps.tick() { self.native_poll()?; }
             rows.push(self.sqlite_row(&statement)?);
         }
         let rows = self.sqlite_list(rows);
