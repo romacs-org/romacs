@@ -69,11 +69,9 @@ impl Leaf<'_> {
     /// a symbol's whole name as Lisp reads it (minibuf.c `Fassoc_string`).
     fn with_compared<R>(&self, value: Value, from: usize, f: impl FnOnce(StrView<'_>, usize) -> R)
         -> std::result::Result<R, Fault> {
-        let wrong = || Fault::Wrong("stringp", value);
-        match self.kind(value) {
-            Kind::Symbol => Ok(crate::symkey::with_name(self.symbol_key(value).ok_or_else(wrong)?, |name| f(name, from))),
-            Kind::String | Kind::Bytes => Ok(f(self.vm.str_view_from(value, from).ok_or_else(wrong)?, 0)),
-            _ => Err(wrong()),
+        match self.symbol_key(value) {
+            Some(key) => Ok(self.read_symbol_name(value, key, |name| f(name, from))),
+            None => Ok(f(self.vm.str_view_from(value, from).ok_or(Fault::Wrong("stringp", value))?, 0)),
         }
     }
 

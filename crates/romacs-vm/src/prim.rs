@@ -625,7 +625,7 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            if let Some(key) = self.symbol_key(v) { return Ok(crate::symkey::with_name(key, |name| f(&mut name.chars()))); }
+            if let Some(key) = self.symbol_key(v) { return Ok(self.read_symbol_name(v, key, |name| f(&mut name.chars()))); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
         }
@@ -635,20 +635,31 @@ mod leaf {
         pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
             self.with_text(v, |a| self.with_text(w, |b| (a.chars, a.bytes) == (b.chars, b.bytes)))?
         }
-        /// F of V's text: a symbol's name as Lisp reads it (`symkey::with_name'),
-        /// or a string's, read where it lies.
-        fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
+        /// F of V's text, read where it lies: a symbol's name as `symbol-name'
+        /// gives it (`read_symbol_name'), or a string's.
+        pub(crate) fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
             match self.symbol_key(v) {
-                Some(key) => Ok(crate::symkey::with_name(key, f)),
+                Some(key) => Ok(self.read_symbol_name(v, key, f)),
                 None => self.vm.str_view(v).map(f).ok_or(Fault::Wrong("stringp", v)),
             }
         }
         /// V's key when it is a symbol (`nil' and `t' too): its name, escaped
         /// where it is not Unicode text (`symkey'), so read through
-        /// `symkey::with_name' wherever it is compared as text.
+        /// `read_symbol_name' wherever it is compared as text.
         pub(crate) fn symbol_key(&self, v: Value) -> Option<&str> {
             if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
                 else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
+        }
+        /// F of symbol V's name, KEY its key, as `symbol-name' gives it: the
+        /// string a private obarray keeps for a symbol it interned (a unibyte
+        /// name stays unibyte there), else the name KEY stands for
+        /// (`symkey::with_name').  An ASCII key reads the same either way.
+        pub(crate) fn read_symbol_name<R>(&self, v: Value, key: &str, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> R {
+            if !key.is_ascii()
+                && let Ok(slot) = self.symbol_slot(v)
+                && let Some(&name) = self.vm.obarray_symbol_names.get(&slot)
+                && let Some(view) = self.vm.str_view(name) { return f(view); }
+            crate::symkey::with_name(key, f)
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
