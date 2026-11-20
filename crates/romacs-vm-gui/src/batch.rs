@@ -190,12 +190,14 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     let root = tree_root(&dir);
     // The installation's Lisp trees, every directory of it a session loads
     // Lisp from by name: lisp/ with its bundled `load-path' (each walked
-    // whole), and the installation's themes, `custom-theme-load-path''s `t'
-    // (the themes/ of `data-directory', the tree's etc/), which every
-    // session loads its stock theme from.
+    // whole), and the installation's themes, `custom-theme-load-path''s `t':
+    // the themes/ of `data-directory', the runtime tree's etc/ (forwarded.rs),
+    // which every session loads its stock theme from, wherever
+    // ROMACS_LISP_DIR puts lisp/.
     let mut runtime = vec![dir.clone()];
     runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
-    runtime.extend(root.as_ref().map(|tree| tree.join("etc/themes")).filter(|themes| themes.is_dir()));
+    let themes = romacs_vm::host::runtime_root().join("etc/themes");
+    runtime.extend(Some(themes).filter(|themes| themes.is_dir()));
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
     let worlds = store.join("worlds");
