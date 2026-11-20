@@ -16,8 +16,11 @@
 
 (ert-deftest romacs-lexical-lisp-forms-are-not-calls ()
   (should (equal (romacs-lexical-tests--spans 'emacs-lisp "(defun f (x) (when-let* ((y x)) (g y)))")
-                 ;; A lexer cannot tell a binding list from a call.
-                 '(("defun" form) ("x" head) ("when-let*" form) ("y" head) ("g" head)))))
+                 ;; A definition's name, its arguments no call; a lexer
+                 ;; cannot tell a binding list from a call.
+                 '(("defun" form) ("f" name) ("when-let*" form) ("y" head) ("g" head))))
+  (should (equal (romacs-lexical-tests--spans 'emacs-lisp "(cl-defun g (a &optional b))")
+                 '(("cl-defun" form) ("g" name) ("&optional" keyword)))))
 
 (ert-deftest romacs-lexical-slash-and-hash-comments ()
   (should (equal (romacs-lexical-tests--spans 'zig "x = 0x1f; // c\n/* b * c */ \"s\"")
@@ -29,7 +32,8 @@
 
 (ert-deftest romacs-lexical-diff-lines ()
   (should (equal (romacs-lexical-tests--spans 'diff "@@ -1 +1 @@\n-old\n+new\n same\n")
-                 '(("@@ -1 +1 @@" hunk) ("-old" removed) ("+new" added)))))
+                 ;; Each a band: through its newline.
+                 '(("@@ -1 +1 @@\n" hunk) ("-old\n" removed) ("+new\n" added)))))
 
 (ert-deftest romacs-lexical-colours-only-a-known-language ()
   (with-temp-buffer

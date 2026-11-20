@@ -147,8 +147,7 @@ pub fn disabled_features(limits: &wgpu::Limits, downlevel: wgpu::DownlevelFlags)
     crate::model::gpu::unsupported(limits, downlevel).into_iter().collect()
 }
 
-/// Create the renderer's device and queue, with Vulkan present timing
-/// enabled when a presentation receipt is requested (`native_presentation`).
+/// Create the renderer's device and queue.
 ///
 /// Keeping this policy here keeps standalone and windowed renderer entry
 /// points from silently creating devices with different capabilities.
@@ -175,21 +174,6 @@ async fn request_device_within(
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         trace: wgpu::Trace::Off,
     };
-
-    std::cfg_select! {
-        target_os = "linux" => {
-            if crate::native_presentation::requested() {
-                match crate::native_presentation::request_device(adapter, &descriptor) {
-                    Ok(device) => return Ok(device),
-                    Err(error) => tracing::warn!(
-                        %error,
-                        "failed to enable Vulkan interop device extensions; falling back to a standard renderer device"
-                    ),
-                }
-            }
-        }
-        _ => {}
-    }
 
     adapter
         .request_device(&descriptor)

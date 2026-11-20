@@ -25,19 +25,21 @@
   :group 'faces
   :prefix "romacs-lexical-")
 
-(defface romacs-lexical-head '((t :inherit font-lock-function-call-face))
-  "The symbol a Lisp list starts with: the function, macro or form it calls.")
-(defface romacs-lexical-added '((t :inherit diff-added))
-  "A diff's added line.")
-(defface romacs-lexical-removed '((t :inherit diff-removed))
-  "A diff's removed line.")
-(defface romacs-lexical-hunk '((t :inherit diff-hunk-header))
-  "A diff's hunk header, and its file header lines.")
+(defface romacs-lexical-head '((t))
+  "The symbol a Lisp list starts with when it calls a function: the
+text's own colour by default, a call being no more than code.")
+(defface romacs-lexical-added '((t :inherit diff-added :extend t))
+  "A diff's added line, to the window's edge.")
+(defface romacs-lexical-removed '((t :inherit diff-removed :extend t))
+  "A diff's removed line, to the window's edge.")
+(defface romacs-lexical-hunk '((t :inherit diff-header :extend t))
+  "A diff's hunk header: a band, never a line's colour.")
 
 (defcustom romacs-lexical-faces
   '((comment . font-lock-comment-face) (string . font-lock-string-face)
     (number . font-lock-number-face) (keyword . font-lock-builtin-face)
     (char . font-lock-constant-face) (head . romacs-lexical-head) (form . font-lock-keyword-face)
+    (name . font-lock-function-name-face)
     (added . romacs-lexical-added) (removed . romacs-lexical-removed) (hunk . romacs-lexical-hunk))
   "The face of each lexical class.  A class left out gets no face."
   :type '(alist :key-type symbol :value-type face))
@@ -100,7 +102,7 @@ digits, letters, dots and underscores (hex, exponents, suffixes)."
                 (cond ((= char ?\;) 'comment)
                       ((= char ?\() 'open)
                       ((= char ??) 'char)
-                      ((= char ?:) 'keyword)
+                      ((memq char '(?: ?&)) 'keyword)
                       (t (romacs-lexical--code char '(?\")))))))
     (pcase state
       ((or 'code 'string-end) (funcall code char))
@@ -184,7 +186,7 @@ which holds to its end; its newline starts the next line afresh."
   "The classes of BEG..END of the current buffer lexed as FAMILY, as
 \(FROM TO CLASS) spans in order, plain code left out."
   (let ((runs (romacs-scanner-runs (alist-get family romacs-lexical--families) beg end))
-        (before nil) (spans nil))
+        (before nil) (spans nil) (defining nil))
     (while runs
       (pcase-let* ((`(,at . ,state) (car runs))
                    (next (or (car-safe (cadr runs)) end))
@@ -195,10 +197,23 @@ which holds to its end; its newline starts the next line afresh."
         ;; A head that is a form, not a call.
         (when (and (eq class 'head) (string-match-p romacs-lexical-lisp-forms (buffer-substring-no-properties at next)))
           (setq class 'form))
+        ;; A diff's line is coloured through its newline, a band.
+        (when (and (memq class '(added removed hunk)) (< next end) (eq (char-after next) ?\n))
+          (setq next (1+ next)))
+        ;; After a definition's head, its name; its list of arguments
+        ;; calls nothing.
+        (when (eq class 'head)
+          (when (eq defining 'arglist) (setq class nil defining nil)))
         (cond ((null class))
               ;; The same class on: one span (a string's escapes, a char's).
               ((and last (eq (nth 2 last) class) (= (nth 1 last) at)) (setcar (cdr last) next))
               (t (push (list at next class) spans)))
+        (when (and (eq class 'form) (string-match-p "\\`\\(?:cl-\\)?def" (buffer-substring-no-properties at next)))
+          (save-excursion
+            (goto-char next)
+            (when (looking-at "[ \t\n]+\\([^] \t\n()\"';]+\\)")
+              (push (list (match-beginning 1) (match-end 1) 'name) spans)
+              (setq defining 'arglist))))
         (setq before state runs (cdr runs))))
     (nreverse spans)))
 

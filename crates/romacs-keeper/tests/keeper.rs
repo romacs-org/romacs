@@ -181,6 +181,7 @@ fn a_child_starts_with_exactly_what_its_spec_names() {
     assert_eq!(lines[6], "4", "only the three named descriptors, and the directory ls reads: {text}");
     assert_eq!((row.tag.as_str(), row.version, row.metadata.as_slice()), ("test", 1, &b"meta"[..]));
     assert_eq!(lines[7], client.keeper.pid.to_string(), "the keeper is the parent");
+    assert_eq!(status_event(&mut client, row.handle, Status::ended), Status::Exited(0), "a session leader's exit is reaped and reported");
 }
 
 #[test]
