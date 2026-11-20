@@ -56,9 +56,10 @@ says whether the program runs.")
   '("C-c" "C-x" "C-u" "C-g" "C-h" "C-l" "M-x" "M-o" "C-y" "M-y" "C-v" "M-v")
   "Keys that keep their Emacs bindings in a terminal running a program.
 Each is a `kbd' string.  While the window follows the cursor on the normal
-screen, every other key not bound in `romacs-term-mode-map' goes to the
-program (M-ESC aside), but for `romacs-term-shell-exceptions' and
-`romacs-term-history-map' at the shell's prompt; the alternate screen
+screen, the other keys the terminal has bytes for (M-ESC aside), and not
+bound in `romacs-term-mode-map', go to the program, but for
+`romacs-term-shell-exceptions' and `romacs-term-history-map' at the
+shell's prompt; the alternate screen
 keeps `romacs-term-alternate-exceptions' and `romacs-term-alternate-map'
 instead.  After changing this outside Customize, run
 `romacs-term-update-keymaps'.")
@@ -71,9 +72,10 @@ prompt.  They move point, as in shell-mode, which leaves the cursor for
 the scrollback until typing returns; the shell's history is on M-p and
 M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
 in the foreground (a REPL, a pager, fzf) gets them while the window follows
-the cursor on the normal screen; the alternate screen keeps only
-`romacs-term-alternate-exceptions'.  Each is a `kbd' string.  After changing this outside Customize, run
-`romacs-term-update-keymaps'.")
+the cursor on the normal screen; the alternate screen keeps
+`romacs-term-alternate-exceptions' and `romacs-term-alternate-map'
+instead.  Each is a `kbd' string.  After changing this outside Customize,
+run `romacs-term-update-keymaps'.")
 
 (defvar romacs-term-alternate-exceptions '("C-x" "M-x" "C-g")
   "Keys that keep their Emacs bindings while a program has the alternate
@@ -489,8 +491,9 @@ While the window follows the cursor on the normal screen, keys go to the
 program, except `romacs-term-keymap-exceptions' and the keys of
 `romacs-term-mode-map'; the shell's prompt and the alternate screen keep
 the keys their own lists name.  On the normal screen C-c C-c sends
-Ctrl-C and C-y and M-y send kills; at the shell's prompt, or away from
-the cursor, M-p and M-n recall the shell's history.  C-c C-j, moving
+Ctrl-C and C-y and M-y send kills; at the shell's prompt M-p and M-n
+recall its history, and away from the cursor they return to it and send
+Up or Down to whatever runs.  C-c C-j, moving
 point off the cursor, or scrolling back makes the window a plain Emacs
 buffer until you type or press C-c C-j again."
   (interactive (list nil current-prefix-arg))
