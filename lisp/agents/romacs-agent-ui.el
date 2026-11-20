@@ -3698,7 +3698,7 @@ with a prefix argument, asked for."
          (shown (lambda (model)
                   (propertize (or (and model (romacs-agent-ui--instance nil harness model nil)) "default")
                               ;; A menu's value is never dim: dim is a command it cannot run.
-                              'face (and model 'romacs-agent-model))))
+                              'face 'bold)))
          (now (and session (or (plist-get (romacs-agent--selection session) :model) (romacs-agent-model session))))
          (next (and session (plist-get (romacs-agent--wanted session) :model))))
     (concat "Model: " (funcall shown now)
@@ -3853,7 +3853,7 @@ and changes nothing; its plan comes as a card to implement."
 
 (defun romacs-agent-ui--plan-label ()
   (if (and romacs-agent-ui--session (plist-get (romacs-agent-options romacs-agent-ui--session) :plan))
-      (concat "Plan mode: " (propertize "on" 'face 'warning))
+      (concat "Plan mode: " (propertize "on" 'face 'bold))
     "Plan mode: off"))
 
 (defun romacs-agent-chat-new ()
@@ -3891,7 +3891,7 @@ and changes nothing; its plan comes as a card to implement."
          (now (and session (plist-get (romacs-agent--selection session) :effort)))
          (next (and session (plist-get (romacs-agent--wanted session) :effort))))
     ;; A menu's value is never dim: dim is a command it cannot run.
-    (cl-flet ((shown (effort) (if effort (romacs-agent-ui--effort effort) "default")))
+    (cl-flet ((shown (effort) (propertize (or effort "default") 'face 'bold)))
       (concat "Effort: " (shown now) (if (equal now next) "" (concat " → " (shown next)))))))
 
 (require 'keymap-popup)

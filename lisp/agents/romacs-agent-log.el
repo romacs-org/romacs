@@ -50,6 +50,7 @@
 (defvar romacs-agent-ui-changed-hook)
 (declare-function romacs-agent-ui--model-label "romacs-agent-ui" ())
 (declare-function romacs-agent-ui--effort-label "romacs-agent-ui" ())
+(declare-function romacs-agent-ui--plan-label "romacs-agent-ui" ())
 (declare-function romacs-agent-chat-model "romacs-agent-ui" (model effort))
 (declare-function romacs-agent-chat-effort "romacs-agent-ui" (effort))
 (declare-function romacs-agent-chat-plan "romacs-agent-ui" ())
@@ -1310,8 +1311,9 @@ transcript's comes with it."
 ;;;; The actions menu
 
 (defun romacs-agent-log--menu-title ()
-  "The actions menu's title: whose chat it is."
-  (concat "Agent · " (or (and romacs-agent-log--session (romacs-agent-title romacs-agent-log--session)) "chat")))
+  "The actions menu's title: whose chat it is, its name first to read."
+  (concat "Agent · " (propertize (or (and romacs-agent-log--session (romacs-agent-title romacs-agent-log--session)) "chat")
+                                 'face 'bold)))
 
 (defun romacs-agent-log--workers ()
   "The sessions this chat's delegated that are at work, those waiting on
@@ -1333,17 +1335,19 @@ it finished since.")
     (setq romacs-agent-log--menu-workers (make-vector 9 nil)))
   romacs-agent-log--menu-workers)
 
-(defun romacs-agent-log--worker-mark (child)
+(defun romacs-agent-log--worker-state (child)
+  "CHILD's state in the menu: the board's mark and a word, in its face."
   (if (eq (romacs-agent-state child) 'waiting-approval)
-      (propertize "⚠" 'face 'romacs-working-waiting)
-    (propertize "●" 'face 'romacs-working-running)))
+      (cons (propertize "◆" 'face 'romacs-working-waiting) (propertize "asks you" 'face 'romacs-working-waiting))
+    (cons (propertize "●" 'face 'romacs-working-running) (propertize "running" 'face 'romacs-working-running))))
 
 (defun romacs-agent-log--worker-label (index)
   "The menu's row of the worker at INDEX: a mark of what it does, then its
 title, so a long title is what the menu cuts; nil, no row, when there is
 none.  The row's digit then opens what it showed."
   (when-let* ((child (aset (romacs-agent-log--menu-slots) index (nth index (romacs-agent-log--workers)))))
-    (concat (romacs-agent-log--worker-mark child) " " (romacs-agent-title child))))
+    (let ((state (romacs-agent-log--worker-state child)))
+      (concat (car state) " " (romacs-agent-title child) " · " (cdr state)))))
 
 (defun romacs-agent-log--open-worker (child)
   "Open worker CHILD's chat, unless it finished since it was shown."
@@ -1386,21 +1390,9 @@ the session, the view."
   :group "Runs on"
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
-  "P" ("Plan mode on or off" romacs-agent-chat-plan)
+  "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
   "H" ("Go on under another instance" romacs-agent-chat-handoff)
   "N" ("Next account with room" romacs-agent-chat-next-account)
-  :row
-  :group "Session"
-  "b" ("Agent board" romacs-agents)
-  "n" ("New session" romacs-agent-chat-new)
-  "R" ("Rename" romacs-agent-chat-rename)
-  "f" ("Fork" romacs-agent-chat-fork)
-  "F" ("Fresh conversation, briefed" romacs-agent-chat-renew)
-  "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-log--running-p)
-  "x" ("Stop" romacs-agent-chat-stop)
-  :group "View"
-  "e" ("Earlier turns" romacs-agent-log-earlier)
-  "w" ("Copy the entry at point" romacs-agent-log-copy)
   ;; No :if: a group whose rows are all empty is not drawn, and a digit
   ;; whose worker finished since says so rather than falling through.
   :group "Workers"
@@ -1415,7 +1407,19 @@ the session, the view."
   "9" ((lambda () (romacs-agent-log--worker-label 8)) romacs-agent-log-open-worker)
   "o" ((lambda () (let ((n (length (romacs-agent-log--workers))))
                     (and (> n 9) (format "All %d at work" n))))
-       romacs-agent-log-workers))
+       romacs-agent-log-workers)
+  :row
+  :group "Session"
+  "b" ("Agent board" romacs-agents)
+  "n" ("New session" romacs-agent-chat-new)
+  "R" ("Rename" romacs-agent-chat-rename)
+  "f" ("Fork" romacs-agent-chat-fork)
+  "F" ("Fresh conversation, briefed" romacs-agent-chat-renew)
+  "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-log--running-p)
+  "x" ("Stop" romacs-agent-chat-stop)
+  :group "View"
+  "e" ("Earlier turns" romacs-agent-log-earlier)
+  "w" ("Copy the entry at point" romacs-agent-log-copy))
 
 (defvar-keymap romacs-agent-log-transcript-map
   :doc "Keys of a chat's transcript: a `keymap' text property, as a view's.

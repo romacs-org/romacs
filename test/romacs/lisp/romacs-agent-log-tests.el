@@ -275,11 +275,11 @@
                           (romacs-agent--make :id "c2" :state 'idle :title "finished")
                           (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
       (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
-        (should (equal (romacs-agent-log--menu-title) "Agent · lane chat"))
+        (should (equal (substring-no-properties (romacs-agent-log--menu-title)) "Agent · lane chat"))
         ;; A finished one is the board's; one waiting on the user first.
         (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))
-        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds"))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "◆ asks · asks you"))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds · running"))
         (should-not (romacs-agent-log--worker-label 2))
         ;; A digit opens the worker it showed; one finished since is the board's.
         (let (shown)
