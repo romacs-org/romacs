@@ -614,17 +614,19 @@ on one loads it, `romacs-agent-get')."
 
 ;;; The agents service's commands (doc/agent-protocol.org, Commands)
 
-(defun romacs-agent-store-command (key)
-  "The command KEY names, as it was kept: (DIGEST . OUTCOME), OUTCOME the
-JSON of its result; nil when none is."
+(defun romacs-agent-store-command (key since)
+  "The command KEY names, as it was kept since time SINCE: (DIGEST .
+OUTCOME), OUTCOME the JSON of its result; nil when none is."
   (when-let* ((db (romacs-agent-store--open))
-              (row (car (ignore-errors (sqlite-select db "select digest, outcome from commands where key = ?" (list key))))))
+              (row (car (ignore-errors (sqlite-select db "select digest, outcome from commands where key = ? and at >= ?"
+                                                      (list key since))))))
     (cons (car row) (cadr row))))
 
-(defun romacs-agent-store-command-put (key digest outcome)
+(defun romacs-agent-store-command-put (key digest outcome &optional done)
   "Keep the command KEY names, of params DIGEST, its OUTCOME the JSON of
-its result, by the writer."
-  (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (float-time)) nil (list 'command key)))
+its result, by the writer: DONE, when given, called with (ok VALUE) or
+\(error ERR) once it is kept, or not."
+  (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (float-time)) done (list 'command key)))
 
 (defun romacs-agent-store--command-row (key digest outcome at)
   (when-let* ((db (romacs-agent-store--open)))

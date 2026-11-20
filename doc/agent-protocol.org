@@ -559,8 +559,8 @@ paging ever holds live delivery back.
 - *Client ids.*  Every command carries =cid=.  The pair (connection
   identity, client instance, =cid=) names it.
 - *The command table.*  =commands= in the store keeps each command by
-  its key: a digest of its params, and its outcome, kept as =unknown=
-  before it takes effect, then its result.  Kept 24 hours, the newest
+  its key: a digest of its method and params, and its outcome, kept as
+  =unknown= before it takes effect, which waits for that, then its result.  Kept 24 hours, the newest
   10,000 at most, pruned when the editor is idle.
 - *Repeats.*
   - A repeated =cid= gets the recorded outcome.  One kept =unknown= (the
@@ -589,11 +589,9 @@ paging ever holds live delivery back.
     sends it again (=agents/send=) or drops it
     (=agents/undelivered.dismiss=).
 - *Admission.*  Each command is admitted atomically at the authority.
-  =answer= reserves its request at admission: a second answer, or
-  policy, gets =request-gone=.  The reservation ends when the request
-  resolves (=pending.resolved=), or when its answer could not be given.
-  It is the running service's: after a restart the records say whether
-  the request still waits.
+  A request is answered once in its run, by whoever answers first: a
+  client, the serving editor's user or its policy.  A second answer gets
+  =request-gone=, as does a handle of another run.
 - *Outcome.*  Each result carries ="state"=:
   - =queued=: held by the service, as a message waiting for a turn;
   - =written=: sent to the host;
