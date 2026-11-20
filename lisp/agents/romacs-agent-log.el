@@ -1304,11 +1304,43 @@ transcript's comes with it."
 
 ;;; Keys and mode
 
+;;;; The actions menu
+
+(defun romacs-agent-log--menu-title ()
+  "The actions menu's title: whose chat it is."
+  (concat "Agent · " (or (and romacs-agent-log--session (romacs-agent-title romacs-agent-log--session)) "chat")))
+
+(defun romacs-agent-log--workers ()
+  "The sessions this chat's delegated that are at work, those waiting on
+the user first: a finished one is the board's."
+  (when romacs-agent-log--session
+    (let ((live (seq-filter (lambda (child) (memq (romacs-agent-state child) '(starting running waiting-approval)))
+                            (romacs-agent-children romacs-agent-log--session))))
+      (append (seq-filter (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)
+              (seq-remove (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)))))
+
+(defun romacs-agent-log--worker-label (index)
+  "The menu's row of the worker at INDEX: a mark of what it does, then its
+title, so a long title is what the menu cuts; nil when there is none."
+  (when-let* ((child (nth index (romacs-agent-log--workers))))
+    (concat (if (eq (romacs-agent-state child) 'waiting-approval)
+                (propertize "⚠" 'face 'romacs-working-waiting)
+              (propertize "●" 'face 'romacs-working-running))
+            " " (romacs-agent-title child))))
+
+(defun romacs-agent-log-open-worker ()
+  "Open the chat of the worker on the menu row of the digit just pressed."
+  (interactive nil romacs-agent-log-mode)
+  (romacs-agent-show (or (nth (- last-command-event ?1) (romacs-agent-log--workers))
+                         (user-error "No such worker"))
+                     '(display-buffer-same-window)))
+
 (keymap-popup-define romacs-agent-log-actions-map
   "Actions of an agent chat: what waits on you, the turn, what it runs on,
 the session, the view."
   :popup-key "?"
   :exit-key "C-g"
+  :description #'romacs-agent-log--menu-title
   :group ("Waits on you" :if (lambda () (and romacs-agent-log--session (romacs-agent-log--pending))))
   "y" ("Allow" romacs-agent-log-allow)
   "!" ("Allow for this session" romacs-agent-log-allow-always)
@@ -1335,7 +1367,17 @@ the session, the view."
   "x" ("Stop" romacs-agent-chat-stop)
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
-  "w" ("Copy the entry at point" romacs-agent-log-copy))
+  "w" ("Copy the entry at point" romacs-agent-log-copy)
+  :group ("Workers" :if #'romacs-agent-log--workers)
+  "1" ((lambda () (romacs-agent-log--worker-label 0)) romacs-agent-log-open-worker)
+  "2" ((lambda () (romacs-agent-log--worker-label 1)) romacs-agent-log-open-worker)
+  "3" ((lambda () (romacs-agent-log--worker-label 2)) romacs-agent-log-open-worker)
+  "4" ((lambda () (romacs-agent-log--worker-label 3)) romacs-agent-log-open-worker)
+  "5" ((lambda () (romacs-agent-log--worker-label 4)) romacs-agent-log-open-worker)
+  "6" ((lambda () (romacs-agent-log--worker-label 5)) romacs-agent-log-open-worker)
+  "7" ((lambda () (romacs-agent-log--worker-label 6)) romacs-agent-log-open-worker)
+  "8" ((lambda () (romacs-agent-log--worker-label 7)) romacs-agent-log-open-worker)
+  "9" ((lambda () (romacs-agent-log--worker-label 8)) romacs-agent-log-open-worker))
 
 (defvar-keymap romacs-agent-log-transcript-map
   :doc "Keys of a chat's transcript: a `keymap' text property, as a view's.

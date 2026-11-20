@@ -260,6 +260,21 @@
                 (should (> (funcall rule) short)))))
         (remhash "L" romacs-agent-log--chats)))))
 
+(ert-deftest romacs-agent-log-menu-lists-the-workers-at-work ()
+  (romacs-agent-log-tests--with
+    (ignore #'draw)
+    (setf (romacs-agent-title session) "lane chat")
+    (let ((children (list (romacs-agent--make :id "c1" :state 'running :title "builds")
+                          (romacs-agent--make :id "c2" :state 'idle :title "finished")
+                          (romacs-agent--make :id "c3" :state 'waiting-approval :title "asks"))))
+      (cl-letf (((symbol-function 'romacs-agent-children) (lambda (_) children)))
+        (should (equal (romacs-agent-log--menu-title) "Agent · lane chat"))
+        ;; A finished one is the board's; one waiting on the user first.
+        (should (equal (mapcar #'romacs-agent-title (romacs-agent-log--workers)) '("asks" "builds")))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 0)) "⚠ asks"))
+        (should (equal (substring-no-properties (romacs-agent-log--worker-label 1)) "● builds"))
+        (should-not (romacs-agent-log--worker-label 2))))))
+
 (ert-deftest romacs-agent-log-several-answers-keep-their-questions ()
   (let ((one (make-hash-table :test #'equal)) (two (make-hash-table :test #'equal)))
     (puthash "Colour?" "Blue" one)
