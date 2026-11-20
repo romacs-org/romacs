@@ -1322,9 +1322,15 @@ the user first: a finished one is the board's."
       (append (seq-filter (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)
               (seq-remove (lambda (child) (eq (romacs-agent-state child) 'waiting-approval)) live)))))
 
-(defvar-local romacs-agent-log--menu-workers (make-vector 9 nil)
-  "The worker each digit's row last showed, however the menu was opened:
-a digit opens that one, saying so when it finished since.")
+(defvar-local romacs-agent-log--menu-workers nil
+  "The worker each digit's row last showed, however the menu was opened,
+a vector of nine, the chat's own: a digit opens that one, saying so when
+it finished since.")
+
+(defun romacs-agent-log--menu-slots ()
+  (unless (and (vectorp romacs-agent-log--menu-workers) (= (length romacs-agent-log--menu-workers) 9))
+    (setq romacs-agent-log--menu-workers (make-vector 9 nil)))
+  romacs-agent-log--menu-workers)
 
 (defun romacs-agent-log--worker-mark (child)
   (if (eq (romacs-agent-state child) 'waiting-approval)
@@ -1335,7 +1341,7 @@ a digit opens that one, saying so when it finished since.")
   "The menu's row of the worker at INDEX: a mark of what it does, then its
 title, so a long title is what the menu cuts; nil, no row, when there is
 none.  The row's digit then opens what it showed."
-  (when-let* ((child (aset romacs-agent-log--menu-workers index (nth index (romacs-agent-log--workers)))))
+  (when-let* ((child (aset (romacs-agent-log--menu-slots) index (nth index (romacs-agent-log--workers)))))
     (concat (romacs-agent-log--worker-mark child) " " (romacs-agent-title child))))
 
 (defun romacs-agent-log--open-worker (child)
@@ -1348,7 +1354,7 @@ none.  The row's digit then opens what it showed."
   "Open the chat of the worker the menu showed on the digit just pressed."
   (interactive nil romacs-agent-log-mode)
   (let ((index (- last-command-event ?1)))
-    (romacs-agent-log--open-worker (or (and (< -1 index 9) (aref romacs-agent-log--menu-workers index))
+    (romacs-agent-log--open-worker (or (and (< -1 index 9) (aref (romacs-agent-log--menu-slots) index))
                                        (user-error "No such worker")))))
 
 (defun romacs-agent-log-workers ()
