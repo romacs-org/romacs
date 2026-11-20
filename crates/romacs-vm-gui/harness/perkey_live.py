@@ -728,6 +728,19 @@ def session(args, index, latency):
     return result
 
 
+def net_per_key(phase, rate, keys):
+    """PHASE's instructions per key, less the idle RATE over its seconds."""
+    return (phase['instructions'] - rate * phase['seconds']) / keys
+
+
+def session_per_key(result, keys):
+    """Per phase of one valid session, its idle-subtracted instructions per
+    key, or None for a phase it refused."""
+    rate = idle_rate(result['idle'])
+    return {name: None if phase['problems'] else net_per_key(phase, rate, keys)
+            for name, phase in result['phases'].items()}
+
+
 def per_key(sessions, keys):
     """Per phase, idle-subtracted instructions per key: of the phases that
     delivered (`valid'), and of those that did not (`refused', with why);
@@ -738,8 +751,7 @@ def per_key(sessions, keys):
         for name in result['phases']:
             phase = result['phases'][name]
             entry = found.setdefault(name, {'valid': [], 'refused': [], 'why': [], 'paints': []})
-            entry['refused' if phase['problems'] else 'valid'].append(
-                (phase['instructions'] - rate * phase['seconds']) / keys)
+            entry['refused' if phase['problems'] else 'valid'].append(net_per_key(phase, rate, keys))
             entry['paints'].append(phase['paints'] / keys)
             entry['why'] += [p for p in phase['problems'][:1] if p not in entry['why']]
     return {name: {'valid': spread(e['valid']) if e['valid'] else None, 'paints_per_key': spread(e['paints']),

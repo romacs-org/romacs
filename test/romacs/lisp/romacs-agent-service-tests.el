@@ -246,14 +246,16 @@ and `wait' waiting until its form holds (5 s at most)."
       (should (equal (gethash "key" (gethash "c" (romacs-agent-service--list-rows romacs-agent-service--list)))
                      "completed")))))
 
-(ert-deftest romacs-agent-service-runs-its-whole-pass-when-quiet ()
+(ert-deftest romacs-agent-service-runs-its-whole-pass-when-idle ()
   (romacs-agent-service-tests--with
     (romacs-agent-service-start socket)
     (setq romacs-agent-service--whole-at 0 romacs-agent-service--dirty nil)
     (when (timerp romacs-agent-service--refresh-timer) (cancel-timer romacs-agent-service--refresh-timer))
     (setq romacs-agent-service--refresh-timer nil)
     (romacs-agent-service--poll)
-    (should (timerp romacs-agent-service--refresh-timer))))
+    ;; Due: once the editor is idle, never while the user types.
+    (should (timerp romacs-agent-service--idle-timer))
+    (should-not romacs-agent-service--refresh-timer)))
 
 (ert-deftest romacs-agent-service-answers-a-long-request-in-bounds ()
   ;; A method name near a message's limit: answered, its error bounded.
@@ -281,5 +283,300 @@ and `wait' waiting until its form holds (5 s at most)."
           (should (file-exists-p (romacs-agent-service-socket))))
       (romacs-agent-service-stop)
       (delete-directory root t))))
+
+(defun romacs-agent-service-tests--log (client)
+  "What CLIENT hears of its sessions, oldest first, under its `log' property."
+  (let ((log (list nil)))
+    (add-hook 'romacs-agent-client-session-functions
+              (lambda (c id notice) (when (eq c client) (setcar log (append (car log) (list (cons id notice)))))))
+    log))
+
+(ert-deftest romacs-agent-service-sends-a-session-s-record-units ()
+  ;; Open: the row and the cursor live events follow from, the last
+  ;; record kept; then each record unit past it, once whole, in revision
+  ;; order.  A replay's copy of the session sends nothing, nor a unit at
+  ;; or below the cursor (a supervisor's replay on attach).
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running :seq 7)))
+      (romacs-agent-service-start socket)
+      (advice-add 'romacs-agent-service--last-seq :override (lambda (_) 7) '((name . rsv-kept)))
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-open client "busy")
+        (should (wait (car log)))
+        (pcase-let ((`("busy" opened ,reply) (car (car log))))
+          (should (equal (gethash "seq" (gethash "cursor" reply)) 7))
+          (should (equal (gethash "id" (gethash "row" reply)) "busy")))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 6 :message "r" :text "replayed" :last t))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 8 :message "m" :text "Hel"))
+        (run-hook-with-args 'romacs-agent-event-functions (romacs-agent--scratch busy)
+                            '(:type delta :seq 3 :message "m" :text "old" :last t))
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 8 :message "m" :text "lo" :last t))
+        (should (wait (cl-find 'event (car log) :key #'cadr)))
+        (let* ((notices (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log)))
+               (params (nth 2 (car notices))))
+          (should (= (length notices) 1))
+          (should (equal (gethash "seq" params) 8))
+          (should (equal (mapcar (lambda (event) (gethash "text" event)) (gethash "events" params)) '("Hel" "lo"))))
+        (advice-remove 'romacs-agent-service--last-seq 'rsv-kept)))))
+
+(ert-deftest romacs-agent-service-cuts-a-long-string ()
+  ;; A tool's output over 64 KiB: its first 64 KiB, the event saying how
+  ;; long it was.
+  (let* ((sent (romacs-agent-service--bounded
+                (list (list :type 'tool :seq 4 :id "t" :name "Bash" :state 'completed
+                            :output (make-string 100000 ?o)))))
+         (event (aref sent 0)))
+    (should (= (string-bytes (gethash "output" event)) (* 64 1024)))
+    (should (equal (gethash "/output" (gethash "truncated" event)) 100000))))
+
+(ert-deftest romacs-agent-client-reopens-on-a-missed-revision ()
+  ;; A notice past the next revision: something was missed, and the
+  ;; session is opened again, the notice not applied.
+  (romacs-agent-service-tests--with
+    (mk "busy" 'running)
+    (romacs-agent-service-start socket)
+    (let* ((client (romacs-agent-client-connect socket)) (opened 0) (events 0))
+      (add-hook 'romacs-agent-client-session-functions
+                (lambda (_ _ notice) (pcase (car notice) ('opened (cl-incf opened)) ('event (cl-incf events)))))
+      (should (wait (romacs-agent-client-revision client)))
+      (romacs-agent-client-open client "busy")
+      (should (wait (= opened 1)))
+      (romacs-agent-client--session-notice client "agents/event"
+                                           (romacs-agent-rpc-object "session" "busy" "revision" 3 "seq" 9 "events" []))
+      (should (wait (= opened 2)))
+      (should (= events 0)))))
+
+(ert-deftest romacs-agent-client-applies-only-its-own-open ()
+  ;; Open, close and open again before the first reply: the first reply
+  ;; never takes the second open's place.
+  (romacs-agent-service-tests--with
+    (mk "busy" 'running)
+    (romacs-agent-service-start socket)
+    (let* ((client (romacs-agent-client-connect socket)) (opened 0))
+      (add-hook 'romacs-agent-client-session-functions (lambda (_ _ notice) (when (eq (car notice) 'opened) (cl-incf opened))))
+      (should (wait (romacs-agent-client-revision client)))
+      (romacs-agent-client-open client "busy")
+      (romacs-agent-client-close-session client "busy")
+      (romacs-agent-client-open client "busy")
+      (should (wait (= opened 1)))
+      (accept-process-output nil 0.2)
+      (should (= opened 1))
+      (should (vectorp (gethash "busy" (romacs-agent-client-sessions client)))))))
+
+(ert-deftest romacs-agent-service-tells-a-gap-it-never-sent ()
+  ;; A session loaded past a subscription's cutoff with no events (a
+  ;; worker's fold): told at once as a gap, its bounds the records never
+  ;; sent live; then live units follow it.
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running :seq 9)))
+      (romacs-agent-service-start socket)
+      (advice-add 'romacs-agent-service--last-seq :override (lambda (_) 7) '((name . rsv-kept)))
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client))
+             (events (lambda () (mapcar (lambda (entry) (nth 2 entry))
+                                        (seq-filter (lambda (entry) (eq (cadr entry) 'event)) (car log))))))
+        (unwind-protect
+            (progn
+              (should (wait (romacs-agent-client-revision client)))
+              (romacs-agent-client-open client "busy")
+              (should (wait (car log)))
+              (romacs-agent-service--loaded busy nil)
+              (should (wait (funcall events)))
+              (let ((gap (gethash "gap" (car (funcall events)))))
+                (should (equal (list (gethash "after" gap) (gethash "upto" gap)) '(7 9)))
+                (should (equal (gethash "events" (car (funcall events))) [])))
+              (run-hook-with-args 'romacs-agent-event-functions busy '(:type delta :seq 10 :message "m" :text "x" :last t))
+              (should (wait (= (length (funcall events)) 2)))
+              (should-not (gethash "gap" (cadr (funcall events)))))
+          (advice-remove 'romacs-agent-service--last-seq 'rsv-kept))))))
+
+(ert-deftest romacs-agent-service-refuses-an-unknown-session ()
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (cl-letf (((symbol-function 'romacs-agent-store-row-session) #'ignore))
+      (let ((client (romacs-agent-client-connect socket)) (answer nil))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-request client "agents/session.open" (romacs-agent-rpc-object "id" "nope")
+                                     (lambda (_ error) (setq answer error)))
+        (should (wait answer))
+        (should (equal (gethash "code" answer) -32010))))))
+
+(ert-deftest romacs-agent-service-tells-a-subscriber-its-row ()
+  (romacs-agent-service-tests--with
+    (let ((busy (mk "busy" 'running)))
+      (romacs-agent-service-start socket)
+      (let* ((client (romacs-agent-client-connect socket)) (log (romacs-agent-service-tests--log client)))
+        (should (wait (romacs-agent-client-revision client)))
+        (romacs-agent-client-open client "busy")
+        (should (wait (car log)))
+        (setf (romacs-agent-state busy) 'idle)
+        (run-hook-with-args 'romacs-agent-event-functions busy '(:type changed))
+        (should (wait (cl-find 'changed (car log) :key #'cadr)))
+        (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
+
+;;; History
+
+(defun romacs-agent-service-tests--line (seq key value)
+  (concat (json-serialize (romacs-mcp--object key value "seq" seq "t" (+ 1794600000.25 seq))) "\n"))
+
+(defun romacs-agent-service-tests--turn (seq n)
+  "A Claude turn from SEQ: its prompt, its reply streamed in two deltas,
+the whole reply, its result."
+  (let ((id (format "m%d" n)) (text (format "answer %d" n)))
+    (concat (romacs-agent-service-tests--line
+             seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                          "romacsRequest" n "type" "user"))
+            (romacs-agent-service-tests--line
+             (+ seq 1) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "message_start"
+                                                                             "message" (romacs-mcp--object "id" id))))
+            (romacs-agent-service-tests--line
+             (+ seq 2) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" "answer "))))
+            (romacs-agent-service-tests--line
+             (+ seq 3) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" (number-to-string n)))))
+            (romacs-agent-service-tests--line
+             (+ seq 4) "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                 "message" (romacs-mcp--object "id" id "content"
+                                                                               (vector (romacs-mcp--object "type" "text" "text" text)))))
+            (romacs-agent-service-tests--line (+ seq 5) "out" (romacs-mcp--object "type" "result" "result" text)))))
+
+(defmacro romacs-agent-service-tests--with-stored (&rest body)
+  "BODY with `session', a Claude session of three turns kept in SQLite, in
+a state root of its own, and a service of its own on `socket'."
+  (declare (indent 0))
+  `(let* ((root (make-temp-file "rsv-store" t))
+          (socket (expand-file-name "s.sock" root))
+          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
+                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                       process-environment))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (romacs-agent--launched (make-hash-table :test #'equal))
+          (romacs-agent--held-notes (make-hash-table :test #'equal))
+          (romacs-agent-store--db nil) (romacs-agent-events--made nil)
+          (romacs-agent-events--imported (make-hash-table :test #'equal))
+          (romacs-agent-event-functions nil)
+          (id "e7e70000-2222-4333-8444-555566667778")
+          (dir (expand-file-name id (romacs-agent--state-root))))
+     (unwind-protect
+         (progn
+           (make-directory dir t)
+           (romacs-agent--write-json (expand-file-name "manifest.json" dir)
+                                     (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "cwd" root
+                                                         "title" "stored" "titleAuto" :false "argv" []
+                                                         "options" (romacs-mcp--object)))
+           (let ((coding-system-for-write 'utf-8-unix))
+             (write-region (concat (romacs-agent-service-tests--line 1 "note" (romacs-mcp--object "type" "run"))
+                                   (romacs-agent-service-tests--turn 2 1) (romacs-agent-service-tests--turn 8 2)
+                                   (romacs-agent-service-tests--turn 14 3))
+                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+           (romacs-agent--load dir)
+           (let ((session (romacs-agent-get id)))
+             (romacs-agent-events-import session)
+             (require 'romacs-agent-turns)
+             (romacs-agent-turns-fill session)
+             (cl-macrolet ((wait (form) `(let ((deadline (+ (float-time) 5)))
+                                            (while (and (not ,form) (< (float-time) deadline))
+                                              (accept-process-output nil 0.02))
+                                            ,form)))
+               ,@body)))
+       (romacs-agent-service-stop)
+       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+       (delete-directory root t))))
+
+(defun romacs-agent-service-tests--live (session)
+  "SESSION's records as live delivery sends them: each unit (SEQ . JSON)."
+  (let ((units nil) (unit nil))
+    (dolist (event (romacs-agent-events session))
+      (push event unit)
+      (when (plist-get event :last)
+        (let ((sent (romacs-agent-service--bounded (nreverse unit))))
+          (unless (equal sent []) (push (cons (plist-get event :seq) (json-serialize sent)) units)))
+        (setq unit nil)))
+    (nreverse units)))
+
+(defun romacs-agent-service-tests--history (client id params)
+  "Session ID's history through CLIENT, each unit (SEQ . JSON), and its reset."
+  (let ((answer nil))
+    (romacs-agent-client-history client id params (lambda (result) (setq answer result)))
+    (let ((deadline (+ (float-time) 5)))
+      (while (and (not answer) (< (float-time) deadline)) (accept-process-output nil 0.02)))
+    (cons (mapcar (lambda (unit) (cons (gethash "seq" unit) (json-serialize (gethash "events" unit)))) (car answer))
+          (nth 2 answer))))
+
+(ert-deftest romacs-agent-service-history-is-what-live-sent ()
+  ;; A session's history is its records' units as live delivery sent
+  ;; them; from a place mid-message, folded from its turn's start, its
+  ;; text never comes twice; too far behind, a reset.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (should (> (length live) 9))
+      (should (equal (car (romacs-agent-service-tests--history
+                           client id (romacs-agent-rpc-object "upto" 19 "turns" 10)))
+                     live))
+      ;; The last turn alone.
+      (should (equal (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1)))
+                     (seq-filter (lambda (unit) (>= (car unit) 14)) live)))
+      ;; After seq 10, the first delta of turn 2: its second delta, then the
+      ;; whole message raising no text, as live.
+      (let ((after (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 10)))))
+        (should (equal after (seq-filter (lambda (unit) (> (car unit) 10)) live)))
+        (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
+      (let ((romacs-agent-service--catch-up 5))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2)))))
+      ;; A turn starting in reach (14, the window from 13) is read from its
+      ;; start; one out of reach is a reset, never a read from mid-turn.
+      (let ((romacs-agent-service--turn-reach 6))
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
+      (let ((romacs-agent-service--turn-reach 6))
+        ;; More turns asked than reach: those in reach.
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 3))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+        ;; The last turn's row not written yet: it starts past the last row.
+        (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq = 14" (list id))
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
+      (let ((romacs-agent-service--turn-reach 3))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))))))))
+
+(ert-deftest romacs-agent-service-history-stops-at-its-bound ()
+  ;; Past its bytes' bound a reply stops, its cursor where; the client asks
+  ;; on from there.  A reply under another epoch than the history held is
+  ;; a reset for it.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (let ((romacs-agent-service--history-bytes 1) (answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r)))
+        (should (wait answer))
+        (should (= (length (car answer)) 1))
+        (should (equal (gethash "seq" (nth 1 answer)) (car (car live))))
+        (should (equal (gethash "seq" (car (car answer))) (car (car live)))))
+      (let ((answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r))
+                                     (romacs-agent-rpc-object "epoch" 99 "adapter" "other"))
+        (should (wait answer))
+        (should (nth 2 answer))
+        (should-not (car answer))))))
+
+(ert-deftest romacs-agent-replay-copies-touch-nothing-live ()
+  ;; A replay's copy starts with no turn under way, whatever the session
+  ;; does; folding a note there never lets go of the live session's held
+  ;; note of the same id.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "live" :harness 'claude :input-seq 40 :completed-seq 30))
+         (copy (romacs-agent-replay-copy session nil))
+         (held (romacs-mcp--object "romacsNote" 1 "type" "selection")))
+    (should (equal (list (romacs-agent-input-seq copy) (romacs-agent-completed-seq copy)) '(0 0)))
+    (puthash "live" (list held) romacs-agent--held-notes)
+    (romacs-agent-replay-record copy (json-parse-string "{\"note\":{\"romacsNote\":1,\"type\":\"selection\"},\"seq\":3,\"t\":1.0}"))
+    (should (equal (gethash "live" romacs-agent--held-notes) (list held)))))
 
 ;;; romacs-agent-service-tests.el ends here
