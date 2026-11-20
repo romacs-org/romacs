@@ -193,7 +193,7 @@ class Engine:
         self.editor_log, self.log_read, self.failed = 'engine.log', 0, None
         self.probe_dir = root / 'probe'
         # A runtime directory for the editor alone; the compositor keeps
-        # the root, where its socket's path is short enough to bind.
+        # the tree's, where its socket's path is short enough to bind.
         self.editor_runtime = None
 
     def start(self, tools):
@@ -221,7 +221,8 @@ class Engine:
         log = (self.root / 'compositor.log').open('w')
         self.processes.append(subprocess.Popen([f'{tools}/labwc', '-C', str(self.root / 'labwc')],
                                                env=self.env, stdout=log, stderr=log))
-        socket = wait(lambda: next((p for p in self.root.glob('wayland-*') if p.is_socket()), None),
+        runtime = Path(self.env['XDG_RUNTIME_DIR'])
+        socket = wait(lambda: next((p for p in runtime.glob('wayland-*') if p.is_socket()), None),
                       15, f'{self.name} compositor', self.processes[0])
         self.env['WAYLAND_DISPLAY'] = socket.name
         self.randr(1280, 900)
@@ -393,15 +394,20 @@ def perf_result(process):
 def private_tree(engine, base, tools, prefix=None):
     """A fresh private root for ENGINE: HOME, XDG, TMPDIR, the probe's
     directory and the compositor environment, named PREFIX (default
-    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV)."""
+    ENGINE-) and a random suffix.  Returns (ROOT, HOME, ENV).
+    The runtime directory is ROOT/run, apart from HOME and the work
+    directory as /run/user is on a real system: a file under it is a
+    memory-only file to the editor (lisp/session/romacs-ram-files.el), with
+    no backup, no auto-save and no place in a restart's session image."""
     root = Path(tempfile.mkdtemp(prefix=prefix or f'{engine}-', dir=base))
     root.chmod(0o700)
     home = root / 'home'
-    for directory in ('home', 'work', 'probe', 'tmp', 'home/.config', 'home/.cache', 'home/.local/share',
+    for directory in ('home', 'work', 'probe', 'tmp', 'run', 'home/.config', 'home/.cache', 'home/.local/share',
                       'home/.local/state'):
         (root / directory).mkdir(parents=True)
+    (root / 'run').chmod(0o700)
     env = {'PATH': f'{tools}:{os.environ["PATH"]}', 'HOME': str(home), 'LANG': 'C.UTF-8', 'ROMACS_DIAGNOSTICS': '1',
-           'XDG_RUNTIME_DIR': str(root), 'XDG_CONFIG_HOME': str(home / '.config'),
+           'XDG_RUNTIME_DIR': str(root / 'run'), 'XDG_CONFIG_HOME': str(home / '.config'),
            'XDG_CACHE_HOME': str(home / '.cache'), 'XDG_DATA_HOME': str(home / '.local/share'),
            'XDG_STATE_HOME': str(home / '.local/state'), 'TMPDIR': str(root / 'tmp'),
            'WLR_BACKENDS': 'headless', 'WLR_RENDERER': 'pixman', 'WLR_HEADLESS_OUTPUTS': '1',

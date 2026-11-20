@@ -34,6 +34,20 @@ class KeyTests(unittest.TestCase):
             self.assertGreater(parity_live.inputs(group), 0, group)
 
 
+class PrivateTreeTests(unittest.TestCase):
+    def test_home_and_work_are_not_memory_only(self):
+        # A file under the runtime directory is a memory-only file to the
+        # editor (lisp/session/romacs-ram-files.el): a restart leaves its
+        # buffer out.  A journey's files must be ordinary ones.
+        with tempfile.TemporaryDirectory() as base:
+            root, home, env = parity_live.private_tree('romacs', Path(base), '/nonexistent')
+            runtime = Path(env['XDG_RUNTIME_DIR'])
+            self.assertTrue(runtime.is_dir())
+            self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
+            for path in (home, root / 'work', root / 'probe', Path(env['TMPDIR'])):
+                self.assertFalse(path.is_relative_to(runtime), path)
+
+
 class StartupFailedTests(unittest.TestCase):
     def test_a_stopped_startup_is_found_in_whole_lines_read_once(self):
         with tempfile.TemporaryDirectory() as root:
