@@ -615,19 +615,17 @@ on one loads it, `romacs-agent-get')."
 ;;; The agents service's commands (doc/agent-protocol.org, Commands)
 
 (defun romacs-agent-store-command (key since)
-  "The command KEY names, as it was kept since time SINCE: (DIGEST .
-OUTCOME), OUTCOME the JSON of its result; nil when none is."
+  "The command KEY names, as it was kept since time SINCE: (DIGEST OUTCOME
+AT), OUTCOME the JSON of its result, AT when it was kept; nil when none is."
   ;; A read that fails is said, never taken for no command.
-  (when-let* ((db (romacs-agent-store--open))
-              (row (car (sqlite-select db "select digest, outcome from commands where key = ? and at >= ?"
-                                       (list key since)))))
-    (cons (car row) (cadr row))))
+  (when-let* ((db (romacs-agent-store--open)))
+    (car (sqlite-select db "select digest, outcome, at from commands where key = ? and at >= ?" (list key since)))))
 
 (defun romacs-agent-store-command-admit (key digest outcome since done)
   "Admit the command KEY names, of params DIGEST, kept as OUTCOME, by the
-writer, in one step: DONE called with (ok t) once it is, (ok (DIGEST .
-OUTCOME)) when one of KEY was kept since time SINCE already, as it was,
-or (error ERR).  One of KEY kept before SINCE has expired: let go of."
+writer, in one step: DONE called with (ok t) once it is, (ok (DIGEST
+OUTCOME AT)) when one of KEY was kept since time SINCE already, as it
+was, or (error ERR).  One of KEY kept before SINCE has expired: let go of."
   (romacs-agent-write 'romacs-agent-store--command-admitted (list key digest outcome since (float-time)) done
                       (list 'command key)))
 
@@ -638,8 +636,7 @@ or (error ERR).  One of KEY kept before SINCE has expired: let go of."
                            (list key digest outcome at))
            0)
         t
-      (let ((row (car (sqlite-select db "select digest, outcome from commands where key = ?" (list key)))))
-        (cons (car row) (cadr row))))))
+      (car (sqlite-select db "select digest, outcome, at from commands where key = ?" (list key))))))
 
 (defun romacs-agent-store-command-put (key digest outcome &optional done)
   "Keep the command KEY names, of params DIGEST, its OUTCOME the JSON of

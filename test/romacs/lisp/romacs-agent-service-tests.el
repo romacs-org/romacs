@@ -864,11 +864,24 @@ a state root of its own, and a service of its own on `socket'."
           ;; Kept in the store: a service started again names the same one.
           (clrhash romacs-agent-service--commands)
           (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first)))
+          ;; Found by the writer as it is admitted, the reader seeing none:
+          ;; a repeat all the same.
+          (clrhash romacs-agent-service--commands)
+          (cl-letf (((symbol-function 'romacs-agent-store-command) #'ignore))
+            (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first))))
           (should (= (length launched) 1))
           (should (plist-get (car launched) :tracked))
           (should (equal (romacs-agent-title (romacs-agent-loaded (gethash "id" first))) "far start")))
         (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" (romacs-agent-rpc-object "cid" "s2" "cwd" "relative")))))
                        "bad-params"))
+        ;; One that fails after the deadline: queued, then its repeats say so.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch)
+                     (run-at-time 1 nil (lambda () (setf (romacs-agent-state session) 'unstarted))))))
+          (let ((params (romacs-agent-rpc-object "cid" "s4" "cwd" cwd)))
+            (should (equal (gethash "state" (car (funcall ask "agents/start" params))) "queued"))
+            (should (wait (let ((error (cadr (funcall ask "agents/start" params))))
+                            (and error (equal (gethash "kind" (gethash "data" error)) "not-live")))))))
         ;; A host that does not start: the start says so, and so does its repeat.
         (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
                    (lambda (session _launch) (setf (romacs-agent-state session) 'unstarted))))
