@@ -537,7 +537,8 @@ fn romacs_host_minibuffer(cx, frame: Value) {
     cx.windows().host_minibuffer(frame)
 }}
 // The window the selected frame's status bar shows: the selected window while it is
-// one of the top-level frame's ordinary windows, else that frame's own selected window.
+// one of the top-level frame's ordinary windows, else that frame's own selected window, or,
+// when that is its minibuffer window, the ordinary window selected last.
 defsubr! { name = "romacs-status-bar-window", gnu = "romacs:frame", effect = Reads,
 fn romacs_status_bar_window(cx) {
     cx.windows().status_bar_window()

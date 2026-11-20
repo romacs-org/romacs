@@ -39,7 +39,9 @@ defsubr! { name = "romacs--pointer", gnu = "romacs:display", effect = Reads,
 fn pointer(cx) { cx.pointer() }}
 // The host frame's native window, for a server session whose window comes
 // and goes (lisp/session/romacs-server.el): ACTION `show' makes it anew when it was
-// closed and asks for the focus, `hide' closes it and keeps the session,
-// `query' only asks. t when a window shows after the request.
+// closed, else raises it; `hide' closes it and keeps the session; `query' only asks.
+// t when a window shows after the request, nil when none does or the host has no native
+// windows; a session that is not a server's shows its window always.  Any other ACTION
+// signals an error.
 defsubr! { name = "romacs--native-window", gnu = "romacs:display", effect = Global,
 fn native_window(cx, action: Value) { cx.native_window(action) }}

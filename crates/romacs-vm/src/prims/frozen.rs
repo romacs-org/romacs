@@ -5,8 +5,9 @@
 use super::*;
 
 // Freeze OBJECT: an immutable copy of its whole value graph in a new frozen region,
-// or OBJECT itself when it is a region's root already.  Writing into a frozen value signals
-// an error; `thaw' gives a mutable copy back.
+// or OBJECT itself when it is a region's root already, a fixnum, nil or t.  A graph
+// holding a value that cannot be frozen signals (error "Cannot freeze" VALUE PATH).
+// Writing into a frozen value signals an error; `thaw' gives a mutable copy back.
 defsubr! { name = "freeze", gnu = "romacs:frozen", effect = Global,
 fn freeze(cx, object: Value) {
     cx.freeze(object)

@@ -64,7 +64,9 @@ fn characters(bytes: &[u8], multibyte: bool) -> usize {
 // Run the scanner TABLE over the current buffer's text from START to END, from STATE.
 // TABLE is a vector of 129 entries a state, each the next state, plus 128 when that
 // transition is marked.  Returns (STATE . MARKED): the state at END, and the positions of
-// the marked characters, or how many there are when COUNT is non-nil.
+// the marked characters, or how many there are when COUNT is non-nil.  A TABLE or STATE
+// not of that shape signals `wrong-type-argument'; START and END not in order within the
+// accessible text, `args-out-of-range'.
 defsubr! { name = "romacs--scanner-run", gnu = "romacs:scanner", effect = Reads,
     fn romacs_scanner_run(cx, table: Value, state: Value, start: Value, end: Value, count: Value) {
         // TABLE: a vector of 129 entries a state, each the next state plus

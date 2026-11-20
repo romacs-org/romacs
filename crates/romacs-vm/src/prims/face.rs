@@ -828,8 +828,9 @@ fn frame_face_hash_table(cx; optional frame: Value) {
 }}
 
 // Whether FRAME (nil for the selected frame) shows another frame's faces: a child
-// frame that no face was ever set on alone, whose faces are its parent's.  `face-spec-recalc'
-// has nothing to recompute on such a frame.
+// frame that no face was ever set on alone, whose faces are those of its nearest ancestor
+// with faces of its own.  `face-spec-recalc' has nothing to recompute on such a frame.
+// Signals unless FRAME is nil or a live frame.
 defsubr! { name = "romacs--frame-shares-faces-p", gnu = "romacs:faces", effect = Reads,
 fn romacs_frame_shares_faces_p(cx; optional frame: Value) {
     // FRAME shows another frame's faces: a child frame nothing set a face

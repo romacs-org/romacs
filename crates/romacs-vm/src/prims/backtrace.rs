@@ -46,9 +46,13 @@ defsubr! { name = "romacs--inspect-frames", gnu = "romacs:inspect", effect = Rea
 fn romacs_inspect_frames(cx) -> Step {
     Ok(Step::Done(cx.inspect_frames()))
 }}
-// Listen for inspect requests on DIRECTORY/inspect.sock, keeping each snapshot in
-// the directory STORE when it is non-nil.  DIRECTORY must be private to this user; a socket
-// there that no one answers on is a dead session's and is replaced.  Returns nil.
+// Listen for inspect requests on DIRECTORY/inspect.sock, a socket only this user may
+// use, after stopping this session's earlier listener.  The caller checks that DIRECTORY
+// is private to this user (`romacs-mcp-start' does).  A socket there that refuses a
+// connection is a dead session's and is replaced; one that answers signals an error.
+// With STORE non-nil, the newest 8 snapshots are kept in that directory, made with mode
+// 0700 when missing; a STORE that is not this user's private directory keeps none.
+// Returns nil.
 defsubr! { name = "romacs--inspect-listen", gnu = "romacs:inspect", effect = Global,
 fn romacs_inspect_listen(cx, directory: Value; optional store: Value) {
     let directory = cx.string_text(directory)?;

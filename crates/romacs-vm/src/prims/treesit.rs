@@ -210,8 +210,8 @@ fn romacs_treesit_parse_early(cx, language: Value) {
     cx.ts_parse_early(language)
 }}
 
-// Whether the current buffer's early parse has not given a tree yet, so asking for
-// one now would wait for it.
+// Whether a parse of the current buffer has not given its tree yet, so asking for one
+// now would wait for it: its early parse, or a parser's parse ahead.
 defsubr! { name = "romacs--treesit-parsing-p", gnu = "romacs:treesit", effect = Reads,
 fn romacs_treesit_parsing_p(cx) {
     cx.ts_parsing_p()
@@ -445,8 +445,11 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 
 // Fontify REGION, a cons (START . END), from the captures in NODE between BEG and END
 // of the query in COMBINED, a cons (QUERY . SPANS) where SPANS names the font-lock settings
-// each part of QUERY belongs to.  The query's predicates run as `treesit-query-capture'
-// runs them.
+// each part of QUERY belongs to.  A capture naming a face puts it on its node's part of
+// REGION: with no OVERRIDE only where no face is yet, with OVERRIDE t over any, and with
+// another OVERRIDE through `treesit-fontify-with-override'.  A capture naming a function
+// calls it with NODE, OVERRIDE, START and END.  The query's predicates run as
+// `treesit-query-capture' runs them.  Returns nil.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
     let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;

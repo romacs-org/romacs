@@ -583,8 +583,10 @@ pub(crate) fn declare(cx: &mut Leaf<'_>, face: Value, spec: Value) -> std::resul
     Ok(())
 }
 
-// The work of `face-spec-recalc': recompute FACE on FRAME from its specs (its
-// `defface' spec, the enabled themes' specs and `face-override-spec'), as faces.el does.
+// The work of `face-spec-recalc': recompute FACE, or the face it is an alias of, on
+// FRAME (nil for the selected frame) from its specs (its `defface' spec, the enabled themes'
+// specs and `face-override-spec'), as faces.el does.  A frame showing another frame's faces
+// is left alone.  Returns nil.
 defsubr! { name = "romacs--face-spec-recalc", gnu = "romacs:faces", effect = Global,
 fn romacs_face_spec_recalc(cx, face: Value, frame: Value) { recalc(cx, face, frame) }}
 
@@ -605,7 +607,8 @@ fn recalc_themed(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value) -> std::result
 }
 
 // The work of `custom-theme-recalc-face': recompute FACE, or the face it is an alias
-// of, on every frame, after a theme changed its specs.  Returns nil.
+// of, on every frame, after a theme changed its specs.  A face not defined for new frames
+// is left alone.  Returns nil.
 defsubr! { name = "romacs--custom-theme-recalc-face", gnu = "romacs:faces", effect = Global,
 fn romacs_custom_theme_recalc_face(cx, face: Value) {
     let keys = cx.face_keys();
@@ -656,8 +659,9 @@ fn romacs_theme_enable_faces(cx, theme: Value, settings: Value) {
 }}
 
 // `disable-theme''s loop over SETTINGS, a run of THEME's settings: remove THEME's
-// spec from each face's `theme-face' stack, and the `saved-face' spec THEME gave it, then
-// recompute the face.  Returns the tail from the first setting that is not a face's, for
+// spec from each face's `theme-face' stack, and when the face's `saved-face' is the value
+// THEME gave it, set `saved-face' to the value of the next theme on the stack.  It
+// recomputes no face.  Returns the tail from the first setting that is not a face's, for
 // Lisp to take, or nil when every one was.
 defsubr! { name = "romacs--theme-disable-faces", gnu = "romacs:faces", effect = Global,
 fn romacs_theme_disable_faces(cx, theme: Value, settings: Value) {
@@ -683,9 +687,10 @@ fn romacs_theme_disable_faces(cx, theme: Value, settings: Value) {
     Ok(Value::NIL)
 }}
 
-// Revert a theme preview: set FACE on FRAME (nil for new frames' defaults) back to the
-// attribute vector SAVED, writing each attribute that differs as a recomputation writes it.
-// Returns nil.
+// Revert a theme preview: set FACE back to the attribute vector SAVED, each attribute
+// that differs.  With FRAME nil, FACE's defaults for new frames are set directly; on a
+// frame each attribute is written as a recomputation writes it.  Does nothing when FACE
+// has no attribute vector there.  Signals unless SAVED is a vector.  Returns nil.
 defsubr! { name = "romacs--face-restore", gnu = "romacs:faces", effect = Global,
 fn romacs_face_restore(cx, face: Value, frame: Value, saved: Value) {
     // A theme preview's revert: FACE on FRAME (nil, new frames' defaults)
@@ -797,8 +802,9 @@ fn romacs_faces_modified_on(cx, frame: Value) {
     Ok(modified)
 }}
 
-// `frame-set-background-mode''s recalculation: recompute every face on FRAME except
-// those in the list MODIFIED, in `face-list' order.  Returns nil.
+// `frame-set-background-mode''s recalculation: recompute every face on FRAME (nil for
+// the selected frame) except those in the list MODIFIED, in `face-list' order.  A frame
+// showing another frame's faces is left alone.  Returns nil.
 defsubr! { name = "romacs--recalc-faces-except", gnu = "romacs:faces", effect = Global,
 fn romacs_recalc_faces_except(cx, frame: Value, modified: Value) {
     // `frame-set-background-mode''s recalculation, in `face-list' order.
@@ -831,7 +837,7 @@ fn romacs_face_spec_choose(cx, spec: Value; optional frame: Value, no_match_retv
 }}
 
 // The work of `face-spec-set-match-display': t when the display requirement DISPLAY
-// of a face spec matches FRAME, else nil.
+// of a face spec matches FRAME (nil for the selected frame), else nil.
 defsubr! { name = "romacs--face-spec-set-match-display", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_spec_set_match_display(cx, display: Value, frame: Value) {
     let keys = cx.face_keys();
@@ -863,7 +869,8 @@ fn attrs_match(cx: &mut Leaf<'_>, keys: &FaceKeys, face: Value, attrs: Value, fr
 }
 
 // The work of `face-attr-match-p': t when FACE's attributes on FRAME (nil for the
-// selected frame) are those the plist ATTRS gives, else nil.
+// selected frame) are those the plist ATTRS gives, each attribute it omits unspecified,
+// else nil.  Signals an error when FACE is not a face there.
 defsubr! { name = "romacs--face-attr-match-p", gnu = "romacs:faces", effect = Reads,
 fn romacs_face_attr_match_p(cx, face: Value, attrs: Value; optional frame: Value) {
     let keys = cx.face_keys();

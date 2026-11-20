@@ -540,9 +540,10 @@ fn event_convert_list(cx, event_desc: Value) {
 defsubr! { name = "romacs--take-deferred-escape", gnu = "romacs:keyboard", effect = Global,
 fn take_deferred_escape(cx, id: Value) { cx.take_deferred_escape(id) }}
 
-// Arm the deadline of call GENERATION to fall MILLISECONDS from now, or with
-// GENERATION nil disarm the current one.  A deadline that falls while its call still runs
-// is taken as a C-g at the next safepoint.  Returns nil.
+// Arm the deadline of call GENERATION, a positive integer, to fall MILLISECONDS, a
+// natural number, from now, and return t; or with GENERATION nil disarm the current one
+// and return nil.  A deadline that falls while its call still runs is taken as a C-g at
+// the next safepoint.
 defsubr! { name = "romacs--call-deadline", gnu = "romacs:keyboard", effect = Global,
 fn call_deadline(cx, generation: Value; optional milliseconds: Value) { cx.call_deadline(generation, milliseconds) }}
 
