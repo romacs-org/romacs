@@ -13,6 +13,9 @@ mod entry_tests;
 #[cfg(test)]
 #[path = "regexp_cache_tests.rs"]
 mod cache_tests;
+#[cfg(test)]
+#[path = "regexp_plain_tests.rs"]
+mod plain_tests;
 
 #[cfg(test)]
 thread_local! {
@@ -20,6 +23,8 @@ thread_local! {
     /// and characters, and the strings they copied to read.
     static CONVERTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The syntax this thread's searches prepared (`regexp_syntax').
+    static PREPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 fn note(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>, n: usize) {
@@ -396,6 +401,24 @@ impl Vm {
         Ok(compiled)
     }
 
+    /// PATTERN's cached compilation for POSIX and KEY when it reads no syntax
+    /// or category table (`reads_lookup'), found from the string's own bytes:
+    /// such a pattern matches alike under any table, so its search needs
+    /// neither the current syntax nor the subject's properties, and passes
+    /// the constant `DefaultSyntaxLookup'. None leaves the search to the
+    /// full path, which compiles and caches as before.
+    fn regexp_plain_hit(&mut self, pattern: Value, posix: bool, key: Translation)
+        -> Option<std::rc::Rc<std::cell::RefCell<regex::CompiledPattern>>> {
+        self.regexp_cache.clock += 1;
+        let clock = self.regexp_cache.clock;
+        let view = self.str_view(pattern)?;
+        let entry = self.regexp_cache.patterns.get(view.bytes())?.iter().find(|e| e.multibyte == view.is_multibyte()
+            && e.posix == posix && e.translation == key && e.syntax.is_none()
+            && e.compiled.try_borrow().is_ok_and(|c| !c.reads_lookup()))?;
+        entry.used.set(clock);
+        Some(entry.compiled.clone())
+    }
+
     /// Drop the patterns whose compilation read a table's content: a
     /// syntax table's (`used_syntax`) or a case table's (a completion
     /// translation, which folds by the canon table's effective ranges, its
@@ -494,7 +517,39 @@ impl Vm {
     /// TRANSLATION), without touching the match data.
     pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, key: Translation,
                                        translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
-        Ok(self.string_search(pattern, string, key, translation)?.map(|(_, at, _)| at))
+        let run = |vm: &mut Self| -> SearchResult<Option<usize>> {
+            let (compiled, source) = match vm.regexp_plain_hit(pattern, false, key) {
+                Some(compiled) => (compiled, None),
+                None => {
+                    let pattern = vm.regexp_input(pattern)?;
+                    let source = vm.regexp_syntax(Some(string))?;
+                    (vm.regexp_pattern(&pattern, false, key, move || translation, &source)?, Some(source))
+                }
+            };
+            let mut compiled = compiled.borrow_mut();
+            let armed = vm.arm_regexp_quit();
+            // The string is read where it lies: nothing moves or changes it
+            // while the search borrows the VM.
+            let found = {
+                let input = vm.regexp_subject(string)?;
+                compiled.set_target_multibyte(input.multibyte);
+                let (bytes, end) = (&input.bytes[..], input.bytes.len() as isize);
+                match source {
+                    Some(source) => regex::re_search(&compiled, bytes, 0, end, &syntax::VmSyntax::new(vm, source), usize::MAX),
+                    None => regex::re_search(&compiled, bytes, 0, end, &regex::DefaultSyntaxLookup, usize::MAX),
+                }
+                .map(|(at, _)| at)
+            };
+            drop(compiled);
+            vm.regexp_quit(armed)?;
+            if regex::take_matcher_overflow() {
+                return Err(Fault::Text("error", regex::MATCHER_OVERFLOW_MESSAGE.into()));
+            }
+            Ok(found)
+        };
+        // A leaf reaches this search, and the matcher answers inspections.
+        let found = if crate::host::inspect_enabled() { self.with_site_leaf(run) } else { run(self) };
+        found.map_err(|fault| self.regexp_fault(fault))
     }
 
     /// [`Self::string_match_no_data`]'s match, as its groups in character positions.
@@ -1184,8 +1239,17 @@ impl Vm {
             return Err(Fault::Signal("args-out-of-range", vec![string, start]));
         };
         let folded = self.regexp_case_fold()?;
-        let source = self.regexp_syntax(Some(string))?;
-        let compiled = self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?;
+        let key = if folded { Translation::Standard } else { Translation::None };
+        let (compiled, source) = match self.regexp_plain_hit(pattern, posix, key) {
+            Some(compiled) => {
+                compiled.borrow_mut().set_target_multibyte(multibyte);
+                (compiled, None)
+            }
+            None => {
+                let source = self.regexp_syntax(Some(string))?;
+                (self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?, Some(source))
+            }
+        };
         let save = inhibit == Value::NIL && !self.regexp_preserve();
         let armed = self.arm_regexp_quit();
         // The string is read where it lies: nothing moves or changes it
@@ -1200,11 +1264,14 @@ impl Vm {
                 input.remember(all - rest, from);
             }
             let compiled = compiled.borrow();
-            let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(from);
             // GNU at_dot compares the text pointer with buffer point; a
             // standalone string cannot contain that buffer address.
-            let found = regex::re_search(&compiled, &input.bytes, byte, (input.bytes.len() - byte).cast_signed(), &syntax, usize::MAX);
+            let range = (input.bytes.len() - byte).cast_signed();
+            let found = match source {
+                Some(source) => regex::re_search(&compiled, &input.bytes, byte, range, &syntax::VmSyntax::new(self, source), usize::MAX),
+                None => regex::re_search(&compiled, &input.bytes, byte, range, &regex::DefaultSyntaxLookup, usize::MAX),
+            };
             match found {
                 Some((at, mut registers)) => {
                     // The match data's positions are characters of the string.
