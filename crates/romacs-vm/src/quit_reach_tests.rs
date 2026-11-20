@@ -422,8 +422,12 @@ fn kernels_the_engine_runs_quit_per_chunk() {
         assert!(signal.interrupt(), "a busy evaluator takes the press");
         assert!(call(&mut vm, p, &values, false).is_ok(), "{p:?}: without the scope the call ends with a value");
         assert!(signal.due(), "{p:?}: without the scope the press stays pending");
+        let consed = vm.allocation.consed.conses;
         let outcome = call(&mut vm, p, &values, true);
         assert_eq!(outcome.err().as_deref(), Some(crate::quit::ESCAPED), "{p:?}: no quit at its poll");
+        // `append' quits in its walk of an argument, before the new list's
+        // first cons: the walk polls, not only the build after it.
+        if p == Append { assert_eq!(vm.allocation.consed.conses, consed, "{args}: a cons made before the quit"); }
         let quit = vm.intern("quit");
         assert!(matches!(vm.propagated_escape, Some(crate::threaded::Escape::Signal(c, _)) if c == quit), "{p:?}: the quit is pending");
         vm.propagated_escape = None;
