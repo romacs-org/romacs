@@ -1,10 +1,16 @@
 //! A catalog Fontconfig reloads moves on, lists the font that made it
 //! reload, and still lists the fonts the process registered, as the GUI
 //! registers its bundled ones (romacs#318); a registered file that cannot be
-//! added to the reloaded configuration is added once it can. This binary's
-//! one test owns the process's Fontconfig and points `FONTCONFIG_FILE`,
-//! before Fontconfig starts, at a configuration whose only font directory
-//! starts empty and which checks for changes every second.
+//! added to the reloaded configuration is added once it can. The test runs
+//! again in a child whose `FONTCONFIG_FILE` names a configuration whose only
+//! font directory starts empty and which checks for changes every second.
+
+#![forbid(unsafe_code)]
+
+#[path = "../../romacs-vm/tests/support/own_test.rs"]
+mod own_test;
+#[path = "support/fontconfig_child.rs"]
+mod fontconfig_child;
 
 use romacs_font::entity::{self, Catalog};
 use std::path::Path;
@@ -28,18 +34,20 @@ fn install_and_wait(font: &Path, dir: &Path) {
 
 #[test]
 fn a_reloaded_catalog_lists_the_installed_font_and_the_registered_ones() {
-    let root = std::env::temp_dir().join(format!("romacs-catalog-reload-{}", std::process::id()));
+    let Some(root) = fontconfig_child::root() else {
+        let root = std::env::temp_dir().join(format!("romacs-catalog-reload-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("fonts")).unwrap();
+        std::fs::create_dir_all(root.join("registered")).unwrap();
+        let config = root.join("fonts.conf");
+        std::fs::write(&config, format!("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
+            <fontconfig><dir>{}</dir><cachedir>{}</cachedir><config><rescan><int>1</int></rescan></config></fontconfig>\n",
+            root.join("fonts").display(), root.join("cache").display())).unwrap();
+        let test = own_test::name(module_path!(), "a_reloaded_catalog_lists_the_installed_font_and_the_registered_ones");
+        fontconfig_child::run(&test, &root, &config);
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    };
     let (fonts, registered) = (root.join("fonts"), root.join("registered"));
-    std::fs::create_dir_all(&fonts).unwrap();
-    std::fs::create_dir_all(&registered).unwrap();
-    let config = root.join("fonts.conf");
-    std::fs::write(&config, format!("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
-        <fontconfig><dir>{}</dir><cachedir>{}</cachedir><config><rescan><int>1</int></rescan></config></fontconfig>\n",
-        fonts.display(), root.join("cache").display())).unwrap();
-    // UNSAFE(Fontconfig takes a configuration file before it starts only from FONTCONFIG_FILE, and std's set_var is unsafe)
-    // SAFETY: the binary's only test, before anything reads the environment
-    // on another thread.
-    unsafe { std::env::set_var("FONTCONFIG_FILE", &config) };
     let [regular, bold, italic, _] = romacs_test_fonts::bundled_iosevka();
     let bold_copy = registered.join("Iosevka-Bold.ttf");
     std::fs::copy(&bold, &bold_copy).unwrap();
@@ -65,5 +73,4 @@ fn a_reloaded_catalog_lists_the_installed_font_and_the_registered_ones() {
     let fourth = Catalog::current().expect("Fontconfig");
     assert_ne!(fourth, third, "adding the registered bold back moves the catalog");
     assert_eq!(weights(), [80, 80, 200], "the registered bold is listed again");
-    let _ = std::fs::remove_dir_all(&root);
 }

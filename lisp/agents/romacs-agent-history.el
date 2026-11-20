@@ -675,6 +675,8 @@ for SESSION: its end, from a prompt on."
   "?" #'describe-mode
   "g" #'undefined
   "e" #'undefined
+  "u" #'undefined
+  "D" #'undefined
   "q" #'quit-window
   "r" #'romacs-agent-history-resume-this)
 

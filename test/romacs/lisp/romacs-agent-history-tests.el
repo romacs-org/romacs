@@ -113,6 +113,9 @@
               (should (eq map romacs-agent-history-text-map))
               (should (eq (lookup-key map "r") #'romacs-agent-history-resume-this))
               (should (eq (lookup-key map [remap self-insert-command]) #'undefined))
+              ;; A turn of a transcript has no checkpoint to roll back or diff.
+              (should (eq (lookup-key map "u") #'undefined))
+              (should (eq (lookup-key map "D") #'undefined))
               (should (eq (lookup-key map "n") #'romacs-agent-log-next)))
             ;; As opened, point past the text: its keys still read it.
             (goto-char (point-max))

@@ -68,7 +68,7 @@
 (declare-function romacs-agent--codex-questions "romacs-agent-codex" (params))
 (declare-function romacs-agent-history-events "romacs-agent-history" (harness imported))
 
-(defcustom romacs-agent-log-output-lines 8
+(defcustom romacs-agent-log-output-lines 5
   "How many lines of a tool's output, or of its input, a chat shows
 under its call; RET on it shows all of it."
   :type 'natnum :group 'romacs-agent)
@@ -106,7 +106,7 @@ key colour raised to 4.5:1 on the header line: each as its default spec.
 A theme's or the user's own spec still wins."
   (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
     ;; A tool's output, and every dim word of a chat's rows: read, 4.5:1.
-    (dolist (face '(romacs-agent-log-output romacs-agent-dim))
+    (dolist (face '(romacs-agent-log-output romacs-agent-dim romacs-agent-log-note))
       (when (facep face)
         (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit shadow))) 'face-defface-spec))))
   (let* ((key (face-foreground 'help-key-binding nil t))
@@ -117,9 +117,10 @@ A theme's or the user's own spec still wins."
 
 (add-hook 'enable-theme-functions #'romacs-agent-log--derive)
 (add-hook 'disable-theme-functions #'romacs-agent-log--derive)
-(romacs-agent-log--derive)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
+;; Its faces derived once its dim faces are defined.
+(romacs-agent-log--derive)
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
   "An approval or a question that waits on the user.")
 (defface romacs-agent-log-allowed '((t :inherit success))
@@ -550,7 +551,9 @@ not, as (TEXT FACE TAIL), or nil: an error, a subagent's report, or a
 command's last lines (TAIL).  Anything else is RET away."
   (cond (failed (list (romacs-agent-log--failure output) 'romacs-agent-log-denied))
         ((member name '("Agent" "Task")) (list (romacs-agent-log--report output) 'romacs-agent-log-output))
-        ((romacs-agent-rows-tail-p name) (list output 'romacs-agent-log-output t))))
+        ((romacs-agent-rows-tail-p name)
+         ;; The harness's own trailer is no line of the command's.
+         (list (replace-regexp-in-string "\n*Shell cwd was reset to [^\n]*\n*\\'" "" output) 'romacs-agent-log-output t))))
 
 (defun romacs-agent-log--live (block text)
   "BLOCK's output streamed so far grows by TEXT: its last lines show under
@@ -1464,11 +1467,18 @@ shows it; its session loaded only then, as its records are read."
   (memq (romacs-agent-state (or session romacs-agent-log--session)) '(starting running waiting-approval)))
 
 (defun romacs-agent-log-send ()
-  "Send the composer's text: into the turn under way, when one runs."
+  "On the transcript, open the entry at point; in the composer, send its
+text (`romacs-agent-log-steer')."
   (interactive nil romacs-agent-log-mode)
   (if (< (point) romacs-agent-log--input)
       (romacs-agent-log-open)
-    (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text)))))
+    (romacs-agent-log-steer)))
+
+(defun romacs-agent-log-steer ()
+  "Send the composer's text now, wherever point is: into the turn under
+way, when one runs."
+  (interactive nil romacs-agent-log-mode)
+  (romacs-agent-log--deliver (lambda (text) (romacs-agent-log--act #'romacs-agent-log-source-send text))))
 
 (defun romacs-agent-log-queue ()
   "Send the composer's text once the turn under way ends."
@@ -1693,6 +1703,8 @@ A character typed on it goes to the composer."
   "RET" #'romacs-agent-log-open
   "w" #'romacs-agent-log-copy
   "e" #'romacs-agent-log-earlier
+  "u" #'romacs-agent-chat-rollback
+  "D" #'romacs-agent-chat-diff
   "g" #'romacs-agent-log-composer)
 
 (defvar-keymap romacs-agent-log-ask-map
@@ -1703,19 +1715,33 @@ A character typed on it goes to the composer."
   "d" #'romacs-agent-log-deny)
 
 (defvar-keymap romacs-agent-log-mode-map
-  :doc "Keys of an agent chat; the composer edits as any buffer does."
+  :doc "Keys of an agent chat; the composer edits as any buffer does.
+The session's commands are the menu's (romacs-agent-menu.el), here
+under C-c as well."
   "RET" #'romacs-agent-log-send
   "C-j" #'newline
   "S-<return>" #'newline
+  ;; The turn.
   "C-c C-c" #'romacs-agent-log-interrupt
+  "C-c C-i" #'romacs-agent-log-interrupt
   "C-c C-k" #'romacs-agent-log-interrupt-and-send
   "C-c C-q" #'romacs-agent-log-queue
+  "C-c C-s" #'romacs-agent-log-steer
+  "C-c C-a" #'romacs-agent-chat-attach
+  ;; What waits on the user.
   "C-c C-y" #'romacs-agent-log-allow
   "C-c C-d" #'romacs-agent-log-deny
   "C-c C-p" #'romacs-agent-log-next-ask
+  ;; The session.
+  "C-c C-n" #'romacs-agent-chat-new
+  "C-c C-r" #'romacs-agent-chat-rename
+  "C-c C-e" #'romacs-agent-chat-effort
+  ;; Elsewhere.
   "C-c C-j" #'romacs-agent-log-composer
   "C-c C-b" #'romacs-agents
+  "C-c C-t" #'romacs-agents
   "C-c C-o" #'romacs-agent-menu-map-popup
+  "C-c C-/" #'describe-mode
   "M-p" #'romacs-agent-log-history-previous
   "M-n" #'romacs-agent-log-history-next)
 
