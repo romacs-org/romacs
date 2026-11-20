@@ -26,7 +26,6 @@ tracing.workspace = true
 thiserror.workspace = true
 bytemuck.workspace = true
 pollster.workspace = true
-ash.workspace = true
 image.workspace = true
 png.workspace = true
 zune-jpeg.workspace = true
