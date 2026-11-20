@@ -110,7 +110,7 @@ rows says how it goes back."
                  (mark (format "%s%-2d" (cond (held "»") (own " ") (t "<")) (setq place (1+ place))))
                  (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
                  (room (max 8 (- width 3 (string-width mark)))))
-            (propertize (concat "  " (propertize mark 'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued-mark))
+            (propertize (concat "  " (propertize mark 'face (if held '(romacs-agent-log-queued-held bold) 'romacs-agent-log-queued-mark))
                                 " " (propertize (truncate-string-to-width line room nil nil (truncate-string-ellipsis))
                                                 'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued))
                                 "\n")
