@@ -201,6 +201,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     } else {
         vec![]
     };
+    let compile_processes = environment.clone();
     romacs_vm::compiled_lisp::configure(romacs_vm::compiled_lisp::Config {
         compiler,
         environment,
@@ -223,16 +224,20 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         // (a source boot, a session, a tree's process) loads what was
         // compiled, so it takes the published manifest checked against the
         // files now (`World::lisp_files_digest`): a changed file gives no
-        // identity, and the load compiles, which rebuilds the world.
+        // identity, and the load compiles, which rebuilds the world. Its
+        // environment records are asked of the compile environment, where
+        // the world is built and restored, not of this process's: a
+        // session's or an installer's LOGNAME is none of a compile's.
         identity: Box::new({
             let world = std::sync::OnceLock::new();
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
+            let environment = compile_processes.clone();
             move || {
                 let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
                 let lisp = match RESTORED.get() {
                     Some((store, key, manifest)) if *store == world.store && *key == world.key =>
                         romacs_vm::world::store::lisp_digest(manifest, &roots)?,
-                    _ => world.lisp_files_digest(&roots)?,
+                    _ => world.lisp_files_digest(&roots, &environment)?,
                 };
                 let libraries = romacs_vm::world::store::libraries_identity().ok()?;
                 Some(format!("compile build {} libraries {libraries} {GEOMETRY} lisp {lisp}", env!("ROMACS_BUILD_ID")))
