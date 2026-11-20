@@ -374,12 +374,12 @@ impl Service {
 fn reap(child: spawn::Child) {
     std::thread::spawn(move || {
         for _ in 0..40 {
-            if spawn::wait(spawn::Whom::Child(&child.pidfd)).is_some_and(|(_, status)| status.ended()) { return; }
+            if spawn::wait(&child.pidfd).is_some_and(spawn::Status::ended) { return; }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let _ = spawn::signal(&child.pidfd, None, libc::SIGKILL);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let _ = spawn::wait(spawn::Whom::Child(&child.pidfd));
+        let _ = spawn::wait(&child.pidfd);
     });
 }
 
