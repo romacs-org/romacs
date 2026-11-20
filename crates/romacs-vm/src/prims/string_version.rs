@@ -4,9 +4,7 @@ use super::*;
 // GNU compares the strings' internal bytes with gnulib filenvercmp.
 defsubr! { name = "string-version-lessp", gnu = "fns.c:577", effect = Pure,
 fn string_version_lessp(cx, first: Value, second: Value) {
-    let bytes = |value| -> std::result::Result<Vec<u8>, Fault> {
-        match cx.symbol_name(value) { Ok(name) => Ok(name.into_bytes()), Err(_) => Ok(cx.string_view(value)?.bytes) }
-    };
+    let bytes = |value| cx.with_text(value, |text| text.bytes.to_vec());
     Ok(if file_version_order(&bytes(first)?, &bytes(second)?).is_lt() { Value::TRUE } else { Value::NIL })
 }}
 

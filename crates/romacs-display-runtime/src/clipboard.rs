@@ -7,8 +7,6 @@ use winit::event_loop::OwnedDisplayHandle;
 
 #[cfg(target_os = "linux")]
 use arboard::{ClearExtLinux, GetExtLinux, LinuxClipboardKind, SetExtLinux};
-#[cfg(target_os = "linux")]
-use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
 mod text_policy;
 
@@ -46,19 +44,10 @@ impl ClipboardService {
     pub(crate) fn for_display(display: OwnedDisplayHandle, answers: Sender<crate::thread_comm::Fact>) -> Result<Self, String> {
         std::cfg_select! {
             target_os = "linux" => {
-                let raw_display = display
-                    .display_handle()
-                    .map_err(|err| format!("failed to access the native display: {err}"))?
-                    .as_raw();
-                if let RawDisplayHandle::Wayland(raw_display) = raw_display {
+                if let Some(clipboard) = crate::wayland_guest::SmithayClipboard::new(&display) {
                     tracing::info!(
                         "Clipboard service using the native Wayland data-device backend"
                     );
-                    // SAFETY: WaylandClipboard owns `display`, which keeps this
-                    // wl_display alive until after `clipboard` is dropped.
-                    let clipboard = unsafe {
-                        smithay_clipboard::Clipboard::new(raw_display.display.as_ptr())
-                    };
                     return Self::start(WaylandClipboard::new(clipboard, display), answers);
                 }
             }
@@ -307,10 +296,10 @@ impl ClipboardBackend for ArboardClipboard {
 
 #[cfg(target_os = "linux")]
 struct WaylandClipboard {
-    // Field order is significant: drop the protocol objects before their display.
-    clipboard: smithay_clipboard::Clipboard,
+    clipboard: crate::wayland_guest::SmithayClipboard,
     data_control: DataControl,
-    _display_owner: OwnedDisplayHandle,
+    /// Where the data-control reader binds, when it first reads.
+    display: OwnedDisplayHandle,
 }
 
 /// Lazily bound fallback for CLIPBOARD reads; see `wayland_data_control`.
@@ -323,11 +312,11 @@ enum DataControl {
 
 #[cfg(target_os = "linux")]
 impl WaylandClipboard {
-    fn new(clipboard: smithay_clipboard::Clipboard, display: OwnedDisplayHandle) -> Self {
+    fn new(clipboard: crate::wayland_guest::SmithayClipboard, display: OwnedDisplayHandle) -> Self {
         Self {
             clipboard,
             data_control: DataControl::Unbound,
-            _display_owner: display,
+            display,
         }
     }
 
@@ -352,17 +341,10 @@ impl WaylandClipboard {
     }
 
     fn bind_data_control(&self) -> Result<Option<wayland_data_control::DataControlReader>, String> {
-        let RawDisplayHandle::Wayland(raw_display) = self
-            ._display_owner
-            .display_handle()
-            .map_err(|err| format!("failed to access the native display: {err}"))?
-            .as_raw()
-        else {
-            return Ok(None);
-        };
-        // SAFETY: `_display_owner` keeps the display alive and is dropped
-        // after `data_control` (field order above).
-        unsafe { wayland_data_control::DataControlReader::connect(raw_display.display) }
+        match crate::wayland_guest::Guest::new(self.display.clone()) {
+            Some(guest) => wayland_data_control::DataControlReader::connect(guest),
+            None => Ok(None),
+        }
     }
 }
 
@@ -380,7 +362,7 @@ impl ClipboardBackend for WaylandClipboard {
             );
         };
         match selection {
-            ClipboardSelection::Clipboard => self.clipboard.store(text.to_owned()),
+            ClipboardSelection::Clipboard => self.clipboard.get().store(text.to_owned()),
         }
         // smithay-clipboard queues ownership requests to its protocol worker;
         // success here means accepted by that API, not compositor confirmation.
@@ -393,7 +375,7 @@ impl ClipboardBackend for WaylandClipboard {
         // selection.  Which selections may then consult the data-control
         // fallback is `text_policy::wayland_read`'s business.
         let native = match selection {
-            ClipboardSelection::Clipboard => self.clipboard.load(),
+            ClipboardSelection::Clipboard => self.clipboard.get().load(),
         };
         text_policy::wayland_read(selection, native, || self.data_control_text())
     }

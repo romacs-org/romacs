@@ -84,9 +84,12 @@ fn start(socket: &Path, detaching: bool, idle_ms: Option<u64>, build: Build) -> 
     serve(table, build)
 }
 
-/// Run the keeper as its arguments say. The first thing a keeper binary's
-/// `main` does: a resumed keeper adopts what it inherited before this
-/// image opens a descriptor of its own ([`crate::exec`]).
+/// Run the keeper as its arguments say.
+///
+/// Call it only as the process's entry point, before the program opens
+/// any descriptor of its own: on `--resume` it takes ownership of the
+/// inherited descriptor numbers the table names, and closes every other
+/// descriptor above the standard streams ([`crate::exec`]).
 #[must_use]
 pub fn main(build: Build) -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
