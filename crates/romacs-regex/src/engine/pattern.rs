@@ -350,10 +350,11 @@ impl CompiledPattern {
     }
 
     /// Whether matching may consult the `SyntaxLookup` it is given: for a
-    /// syntax class, a word or symbol boundary, a bracket class, or a
-    /// category. A pattern that does not reads the same under any table, so
-    /// a host may pass `DefaultSyntaxLookup` in place of the one it would
-    /// otherwise prepare.
+    /// syntax class, a word or symbol boundary, a bracket class that reads
+    /// the table, or a category. A pattern that does not reads the same
+    /// under any table, so a host may pass `DefaultSyntaxLookup` in place of
+    /// the one it would otherwise prepare. Conservative: a construct the
+    /// compiler then removes (`\w\{0\}`) still counts.
     #[inline]
     pub fn reads_lookup(&self) -> bool {
         self.reads_table || self.uses_categories
