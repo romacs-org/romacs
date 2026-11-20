@@ -38,6 +38,7 @@
 (require 'romacs-agent-board)
 (require 'romacs-agent-wire)
 (require 'romacs-agent-events)
+(require 'romacs-agent-turns)
 (require 'romacs-mcp)
 
 (defconst romacs-agent-service-version '(1 0)
@@ -805,17 +806,17 @@ meanwhile, or a read after a place would fold too many."
            (lambda (why) (funcall respond (list 'error -32603 "internal" why)))))))))
 
 (defun romacs-agent-service--turn-start (session turns end begin)
-  "The seq of the start of the turn TURNS turns back from before seq END,
-fewer when not that many are there, from SESSION's turn rows, each
-turn's first seq kept exactly; else (a turn whose row is not written
-yet) as the chat finds it (`romacs-agent-events-tail'), looked for from
-seq BEGIN, the session's start when it begins there.  Nil when it is
-before BEGIN, out of reach."
-  (let ((start (or (car (last (and (fboundp 'romacs-agent-turns-first-seqs)
-                                   (romacs-agent-turns-first-seqs session turns end))))
-                   (car (romacs-agent-events-tail session turns end begin))
-                   (and (zerop begin) 0))))
-    (and start (>= start begin) start)))
+  "The seq of a turn's start TURNS turns back from before seq END, fewer
+when the older start before seq BEGIN, out of reach; nil when none is in
+reach.  A turn starts at each row's first seq (romacs-agent-turns, each
+turn's kept exactly), and after the last row ends: records past it, the
+turns under way or not yet written, begin with no turn under way."
+  (let* ((rows (romacs-agent-turns-first-seqs session turns end))
+         (last (romacs-agent-turns-last-seq session))
+         (after (if last (1+ last) 0))
+         (starts (seq-filter (lambda (seq) (>= seq begin))
+                             (if (< after end) (cons after rows) rows))))
+    (car (last (seq-take starts turns)))))
 
 (defun romacs-agent-service--history-reply (rpc session upto epoch units reset)
   "A history reply of UNITS (each (SEQ . SENT)) through UPTO under EPOCH, or

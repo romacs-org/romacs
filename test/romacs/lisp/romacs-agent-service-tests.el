@@ -534,6 +534,14 @@ a state root of its own, and a service of its own on `socket'."
       (let ((romacs-agent-service--turn-reach 6))
         (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
                        (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
+      (let ((romacs-agent-service--turn-reach 6))
+        ;; More turns asked than reach: those in reach.
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 3))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+        ;; The last turn's row not written yet: it starts past the last row.
+        (sqlite-execute (romacs-agent-turns--db) "delete from turns where session = ? and first_seq = 14" (list id))
+        (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))
+                       (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil))))
       (let ((romacs-agent-service--turn-reach 3))
         (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1))))))))
 

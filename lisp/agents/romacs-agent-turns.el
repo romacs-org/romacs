@@ -457,7 +457,7 @@ batch process (`romacs-agent-turns-fill-soon'), not here."
 
 ;;; Filling
 
-(defun romacs-agent-turns--last (session)
+(defun romacs-agent-turns-last-seq (session)
   "The seq SESSION's latest row ends at, or nil with no row."
   (when-let* ((db (romacs-agent-turns--db)))
     (caar (sqlite-select db "select max(last_seq) from turns where session = ? and first_seq > 0" (list (romacs-agent-id session))))))
@@ -466,7 +466,7 @@ batch process (`romacs-agent-turns-fill-soon'), not here."
   "Write the rows of SESSION's turns its rows do not have yet: its records
 after its latest row (all of them with none) replayed into a copy, as
 they came.  The number written."
-  (let* ((last (romacs-agent-turns--last session))
+  (let* ((last (romacs-agent-turns-last-seq session))
          (from (if last (romacs-agent--journal-after session last) 0)))
     (if (not from) 0
       (let ((scratch (romacs-agent--scratch session)) (before (romacs-agent-turns-count session)))
@@ -638,7 +638,7 @@ whether it has rows before this page's."
                                            (if before " and first_seq < ?" "") " order by first_seq desc limit ?")
                                 (append (list id) (and before (list before)) (list (1+ limit))))))
       (list :rows (mapcar #'romacs-agent-turns--page-row (seq-take rows limit))
-            :after (romacs-agent-turns--last session)
+            :after (romacs-agent-turns-last-seq session)
             :more (> (length rows) limit)))))
 
 (defun romacs-agent-turns-first-after (session seq)

@@ -445,9 +445,10 @@ paging ever holds live delivery back.
 ** Pages
 - *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
   bounds =after < seq ≤ upto=:
-  - without =after=, about the last =turns= prompts (3 by default, 50
-    at most; a steer counts) ending at =upto=, fewer when they start
-    further back than 20,000 records;
+  - without =after=, the last =turns= turns (3 by default, 50 at most)
+    ending at =upto=, fewer when they start further back than 20,000
+    records; a turn starts at its row's first record, or past the last
+    row's end;
     =upto= set to just before the first unit goes further back;
   - with =after=, every record unit in the range.  A range over 4,000
     records, or one whose turn starts further back than 20,000, answers
