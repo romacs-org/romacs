@@ -51,9 +51,10 @@ one with nothing to resume.")
 
 (defun romacs-agent-history--read (file beg end keep)
   "The JSON objects of FILE's complete lines between bytes BEG and END, in
-order, that KEEP accepts: it is called with a line's first \"type\" and
-the line's end, point after that type, so it may look further.  A line
-BEG or END cuts is left out."
+order, that KEEP (a function of a parsed object) accepts.  Each line is
+parsed whole, however its writer spaced or ordered it.  A line BEG or
+END cuts is left out; the file's last line counts whole without its
+newline when END is the file's end."
   (with-temp-buffer
     (set-buffer-multibyte nil)
     ;; From the byte before BEG: a line starting at BEG is whole.
@@ -61,23 +62,25 @@ BEG or END cuts is left out."
     (goto-char (point-min))
     ;; Cut at the start: a line's tail, or the newline before BEG.
     (when (> beg 0) (forward-line 1))
-    (let ((objects nil))
-      (while (search-forward "\n" nil t)
-        (let ((line-end (1- (point))) (line-start (line-beginning-position 0)))
-          (goto-char line-start)
-          (when (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t)
-                     (funcall keep (match-string 1) line-end))
+    (let ((objects nil)
+          (whole-end (>= end (or (file-attribute-size (file-attributes file)) end))))
+      (while (< (point) (point-max))
+        (let* ((line-start (point))
+               (newline (search-forward "\n" nil t))
+               (line-end (if newline (1- newline) (point-max))))
+          (when (or newline whole-end)
             (let ((object (ignore-errors
                             (json-parse-string (decode-coding-string (buffer-substring-no-properties line-start line-end)
                                                                      'utf-8)
                                                :object-type 'hash-table :null-object :null :false-object :false))))
-              (when (hash-table-p object) (push object objects))))
-          (goto-char (1+ line-end))))
+              (when (and (hash-table-p object) (funcall keep object)) (push object objects))))
+          (goto-char (if newline newline (point-max)))))
       (nreverse objects))))
 
-(defun romacs-agent-history--payload-type (line-end)
-  "The next \"type\" on the line, before LINE-END: a Codex payload's."
-  (and (re-search-forward "\"type\":\"\\([^\"]*\\)\"" line-end t) (match-string 1)))
+(defun romacs-agent-history--field (object &rest keys)
+  "OBJECT's value at KEYS, each a key of the object the last one gave."
+  (while (and keys (hash-table-p object)) (setq object (gethash (pop keys) object)))
+  (and (null keys) object))
 
 (defun romacs-agent-history--title (text)
   "TEXT's first line, as a title (`romacs-agent--task-line'); nil for
@@ -102,9 +105,9 @@ result, an injected context)."
 
 ;;; Claude Code
 
-(defun romacs-agent-history--claude-keep (type _line-end)
-  ;; An assistant line's first type is its message's.
-  (member type '("user" "message" "assistant")))
+(defun romacs-agent-history--claude-keep (object)
+  "Whether Claude Code's transcript line OBJECT is a message's."
+  (member (gethash "type" object) '("user" "message" "assistant")))
 
 (defun romacs-agent-history--claude-files (dir _limit)
   "Claude Code's transcripts under DIR: (PATH SIZE MTIME)."
@@ -176,17 +179,18 @@ project it was run, or nil."
 
 ;;; Codex
 
-(defun romacs-agent-history--codex-keep (type line-end)
-  (pcase type
+(defun romacs-agent-history--codex-keep (object)
+  "Whether Codex's rollout line OBJECT is one its history reads."
+  (pcase (gethash "type" object)
     ((or "session_meta" "turn_context") t)
     ("response_item"
-     (member (romacs-agent-history--payload-type line-end)
+     (member (romacs-agent-history--field object "payload" "type")
              '("message" "function_call" "function_call_output" "custom_tool_call" "custom_tool_call_output"
                "local_shell_call" "web_search_call")))
     ("event_msg"
-     (pcase (romacs-agent-history--payload-type line-end)
+     (pcase (romacs-agent-history--field object "payload" "type")
        ((or "user_message" "task_complete" "token_count") t)
-       ("item_completed" (save-excursion (re-search-forward "\"item\":{\"type\":\"UserMessage\"" line-end t)))))))
+       ("item_completed" (equal (romacs-agent-history--field object "payload" "item" "type") "UserMessage"))))))
 
 (defun romacs-agent-history--codex-files (dir limit)
   "Codex's rollouts under DIR, newest days first, until LIMIT are found:
@@ -697,7 +701,9 @@ as `pop-to-buffer' does with ACTION."
         (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
         (romacs-agent-log--header-show)))
     (pop-to-buffer buffer action)
+    ;; On its last entry, its end in view: nothing here is typed at.
     (goto-char (point-max))
+    (romacs-agent-log-previous 1)
     (recenter -1)
     buffer))
 

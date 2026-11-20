@@ -1,5 +1,6 @@
 ;;; word-command-test.el --- GNU word commands on the native substrate -*- lexical-binding: t -*-
 ;; SPDX-License-Identifier: GPL-3.0-or-later
+;; romacs-test: editor (needs simple.el's word kill commands and the global keymap)
 
 (require 'romacs-test)
 

@@ -519,7 +519,78 @@
     (should (equal (mapcar #'car romacs-agent-log--asks) '("c")))
     (draw :type 'exit :status 1)
     (should (string-match-p "the harness exited with it unanswered" (romacs-agent-log-tests--transcript)))
-    (should-not romacs-agent-log--asks)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-a-history-drawn-whole-says-each-ask-once ()
+  ;; Another machine's history, drawn before what it waits on now: an ask
+  ;; settled later in it says how, once; one left open says its turn ended.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "e" :tool "Bash")
+      (draw :type 'approval :request-id "f" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'answered :request-id "e" :how 'harness))
+    (should (equal (mapcar #'car romacs-agent-log--ended-asks) '("f")))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (= 1 (how-many "the turn ended with it unanswered" (point-min) (point-max))))
+      (should (string-match-p "harness" text)))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-ask-said-late-keeps-its-place ()
+  ;; Said where its turn ended: a reply streaming since goes on unbroken.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "h" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'delta :message "m" :text "Hel"))
+    (romacs-agent-log--sync-asks session)
+    (draw :type 'delta :message "m" :text "lo there")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Hello there" text))
+      (should (< (string-search "the turn ended with it unanswered" text) (string-search "Hello" text))))))
+
+(ert-deftest romacs-agent-log-an-ask-ends-where-it-first-ended ()
+  ;; Its harness exited with it open; a later run's turn ends: it ended
+  ;; at the exit, said once.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "i" :tool "Bash")
+      (draw :type 'exit :status 1)
+      (draw :type 'delta :message "m2" :text "later run")
+      (draw :type 'done))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (= 1 (how-many "the harness exited with it unanswered" (point-min) (point-max))))
+      (should-not (string-match-p "the turn ended with it unanswered" text))
+      (should (< (string-search "exited with it unanswered" text) (string-search "later run" text))))
+    (should-not romacs-agent-log--ended-asks)))
+
+(ert-deftest romacs-agent-log-an-answer-without-its-actor-says-who ()
+  ;; A service older than :actor sends who alone.
+  (romacs-agent-log-tests--with
+    (draw :type 'attributed :request-id "g" :by "policy" :decision "allow" :scope "once")
+    (should (string-match-p "allowed by Romacs" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-an-ask-let-go-after-its-exit-says-so ()
+  ;; Another machine's service sends the exit before it lets the ask go:
+  ;; said once it does, not lost.
+  (romacs-agent-log-tests--with
+    (puthash "d" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "d" :tool "Bash")
+    (draw :type 'exit :status 1)
+    (should-not (string-match-p "exited with it unanswered" (romacs-agent-log-tests--transcript)))
+    (should (equal (mapcar #'car romacs-agent-log--asks) '("d")))
+    (remhash "d" (romacs-agent-approvals session))
+    (romacs-agent-log--sync-asks session)
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "the harness exited with it unanswered" text))
+      (should (= 1 (how-many "exited with it unanswered" (point-min) (point-max)))))
+    (should-not romacs-agent-log--asks)
+    (should-not romacs-agent-log--ended-asks)))
 
 (ert-deftest romacs-agent-log-earlier-turns-draw-no-live-asks ()
   ;; An approval in the earlier turns whose settling the shown ones hold.
@@ -732,10 +803,14 @@
         notes raised)
     (puthash "tool_name" "Bash" request)
     (puthash "b" request (romacs-agent-approvals session))
+    (puthash "c" request (romacs-agent-approvals session))
     (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
               ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note notes))))
       (romacs-agent-respond session "b" t nil 'user)
-      (romacs-agent-respond session "b" nil "no" '(:kind policy :login "ci" :client "phone")))
+      ;; A request is answered once: a second answer is refused, noted by no one.
+      (should-error (romacs-agent-respond session "b" nil "no" 'policy) :type 'user-error)
+      (should (= (length notes) 1))
+      (romacs-agent-respond session "c" nil "no" '(:kind policy :login "ci" :client "phone")))
     (pcase-let ((`(,second ,first) notes))
       (should (equal (gethash "by" first) "user"))
       (should (equal (gethash "login" first) (user-login-name)))
@@ -782,6 +857,98 @@
     (draw :type 'tool :state 'started :id "x" :name "Bash" :input (romacs-agent-log-tests--input "command" "seq 2"))
     (draw :type 'tool-output :id "x" :text "line 2\n")
     (should (string-match-p "⋮ running: 2 lines so far\n    line 1\n    line 2" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-interrupt-and-send-asks-the-live-session ()
+  ;; A restored chat shows its row, idle; its session, loaded, runs a
+  ;; turn: that turn is interrupted, the text sent first once it ends.
+  (romacs-agent-log-tests--with
+    (let ((live (romacs-agent--make :id "L" :harness 'claude :state 'running)) (calls nil))
+      (setf (romacs-agent-state session) 'idle)
+      (cl-letf (((symbol-function 'romacs-agent-loaded) (lambda (_) nil))
+                ((symbol-function 'romacs-agent-get) (lambda (_) live))
+                ((symbol-function 'romacs-agent-interrupt) (lambda (s) (push (list 'interrupt s) calls)))
+                ((symbol-function 'romacs-agent-send-later) (lambda (s text &optional first) (push (list 'later s text first) calls)))
+                ((symbol-function 'romacs-agent-send) (lambda (s text &rest _) (push (list 'send s text) calls))))
+        (goto-char (point-max))
+        (insert "stop that")
+        (romacs-agent-log-interrupt-and-send))
+      (should (equal (reverse calls) (list (list 'interrupt live) (list 'later live "stop that" t)))))))
+
+;; A chat's source.
+
+(cl-defstruct (romacs-agent-log-tests--source (:constructor romacs-agent-log-tests--source))
+  calls approvals (chats (make-hash-table :test #'equal)))
+
+(defun romacs-agent-log-tests--called (source &rest call)
+  (push call (romacs-agent-log-tests--source-calls source)))
+
+(cl-defmethod romacs-agent-log-source-fill ((source romacs-agent-log-tests--source) session)
+  (romacs-agent-log-tests--called source 'fill)
+  (romacs-agent-log-draw session '(:type input :text "from the source" :seq 1 :last t)))
+(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-log-tests--source) _session text &optional when)
+  (romacs-agent-log-tests--called source 'send text when))
+(cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'interrupt))
+(cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-log-tests--source) _session id allow reason)
+  (romacs-agent-log-tests--called source 'respond id allow reason))
+(cl-defmethod romacs-agent-log-source-seen ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--called source 'seen))
+(cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-log-tests--source))
+  (romacs-agent-log-tests--source-chats source))
+(cl-defmethod romacs-agent-log-source-approvals ((source romacs-agent-log-tests--source) _session)
+  (romacs-agent-log-tests--source-approvals source))
+
+(ert-deftest romacs-agent-log-reads-and-acts-through-its-source ()
+  ;; A chat of another source draws what it gives and acts through it
+  ;; alone: none of this editor's sessions is touched, its policy answers
+  ;; none of its requests, and its session commands are not offered.
+  (let* ((source (romacs-agent-log-tests--source :approvals (make-hash-table :test #'equal)))
+         (session (romacs-agent--make :id "S-remote" :harness 'claude :state 'running :title "far"))
+         (romacs-agent-approval-policy 'allow)
+         (buffer (romacs-agent-log-chat session nil source)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (error "Sent here")))
+                  ((symbol-function 'romacs-agent-send-later) (lambda (&rest _) (error "Queued here")))
+                  ((symbol-function 'romacs-agent-interrupt) (lambda (&rest _) (error "Interrupted here")))
+                  ((symbol-function 'romacs-agent-respond) (lambda (&rest _) (error "Answered here")))
+                  ((symbol-function 'romacs-agent-mark-seen) (lambda (&rest _) (error "Seen here"))))
+          (with-current-buffer buffer
+            (should (string-match-p "from the source" (buffer-string)))
+            (should-not (romacs-agent-log--commands-p))
+            (should-not romacs-agent-ui--session)
+            (should-not desktop-save-buffer)
+            (should (stringp warm-restart-left-out))
+            ;; Drawn, it holds nothing typed; a draft typed, it does.
+            (should-not (buffer-modified-p))
+            (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
+              (type "now")
+              (should (buffer-modified-p))
+              (romacs-agent-log-send)
+              (should-not (buffer-modified-p))
+              (type "later") (romacs-agent-log-queue)
+              (romacs-agent-log-interrupt)
+              (type "after") (romacs-agent-log-interrupt-and-send))
+            (puthash "r1" t (romacs-agent-log-tests--source-approvals source))
+            (romacs-agent-log-draw session '(:type approval :request-id "r1" :tool "Bash"))
+            (goto-char (point-max))
+            (romacs-agent-log-allow)
+            (romacs-agent-log-deny "no")
+            (romacs-agent-log-show session nil source)
+            (should (equal (reverse (romacs-agent-log-tests--source-calls source))
+                           '((fill) (send "now" nil) (send "later" later) (interrupt) (send "after" interrupt)
+                             (respond "r1" t nil) (respond "r1" nil "no") (seen)))))
+          ;; This editor's own session of the same id has a chat of its own.
+          (let ((local (romacs-agent-log-chat (romacs-agent--make :id "S-remote" :harness 'claude :state 'idle) t)))
+            (unwind-protect
+                (progn (should-not (eq local buffer))
+                       (should (eq (buffer-local-value 'romacs-agent-log--source local) romacs-agent-log-local))
+                       (with-current-buffer local
+                         (should (romacs-agent-log--commands-p))
+                         (should romacs-agent-ui--session)
+                         (should desktop-save-buffer)))
+              (remhash "S-remote" romacs-agent-log--chats)
+              (kill-buffer local))))
+      (kill-buffer buffer))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

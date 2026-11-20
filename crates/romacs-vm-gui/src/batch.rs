@@ -45,6 +45,12 @@ pub fn run(args: Vec<String>, quick: bool, store: Option<PathBuf>) -> Result<(),
         let mut vm = Vm::new();
         vm.set_frame_geometry(1000, 700, 20, 10)?;
         super::startup::initialize_files_from_sources(&mut vm, &[], &root)?;
+        // A file of Romacs's Lisp that signalled, which a session goes on
+        // without, fails a headless run: each, with its file and line.
+        let noted = super::startup::noted_lisp_errors(&mut vm)?;
+        if !noted.is_empty() {
+            return Err(noted.iter().filter_map(|error| error["error"].as_str()).collect::<Vec<_>>().join("\n"));
+        }
         if let Some(path) = init {
             if !super::user_init::load(&mut vm, &path)? {
                 return Err(format!("Explicit init file does not exist: {}", path.display()));
@@ -107,8 +113,12 @@ const COMPILE_STORE: &str = "ROMACS_COMPILED_LISP_STORE";
 
 /// A compile process's whole environment, for the store STORE: the
 /// [`COMPILE_INHERITS`] names, a HOME and temporary directory of its own
-/// in the store (HOME is its working directory too) and the C.UTF-8
-/// locale. None of the user's HOME, XDG directories, locale or identity
+/// in the store (HOME is its working directory too), the C.UTF-8 locale
+/// and compiled Lisp on. It is the compile world's too, which a compile
+/// process builds, so the compile identity asks that world's environment
+/// records of it; what differs from one compile to the next (the file
+/// compiled, the process that started it: `compiled_lisp::compile_command`)
+/// is no part of it. None of the user's HOME, XDG directories, locale or identity
 /// reaches a compile, as none reaches GNU's installed `.elc`
 /// files, which `make` compiled: what a compile makes of a file is the
 /// same under every HOME, and every HOME shares it.
@@ -116,7 +126,8 @@ fn compile_environment(store: &Path) -> Vec<(OsString, OsString)> {
     COMPILE_INHERITS.iter()
         .filter_map(|name| Some((OsString::from(name), std::env::var_os(name)?)))
         .chain([("HOME".into(), store.join("home").into()), ("TMPDIR".into(), store.join("tmp").into()),
-                ("LANG".into(), "C.UTF-8".into()), (COMPILE_STORE.into(), store.into())])
+                ("LANG".into(), "C.UTF-8".into()), (COMPILE_STORE.into(), store.into()),
+                ("ROMACS_COMPILED_LISP".into(), "on".into())])
         .collect()
 }
 
@@ -176,6 +187,21 @@ pub fn configure_worker_compiled_lisp(store: PathBuf) {
     configure_store(store, false, true);
 }
 
+/// The installation's Lisp trees, every directory of it a session loads
+/// Lisp from by name: DIR, its lisp/ (canonical), with its bundled
+/// `load-path' (each walked whole), and the installation's themes,
+/// `custom-theme-load-path''s `t': the themes/ of `data-directory', the
+/// etc/ of RUNTIME_ROOT (forwarded.rs), which every session loads its stock
+/// theme from, wherever ROMACS_LISP_DIR puts lisp/. Canonical, as DIR is and
+/// as a load names its file, through a symlinked runtime root too.
+fn installation_lisp(dir: &Path, runtime_root: &Path) -> Vec<PathBuf> {
+    let mut trees = vec![dir.to_owned()];
+    trees.extend(super::startup::bundled_load_path(dir).unwrap_or_default());
+    let themes = romacs_vm::host::canonicalize(runtime_root.join("etc/themes"));
+    trees.extend(themes.ok().filter(|themes| themes.is_dir()));
+    trees
+}
+
 /// Load compiled Lisp from STORE; COMPILES when this process may compile
 /// into it; DEFER_MISSES when no load may wait for a compile.
 fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
@@ -187,11 +213,8 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     // it, or the executable's place). Artifacts and the compile identity name
     // its files relative to it (`compiled_lisp::Config::root`). A Lisp tree
     // with no such tree around it: every file by its path.
-    let root = dir.parent()
-        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
-        .map(Path::to_path_buf);
-    let mut runtime = vec![dir.clone()];
-    runtime.extend(super::startup::bundled_load_path(&dir).unwrap_or_default());
+    let root = tree_root(&dir);
+    let runtime = installation_lisp(&dir, &romacs_vm::host::runtime_root());
     let environment = compile_environment(&store);
     let recipe = recipe(&dir);
     let worlds = store.join("worlds");
@@ -201,6 +224,7 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
     } else {
         vec![]
     };
+    let compile_processes = environment.clone();
     romacs_vm::compiled_lisp::configure(romacs_vm::compiled_lisp::Config {
         compiler,
         environment,
@@ -212,14 +236,30 @@ fn configure_store(store: PathBuf, compiles: bool, defer_misses: bool) {
         // the libraries it loaded, the compile world's geometry and the Lisp
         // its build read, named relative to the tree. Not the executable's
         // file: two builds of one commit differ there (romacs#277). The world
-        // is made once (its key still binds the executable); only whether its
-        // build was published is asked again.
+        // is made once (its key still binds the executable).
+        //
+        // Which manifest names the Lisp. A process that restored the compile
+        // world (a compile process) takes the manifest of the image it runs
+        // (`RESTORED`), unchecked: the key then labels what it compiles with
+        // the code that compiled it, whatever was published since. If a
+        // preloaded file changed, that key is one no loader's matches, which
+        // costs an unused artifact, never a wrong load. Any other process
+        // (a source boot, a session, a tree's process) loads what was
+        // compiled, so it takes the published manifest checked against the
+        // files now (`World::lisp_files_digest`): a changed file gives no
+        // identity, and the load compiles, which rebuilds the world. Its
+        // environment records are asked of the compile environment, where
+        // the world is built and restored, not of this process's: a
+        // session's or an installer's LOGNAME is none of a compile's.
         identity: Box::new({
             let world = std::sync::OnceLock::new();
             let roots: Vec<PathBuf> = root.iter().cloned().collect();
+            let environment = compile_processes;
             move || {
-                let lisp = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?
-                    .lisp_files_digest(&roots)?;
+                let world = world.get_or_init(|| World::new(worlds.clone(), recipe.clone()).ok()).as_ref()?;
+                let (source, lisp) = compile_lisp_digest(world, &roots, &environment, RESTORED.get());
+                diagnose(&serde_json::json!({"compile_identity": source, "lisp": lisp}));
+                let lisp = lisp?;
                 let libraries = romacs_vm::world::store::libraries_identity().ok()?;
                 Some(format!("compile build {} libraries {libraries} {GEOMETRY} lisp {lisp}", env!("ROMACS_BUILD_ID")))
             }
@@ -246,6 +286,8 @@ pub fn compile_lisp(file: PathBuf, store: Option<PathBuf>) -> Result<(), String>
             let dirs: Vec<PathBuf> = path.lines().map(PathBuf::from).collect();
             vm.set_load_path(&dirs)?;
         }
+        // The tree's compile checks what it finds on the same `load-path'.
+        println!("romacs-compile-load-path: {}", serde_json::to_string(&vm.compile_load_path()?).map_err(|e| e.to_string())?);
         let (artifact, held) = vm.compile_lisp_file(&file)?;
         if held { println!("romacs-compile-held"); }
         println!("romacs-compiled: {}", artifact.display());
@@ -302,6 +344,38 @@ fn restarted(mut vm: Vm) -> Result<Vm, String> {
     Ok(vm)
 }
 
+/// The tree the Lisp directory DIR lies in, by its true name (DIR is
+/// canonical): the directory holding it as `lisp/` beside `etc/`, as every
+/// runtime tree does. None for a Lisp tree with no such tree around it.
+fn tree_root(dir: &Path) -> Option<PathBuf> {
+    dir.parent()
+        .filter(|tree| dir.file_name().is_some_and(|n| n == "lisp") && tree.join("etc").is_dir())
+        .map(Path::to_path_buf)
+}
+
+/// The digest of the Lisp compiled code made against WORLD (the compile
+/// world) is keyed by, named relative to ROOTS, and which manifest gave it:
+/// `restored`, the manifest of the world this process RESTORED, when that
+/// is WORLD (a compile process), else `published`, WORLD's published
+/// manifest checked against the files now, its environment records against
+/// ENVIRONMENT, a compile process's (`configure_store` says why).
+fn compile_lisp_digest(world: &World, roots: &[PathBuf], environment: &[(OsString, OsString)],
+                       restored: Option<&(PathBuf, [u8; 32], serde_json::Value)>) -> (&'static str, Option<String>) {
+    match restored {
+        Some((store, key, manifest)) if *store == world.store && *key == world.key =>
+            ("restored", romacs_vm::world::store::lisp_digest(manifest, roots)),
+        _ => ("published", world.lisp_files_digest(roots, environment)),
+    }
+}
+
+/// The world this process restored, by its store and key, with the manifest
+/// of the image it runs: what compiled Lisp it makes is keyed by. A process
+/// static, as the compiled-Lisp configuration is: that configuration, with
+/// its identity, is made before `boot` runs (`compiled_lisp::configure`
+/// reads the process while it is single threaded) and asked lazily by
+/// loads long after, where `boot`'s result is out of reach.
+static RESTORED: std::sync::OnceLock<(PathBuf, [u8; 32], serde_json::Value)> = std::sync::OnceLock::new();
+
 /// The batch session's VM up to the chain's end: a world restored, then
 /// this process's startup steps; else the chain from source, as a session
 /// without worlds boots, while a builder prepares the world for the next
@@ -319,8 +393,9 @@ fn boot(store: Option<PathBuf>, wait: bool) -> Result<Vm, String> {
     let launched = romacs_vm::flight::without(|| world(store, &dir).map(|world| (world.launch::<()>(|| builder_args(&world), wait, |_| {}), world)));
     let Some((launched, world)) = launched else { return chain(&dir) };
     match launched {
-        Launch::Restored { vm, .. } => {
+        Launch::Restored { vm, manifest, .. } => {
             diagnose(&serde_json::json!({"mode": "restored", "store": world.store, "guard": format!("{:?}", romacs_vm::world::arena::executable_guard())}));
+            let _ = RESTORED.set((world.store.clone(), world.key, manifest));
             restarted(*vm)
         }
         Launch::Build => {
@@ -467,4 +542,52 @@ fn command_line_options(args: Vec<String>, mut quick: bool) -> (bool, Vec<String
         rest.next();
     }
     (quick, rest.collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A runtime root reached through a symlink names its themes by their
+    /// true path, as a load of a theme names its file.
+    #[test]
+    fn the_installations_themes_are_named_by_their_true_path() {
+        let root = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("romacs-installation-lisp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real/etc/themes")).unwrap();
+        std::fs::create_dir_all(root.join("real/lisp")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        let trees = installation_lisp(&root.join("real/lisp"), &root.join("link"));
+        assert!(trees.contains(&root.join("real/etc/themes")), "{trees:?}");
+        assert!(!trees.iter().any(|tree| tree.starts_with(root.join("link"))), "{trees:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A compile process keys by the manifest of the world it restored,
+    /// whatever was published since; any other process, or one that
+    /// restored another store's world, by the published manifest.
+    #[test]
+    fn a_compile_process_keys_by_the_world_it_restored() {
+        let store = std::env::temp_dir().join(format!("romacs-compile-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store);
+        std::fs::create_dir_all(&store).unwrap();
+        let key = [0x3c; 32];
+        let world = World { store: store.clone(), key, recipe: vec![] };
+        // Each manifest read a file that is not there: it holds as long as
+        // that stays so, and the two name different Lisp.
+        let manifest = |name: &str| serde_json::json!({"records": [{"kind": "file-read",
+            "path": store.join(name).to_str().unwrap(), "result": {"errno": libc::ENOENT}}]});
+        let (v1, v2) = (manifest("v1.el"), manifest("v2.el"));
+        let published = store.join(format!("{}.json", key.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        std::fs::write(&published, v2.to_string()).unwrap();
+        let roots = [store.clone()];
+        let digest = |m| romacs_vm::world::store::lisp_digest(m, &roots);
+        assert_ne!(digest(&v1), digest(&v2));
+        let restored = (store.clone(), key, v1.clone());
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], Some(&restored)), ("restored", digest(&v1)), "the restored world");
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], None), ("published", digest(&v2)), "the published world");
+        let elsewhere = (store.join("other"), key, v1.clone());
+        assert_eq!(compile_lisp_digest(&world, &roots, &[], Some(&elsewhere)), ("published", digest(&v2)), "another store's world");
+        let _ = std::fs::remove_dir_all(&store);
+    }
 }

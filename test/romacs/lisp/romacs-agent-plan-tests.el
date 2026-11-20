@@ -231,7 +231,7 @@
       (setq romacs-agent-log--session session
             romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
       (set-marker-insertion-type romacs-agent-log--end t)
-      (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda () session)))
+      (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) session)))
         ;; A replayed plan offers nothing; the live one its row, by y.
         (let ((romacs-agent-log--replaying t))
           (romacs-agent-log-draw session '(:type plan :text "0. old" :proceed t)))

@@ -36,7 +36,9 @@ The rule, by path:
   anything else (the workspace's manifests, the toolchain, the test tools)
       everything.
 The structural rules (STRUCTURAL) run whatever changed, and a crate's own
-rules (CRATE_RULES) when it changed. A change that reaches romacs-vm-gui's
+rules (CRATE_RULES) when it changed. A test of PATH_GATED runs only for its
+paths (or its own file), though its package is selected: the answer leaves it
+(`leave`), unless everything runs. A change that reaches romacs-vm-gui's
 binary or the runtime tree it reads calls for every standard harness
 (HARNESSES); HARNESS_RULES add others for their paths.
 """
@@ -74,6 +76,28 @@ GATE_ONLY = 'test(/(^|::)parity_ratchet_/)'
 # changes, so a small gate does not build every such crate's tests.
 CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test(/(^|::)time_discipline_test::/)'}
 
+# Tests too costly for every change that reaches their package, each with
+# the paths that call for it beside its own file and fixtures: it runs for
+# those, and in the full gate. The Lisp tree's compile (lisp_tree_compiles.rs,
+# 2 to 19 minutes cold, and cold for every new build) for the compiled-Lisp
+# store; the compiler's own modules, whose job is compiling Lisp to the VM's
+# code (request_code, expand, variable_definitions, capture, sealed) or
+# producing what an artifact holds of it (closure_key, a compiled function's
+# key); and the Lisp a file's compile walks it with: romacs-compile.el, and
+# the macro expansion and closure conversion it calls (macroexp, byte-run,
+# bytecomp, cconv). Left to the full gate the nightly runs: a Lisp file that
+# comes to fail to compile; the compiler's functions that live in lib.rs
+# (Vm::compile, build_function and the rest) and the reader (reader/, which
+# the compile walk reads each form through), both shared by every load and
+# read by every other test; and the compile pipeline outside these paths
+# (world/, batch.rs).
+PATH_GATED = {
+    'romacs-vm-gui::lisp_tree_compiles': re.compile(
+        r'^(?:crates/romacs-vm/src/compiled_lisp/'
+        r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed|closure_key)\.rs$'
+        r'|lisp/emacs-lisp/(?:romacs-compile|macroexp|byte-run|bytecomp|cconv)\.el$)'),
+}
+
 # The live harnesses a check runs for any change that reaches the editor
 # (crates/romacs-vm-gui/harness/NAME_live.py, each taking --binary and --output).
 HARNESSES = ('world', 'autoloads', 'completion', 'fontify', 'timers', 'popup', 'lines', 'find_file',
@@ -83,6 +107,9 @@ HARNESS_RULES = (
     # The agent client end to end (sessions, selections and restarts, relays, tools).
     (re.compile(r'^(?:lisp/agents/romacs-(?:agent|mcp)[^/]*\.el|crates/romacs-mcp/'
                 r'|crates/romacs-vm-gui/harness/(?:agent_live|fake_[a-z]+)\.py)'), 'agent'),
+    # A startup that fails holds its screen until the window is closed: the evaluator's end
+    # (main.rs, exit.rs), the screen (loading.rs) and the Lisp errors it shows (startup.rs).
+    (re.compile(r'^crates/romacs-vm-gui/src/(?:main|exit|loading|startup)\.rs$'), 'startup_failed'),
     # The working thread: drawn by the render thread while the main VM is busy.
     (re.compile(r'^(?:lisp/ui/romacs-(?:working|animate)\.el|crates/romacs-logo/src/working\.rs'
                 r'|crates/romacs-display-protocol/src/text_animation\.rs'
@@ -199,7 +226,8 @@ def select(paths, root, metadata):
         pattern = re.compile(rf'["/]{re.escape(tree)}/|join\("{re.escape(tree)}"\)')
         return sorted({owner(path)[0] for path, text in sources.items() if pattern.search(text)} - {None})
 
-    for path in sorted(set(paths)):
+    paths = sorted(set(paths))
+    for path in paths:
         if QUIET.search(path):
             continue
         for rx, name in HARNESS_RULES:
@@ -249,7 +277,11 @@ def select(paths, root, metadata):
     if reasons:
         return {'everything': True, 'reasons': reasons, 'packages': {}, 'files': {}, 'lisp': lisp, 'filter': None,
                 'harnesses': {name: 'everything runs' for name in HARNESSES} | harnesses,
-                'packages_to_build': sorted(dirs)}
+                'packages_to_build': sorted(dirs), 'leave': []}
+    # A gated test its package would run, which no path calls for.
+    leave = sorted(test for test, rx in PATH_GATED.items()
+                   if test.split('::')[0] in packages and test not in files
+                   and not any(rx.match(path) for path in paths))
     if EDITOR in packages:
         for name in HARNESSES:
             harnesses.setdefault(name, f'{EDITOR}: {packages[EDITOR]}')
@@ -257,9 +289,12 @@ def select(paths, root, metadata):
                                                              if crate in packages]
     terms = [f'package({name})' for name in sorted(packages)] + \
             [test_file(f) for f in sorted(files) if f.split('::')[0] not in packages] + rules
+    left = ' | '.join(test_file(test) for test in leave)
     build = {name for name in packages} | {f.split('::')[0] for f in files} | {b.split('::')[0] for b in STRUCTURAL}
+    joined = ' | '.join(terms)
     return {'everything': False, 'reasons': [], 'packages': packages, 'files': files, 'harnesses': harnesses,
-            'lisp': lisp, 'filter': ' | '.join(terms), 'packages_to_build': sorted(build)}
+            'lisp': lisp, 'filter': f'({joined}) & not ({left})' if leave else joined,
+            'packages_to_build': sorted(build), 'leave': leave}
 
 
 def runs(answer, root, leave=()):
@@ -267,9 +302,11 @@ def runs(answer, root, leave=()):
     nextest filter)], for a caller that runs each package alone; None when
     everything runs. A package's filter keeps the terms that name it. LEAVE
     are test files, `PACKAGE::FILE` (as SLOW_RULES), that no run takes, though
-    the answer reaches them: a package's filter then ends `& not (...)`."""
+    the answer reaches them, with the answer's own (`PATH_GATED`): a
+    package's filter then ends `& not (...)`."""
     if answer['everything']:
         return None
+    leave = set(leave) | set(answer.get('leave', []))
     terms = {}
     for name in answer['packages']:
         terms.setdefault(name, []).append(f'package({name})')

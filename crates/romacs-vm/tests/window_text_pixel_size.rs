@@ -158,8 +158,12 @@ fn window_el_fits_a_bottom_side_window_under_the_status_bar() {
 
 #[test]
 fn keymap_popup_window_matches_pinned_gnu() {
-    let library = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lisp/packages/keymap-popup/keymap-popup.el");
-    let journey = format!(r#"(progn (load {:?} nil t) (eval '(keymap-popup-define wtps-test-map "Test popup." :group "Files" "f" ("Find file" ignore) "s" ("Save" ignore) :group "Other" "x" ("Extra" ignore) "l" ("A longer description of a command" ignore)) t) (keymap-popup wtps-test-map) (prog1 (let ((w (cadr (window-list)))) (list (length (window-list)) (window-total-height w) (window-body-height w) (window-text-pixel-size w nil t nil (frame-pixel-height) t) (with-current-buffer (window-buffer w) (buffer-substring-no-properties (point-min) (point-max))))) (keymap-popup-dismiss)))"#, library.canonicalize().unwrap().display().to_string());
+    // keymap-popup lays its menus out with romacs-grid.el, which GNU -Q
+    // does not have on its load path: both engines load it first.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let library = root.join("lisp/packages/keymap-popup/keymap-popup.el");
+    let grid = root.join("lisp/ui/romacs-grid.el").canonicalize().unwrap().display().to_string();
+    let journey = format!(r#"(progn (load {grid:?} nil t) (load {:?} nil t) (eval '(keymap-popup-define wtps-test-map "Test popup." :group "Files" "f" ("Find file" ignore) "s" ("Save" ignore) :group "Other" "x" ("Extra" ignore) "l" ("A longer description of a command" ignore)) t) (keymap-popup wtps-test-map) (prog1 (let ((w (cadr (window-list)))) (list (length (window-list)) (window-total-height w) (window-body-height w) (window-text-pixel-size w nil t nil (frame-pixel-height) t) (with-current-buffer (window-buffer w) (buffer-substring-no-properties (point-min) (point-max))))) (keymap-popup-dismiss)))"#, library.canonicalize().unwrap().display().to_string());
     compare(&mut gnu_ert_vm::bootstrapped(), &journey);
 }
 
