@@ -1,32 +1,40 @@
 //! `romacs-relay`: the agent session protocol (doc/agent-protocol.org) over a
-//! tailnet. It holds no agent logic: it carries the protocol's lines between
-//! a WebSocket and the agents service's Unix socket.
+//! tailnet. It holds no agent logic: it carries the protocol's messages, one
+//! JSON line each, between a WebSocket and the agents service's Unix socket.
 //!
 //! `romacs-relay serve [--socket PATH] [--service PATH] [--page FILE]`
 //! listens on a private Unix socket that `tailscale serve --https=443
 //! unix:PATH` publishes on the tailnet. `GET /` serves the phone page;
-//! `/agents` upgrades to a WebSocket. Before anything else, the request must
-//! carry `Tailscale-User-Login` (Serve sets it for a user's device, and strips
-//! what a caller sends) naming a login of the allowlist,
+//! `GET /agents` upgrades to a WebSocket. Before anything else, the request
+//! must carry `Tailscale-User-Login` (Serve sets it for a user's device, and
+//! strips what a caller sends) naming a login of the allowlist,
 //! `$XDG_CONFIG_HOME/romacs/relay.json` (`{"allow": ["LOGIN"]}`), and an
-//! `Origin`, when there is one, must be the page's own. The relay then
-//! connects to the service's `service-relay.sock` and says first who called
+//! `Origin`, when there is one, must be the page's own: Serve passes the
+//! public authority as `X-Forwarded-Host`. The relay then connects to the
+//! service's `service-relay.sock` and says first who called
 //! (`agents/transport`); a caller's message naming that method is dropped.
 //!
 //! `romacs-relay connect URL --socket PATH` runs on another machine: each
 //! connection to its local socket is carried over one WebSocket to URL
 //! (`wss://HOST/agents`), so a Romacs there speaks to a Unix socket, as it
 //! does at home. When either end goes, so does the other.
+//!
+//! Its sockets are in directories of the user's alone, under
+//! `$XDG_RUNTIME_DIR`: only a stale socket of the user's is ever replaced.
+//! Every read is bounded (a request head, a line, a WebSocket message), and
+//! every write is given a deadline, so a stalled peer ends its connection
+//! rather than pin the relay.
 #![forbid(unsafe_code)]
 
 use serde_json::{Value as Json, json};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
+use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket};
 
 const USAGE: &str = "usage: romacs-relay serve [--socket PATH] [--service PATH] [--page FILE]\n       romacs-relay connect URL --socket PATH\n       romacs-relay check [--socket PATH]";
@@ -41,16 +49,29 @@ const HEAD_LIMIT: usize = 64 * 1024;
 /// How long a WebSocket read waits before the relay looks at the other end.
 const POLL: Duration = Duration::from_millis(25);
 
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
+/// How long a connection, a handshake or a write may take before its
+/// connection is given up.
+const DEADLINE: Duration = Duration::from_secs(10);
+
+/// The lines read from the Unix end and not yet sent on: past them, its
+/// reader waits, and so does the end it reads from.
+const QUEUE: usize = 64;
+
+fn ws_config() -> WebSocketConfig {
+    WebSocketConfig::default().max_message_size(Some(MESSAGE_LIMIT)).max_frame_size(Some(MESSAGE_LIMIT))
 }
 
-fn default_socket() -> PathBuf {
-    runtime_dir().join("romacs/relay/http.sock")
+fn runtime_dir() -> Result<PathBuf, String> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
+        .ok_or_else(|| "XDG_RUNTIME_DIR is not set: the relay's sockets live there".into())
 }
 
-fn default_service() -> PathBuf {
-    runtime_dir().join("romacs/agents/service/service-relay.sock")
+fn default_socket() -> Result<PathBuf, String> {
+    Ok(runtime_dir()?.join("romacs/relay/http.sock"))
+}
+
+fn default_service() -> Result<PathBuf, String> {
+    Ok(runtime_dir()?.join("romacs/agents/service/service-relay.sock"))
 }
 
 fn allowlist_file() -> PathBuf {
@@ -93,9 +114,10 @@ impl<S: Write> Write for Prefixed<S> {
     fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
 }
 
-/// A request's head: its path and headers (names lowercased), and the bytes
-/// read, which the WebSocket handshake reads again.
+/// A request's head: its method, path and headers (names lowercased), and
+/// the bytes read, which the WebSocket handshake reads again.
 struct Head {
+    method: String,
     path: String,
     headers: Vec<(String, String)>,
     bytes: Vec<u8>,
@@ -107,7 +129,7 @@ impl Head {
     }
 }
 
-/// Read a request's head from STREAM, none past `HEAD_LIMIT`.
+/// Read a request's head from STREAM, none longer than `HEAD_LIMIT`.
 fn read_head(stream: &mut impl Read) -> Result<Head, String> {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -118,28 +140,30 @@ fn read_head(stream: &mut impl Read) -> Result<Head, String> {
         let mut headers = [httparse::EMPTY_HEADER; 64];
         let mut request = httparse::Request::new(&mut headers);
         match request.parse(&bytes) {
-            Ok(httparse::Status::Complete(_)) => {
+            Ok(httparse::Status::Complete(length)) if length <= HEAD_LIMIT => {
+                let method = request.method.unwrap_or("").to_owned();
                 let path = request.path.unwrap_or("/").to_owned();
                 let headers = request.headers.iter()
                     .map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).into_owned()))
                     .collect();
-                return Ok(Head { path, headers, bytes });
+                return Ok(Head { method, path, headers, bytes });
             }
             Ok(httparse::Status::Partial) if bytes.len() < HEAD_LIMIT => {}
-            Ok(httparse::Status::Partial) => return Err("the request's head is too long".into()),
+            Ok(_) => return Err("the request's head is too long".into()),
             Err(error) => return Err(error.to_string()),
         }
     }
 }
 
 /// Why HEAD may not reach the agents, or none: its caller's login must be
-/// in ALLOWED, and its Origin, when it has one, the page's own.
+/// in ALLOWED, and its Origin, when it has one, the page's own (the public
+/// authority, which Serve passes as X-Forwarded-Host).
 fn refusal(head: &Head, allowed: &[String]) -> Option<&'static str> {
     let Some(login) = head.header("tailscale-user-login") else { return Some("no tailnet login") };
     if !allowed.iter().any(|allowed| allowed == login) { return Some("this login may not") }
     if let Some(origin) = head.header("origin") {
-        let host = head.header("host").unwrap_or("");
-        if origin != format!("https://{host}") { return Some("another site's page") }
+        let authority = head.header("x-forwarded-host").or(head.header("host")).unwrap_or("");
+        if origin != format!("https://{authority}") { return Some("another site's page") }
     }
     None
 }
@@ -151,31 +175,38 @@ fn respond(stream: &mut impl Write, status: &str, kind: &str, body: &[u8]) {
     let _ = stream.flush();
 }
 
-/// Whether LINE, a client's message, names the transport method: only the
-/// relay says who called.
-fn names_transport(line: &str) -> bool {
-    serde_json::from_str::<Json>(line).ok()
-        .is_some_and(|message| message.get("method").and_then(Json::as_str) == Some("agents/transport"))
+/// Whether TEXT, a caller's message, may go on to the service: one line,
+/// not naming the transport method (only the relay says who called).
+fn carried(text: &str) -> bool {
+    !text.contains(['\n', '\r'])
+        && serde_json::from_str::<Json>(text).ok()
+            .is_none_or(|message| message.get("method").and_then(Json::as_str) != Some("agents/transport"))
+}
+
+/// One line from READER, its newline left out: none at its end, past
+/// `MESSAGE_LIMIT`, or unended (a line cut short is no message).
+fn read_line(reader: &mut BufReader<UnixStream>) -> Option<String> {
+    let mut line = Vec::new();
+    let n = reader.by_ref().take(MESSAGE_LIMIT as u64 + 2).read_until(b'\n', &mut line).ok()?;
+    if n == 0 || line.last() != Some(&b'\n') { return None }
+    line.pop();
+    if line.last() == Some(&b'\r') { line.pop(); }
+    String::from_utf8(line).ok()
 }
 
 /// Carry messages between WS and LOCAL, a Unix stream of lines, until either
-/// ends: each text message a line, each line a text message; a line DROP
-/// says is not carried on. WS's underlying stream reads with a timeout
-/// (`POLL`), so its reads give way to the local end's lines.
-fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, drop: fn(&str) -> bool) {
-    let (lines_tx, lines) = mpsc::channel::<Option<String>>();
-    let reading = match local.try_clone() { Ok(reading) => reading, Err(_) => return };
+/// ends: each text message a line (those CARRY refuses not, one with a
+/// newline ending it all), each line a text message.  WS's stream reads with
+/// a timeout (`POLL`), so its reads give way to LOCAL's lines; both write
+/// with a deadline.  At the end LOCAL is shut, which ends its reader.
+fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&str) -> bool) {
+    let (lines_tx, lines) = mpsc::sync_channel::<Option<String>>(QUEUE);
+    let (Ok(reading), Ok(())) = (local.try_clone(), local.set_write_timeout(Some(DEADLINE))) else { return };
     let mut writing = local;
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reading);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(n) if n > MESSAGE_LIMIT + 1 => break,
-                Ok(_) => { if lines_tx.send(Some(line.trim_end_matches(['\n', '\r']).to_owned())).is_err() { return } }
-            }
+        while let Some(line) = read_line(&mut reader) {
+            if lines_tx.send(Some(line)).is_err() { return }
         }
         let _ = lines_tx.send(None);
     });
@@ -183,8 +214,8 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, drop: fn(&str
         match ws.read() {
             Ok(Message::Text(text)) => {
                 let text = text.as_str();
-                if text.len() > MESSAGE_LIMIT { break }
-                if !drop(text) && writeln!(writing, "{}", text.trim_end_matches(['\n', '\r'])).is_err() { break }
+                if text.contains(['\n', '\r']) { break }
+                if carry(text) && writeln!(writing, "{text}").is_err() { break }
             }
             Ok(Message::Close(_)) => break,
             Ok(_) => {}
@@ -200,19 +231,24 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, drop: fn(&str
             }
         }
     }
+    let _ = writing.shutdown(std::net::Shutdown::Both);
+    drop(lines);
     let _ = ws.close(None);
     let _ = ws.flush();
-    let _ = writing.shutdown(std::net::Shutdown::Both);
 }
 
 /// Serve one connection from tailscale's Serve on STREAM.
 fn serve_one(mut stream: UnixStream, service: &Path, page: Option<&Path>, allowed: &[String]) {
+    if stream.set_read_timeout(Some(DEADLINE)).is_err() || stream.set_write_timeout(Some(DEADLINE)).is_err() { return }
     let head = match read_head(&mut stream) {
         Ok(head) => head,
         Err(_) => return respond(&mut stream, "400 Bad Request", "text/plain", b"bad request\n"),
     };
     if let Some(why) = refusal(&head, allowed) {
         return respond(&mut stream, "403 Forbidden", "text/plain", format!("{why}\n").as_bytes());
+    }
+    if head.method != "GET" {
+        return respond(&mut stream, "405 Method Not Allowed", "text/plain", b"GET only\n");
     }
     match head.path.split('?').next().unwrap_or("") {
         "/" => match page.and_then(|page| std::fs::read(page).ok()) {
@@ -222,32 +258,58 @@ fn serve_one(mut stream: UnixStream, service: &Path, page: Option<&Path>, allowe
         "/agents" => {
             let login = head.header("tailscale-user-login").unwrap_or("").to_owned();
             let peer = head.header("tailscale-user-name").unwrap_or("").to_owned();
+            let prefixed = Prefixed { prefix: head.bytes, at: 0, inner: stream };
+            let Ok(mut ws) = tungstenite::accept_with_config(prefixed, Some(ws_config())) else { return };
             let Ok(mut agents) = UnixStream::connect(service) else {
-                return respond(&mut stream, "503 Service Unavailable", "text/plain", b"the agents service is not running\n");
+                let _ = ws.close(Some(tungstenite::protocol::CloseFrame {
+                    code: tungstenite::protocol::frame::coding::CloseCode::Again,
+                    reason: "the agents service is not running".into(),
+                }));
+                let _ = ws.flush();
+                return;
             };
             let transport = json!({"jsonrpc": "2.0", "method": "agents/transport",
                                    "params": {"via": "tailnet", "login": login, "peer": peer}});
-            if writeln!(agents, "{transport}").is_err() { return }
-            if stream.set_read_timeout(Some(POLL)).is_err() { return }
-            let prefixed = Prefixed { prefix: head.bytes, at: 0, inner: stream };
-            if let Ok(mut ws) = tungstenite::accept(prefixed) { pump(&mut ws, agents, names_transport) }
+            if agents.set_write_timeout(Some(DEADLINE)).is_err() || writeln!(agents, "{transport}").is_err() { return }
+            if ws.get_ref().inner.set_read_timeout(Some(POLL)).is_err() { return }
+            pump(&mut ws, agents, carried);
         }
         _ => respond(&mut stream, "404 Not Found", "text/plain", b"not found\n"),
     }
 }
 
+/// Make DIR a directory of the user's alone: made so when missing; one
+/// there must already be the user's (as the runtime directory is) and
+/// closed to others, never changed here.
 fn private_dir(dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| format!("{}: {e}", dir.display()))
+    let owner = std::fs::metadata(runtime_dir()?).map_err(|e| e.to_string())?.uid();
+    if !dir.exists() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !meta.is_dir() || meta.uid() != owner || meta.mode() & 0o077 != 0 {
+        return Err(format!("{}: not a directory of the user's alone", dir.display()));
+    }
+    Ok(())
 }
 
-/// Listen on SOCKET, in a directory of its own, replacing a socket nothing
-/// answers at.
+/// Listen on SOCKET, in a directory of the user's alone, replacing only a
+/// socket of the user's that refuses connections.
 fn listen(socket: &Path) -> Result<UnixListener, String> {
-    if let Some(dir) = socket.parent() { private_dir(dir)?; }
-    if socket.exists() {
-        if UnixStream::connect(socket).is_ok() { return Err(format!("{}: something answers there", socket.display())) }
-        std::fs::remove_file(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    let dir = socket.parent().ok_or_else(|| format!("{}: no directory", socket.display()))?;
+    private_dir(dir)?;
+    if let Ok(meta) = std::fs::symlink_metadata(socket) {
+        let owner = std::fs::metadata(dir).map_err(|e| e.to_string())?.uid();
+        if !meta.file_type().is_socket() || meta.uid() != owner {
+            return Err(format!("{}: there, and no socket of the user's", socket.display()));
+        }
+        match UnixStream::connect(socket) {
+            Ok(_) => return Err(format!("{}: something answers there", socket.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                std::fs::remove_file(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+            }
+            Err(error) => return Err(format!("{}: {error}", socket.display())),
+        }
     }
     UnixListener::bind(socket).map_err(|e| format!("{}: {e}", socket.display()))
 }
@@ -276,30 +338,41 @@ fn tls() -> Arc<rustls::ClientConfig> {
     Arc::new(config)
 }
 
-/// Carry LOCAL, one connection to the local socket, over a WebSocket to URL.
-fn connect_one(local: UnixStream, url: &str, tls: Arc<rustls::ClientConfig>) {
-    let host_port = url.split("://").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or("");
-    let address = if host_port.contains(':') { host_port.to_owned() } else { format!("{host_port}:443") };
-    let Ok(tcp) = std::net::TcpStream::connect(&address) else { return };
-    let Ok((mut ws, _)) = tungstenite::client_tls_with_config(url, tcp, None, Some(tungstenite::Connector::Rustls(tls)))
+/// URL's host and port, a wss:// URL's.
+fn endpoint(url: &str) -> Result<(String, u16), String> {
+    let uri: tungstenite::http::Uri = url.parse().map_err(|e| format!("{url}: {e}"))?;
+    if uri.scheme_str() != Some("wss") { return Err(format!("{url}: a wss:// URL")) }
+    let host = uri.host().ok_or_else(|| format!("{url}: no host"))?.to_owned();
+    Ok((host, uri.port_u16().unwrap_or(443)))
+}
+
+/// Carry LOCAL, one connection to the local socket, over a WebSocket to URL,
+/// at HOST:PORT: connected and shaken hands within the deadline.
+fn connect_one(local: UnixStream, url: &str, (host, port): (String, u16), tls: Arc<rustls::ClientConfig>) {
+    use std::net::ToSocketAddrs;
+    let Some(address) = (host.as_str(), port).to_socket_addrs().ok().and_then(|mut all| all.next()) else { return };
+    let Ok(tcp) = std::net::TcpStream::connect_timeout(&address, DEADLINE) else { return };
+    if tcp.set_read_timeout(Some(DEADLINE)).is_err() || tcp.set_write_timeout(Some(DEADLINE)).is_err() { return }
+    let Ok((mut ws, _)) = tungstenite::client_tls_with_config(url, tcp, Some(ws_config()),
+                                                              Some(tungstenite::Connector::Rustls(tls)))
     else { return };
-    // Polled once connected: the handshakes above wait as long as they take.
+    // Polled once connected.
     let socket = match ws.get_ref() {
         tungstenite::stream::MaybeTlsStream::Rustls(stream) => &stream.sock,
         tungstenite::stream::MaybeTlsStream::Plain(stream) => stream,
         _ => return,
     };
     if socket.set_read_timeout(Some(POLL)).is_err() { return }
-    pump(&mut ws, local, |_| false);
+    pump(&mut ws, local, |_| true);
 }
 
 fn connect(url: String, socket: &Path) -> Result<(), String> {
-    if !url.starts_with("wss://") { return Err(format!("{url}: a wss:// URL")) }
+    let endpoint = endpoint(&url)?;
     let listener = listen(socket)?;
     let tls = tls();
     for local in listener.incoming().map_while(Result::ok) {
-        let (url, tls) = (url.clone(), tls.clone());
-        std::thread::spawn(move || connect_one(local, &url, tls));
+        let (url, endpoint, tls) = (url.clone(), endpoint.clone(), tls.clone());
+        std::thread::spawn(move || connect_one(local, &url, endpoint, tls));
     }
     Ok(())
 }
@@ -309,14 +382,15 @@ fn check(socket: &Path) -> Result<(), String> {
     let status = std::process::Command::new("tailscale").args(["serve", "status"]).output()
         .map_err(|e| format!("tailscale: {e}"))?;
     let text = String::from_utf8_lossy(&status.stdout);
+    let target = format!("unix:{}", socket.display());
     let allowed = allowlist(&allowlist_file());
     println!("socket: {}", socket.display());
     println!("allowlist: {} ({} login{})", allowlist_file().display(), allowed.len(), if allowed.len() == 1 { "" } else { "s" });
-    if text.contains(&*socket.to_string_lossy()) {
+    if text.split_whitespace().any(|word| word == target) {
         println!("tailscale serves it:\n{text}");
         Ok(())
     } else {
-        Err(format!("tailscale does not serve it: run\n  tailscale serve --bg --https=443 unix:{}", socket.display()))
+        Err(format!("tailscale does not serve it: run\n  tailscale serve --bg --https=443 {target}"))
     }
 }
 
@@ -333,15 +407,15 @@ fn main() {
     let socket = option("--socket").map(PathBuf::from);
     let result = match command.as_str() {
         "serve" => {
-            let service = option("--service").map(PathBuf::from).unwrap_or_else(default_service);
+            let service = option("--service").map(PathBuf::from);
             let page = option("--page").map(PathBuf::from);
-            serve(&socket.unwrap_or_else(default_socket), service, page)
+            (|| serve(&socket.map_or_else(default_socket, Ok)?, service.map_or_else(default_service, Ok)?, page))()
         }
         "connect" => match (rest.first().cloned(), socket) {
             (Some(url), Some(socket)) => connect(url, &socket),
             _ => Err(USAGE.into()),
         },
-        "check" => check(&socket.unwrap_or_else(default_socket)),
+        "check" => socket.map_or_else(default_socket, Ok).and_then(|socket| check(&socket)),
         _ => Err(USAGE.into()),
     };
     if let Err(error) = result {
@@ -368,17 +442,34 @@ mod tests {
         assert_eq!(refusal(&head(&["Host: box.ts.net", "Tailscale-User-Login: me@example",
                                    "Origin: https://evil.example"]), &allowed),
                    Some("another site's page"));
-        assert_eq!(refusal(&head(&["Host: box.ts.net", "Tailscale-User-Login: me@example",
-                                   "Origin: https://box.ts.net"]), &allowed), None);
+        // As Serve passes it: Host rewritten, the public authority forwarded.
+        assert_eq!(refusal(&head(&["Host: localhost", "X-Forwarded-Host: box.ts.net",
+                                   "Tailscale-User-Login: me@example", "Origin: https://box.ts.net"]), &allowed), None);
+        assert_eq!(refusal(&head(&["Host: localhost", "X-Forwarded-Host: box.ts.net",
+                                   "Tailscale-User-Login: me@example", "Origin: https://localhost"]), &allowed),
+                   Some("another site's page"));
         // A native client sends no Origin.
         assert_eq!(refusal(&head(&["Host: box.ts.net", "Tailscale-User-Login: me@example"]), &allowed), None);
     }
 
     #[test]
-    fn only_the_relay_says_who_called() {
-        assert!(names_transport(r#"{"jsonrpc":"2.0","method":"agents/transport","params":{"login":"x"}}"#));
-        assert!(!names_transport(r#"{"jsonrpc":"2.0","id":1,"method":"agents/hello","params":{}}"#));
-        assert!(!names_transport("not json"));
+    fn a_head_past_its_limit_is_refused() {
+        let text = format!("GET / HTTP/1.1\r\nX-Pad: {}\r\n\r\n", "x".repeat(HEAD_LIMIT));
+        assert!(read_head(&mut text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn only_the_relay_says_who_called_and_a_message_is_one_line() {
+        assert!(!carried(r#"{"jsonrpc":"2.0","method":"agents/transport","params":{"login":"x"}}"#));
+        assert!(carried(r#"{"jsonrpc":"2.0","id":1,"method":"agents/hello","params":{}}"#));
+        assert!(!carried("{\"jsonrpc\":\"2.0\"}\n{\"method\":\"agents/transport\"}"));
+    }
+
+    #[test]
+    fn only_a_wss_url_is_connected_to() {
+        assert_eq!(endpoint("wss://box.ts.net/agents"), Ok(("box.ts.net".to_owned(), 443)));
+        assert_eq!(endpoint("wss://box.ts.net:8443/agents"), Ok(("box.ts.net".to_owned(), 8443)));
+        assert!(endpoint("ws://box.ts.net/agents").is_err());
     }
 
     /// A fake agents service: its socket, and the lines it was sent, each
@@ -398,22 +489,27 @@ mod tests {
         (socket, rx)
     }
 
-    #[test]
-    fn a_websocket_reaches_the_service_after_its_caller_is_named() {
-        let dir = std::env::temp_dir().join(format!("romacs-relay-ws-{}", std::process::id()));
-        private_dir(&dir).unwrap();
-        let (service, said) = fake_service(&dir);
-        let (relay_end, client_end) = UnixStream::pair().unwrap();
-        let allowed = vec!["me@example".to_owned()];
-        std::thread::spawn(move || serve_one(relay_end, &service, None, &allowed));
+    fn upgrade(client_end: UnixStream) -> WebSocket<UnixStream> {
         let request = tungstenite::http::Request::builder()
-            .uri("ws://box.ts.net/agents").header("Host", "box.ts.net")
+            .uri("ws://box.ts.net/agents").header("Host", "localhost").header("X-Forwarded-Host", "box.ts.net")
+            .header("Origin", "https://box.ts.net")
             .header("Tailscale-User-Login", "me@example").header("Tailscale-User-Name", "Me")
             .header("Connection", "Upgrade").header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
             .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
             .body(()).unwrap();
-        let (mut ws, _) = tungstenite::client(request, client_end).unwrap();
+        tungstenite::client(request, client_end).unwrap().0
+    }
+
+    #[test]
+    fn a_websocket_reaches_the_service_after_its_caller_is_named() {
+        let dir = std::env::temp_dir().join(format!("romacs-relay-ws-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (service, said) = fake_service(&dir);
+        let (relay_end, client_end) = UnixStream::pair().unwrap();
+        let allowed = vec!["me@example".to_owned()];
+        std::thread::spawn(move || serve_one(relay_end, &service, None, &allowed));
+        let mut ws = upgrade(client_end);
         // Who called comes first, from the relay; a caller's own is dropped.
         let first: Json = serde_json::from_str(&said.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
         assert_eq!(first["method"], "agents/transport");
@@ -429,6 +525,9 @@ mod tests {
             if let Message::Text(text) = ws.read().unwrap() { echoes.push(text.as_str().to_owned()) }
         }
         assert!(echoes[1].contains("agents/hello"));
+        // A message of two lines ends the connection: neither reaches the service.
+        ws.send(Message::text("{\"id\":2,\"method\":\"agents/hello\"}\n{\"id\":3}")).unwrap();
+        assert!(said.recv_timeout(Duration::from_millis(500)).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -443,18 +542,20 @@ mod tests {
     }
 
     #[test]
-    fn the_page_is_served_at_the_root() {
+    fn the_page_is_served_at_the_root_to_a_get() {
         let dir = std::env::temp_dir().join(format!("romacs-relay-page-{}", std::process::id()));
-        private_dir(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         let page = dir.join("index.html");
         std::fs::write(&page, "<p>agents</p>").unwrap();
-        let (relay_end, mut client_end) = UnixStream::pair().unwrap();
-        let allowed = vec!["me@example".to_owned()];
-        std::thread::spawn(move || serve_one(relay_end, Path::new("/nonexistent"), Some(&page), &allowed));
-        write!(client_end, "GET / HTTP/1.1\r\nHost: box.ts.net\r\nTailscale-User-Login: me@example\r\n\r\n").unwrap();
-        let mut reply = String::new();
-        client_end.read_to_string(&mut reply).unwrap();
-        assert!(reply.starts_with("HTTP/1.1 200") && reply.ends_with("<p>agents</p>"), "{reply}");
+        for (method, status) in [("GET", "200"), ("POST", "405")] {
+            let (relay_end, mut client_end) = UnixStream::pair().unwrap();
+            let (allowed, page) = (vec!["me@example".to_owned()], page.clone());
+            std::thread::spawn(move || serve_one(relay_end, Path::new("/nonexistent"), Some(&page), &allowed));
+            write!(client_end, "{method} / HTTP/1.1\r\nHost: box.ts.net\r\nTailscale-User-Login: me@example\r\n\r\n").unwrap();
+            let mut reply = String::new();
+            client_end.read_to_string(&mut reply).unwrap();
+            assert!(reply.starts_with(&format!("HTTP/1.1 {status}")), "{reply}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
