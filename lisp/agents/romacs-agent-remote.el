@@ -123,7 +123,8 @@ as its live events are drawn."
   (when-let* ((source romacs-agent-remote--source)
               ((eq client (romacs-agent-remote-client source))))
     (pcase notice
-      (`(row ,row) (romacs-agent-remote--mirror source row)))
+      (`(row ,row) (romacs-agent-remote--mirror source row))
+      (`(pending ,requests) (romacs-agent-remote--waits source id requests)))
     (when-let* ((buffer (romacs-agent-remote--chat source id)))
       (with-current-buffer buffer
         (let ((session romacs-agent-log--session))
@@ -131,6 +132,9 @@ as its live events are drawn."
             (`(drawn ,units ,from) (romacs-agent-remote--drawn session units from))
             (`(more ,units) (dolist (unit units) (romacs-agent-remote--draw-unit session unit t)))
             (`(row ,_) (romacs-agent-log--separator) (romacs-agent-log--header-show))
+            (`(pending ,_)
+             (when romacs-agent-log--filled (romacs-agent-log--sync-asks session))
+             (romacs-agent-log--separator))
             (`(failed ,error)
              (setq romacs-agent-remote--earlier nil)
              (romacs-agent-log--writing
@@ -193,6 +197,24 @@ client still CLIENT."
              (romacs-agent-log--draw-above
               session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit)))))))))))
 
+(defun romacs-agent-remote--waits (source id requests)
+  "SOURCE's session ID waits on REQUESTS, a table of handle id to request:
+its mirror's approvals, each the approval event that asks it."
+  (when-let* ((session (gethash id (romacs-agent-remote-sessions source))))
+    (let ((approvals (make-hash-table :test #'equal)))
+      (maphash (lambda (handle request)
+                 (puthash handle (append (list :type 'approval) (romacs-agent-wire--asked request)) approvals))
+               requests)
+      (setf (romacs-agent-approvals session) approvals))))
+
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _id request)
+  "REQUEST, of a mirror's approvals, is its approval event."
+  request)
+
+(cl-defmethod romacs-agent-log-source-answers-p ((_source romacs-agent-remote) _session event)
+  "Whether the policy of the editor serving EVENT answers it, as it said."
+  (eq (plist-get event :policy) t))
+
 (cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-remote))
   (romacs-agent-remote-chats source))
 
@@ -202,17 +224,94 @@ client still CLIENT."
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-remote) _session)
   nil)
 
-(defun romacs-agent-remote--no-commands (&rest _)
-  (user-error "Another machine's sessions are shown, not yet acted on: its service takes no commands"))
+(defun romacs-agent-remote--command (source method params &optional refused)
+  "Run METHOD with PARAMS on SOURCE's service; said when it is refused,
+and REFUSED, when given, called then."
+  (let ((client (romacs-agent-remote-client source)))
+    (unless (and client (romacs-agent-client-live-p client))
+      (user-error (substitute-command-keys "Not connected: \\[romacs-agents-remote] connects")))
+    (romacs-agent-client-command
+     client method params
+     (lambda (_result error)
+       (when error
+         (message "%s: %s" method (gethash "message" error))
+         (when refused (funcall refused)))))))
 
-(cl-defmethod romacs-agent-log-source-send ((_source romacs-agent-remote) _session _text &optional _when)
-  (romacs-agent-remote--no-commands))
-(cl-defmethod romacs-agent-log-source-interrupt ((_source romacs-agent-remote) _session)
-  (romacs-agent-remote--no-commands))
-(cl-defmethod romacs-agent-log-source-respond ((_source romacs-agent-remote) _session _id _allow _reason)
-  (romacs-agent-remote--no-commands))
-(cl-defmethod romacs-agent-log-source-ask ((_source romacs-agent-remote) _session _id _questions)
-  (romacs-agent-remote--no-commands))
+(cl-defmethod romacs-agent-log-source-send ((source romacs-agent-remote) session text &optional when)
+  "Send SESSION TEXT through SOURCE's service, WHEN as the chat says it."
+  (unless (string-empty-p text)
+    (when (and (eq when 'interrupt) (romacs-agent-log--running-p session))
+      (romacs-agent-log-source-interrupt source session))
+    (let ((buffer (current-buffer)))
+      (romacs-agent-remote--command
+       source "agents/send"
+       (romacs-agent-rpc-object "id" (romacs-agent-id session) "text" text
+                                "mode" (if (memq when '(later interrupt)) "next" "now"))
+       ;; Not sent: the text is the composer's again, when it holds none.
+       (lambda ()
+         (when (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (save-excursion
+               (goto-char romacs-agent-log--input)
+               ;; Ahead of a draft written meanwhile, kept whole.
+               (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n")))))))))
+  (when (and (string-empty-p text) (eq when 'interrupt) (romacs-agent-log--running-p session))
+    (romacs-agent-log-source-interrupt source session)))
+
+(cl-defmethod romacs-agent-log-source-interrupt ((source romacs-agent-remote) session)
+  (romacs-agent-remote--command source "agents/interrupt" (romacs-agent-rpc-object "id" (romacs-agent-id session))))
+
+(defun romacs-agent-remote--answers (event chosen)
+  "CHOSEN, ((QUESTION . LABELS) ...), each label as picked, as the
+protocol says them for EVENT's questions: a table of question id to
+{options, text}, a label not an option's its text."
+  (let ((answers (make-hash-table :test #'equal)))
+    (cl-loop for (text . props) in (plist-get event :questions) for q from 1
+             for picked = (cdr (assoc text chosen))
+             when picked
+             do (let ((labels (plist-get props :options)) (options nil) (free nil))
+                  (dolist (part picked)
+                    (if-let* ((index (cl-position part labels :test #'equal)))
+                        (push (format "o%d" (1+ index)) options)
+                      (push part free)))
+                  (puthash (format "q%d" q)
+                           (romacs-agent-rpc-object "options" (vconcat (nreverse options))
+                                                    "text" (if free (string-join (nreverse free) ", ") :null))
+                           answers)))
+    answers))
+
+(cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-remote) session id allow reason)
+  "Answer SESSION's request ID, a handle's id, through SOURCE's service."
+  (romacs-agent-remote--answer source session (gethash id (romacs-agent-approvals session)) allow reason))
+
+(defun romacs-agent-remote--answer (source session event allow reason)
+  "Answer SESSION's request EVENT asks, as it was asked, its handle whole,
+through SOURCE's service."
+  (let ((id (plist-get event :request-id)))
+    (unless event (user-error "That request is answered"))
+    (romacs-agent-remote--command
+     source "agents/answer"
+     (let ((params (romacs-agent-rpc-object
+                    "id" (romacs-agent-id session)
+                    "handle" (romacs-agent-rpc-object "run" (or (plist-get event :run) 0) "id" id)
+                    "decision" (if allow "allow" "deny")
+                    "scope" (if (and (consp allow) (plist-get allow :always)) "session" "once")
+                    "reason" (or reason :null))))
+       (when (and (consp allow) (or (plist-get allow :chosen) (plist-get allow :answers)))
+         (puthash "answers" (romacs-agent-remote--answers
+                             event (or (plist-get allow :chosen)
+                                       ;; Answers alone: each one whole, a label or its text.
+                                       (mapcar (lambda (pair) (list (car pair) (cdr pair))) (plist-get allow :answers))))
+                  params))
+       params))))
+
+(cl-defmethod romacs-agent-log-source-ask ((source romacs-agent-remote) session id questions)
+  "Open the layer answering SESSION's request ID, its answers sent through
+SOURCE's service."
+  (let ((event (gethash id (romacs-agent-approvals session))))
+    ;; Its request as asked now, its run too: the layer answers that one.
+    (romacs-agent-ask-open session id questions nil
+                           (lambda (allow) (romacs-agent-remote--answer source session event allow nil)))))
 
 ;;; The board
 

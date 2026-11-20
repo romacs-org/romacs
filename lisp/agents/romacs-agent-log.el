@@ -211,6 +211,10 @@ An empty TEXT is not sent.")
 (cl-defgeneric romacs-agent-log-source-seen (source session)
   "SESSION's chat has been shown to its end, through SOURCE.")
 
+(cl-defgeneric romacs-agent-log-source-request-event (source id request)
+  "The approval event that asks REQUEST, ID, of what SOURCE's session
+waits on (`romacs-agent-log-source-approvals').")
+
 (cl-defgeneric romacs-agent-log-source-chats (source)
   "SOURCE's chat buffers, a table by session id.")
 
@@ -935,21 +939,8 @@ records drew: a block no longer waited on settled, one waited on drawn."
       (unless (gethash (car ask) approvals) (romacs-agent-log--settle-ask (car ask))))
     (maphash (lambda (id request)
                (unless (assoc id romacs-agent-log--asks)
-                 (romacs-agent-log--ask-block (romacs-agent-log--request-event id request))))
+                 (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
              approvals)))
-
-(defun romacs-agent-log--request-event (id request)
-  "An approval event for request ID, REQUEST as its harness asked it: a
-table (Claude Code's), else (WIRE METHOD PARAMS) (Codex's); its questions
-read as its harness's events read them."
-  (if (hash-table-p request)
-      (let ((tool (gethash "tool_name" request)) (input (gethash "input" request)))
-        (list :type 'approval :request-id id :tool tool :input input
-              :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
-              :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))
-    (pcase-let ((`(,_ ,method ,params) request))
-      (list :type 'approval :request-id id :tool method :input params
-            :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
 
 (defun romacs-agent-log-earlier ()
   "Show the turns before those this chat shows, above them."
@@ -1116,6 +1107,9 @@ shows it; its session loaded only then, as its records are read."
 
 (cl-defmethod romacs-agent-log-source-seen ((_source romacs-agent-log-local-source) session)
   (romacs-agent-mark-seen session))
+
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-log-local-source) id request)
+  (romacs-agent-request-event id request))
 
 (cl-defmethod romacs-agent-log-source-chats ((_source romacs-agent-log-local-source))
   romacs-agent-log--chats)

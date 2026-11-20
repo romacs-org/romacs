@@ -127,9 +127,14 @@ raised: each sent field as it held it, the last of them marked :last."
              do (should (eq (plist-get back :type) (plist-get event :type)))
              do (should (equal (plist-get back :last) (eq event (car (last kept)))))
              do (dolist (field (cdr (assq (plist-get event :type) romacs-agent-wire-events)))
-                  (let ((key (intern (concat ":" (symbol-name (car (romacs-agent-wire--field field)))))))
-                    (should (romacs-agent-wire-tests--same (list key (plist-get back key))
-                                                           (list key (plist-get event key)))))))))
+                  (pcase-let ((`(,name . ,kind) (romacs-agent-wire--field field)))
+                    (dolist (key (pcase kind
+                                   ;; A request is named by its handle, not its harness's id.
+                                   ('request '(:tool :input :description :questions :plan :user))
+                                   ('handle '(:run))
+                                   (_ (list (intern (concat ":" (symbol-name name)))))))
+                      (should (romacs-agent-wire-tests--same (list key (plist-get back key))
+                                                             (list key (plist-get event key))))))))))
 
 (ert-deftest romacs-agent-wire-claude-vector ()
   (romacs-agent-wire-tests--check 'claude romacs-agent-wire-tests--claude))
@@ -144,11 +149,16 @@ raised: each sent field as it held it, the last of them marked :last."
     (let ((object (romacs-agent-wire-event (list :type (car entry) :seq 1 :time 2.0 :unnamed t))))
       (should (equal (let ((keys nil)) (maphash (lambda (key _) (push key keys)) object) (nreverse keys))
                      (append '("type" "seq" "time")
-                             (mapcar (lambda (field) (romacs-agent-wire--name (car (romacs-agent-wire--field field))))
+                             (mapcar (lambda (field)
+                                       (pcase (romacs-agent-wire--field field)
+                                         (`(,_ . handle) "handle")
+                                         (`(,name . ,_) (romacs-agent-wire--name name))))
                                      (cdr entry)))))
       (should (equal (gethash "type" object) (symbol-name (car entry))))
       (dolist (field (cdr entry))
-        (should (eq (gethash (romacs-agent-wire--name (car (romacs-agent-wire--field field))) object) :null)))))
+        (pcase (romacs-agent-wire--field field)
+          (`(,_ . ,(or 'request 'handle)))
+          (`(,name . ,_) (should (eq (gethash (romacs-agent-wire--name name) object) :null)))))))
   (should-not (romacs-agent-wire-event '(:type handshake :seq 1 :state (:owed nil))))
   (should (equal (romacs-agent-wire-unit '((:type cache :seq 3 :ttl 300))) [])))
 
@@ -185,7 +195,15 @@ raised: each sent field as it held it, the last of them marked :last."
         (list :type 'replied :message "m-9" :reply "yes" :by-user t)
         (list :type 'unknown :raw (json-parse-string "{\"type\":\"odd\"}") :method nil)
         (list :type 'unknown :raw "a line")
-        (list :type 'exit :status 0))
+        (list :type 'exit :status 0)
+        (list :type 'approval :request-id "req-1" :run 1 :tool "Bash" :input (json-parse-string "{\"command\":\"ls\"}")
+              :description "list" :questions nil :plan nil :user nil :policy nil)
+        (list :type 'approval :request-id "req-2" :run 1 :tool "AskUserQuestion" :input (json-parse-string "{}")
+              :description nil :plan nil :user t :policy nil
+              :questions '(("Tea or coffee?" :header "Drink" :options ("Tea" "Coffee") :notes (("Tea" . "hot")) :multi nil)))
+        (list :type 'answered :request-id "req-2" :run 1 :behavior "allow"
+              :answers (json-parse-string "{\"Tea or coffee?\":\"Tea\"}"))
+        (list :type 'attributed :request-id "req-1" :run 1 :by "user" :decision "allow" :scope "once" :reason nil :answers nil))
   "An event of each type sent, with values of each kind its fields hold.")
 
 (ert-deftest romacs-agent-wire-reads-back-each-type ()

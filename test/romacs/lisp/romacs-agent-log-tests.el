@@ -408,7 +408,9 @@
       (romacs-agent-respond session "p" nil "more" 'user)
       (should-not planned)
       ;; Proceeding, however answered (here, the board's way): out of it.
-      (romacs-agent-respond session "p" t nil 'user)
+      (puthash "p2" request (romacs-agent-approvals session))
+      (romacs-agent--raise session '(:type approval :request-id "p2" :tool "ExitPlanMode" :plan t :user t))
+      (romacs-agent-respond session "p2" t nil 'user)
       (should (equal planned '(nil))))))
 
 (ert-deftest romacs-agent-log-a-turn-end-ends-what-runs ()

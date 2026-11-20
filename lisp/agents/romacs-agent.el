@@ -495,6 +495,19 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
+(defun romacs-agent-request-event (id request)
+  "An approval event for request ID, REQUEST as its harness asked it: a
+table (Claude Code's), else (WIRE METHOD PARAMS) (Codex's); its questions
+read as its harness's events read them."
+  (if (hash-table-p request)
+      (let ((tool (gethash "tool_name" request)) (input (gethash "input" request)))
+        (list :type 'approval :request-id id :tool tool :input input
+              :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
+              :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))
+    (pcase-let ((`(,_ ,method ,params) request))
+      (list :type 'approval :request-id id :tool method :input params
+            :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
+
 (defun romacs-agent--auto-answer-p (session event)
   "Whether Romacs answers SESSION's approval EVENT itself: a tool call,
 under the `allow' policy, out of plan mode.  A plan presented, a question,
@@ -4446,12 +4459,35 @@ its thread.  One a worker folds still is interrupted once it is folded."
   "Answer SESSION's approval REQUEST-ID: ALLOW, as a driver's :respond
 takes it, allows (t, or a plist of :answers or :always), else it is denied
 with MESSAGE.  BY, `user' or `policy', is who answered: a note says so in
-SESSION's records first, so every view shows who decided."
+SESSION's records first, so every view shows who decided.  A request is
+answered once in its run, by whoever answers first: an editor's user,
+its policy, or another machine's through its service."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
-  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
-         ;; A plan is proceeded with once: no rule for the session.
-         (allow (if (and plan allow) t allow))
-         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  (when (member request-id (plist-get (romacs-agent-driver-state session) :answered))
+    (user-error "That request is answered"))
+  ;; Claimed before anything is written, which may wait on the host:
+  ;; let go of only should its answer not be written.
+  (setf (romacs-agent-driver-state session)
+        (plist-put (romacs-agent-driver-state session) :answered
+                   (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
+  (let ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans))))
+    (condition-case err
+        (romacs-agent--answer session request-id (if (and plan allow) t allow) message by)
+      ((error quit)
+       (setf (romacs-agent-driver-state session)
+             (plist-put (romacs-agent-driver-state session) :answered
+                        (delete request-id (plist-get (romacs-agent-driver-state session) :answered))))
+       (signal (car err) (cdr err))))
+    ;; Written: whatever follows, it stays answered.  Proceeding with a
+    ;; plan leaves plan mode, as Claude Code's does: the agent goes on to
+    ;; implement it.
+    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
+      (romacs-agent-set-plan session nil))))
+
+(defun romacs-agent--answer (session request-id allow message by)
+  "Write SESSION's answer ALLOW (MESSAGE) to REQUEST-ID, BY's note first.
+A plan is proceeded with once: its ALLOW is t, no rule for the session."
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when by
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name by)
@@ -4462,11 +4498,7 @@ SESSION's records first, so every view shows who decided."
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)
-    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
-    ;; agent goes on to implement it.
-    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
-      (romacs-agent-set-plan session nil))))
+    (romacs-agent--line session line)))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
