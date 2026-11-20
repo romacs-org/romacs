@@ -997,9 +997,12 @@ how long the turn has run."
               "")
             ;; A harness's transcript, shown: it is read, not typed at.
             (if (eq (romacs-agent-state session) 'history)
-                (propertize (concat "  read-only · "
-                                    (substitute-command-keys "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this] resumes"))
-                            'face 'romacs-agent-log-note)
+                ;; The header's own colour, read first: what this view is.
+                (concat " read-only · "
+                        (propertize (substitute-command-keys
+                                     "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this]")
+                                    'face 'help-key-binding)
+                        " resumes")
               "")
             (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
                 (propertize (format "  %ds · %s stops" (round (- (float-time) start))
