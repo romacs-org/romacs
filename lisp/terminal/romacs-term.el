@@ -214,7 +214,7 @@ the key the function key map makes it where it is unbound (Tab is TAB,
 `C-m' RET), as the command loop would look it up."
   (let ((as (lookup-key (if (boundp 'local-function-key-map) local-function-key-map function-key-map) key)))
     (or (member (key-description key) skip)
-        (and (vectorp as) (member (key-description as) skip)))))
+        (and (arrayp as) (member (key-description as) skip)))))
 
 (defun romacs-term--passthrough-keymap (exceptions)
   "A keymap that sends every key to the terminal except EXCEPTIONS: ASCII
