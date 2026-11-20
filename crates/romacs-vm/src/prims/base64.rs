@@ -32,6 +32,11 @@ fn alphabet(url: bool) -> &'static [u8; 64] {
 /// for the line breaks. Nothing is made before it ends.
 fn encoded(cx: &mut Leaf<'_>, octets: &[u8], line_break: bool, pad: bool, url: bool) -> std::result::Result<Vec<u8>, Fault> {
     const SLICE: usize = 3 << 12;
+    if octets.len() <= SLICE {
+        let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
+        encode_into(&mut out, octets, &mut 0, line_break, pad, url);
+        return Ok(out);
+    }
     cx.quittable(|cx| {
         let mut out = Vec::with_capacity(octets.len() / 3 * 4 + octets.len() / 57 + 4);
         let mut group = 0;
@@ -149,6 +154,11 @@ const CHECK: usize = 1 << 14;
 /// quit probe, and the poll quits or, nothing to quit for after all, the
 /// bytes are decoded again unpolled. Nothing is made before it ends.
 fn decoded(cx: &mut Leaf<'_>, bytes: &[u8], url: bool, ignore_invalid: bool) -> std::result::Result<Vec<u8>, Fault> {
+    // One check's worth of input asks no quit probe.
+    if bytes.len() <= CHECK {
+        return decode(bytes, url, ignore_invalid, &crate::quit::NativeStop::never(), &mut false)
+            .ok_or_else(|| Fault::Error("Invalid base64 data".into()));
+    }
     cx.quittable(|cx| {
         let (stop, mut stopped) = (cx.native_stop(), false);
         let mut result = decode(bytes, url, ignore_invalid, &stop, &mut stopped);

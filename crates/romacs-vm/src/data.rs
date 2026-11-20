@@ -1114,9 +1114,9 @@ impl Vm {
                     // call target's scope.
                     let values = self.list_values_polled(x)?;
                     let mut copy = Value::NIL;
-                    for chunk in values.rchunks(crate::quit::KERNEL_CHUNK) {
+                    for (i, chunk) in values.rchunks(crate::quit::KERNEL_CHUNK).enumerate() {
+                        if i > 0 { self.native_poll_text()?; }
                         for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }
-                        self.native_poll_text()?;
                     }
                     return Ok(copy);
                 }

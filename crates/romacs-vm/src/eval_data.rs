@@ -48,13 +48,13 @@ impl Vm {
                     }
                 }
                 // The new list is the caller's only once it returns: a quit
-                // between chunks drops it.
+                // between chunks drops it. One chunk polls not at all.
                 let mut tail = self.stack[start + n - 1];
-                for chunk in prefix.rchunks(KERNEL_CHUNK) {
+                for (i, chunk) in prefix.rchunks(KERNEL_CHUNK).enumerate() {
+                    if i > 0 { self.native_poll_text()?; }
                     for &value in chunk.iter().rev() {
                         tail = self.alloc_cons(value, tail);
                     }
-                    self.native_poll_text()?;
                 }
                 Ok(tail)
             }
@@ -788,7 +788,8 @@ impl Vm {
         let mut accum = self.coerce_number(args[0], true)?;
         // Only `min` and `max` call this: a quit between chunks returns
         // nothing, and polls only inside their scope (`native_poll_text`).
-        for chunk in args[1..].chunks(KERNEL_CHUNK) {
+        for (i, chunk) in args[1..].chunks(KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.native_poll_text()?; }
             for &arg in chunk {
                 let value = self.coerce_number(arg, true)?;
                 if self.numeric_cmp(value, accum)? == Some(better) {
@@ -797,7 +798,6 @@ impl Vm {
                     return Ok(value);
                 }
             }
-            self.native_poll_text()?;
         }
         Ok(accum)
     }

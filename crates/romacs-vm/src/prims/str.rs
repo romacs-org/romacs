@@ -123,17 +123,23 @@ fn make_string(cx, length: Value, initial: Value; optional multibyte: Value) {
         .ok_or_else(|| Fault::Error("String overflow".into()))?;
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(size).map_err(|_| Fault::Error("String overflow".into()))?;
-    // Filled a chunk at a time, polled between: the string is made after.
-    cx.quittable(|cx| {
-        let mut left = count;
-        while left > 0 {
-            let part = left.min(1 << 14);
-            for _ in 0..part { bytes.extend_from_slice(&unit); }
-            left -= part;
-            if left > 0 { cx.native_poll()?; }
-        }
-        Ok(())
-    })?;
+    const PART: usize = 1 << 14;
+    let fill = |bytes: &mut Vec<u8>, n: usize| for _ in 0..n { bytes.extend_from_slice(&unit); };
+    if count <= PART {
+        fill(&mut bytes, count);
+    } else {
+        // Filled a part at a time, polled between: the string is made after.
+        cx.quittable(|cx| {
+            let mut left = count;
+            while left > 0 {
+                let part = left.min(PART);
+                fill(&mut bytes, part);
+                left -= part;
+                if left > 0 { cx.native_poll()?; }
+            }
+            Ok(())
+        })?;
+    }
     Ok(cx.make_string(bytes, multibyte))
 }}
 
