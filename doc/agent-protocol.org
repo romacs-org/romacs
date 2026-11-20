@@ -682,21 +682,33 @@ paging ever holds live delivery back.
 | type | fields |
 |------+--------|
 | =input= | =text images steer own messages request= |
+| =incoming= | =text prompt messages= (messages from other sessions) |
 | =delta= | =message text parent= (text appended to message =message=) |
 | =thinking= | =text parent= |
 | =message-end= | =message parent= (the message's deltas are all of it) |
 | =tool= | =id name state input output parent= (=state=: =started=, =completed=, =failed=) |
+| =tool-output= | =id text= (streamed command output, live only) |
+| =task= | =id task state background activity summary title= |
 | =status=, =error= | =text parent= |
-| =done= | =text error limit duration cost reason= |
+| =done= | =text error limit interrupted duration cost reason= |
 | =exit= | =status= |
 | =compacted=, =plan= | =text= |
 | =usage= | =context_used= |
+| =selection= | =from to= (each ={model, effort, provider}=) |
+| =renewed= | =why from to brief= |
+| =forked= | =from title seq_from turns after= |
+| =rolled-back= | =to turns prompt files= |
+| =replied= | =message reply by_user= |
+| =unknown= | =raw method= (a harness line Romacs does not read) |
 
+- *Reading back.*  =romacs-agent-wire-decode= reads an event as it was
+  raised: the schema names the fields read back as a name or as data.
 - *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el=: a turn of
-  each harness, each record with the events sent for it.
-- *Slice 1 adds* =tool-output {id text}= (streamed command output),
-  =approval=, =answered= and =attributed= (keyed by service handles).
-  A tool's output is its completed item's, as its harness caps it:
+  each harness, each record with the events sent for it, read back and
+  drawn as the chat draws them raised.
+- *Requests add* =approval=, =answered= and =attributed=, keyed by
+  service handles (Pending requests).
+- A tool's output is its completed item's, as its harness caps it:
   streamed output is live only; compaction removes it once the item
   completes.
 
