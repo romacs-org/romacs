@@ -48,6 +48,21 @@ that reads already, or an unknown one, unchanged."
           (should (equal (romacs-popup-legible "no-such-colour") "no-such-colour")))
       (face-spec-set 'romacs-popup spec 'face-defface-spec))))
 
+(ert-deftest romacs-popup-card-local-first-after-the-card-records-its-prefix ()
+  "`which-key-local-then-key-order' on the card: a local key sorts first
+once a display has recorded the prefix, the full key looked up once."
+  (require 'which-key)
+  (let ((local (make-sparse-keymap)) (global (make-sparse-keymap)) (old (current-global-map))
+        (which-key-sort-order #'which-key-local-then-key-order))
+    (define-key global [f12 ?a] #'forward-char)
+    (define-key local [f12 ?z] #'backward-char)
+    (unwind-protect
+        (with-temp-buffer
+          (use-global-map global) (use-local-map local)
+          (cl-letf (((symbol-function 'which-key--current-prefix) (lambda () [f12])))
+            (should (equal (mapcar #'car (romacs-popup--card-entries [f12])) '("z" "a")))))
+      (use-global-map old))))
+
 (defun romacs-popup-card-tests--entry (key label binding &optional prefix-p source)
   "An entry as `romacs-popup--card-entry' makes it."
   (list key label prefix-p (or source 'global) 0 binding nil (cons key label)))

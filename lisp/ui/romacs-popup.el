@@ -63,21 +63,26 @@ theme's dim text, made legible on the menu's glass (`romacs-popup-legible').")
 (defconst romacs-popup-key-contrast 4.5
   "The contrast a menu's text keeps on its glass, WCAG AA for text.")
 
+(defun romacs-popup--floor (color &optional contrast)
+  "COLOR moved in lightness until it reads on the menus' glass at
+CONTRAST (`romacs-popup-key-contrast' by default), as #RRGGBB; nil when
+COLOR or the glass cannot be resolved.  A #RRGGBB colour is taken as
+written: only a name needs the display."
+  (let* ((hex (lambda (c) (cond ((not (stringp c)) nil)
+                                 ((string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c)
+                                 ((color-defined-p c) (romacs-chrome--hex c)))))
+         (fg (funcall hex color))
+         (glass (funcall hex (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))))
+    (and (fboundp 'romacs-color-floor-on) fg glass
+         (romacs-color-floor-on fg (list glass) (or contrast romacs-popup-key-contrast)))))
+
 (defun romacs-popup-legible (color &optional contrast)
   "COLOR moved in lightness until it reads on the menus' glass (the
 `romacs-popup' face's background) at CONTRAST, by default
 `romacs-popup-key-contrast', as #RRGGBB; COLOR itself when either colour
 is unknown.  For a caller's own colours on a menu: the glass, not the
 editor's background, is what they are drawn over."
-  (let* ((hex (lambda (c) (cond ((not (stringp c)) nil)
-                                 ;; As written: only a name needs the display.
-                                 ((string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c)
-                                 ((color-defined-p c) (romacs-chrome--hex c)))))
-         (fg (funcall hex color))
-         (glass (funcall hex (or (face-background 'romacs-popup nil t) (face-background 'default nil t)))))
-    (or (and (fboundp 'romacs-color-floor-on) fg glass
-             (romacs-color-floor-on fg (list glass) (or contrast romacs-popup-key-contrast)))
-        color)))
+  (or (romacs-popup--floor color contrast) color))
 
 (defun romacs-popup--set-spec (face spec)
   "Make SPEC FACE's default spec, unless it is already."
@@ -100,10 +105,8 @@ one) gives its keys its link colour, else the text's.  Run from
                      (face-foreground 'default nil t)))
          ;; Only a colour the floor computed: an unknown one leaves the
          ;; face its inherited colour.
-         (floored (lambda (color) (let ((c (and (stringp color) (romacs-popup-legible color))))
-                                    (and c (string-match-p "\\`#[[:xdigit:]]\\{6\\}\\'" c) c))))
-         (key (funcall floored accent))
-         (also (funcall floored (face-foreground 'romacs-popup-dim nil t))))
+         (key (romacs-popup--floor accent))
+         (also (romacs-popup--floor (face-foreground 'romacs-popup-dim nil t))))
     (romacs-popup--set-spec 'romacs-popup-key `((t :inherit romacs-layer-glow :weight bold ,@(and key (list :foreground key)))))
     (romacs-popup--set-spec 'romacs-popup-also `((t :inherit romacs-popup-dim ,@(and also (list :foreground also)))))))
 

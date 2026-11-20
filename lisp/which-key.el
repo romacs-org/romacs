@@ -1652,9 +1652,11 @@ which are strings.  KEY is of the form produced by `key-binding'."
   (key-description (which-key--current-key-list key-str)))
 
 (defun which-key--local-binding-p (keydesc)
-  (eq (which-key--safe-lookup-key-description
-       (current-local-map)
-       (which-key--current-key-string (car keydesc)))
+  "Whether KEYDESC, (KEY . BINDING) as which-key collects it, KEY the
+whole sequence, is the local map's binding of KEY."
+  ;; KEY already holds the prefix: prepending the current one looked up
+  ;; the prefix twice once a display had recorded it.
+  (eq (which-key--safe-lookup-key-description (current-local-map) (car keydesc))
       (intern (cdr keydesc))))
 
 (defun which-key--map-binding-p (map keydesc)
@@ -1885,6 +1887,9 @@ Requires `which-key-compute-remaps' to be non-nil."
                          ((symbolp remap) (symbol-name remap))
                          ((eq 'lambda (car-safe remap)) "lambda")
                          ((eq 'closure (car-safe remap)) "closure")
+                         ;; A keyboard macro by its keys, as a binding to one.
+                         ((stringp remap) remap)
+                         ((vectorp remap) (key-description remap))
                          (t "function")))))
 
 (defun which-key--get-menu-item-binding (def)
