@@ -120,9 +120,13 @@ background near black."
     (should (equal (romacs-working--running-colour) "#d45f5e"))))
 
 (ert-deftest romacs-working-reads-any-form-of-colour ()
-  (should (equal (romacs-working--hex "#abc123") "#abc123"))
-  (should (equal (romacs-working--hex "#ffffff") "#ffffff"))
-  (should-not (romacs-working--hex nil)))
+  (should (equal (romacs-color-hex "#abc123") "#abc123"))
+  (should (equal (romacs-color-hex "#ffffff") "#ffffff"))
+  (should-not (romacs-color-hex nil))
+  ;; A name, as the frame resolves it; legible on a named background.
+  (should (equal (romacs-color-hex "white") "#ffffff"))
+  (should (stringp (romacs-color-legible "grey90" "white")))
+  (should-not (romacs-color-legible "no-such-colour" "white")))
 
 (provide 'romacs-working-tests)
 ;;; romacs-working-tests.el ends here

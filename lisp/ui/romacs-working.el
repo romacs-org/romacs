@@ -43,6 +43,7 @@
 
 (require 'cl-lib)
 (require 'romacs-animate)
+(require 'romacs-theme)
 
 (defface romacs-working-idle '((t :inherit shadow)) "The working thread, idle.")
 (defface romacs-working-running '((t :inherit link :underline nil))
@@ -129,28 +130,13 @@ its error's."
 
 (declare-function romacs-color-floor "romacs-theme" (fg bg minimum))
 
-(defun romacs-working--hex (colour)
-  "COLOUR as #rrggbb, whatever form the theme gave it in; nil when the
-frame cannot resolve it."
-  (when-let* ((rgb (romacs-working--rgb colour)))
-    (apply #'format "#%02x%02x%02x" (mapcar (lambda (c) (round (* 255 c))) rgb))))
-
-(defun romacs-working-readable (colour &optional background)
-  "COLOUR raised to WCAG's 4.5:1 on BACKGROUND, the theme's background by
-default, its hue kept.  Either may be named in any form a frame resolves."
-  (let ((colour (romacs-working--hex colour))
-        (background (romacs-working--hex (or background (face-background 'default nil t)))))
-    (if (and colour background (fboundp 'romacs-color-floor))
-        (romacs-color-floor colour background 4.5)
-      colour)))
-
 (defun romacs-working--derive (&rest _)
   "Make the running and waiting faces the theme's colours for them, each
 readable on its background, as their default specs: a theme's or the
 user's own spec still wins."
   (pcase-dolist (`(,face . ,colour) `((romacs-working-running . ,(romacs-working--running-colour))
                                      (romacs-working-waiting . ,(romacs-working--waiting-colour))))
-    (let ((colour (romacs-working-readable colour)))
+    (let ((colour (romacs-color-legible colour)))
       (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit default))) 'face-defface-spec))))
 
 (add-hook 'enable-theme-functions #'romacs-working--derive)

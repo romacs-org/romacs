@@ -99,11 +99,11 @@ header line.")
 background, read, never hidden; and a key the header names the theme's
 key colour raised to 4.5:1 on the header line: each as its default spec.
 A theme's or the user's own spec still wins."
-  (let ((colour (romacs-working-readable (face-foreground 'shadow nil t))))
+  (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
     (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
                    'face-defface-spec))
   (let* ((key (face-foreground 'help-key-binding nil t))
-         (colour (and key (romacs-working-readable key (face-background 'header-line nil t)))))
+         (colour (and key (romacs-color-legible key (face-background 'header-line nil t)))))
     (face-spec-set 'romacs-agent-log-header-key
                    (if colour `((t :foreground ,colour :weight bold)) '((t :inherit help-key-binding :weight bold)))
                    'face-defface-spec)))
