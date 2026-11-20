@@ -159,26 +159,6 @@
            (+ (float-time) 8))))))
    (+ (float-time) 8)))
 
-(defun desktop-font-live-overlapping-resize ()
-  (menu-bar-mode -1)
-  (tool-bar-mode -1)
-  (set-frame-size nil 80 24)
-  (desktop-font-live-await
-   #'desktop-font-live-grid-ready
-   (lambda ()
-     (let ((submission (or (plist-get (desktop-font-live-receipt) :submission) 0)))
-       ;; Native observations may interleave or coalesce these requests. The
-       ;; deterministic core control supplies the specifically older size.
-       (set-frame-size nil 85 24)
-       (set-frame-size nil 91 25)
-       (set-face-attribute 'default nil :font "DejaVu Sans Mono 16")
-       (desktop-font-live-await
-        (lambda () (and (= (frame-width) 91) (= (frame-text-lines) 25)
-                        (= (frame-char-width) 13) (= (frame-char-height) 25)
-                        (desktop-font-live-presented submission)))
-        #'desktop-font-live-pass (+ (float-time) 8))))
-   (+ (float-time) 8)))
-
 (defun desktop-font-live-repeated ()
   (desktop-font-live-geometry
    (lambda ()
@@ -404,7 +384,6 @@ keyfile contents the keyfile backend would read."
            ("minimum" (desktop-font-live-minimum))
            ("minimum-vertical" (desktop-font-live-minimum t))
            ("grown-minibuffer" (desktop-font-live-grown-minibuffer))
-           ("overlapping-resize" (desktop-font-live-overlapping-resize))
            ("fullscreen" (desktop-font-live-fullscreen))
            (_ (error "Unknown live font case: %S" (getenv "ROMACS_GUI_LIVE_FONT_CASE")))))
      (error (desktop-font-live-log "LIVE-FONT-FAIL %S" err) (kill-emacs 1)))))

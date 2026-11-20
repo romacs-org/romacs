@@ -95,14 +95,14 @@
               (romacs-agent-ui--render session (list :type 'input :text "third question" :seq 5 :last t))
               (should (string-search "third question" (with-current-buffer buffer (buffer-string))))
               ;; Shown again: nothing replays again.
-              (romacs-agent-show session)
+              (romacs-agent-ui--show-chat session)
               (should (= replays 2))
               (kill-buffer buffer)
               ;; Its supervisor never came up while it was not shown (said
               ;; by no journal record): its chat says so once shown.
               (let ((again (romacs-agent-ui--make-chat session)))
                 (romacs-agent--raise session (list :type 'unstarted :seq 9 :text "its supervisor never started"))
-                (romacs-agent-show session)
+                (romacs-agent-ui--show-chat session)
                 (should (string-match-p "^! its supervisor never started$" (with-current-buffer again (buffer-string))))
                 (kill-buffer again)))))
       (delete-directory root t)

@@ -1142,7 +1142,7 @@ fn fileio_defuns_match_gnu() {
         at("b", 1_000_000_000);
         let status = std::process::Command::new("setfacl").args(["-m", "u:root:rwx,g:wheel:r-x,m::r--"]).arg(dir.join("ext")).status().unwrap();
         assert!(status.success(), "setfacl");
-        std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o000)).unwrap();
     };
     fn snapshot(base: &Path, at: &Path, out: &mut Vec<String>) {
         use std::os::unix::fs::PermissionsExt;

@@ -24,7 +24,7 @@ tracing.workspace = true
 ttf-parser.workspace = true
 fontconfig.workspace = true
 yeslogic-fontconfig-sys.workspace = true
-freetype-rs = { version = "0.38.0" }
+freetype-rs.workspace = true
 
 [dev-dependencies]
 romacs-renderer-wgpu = { workspace = true, features = ["test-gpu"] }

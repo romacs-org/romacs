@@ -102,10 +102,12 @@ class CandidateContract(unittest.TestCase):
         self.assertEqual(result.returncode, PR.EXIT_INVALID, result.stderr)
         self.assertIn('gnu_parity_loaded', result.stderr)
 
-    def test_denominator_lowering_is_rejected(self):
-        self.data['census']['cold']['files_measured'] -= 1
-        self.assertEqual(PR.consistency(self.data), [])
-        self.assert_rejected('files_measured lowered')
+    def test_stored_census_denominator_is_rejected(self):
+        self.data['census']['cold']['files_measured'] = 1594
+        self.write()
+        result = self.candidate()
+        self.assertEqual(result.returncode, PR.EXIT_INVALID, result.stderr)
+        self.assertIn('never recorded', result.stderr)
 
     def test_committed_loss_restored_in_worktree_is_rejected(self):
         old = self.data['census']['cold']['loaded'].pop()

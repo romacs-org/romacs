@@ -549,7 +549,9 @@ environment."))
 	 (if slot
 	     (set-char-table-range
 	      composition-function-table key
-	      (list (vector (cdr slot) 0 #'font-shape-gstring))))))
+	      ;; The shaper by name, called when text is composed: the
+	      ;; display defines it (as indonesian.el names it).
+	      (list (vector (cdr slot) 0 'font-shape-gstring))))))
    char-script-table))
 
 ;; Brahmi composition rules

@@ -29,6 +29,10 @@ a time, `allow' marks it allowed."
           (romacs-agent-pools nil)
           (romacs-agent--room (make-hash-table :test #'equal))
           (romacs-agent--room-loaded t)
+          ;; No account asked again unless a test says.
+          (romacs-agent-room-check-interval nil)
+          (romacs-agent--room-timer nil)
+          (romacs-agent--room-asking (make-hash-table :test #'equal))
           (romacs-agent--sessions (make-hash-table :test #'equal)))
      (cl-letf (((symbol-function 'romacs-agent--check-companions) #'ignore))
        (cl-flet ((spend (name resets &optional time)
@@ -315,5 +319,125 @@ a time, `allow' marks it allowed."
                 ((symbol-function 'romacs-agent-tools--handed-off) (lambda (_task provider &rest _) (setq to provider))))
         (romacs-agent-tools--switch (romacs-mcp--object "provider" "codex"))
         (should (eq to 'codex))))))
+
+;;; Asking spent accounts again
+
+(ert-deftest romacs-agent-pools-claude-usage-as-a-report ()
+  (let* ((object (json-parse-string
+                  "{\"five_hour\":null,\"seven_day\":{\"utilization\":1.0,\"resets_at\":\"2026-11-23T05:59:59.888143+00:00\"},\"seven_day_opus\":{\"utilization\":100.0,\"resets_at\":null}}"
+                  :object-type 'hash-table :null-object nil :false-object nil))
+         (report (romacs-agent--claude-usage-report object 5.0)))
+    ;; Percentages there, fractions here; null unused; one not named, not said.
+    (should (eq (plist-get report :status) 'rejected))
+    (should (equal (mapcar (lambda (w) (list (plist-get w :name) (plist-get w :used))) (plist-get report :windows))
+                   '(("five_hour" 0.0) ("seven_day" 0.01) ("seven_day_opus" 1.0))))
+    (remhash "seven_day_opus" object)
+    (setq report (romacs-agent--claude-usage-report object 5.0))
+    (should (eq (plist-get report :status) 'allowed))
+    (should (= (plist-get report :used) 0.01))
+    ;; Its fraction of a second may be dropped.
+    (should (<= (abs (- (plist-get report :resets) 1795413600)) 1))
+    (should (= (plist-get report :time) 5.0))
+    (puthash "five_hour" (json-parse-string "{\"utilization\":100.0,\"resets_at\":null}" :object-type 'hash-table) object)
+    (should (eq (plist-get (romacs-agent--claude-usage-report object 6.0) :status) 'rejected))
+    (should-not (romacs-agent--claude-usage-report (make-hash-table :test #'equal) 7.0))))
+
+(ert-deftest romacs-agent-pools-claude-usage-keeps-its-token-off-the-command-line ()
+  (let* ((home (make-temp-file "claude-home" t)) (runs nil) (sent nil) (got 'none)
+         (keep (lambda (expires)
+                 (with-temp-file (expand-file-name ".credentials.json" home)
+                   (insert (format "{\"claudeAiOauth\":{\"accessToken\":\"sekrit\",\"expiresAt\":%d}}"
+                                   (round (* 1000 expires))))))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'romacs-agent--claude-run)
+                   (lambda (_name command _environment then) (push (cons command then) runs) 'process))
+                  ((symbol-function 'process-send-string) (lambda (_p text) (push text sent)))
+                  ((symbol-function 'process-send-eof) #'ignore))
+          ;; Fresh: asked at once, the token on curl's stdin.
+          (funcall keep (+ (float-time) 3600))
+          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
+          (should (equal (car (car (car runs))) "curl"))
+          (should-not (cl-find "sekrit" (car (car runs)) :test #'string-search))
+          (should (equal sent '("Authorization: Bearer sekrit\n")))
+          (funcall (cdr (car runs)) "{\"seven_day\":{\"utilization\":40.0,\"resets_at\":null}}\n200" 0)
+          (should (= (plist-get got :used) 0.4))
+          ;; Refused: not known.
+          (funcall (cdr (car runs)) "{}\n401" 0)
+          (should-not got)
+          ;; Expired: Claude Code renews it in place first; still expired, not known.
+          (setq runs nil got 'none)
+          (funcall keep (- (float-time) 10))
+          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
+          (should (equal (cdr (car (car runs))) '("auth" "status" "--json")))
+          (funcall (cdr (car runs)) "" 0)
+          (should-not got)
+          ;; Renewed meanwhile: asked.
+          (setq runs nil got 'none)
+          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
+          (funcall keep (+ (float-time) 3600))
+          (funcall (cdr (car runs)) "" 0)
+          (should (equal (car (car (car runs))) "curl"))
+          ;; No sign-in: not known, nothing run.
+          (delete-file (expand-file-name ".credentials.json" home))
+          (setq runs nil got 'none)
+          (romacs-agent--claude-usage home (lambda (report) (setq got report)))
+          (should-not (or runs got)))
+      (delete-directory home t))))
+
+(ert-deftest romacs-agent-pools-a-spent-pool-is-asked-and-resumes-early ()
+  ;; Every account spent, the first back days away: asked, one has room
+  ;; already, and the session waiting for that reset goes on now.
+  (romacs-agent-pools-tests--with
+    (let* ((dir (make-temp-file "s" t))
+           (session (romacs-agent--make :id "e" :harness 'claude :provider "claude2" :state 'idle :caught-up t
+                                        :dir dir :done-seq 4 :input-seq 3 :limited '(:provider "claude2")))
+           (later (+ (float-time) (* 3 86400))) (asked nil) (moved nil) (timers nil)
+           (romacs-agent-room-check-interval 600)
+           (romacs-agent-tools--resumes (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent-tools--resets-used (make-hash-table :test #'eq :weakness 'key))
+           (romacs-agent-tools--moving (make-hash-table :test #'equal))
+           (romacs-agent-switch-delay 0) (romacs-agent-resume-margin 1))
+      (puthash "e" session romacs-agent--sessions)
+      (romacs-agent--manifest session nil)
+      (cl-letf (((symbol-function 'run-at-time) (lambda (delay repeat function &rest _)
+                                                  (push (list delay repeat function) timers) (list 'timer delay)))
+                ((symbol-function 'cancel-timer) (lambda (timer) (setq timers (cl-remove (cadr timer) timers :key #'car))))
+                ((symbol-function 'romacs-agent-tools--wake) #'ignore)
+                ((symbol-function 'romacs-agent-move-on) (lambda (_s why) (push why moved)))
+                ((symbol-function 'romacs-agent--claude-usage)
+                 (lambda (home callback) (push (file-name-nondirectory home) asked)
+                   ;; The others' usage not known now.
+                   (funcall callback
+                            (and (equal (file-name-nondirectory home) "claude")
+                                 (list :type 'rate-limit :status 'allowed :used 0.01 :window "seven_day"
+                                       :windows (list (list :name "five_hour" :status 'allowed :used 0.0)
+                                                      (list :name "seven_day" :status 'allowed :used 0.01))
+                                       :time (float-time)))))))
+        (dolist (spent `(("claude" . ,later) ("claude2" . ,(+ later 600)) ("claude3" . ,(+ later 900))))
+          (romacs-agent-note-room (car spent) (list :status 'rejected :resets (cdr spent) :window "seven_day" :time 1.0)))
+        ;; Spent: asked again every interval.
+        (should (cl-find #'romacs-agent-check-room timers :key #'caddr))
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should (= (romacs-agent-resume-time session) (+ later 1)))
+        (romacs-agent-check-room)
+        (should (equal (sort asked #'string<) '("claude" "claude2" "claude3")))
+        ;; The first has room: the wait is over, moved there.
+        (should (romacs-agent-room "claude"))
+        (should-not (romacs-agent-resume-time session))
+        (should (equal moved '("limit reset")))
+        ;; Its next turn stops at a limit again, the same resets ahead:
+        ;; it waits for them again.
+        (romacs-agent-note-room "claude" (list :status 'rejected :resets later :window "seven_day" :time (float-time)))
+        (romacs-agent-tools--switch-on-limit session '(:limit t))
+        (should (romacs-agent-resume-time session))
+        ;; An answer not known changes nothing; none asked twice at once.
+        (setq asked nil)
+        (puthash "claude2" t romacs-agent--room-asking)
+        (romacs-agent-check-room)
+        (should (equal (sort asked #'string<) '("claude" "claude3")))
+        ;; None spent: asked no longer.
+        (dolist (name '("claude" "claude2" "claude3"))
+          (romacs-agent-note-room name (list :status 'allowed :used 0.2 :window "seven_day" :time (float-time))))
+        (should-not (cl-find #'romacs-agent-check-room timers :key #'caddr))))))
 
 ;;; romacs-agent-pools-tests.el ends here

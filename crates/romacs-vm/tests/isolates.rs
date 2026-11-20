@@ -99,6 +99,173 @@ fn an_interrupt_quits_cpu_bound_lisp_and_the_worker_serves_on() {
     eval(&mut vm, "(isolate-kill-all)");
 }
 
+/// Files a test and its worker's job meet at, in a directory of the
+/// test's own: the job writes `ready' just before the wait the test is
+/// about, the spawner writes `go' once it has signalled, a job writes
+/// `mark' to show it ran. Each is given as a Lisp string.
+struct Handshake(std::path::PathBuf);
+impl Handshake {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("romacs-handshake-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Handshake(dir)
+    }
+    fn file(&self, name: &str) -> String {
+        serde_json::to_string(&self.0.join(name)).unwrap()
+    }
+    /// The job's form that says it is about to wait.
+    fn ready(&self) -> String {
+        format!("(write-region \"\" nil {} nil 'no-message)", self.file("ready"))
+    }
+    /// The spawner's form that waits, up to 10 s, until the job is ready,
+    /// and signals if it never is.
+    fn await_ready(&self) -> String {
+        let ready = self.file("ready");
+        format!("(let ((end (+ (float-time) 10))) (while (and (not (file-exists-p {ready})) (< (float-time) end)) (romacs--isolate-wait 0.01)) \
+                 (unless (file-exists-p {ready}) (error \"the job never reached its wait\")))")
+    }
+}
+impl Drop for Handshake {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
+/// A worker's job connected to its own server, which never writes: BODY
+/// then waits on the client as `client'.
+fn silent_socket_job(body: &str) -> String {
+    format!("'(lambda () \
+       (let* ((server (make-network-process :name \"s\" :server t :host \"127.0.0.1\" :service t :noquery t)) \
+              (client (make-network-process :name \"c\" :host \"127.0.0.1\" :service (process-contact server :service) :noquery t))) \
+         {body}))")
+}
+
+/// A worker waiting for a socket that never answers takes an interrupt as
+/// a quit within the bound, not at its wait's timeout or the spawner's
+/// kill: the wait polls the wake pipe the signal writes. The worker serves
+/// on. The list's last element is the interrupt's milliseconds to quit.
+#[test]
+fn an_interrupt_ends_a_workers_wait_for_process_output() {
+    let mut vm = vm();
+    let hs = Handshake::new("interrupt");
+    let job = silent_socket_job(&format!("{} (accept-process-output client 60) 'waited", hs.ready()));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (< ms 500) (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("interrupt to quit: {ms} ms");
+    assert_eq!(head, "(interrupted t 2", "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// Under `inhibit-quit' the interrupt is held: the wait runs its full
+/// 0.5 s without spinning on the drained wake pipe. Once `inhibit-quit'
+/// ends, the next wait quits before it blocks, though no wake is left for
+/// it. The worker keeps what the first wait measured.
+#[test]
+fn an_interrupt_held_by_inhibit_quit_waits_out_the_wait_without_spinning() {
+    let mut vm = vm();
+    let hs = Handshake::new("held");
+    let job = silent_socket_job(&format!("(let ((inhibit-quit t) (t0 (float-time)) (c0 (float-time (get-internal-run-time)))) \
+         {} (accept-process-output client 0.5) \
+         (setq held (list (- (float-time) t0) (- (float-time (get-internal-run-time)) c0)))) \
+       (accept-process-output client 60) 'unquit", hs.ready()));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} (isolate-interrupt iso) \
+        (let* ((start (float-time)) \
+               (result (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e)))) \
+               (ms (round (* 1000 (- (float-time) start)))) \
+               (held (isolate-await (isolate-spawn '(lambda () held) :isolate iso)))) \
+          (list result (>= (car held) 0.45) (< (nth 1 held) 0.1) (< ms 1500) held)))", hs.await_ready()));
+    eprintln!("held wait (wall cpu): {out}");
+    assert!(out.starts_with("(interrupted t t t "), "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// A wake that raises no quit (the interrupt is held) keeps the events it
+/// came with: output ready on the socket beside the wake byte is read, and
+/// `(accept-process-output client 0)' says so.
+#[test]
+fn a_held_interrupt_leaves_ready_output_to_its_wait() {
+    let mut vm = vm();
+    let hs = Handshake::new("ready-output");
+    let job = format!("'(lambda () \
+       (let* ((server (make-network-process :name \"s\" :server t :host \"127.0.0.1\" :service t :noquery t)) \
+              (client (make-network-process :name \"c\" :host \"127.0.0.1\" :service (process-contact server :service) :noquery t)) \
+              (conn nil)) \
+         (let ((end (+ (float-time) 5))) \
+           (while (and (null conn) (< (float-time) end)) \
+             (accept-process-output nil 0.05) \
+             (dolist (p (process-list)) (unless (or (eq p server) (eq p client)) (setq conn p))))) \
+         (let ((inhibit-quit t)) \
+           (process-send-string conn \"x\") \
+           {} (while (not (file-exists-p {}))) \
+           (setq got (accept-process-output client 0))) \
+         (accept-process-output client 60) 'unquit))", hs.ready(), hs.file("go"));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} (isolate-interrupt iso) (romacs--isolate-wait 0.1) (write-region \"\" nil {} nil 'no-message) \
+        (list (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))) \
+              (isolate-await (isolate-spawn '(lambda () got) :isolate iso))))", hs.await_ready(), hs.file("go")));
+    assert_eq!(out, "(interrupted t)", "{out}");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
+/// SIGTERM writes the same wake pipe: `isolate-kill' of a worker waiting
+/// on a silent socket ends it on the SIGTERM, before `isolate-kill-timeout'
+/// would send SIGKILL. The list's last element is the kill's milliseconds.
+#[test]
+fn a_kill_ends_a_workers_wait_before_the_kill_timeout() {
+    let mut vm = vm();
+    let hs = Handshake::new("kill");
+    let job = silent_socket_job(&format!("{} (accept-process-output client 60) 'waited", hs.ready()));
+    let out = eval(&mut vm, &format!("(let* ((isolate-kill-timeout 1.0) (iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} \
+        (let* ((start (float-time)) (_ (isolate-kill iso)) (ms (round (* 1000 (- (float-time) start))))) \
+          (list (condition-case e (isolate-await f 1) (error (car e))) (< ms 900) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("kill to end: {ms} ms");
+    assert_eq!(head, "(isolate-killed t", "{out}");
+}
+
+/// A killed worker starts no job queued behind the one the kill ended.
+#[test]
+fn a_kill_starts_no_queued_job() {
+    let mut vm = vm();
+    let hs = Handshake::new("queued");
+    let job = silent_socket_job(&format!("{} (accept-process-output client 60) 'waited", hs.ready()));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (a (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso))) \
+        (b (isolate-spawn '(lambda () (write-region \"\" nil {} nil 'no-message)) :isolate iso))) \
+        {} (isolate-kill iso) \
+        (list (condition-case e (isolate-await b 1) (error (car e))) (file-exists-p {})))", hs.file("mark"), hs.await_ready(), hs.file("mark")));
+    assert_eq!(out, "(isolate-killed nil)", "{out}");
+}
+
+/// An interrupt and a termination both pending: the termination's quit
+/// supersedes the interrupt, so the cleanup it unwinds through, which waits
+/// on the silent socket, is not cut short by the older interrupt.
+#[test]
+fn a_termination_supersedes_a_pending_interrupt() {
+    let mut vm = vm();
+    let hs = Handshake::new("supersede");
+    let job = silent_socket_job(&format!("(unwind-protect \
+         (progn (let ((inhibit-quit t)) {} (while (not (file-exists-p {})))) (accept-process-output client 60)) \
+         (accept-process-output client 0) (write-region \"\" nil {} nil 'no-message))", hs.ready(), hs.file("go"), hs.file("mark")));
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} (isolate-interrupt iso) (romacs--isolate-signal (romacs--isolate-id iso) 15) (romacs--isolate-wait 0.1) \
+        (write-region \"\" nil {} nil 'no-message) \
+        (let ((end (+ (float-time) 5))) (while (and (not (file-exists-p {})) (< (float-time) end)) (romacs--isolate-wait 0.01))) \
+        (prog1 (file-exists-p {}) (isolate-kill iso)))", hs.await_ready(), hs.file("go"), hs.file("mark"), hs.file("mark")));
+    assert_eq!(out, "t", "{out}");
+}
+
 #[test]
 fn kill_leaves_no_zombie_and_settles_futures() {
     let mut vm = vm();

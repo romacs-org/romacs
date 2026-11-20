@@ -1390,6 +1390,30 @@ kept, if any; with `romacs-agent-resume-at-reset' off, that is forgotten."
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-tools--rearm-resume)
 
+(defun romacs-agent-tools--room-back (provider)
+  "Instance PROVIDER has room again before the reset sessions wait for:
+each waiting to resume on its harness's pool resumes now."
+  (let ((harness (plist-get (cl-find provider (romacs-agent-instances) :key (lambda (i) (plist-get i :name))
+                                     :test #'equal)
+                            :harness))
+        (due nil))
+    (maphash (lambda (session pending)
+               (when (eq (romacs-agent-harness session) harness) (push (cons session (car pending)) due)))
+             romacs-agent-tools--resumes)
+    (pcase-dolist (`(,session . ,time) due)
+      (cancel-timer (cdr (gethash session romacs-agent-tools--resumes)))
+      ;; Its reset not reached: a limit there again waits for it again.
+      (remhash session romacs-agent-tools--resets-used)
+      (condition-case err
+          (romacs-agent-tools--resume session time)
+        ;; It waits on as it did, its own failure said.
+        (error (romacs-agent-tools--arm-resume session time)
+               ;; Kept as it can be: the others still go on.
+               (ignore-errors (romacs-agent-tools--keep-resume session time))
+               (message "Resuming %s: %s" (romacs-agent-id session) (error-message-string err)))))))
+
+(add-hook 'romacs-agent-room-functions #'romacs-agent-tools--room-back)
+
 (defun romacs-agent-tools--not-moved (session why)
   "SESSION stays where its limit stopped it, WHY when said: its end goes
 to its parent."

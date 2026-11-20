@@ -23,8 +23,7 @@ concurrency:
 
 jobs:
   linux-x86_64:
-    # The runner's glibc (2.39) is the oldest a user can run; its FreeType
-    # also meets freetype-sys's minimum, which ubuntu-22.04's does not.
+    # The runner's glibc (2.39) is the oldest a user can run.
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
@@ -42,8 +41,10 @@ jobs:
             exit 1
           fi
 
-      # The libraries the binary links (fontconfig, freetype, zlib); every
-      # other native library is loaded at run time. DejaVu gives the smoke
+      # The libraries the binary links (fontconfig, which loads the system
+      # FreeType for itself, and zlib; Romacs's own FreeType is built in from
+      # crates/vendor/freetype-sys); every other native library is loaded at
+      # run time. DejaVu gives the smoke
       # test's world build a font.
       - name: Install build packages
         run: |

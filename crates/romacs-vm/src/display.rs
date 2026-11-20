@@ -379,6 +379,17 @@ impl DisplayState {
     pub(super) fn base(&self, id: u64) -> usize {
         self.bases.get(&id).copied().unwrap_or(0)
     }
+    /// The byte window ID's last published text shows buffer byte BYTE at,
+    /// or None where that text does not show it.
+    pub(super) fn published_byte(&self, id: u64, byte: usize) -> Option<usize> {
+        match self.segments(id) {
+            None => byte.checked_sub(self.base(id)),
+            // Half open, as the echo area maps its text: a byte at a
+            // string's position is the text after the string.
+            Some(segments) => segments.iter().find(|s| !s.string && s.buffer <= byte && byte < s.buffer + s.len)
+                .map(|s| s.display + (byte - s.buffer)),
+        }
+    }
     /// Window END.id's last publication was painted as END reports, ending
     /// at buffer byte BYTE.
     pub(super) fn painted_rows(&mut self, end: &romacs_layout_input::WindowEnd, byte: usize) {
@@ -676,7 +687,7 @@ impl Vm {
     /// BUFFER, keyed by KEY and WINDOW.  START is the buffer position (or
     /// marker) where the block's first row begins.  MOVING is t, nil (held
     /// where it is) or `still' (motion is off: its still frame).  KIND is
-    /// (logo CELL-ASPECT EPOCH).
+    /// (logo CELL-ASPECT EPOCH) or (working WORK EPOCH FACE BEATS).
     /// They travel with the frame, so each frame the display shows says
     /// which animations it has: none once the buffer is no longer shown.
     /// The block's row in WINDOW is counted here, from the window start
@@ -690,6 +701,7 @@ impl Vm {
         if list == Value::NIL || list == Value::UNBOUND { return Ok(vec![]); }
         let natural = |v: Value| v.integer_value().and_then(|n| u64::try_from(n).ok()).ok_or("natural number required");
         let logo = self.intern("logo");
+        let working = self.intern("working");
         let still = self.intern("still");
         let mut animations = vec![];
         for entry in self.list_values(list)? {
@@ -701,9 +713,14 @@ impl Vm {
             };
             if !shown { continue; }
             let rows = natural(rows)? as u32;
+            // A marker of the caller's, read as this frame freezes: one
+            // detached or in another buffer places nothing.
             let start = match start.integer_value() {
                 Some(n) => n,
-                None => self.marker_position_value(start)?.integer_value().ok_or("text animation start")?,
+                None => {
+                    if self.marker(start)?.buffer != buffer { continue; }
+                    match self.marker_position_value(start)?.integer_value() { Some(n) => n, None => continue }
+                }
             };
             let (top, in_view) = self.text_animation_row(window, start, rows)?;
             let kind = match self.list_values(kind)?[..] {
@@ -720,14 +737,42 @@ impl Vm {
                     };
                     TextAnimationKind::Logo { cell_aspect, epoch: natural(epoch)?, colours }
                 }
+                // (working WORK EPOCH FACE BEATS): lisp/ui/romacs-working.el's
+                // thread, in FACE's foreground.
+                [head, work, epoch, face, beats] if head == working => {
+                    use romacs_logo::working::Work;
+                    let work = match self.symbol_name_of(work).as_deref() {
+                        Some("running") => Work::Running,
+                        Some("waiting") => Work::Waiting,
+                        Some("failed") => Work::Failed,
+                        _ => Work::Idle,
+                    };
+                    let face = self.symbol_name_of(face).ok_or("face symbol required")?;
+                    TextAnimationKind::Working { work, beats: natural(beats)?, epoch: natural(epoch)?,
+                                                 colour: self.display_face(&face)?.foreground,
+                                                 bead: self.display_face("default")?.foreground }
+                }
                 _ => return Err("bad text animation kind".into()),
             };
             // Keyed by animation and window: each window showing one has its
             // own motion.
             let window = self.window(window)?.id;
+            // A working thread is placed by the host on the row its layout
+            // lays START on: START as a byte of the text it published.
+            let anchor = match kind {
+                TextAnimationKind::Working { .. } => {
+                    let byte = self.shown_text(buffer).ok().and_then(|b| {
+                        let pos = (start.max(1) as usize - 1).min(b.len_chars());
+                        b.byte_of_char(coordinates::CharOffset(pos)).ok().map(|o| o.0)
+                    });
+                    match byte.and_then(|byte| self.display_state.published_byte(window, byte)) { Some(a) => Some(a), None => continue }
+                }
+                _ => None,
+            };
             animations.push(((natural(key)? << 32) | (window & 0xffff_ffff), TextAnimation {
-                window, top, cols: natural(cols)? as u32, rows,
-                fps: natural(fps)? as u32, moving: in_view && moving != Value::NIL && moving != still, still: moving == still, kind,
+                window, top, cols: natural(cols)? as u32, rows, anchor, rise: None,
+                fps: natural(fps)? as u32, moving: (anchor.is_some() || in_view) && moving != Value::NIL && moving != still,
+                still: moving == still, kind,
             }));
         }
         Ok(animations)

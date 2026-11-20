@@ -36,18 +36,15 @@ enum LiveFontCase {
     Minimum,
     MinimumVertical,
     GrownMinibuffer,
-    OverlappingResize,
 }
 
-#[test]
-// Prerequisites: requires GNU GUI Emacs, Xvfb, GSettings and fonts.
-fn gnu_overlapping_resize_and_font_change_preserve_latest_grid() {
-    check_live_font(
-        GuiBackend::LinuxX11,
-        "gnu-live-overlapping",
-        LiveFontCase::OverlappingResize,
-    );
-}
+// No case issues overlapping native resizes: GNU does not decide their
+// outcome. Two back-to-back `set-frame-size' calls (85x24, then 91x25) and a
+// font change passed on a quiet host and in the nightly, but every failure
+// ended at 85x24: 4 of 25 runs under CPU load with `x-wait-for-event-timeout'
+// at its default 0.1 s, 15 of 15 on an idle host with it nil, 5 of 40 under
+// load with it 10 s. An oracle needs an answer GNU gives every time; resizes
+// awaited one at a time are the geometry case.
 
 #[test]
 // Prerequisites: requires GNU GUI Emacs, Xvfb, GSettings and fonts.

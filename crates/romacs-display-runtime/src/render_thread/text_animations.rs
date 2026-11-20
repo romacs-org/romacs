@@ -105,7 +105,7 @@ impl TextAnimations {
     /// GPU allows it; the others are drawn as cells.
     pub(crate) fn prepare_scenes(&mut self, frame: &FrameGlyphBuffer, gpu: bool, renderer: &mut WgpuRenderer) {
         for running in self.running.values_mut() {
-            if !gpu {
+            if !gpu || !running.animation.kind.scened() {
                 if let Some(scene) = running.scene.take() { self.retired.push(scene); }
                 continue;
             }
@@ -170,7 +170,12 @@ impl TextAnimations {
     pub(crate) fn paint(&mut self, frame: &mut FrameGlyphBuffer) {
         if !self.running.is_empty() { frame.layout_identity = 0; }
         for running in self.running.values_mut() {
-            let block = page_scenes::block(frame, &running.animation);
+            // A thread's block, confirmed on this frame's rows.
+            let Some(placed) = romacs_display_protocol::text_animation::located(frame, &running.animation) else {
+                running.report(Drawn::Hidden);
+                continue;
+            };
+            let block = page_scenes::block(frame, &placed);
             let shown = running.scene.as_ref().filter(|_| running.drawn_as_scene())
                 .zip(block)
                 .and_then(|(scene, block)| scene.glyph(&block));
@@ -191,7 +196,7 @@ impl TextAnimations {
             if running.cells.as_ref().is_none_or(|(at, _)| *at != moved) {
                 running.cells = Some((moved, running.animation.cells(moved)));
             }
-            if let Some((_, cells)) = &running.cells { paint(frame, &running.animation, cells); }
+            if let Some((_, cells)) = &running.cells { paint(frame, &placed, cells); }
         }
     }
 
