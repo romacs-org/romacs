@@ -21,13 +21,7 @@ impl Vm {
                 let equal = if self.native_quit { self.equal_primitive(a, b)? } else { self.equal_text(a, b)? };
                 Ok(if equal { Value::TRUE } else { Value::NIL })
             }
-            Min => {
-                if n == 0 {
-                    return Err("wrong primitive arity".into());
-                }
-                let args = self.stack[start..start + n].to_vec();
-                self.minmax(&args, std::cmp::Ordering::Less)
-            }
+            Min => self.min_max::<false>(start, n, std::cmp::Ordering::Less),
             Append => self.append_values::<false>(start, n),
             _ => unreachable!("eval data dispatch"),
         }
@@ -813,22 +807,50 @@ impl Vm {
     /// data.c minmax_driver: markers become their positions, a later
     /// argument wins only when strictly better (ties keep the first, with
     /// its own type), and a NaN that does not win is returned at once.
-    pub(super) fn minmax(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
-        let mut accum = self.coerce_number(args[0], true)?;
-        // Only `min` and `max` call this: a quit between chunks returns
-        // nothing, and polls only inside their scope (`native_poll_text`).
-        for (i, chunk) in args[1..].chunks(KERNEL_CHUNK).enumerate() {
-            if i > 0 { self.native_poll_text()?; }
-            for &arg in chunk {
-                let value = self.coerce_number(arg, true)?;
-                if self.numeric_cmp(value, accum)? == Some(better) {
-                    accum = value;
-                } else if self.number(value)?.is_nan() {
-                    return Ok(value);
-                }
+    /// Past a chunk of arguments, polled between chunks (`Vm::kernel_poll`,
+    /// SCOPED from their engine targets); a quit returns nothing.
+    pub(super) fn minmax<const SCOPED: bool>(&mut self, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        let accum = self.coerce_number(args[0], true)?;
+        if args.len() > KERNEL_CHUNK + 1 {
+            return self.minmax_polled::<SCOPED>(accum, &args[1..], better);
+        }
+        Ok(match self.minmax_fold(accum, &args[1..], better)? {
+            std::ops::ControlFlow::Continue(accum) | std::ops::ControlFlow::Break(accum) => accum,
+        })
+    }
+    /// `minmax` over more than a chunk of ARGS, ACCUM their first's value.
+    #[cold]
+    #[inline(never)]
+    fn minmax_polled<const SCOPED: bool>(&mut self, mut accum: Value, args: &[Value], better: std::cmp::Ordering) -> Result<Value> {
+        for (i, chunk) in args.chunks(KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            match self.minmax_fold(accum, chunk, better)? {
+                std::ops::ControlFlow::Continue(next) => accum = next,
+                std::ops::ControlFlow::Break(nan) => return Ok(nan),
             }
         }
         Ok(accum)
+    }
+    /// ACCUM folded over ARGS; Break with a NaN that did not win.
+    #[inline(always)]
+    fn minmax_fold(&mut self, mut accum: Value, args: &[Value], better: std::cmp::Ordering) -> Result<std::ops::ControlFlow<Value, Value>> {
+        for &arg in args {
+            let value = self.coerce_number(arg, true)?;
+            if self.numeric_cmp(value, accum)? == Some(better) {
+                accum = value;
+            } else if self.number(value)?.is_nan() {
+                return Ok(std::ops::ControlFlow::Break(value));
+            }
+        }
+        Ok(std::ops::ControlFlow::Continue(accum))
+    }
+    /// `min` (LESS) or `max` of the N arguments at START.
+    pub(super) fn min_max<const SCOPED: bool>(&mut self, start: usize, n: usize, better: std::cmp::Ordering) -> Result<Value> {
+        if n == 0 {
+            return Err("wrong primitive arity".into());
+        }
+        let args = self.stack[start..start + n].to_vec();
+        self.minmax::<SCOPED>(&args, better)
     }
 }
 

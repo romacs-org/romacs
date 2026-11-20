@@ -150,7 +150,7 @@ impl Vm {
                     Value::NIL
                 },
             ),
-            Max => self.minmax(&a, std::cmp::Ordering::Greater),
+            Max => self.minmax::<false>(&a, std::cmp::Ordering::Greater),
             _ => unreachable!("bootstrap primitive dispatch"),
         }
     }

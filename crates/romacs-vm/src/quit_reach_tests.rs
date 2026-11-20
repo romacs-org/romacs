@@ -708,14 +708,16 @@ fn call_kernel(vm: &mut Vm, p: crate::Primitive, args: &[Value], engine: bool) -
 /// value too.
 #[test]
 fn gated_kernels_take_their_scope_at_their_first_chunk() {
-    use crate::Primitive::{Append, CopySequence, Nreverse};
+    use crate::Primitive::{Append, CopySequence, Max, Min, Nreverse};
     const K: usize = crate::quit::KERNEL_CHUNK;
-    let kernels: [(crate::Primitive, fn(usize) -> String); 5] = [
+    let kernels: [(crate::Primitive, fn(usize) -> String); 7] = [
         (Nreverse, |n| format!("(list (make-list {n} 1))")),
         (CopySequence, |n| format!("(list (make-list {n} 1))")),
         (Append, |n| format!("(list (make-list {n} 1) nil)")),
         (Append, |n| format!("(list (make-string {n} ?a) nil)")),
         (Append, |n| format!("(list (make-bool-vector {n} t) nil)")),
+        (Min, |n| format!("(make-list {n} 1)")),
+        (Max, |n| format!("(make-list {n} 1)")),
     ];
     for (p, form) in kernels {
         for (n, engine) in [(3 * K, true), (K - 1, true), (3 * K, false)] {

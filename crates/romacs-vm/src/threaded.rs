@@ -4306,11 +4306,12 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         }
         TempBuffer => Vm::eval_buffer_primitive,
         // Their own entry, which raises a poll's escape (`primitive_value`).
-        DeepEqual | Min => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
-        // Granting its quit scope at its first chunk boundary
+        DeepEqual => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        // Granting their quit scope at their first chunk boundary
         // (`Vm::kernel_poll`), as Nreverse below.
         Append => |vm, _, start, n| vm.append_values::<true>(start, n),
-        Max => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.bootstrap_primitive(p, start, n)),
+        Min => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Less),
+        Max => |vm, _, start, n| vm.min_max::<true>(start, n, std::cmp::Ordering::Greater),
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
             Vm::eval_buffer_primitive
