@@ -85,6 +85,18 @@ line above them brings earlier ones."
 syntax face's, which a theme may draw as red as an error.")
 (defface romacs-agent-log-output '((t :inherit shadow))
   "A tool's output, and its input's lines.")
+
+(defun romacs-agent-log--derive-output (&rest _)
+  "Make a tool's output the theme's dim colour raised to 4.5:1 on its
+background, as its default spec: read, never hidden.  A theme's or the
+user's own spec still wins."
+  (let ((colour (romacs-working-readable (face-foreground 'shadow nil t))))
+    (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
+                   'face-defface-spec)))
+
+(add-hook 'enable-theme-functions #'romacs-agent-log--derive-output)
+(add-hook 'disable-theme-functions #'romacs-agent-log--derive-output)
+(romacs-agent-log--derive-output)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
@@ -872,6 +884,12 @@ how long the turn has run."
             (if (> pending 0)
                 (propertize (format "  ⚠ %d wait%s on you" pending (if (= pending 1) "s" ""))
                             'face 'romacs-agent-log-ask)
+              "")
+            ;; A harness's transcript, shown: it is read, not typed at.
+            (if (eq (romacs-agent-state session) 'history)
+                (propertize (concat "  read-only · "
+                                    (substitute-command-keys "\\<romacs-agent-history-text-map>\\[romacs-agent-history-resume-this] resumes"))
+                            'face 'romacs-agent-log-note)
               "")
             (if (and start (zerop pending) (memq (romacs-agent-state session) '(starting running)))
                 (propertize (format "  %ds · %s stops" (round (- (float-time) start))

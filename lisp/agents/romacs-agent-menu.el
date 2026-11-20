@@ -331,9 +331,10 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
-  "u" ("Roll back to before this turn (C-u: the last)" romacs-agent-chat-rollback
+  "A" ("Attach a file's path" romacs-agent-chat-attach)
+  "u" ("Roll back this turn (C-u: last)" romacs-agent-chat-rollback
        :inapt-if (lambda () (not (romacs-agent--harness-free-p romacs-agent-log--session))))
-  "D" ("Diff of this turn (C-u: all)" romacs-agent-chat-diff)
+  "D" ("Diff this turn (C-u: session)" romacs-agent-chat-diff)
   :group "Runs on"
   "m" (#'romacs-agent-menu--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-menu--effort-label romacs-agent-chat-effort)
@@ -368,8 +369,7 @@ the session, the view."
   "x" ("Stop" romacs-agent-chat-stop)
   :group "View"
   "e" ("Earlier turns" romacs-agent-log-earlier)
-  "w" ("Copy the entry at point" romacs-agent-log-copy)
-  "A" ("Attach a file (its path)" romacs-agent-chat-attach))
+  "w" ("Copy the entry at point" romacs-agent-log-copy))
 
 (put 'romacs-agent-menu-map-popup 'command-modes '(romacs-agent-log-mode))
 

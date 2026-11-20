@@ -701,7 +701,9 @@ as `pop-to-buffer' does with ACTION."
         (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
         (romacs-agent-log--header-show)))
     (pop-to-buffer buffer action)
+    ;; On its last entry, its end in view: nothing here is typed at.
     (goto-char (point-max))
+    (romacs-agent-log-previous 1)
     (recenter -1)
     buffer))
 
