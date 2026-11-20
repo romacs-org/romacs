@@ -661,7 +661,7 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
     """which-key's automatic hint is the key-hint card: after C-x, at the
     selected pane's bottom right 12 px in and above the status bar, titled
-    by the prefix, prefixes first; C-h pages it in place and the command
+    by the prefix, in which-key-sort-order's order; C-h pages it in place and the command
     still runs; a sub-prefix key hides it at once and a card for the longer
     prefix follows; C-g ends it.  Then C-c in org, C-h as a prefix, a narrow
     pane, and point at the bottom right (the card flips to the bottom left)."""
@@ -711,7 +711,7 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     shown = card_rows()
     report['captures'].append({'name': 'C-x', 'rows': shown, 'state': cx})
     placed(cx)
-    if not any('+' in row for row in shown[1:3]) or not any('find-file' in row for row in shown):
+    if not any('+' in row for row in shown[1:]) or not any('switch-to-buffer' in row for row in shown):
         raise AssertionError(f'C-x card rows {shown}')
     keys('-M', 'ctrl', 'h', '-m', 'ctrl')
     fio.wait(lambda: read().get('page') == 1 and card_rows(), args.timeout, 'C-h pages the card', process)
@@ -850,12 +850,17 @@ def multiset(runs):
 
 def romacs_menu(gnu):
     """GNU's runs as Romacs's menu deliberately draws them
-    (ledger/divergences/VM2-MENU-LAYERS.md): the title is the menu's
-    description in `keymap-popup-title', without the exit key the footer
-    already shows, and a submenu's label ends in ` ›' instead of a syntax
-    face's colour."""
-    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']]
-    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in gnu['body']]
+    (ledger/divergences/VM2-MENU-LAYERS.md): the title row is the menu's
+    description in `keymap-popup-title' and, right-aligned, the exit hint
+    GNU's footer shows (its key and `Dismiss menu'), which leaves the body;
+    a submenu's label ends in ` ›' instead of a syntax face's colour."""
+    exit_key = next(text for text, faces in gnu['title'] if faces == ['keymap-popup-key'])
+    hint = [[exit_key, ['keymap-popup-key']], ['Dismiss menu', None]]
+    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']] + hint
+    body = list(gnu['body'])
+    for run in hint:
+        body.remove(run)
+    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in body]
     return {'title': title, 'body': body}
 
 
@@ -965,10 +970,11 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
         centre = probe['inset'] + probe['parent-text-width'] / 2
         if abs(left + width / 2 - centre) > 1 or top + height != probe['chrome-bottom'] - probe['margin']:
             raise AssertionError(f"panel at {left},{top} {width}x{height}, centre {centre}, chrome bottom {probe['chrome-bottom']}")
-        if not lines or lines[0].strip() != probe['description']:
-            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r}')
+        # The title row: the description, the exit hint at its right.
+        if not lines or not lines[0].strip().startswith(probe['description']) or not lines[0].rstrip().endswith('Dismiss menu'):
+            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r} then the exit hint')
         bar = ' '.join(t for _, t in shown['root_mode_lines'])
-        if 'Dismiss' in bar or lines[0].strip() in bar:
+        if 'Dismiss' in bar or probe['description'] in bar:
             raise AssertionError(f'status bar shows the popup: {bar!r}')
         report['checks'].append({'panel_title': lines[0], 'panel_rows': len(lines)})
     # The root frame's windows are as they were with the popup gone.
@@ -1164,6 +1170,16 @@ def run(args):
                     # Column 0 is the window's text left (a row that starts
                     # with an empty column starts with a stretch, no glyph).
                     left = probe['text-left']
+                    # A title row's exit hint is aligned to the window's right
+                    # edge, not to its column in the string: painted right of
+                    # the title, past a gap of two columns at least.
+                    hint = re.search(r'\S+  (Dismiss menu|Back)\s*$', line_text) if [line_text, y] == list(starts[0]) else None
+                    if hint:
+                        title_end = left + len(line_text[:hint.start()].rstrip()) * column
+                        key = line_text[hint.start()]
+                        if not any(gx >= title_end + 2 * column - 1.5 and ch == key for gx, ch in row):
+                            raise AssertionError(f'title row {line_text!r}: exit hint {key!r} not painted right of the title (from x {title_end})')
+                        line_text = line_text[:hint.start()]
                     for start in (m.start() for m in re.finditer(r'(?<=  )\S', line_text)):
                         x = left + start * column
                         if not any(abs(gx - x) < 1.5 and ch == line_text[start] for gx, ch in row):

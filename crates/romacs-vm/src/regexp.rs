@@ -10,9 +10,14 @@ pub(crate) use syntax::{parse_syntax_descriptor, VmSyntax};
 #[cfg(test)]
 #[path = "regexp_entry_tests.rs"]
 mod entry_tests;
+#[path = "regexp_plain.rs"]
+mod plain;
 #[cfg(test)]
 #[path = "regexp_cache_tests.rs"]
 mod cache_tests;
+#[cfg(test)]
+#[path = "regexp_plain_tests.rs"]
+mod plain_tests;
 
 #[cfg(test)]
 thread_local! {
@@ -20,6 +25,8 @@ thread_local! {
     /// and characters, and the strings they copied to read.
     static CONVERTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The syntax this thread's searches prepared (`regexp_syntax`).
+    static PREPARED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 fn note(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>, n: usize) {
@@ -488,13 +495,6 @@ impl Vm {
     /// GNU fast_string_match: case-sensitive, current syntax, no match-data writes.
     pub(crate) fn file_name_match(&mut self, pattern: Value, string: Value) -> std::result::Result<Option<usize>, prim::Fault> {
         self.string_match_no_data(pattern, string, Translation::None, None)
-    }
-
-    /// PATTERN against STRING with the translation KEY names (built as
-    /// TRANSLATION), without touching the match data.
-    pub(crate) fn string_match_no_data(&mut self, pattern: Value, string: Value, key: Translation,
-                                       translation: Option<regex::CaseTranslation>) -> std::result::Result<Option<usize>, prim::Fault> {
-        Ok(self.string_search(pattern, string, key, translation)?.map(|(_, at, _)| at))
     }
 
     /// [`Self::string_match_no_data`]'s match, as its groups in character positions.
@@ -1184,8 +1184,14 @@ impl Vm {
             return Err(Fault::Signal("args-out-of-range", vec![string, start]));
         };
         let folded = self.regexp_case_fold()?;
-        let source = self.regexp_syntax(Some(string))?;
-        let compiled = self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?;
+        let key = if folded { Translation::Standard } else { Translation::None };
+        let (compiled, source) = if let Some(compiled) = self.regexp_plain_hit(pattern, posix, key) {
+            compiled.borrow_mut().set_target_multibyte(multibyte);
+            (compiled, None)
+        } else {
+            let source = self.regexp_syntax(Some(string))?;
+            (self.regexp_compiled_string(pattern, multibyte, posix, folded, &source)?, Some(source))
+        };
         let save = inhibit == Value::NIL && !self.regexp_preserve();
         let armed = self.arm_regexp_quit();
         // The string is read where it lies: nothing moves or changes it
@@ -1200,11 +1206,15 @@ impl Vm {
                 input.remember(all - rest, from);
             }
             let compiled = compiled.borrow();
-            let syntax = syntax::VmSyntax::new(self, source);
             let byte = input.byte(from);
             // GNU at_dot compares the text pointer with buffer point; a
             // standalone string cannot contain that buffer address.
-            let found = regex::re_search(&compiled, &input.bytes, byte, (input.bytes.len() - byte).cast_signed(), &syntax, usize::MAX);
+            let range = (input.bytes.len() - byte).cast_signed();
+            let found = if let Some(source) = source {
+                regex::re_search(&compiled, &input.bytes, byte, range, &syntax::VmSyntax::new(self, source), usize::MAX)
+            } else {
+                regex::re_search(&compiled, &input.bytes, byte, range, &regex::DefaultSyntaxLookup, usize::MAX)
+            };
             match found {
                 Some((at, mut registers)) => {
                     // The match data's positions are characters of the string.

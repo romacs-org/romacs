@@ -385,7 +385,8 @@ fn a_tree_decides_held_artifacts_itself() {
     let configured = Configured {
         config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
                          identity: Box::new(|| Some("env".into())), runtime: vec![], root: None },
-        chain: String::new(), trace: false, no_prune: false, identity: std::sync::OnceLock::new(),
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: store.join("tmp"),
+        identity: std::sync::OnceLock::new(),
     };
     // A's artifact, published as its compile would, having resolved NAME.
     let publish = |name: &str| {
@@ -417,4 +418,46 @@ fn a_tree_decides_held_artifacts_itself() {
     std::fs::write(&source, "(require 'b) ; changed\n").unwrap();
     assert_eq!(held(&load_path), None, "a changed source compiles again");
     std::fs::remove_dir_all(&store).unwrap();
+}
+
+/// A compile process's record names its artifact in the store both
+/// processes share, says whether it held already, and keeps the
+/// `load-path' searched; a file outside the store has none.
+#[test]
+fn a_compile_record_round_trips_through_its_text() {
+    use std::os::unix::ffi::OsStrExt;
+    let store = Path::new(std::ffi::OsStr::from_bytes(b"/home/u\xff/store"));
+    let record = Record { artifact: store.join("0123456789abcdef/ab12/cd34.rlc"), held: true,
+                          load_path: vec!["/a/lisp".into(), "/b/site-lisp".into()] };
+    let text = record.text(store).unwrap();
+    assert_eq!(Record::read(text.as_bytes(), store), Some(record));
+    let outside = Record { artifact: PathBuf::from("/elsewhere/a.rlc"), held: false, load_path: vec![] };
+    assert_eq!(outside.text(store), None);
+    assert_eq!(Record::read(b"romacs-compiled: /s/a.rlc", store), None);
+}
+
+/// A compile process that cannot start leaves no record file behind.
+#[test]
+fn a_compile_that_does_not_start_leaves_no_record() {
+    let store = test_store("no-start");
+    let scratch = store.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| None), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: scratch.clone(),
+        identity: std::sync::OnceLock::new(),
+    };
+    assert_eq!(run_compile(&configured, store.join("no-such-program").into(), vec![], vec![]), None);
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0, "a record file was left in {}", scratch.display());
+}
+
+/// The temporary directory a compile's record is made in is absolute, as
+/// the compile process works in another directory; /tmp without one.
+#[test]
+fn the_scratch_directory_is_absolute() {
+    let relative = scratch_dir(Some("tmp".into()));
+    assert!(relative.is_absolute() && relative.ends_with("tmp"), "{}", relative.display());
+    assert_eq!(scratch_dir(None), Path::new("/tmp"));
+    assert_eq!(scratch_dir(Some("".into())), Path::new("/tmp"));
 }

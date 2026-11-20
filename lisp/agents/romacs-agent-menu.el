@@ -316,10 +316,38 @@ argument ALL, what every turn of the session did."
   (interactive nil romacs-agent-log-mode)
   (romacs-agent-tools--cancel-resume (romacs-agent-menu--session) "cancelled by hand"))
 
+(defun romacs-agent-menu--clipboard-image-type ()
+  "The MIME type of the clipboard's image, or nil when it holds none."
+  (and (executable-find "wl-paste")
+       (seq-find (lambda (type) (string-prefix-p "image/" type))
+                 (process-lines-ignore-status "wl-paste" "--list-types"))))
+
+(defun romacs-agent-menu--save-clipboard-image (session type)
+  "Save the clipboard's image, of MIME TYPE, with SESSION; return its file."
+  (let* ((dir (expand-file-name "attachments" (romacs-agent-dir session)))
+         (file (progn (make-directory dir t)
+                      (make-temp-file (expand-file-name "clipboard-" dir) nil
+                                      (concat "." (substring type (length "image/"))))))
+         (saved nil))
+    (unwind-protect
+        (progn
+          (unless (eql 0 (call-process "wl-paste" nil (list :file file) nil "--type" type))
+            (user-error "Could not read the clipboard's image"))
+          (setq saved t)
+          file)
+      (unless saved (delete-file file)))))
+
 (defun romacs-agent-chat-attach (file)
   "Put FILE's path in the composer: the agent reads it where it is, no
-copy is made."
-  (interactive (list (read-file-name "Attach: " nil nil t)) romacs-agent-log-mode)
+copy is made.  Interactively the clipboard's image, saved with the
+session; with a prefix argument, when the clipboard holds none, or in a
+chat whose session takes no commands from here, a file asked for."
+  (interactive
+   (list (if-let* ((type (and (not current-prefix-arg) (romacs-agent-log--commands-p)
+                              (romacs-agent-menu--clipboard-image-type))))
+             (romacs-agent-menu--save-clipboard-image (romacs-agent-menu--session) type)
+           (read-file-name "Attach: " nil nil t)))
+   romacs-agent-log-mode)
   (goto-char (point-max))
   (unless (or (= (point) romacs-agent-log--input) (memq (char-before) '(?\s ?\n))) (insert " "))
   (insert (expand-file-name file)))

@@ -19,7 +19,7 @@ use rustix::io::FdFlags;
 use rustix::process::{Pid, PidfdFlags, Resource, Signal};
 
 use crate::proto::{self, count, kind};
-use crate::spawn::{self, Spec, Status, Whom};
+use crate::spawn::{self, Spec, Status};
 use crate::table::{Attachment, Child, Entry, Table, TABLE_VERSION};
 
 /// How long a closed handle's child has after its signal, and a superseded
@@ -77,10 +77,12 @@ fn os(result: libc::c_int) -> io::Result<libc::c_int> {
 /// A descriptor that reads when SIGCHLD arrives; the signal stays blocked.
 /// Direct calls: rustix has no signalfd, and changes the signal mask and a
 /// disposition only through unsafe runtime functions.
+#[expect(unsafe_code, reason = "sigprocmask and signalfd: see the SAFETY comment")]
 fn child_signals() -> io::Result<OwnedFd> {
     // SAFETY: the set is initialised by sigemptyset before use; the calls
     // take it by pointer for their duration. signalfd returns a new
     // descriptor owned here.
+    // UNSAFE(rustix has no signalfd, and changes the signal mask only unsafely)
     unsafe {
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&raw mut set);
@@ -96,12 +98,14 @@ fn child_signals() -> io::Result<OwnedFd> {
 /// recorded then. Both options are read directly: rustix has no
 /// `SO_PEERPIDFD`, and its `SO_PEERCRED` holds the pid as non-zero, which
 /// a peer outside this keeper's pid namespace, reported as 0, would break.
+#[expect(unsafe_code, reason = "getsockopt: see the SAFETY comment")]
 fn peer(socket: &UnixStream) -> io::Result<(i32, OwnedFd)> {
     let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut pidfd: RawFd = -1;
     // SAFETY: each getsockopt writes at most the stated size into a local
     // of that size. SO_PEERPIDFD's, on success, is a new descriptor owned
     // here alone.
+    // UNSAFE(rustix has no SO_PEERPIDFD, and its SO_PEERCRED refuses pid 0)
     let made = unsafe {
         let mut len: libc::socklen_t = 12;
         os(libc::getsockopt(socket.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut cred).cast(), &raw mut len))?;
@@ -519,15 +523,11 @@ impl Keeper {
     /// Take every pending change of every child, the keeper's own and the
     /// orphans it inherited as subreaper.
     fn reap(&mut self) {
-        while let Some((pid, _)) = spawn::wait(Whom::PeekAny) {
-            let Some(&handle) = self.table.pids.get(&pid) else {
-                // An orphan: nobody asks for its status.
-                let _ = spawn::wait(Whom::Pid(pid));
-                continue;
-            };
+        while let Some((pid, status)) = spawn::wait_any() {
+            // An orphan's change was taken too: nobody asks for its status.
+            let Some(&handle) = self.table.pids.get(&pid) else { continue };
             let entry = self.table.handles.get_mut(&handle).expect("indexed");
             let child = entry.child.as_mut().expect("indexed");
-            let Some((_, status)) = spawn::wait(Whom::Child(&child.pidfd)) else { break };
             (child.status, child.unreported) = (status, true);
             if status.ended() {
                 self.table.pids.remove(&pid);
