@@ -8,7 +8,7 @@
 //! GNU's budget of steps, a leading `//' and a target beginning with `//'
 //! or ending in a slash (it keeps them), a NUL, and a name or target that
 //! is not UTF-8 text.
-use super::*;
+use super::{Step, Value};
 use std::os::unix::ffi::OsStrExt;
 
 /// The most links a walk follows before it leaves the name to the Lisp
@@ -35,7 +35,7 @@ fn file_truename_local(cx, filename: Value) -> Step {
     if !text || path.first() != Some(&b'/') {
         return Ok(Step::Done(Value::NIL));
     }
-    Ok(Step::Done(match truename(&path, |p| read_link(p)) {
+    Ok(Step::Done(match truename(&path, read_link) {
         None => Value::NIL,
         Some(Walk { true_name, through }) if through.is_empty() => super::fileio::file_name_value(cx, &true_name),
         // With the names each followed link spliced in, for the caller to
