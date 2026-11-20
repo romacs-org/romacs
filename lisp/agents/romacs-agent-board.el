@@ -332,15 +332,15 @@ takes what the others and the gaps between them leave."
         (propertize cell 'romacs-agent-board-live (list function width))
       cell)))
 
-(defconst romacs-agent-board--indent-levels 6
-  "How many levels a delegated thread's row indents, two columns each:
-deeper ones line up with the last, so a long chain keeps its titles in
-view and each row costs the same.")
+(defconst romacs-agent-board--max-indent-depth 6
+  "The deepest a delegated thread's row indents, two columns a level (12
+columns): deeper ones line up with it, so a row's indent costs the same
+however long its chain, and a chain's titles stay in view.")
 
 (defun romacs-agent-board--thread-line (row width)
   "Thread ROW in a line WIDTH columns wide: its fold, then its columns
 \(`romacs-agent-board-columns')."
-  (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--indent-levels)) ?\s)
+  (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--max-indent-depth)) ?\s)
                        (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
          (widths (romacs-agent-board--widths width (string-width head))))
     (cl-flet ((line (live)

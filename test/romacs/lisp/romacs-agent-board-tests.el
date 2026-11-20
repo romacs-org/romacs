@@ -136,7 +136,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
            (line (substring-no-properties (romacs-agent-board--line deep 80))))
       (should (= (plist-get deep :depth) 39))
       (should (= (string-width line) 80))
-      (should (string-match-p (format "\\`%s +link 39 " (make-string (* 2 (1+ romacs-agent-board--indent-levels)) ?\s))
+      (should (string-match-p (format "\\`%s +link 39 " (make-string (* 2 (1+ romacs-agent-board--max-indent-depth)) ?\s))
                               line)))))
 
 (ert-deftest romacs-agent-board-a-thread-shows-in-its-own-section ()
