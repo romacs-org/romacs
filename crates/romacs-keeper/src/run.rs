@@ -49,12 +49,14 @@ fn detach(args: &[String]) -> Result<(), String> {
 
 /// In the process [`detach`] started: lead a new session, without a
 /// terminal, and take the standard output as the report pipe, leaving
-/// `/dev/null` in its place.
+/// all three standard streams on one read-write `/dev/null`.
 fn detached() -> std::io::Result<std::fs::File> {
     let _ = rustix::process::setsid();
     let report = std::io::stdout().as_fd().try_clone_to_owned()?;
     let null = std::fs::OpenOptions::new().read(true).write(true).open("/dev/null")?;
+    rustix::stdio::dup2_stdin(&null)?;
     rustix::stdio::dup2_stdout(&null)?;
+    rustix::stdio::dup2_stderr(&null)?;
     Ok(std::fs::File::from(report))
 }
 
