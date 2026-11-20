@@ -373,11 +373,19 @@
     (goto-char (point-max))
     (should-error (romacs-agent-chat-rollback) :type 'user-error)))
 
+(ert-deftest romacs-agent-log-a-rollback-before-the-drawn-turns-dims-them-all ()
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 3))))
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 3 :prompt "long ago")
+    (let ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn 9)))
+      (should (memq 'romacs-agent-log-note (ensure-list (get-text-property at 'face)))))))
+
 (ert-deftest romacs-agent-log-a-compaction-opens-whole ()
   (romacs-agent-log-tests--with
     (draw :type 'compacted :text (mapconcat #'number-to-string (number-sequence 1 30) "\n"))
+    ;; From where entry motion lands, its first character.
     (goto-char (point-min))
-    (search-forward "context compacted")
     (should (equal (cdr (get-text-property (point) 'romacs-agent-log-full)) (mapconcat #'number-to-string (number-sequence 1 30) "\n")))
     (should (string-match-p "more lines" (romacs-agent-log-tests--transcript)))))
 

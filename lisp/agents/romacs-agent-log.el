@@ -691,7 +691,11 @@ unless a note said who gave it, that it was answered."
 it went back to before on (they stay readable, as the records keep
 them), and a note of how many, whether their files came back, and that
 prompt."
-  (when-let* ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn (plist-get event :to))))
+  (when-let* ((at (or (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn (plist-get event :to))
+                      ;; Its prompt among the earlier turns not drawn: all
+                      ;; the turns drawn came after it.
+                      (and (get-text-property (point-min) 'romacs-agent-log-earlier)
+                           (next-single-property-change (point-min) 'romacs-agent-log-earlier nil romacs-agent-log--end)))))
     (romacs-agent-log--writing (add-face-text-property at romacs-agent-log--end 'romacs-agent-log-note)))
   (let ((turns (or (plist-get event :turns) 0)))
     (romacs-agent-log--note event (format "↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
@@ -742,15 +746,18 @@ prompt."
                (romacs-agent-log--note event text)))
     ('compacted (let* ((summary (or (plist-get event :text) ""))
                        (lines (romacs-agent-log--lines summary romacs-agent-log-output-lines)))
-                  ;; Its first lines, and the whole summary on RET.
-                  (romacs-agent-log--note event (propertize
-                                                 (concat "context compacted\n" (car lines)
-                                                         (if (> (cdr lines) romacs-agent-log-output-lines)
-                                                             (format "\n… %d more lines · %s shows all"
-                                                                     (- (cdr lines) romacs-agent-log-output-lines)
-                                                                     (romacs-agent-log--key 'romacs-agent-log-open))
-                                                           ""))
-                                                 'romacs-agent-log-full (cons nil summary)))))
+                  ;; Its first lines, and the whole summary on RET, from
+                  ;; anywhere in the entry.
+                  (romacs-agent-log--line event 'note
+                                          (propertize
+                                           (concat "· context compacted\n" (car lines)
+                                                   (if (> (cdr lines) romacs-agent-log-output-lines)
+                                                       (format "\n… %d more lines · %s shows all"
+                                                               (- (cdr lines) romacs-agent-log-output-lines)
+                                                               (romacs-agent-log--key 'romacs-agent-log-open))
+                                                     ""))
+                                           'romacs-agent-log-full (cons nil summary))
+                                          'romacs-agent-log-note)))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'exit)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
