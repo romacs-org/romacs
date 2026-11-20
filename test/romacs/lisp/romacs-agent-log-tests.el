@@ -381,6 +381,29 @@
     (let ((at (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn 9)))
       (should (memq 'romacs-agent-log-note (ensure-list (get-text-property at 'face)))))))
 
+(ert-deftest romacs-agent-log-a-rollback-reaches-over-earlier-turns-put-above ()
+  ;; The rollback is drawn on the page shown; the prompt it went back to
+  ;; before is on the page put above it later: from there on, dimmed.
+  (romacs-agent-log-tests--with
+    (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line 5))))
+    (setq romacs-agent-log--from 5)
+    (draw :type 'input :text "shown" :request 9)
+    (draw :type 'rolled-back :to 2 :turns 3 :prompt "long ago")
+    (cl-letf (((symbol-function 'romacs-agent--journal-tail) (lambda (&rest _) '(nil)))
+              ((symbol-function 'romacs-agent-events-p) #'ignore)
+              ((symbol-function 'romacs-agent-log--replay)
+               (lambda (s &rest _)
+                 (romacs-agent-log-draw s '(:type input :text "before it" :request 1))
+                 (romacs-agent-log-draw s '(:type input :text "long ago" :request 2)))))
+      (romacs-agent-log-earlier))
+    (let ((dim (lambda (request) (memq 'romacs-agent-log-note
+                                       (ensure-list (get-text-property (text-property-any (point-min) romacs-agent-log--end
+                                                                                          'romacs-agent-log-turn request)
+                                                                       'face))))))
+      (should-not (funcall dim 1))
+      (should (funcall dim 2))
+      (should (funcall dim 9)))))
+
 (ert-deftest romacs-agent-log-a-compaction-opens-whole ()
   (romacs-agent-log-tests--with
     (draw :type 'compacted :text (mapconcat #'number-to-string (number-sequence 1 30) "\n"))

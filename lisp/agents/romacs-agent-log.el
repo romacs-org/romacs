@@ -687,22 +687,44 @@ unless a note said who gave it, that it was answered."
   (romacs-agent-log--line event 'note (concat "· " text) 'romacs-agent-log-note))
 
 (defun romacs-agent-log--rolled-back (event)
-  "Draw rollback EVENT: the turns it took back dimmed, from the prompt
-it went back to before on (they stay readable, as the records keep
-them), and a note of how many, whether their files came back, and that
-prompt."
-  (when-let* ((at (or (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-turn (plist-get event :to))
-                      ;; Its prompt among the earlier turns not drawn: all
-                      ;; the turns drawn came after it.
-                      (and (get-text-property (point-min) 'romacs-agent-log-earlier)
-                           (next-single-property-change (point-min) 'romacs-agent-log-earlier nil romacs-agent-log--end)))))
-    (romacs-agent-log--writing (add-face-text-property at romacs-agent-log--end 'romacs-agent-log-note)))
+  "Draw rollback EVENT: a note of how many turns, whether their files came
+back, and to before which prompt, which names that prompt's turn; the
+turns it took back are dimmed (`romacs-agent-log--dim-rollbacks')."
   (let ((turns (or (plist-get event :turns) 0)))
-    (romacs-agent-log--note event (format "↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
-                                          (if (plist-get event :files) " and their files" "")
-                                          (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n"))
-                                                                    60 nil nil t)))))
+    (romacs-agent-log--line event 'note
+                            (propertize (format "· ↶ rolled back %d turn%s%s to before: %s" turns (if (= turns 1) "" "s")
+                                                (if (plist-get event :files) " and their files" "")
+                                                (truncate-string-to-width (car (split-string (or (plist-get event :prompt) "") "\n"))
+                                                                          60 nil nil t))
+                                        'romacs-agent-log-rolled-back (plist-get event :to))
+                            'romacs-agent-log-note))
+  (romacs-agent-log--dim-rollbacks))
 
+(defun romacs-agent-log--dim (start end)
+  "Dim START to END, what is not dimmed yet."
+  (let ((pos start))
+    (while (< pos end)
+      (let ((next (next-single-property-change pos 'romacs-agent-log-dimmed nil end)))
+        (unless (get-text-property pos 'romacs-agent-log-dimmed)
+          (add-face-text-property pos next 'romacs-agent-log-note)
+          (put-text-property pos next 'romacs-agent-log-dimmed t))
+        (setq pos next)))))
+
+(defun romacs-agent-log--dim-rollbacks ()
+  "Dim the turns each rollback the transcript draws took back, from the
+prompt it went back to before, to its note; from the earlier turns' row
+when that prompt is among the turns not drawn.  They stay readable, as
+the records keep them.  Run as a rollback is drawn and as earlier turns
+are put above, so the drawn turns' order does not matter."
+  (romacs-agent-log--writing
+    (let ((pos (point-min)))
+      (while (setq pos (text-property-not-all pos romacs-agent-log--end 'romacs-agent-log-rolled-back nil))
+        (let* ((to (get-text-property pos 'romacs-agent-log-rolled-back))
+               (start (or (text-property-any (point-min) pos 'romacs-agent-log-turn to)
+                          (and (get-text-property (point-min) 'romacs-agent-log-earlier)
+                               (next-single-property-change (point-min) 'romacs-agent-log-earlier nil pos)))))
+          (when start (romacs-agent-log--dim start pos))
+          (setq pos (next-single-property-change pos 'romacs-agent-log-rolled-back nil romacs-agent-log--end)))))))
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
@@ -1069,7 +1091,9 @@ when the chat does not show it."
           (let ((line-end (line-beginning-position 2)))
             (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
           (insert (if from (romacs-agent-log--earlier-line from) "") text))))
-    (setq romacs-agent-log--from from)))
+    (setq romacs-agent-log--from from)
+    ;; A rollback either side of the new page's start reaches over it.
+    (romacs-agent-log--dim-rollbacks)))
 
 ;;; The chat
 
