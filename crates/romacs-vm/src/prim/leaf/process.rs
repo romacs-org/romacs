@@ -1219,6 +1219,12 @@ impl Leaf<'_> {
         let mut buf = vec![0; 64 * 1024];
         let mut held = false;
         loop {
+            // A worker's interrupt or termination stops the child as a C-g
+            // does, asked before each wait: one an `inhibit-quit' since
+            // unbound held, or one whose wake ended the last wait.
+            if let Some(quit) = self.vm.worker_quit() {
+                return Err(self.call_process_quit(pid, pidfd.as_ref(), quit));
+            }
             let (fds, tick) = match (&reader, &pidfd) {
                 (Some(read), _) => (vec![(read.as_raw_fd(), libc::POLLIN)], None),
                 (None, Some(pidfd)) => (vec![(pidfd.as_raw_fd(), libc::POLLIN)], None),
@@ -1231,11 +1237,7 @@ impl Leaf<'_> {
                 .map_err(|e| self.file_errno("Waiting for process", &e))?;
             if revents.first().is_none_or(|&r| r == 0) {
                 if let Err(quit) = self.native_poll() {
-                    // A4's abort offer reads this: HandedOff leaves a live
-                    // child owned by the reaper until `Table::owns` says not.
-                    let end = self.call_process_stop(pid, pidfd.as_ref());
-                    debug_assert!(end == ChildEnd::Reaped || self.vm.subprocesses.owns(pid), "a handed-off child has one owner");
-                    return Err(quit);
+                    return Err(self.call_process_quit(pid, pidfd.as_ref(), quit));
                 }
                 held = self.vm.quit.pressed();
                 continue;
@@ -1247,6 +1249,16 @@ impl Leaf<'_> {
             }
         }
         Ok(bytes)
+    }
+
+    /// QUIT, raised while call_process waits for child PID, once the child
+    /// is stopped (`call_process_stop`).
+    fn call_process_quit(&mut self, pid: i32, pidfd: Option<&OwnedFd>, quit: Fault) -> Fault {
+        // A4's abort offer reads this: HandedOff leaves a live child owned
+        // by the reaper until `Table::owns` says not.
+        let end = self.call_process_stop(pid, pidfd);
+        debug_assert!(end == ChildEnd::Reaped || self.vm.subprocesses.owns(pid), "a handed-off child has one owner");
+        quit
     }
 
     /// `call_process_cleanup` for a quit: SIGINT to the child's process group

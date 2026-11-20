@@ -266,6 +266,34 @@ fn a_termination_supersedes_a_pending_interrupt() {
     assert_eq!(out, "t", "{out}");
 }
 
+/// A worker's cancel during a long `call-process' stops the child, as a
+/// C-g's quit does (SIGINT to its group), and quits within the bound; the
+/// worker serves on. The child writes its pid and the ready file itself,
+/// so the cancel comes while the call waits on it. The list's last element
+/// is the milliseconds to quit.
+#[test]
+fn an_interrupt_stops_a_workers_call_process() {
+    let mut vm = vm();
+    let hs = Handshake::new("call-process");
+    let pidfile = hs.0.join("pid");
+    let script = format!("echo $$ > {}; : > {}; exec sleep 30", pidfile.display(), hs.0.join("ready").display());
+    let job = format!("'(lambda () (let ((exec-suffixes '(\"\")) (exec-path '(\"/usr/bin\" \"/bin\"))) \
+        (call-process \"sh\" nil nil nil \"-c\" {}) 'waited))", serde_json::to_string(&script).unwrap());
+    let out = eval(&mut vm, &format!("(let* ((iso (isolate-create)) \
+        (f (progn (isolate-await (isolate-spawn 'list :isolate iso)) (isolate-spawn {job} :isolate iso)))) \
+        {} \
+        (let* ((start (float-time)) \
+               (result (progn (isolate-interrupt iso) (condition-case e (isolate-await f 10) (quit 'interrupted) (error (car e))))) \
+               (ms (round (* 1000 (- (float-time) start))))) \
+          (list result (< ms 500) (condition-case e (isolate-await (isolate-spawn '+ 1 1 :isolate iso)) (error (car e))) ms)))", hs.await_ready()));
+    let (head, ms) = out.rsplit_once(' ').unwrap_or((&out, ""));
+    eprintln!("call-process interrupt to quit: {ms} ms");
+    assert_eq!(head, "(interrupted t 2", "{out}");
+    let child: i64 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+    assert!(settles(|| !process_exists(child)), "child {child} outlived the cancel");
+    eval(&mut vm, "(isolate-kill-all)");
+}
+
 #[test]
 fn kill_leaves_no_zombie_and_settles_futures() {
     let mut vm = vm();
