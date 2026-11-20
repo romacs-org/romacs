@@ -79,11 +79,22 @@ class JudgedTest(unittest.TestCase):
         for cause in ('exit -9', self.DIED):
             self.assertEqual(lint.judged([self.A, self.B], [[OLD], cause], {self.A: [OLD], self.B: cause})[3], [self.B])
 
-    def test_only_the_hosts_text_error_names_a_files_own_limit(self):
-        self.assertEqual(lint.cause_of(False, 255, 'Loading...\ninvalid Unicode text\n'), lint.UNREADABLE)
-        self.assertEqual(lint.cause_of(False, 255, 'Symbol\u2019s value as variable is void: x\n'), 'exit 255')
-        self.assertEqual(lint.cause_of(False, -9, ''), 'exit -9')
-        self.assertIsNone(lint.cause_of(True, 1, ''))
+    def test_only_the_hosts_text_error_on_a_file_not_utf8_names_its_own_limit(self):
+        text_error = 'Loading...\ninvalid Unicode text\n'
+        self.assertEqual(lint.cause_of(False, 255, text_error, False), lint.UNREADABLE)
+        # The same error while the judged file is UTF-8 came from another file the host read.
+        self.assertEqual(lint.cause_of(False, 255, text_error, True), 'exit 255')
+        self.assertEqual(lint.cause_of(False, 255, 'Symbol\u2019s value as variable is void: x\n', False), 'exit 255')
+        self.assertEqual(lint.cause_of(False, -9, '', False), 'exit -9')
+        self.assertIsNone(lint.cause_of(True, 1, '', True))
+
+    def test_a_file_is_utf8_by_its_own_bytes(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            good, bad = Path(directory) / 'good.el', Path(directory) / 'bad.el'
+            good.write_bytes('(defun f () "\u00e9")\n'.encode())
+            bad.write_bytes(b'(defconst c "\xf8\x88\x80\x80\x80")\n')  # a 5-byte charset sequence, past Unicode
+            self.assertEqual((lint.utf8(good), lint.utf8(bad), lint.utf8(Path(directory) / 'missing.el')), (True, False, False))
 
     def test_a_timeout_is_never_as_at_the_base(self):
         self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: 'timeout'})[3], [self.B])

@@ -39,9 +39,11 @@ FINDING = re.compile(r'^(?P<file>.+?):\d+: (?P<level>error|warning|hint): (?P<te
 FAILING = ('error', 'warning')
 COMPLETE = re.compile(r'^romacs-lint: \d+ files?, ', re.MULTILINE)
 # The one failure that names a file's own limit: the host cannot hold its text
-# (crates/romacs-vm/src/text.rs), as for charset text past Unicode. Any other
-# early end, a signal or another message under the same status included, says
-# nothing about the file.
+# (crates/romacs-vm/src/text.rs), as for charset text past Unicode, and the
+# judged file's own bytes are not UTF-8. The message alone names no file (the
+# host reads others too), so the file's text must show the same limit. Any
+# other early end, a signal or another message under the same status
+# included, says nothing about the file.
 UNREADABLE = 'unreadable text'
 
 
@@ -167,17 +169,27 @@ def lint(binary, arguments, timeout, root=ROOT):
     output = '\n'.join(named_from(line, home, root) for line in done.stdout.splitlines())
     return ((done.returncode if finished else None), output,
             done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n'),
-            cause_of(finished, done.returncode, done.stderr))
+            cause_of(finished, done.returncode, done.stderr, utf8(Path(arguments[-1]))))
 
 
-def cause_of(finished, status, errors):
+def cause_of(finished, status, errors, judged_utf8):
     """Why a host that exited with STATUS, writing ERRORS, gave no result: UNREADABLE
-    when it ended on the judged file's text, else `exit STATUS'; None when FINISHED."""
+    when it ended on text it cannot hold and the judged file is not UTF-8
+    (JUDGED_UTF8 false), else `exit STATUS'; None when FINISHED."""
     if finished:
         return None
-    if status == 255 and errors.rstrip().splitlines()[-1:] == ['invalid Unicode text']:
+    if status == 255 and errors.rstrip().splitlines()[-1:] == ['invalid Unicode text'] and not judged_utf8:
         return UNREADABLE
     return f'exit {status}'
+
+
+def utf8(path):
+    """Whether the file at PATH is UTF-8 text (an unreadable file is not)."""
+    try:
+        path.read_bytes().decode('utf-8')
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
