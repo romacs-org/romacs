@@ -367,10 +367,15 @@ takes what the others and the gaps between them leave."
         (propertize cell 'romacs-agent-board-live (list function width))
       cell)))
 
+(defconst romacs-agent-board--max-indent-depth 6
+  "The deepest a delegated thread's row indents, two columns a level (12
+columns): deeper ones line up with it, so a row's indent costs the same
+however long its chain, and a chain's titles stay in view.")
+
 (defun romacs-agent-board--thread-line (row width)
   "Thread ROW in a line WIDTH columns wide: its fold, then its columns
 \(`romacs-agent-board-columns')."
-  (let* ((head (concat (make-string (* 2 (plist-get row :depth)) ?\s)
+  (let* ((head (concat (make-string (* 2 (min (plist-get row :depth) romacs-agent-board--max-indent-depth)) ?\s)
                        (cond ((null (plist-get row :children)) "  ") ((plist-get row :open) "˅ ") (t "› "))))
          (widths (romacs-agent-board--widths width (string-width head))))
     (cl-flet ((line (live)
@@ -809,15 +814,24 @@ its next activity.  A settled one, bring back."
       (romacs-agent-board--redraw))))
 
 (defun romacs-agent-board-new ()
-  "Start a new thread, in this row's project."
+  "Start a new thread, in this row's project, where the board's sessions
+run (`romacs-agent-board-source')."
   (interactive nil romacs-agent-board-mode)
-  (romacs-agent-board--acting)
+  ;; Its row's directory is the drawn rows' source's: started there only.
+  (unless (eq (or romacs-agent-board--drawn-source romacs-agent-board-source) romacs-agent-board-source)
+    (user-error "The board shows another source's sessions: draw it again (g)"))
   (let* ((row (romacs-agent-board--row))
          (cwd (cond ((plist-get row :session) (romacs-agent-cwd (plist-get row :session)))
                     ((plist-get row :cwd))
                     ((plist-get row :item) (plist-get (plist-get row :item) :cwd)))))
-    (apply #'funcall-interactively #'romacs-agent-start
-           (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default))))))
+    (romacs-agent-board-source-new romacs-agent-board-source cwd)))
+
+(cl-defgeneric romacs-agent-board-source-new (source cwd)
+  "Start a session where SOURCE's sessions run, in directory CWD offered.")
+
+(cl-defmethod romacs-agent-board-source-new ((_source romacs-agent-log-local-source) cwd)
+  (apply #'funcall-interactively #'romacs-agent-start
+         (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default)))))
 
 (defun romacs-agent-board-filter ()
   "Show only the threads whose title, project, provider or model have

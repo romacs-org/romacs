@@ -144,6 +144,13 @@ class Lint(unittest.TestCase):
         self.assertEqual(check.lint_stage(0, 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints\n', ''),
                          ('ok', '1 file, 0 errors, 0 warnings, 0 hints', []))
 
+    def test_a_lint_that_left_a_file_unjudged_is_incomplete_with_what_it_found(self):
+        output = 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abc (0 older not shown; --all shows them); 1 more gave no result, so the lint is incomplete\n'
+        errors = 'invalid Unicode text\nromacs-lint: lisp/b.el gives no result (exit 255), nor did it at the base (exit 255)\n'
+        self.assertEqual(check.lint_stage(2, output, errors),
+                         ('SKIP', output.strip().removeprefix('romacs-lint: '),
+                          ['romacs-lint: lisp/b.el gives no result (exit 255), nor did it at the base (exit 255)']))
+
     def test_a_lint_that_gave_no_result_is_not_a_pass(self):
         status, summary, findings = check.lint_stage(2, '', 'usage: romacs-lint\nromacs-lint: error: no host at /x/romacs-vm-gui\n')
         self.assertEqual((status, summary), ('SKIP', 'tools/romacs-lint gave no result'))
@@ -340,16 +347,205 @@ class Report(unittest.TestCase):
 
 class Epoch(unittest.TestCase):
     def test_lisp_vm_beside_romacs_vm_rust_names_the_epoch(self):
-        status, _, findings = check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'})
+        status, _, findings = check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'}, [], '2\n', '2\n')
         self.assertEqual(status, 'ok')
         self.assertEqual(len(findings), 1)
         self.assertIn('lisp/vm/keyboard.el', findings[0])
         self.assertIn(check.EPOCH, findings[0])
 
     def test_a_raised_epoch_or_lisp_alone_is_quiet(self):
-        self.assertEqual(check.epoch({'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs', check.EPOCH})[2], [])
-        self.assertEqual(check.epoch({'lisp/vm/keyboard.el'})[2], [])
-        self.assertEqual(check.epoch({'crates/romacs-vm/src/prims/keyboard.rs'})[2], [])
+        both = {'lisp/vm/keyboard.el', 'crates/romacs-vm/src/prims/keyboard.rs'}
+        self.assertEqual(check.epoch(both | {check.EPOCH}, ['0123abcd'], '3\n', '2\n')[:3:2], ('ok', []))
+        self.assertEqual(check.epoch({'lisp/vm/keyboard.el'}, [], '2\n', '2\n')[2], [])
+        self.assertEqual(check.epoch({'crates/romacs-vm/src/prims/keyboard.rs'}, [], '2\n', '2\n')[2], [])
+
+    def test_a_raise_not_above_the_trunk_fails_with_the_next_number(self):
+        for ours in ['3\n', '2\n']:
+            status, _, findings = check.epoch(set(), ['0123abcd'], ours, '3\n')
+            self.assertEqual(status, 'FAIL', ours)
+            self.assertIn('raise it to 4', findings[0])
+
+    def test_an_epoch_file_without_a_whole_number_fails(self):
+        for raised, ours, tip in [(['0123abcd'], 'oops\n', None), ([], 'oops\n', '3\n'), ([], '\u00b2\n', '3\n')]:
+            self.assertEqual(check.epoch(set(), raised, ours, tip)[0], 'FAIL', ours)
+
+    def test_a_generation_has_one_spelling(self):
+        for ours in ['03\n', '3\n\n', ' 3\n', '3 \n', '3\r\n', '']:
+            status, _, findings = check.epoch(set(), [], ours, '3\n')
+            self.assertEqual(status, 'FAIL', repr(ours))
+            self.assertIn('no leading zero', findings[0])
+        for ours in ['3', '3\n', '0\n', '10\n']:
+            self.assertEqual(check.epoch(set(), [], ours, '3\n')[0], 'ok', repr(ours))
+
+    # Shapes of a branch's history: its commits as (COMMIT, PARENT ...), each commit's
+    # generation (`t*` are the trunk's), and the branch's own raises.
+    SHAPES = [
+        ('a raise', [('r', 'b')], {'b': 2, 'r': 3}, {'r'}),
+        ('a full revert (S1): the raise still counts', [('v', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'v': 2}, {'r'}),
+        ('a partial revert (S5)', [('v', 'q'), ('q', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'q': 4, 'v': 3}, {'r', 'q'}),
+        ('the first of two raises reverted (S7)', [('v', 'q'), ('q', 'r'), ('r', 'b')], {'b': 3, 'r': 4, 'q': 5, 'v': 3},
+         {'r', 'q'}),
+        ('the same number, spelled again', [('f', 'r'), ('r', 'b')], {'b': 2, 'r': 3, 'f': 3}, {'r'}),
+        ('the trunk taken in, equal', [('m', 'r', 't3'), ('r', 'b')], {'b': 2, 'r': 3, 't3': 3, 'm': 3}, {'r'}),
+        ("the trunk's higher number taken", [('m', 'r', 't5'), ('r', 'b')], {'b': 2, 'r': 3, 't5': 5, 'm': 5}, {'r'}),
+        ("only the trunk's raise", [('m', 'c', 't3'), ('c', 'b')], {'b': 2, 'c': 2, 't3': 3, 'm': 3}, set()),
+        ('a raise in a merge commit', [('m', 'r', 't3'), ('r', 'b')], {'b': 2, 'r': 3, 't3': 3, 'm': 4}, {'r', 'm'}),
+        ('an uncommitted raise', [(check.TREE, 'h'), ('h', 'b')], {'b': 3, 'h': 3, check.TREE: 4}, {check.TREE}),
+        ('an uncommitted tree at its HEAD', [(check.TREE, 'h'), ('h', 'b')], {'b': 3, 'h': 3, check.TREE: 3}, set()),
+    ]
+
+    def test_own_raises_over_each_shape(self):
+        for name, lines, value, expected in self.SHAPES:
+            self.assertEqual(set(check.own_raises([list(line) for line in lines], value)), expected, name)
+
+
+class EpochHistory(unittest.TestCase):
+    """Two lanes raise the epoch to one number: the second fails as a lane, after
+    merging the trunk, and as the merged tree the queue checks."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.repo = Path(temp.name)
+        (self.repo / 'etc').mkdir()
+        self.git('init', '-q', '-b', 'beta')
+        self.commit('base', {check.EPOCH: '2\n', 'a.txt': 'a\n'})
+        self.git('branch', 'first')
+        self.git('branch', 'second')
+        self.git('checkout', '-q', 'first')
+        self.commit('first raises', {check.EPOCH: '3\n'})
+        self.git('checkout', '-q', 'second')
+        self.commit('second raises', {check.EPOCH: '3\n', 'b.txt': 'b\n'})
+        self.git('checkout', '-q', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land first', 'first')
+
+    def git(self, *args):
+        # A throwaway fixture: no identity, signing key or line-ending conversion of the caller's.
+        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false',
+                        '-c', 'core.autocrlf=false', *args], cwd=self.repo, check=True, stdout=subprocess.DEVNULL)
+
+    def commit(self, message, files):
+        for name, text in files.items():
+            (self.repo / name).write_text(text)
+        self.git('add', '.')
+        self.git('commit', '-q', '-m', message)
+
+    def stage(self):
+        names = check.load_gate().changed_names(self.repo, 'beta')
+        return check.epoch(names, *check.epoch_history(self.repo, 'beta'))
+
+    def test_the_second_equal_raise_fails_as_a_lane(self):
+        self.git('checkout', '-q', 'second')
+        status, _, findings = self.stage()
+        self.assertEqual(status, 'FAIL')
+        self.assertIn('raise it to 4', findings[0])
+
+    def test_the_second_equal_raise_fails_after_merging_the_trunk(self):
+        self.git('checkout', '-q', 'second')
+        self.git('merge', '-q', '--no-ff', '-m', 'merge beta', 'beta')
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_the_second_equal_raise_fails_as_the_merged_tree_the_queue_checks(self):
+        self.git('checkout', '-q', '--detach', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land second', 'second')
+        self.assertEqual((self.repo / check.EPOCH).read_text(), '3\n')
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_raised_above_the_trunk_it_lands(self):
+        self.git('checkout', '-q', 'second')
+        self.git('merge', '-q', '--no-ff', '-m', 'merge beta', 'beta')
+        self.commit('second raises again', {check.EPOCH: '4\n'})
+        self.assertEqual(self.stage()[0], 'ok')
+        self.git('checkout', '-q', '--detach', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land second', 'second')
+        self.assertEqual(self.stage()[0], 'ok')
+
+    def test_a_lane_taking_the_trunks_raise_raises_nothing(self):
+        self.git('checkout', '-q', '-b', 'third', 'beta~1')
+        self.commit('third', {'c.txt': 'c\n'})
+        self.git('merge', '-q', '--no-ff', '-m', 'merge beta', 'beta')
+        self.assertEqual(check.epoch_history(self.repo, 'beta'), ([], '3\n', '3\n'))
+        self.assertEqual(self.stage()[:3:2], ('ok', []))
+
+    def test_a_raise_made_in_a_merge_commit_counts(self):
+        self.git('checkout', '-q', '-b', 'fourth', 'beta~1')
+        self.commit('fourth', {'d.txt': 'd\n'})
+        self.git('merge', '-q', '--no-ff', '--no-commit', 'beta')
+        self.commit('merge beta, raising', {check.EPOCH: '4\n'})
+        raises, ours, tip = check.epoch_history(self.repo, 'beta')
+        self.assertEqual((len(raises), ours, tip), (1, '4\n', '3\n'))
+
+    def test_a_reverted_raise_still_takes_a_number_as_a_lane_or_merged(self):
+        self.git('checkout', '-q', '-b', 'reverted', 'beta~1')
+        self.commit('raise', {check.EPOCH: '3\n'})
+        self.commit('revert the raise', {check.EPOCH: '2\n'})
+        self.commit('docs', {'e.txt': 'e\n'})
+        self.assertIn('raise it to 4', self.stage()[2][0])
+        self.git('checkout', '-q', '--detach', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land reverted', 'reverted')
+        self.assertIn('raise it to 4', self.stage()[2][0])
+
+    def test_a_carriage_return_in_the_file_fails_as_a_second_spelling(self):
+        self.git('checkout', '-q', '-b', 'crlf', 'beta')
+        self.commit('crlf', {check.EPOCH: '3\r\n'})
+        self.assertIn('no leading zero', self.stage()[2][0])
+
+    def test_a_missing_epoch_file_fails(self):
+        self.git('checkout', '-q', '-b', 'gone', 'beta')
+        self.git('rm', '-q', check.EPOCH)
+        self.git('commit', '-q', '-m', 'gone')
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_a_commit_with_a_directory_at_the_path_holds_no_generation(self):
+        self.git('checkout', '-q', '-b', 'dir', 'beta')
+        self.git('rm', '-q', check.EPOCH)
+        (self.repo / check.EPOCH).mkdir(parents=True)
+        self.commit('a directory', {check.EPOCH + '/x': 'x\n'})
+        self.git('rm', '-q', '-r', check.EPOCH)
+        (self.repo / 'etc').mkdir(exist_ok=True)
+        self.commit('restored above the trunk', {check.EPOCH: '4\n'})
+        self.assertEqual(self.stage()[0], 'ok')
+
+    def test_a_second_spelling_fails_and_its_fix_raises_nothing(self):
+        self.git('checkout', '-q', '-b', 'spelled', 'beta')
+        self.commit('leading zero', {check.EPOCH: '03\n'})
+        self.assertIn('no leading zero', self.stage()[2][0])
+        self.commit('one spelling', {check.EPOCH: '3\n'})
+        self.assertEqual(self.stage()[:3:2], ('ok', []))
+
+    def test_an_uncommitted_raise_counts(self):
+        self.git('checkout', '-q', '-b', 'dirty', 'beta')
+        (self.repo / check.EPOCH).write_text('3\n')
+        self.assertFalse(check.epoch_history(self.repo, 'beta')[0])
+        (self.repo / check.EPOCH).write_text('4\n')
+        self.assertEqual(check.epoch_history(self.repo, 'beta'), ([check.TREE], '4\n', '3\n'))
+
+    def test_a_partial_revert_keeps_the_raise_it_leaves_as_a_lane_or_merged(self):
+        self.git('checkout', '-q', '-b', 'partial', 'beta~1')
+        self.commit('raise for one change', {check.EPOCH: '3\n', 'f.txt': 'f\n'})
+        self.commit('raise for another', {check.EPOCH: '4\n', 'g.txt': 'g\n'})
+        self.commit('revert the other', {check.EPOCH: '3\n', 'g.txt': ''})
+        status, _, findings = self.stage()
+        self.assertEqual(status, 'FAIL')
+        self.assertIn('raise it to 4', findings[0])
+        self.git('checkout', '-q', '--detach', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land partial', 'partial')
+        self.assertEqual(self.stage()[0], 'FAIL')
+
+    def test_taking_the_trunks_higher_number_keeps_the_raise(self):
+        self.git('checkout', '-q', '-b', 'up', 'beta')
+        self.commit('up', {check.EPOCH: '4\n'})
+        self.git('checkout', '-q', 'beta')
+        self.git('merge', '-q', '--no-ff', '-m', 'land up', 'up')
+        self.git('checkout', '-q', 'second')
+        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', 'beta'], cwd=self.repo,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.commit('merge beta, taking its number', {check.EPOCH: '4\n'})
+        parents = subprocess.run(['git', 'rev-list', '--parents', '-n1', 'HEAD'], cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(len(parents.stdout.split()), 3)
+        status, _, findings = self.stage()
+        self.assertEqual(status, 'FAIL')
+        self.assertIn('raise it to 5', findings[0])
 
 
 if __name__ == '__main__':

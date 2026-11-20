@@ -620,8 +620,7 @@ a state root of its own, and a service of its own on `socket'."
                   (goto-char (point-min))
                   (romacs-agent-board-next 2)
                   (should-error (romacs-agent-board-settle) :type 'user-error)
-                  (should-error (romacs-agent-board-settle-finished) :type 'user-error)
-                  (should-error (romacs-agent-board-new) :type 'user-error)))
+                  (should-error (romacs-agent-board-settle-finished) :type 'user-error)))
               (with-current-buffer (romacs-agent-board--buffer)
                 (should-error (romacs-agent-board-settle-finished) :type 'user-error))
               ;; The rows it serves are its own board's, whatever its board shows.
@@ -835,6 +834,65 @@ a state root of its own, and a service of its own on `socket'."
                   (should (wait (equal (romacs-agent-log--draft) "not sent"))))))
           (romacs-agent-remote-disconnect)
           (when remote (kill-buffer remote)))))))
+
+(ert-deftest romacs-agent-service-starts-a-session-once ()
+  ;; agents/start starts a session, its host tracked, once by its cid: a
+  ;; repeat names the same session.  The lists say where and under what.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((home (make-temp-file "rsv-claude" t)) (cwd (make-temp-file "rsv-project" t))
+           (romacs-agent-providers (list (cons "claude" home))) (romacs-agent-default-provider "claude")
+           (romacs-agent-start-deadline 0.5)
+           (romacs-agent-service--commands (make-hash-table :test #'equal))
+           (client (romacs-agent-client-connect socket)) (launched nil)
+           (ask (lambda (method params)
+                  (let ((answer nil))
+                    (romacs-agent-client-request client method params (lambda (r e) (setq answer (list r e))))
+                    (wait answer)
+                    answer))))
+      (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                 (lambda (session _launch) (push (romacs-agent-options session) launched)))
+                ((symbol-function 'romacs-agent--check-companions) #'ignore))
+        (should (wait (romacs-agent-client-revision client)))
+        (let* ((params (romacs-agent-rpc-object "cid" "s1" "cwd" cwd "title" "far start"))
+               (first (car (funcall ask "agents/start" params)))
+               (again (car (funcall ask "agents/start" params))))
+          (should (stringp (gethash "id" first)))
+          ;; Its launch still waited for at its deadline: queued.
+          (should (equal (gethash "state" first) "queued"))
+          (should (equal (gethash "id" again) (gethash "id" first)))
+          ;; Kept in the store: a service started again names the same one.
+          (clrhash romacs-agent-service--commands)
+          (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first)))
+          ;; Found by the writer as it is admitted, the reader seeing none:
+          ;; a repeat all the same.
+          (clrhash romacs-agent-service--commands)
+          (cl-letf (((symbol-function 'romacs-agent-store-command) #'ignore))
+            (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first))))
+          (should (= (length launched) 1))
+          (should (plist-get (car launched) :tracked))
+          (should (equal (romacs-agent-title (romacs-agent-loaded (gethash "id" first))) "far start")))
+        (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" (romacs-agent-rpc-object "cid" "s2" "cwd" "relative")))))
+                       "bad-params"))
+        ;; One that fails after the deadline: queued, then its repeats say so.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch)
+                     (run-at-time 1 nil (lambda () (setf (romacs-agent-state session) 'unstarted))))))
+          (let ((params (romacs-agent-rpc-object "cid" "s4" "cwd" cwd)))
+            (should (equal (gethash "state" (car (funcall ask "agents/start" params))) "queued"))
+            (should (wait (let ((error (cadr (funcall ask "agents/start" params))))
+                            (and error (equal (gethash "kind" (gethash "data" error)) "not-live")))))))
+        ;; A host that does not start: the start says so, and so does its repeat.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch) (setf (romacs-agent-state session) 'unstarted))))
+          (let ((params (romacs-agent-rpc-object "cid" "s3" "cwd" cwd)))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))))
+        (should (seq-some (lambda (p) (equal (gethash "cwd" p) root))
+                          (gethash "projects" (car (funcall ask "agents/projects.list" (romacs-agent-rpc-object))))))
+        (should (equal (mapcar (lambda (p) (gethash "name" p))
+                               (gethash "providers" (car (funcall ask "agents/providers.list" (romacs-agent-rpc-object)))))
+                       '("claude")))))))
 
 (ert-deftest romacs-agent-service-history-stops-at-its-bound ()
   ;; Past its bytes' bound a reply stops, its cursor where; the client asks

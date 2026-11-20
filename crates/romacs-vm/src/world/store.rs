@@ -616,7 +616,7 @@ impl World {
                 _ => host::replay(record),
             };
             match now {
-                Some(now) if now == expected => {}
+                Some(now) if host::same_fact(&expected, &now) => {}
                 now => return Err(json!({"stale": expected, "now": now})),
             }
         }
@@ -1699,6 +1699,28 @@ mod tests {
         let other = [(OsString::from(name), OsString::from("session"))];
         assert!(world.lisp_files_digest(&roots, &other).is_none(), "another value: stale");
         assert!(world.valid_manifest().is_err_and(|why| why.get("stale").is_some()), "a launch asks its own environment");
+        let _ = std::fs::remove_dir_all(&store);
+    }
+
+    /// A world built over a tree holds over a copy of it, whose files have
+    /// other inodes: a stat record is kept by what the file holds and its
+    /// times, not by where it lies. Another mtime is a stale world.
+    #[test]
+    fn a_world_holds_over_a_copy_of_the_files_it_stat() {
+        use std::os::unix::fs::MetadataExt;
+        let store = marked_store("copied-stat");
+        let file = store.join("subr.el");
+        std::fs::write(&file, "x").unwrap();
+        let meta = std::fs::metadata(&file).unwrap();
+        let stat = |ino: u64, mtime: i64| serde_json::json!({"kind": "probe", "path": file.to_str().unwrap(), "probe": "stat",
+            "result": {"mode": meta.mode(), "len": meta.len(), "mtime": [mtime, meta.mtime_nsec()], "dev": meta.dev(), "ino": ino,
+                       "nlink": meta.nlink(), "uid": meta.uid(), "gid": meta.gid()}});
+        let world = World { store: store.clone(), key: [0x3c; 32], recipe: vec![] };
+        let publish = |record: serde_json::Value| std::fs::write(world.file(".json"), serde_json::json!({"records": [record]}).to_string()).unwrap();
+        publish(stat(meta.ino() + 1, meta.mtime()));
+        assert!(world.valid_manifest().is_ok(), "another inode: the same file, copied");
+        publish(stat(meta.ino(), meta.mtime() + 1));
+        assert!(world.valid_manifest().is_err_and(|why| why.get("stale").is_some()), "another mtime: stale");
         let _ = std::fs::remove_dir_all(&store);
     }
 

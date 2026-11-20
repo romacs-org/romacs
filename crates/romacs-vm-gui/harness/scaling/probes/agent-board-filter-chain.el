@@ -1,7 +1,8 @@
 ;;; agent-board-filter-chain.el --- scaling probe  -*- lexical-binding: t -*-
 
 ;; The agent board filtered to the last of a chain of N delegated threads:
-;; every thread above it shows for context, each one's subtree looked at once.
+;; every thread above it shows for context, each one's subtree looked at once,
+;; each row the same width however deep.
 (scaling-probe agent-board-filter-chain :n 50
   :setup (progn (scaling--agent)
                 (clrhash romacs-agent--sessions)
@@ -15,5 +16,8 @@
                     (romacs-agent--index s)))
                 (with-current-buffer (scaling--agent-board)
                   (setq romacs-agent-board--words '("needle"))
+                  ;; Drawn once first: the board's first draw loads what it
+                  ;; draws with, a cost that is not the chain's.
+                  (romacs-agent-board--render (current-buffer) 120)
                   (current-buffer)))
   :body (romacs-agent-board--render it 120))
