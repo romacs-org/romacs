@@ -403,6 +403,19 @@
     (should-not romacs-agent-log--asks)
     (should-not romacs-agent-log--ended-asks)))
 
+(ert-deftest romacs-agent-log-an-ask-said-late-keeps-its-place ()
+  ;; Said where its turn ended: a reply streaming since goes on unbroken.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "h" :tool "Bash")
+      (draw :type 'done)
+      (draw :type 'delta :message "m" :text "Hel"))
+    (romacs-agent-log--sync-asks session)
+    (draw :type 'delta :message "m" :text "lo there")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "Hello there" text))
+      (should (< (string-search "the turn ended with it unanswered" text) (string-search "Hello" text))))))
+
 (ert-deftest romacs-agent-log-an-answer-without-its-actor-says-who ()
   ;; A service older than :actor sends who alone.
   (romacs-agent-log-tests--with

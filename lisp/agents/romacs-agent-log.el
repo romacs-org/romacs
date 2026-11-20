@@ -145,8 +145,16 @@ the history is drawn, unless an answer in it settles it.")
 
 (defvar-local romacs-agent-log--ended-asks nil
   "Asks open when their turn ended or harness exited, still listed as
-waited on by their source, each (ID . WHY): said once the source lets
-them go (`romacs-agent-log--sync-asks'), as another machine's does after.")
+waited on by their source, each (ID ENTRY . AT): ENTRY, saying why, is
+put AT the place it ended, a marker, once the source lets the ask go
+\(`romacs-agent-log--sync-asks'), as another machine's does after.")
+
+(defun romacs-agent-log--drop-ended (id)
+  "Forget what is owed for ask ID's end, and return it: (ENTRY . AT)."
+  (when-let* ((ended (assoc id romacs-agent-log--ended-asks)))
+    (setq romacs-agent-log--ended-asks (delq ended romacs-agent-log--ended-asks))
+    (prog1 (cons (cadr ended) (marker-position (cddr ended)))
+      (set-marker (cddr ended) nil))))
 (defvar romacs-agent-log--replaying nil
   "While a replay draws, the copy of the session its records are read
 into: what the session waited on then, not now.")
@@ -678,12 +686,18 @@ recorded answer settles its block."
         (cond ((and (not (gethash id approvals)) (not romacs-agent-log--closes-deferred))
                (romacs-agent-log--settle-ask id)
                (romacs-agent-log--note event why)
-               (setq romacs-agent-log--ended-asks (assoc-delete-all id romacs-agent-log--ended-asks)))
+               (romacs-agent-log--drop-ended id))
               ;; Still listed by a source that says so later, or drawn
               ;; from a source's history before what it waits on now:
-              ;; said once it lets it go, unless an answer settles it.
+              ;; said, where it ended, once it lets it go, unless an
+              ;; answer settles it.
               ((not romacs-agent-log--replaying)
-               (setf (alist-get id romacs-agent-log--ended-asks nil nil #'equal) why)))))))
+               (romacs-agent-log--drop-ended id)
+               (romacs-agent-log--close-stream)
+               (push (cons id (cons (romacs-agent-log--entry (propertize (concat "· " why) 'face 'romacs-agent-log-note)
+                                                             'note event)
+                                    (copy-marker romacs-agent-log--end)))
+                     romacs-agent-log--ended-asks)))))))
 
 (defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
   "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
@@ -722,7 +736,7 @@ unless a note said who gave it, that it was answered."
   (let ((id (plist-get event :request-id)))
     (romacs-agent-log--settle-ask id)
     ;; Settled: no longer left to say its turn ended with it open.
-    (setq romacs-agent-log--ended-asks (assoc-delete-all id romacs-agent-log--ended-asks))
+    (romacs-agent-log--drop-ended id)
     ;; Settled by the harness over an answer it never took.
     (when (and (eq (plist-get event :how) 'harness) (member id romacs-agent-log--attributed))
       (romacs-agent-log--note event "an answer not delivered: the harness settled it first"))
@@ -1039,9 +1053,10 @@ records drew: a block no longer waited on settled, one waited on drawn."
     (dolist (ask romacs-agent-log--asks)
       (unless (gethash (car ask) approvals)
         (romacs-agent-log--settle-ask (car ask))
-        (when-let* ((ended (assoc (car ask) romacs-agent-log--ended-asks)))
-          (setq romacs-agent-log--ended-asks (delq ended romacs-agent-log--ended-asks))
-          (romacs-agent-log--writing (romacs-agent-log--note nil (cdr ended))))))
+        ;; Said where it ended: what streams since goes on unbroken.
+        (when-let* ((ended (romacs-agent-log--drop-ended (car ask))))
+          (romacs-agent-log--writing
+            (save-excursion (goto-char (cdr ended)) (insert (romacs-agent-log--sealed (car ended))))))))
     (maphash (lambda (id request)
                (unless (assoc id romacs-agent-log--asks)
                  (romacs-agent-log--ask-block (romacs-agent-log-source-request-event romacs-agent-log--source id request))))
@@ -1124,6 +1139,7 @@ drew forgotten, its markers let go, its composer kept."
   (when romacs-agent-log--blocks
     (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
   (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
+  (pcase-dolist (`(,_ ,_ . ,at) romacs-agent-log--ended-asks) (set-marker at nil))
   (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
