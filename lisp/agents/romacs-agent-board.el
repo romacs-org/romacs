@@ -809,15 +809,22 @@ its next activity.  A settled one, bring back."
       (romacs-agent-board--redraw))))
 
 (defun romacs-agent-board-new ()
-  "Start a new thread, in this row's project."
+  "Start a new thread, in this row's project, where the board's sessions
+run (`romacs-agent-board-source')."
   (interactive nil romacs-agent-board-mode)
-  (romacs-agent-board--acting)
+  (when (eq romacs-agent-board--drawn-source 'drawing) (romacs-agent-board--acting))
   (let* ((row (romacs-agent-board--row))
          (cwd (cond ((plist-get row :session) (romacs-agent-cwd (plist-get row :session)))
                     ((plist-get row :cwd))
                     ((plist-get row :item) (plist-get (plist-get row :item) :cwd)))))
-    (apply #'funcall-interactively #'romacs-agent-start
-           (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default))))))
+    (romacs-agent-board-source-new romacs-agent-board-source cwd)))
+
+(cl-defgeneric romacs-agent-board-source-new (source cwd)
+  "Start a session where SOURCE's sessions run, in directory CWD offered.")
+
+(cl-defmethod romacs-agent-board-source-new ((_source romacs-agent-log-local-source) cwd)
+  (apply #'funcall-interactively #'romacs-agent-start
+         (romacs-agent--start-arguments (if cwd (file-name-as-directory cwd) (romacs-agent--project-default)))))
 
 (defun romacs-agent-board-filter ()
   "Show only the threads whose title, project, provider or model have

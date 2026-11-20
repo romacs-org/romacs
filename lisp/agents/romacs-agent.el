@@ -4043,6 +4043,11 @@ to it."
                               (romacs-agent--environment-arguments)
                               (cons "--" command)))))
         (setf (romacs-agent-unit session) unit)
+      ;; A session the agents service started is tracked, or not started.
+      (when (plist-get (romacs-agent-options session) :tracked)
+        (setf (romacs-agent-state session) 'ended)
+        (romacs-agent--changed session)
+        (error "Session %s is not started: no user unit could be made for its host" (romacs-agent-title session)))
       (let ((coding-system-for-write 'utf-8-unix)
             (process-environment (romacs-agent--harness-environment)))
         (apply #'call-process "setsid" nil 0 nil "--fork" command))

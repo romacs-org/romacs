@@ -42,9 +42,10 @@ as `romacs-relay connect' takes it (wss://HOST/agents), or nil."
 (cl-defstruct (romacs-agent-remote (:constructor romacs-agent-remote--make) (:copier nil))
   "Another machine's sessions as a chat's source: the CLIENT of its
 service, the RELAY process that carries it here, the mirror of each of
-its sessions, by id (SESSIONS), their CHATS by id, and while it connects,
-the DIAL its one attempt is named by."
-  client relay dial
+its sessions, by id (SESSIONS), their CHATS by id, while it connects the
+DIAL its one attempt is named by, and the PROJECTS and PROVIDERS its
+service last listed (`agents/projects.list', `agents/providers.list')."
+  client relay dial projects providers
   (sessions (make-hash-table :test #'equal))
   (chats (make-hash-table :test #'equal)))
 
@@ -349,6 +350,36 @@ the board knows them all as shown from their rows."
 
 (add-hook 'romacs-agent-client-rows-functions #'romacs-agent-remote--rows-changed)
 
+(cl-defmethod romacs-agent-board-source-new ((source romacs-agent-remote) cwd)
+  "Start a session on SOURCE's machine: its project read among those its
+service listed, CWD offered, its provider among its instances, its first
+prompt; its chat shown once the service lists it."
+  (romacs-agent-remote--client)
+  (let* ((projects (mapcar (lambda (p) (gethash "cwd" p)) (romacs-agent-remote-projects source)))
+         (providers (mapcar (lambda (p) (gethash "name" p)) (romacs-agent-remote-providers source)))
+         (project (completing-read "Project on the other machine: " projects nil nil
+                                   (and cwd (directory-file-name cwd))))
+         (provider (if (cdr providers) (completing-read "Provider: " providers nil t nil nil (car providers))
+                     (car providers)))
+         (prompt (read-string "First prompt (RET: none): ")))
+    (romacs-agent-remote--lists source)
+    (romacs-agent-client-command
+     (romacs-agent-remote-client source) "agents/start"
+     (romacs-agent-rpc-object "cwd" (expand-file-name project "/") "provider" (or provider :null)
+                              "prompt" (if (string-empty-p prompt) :null prompt))
+     (lambda (result error)
+       (if error (message "Not started: %s" (gethash "message" error))
+         (romacs-agent-remote--show-when-listed source (gethash "id" result) (+ (float-time) 10)))))))
+
+(defun romacs-agent-remote--show-when-listed (source id deadline)
+  "Show the chat of SOURCE's session ID once its service lists it, until DEADLINE."
+  (cond ((not (eq source romacs-agent-remote--source)))
+        ((gethash id (romacs-agent-remote--rows source))
+         (pop-to-buffer (romacs-agent-remote-chat id)))
+        ((< (float-time) deadline)
+         (run-at-time 0.2 nil #'romacs-agent-remote--show-when-listed source id deadline))
+        (t (message "Started %s; not listed yet" id))))
+
 ;;; Connecting
 
 (defun romacs-agent-remote--socket ()
@@ -393,9 +424,21 @@ it, a stale one, refuses until the relay replaces it."
           (message "No relay to %s: %s" romacs-agent-remote-host
                    (with-current-buffer (process-buffer relay) (string-trim (buffer-string)))))))))
 
+(defun romacs-agent-remote--lists (source)
+  "Ask SOURCE's service what a session may start in and under, kept for
+the next start."
+  (let ((client (romacs-agent-remote-client source)))
+    (romacs-agent-client-request client "agents/projects.list" (romacs-agent-rpc-object)
+                                 (lambda (result _) (when result (setf (romacs-agent-remote-projects source)
+                                                                        (append (gethash "projects" result) nil)))))
+    (romacs-agent-client-request client "agents/providers.list" (romacs-agent-rpc-object)
+                                 (lambda (result _) (when result (setf (romacs-agent-remote-providers source)
+                                                                        (append (gethash "providers" result) nil)))))))
+
 (defun romacs-agent-remote--connected (source client)
   "SOURCE connected through CLIENT: each chat it shows followed through it."
   (setf (romacs-agent-remote-client source) client)
+  (romacs-agent-remote--lists source)
   (maphash (lambda (id buffer)
              (when (buffer-live-p buffer)
                (romacs-agent-client-follow client id romacs-agent-log-turns romacs-agent-log-records)))

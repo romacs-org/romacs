@@ -571,11 +571,11 @@ paging ever holds live delivery back.
   items are kept in the store, and the message's =in= record names the
   item it was (=romacsQueued=), so no item goes twice across a restart.
   Its =in= record carries the message's =romacsRequest= tag.
-- *Start* (=agents/start=, next): its milestones (=allocated=,
-  =launched=, =prompted=) are kept in its row, a repeat reporting the last
-  reached.  Every host the service starts gets a unit of its own, never
-  an untracked =setsid= launch, and a unit pending or activating counts
-  as in flight.
+- *Start* (=agents/start=): the new session's id is kept in its row
+  as soon as it is made (=milestone= =allocated=), so a repeat after a
+  stop names it.  Every host the service starts gets a user unit of its
+  own; one that cannot be made fails the start, never an untracked
+  =setsid= launch.
 - *With the service in its own process (S6+):*
   - a queued item is marked =dispatching= before it is handed off, and
     an item marked so is never handed off again;
@@ -602,7 +602,8 @@ paging ever holds live delivery back.
 
   What the harness then did arrives as events.
 
-Served: =send=, =answer=, =interrupt=; the others come in their slices.
+Served: =send=, =answer=, =interrupt=, =start=, =projects.list=,
+=providers.list=; the others come in their slices.
 
 | method | params | result |
 |--------+--------+--------|
