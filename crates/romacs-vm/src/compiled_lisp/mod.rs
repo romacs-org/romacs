@@ -212,8 +212,8 @@ const NO_PRUNE: &str = "ROMACS_COMPILE_NO_PRUNE";
 
 /// In a compile process's environment: the file it writes its record to,
 /// the one thing the process that started it reads of it. Its standard
-/// output is the compile log's, with whatever the file's compile-time code
-/// prints.
+/// output, with whatever the file's compile-time code prints, is dropped,
+/// and its standard error appended to the compile log (`run_compile`).
 const RECORD: &str = "ROMACS_COMPILE_RECORD";
 
 /// A compile process's record (`write_record`): the artifact it published,
