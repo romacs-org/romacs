@@ -34,9 +34,16 @@ fn lisp_files(dir: &Path, found: &mut HashSet<PathBuf>) {
 #[test]
 fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     // Outside the checkout, as an installation is: a compile's `normal-mode'
-    // reads the .dir-locals.el of every directory above a file.
-    let root = std::env::temp_dir().canonicalize().unwrap().join(format!("romacs-compile-install-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    // reads the .dir-locals.el of every directory above a file. A directory
+    // of this run's own, made new: nothing of another run's is removed.
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let parent = std::env::temp_dir().canonicalize().unwrap();
+    assert!(!parent.starts_with(&checkout), "the temporary directory {} is inside the checkout: set TMPDIR elsewhere", parent.display());
+    let root = (0..16).find_map(|_| {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
+        let root = parent.join(format!("romacs-compile-install-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&root).ok().map(|()| root)
+    }).expect("a new directory for the installation");
     let (bin, home) = (root.join("bin"), root.join("home"));
     for dir in ["config", "cache", "data", "state", "runtime", "tmp"] {
         std::fs::create_dir_all(home.join(dir)).unwrap();
@@ -50,8 +57,7 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     // extents where the file system has them), as an installation's is:
     // nothing of the checkout around it (its .dir-locals.el files, its
     // sources) is in reach.
-    let (checkout, share) = (Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap(), root.join("share/romacs"));
-    assert!(!root.starts_with(&checkout), "the installation {} is inside the checkout: set TMPDIR elsewhere", root.display());
+    let share = root.join("share/romacs");
     std::fs::create_dir_all(&share).unwrap();
     for dir in ["lisp", "etc"] {
         let copied = Command::new("cp").args(["-a", "--reflink=auto"]).arg(checkout.join(dir)).arg(&share).status().unwrap();
@@ -79,8 +85,9 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     let summary: serde_json::Value = serde_json::from_str(line).unwrap();
     assert!(summary["store"].as_str().is_some_and(|store| Path::new(store) == bin.join("romacs-vm-gui.lisp")),
             "the installation's store: {summary}");
-    let empty = |field: &str| summary[field].as_array().is_some_and(Vec::is_empty);
-    assert!(empty("failed") && empty("lost"), "files without a usable artifact: {summary}");
+    for field in ["failed", "lost"] {
+        assert!(summary[field].as_array().is_some_and(Vec::is_empty), "{field}: files without a usable artifact: {summary}");
+    }
     // Every file of the runtime trees, lisp/ and the installation's themes,
     // was reached, and each has an outcome.
     let mut inventory = HashSet::new();
