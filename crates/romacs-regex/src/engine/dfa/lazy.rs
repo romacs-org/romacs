@@ -35,6 +35,11 @@ pub(crate) const MATCH: u32 = 2;
 pub(crate) const SLOW: u32 = 3;
 const MIN_STRIDE_SHIFT: u32 = 3;
 
+/// A state's answer at the end of the text, kept in `accepts_at_end`.
+const END_UNKNOWN: u8 = 0;
+const END_NO: u8 = 1;
+const END_YES: u8 = 2;
+
 /// The cache is cleared at the next candidate once it holds this many bytes.
 pub(crate) const MEMORY_CAP: usize = 64 * 1024;
 /// Within one candidate the cache may grow to this before the candidate is
@@ -111,6 +116,11 @@ pub struct ExistenceDfa {
     pub(crate) stride_shift: u32,
     pub(crate) trans: Vec<u32>,
     states: Vec<StateKey>,
+    /// Per state, whether it accepts at the end of the text: [`END_UNKNOWN`]
+    /// until first asked.  At the text's end every assertion the closure
+    /// tests reads only the state's previous-character facts (no next
+    /// character exists), so the answer is the state's own.
+    accepts_at_end: Vec<u8>,
     state_ids: FxHashMap<StateKey, u32>,
     /// Start state index + 1 per previous-character facts (0: not built).
     pub(crate) start: [u32; 32],
@@ -142,6 +152,7 @@ impl ExistenceDfa {
             stride_shift: MIN_STRIDE_SHIFT,
             trans: Vec::new(),
             states: Vec::new(),
+            accepts_at_end: Vec::new(),
             state_ids: FxHashMap::default(),
             start: [0; 32],
             scratch: ClosureScratch::default(),
@@ -211,6 +222,7 @@ impl ExistenceDfa {
     /// Drop every state and transition, keeping the NFA and the classes.
     pub(crate) fn clear_states(&mut self) {
         self.states.clear();
+        self.accepts_at_end.clear();
         self.state_ids.clear();
         self.trans.clear();
         self.trans.resize(self.stride(), UNKNOWN);
@@ -256,6 +268,7 @@ impl ExistenceDfa {
         let index = self.states.len() as u32;
         self.memory += key.kernel.len() * 4 + 48 + self.stride() * 4;
         self.states.push(key.clone());
+        self.accepts_at_end.push(END_UNKNOWN);
         self.state_ids.insert(key, index);
         self.trans.resize(self.trans.len() + self.stride(), UNKNOWN);
         self.counters.states += 1;
@@ -346,9 +359,19 @@ impl ExistenceDfa {
         self.transition(row, class, at, false)
     }
 
-    /// Whether the state at `row`, at `at` (the match stop), accepts.
+    /// Whether the state at `row`, at `at` (the match stop), accepts.  At
+    /// the text's end the answer is kept with the state, unless point or a
+    /// positional syntax lookup can make it differ between searches.
     fn accepts_at(&mut self, row: u32, at: &Place<'_>) -> bool {
         let index = self.index_of(row) as usize;
+        let keep = at.d == at.text.len() && !self.has_at_dot && !self.search.positional;
+        if keep {
+            match self.accepts_at_end[index] {
+                END_NO => return false,
+                END_YES => return true,
+                _ => {}
+            }
+        }
         let mut positions = std::mem::take(&mut self.positions);
         positions.clear();
         let accept = self.nfa.closure(
@@ -358,6 +381,9 @@ impl ExistenceDfa {
             &mut positions,
         );
         self.positions = positions;
+        if keep {
+            self.accepts_at_end[index] = if accept { END_YES } else { END_NO };
+        }
         accept
     }
 
