@@ -198,6 +198,8 @@ typing puts the window back on the cursor and sends the key.")
     f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
   "The function keys a terminal has bytes for.")
 
+(declare-function romacs-gui-control-key-events "romacs-editing" ())
+
 (defconst romacs-term--modifier-prefixes
   '("" "S-" "C-" "M-" "C-S-" "M-S-" "C-M-" "C-M-S-")
   "The modifier combinations bound for each function key.")
@@ -241,6 +243,16 @@ through the remapping."
                 (define-key map key 'romacs-term-send-key)))
             (setq prefixes (cdr prefixes))))
         (setq names (cdr names))))
+    ;; The GUI's keys a terminal has only as control characters: `C-m' and
+    ;; the rest (romacs-editing.el), and C-SPC and C-? (NUL and DEL), with
+    ;; Meta.  Each stays with Emacs when the character it was does, and one
+    ;; with Super, Hyper or Alt, which a terminal has no bytes for, is left.
+    (dolist (pair (append (romacs-gui-control-key-events)
+                          (list (cons (logior ?\s #x4000000) 0) (cons (logior ?\s #xc000000) #x8000000)
+                                (cons (logior ?? #x4000000) 127) (cons (logior ?? #xc000000) #x800007f))))
+      (unless (or (/= 0 (logand (cdr pair) #x1c00000))
+                  (member (key-description (vector (cdr pair))) skip))
+        (define-key map (vector (car pair)) 'romacs-term-send-key)))
     ;; Last, so the front of the list: every lookup of a remapping finds it
     ;; first.
     (define-key map [remap self-insert-command] 'romacs-term-send-key)

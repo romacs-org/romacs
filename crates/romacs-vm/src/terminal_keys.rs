@@ -74,7 +74,12 @@ pub(crate) fn encode(event: KeyEvent<'_>, application_cursor: bool) -> Result<Ve
             "backspace" => Some('\u{7f}'),
             "escape" => Some('\x1b'),
             "backtab" => return Ok(b"\x1b[Z".to_vec()),
-            _ => None,
+            // A GUI key a terminal can only send as its control character:
+            // `C-m' is CR, `C-i' TAB, `C-[' ESC (VM2-GUI-KEYS).
+            _ => {
+                let mut chars = name.chars();
+                chars.next().filter(|_| chars.next().is_none())
+            }
         },
     };
     if let Some(mut c) = character {
@@ -161,5 +166,19 @@ mod tests {
         assert_eq!(key("backtab", false), b"\x1b[Z");
         assert_eq!(key("return", false), b"\r");
         assert_eq!(key("M-backspace", false), b"\x1b\x7f");
+    }
+
+    /// A GUI control key sends the control character a terminal sends for
+    /// its chord.
+    #[test]
+    fn gui_control_keys_encode_as_their_control_characters() {
+        assert_eq!(key("C-m", false), b"\r");
+        assert_eq!(key("C-i", false), b"\t");
+        assert_eq!(key("C-[", false), b"\x1b");
+        assert_eq!(key("C-M-m", false), b"\x1b\r");
+        assert_eq!(key("C-S-m", false), b"\r");
+        assert!(encode(symbol_event("C-s-m"), false).is_err());
+        assert_eq!(key("tab", false), b"\t");
+        assert_eq!(key("C-tab", false), b"\t");
     }
 }

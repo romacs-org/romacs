@@ -564,7 +564,16 @@ nothing but the echo area.  KEYMAP-READ says a key sequence is being read."
                       (let* ((mask (get val 'event-symbol-element-mask))
                              (ascii (and mask (get (car mask) 'ascii-character))))
                         (when (and (integerp ascii) (integerp (car (cdr mask))))
-                          (setq val (logior ascii (car (cdr mask)))))))
+                          (setq val (logior ascii (car (cdr mask))))))
+                      ;; A GUI key that is one character to a terminal
+                      ;; (`C-m', romacs-editing.el) is that character.
+                      (when (symbolp val)
+                        (let ((legacy (lookup-key (if (boundp 'local-function-key-map)
+                                                      local-function-key-map function-key-map)
+                                                  (vector val))))
+                          (when (and (vectorp legacy) (= (length legacy) 1)
+                                     (integerp (aref legacy 0)))
+                            (setq val (aref legacy 0))))))
                     (and (not (integerp val))
                          (if error-nonascii
                              (progn (setq unread-command-events (list val))
