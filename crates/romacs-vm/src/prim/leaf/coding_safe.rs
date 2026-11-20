@@ -169,7 +169,7 @@ impl Leaf<'_> {
             let size = size as i64;
             let index = |v: Value, default: i64| -> std::result::Result<i64, Fault> {
                 if v == Value::NIL { return Ok(default); }
-                let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+                let n = v.integer_value().ok_or_else(|| Fault::Wrong("integerp", v))?;
                 Ok(if n < 0 { n + size } else { n })
             };
             let (f, t) = (index(start, 0)?, index(end, size)?);
@@ -180,7 +180,7 @@ impl Leaf<'_> {
             (codes, f)
         };
         let mut wanted = if count == Value::NIL { 1 } else {
-            count.integer_value().filter(|&n| n >= 0).ok_or(Fault::Wrong("wholenump", count))?
+            count.integer_value().filter(|&n| n >= 0).ok_or_else(|| Fault::Wrong("wholenump", count))?
         };
         let mut positions = Vec::new();
         for (i, &c) in codes.iter().enumerate() {

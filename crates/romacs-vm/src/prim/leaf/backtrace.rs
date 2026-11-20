@@ -55,7 +55,7 @@ impl Leaf<'_> {
         let mut tail = span;
         for part in &mut parts {
             let (head, rest) = self.vm.cons_pair(tail).map_err(|_| Fault::Wrong("consp", span))?;
-            *part = head.integer_value().and_then(|n| usize::try_from(n).ok()).ok_or(Fault::Wrong("wholenump", head))?;
+            *part = head.integer_value().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Fault::Wrong("wholenump", head))?;
             tail = rest;
         }
         self.vm.backtrace_rewind(parts).map_err(Fault::Error)?;

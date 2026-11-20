@@ -559,7 +559,7 @@ impl Vm {
         let (point, begv, zv) = self.point_extent()?;
         let from = from.max(begv);
         let to = to.min(zv).max(from);
-        let inserted = self.str_view(text).ok_or(Fault::Wrong("stringp", text))?.chars().count() as i64;
+        let inserted = self.str_view(text).ok_or_else(|| Fault::Wrong("stringp", text))?.chars().count() as i64;
         if from == to && inserted == 0 {
             return Ok(None);
         }

@@ -28,7 +28,7 @@ impl Leaf<'_> {
     }
     /// CHECK_PROCESS, then the process.
     pub(crate) fn process(&self, v: Value) -> Result<&Process> {
-        self.process_if(v).ok_or(Fault::Wrong("processp", v))
+        self.process_if(v).ok_or_else(|| Fault::Wrong("processp", v))
     }
     pub(super) fn process_mut(&mut self, v: Value) -> &mut Process {
         let index = v.index(0).expect("checked process") - 1;

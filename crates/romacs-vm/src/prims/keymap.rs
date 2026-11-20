@@ -27,7 +27,7 @@ fn char_table_subtype(cx, table: Value) {
 /// GNU `keymap_parent` (keymap.c:235) after `get_keymap (KEYMAP, 1, ...)`:
 /// the first tail of KEYMAP past its `keymap' head that is itself a keymap.
 fn keymap_parent(cx: &Leaf<'_>, keymap: Value) -> std::result::Result<Value, Fault> {
-    let keymap = cx.keymap(keymap).ok_or(Fault::Wrong("keymapp", keymap))?;
+    let keymap = cx.keymap(keymap).ok_or_else(|| Fault::Wrong("keymapp", keymap))?;
     let mut list = cx.pair(keymap).map_or(Value::NIL, |(_, tail)| tail);
     // A cyclic keymap hangs GNU here; VM2 stops at the list limit.
     for _ in 0..=cx.list_limit() {
@@ -51,11 +51,11 @@ fn keymap_parent_subr(cx, keymap: Value) {
 // spliced in at the first tail that is nil, an atom or an existing parent.
 defsubr! { name = "set-keymap-parent", gnu = "keymap.c:273", effect = Global,
 fn set_keymap_parent(cx, keymap: Value, parent: Value) {
-    let keymap = cx.keymap(keymap).ok_or(Fault::Wrong("keymapp", keymap))?;
+    let keymap = cx.keymap(keymap).ok_or_else(|| Fault::Wrong("keymapp", keymap))?;
     let parent = if parent == Value::NIL {
         Value::NIL
     } else {
-        let parent = cx.keymap(parent).ok_or(Fault::Wrong("keymapp", parent))?;
+        let parent = cx.keymap(parent).ok_or_else(|| Fault::Wrong("keymapp", parent))?;
         // keymap_memberp (keymap.c:262): is KEYMAP PARENT or an ancestor?
         let mut maps = parent;
         for _ in 0..=cx.list_limit() {

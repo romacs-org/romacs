@@ -227,7 +227,7 @@ fn face_font(cx, face: Value; optional frame: Value, character: Value) {
         return Ok(if graphic_record(cx)? { cx.string("tty") } else { Value::NIL });
     }
     let ch = if character == Value::NIL { ' ' } else {
-        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or(Fault::Wrong("characterp", character))?;
+        let code = character.integer_value().filter(|c| (0..=0x3fffff).contains(c)).ok_or_else(|| Fault::Wrong("characterp", character))?;
         char::from_u32(code as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
     };
     let name = cx.symbol_name(resolved)?;

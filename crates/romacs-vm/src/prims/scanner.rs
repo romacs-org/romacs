@@ -81,12 +81,12 @@ defsubr! { name = "romacs--scanner-run", gnu = "romacs:scanner", effect = Reads,
         let mut packed = Vec::with_capacity(entries.len());
         for entry in &entries {
             let byte = entry.integer_value().and_then(|n| u8::try_from(n).ok()).filter(|&n| usize::from(n & 127) < states);
-            packed.push(byte.ok_or(Fault::Wrong("romacs-scanner-table-p", table))?);
+            packed.push(byte.ok_or_else(|| Fault::Wrong("romacs-scanner-table-p", table))?);
         }
         let from = state.integer_value().and_then(|n| usize::try_from(n).ok()).filter(|&n| n < states)
-            .ok_or(Fault::Wrong("romacs-scanner-state-p", state))?;
-        let first = start.integer_value().ok_or(Fault::Wrong("fixnump", start))?;
-        let last = end.integer_value().ok_or(Fault::Wrong("fixnump", end))?;
+            .ok_or_else(|| Fault::Wrong("romacs-scanner-state-p", state))?;
+        let first = start.integer_value().ok_or_else(|| Fault::Wrong("fixnump", start))?;
+        let last = end.integer_value().ok_or_else(|| Fault::Wrong("fixnump", end))?;
         let only_count = count != Value::NIL;
         let scanned = cx.scan_region(first, last, |bytes, multibyte| {
             let table = by_byte(&packed, multibyte);

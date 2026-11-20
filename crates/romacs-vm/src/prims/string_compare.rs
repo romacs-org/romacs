@@ -20,7 +20,7 @@ fn compare_strings(cx, first: Value, from: Value, to: Value, second: Value,
 
 /// STRING's length in characters.
 pub(super) fn chars(cx: &Leaf<'_>, string: Value) -> std::result::Result<usize, Fault> {
-    cx.string_chars(string).ok_or(Fault::Wrong("stringp", string))
+    cx.string_chars(string).ok_or_else(|| Fault::Wrong("stringp", string))
 }
 
 fn bounds(
@@ -36,7 +36,7 @@ fn bounds(
         }
         let n = value
             .integer_value()
-            .ok_or(Fault::Wrong("integerp", value))?;
+            .ok_or_else(|| Fault::Wrong("integerp", value))?;
         Ok(if n < 0 { n + size } else { n })
     };
     let end = if to.integer_value().is_some_and(|n| n > size) {

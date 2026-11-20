@@ -62,7 +62,7 @@ fn prepare(cx: &mut Leaf<'_>, args: [Value; 7], minibuffer: bool) -> Next {
         let local = cx.intern("minibuffer-local-map");
         cx.variable_value(local)?.unwrap_or(Value::NIL)
     } else {
-        cx.keymap(keymap).ok_or(Fault::Wrong("keymapp", keymap))?
+        cx.keymap(keymap).ok_or_else(|| Fault::Wrong("keymapp", keymap))?
     };
     // HIST: a symbol, or (HISTVAR . HISTPOS) through car-safe; nil means
     // `minibuffer-history'. HISTPOS feeds only the history commands, which
@@ -170,7 +170,7 @@ fn object_read(cx: &mut Leaf<'_>, read: Value, saved: &[Value]) -> Next {
 }
 
 fn fixnum(v: Value) -> std::result::Result<i64, Fault> {
-    v.integer_value().ok_or(Fault::Wrong("fixnump", v))
+    v.integer_value().ok_or_else(|| Fault::Wrong("fixnump", v))
 }
 
 use super::keyboard::{enter, DONE};

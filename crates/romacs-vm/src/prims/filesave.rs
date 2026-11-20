@@ -188,7 +188,7 @@ fn file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> N
 
 defsubr! { name = "set-file-modes", gnu = "fileio.c:3666", effect = Global,
 fn set_file_modes(cx, filename: Value, mode: Value; optional flag: Value) -> Step {
-    mode.integer_value().ok_or(Fault::Wrong("fixnump", mode))?;
+    mode.integer_value().ok_or_else(|| Fault::Wrong("fixnump", mode))?;
     expanding_in_buffer(cx, filename, set_file_modes_expanded, vec![mode, flag])
 }}
 fn set_file_modes_expanded(cx: &mut Leaf<'_>, expanded: Value, saved: &[Value]) -> Next {
@@ -212,7 +212,7 @@ fn default_file_modes(cx) {
 }}
 defsubr! { name = "set-default-file-modes", gnu = "fileio.c:3700", effect = Global,
 fn set_default_file_modes(cx, mode: Value) {
-    let mode = mode.integer_value().ok_or(Fault::Wrong("fixnump", mode))?;
+    let mode = mode.integer_value().ok_or_else(|| Fault::Wrong("fixnump", mode))?;
     cx.filesave_set_umask(!(mode as u32) & 0o777);
     Ok(Value::NIL)
 }}

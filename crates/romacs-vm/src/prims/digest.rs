@@ -28,7 +28,7 @@ fn romacs_secure_hash(cx, algorithm: Value, bytes: Value; optional binary: Value
 defsubr! { name = "romacs-pbkdf2-hmac", gnu = "romacs:digest", effect = Pure,
 fn romacs_pbkdf2_hmac(cx, algorithm: Value, password: Value, salt: Value, iterations: Value) {
     let name = cx.symbol_name(algorithm)?;
-    let count = iterations.integer_value().filter(|n| *n >= 1).ok_or(Fault::Wrong("natnump", iterations))?;
+    let count = iterations.integer_value().filter(|n| *n >= 1).ok_or_else(|| Fault::Wrong("natnump", iterations))?;
     let encoded = |cx: &mut Leaf<'_>, value: Value| -> std::result::Result<Vec<u8>, Fault> {
         let view = cx.string_view(value).map_err(|_| Fault::Wrong("stringp", value))?;
         if view.multibyte && !view.bytes().is_ascii() {

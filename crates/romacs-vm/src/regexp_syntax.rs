@@ -617,7 +617,7 @@ impl Vm {
                     let c = self.regexp_int(args[0])?;
                     (c, c)
                 };
-                let description = self.str_view(args[1]).ok_or(Fault::Wrong("stringp", args[1]))?.to_owned();
+                let description = self.str_view(args[1]).ok_or_else(|| Fault::Wrong("stringp", args[1]))?.to_owned();
                 let parsed = parse_syntax_descriptor(&description).map_err(|message| Fault::Text("error", message))?;
                 let table = if args[2] == Value::NIL {
                     self.regexp_current_syntax()?

@@ -102,7 +102,7 @@ fn other_buffer_ask(cx: &mut Leaf<'_>, scan: [Value; 5]) -> Next {
 /// The predicate's ANSWER for the buffer at the head of the scan's tail.
 fn other_buffer_answered(cx: &mut Leaf<'_>, answer: Value, saved: &[Value]) -> Next {
     let (buffer, visible_ok, pred, mut notsogood, tail) = (saved[0], saved[1], saved[2], saved[3], saved[4]);
-    let (b, rest) = cx.pair(tail).ok_or(Fault::Wrong("consp", tail))?;
+    let (b, rest) = cx.pair(tail).ok_or_else(|| Fault::Wrong("consp", tail))?;
     if answer != Value::NIL {
         let visible = cx.intern("visible");
         if visible_ok != Value::NIL || cx.windows().get_buffer_window(b, visible)? == Value::NIL {

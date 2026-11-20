@@ -92,7 +92,7 @@ fn ran_whole(cx: &mut Leaf<'_>, result: Value, saved: &[Value]) -> Next {
 fn walk_local(cx: &mut Leaf<'_>, args: &[Value], sym: Value, mut val: Value, hooks: &[Value], mode: Mode) -> Next {
     while let Some((element, tail)) = cx.pair(val) {
         if element == Value::TRUE {
-            let global = default_value(cx, sym)?.ok_or(Fault::VoidVariable(sym))?;
+            let global = default_value(cx, sym)?.ok_or_else(|| Fault::VoidVariable(sym))?;
             if global != Value::NIL {
                 match cx.pair(global) {
                     Some((head, _)) if head != cx.intern("lambda") => {

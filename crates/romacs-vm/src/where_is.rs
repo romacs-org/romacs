@@ -157,7 +157,7 @@ pub(crate) fn keymap_noload(cx: &Leaf<'_>, object: Value) -> Option<Value> {
 }
 /// `get_keymap` (OBJECT, 1, 0): OBJECT's keymap, which must be loaded.
 fn keymap_loaded(cx: &Leaf<'_>, object: Value) -> Faulty<Value> {
-    keymap_noload(cx, object).filter(|map| map.tag() == 3).ok_or(Fault::Wrong("keymapp", object))
+    keymap_noload(cx, object).filter(|map| map.tag() == 3).ok_or_else(|| Fault::Wrong("keymapp", object))
 }
 
 /// `map_keymap` without AUTOLOAD over a keymap and its parents: each event

@@ -171,7 +171,7 @@ fn font_kind(cx: &mut Leaf<'_>, value: Value) -> Option<Kind3> {
         .into_iter().find(|(_, name, len)| tag == cx.intern(name) && slots.len() == *len).map(|(kind, _, _)| kind)
 }
 fn check_font(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<Kind3, Fault> {
-    font_kind(cx, value).ok_or(Fault::Wrong("font", value))
+    font_kind(cx, value).ok_or_else(|| Fault::Wrong("font", value))
 }
 fn check_spec(cx: &mut Leaf<'_>, value: Value) -> std::result::Result<(), Fault> {
     if font_kind(cx, value) == Some(Kind3::Spec) { Ok(()) } else { Err(Fault::Wrong("font-spec", value)) }
@@ -1101,7 +1101,7 @@ fn list_fonts(cx, font_spec: Value; optional frame: Value, num: Value, prefer: V
     cx.windows().check_live_frame(frame)?;
     check_spec(cx, font_spec)?;
     let limit = if num == Value::NIL { None } else {
-        let n = num.integer_value().ok_or(Fault::Wrong("fixnump", num))?;
+        let n = num.integer_value().ok_or_else(|| Fault::Wrong("fixnump", num))?;
         if n <= 0 { return Ok(Value::NIL); }
         Some(n as usize)
     };
@@ -1172,7 +1172,7 @@ fn query_font(cx, font_object: Value) {
 defsubr! { name = "font-has-char-p", gnu = "font.c:5335", effect = Reads,
 fn font_has_char_p(cx, font: Value, ch: Value; optional frame: Value) {
     check_font(cx, font)?;
-    let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", ch))?;
+    let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or_else(|| Fault::Wrong("characterp", ch))?;
     if frame != Value::NIL && cx.kind(frame) != Kind::Frame { return Err(Fault::Wrong("framep", frame)); }
     let Some(object) = open(cx, font)? else { return Ok(Value::NIL) };
     let Some(opened) = opened_of(cx, object) else { return Ok(Value::NIL) };
@@ -1347,14 +1347,14 @@ fn font_get_glyphs(cx, font_object: Value, from: Value, to: Value; optional obje
         // validate_subarray.
         let size = elements.len() as i64;
         let bound = |v: Value| -> std::result::Result<i64, Fault> {
-            let n = v.integer_value().ok_or(Fault::Wrong("integerp", v))?;
+            let n = v.integer_value().ok_or_else(|| Fault::Wrong("integerp", v))?;
             Ok(if n < 0 { n + size } else { n })
         };
         let (start, end) = (bound(from)?, bound(to)?);
         if !(0 <= start && start <= end && end <= size) { return Err(Fault::Range3(object, from, to)); }
         let mut chars = Vec::with_capacity((end - start) as usize);
         for &element in &elements[start as usize..end as usize] {
-            chars.push(element.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or(Fault::Wrong("characterp", element))?);
+            chars.push(element.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c)).ok_or_else(|| Fault::Wrong("characterp", element))?);
         }
         chars
     };
@@ -1438,7 +1438,7 @@ fn internal_char_font(cx, position: Value; optional ch: Value) -> Step {
     }
     let shape = cx.buffer_shape()?;
     let at = position.integer_value().or_else(|| cx.marker_position(position).flatten())
-        .ok_or(Fault::Wrong("integer-or-marker-p", position))?;
+        .ok_or_else(|| Fault::Wrong("integer-or-marker-p", position))?;
     if !(shape.begv <= at && at < shape.zv) {
         return Err(Fault::Range3(position, Value::integer(shape.begv).unwrap(), Value::integer(shape.zv).unwrap()));
     }
@@ -1467,7 +1467,7 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
         if buffer != cx.current_buffer()? { return Err(error(cx, "Specified window is not displaying the current buffer".into())); }
         let shape = cx.buffer_shape()?;
         let at = position.integer_value().or_else(|| cx.marker_position(position).flatten())
-            .ok_or(Fault::Wrong("integer-or-marker-p", position))?;
+            .ok_or_else(|| Fault::Wrong("integer-or-marker-p", position))?;
         if !(shape.begv <= at && at < shape.zv) {
             return Err(Fault::Range3(position, Value::integer(shape.begv).unwrap(), Value::integer(shape.zv).unwrap()));
         }
@@ -1475,7 +1475,7 @@ fn font_at_window(cx: &mut Leaf<'_>, buffer: Value, saved: &[Value]) -> Next {
         let f = cx.intern("char-after");
         return Ok(Step::Call { f, args: vec![Value::integer(at).unwrap()], then: font_object_of_char, saved: vec![] });
     }
-    let at = position.integer_value().ok_or(Fault::Wrong("fixnump", position))?;
+    let at = position.integer_value().ok_or_else(|| Fault::Wrong("fixnump", position))?;
     cx.string_shape(string)?;
     let ch = match usize::try_from(at) { Ok(at) => cx.string_char(string, at)?, Err(_) => None };
     let Some(ch) = ch else { return Err(Fault::Range(string, position)) };

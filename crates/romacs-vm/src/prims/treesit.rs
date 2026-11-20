@@ -459,14 +459,14 @@ fn treesit_query_capture(cx, node: Value, query: Value; optional beg: Value, end
 // runs them.  Returns nil.
 defsubr! { name = "romacs--treesit-fontify", gnu = "romacs:treesit", effect = Global,
 fn romacs_treesit_fontify(cx, node: Value, combined: Value, beg: Value, end: Value, region: Value) -> Step {
-    let (query, spans) = cx.pair(combined).ok_or(Fault::Wrong("consp", combined))?;
+    let (query, spans) = cx.pair(combined).ok_or_else(|| Fault::Wrong("consp", combined))?;
     if !cx.ts_query_p(query) {
         let predicate = cx.intern("treesit-query-p");
         return Err(cx.ts_signal("wrong-type-argument", &[predicate, query]));
     }
-    let (start, stop) = cx.pair(region).ok_or(Fault::Wrong("consp", region))?;
-    let start = start.integer_value().ok_or(Fault::Wrong("integerp", start))?;
-    let stop = stop.integer_value().ok_or(Fault::Wrong("integerp", stop))?;
+    let (start, stop) = cx.pair(region).ok_or_else(|| Fault::Wrong("consp", region))?;
+    let start = start.integer_value().ok_or_else(|| Fault::Wrong("integerp", start))?;
+    let stop = stop.integer_value().ok_or_else(|| Fault::Wrong("integerp", stop))?;
     let next = cx.ts_fontify(node, query, beg, end, (start, stop), spans)?;
     fontify_step(cx, next)
 }}

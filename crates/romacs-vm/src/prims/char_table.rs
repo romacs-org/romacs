@@ -37,7 +37,7 @@ defsubr! { name = "char-table-range", gnu = "chartab.c:578", effect = Reads,
 fn char_table_range(cx, table: Value, range: Value) {
     if cx.kind(table) != crate::prim::leaf::Kind::CharTable { return Err(Fault::Wrong("char-table-p", table)); }
     let character = |v: Value| v.integer_value().filter(|&n| (0..=crate::lstring::MAX_CHAR as i64).contains(&n))
-        .map(|n| n as usize).ok_or(Fault::Wrong("characterp", v));
+        .map(|n| n as usize).ok_or_else(|| Fault::Wrong("characterp", v));
     if range == Value::NIL { return Ok(cx.map_table_default(table)); }
     if range.integer_value().is_some() {
         let c = character(range).map_err(|_| Fault::Error("Invalid RANGE argument to \u{2018}char-table-range\u{2019}".into()))?;
@@ -69,7 +69,7 @@ fn optimize_char_table(cx, table: Value; optional test: Value) {
 fn uniprop_args(cx: &Leaf<'_>, table: Value, ch: Value) -> std::result::Result<usize, Fault> {
     if cx.kind(table) != crate::prim::leaf::Kind::CharTable { return Err(Fault::Wrong("char-table-p", table)); }
     let c = ch.integer_value().filter(|&c| (0..=crate::lstring::MAX_CHAR as i64).contains(&c))
-        .ok_or(Fault::Wrong("characterp", ch))? as usize;
+        .ok_or_else(|| Fault::Wrong("characterp", ch))? as usize;
     if !cx.is_uniprop(table) { return Err(Fault::Error("Invalid Unicode property table".into())); }
     Ok(c)
 }

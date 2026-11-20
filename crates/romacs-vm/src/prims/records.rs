@@ -12,9 +12,9 @@ fn record(cx, tag: Value; rest slots) {
 defsubr! { name = "make-record", gnu = "alloc.c:3499", effect = Pure,
 fn make_record(cx, tag: Value, slots: Value, init: Value) {
     let n = slots.integer_value().and_then(|n| usize::try_from(n).ok())
-        .ok_or(Fault::Wrong("wholenump", slots))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", slots))?;
     // PSEUDOVECTOR_SIZE_BITS is 12 in the pinned GNU lisp.h.
-    let count = n.checked_add(1).ok_or(Fault::Wrong("wholenump", slots))?;
+    let count = n.checked_add(1).ok_or_else(|| Fault::Wrong("wholenump", slots))?;
     if count > 4095 {
         return Err(Fault::Error(format!("Attempt to allocate a record of {count} slots; max is 4095")));
     }

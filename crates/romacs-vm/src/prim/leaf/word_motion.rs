@@ -15,7 +15,7 @@ impl Leaf<'_> {
         let count = if count == Value::NIL {
             1
         } else {
-            count.integer_value().ok_or(Fault::Wrong("fixnump", count))?
+            count.integer_value().ok_or_else(|| Fault::Wrong("fixnump", count))?
         };
         if count == 0 {
             return Ok(Value::TRUE);
@@ -116,7 +116,7 @@ impl Leaf<'_> {
         // The classes named, a bit each, and whether a leading ^ has the
         // skip pass every other class instead.
         let (named, negate) = {
-            let spec = self.vm.str_view(syntax).ok_or(Fault::Wrong("stringp", syntax))?;
+            let spec = self.vm.str_view(syntax).ok_or_else(|| Fault::Wrong("stringp", syntax))?;
             let (mut named, mut negate, mut first) = (0_u32, false, true);
             for c in spec.chars() {
                 let designator = c as u8;

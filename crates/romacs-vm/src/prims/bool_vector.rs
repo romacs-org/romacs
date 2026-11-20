@@ -20,7 +20,7 @@ fn wrong_length(cx: &mut Leaf<'_>, a: Value, b: Value, c: Value) -> Fault {
 defsubr! { name = "make-bool-vector", gnu = "alloc.c:2202", effect = Pure,
 fn make_bool_vector(cx, length: Value, init: Value) {
     let n = length.integer_value().and_then(|n| usize::try_from(n).ok())
-        .ok_or(Fault::Wrong("wholenump", length))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", length))?;
     let bits = BoolVector::new(n, init != Value::NIL).map_err(Fault::Error)?;
     Ok(cx.bool_vector_from(bits))
 }}
@@ -85,7 +85,7 @@ defsubr! { name = "bool-vector-count-consecutive", gnu = "data.c:3943", effect =
 fn consecutive(cx, a: Value, b: Value, index: Value) {
     let bits = cx.bool_vector(a)?;
     let i = index.integer_value().and_then(|i| usize::try_from(i).ok())
-        .ok_or(Fault::Wrong("wholenump", index))?;
+        .ok_or_else(|| Fault::Wrong("wholenump", index))?;
     if i > bits.len { return Err(Fault::Range(a, index)); }
     let count = (i..bits.len).take_while(|&i| bits.get(i) == Some(b != Value::NIL)).count();
     Ok(Value::integer(count as i64).unwrap())

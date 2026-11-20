@@ -67,7 +67,7 @@ fn frexp(cx, x: Value) {
 
 defsubr! { name = "ldexp", gnu = "floatfns.c:200", effect = Pure,
 fn ldexp(cx, sgnfcand: Value, exponent: Value) {
-    let e = exponent.integer_value().ok_or(Fault::Wrong("fixnump", exponent))?
+    let e = exponent.integer_value().ok_or_else(|| Fault::Wrong("fixnump", exponent))?
         .clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     let x = number(cx, sgnfcand)?;
     Ok(cx.float(ldexp_value(x, e)))

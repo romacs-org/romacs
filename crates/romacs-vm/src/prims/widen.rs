@@ -19,7 +19,7 @@ fn use_global_map(cx, map: Value) {
 defsubr! { name = "make-symbol", gnu = "alloc.c:3708", effect = Pure,
 fn make_symbol(cx, name: Value) {
     let key = cx.string_view(name).map_err(|_| Fault::Wrong("stringp", name)).map(|v| crate::obarray::symbol_key(v.bytes(), v.len()).map(std::borrow::Cow::into_owned))?;
-    Ok(cx.make_symbol(&key.ok_or(Fault::NotUnicode(name))?))
+    Ok(cx.make_symbol(&key.ok_or_else(|| Fault::NotUnicode(name))?))
 }}
 
 defsubr! { name = "listp", gnu = "data.c:332", effect = Pure,
@@ -76,7 +76,7 @@ fn concat(cx; rest args) {
         } else { cx.vector_values(arg).map_err(|_|Fault::Wrong("sequencep",arg))? };
         let mut bytes=Vec::new();
         for value in values {
-            let code=value.integer_value().and_then(|n|u32::try_from(n).ok()).filter(|&c|c<=crate::lstring::MAX_CHAR).ok_or(Fault::Wrong("characterp",value))?;
+            let code=value.integer_value().and_then(|n|u32::try_from(n).ok()).filter(|&c|c<=crate::lstring::MAX_CHAR).ok_or_else(|| Fault::Wrong("characterp",value))?;
             multibyte |= code >= 128 && code <= crate::lstring::MAX_5_BYTE_CHAR;
             let mut encoded=[0;5]; let n=crate::lstring::char_string(code,&mut encoded); bytes.extend_from_slice(&encoded[..n]);
         }
@@ -231,8 +231,8 @@ defsubr! { name = "get-load-suffixes", gnu = "lread.c:961", effect = Reads,
 fn get_load_suffixes(cx) {
     let load = cx.intern("load-suffixes");
     let reps = cx.intern("load-file-rep-suffixes");
-    let suffixes = cx.variable_value(load)?.ok_or(Fault::VoidVariable(load))?;
-    let exts = cx.variable_value(reps)?.ok_or(Fault::VoidVariable(reps))?;
+    let suffixes = cx.variable_value(load)?.ok_or_else(|| Fault::VoidVariable(load))?;
+    let exts = cx.variable_value(reps)?.ok_or_else(|| Fault::VoidVariable(reps))?;
     let mut out = Vec::new();
     let mut suffix_tail = suffixes;
     let mut seen_suffixes = HashSet::default();
@@ -247,7 +247,7 @@ fn get_load_suffixes(cx) {
                 && cx.string_bytes(suffix).is_ok_and(|b| b.ends_with(b".so"))
             {
                 let jka = cx.intern("jka-compr-load-suffixes");
-                let list = cx.variable_value(jka)?.ok_or(Fault::VoidVariable(jka))?;
+                let list = cx.variable_value(jka)?.ok_or_else(|| Fault::VoidVariable(jka))?;
                 if suffix_member(cx, ext, list)? { continue; }
             }
             out.push(concat(cx, &[suffix, ext])?);

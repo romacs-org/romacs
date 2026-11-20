@@ -353,7 +353,7 @@ impl Leaf<'_> {
                     let index = up
                         .integer_value()
                         .filter(|n| (0..CharTable::LEN as i64).contains(n))
-                        .ok_or(Fault::Wrong("characterp", up))?;
+                        .ok_or_else(|| Fault::Wrong("characterp", up))?;
                     let canonical = self.char_table_element(table, index as usize)?;
                     self.case_set(roots[2], from, to, canonical)?;
                 }

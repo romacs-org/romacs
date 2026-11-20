@@ -13,7 +13,7 @@ fn char_syntax(cx, character: Value) { cx.char_syntax(character) }}
 
 defsubr! { name = "syntax-class-to-char", gnu = "syntax.c:1124", effect = Pure,
 fn syntax_class_to_char(cx, syntax: Value) {
-    let class = syntax.integer_value().ok_or(Fault::Wrong("fixnump", syntax))?;
+    let class = syntax.integer_value().ok_or_else(|| Fault::Wrong("fixnump", syntax))?;
     let spec = crate::syntax_scan::SYNTAX_CODE_SPEC;
     match usize::try_from(class).ok().and_then(|class| spec.get(class)) {
         Some(&c) => Ok(Value::integer(i64::from(c)).expect("character")),

@@ -85,7 +85,7 @@ impl Leaf<'_> {
         -> std::result::Result<(Ordering, usize, bool), Fault> {
         let text = |span: Span| {
             let from = span.start + skip;
-            let view = self.compared_text(span.text, from).ok_or(Fault::Wrong("stringp", span.text))?;
+            let view = self.compared_text(span.text, from).ok_or_else(|| Fault::Wrong("stringp", span.text))?;
             Ok(codes(view, span.end.saturating_sub(from)))
         };
         let (order, matched, differ) = parting(text(a)?, text(b)?, fold)?;
