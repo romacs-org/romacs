@@ -625,41 +625,30 @@ mod leaf {
         }
         fn with_name_chars<R>(&self, v: Value, f: impl FnOnce(&mut dyn Iterator<Item = u32>) -> R)
             -> std::result::Result<R, Fault> {
-            if let Some(name) = self.symbol_name_text(v) { return Ok(f(&mut name.view().chars())); }
+            if let Some(key) = self.symbol_key(v) { return Ok(crate::symkey::with_name(key, |name| f(&mut name.chars()))); }
             let view = self.vm.str_view(v).ok_or(Fault::Wrong("stringp", v))?;
             Ok(f(&mut view.chars()))
         }
         /// GNU string-equal's test (fns.c:339) on V and W as text, a symbol by
         /// its name: the same character count, byte count and bytes, read in
-        /// place, with nothing copied.
+        /// place, with nothing copied but an escaped symbol name's decoding.
         pub(crate) fn string_equal(&self, v: Value, w: Value) -> std::result::Result<bool, Fault> {
-            let text = |v| match self.symbol_name_text(v) {
-                Some(name) => Ok(name),
-                None => self.vm.str_view(v).map(crate::lstring::Text::Viewed).ok_or(Fault::Wrong("stringp", v)),
-            };
-            let (v, w) = (text(v)?, text(w)?);
-            let (v, w) = (v.view(), w.view());
-            Ok((v.chars, v.bytes) == (w.chars, w.bytes))
+            self.with_text(v, |a| self.with_text(w, |b| (a.chars, a.bytes) == (b.chars, b.bytes)))?
         }
-        /// V's name when it is a symbol (`nil' and `t' too), as Lisp reads it:
-        /// the symbol's key where it lies when the key holds no U+FDD0, as
-        /// nearly every name's does, else the name decoded from the key
-        /// (`symkey'), which escapes U+FDD0 and characters that are not
-        /// Unicode scalars.  An ASCII key, the common case, is its own name
-        /// and counts one character a byte.
-        pub(crate) fn symbol_name_text(&self, v: Value) -> Option<crate::lstring::Text<'_>> {
-            use crate::lstring::{OwnedStr, StrView, Text};
-            let key = if v == Value::NIL { "nil" } else if v == Value::TRUE { "t" }
-                else { self.vm.symbol_names[self.symbol_slot(v).ok()?].as_str() };
-            let viewed = |chars| Text::Viewed(StrView { bytes: key.as_bytes(), chars, multibyte: true });
-            if key.is_ascii() { return Some(viewed(key.len())); }
-            Some(match crate::symkey::to_internal(key) {
-                None => viewed(key.chars().count()),
-                Some(bytes) => {
-                    let chars = StrView { bytes: &bytes, chars: 0, multibyte: true }.chars().count();
-                    Text::Owned(OwnedStr { bytes, chars, multibyte: true })
-                }
-            })
+        /// F of V's text: a symbol's name as Lisp reads it (`symkey::with_name'),
+        /// or a string's, read where it lies.
+        fn with_text<R>(&self, v: Value, f: impl FnOnce(crate::lstring::StrView<'_>) -> R) -> std::result::Result<R, Fault> {
+            match self.symbol_key(v) {
+                Some(key) => Ok(crate::symkey::with_name(key, f)),
+                None => self.vm.str_view(v).map(f).ok_or(Fault::Wrong("stringp", v)),
+            }
+        }
+        /// V's key when it is a symbol (`nil' and `t' too): its name, escaped
+        /// where it is not Unicode text (`symkey'), so read through
+        /// `symkey::with_name' wherever it is compared as text.
+        pub(crate) fn symbol_key(&self, v: Value) -> Option<&str> {
+            if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
+                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.

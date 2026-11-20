@@ -121,21 +121,6 @@ impl<'a> StrView<'a> {
     }
 }
 
-/// A text read where it lies, or decoded into a copy when it is not kept
-/// as Lisp reads it (a symbol's escaped key, `symkey').
-pub(crate) enum Text<'a> {
-    Viewed(StrView<'a>),
-    Owned(OwnedStr),
-}
-impl Text<'_> {
-    pub(crate) fn view(&self) -> StrView<'_> {
-        match self {
-            Text::Viewed(view) => *view,
-            Text::Owned(owned) => owned.view(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct OwnedStr {
     pub(crate) bytes: Vec<u8>,

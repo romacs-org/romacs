@@ -1,9 +1,9 @@
 //! fns.c `Fcompare_strings`' loop over strings and symbol names where they
 //! lie: the characters are decoded from the bytes, a pair that differs is
 //! folded through the buffer's upcase table read flat, and neither text is
-//! copied.
+//! copied but an escaped symbol name's decoding (`symkey::with_name`).
 use super::{Fault, Kind, Leaf, Value};
-use crate::lstring::{BYTE8_OFFSET, StrView, Text};
+use crate::lstring::{BYTE8_OFFSET, StrView};
 use std::cmp::Ordering;
 
 /// The characters START..END of a string or of a symbol's name, END the
@@ -19,6 +19,11 @@ impl Span {
     pub(crate) fn whole(text: Value) -> Self {
         Self { text, start: 0, end: usize::MAX }
     }
+}
+
+/// COUNT of VIEW's characters after its first SKIPPED.
+fn after(view: StrView<'_>, skipped: usize, count: usize) -> impl Iterator<Item = u32> + '_ {
+    codes(view, skipped.saturating_add(count)).skip(skipped)
 }
 
 /// VIEW's first COUNT characters, a unibyte string's bytes above ASCII as
@@ -59,14 +64,16 @@ fn parting(a: impl Iterator<Item = u32>, b: impl Iterator<Item = u32>, fold: imp
 }
 
 impl Leaf<'_> {
-    /// The text a comparison reads of VALUE: a string's from character
-    /// FROM, or a symbol's whole name as Lisp reads it, with FROM
-    /// characters to skip (minibuf.c `Fassoc_string`).
-    fn compared_text(&self, value: Value, from: usize) -> Option<(Text<'_>, usize)> {
+    /// F of the text a comparison reads of VALUE, with how many of its
+    /// characters to skip to reach character FROM: a string's from FROM, or
+    /// a symbol's whole name as Lisp reads it (minibuf.c `Fassoc_string`).
+    fn with_compared<R>(&self, value: Value, from: usize, f: impl FnOnce(StrView<'_>, usize) -> R)
+        -> std::result::Result<R, Fault> {
+        let wrong = || Fault::Wrong("stringp", value);
         match self.kind(value) {
-            Kind::Symbol => Some((self.symbol_name_text(value)?, from)),
-            Kind::String | Kind::Bytes => Some((Text::Viewed(self.vm.str_view_from(value, from)?), 0)),
-            _ => None,
+            Kind::Symbol => Ok(crate::symkey::with_name(self.symbol_key(value).ok_or_else(wrong)?, |name| f(name, from))),
+            Kind::String | Kind::Bytes => Ok(f(self.vm.str_view_from(value, from).ok_or_else(wrong)?, 0)),
+            _ => Err(wrong()),
         }
     }
 
@@ -78,15 +85,11 @@ impl Leaf<'_> {
     /// A and B's parting from character SKIP of each, as FOLD folds.
     fn text_parting(&self, a: Span, b: Span, skip: usize, fold: impl Fn(u32) -> std::result::Result<u32, Fault>)
         -> std::result::Result<(Ordering, usize, bool), Fault> {
-        let text = |span: Span| {
-            let from = span.start + skip;
-            let (text, skipped) = self.compared_text(span.text, from).ok_or(Fault::Wrong("stringp", span.text))?;
-            Ok((text, skipped, span.end.saturating_sub(from)))
-        };
-        let ((a, a_skip, a_count), (b, b_skip, b_count)) = (text(a)?, text(b)?);
-        let a = codes(a.view(), a_skip.saturating_add(a_count)).skip(a_skip);
-        let b = codes(b.view(), b_skip.saturating_add(b_count)).skip(b_skip);
-        let (order, matched, differ) = parting(a, b, fold)?;
+        let (from_a, from_b) = (a.start + skip, b.start + skip);
+        let (count_a, count_b) = (a.end.saturating_sub(from_a), b.end.saturating_sub(from_b));
+        let (order, matched, differ) = self.with_compared(a.text, from_a, |va, sa| {
+            self.with_compared(b.text, from_b, |vb, sb| parting(after(va, sa, count_a), after(vb, sb, count_b), &fold))
+        })???;
         Ok((order, skip + matched, differ))
     }
 
