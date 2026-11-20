@@ -11,7 +11,7 @@ fn integer_marker(cx: &Leaf<'_>, value: Value, first: bool) -> Result<num_bigint
             .map(Into::into)
             .ok_or_else(|| Fault::Error("Marker does not point anywhere".into()));
     }
-    let predicate = if first || cx.float_value(value).is_ok() {
+    let predicate = if first || cx.is_float(value) {
         "integer-or-marker-p"
     } else {
         "number-or-marker-p"

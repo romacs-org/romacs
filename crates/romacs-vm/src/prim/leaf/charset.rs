@@ -6,18 +6,19 @@ include!("charset_define.rs");
 pub(crate) struct Run { pub start: i64, pub end: i64, pub walk: Option<usize> }
 
 impl Leaf<'_> {
-    fn charset_record(&mut self, name: Value) -> std::result::Result<usize, Fault> {
+    /// NAME's charset record, when NAME names one; builds no error.
+    fn charset_index(&mut self, name: Value) -> Option<usize> {
         self.vm.ensure_charsets();
         if self.kind(name) != Kind::Symbol {
-            return Err(Fault::Wrong("charsetp", name));
+            return None;
         }
-        self.vm
-            .charsets
-            .lookup(name)
-            .ok_or_else(|| Fault::Wrong("charsetp", name))
+        self.vm.charsets.lookup(name)
+    }
+    fn charset_record(&mut self, name: Value) -> std::result::Result<usize, Fault> {
+        self.charset_index(name).ok_or_else(|| Fault::Wrong("charsetp", name))
     }
     pub fn is_charset(&mut self, object: Value) -> bool {
-        self.charset_record(object).is_ok()
+        self.charset_index(object).is_some()
     }
     pub fn charset_plist(&mut self, name: Value) -> super::super::Out {
         let i = self.charset_record(name)?;

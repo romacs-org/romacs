@@ -48,7 +48,7 @@ fn unlock_all_files(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {
         if !cx.lifecycle_live_p(buffer) { continue; }
         let truename = cx.buffer_local_read(field, buffer)?;
         let state = cx.buffer_modification(buffer)?;
-        if cx.string_view(truename).is_ok() && state.save_modiff < state.modiff { truenames.push(truename); }
+        if cx.is_string(truename) && state.save_modiff < state.modiff { truenames.push(truename); }
     }
     unlock_next(cx, Value::NIL, &truenames)
 }

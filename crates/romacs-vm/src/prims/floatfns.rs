@@ -110,7 +110,7 @@ fn expt(cx, arg1: Value, arg2: Value) {
 defsubr! { name = "float", gnu = "floatfns.c:296", effect = Pure,
 fn float(cx, arg: Value) {
     let x = number(cx, arg)?;
-    Ok(if cx.float_value(arg).is_ok() { arg } else { cx.float(x) })
+    Ok(if cx.is_float(arg) { arg } else { cx.float(x) })
 }}
 
 fn float_rounding(cx: &mut Leaf<'_>, arg: Value, f: fn(f64) -> f64) -> Out {

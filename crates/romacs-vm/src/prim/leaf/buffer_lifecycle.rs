@@ -16,7 +16,7 @@ impl Leaf<'_> {
     pub fn minibuffer_predicate(&mut self, buffer: Value, live: Value) -> Out {
         let buffer = if buffer == Value::NIL { self.current_buffer()? }
             else if self.lifecycle_buffer_p(buffer) { buffer }
-            else if self.string_view(buffer).is_ok() { self.lifecycle_get(buffer)? }
+            else if self.is_string(buffer) { self.lifecycle_get(buffer)? }
             else { return Err(Fault::Wrong("bufferp", buffer)); };
         self.vm.ensure_windows().map_err(Fault::Error)?;
         // minibuf.c: one of `Vminibuffer_list' (lisp/vm/minibuf.el),

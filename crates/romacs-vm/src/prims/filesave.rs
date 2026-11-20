@@ -46,7 +46,7 @@ fn dir_to_file(
     always: bool,
 ) -> std::result::Result<std::result::Result<(std::path::PathBuf, Value), Next>, Fault> {
     if saved.len() > args {
-        if cx.string_bytes(expanded).is_err() {
+        if !cx.is_string(expanded) {
             return Err(Fault::Error("Invalid handler in ‘file-name-handler-alist’".into()));
         }
         return Ok(Ok(as_file(cx, expanded)?));

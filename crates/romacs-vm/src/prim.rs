@@ -642,7 +642,7 @@ mod leaf {
         /// V's name when it is a symbol (`nil' and `t' too), borrowed.
         fn symbol_text(&self, v: Value) -> Option<&str> {
             if v == Value::NIL { Some("nil") } else if v == Value::TRUE { Some("t") }
-                else { self.symbol_slot(v).ok().map(|slot| self.vm.symbol_names[slot].as_str()) }
+                else { self.symbol_index(v).map(|slot| self.vm.symbol_names[slot].as_str()) }
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
@@ -932,6 +932,11 @@ mod leaf {
                 _ => Err(Fault::Wrong("vectorp", v)),
             }
         }
+        /// `vectorp`: where `vector_len` and `vector_values` answer, with
+        /// nothing copied and no error built.
+        pub fn is_vector(&self, v: Value) -> bool {
+            matches!(self.vm.object_if(v), Some(data::Object::Vector(_)))
+        }
         pub fn vector_len(&self, v: Value) -> std::result::Result<usize, Fault> {
             match self.vm.object_if(v) {
                 Some(data::Object::Vector(a)) => Ok(a.len()),
@@ -1093,6 +1098,10 @@ mod leaf {
             }
             Some(self.vm.marker_position_value(v).ok().and_then(|p| p.integer_value()))
         }
+        /// `floatp`: where `float_value` answers, with no error built.
+        pub fn is_float(&self, v: Value) -> bool {
+            matches!(self.vm.object_if(v), Some(data::Object::Float(_)))
+        }
         pub fn float_value(&self, v: Value) -> std::result::Result<f64, Fault> {
             match self.vm.object_if(v) {
                 Some(data::Object::Float(n)) => Ok(*n),
@@ -1116,12 +1125,16 @@ mod leaf {
         pub fn equal_including_properties(&self, a: Value, b: Value) -> std::result::Result<bool, hash::HashFault> {
             self.vm.equal_including_properties(a, b)
         }
+        /// V's slot when it is a symbol other than nil and t; builds no error.
         #[inline]
-        fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
+        fn symbol_index(&self, v: Value) -> Option<usize> {
             v.index_if(7)
                 .and_then(|i| i.checked_sub(1))
                 .filter(|&i| i < self.vm.slots.len())
-                .ok_or_else(|| Fault::Wrong("symbolp", v))
+        }
+        #[inline]
+        fn symbol_slot(&self, v: Value) -> std::result::Result<usize, Fault> {
+            self.symbol_index(v).ok_or_else(|| Fault::Wrong("symbolp", v))
         }
         pub fn symbol_name(&self, v: Value) -> std::result::Result<String, Fault> {
             if v == Value::NIL {
@@ -1640,7 +1653,7 @@ mod leaf {
         /// `symbolp`: exactly where `kind` answers Symbol, without the
         /// object classification `kind` runs first.
         pub fn is_symbol(&self, v: Value) -> bool {
-            v == Value::NIL || v == Value::TRUE || self.symbol_slot(v).is_ok()
+            v == Value::NIL || v == Value::TRUE || self.symbol_index(v).is_some()
         }
         /// `stringp`: exactly where `kind` answers String or Bytes (a unibyte
         /// string with octets above 127 is `Bytes`), by `kind`'s own arms.
@@ -1664,7 +1677,7 @@ mod leaf {
                 4 if (v.payload() as usize) < self.vm.closures.len() => Kind::Closure,
                 5 if (v.payload() as usize) < self.vm.cells.len() => Kind::Cell,
                 6 if super::descriptor(v.payload() as usize).is_some() => Kind::Subr,
-                7 if self.symbol_slot(v).is_ok() => Kind::Symbol,
+                7 if self.symbol_index(v).is_some() => Kind::Symbol,
                 // A private object first: an executable-image string is past
                 // the private table, so `object_if' answers None for it.
                 0 => match self.vm.object_if(v) {

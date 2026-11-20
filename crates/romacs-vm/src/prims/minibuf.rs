@@ -139,9 +139,9 @@ fn string_done(cx: &mut Leaf<'_>, val: Value, saved: &[Value]) -> Next {
 /// call: an activation GNU's C call lacks, seen in a backtrace and in eval depth.
 fn string_to_object(cx: &mut Leaf<'_>, mut val: Value, default: Value) -> Next {
     if cx.string_view(val).is_ok_and(|s| s.chars == 0) {
-        if cx.string_view(default).is_ok() {
+        if cx.is_string(default) {
             val = default;
-        } else if let Some((car, _)) = cx.pair(default).filter(|&(car, _)| cx.string_view(car).is_ok()) {
+        } else if let Some((car, _)) = cx.pair(default).filter(|&(car, _)| cx.is_string(car)) {
             val = car;
         }
     }

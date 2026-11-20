@@ -716,7 +716,7 @@ fn stamp_float(s: Stamp) -> f64 {
 
 defsubr! { name = "float-time", gnu = "timefns.c:1307", effect = Global,
 fn float_time(cx; optional time: Value) {
-    if cx.float_value(time).is_ok() {return Ok(time);}
+    if cx.is_float(time) {return Ok(time);}
     let s=stamp(cx,time,false)?;
     Ok(cx.float(stamp_float(s)))
 }}

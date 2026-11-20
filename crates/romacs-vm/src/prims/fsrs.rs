@@ -116,7 +116,7 @@ fn weights(cx: &mut Leaf<'_>, parameters: Value) -> Result<Vec<f32>> {
 /// PARAMETERS' numbers as given, empty for nil (the crate's defaults).
 fn given_weights(cx: &mut Leaf<'_>, parameters: Value) -> Result<Vec<f32>> {
     let values = if parameters == Value::NIL { vec![] }
-        else if cx.vector_len(parameters).is_ok() { cx.vector_values(parameters)? }
+        else if cx.is_vector(parameters) { cx.vector_values(parameters)? }
         else { elements(cx, parameters)? };
     values.into_iter().map(|w| {
         let x = number(cx, w)?;

@@ -106,7 +106,7 @@ fn indirect_function(cx, object: Value; optional noerror: Value) {
     // GNU fset prevents cycles; defend corrupt/internal function graphs too.
     let mut current = object;
     let mut seen = Vec::new();
-    while current != Value::NIL && cx.symbol_name(current).is_ok() {
+    while current != Value::NIL && cx.is_symbol(current) {
         if seen.contains(&current) { return Err(Fault::CyclicFunctionIndirection(object)); }
         seen.push(current);
         current = cx.symbol_definition(current)?;

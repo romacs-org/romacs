@@ -286,7 +286,7 @@ fn keymap_prompt_in(cx: &mut Leaf<'_>, map: Value, depth: usize) -> Out {
     let Some(mut map) = cx.keymap(map) else { return Ok(Value::NIL) };
     for _ in 0..=cx.list_limit() {
         let Some((item, rest)) = cx.pair(map) else { return Ok(Value::NIL) };
-        if cx.string_view(item).is_ok() { return Ok(item); }
+        if cx.is_string(item) { return Ok(item); }
         if depth < cx.list_limit() && cx.keymap(item).is_some() {
             let prompt = keymap_prompt_in(cx, item, depth + 1)?;
             if prompt != Value::NIL { return Ok(prompt); }

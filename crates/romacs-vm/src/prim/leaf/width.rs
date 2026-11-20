@@ -135,7 +135,7 @@ impl Leaf<'_> {
                 rules = rest;
                 let Ok(rule) = self.vector_values(item) else { continue };
                 if rule.len() != 3 || rule[1].integer_value() != Some(k as i64) { continue; }
-                let end = if rule[0] == Value::NIL { Some(start + 1) } else if self.string_view(rule[0]).is_ok() {
+                let end = if rule[0] == Value::NIL { Some(start + 1) } else if self.is_string(rule[0]) {
                     self.vm.string_looking_at(string, rule[0], from + start, text[start].1)?
                         .map(|end| end - from).filter(|&end| end > start)
                 } else { None };
