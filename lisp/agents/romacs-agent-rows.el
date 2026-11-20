@@ -115,7 +115,10 @@ output."
                      (romacs-agent-rows--plural (hash-table-count value) "field"))))
                 ((vectorp value) (romacs-agent-rows--plural (length value) "item"))
                 ((or (not (stringp output)) (string-empty-p (string-trim output))) nil)
-                ((= (romacs-agent-rows--lines output) 1) (truncate-string-to-width (string-trim output) 48 nil nil "…"))
+                ;; One line: its first clause, without the tool's own
+                ;; name the row says already.
+                ((= (romacs-agent-rows--lines output) 1)
+                 (truncate-string-to-width (string-trim (car (split-string (string-trim output) " *[(;]"))) 48 nil nil "…"))
                 (t (romacs-agent-rows--plural (romacs-agent-rows--lines output) "line")))))
     (cond (error (concat (romacs-agent-rows--dim " · ") (propertize (romacs-agent-rows--line error) 'face 'romacs-agent-error)))
           ((or (null said) (string-empty-p said)) "")

@@ -101,8 +101,10 @@ background, read, never hidden; and a key the header names the theme's
 key colour raised to 4.5:1 on the header line: each as its default spec.
 A theme's or the user's own spec still wins."
   (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
-    (face-spec-set 'romacs-agent-log-output (if colour `((t :foreground ,colour)) '((t :inherit shadow)))
-                   'face-defface-spec))
+    ;; A tool's output, and every dim word of a chat's rows: read, 4.5:1.
+    (dolist (face '(romacs-agent-log-output romacs-agent-dim))
+      (when (facep face)
+        (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit shadow))) 'face-defface-spec))))
   (let* ((key (face-foreground 'help-key-binding nil t))
          (colour (and key (romacs-color-legible key (face-background 'header-line nil t)))))
     (face-spec-set 'romacs-agent-log-header-key
@@ -465,7 +467,7 @@ on it shows."
                          shown
                          (if (and more (not tail)) (concat "\n    " more) "")
                          "\n")))
-      (propertize text 'romacs-agent-log-full full))))
+      (propertize text 'romacs-agent-log-full full 'wrap-prefix "    "))))
 
 (defun romacs-agent-log--json (value)
   "VALUE, a tool's input, as indented JSON text."
@@ -484,11 +486,15 @@ renderer's, else its name and the brief of its input."
                    (condition-case err (funcall (plist-get renderer :row) input)
                      (error (message "The row of %s failed: %s" name (error-message-string err)) nil)))))
     (or row (concat (propertize name 'face 'romacs-agent-log-tool)
-                    ;; One line of it: RET shows all of it.
-                    (let ((brief (truncate-string-to-width
-                                  (car (split-string (romacs-agent-rows--brief input) "\n"))
-                                  60 nil nil (truncate-string-ellipsis))))
-                      (if (string-empty-p brief) "" (concat "(" brief ")")))))))
+                    ;; One line of it, its own description when it gives
+                    ;; one: RET shows all of it.
+                    (let* ((described (gethash "description" input))
+                           (brief (truncate-string-to-width
+                                   (car (split-string (if (stringp described) described (romacs-agent-rows--brief input)) "\n"))
+                                   48 nil nil (truncate-string-ellipsis))))
+                      (cond ((string-empty-p brief) "")
+                            ((stringp described) (concat " " brief))
+                            (t (concat "(" brief ")"))))))))
 
 (defun romacs-agent-log--one-line (text)
   "TEXT, a row, on one line: its line breaks spaces (RET shows it whole)."
@@ -497,10 +503,12 @@ renderer's, else its name and the brief of its input."
 (defun romacs-agent-log--call (event)
   "The first line of tool call EVENT, its mark first."
   (let ((input (plist-get event :input)))
-    (concat (propertize "● " 'face 'romacs-agent-log-tool)
-            (romacs-agent-log--one-line
-             (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
-                                         (if (hash-table-p input) input (make-hash-table :test #'equal)))))))
+    ;; A row that wraps hangs under its text, not the margin.
+    (propertize (concat (propertize "● " 'face 'romacs-agent-log-tool)
+                        (romacs-agent-log--one-line
+                         (romacs-agent-log--call-row (romacs-agent-rows-name (plist-get event :name))
+                                                     (if (hash-table-p input) input (make-hash-table :test #'equal)))))
+                'wrap-prefix "  ")))
 
 (defun romacs-agent-log--ended-row (block output)
   "BLOCK's row, its call ended well with OUTPUT, rewritten to say what came
@@ -522,7 +530,8 @@ of it (`romacs-agent-rows-ended'), after its mark."
             (let* ((mark (match-beginning 0))
                    (properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
                                      'romacs-agent-log-full (get-text-property mark 'romacs-agent-log-full)
-                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool))))
+                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool)
+                                     'wrap-prefix "  ")))
               (romacs-agent-log--writing
                 (delete-region (point) end)
                 (insert (romacs-agent-log--sealed (apply #'propertize ended properties)))))))))))
