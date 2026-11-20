@@ -1088,6 +1088,8 @@ const FAILED_SIGNAL_LOOK: std::time::Duration = std::time::Duration::from_millis
 /// nothing either.
 fn failed_screen(host: &std::cell::RefCell<prompt::Shared>, early_window: &mut Option<crossbeam_channel::Receiver<Result<(), String>>>,
                  error: &str) -> Option<loading::Loading> {
+    // No screen to show: no wait for a window to show it in.
+    if host.borrow().loading.is_none() { return None; }
     // A window asked for at the start is not yet shown, only being made.
     let early = early_window.take().map(|ready| made(&ready));
     if early == Some(false) { return None; }
