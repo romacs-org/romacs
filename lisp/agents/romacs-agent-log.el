@@ -1752,6 +1752,17 @@ under C-c as well."
   "M-n" #'romacs-agent-log-history-next)
 
 
+(defun romacs-agent-log--undecorated (text)
+  "TEXT without its decoration, the runs marked `romacs-agent-decor'."
+  (if (not (stringp text)) text
+    (let ((at 0) (parts nil))
+      (while (< at (length text))
+        (let ((next (next-single-property-change at 'romacs-agent-decor text (length text))))
+          (unless (get-text-property at 'romacs-agent-decor text)
+            (push (substring text at next) parts))
+          (setq at next)))
+      (apply #'concat (nreverse parts)))))
+
 (define-derived-mode romacs-agent-log-mode fundamental-mode "Agent"
   "An agent session's chat: its transcript, and below, the composer.
 \\{romacs-agent-log-mode-map}
@@ -1762,6 +1773,8 @@ On the transcript's text:
   (setq-local scroll-conservatively 101)
   (setq-local header-line-format "")
   (setq-local desktop-save-buffer #'romacs-agent-log--desktop-save)
+  ;; A quote's bar is decoration: never in what one copies.
+  (add-function :filter-return (local 'filter-buffer-substring-function) #'romacs-agent-log--undecorated)
   ;; The separator's rule fits the window it is shown in.
   (add-hook 'window-size-change-functions (lambda (_) (when romacs-agent-log--input (romacs-agent-log--separator))) nil t)
   (add-hook 'after-change-functions #'romacs-agent-log--composer-plain nil t))

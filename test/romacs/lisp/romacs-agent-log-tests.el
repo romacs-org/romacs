@@ -1098,8 +1098,8 @@
       (romacs-agent-log-draw session event))
     (let ((text (romacs-agent-log-tests--transcript)))
       (should (string-match-p "❯ do it" text))
-      (should (string-match-p "✉ lane x · completed\ndone" text))
-      (should (string-match-p "✉ background task · completed\nBuild done" text))
+      (should (string-match-p "⇠ lane x · completed\n┃ done" text))
+      (should (string-match-p "⇠ background task · completed\n┃ Build done" text))
       (should-not (string-match-p "❯ Delegated" text)))
     (goto-char (point-min))
     (search-forward "do it")
@@ -1130,8 +1130,8 @@
           :messages (list (list :kind "child" :from '(:name "lane a") :wake '(:state "completed") :text "A done")
                           (list :kind "child" :from '(:name "lane b") :text "B says")))
     (let ((text (romacs-agent-log-tests--transcript)))
-      (should (string-match-p "✉ lane a · completed\nA done" text))
-      (should (string-match-p "✉ lane b · child\nB says" text)))
+      (should (string-match-p "⇠ lane a · completed\n┃ A done" text))
+      (should (string-match-p "⇠ lane b · child\n┃ B says" text)))
     ;; Its turn anchored: diff and rollback read it.
     (goto-char (point-min))
     (search-forward "A done")
@@ -1327,6 +1327,21 @@ none when dropped.")
       (should (looking-at "third"))
       (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
       (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (1- line) 'face)))))))
+
+;;; From elsewhere, quoted
+
+(ert-deftest romacs-agent-log-rounds-quote-what-came-from-elsewhere ()
+  ;; Its head, its lines behind a bar, a blank line after; the bar is no
+  ;; part of what one copies.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text (concat "<romacs-message id=\"m-1\" kind=\"parent\" from=\"lead\">\nGo on\nand on\n</romacs-message>\n"
+                                     "Reply to this message with romacs_task_reply(messageId=\"m-1\", text=...)."))
+    (draw :type 'delta :text "On it.")
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "⇠ lead · parent\n┃ Go on\n┃ and on\n\nOn it." text)))
+    (goto-char (point-min))
+    (search-forward "Go on")
+    (should (equal (filter-buffer-substring (line-beginning-position) (line-end-position)) "Go on"))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
