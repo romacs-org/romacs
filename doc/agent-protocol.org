@@ -377,14 +377,16 @@ JSON-RPC errors with numeric codes and =data.kind=:
   {"id": "...", "title": "...", "cwd": "...", "project": "...", "parent": null,
    "harness": "claude", "provider": "claude", "model": "...", "effort": null,
    "state": "starting|running|waiting-approval|idle|detached|unstarted|ended",
-   "key": "working", "pending": 0, "queued": 0,
+   "key": "working", "pending": 0, "queued": 0, "activity": null, "turn_start": null,
+   "input_seq": 0, "done_seq": 0, "seen_seq": null, "settled_seq": null, "failed": false,
    "last_time": 0.0, "cost": null, "context_used": null, "context_window": null,
    "children": 0}
   #+end_src
   Every field is present; =null= means unknown.  =key= is the session's
   state as this machine's board shows it (=romacs-agent-board--key=),
   made by the service alone: a client draws it, never derives it.
-  =pending= counts the session's pending requests.
+  =pending= counts the session's pending requests.  The seqs are those a
+  store row keeps: a client makes its session of a row as a row's is made.
 
 ** One session
 Live state and history are separate.  Live state is small, and is
@@ -443,22 +445,23 @@ paging ever holds live delivery back.
   cannot be lost.
 
 ** Pages
-- *Method.*  =agents/session.history {id, upto, after?, turns?}=, its
-  bounds =after < seq ≤ upto=:
+- *Method.*  =agents/session.history {id, upto, after?, turns?, records?}=,
+  its bounds =after < seq ≤ upto=:
   - without =after=, the last =turns= turns (3 by default, 50 at most)
-    ending at =upto=, fewer when they start further back than 20,000
-    records; a turn starts at its row's first record, or past the last
-    row's end;
+    ending at =upto=, from where a chat of them begins
+    (=romacs-agent-tail-start=): no more than =records= records (20,000,
+    also the most), within a turn longer than that;
     =upto= set to just before the first unit goes further back;
-  - with =after=, every record unit in the range.  A range over 4,000
-    records, or one whose turn starts further back than 20,000, answers
-    =reset=: the client draws the session afresh.
+  - with =after=, every record unit in the range, folded from its turn's
+    start however far back.  A range over 4,000 records answers =reset=:
+    the client draws the session afresh.
 - *Read as live.*  The service replays from the first record of the turn
   the range begins in, so each unit's events are those live delivery
   sent (a message's text never twice), between the editor's other work.
   A reply's units can begin mid-turn, after units the client holds.
 - *Reply.*  ={"cursor": {seq, epoch, adapter}, "units": [{seq, events}],
-  "reset", "more"}=, paged by units.  Past 8 MiB of units it stops, its
+  "from", "reset", "more"}=, paged by units; =from=, for a read without
+  =after=, is the seq its records begin at, =null= at the session's start.  Past 8 MiB of units it stops, its
   cursor's seq where: the client asks on from there.  The epoch is read
   before and after the replay: moved, the reply is =reset=.  A client
   compares a reply's epoch and adapter with those its history was read
@@ -535,9 +538,10 @@ paging ever holds live delivery back.
     ={"type":"answer","request","by","decision","scope","reason","login","client"}=,
     which replays as an =attributed= event; then it writes the response
     line.
-  - The note and the response line carry the same =romacsRequest= tag.
-    An =answer= note counts as an answer only once the response with its
-    tag is recorded.  A note whose response never came (the process
+  - The note names the harness's request id; with =handle.run=, the
+    run it was asked in, that pairs it with its response line.  An
+    =answer= note counts as an answer only once that response is
+    recorded.  A note whose response never came (the process
     died between them) leaves the request pending, and is drawn as "an
     answer not delivered".
   - The service reads the actor from that note.  An answer without one
@@ -559,11 +563,11 @@ paging ever holds live delivery back.
   - a digest of its params;
   - state and outcome;
   - for =start=, the new session's id;
-  - for =send= and =answer=, the =romacsRequest= tag its =in= record
-    carries.
+  - for =send=, the =romacsRequest= tag its =in= record carries; for
+    =answer=, its request's handle.
 - *Committed before its effect.*  A command's row is committed with
   state =admitted= before it takes effect.
-  - Every line the service writes for a command carries the command's
+  - Every message the service writes for a =send= carries the command's
     =romacsRequest= tag, a per-turn run's =--input= prompt included.  The
     v0.1 host takes the tag (=--input-tag=) into the prompt's =in=
     record, so recovery always finds a delivered command by its tag.
@@ -594,8 +598,9 @@ paging ever holds live delivery back.
   resolved from the records, never run again:
   - a =start= reports the last milestone reached with the session's id;
     one never =allocated= is =unknown=;
-  - a =send= or =answer= whose =romacsRequest= tag is in an =in= record
-    is =recorded=.  For an answer that only confirms the recording: its
+  - a =send= whose =romacsRequest= tag is in an =in= record, or an
+    =answer= whose response to its request is in its run's records, is
+    =recorded=.  For an answer that only confirms the recording: its
     request stays =answering= until one of its own clearing events (its
     =written= record, settlement, the turn's end, the exit) is in the
     records too;
@@ -682,21 +687,33 @@ paging ever holds live delivery back.
 | type | fields |
 |------+--------|
 | =input= | =text images steer own messages request= |
+| =incoming= | =text prompt messages= (messages from other sessions) |
 | =delta= | =message text parent= (text appended to message =message=) |
 | =thinking= | =text parent= |
 | =message-end= | =message parent= (the message's deltas are all of it) |
 | =tool= | =id name state input output parent= (=state=: =started=, =completed=, =failed=) |
+| =tool-output= | =id text= (streamed command output, live only) |
+| =task= | =id task state background activity summary title= |
 | =status=, =error= | =text parent= |
-| =done= | =text error limit duration cost reason= |
+| =done= | =text error limit interrupted duration cost reason= |
 | =exit= | =status= |
 | =compacted=, =plan= | =text= |
 | =usage= | =context_used= |
+| =selection= | =from to= (each ={model, effort, provider}=) |
+| =renewed= | =why from to brief= |
+| =forked= | =from title seq_from turns after= |
+| =rolled-back= | =to turns prompt files= |
+| =replied= | =message reply by_user= |
+| =unknown= | =raw method= (a harness line Romacs does not read) |
 
+- *Reading back.*  =romacs-agent-wire-decode= reads an event as it was
+  raised: the schema names the fields read back as a name or as data.
 - *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el=: a turn of
-  each harness, each record with the events sent for it.
-- *Slice 1 adds* =tool-output {id text}= (streamed command output),
-  =approval=, =answered= and =attributed= (keyed by service handles).
-  A tool's output is its completed item's, as its harness caps it:
+  each harness, each record with the events sent for it, read back and
+  drawn as the chat draws them raised.
+- *Requests add* =approval=, =answered= and =attributed=, keyed by
+  service handles (Pending requests).
+- A tool's output is its completed item's, as its harness caps it:
   streamed output is live only; compaction removes it once the item
   completes.
 

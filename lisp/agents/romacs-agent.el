@@ -4969,7 +4969,7 @@ find it.  A journal's tail is read from its end, within BUDGET: its rows
 would only name a seq to search the same bytes for, further back when
 they lag."
   (if (romacs-agent-events-p session)
-      (or (and (not end) (not begin) (romacs-agent--turns-tail session turns budget))
+      (or (and (not begin) (romacs-agent--turns-tail session turns budget end))
           (romacs-agent-events-tail session turns end begin))
     (romacs-agent--journal-file-tail session turns end begin budget)))
 
@@ -4987,17 +4987,18 @@ the agents service reads for one."
         (- end records)
       from)))
 
-(defun romacs-agent--turns-tail (session turns &optional budget)
+(defun romacs-agent--turns-tail (session turns &optional budget before)
   "(FROM . TURNS), FROM the place of SESSION's TURNSth latest turn's first
-record, from its turns' rows; nil when it has fewer rows than that, none
-earlier (all of it is then drawn), or for a journal when it begins more
-than BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
+record, from its turns' rows (those before seq BEFORE when given, of
+SQLite's records); nil when it has fewer rows than that, none earlier
+\(all of it is then drawn), or for a journal when it begins more than
+BUDGET bytes before the journal's end (`romacs-agent-journal-tail-bytes'
 by default; `none', no bound)."
   ;; Bounded as the journal's own tail is (`none', not at all): looked for
   ;; only within the bound's bytes.
   (let ((bound (cond ((eq budget 'none) nil) (budget) (t romacs-agent-journal-tail-bytes))))
     (when-let* (((fboundp 'romacs-agent-turns-first-seqs))
-                (seqs (romacs-agent-turns-first-seqs session (1+ turns)))
+                (seqs (romacs-agent-turns-first-seqs session (1+ turns) before))
                 ;; One turn more than drawn: what is before it is earlier turns.
                 ((> (length seqs) turns))
                 (seq (nth (1- turns) seqs))

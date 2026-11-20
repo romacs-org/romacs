@@ -165,7 +165,7 @@ STATE AGE &rest FIELDS), and `rows' the board's rows for a VIEW plist."
   `(let ((shown nil))
      (with-temp-buffer
        (romacs-agent-board-mode)
-       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action) (push (list session action) shown)))
+       (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session &optional action _source) (push (list session action) shown)))
                  ((symbol-function 'romacs-agent-board--columns) (lambda (_) 100)))
          (romacs-agent-board--redraw)
          ,@body))))

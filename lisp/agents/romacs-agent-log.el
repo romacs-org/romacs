@@ -961,22 +961,28 @@ read as its harness's events read them."
   (let* ((end romacs-agent-log--from)
          (from (and end (romacs-agent-tail-start session romacs-agent-log-turns romacs-agent-log-records end))))
     (unless end (user-error "This chat shows the session from its start"))
-    ;; Drawn into a buffer of its own, then put above: the live end is untouched.
-    (let ((text (with-temp-buffer
-                  (romacs-agent-log-mode)
-                  (setq romacs-agent-log--session session
-                        romacs-agent-log--end (point-max-marker)
-                        romacs-agent-log--input (point-max-marker))
-                  (set-marker-insertion-type romacs-agent-log--end t)
-                  (romacs-agent-log--replay session from end)
-                  (buffer-substring (point-min) romacs-agent-log--end))))
-      (romacs-agent-log--writing
-        (save-excursion
-          (goto-char (point-min))
-          (let ((line-end (line-beginning-position 2)))
-            (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
-          (insert (if from (romacs-agent-log--earlier-line from) "") text))))
-    (setq romacs-agent-log--from from)))
+    (romacs-agent-log--draw-above session from (lambda () (romacs-agent-log--replay session from end)))))
+
+(defun romacs-agent-log--draw-above (session from draw)
+  "Put above what the current chat shows the turns DRAW draws of SESSION,
+called in a chat of its own: the live end is untouched.  They begin at
+FROM, nil at the session's start."
+  (let ((text (with-temp-buffer
+                (romacs-agent-log-mode)
+                (setq romacs-agent-log--session session
+                      romacs-agent-log--end (point-max-marker)
+                      romacs-agent-log--input (point-max-marker))
+                (set-marker-insertion-type romacs-agent-log--end t)
+                (funcall draw)
+                (romacs-agent-log--close-stream)
+                (buffer-substring (point-min) romacs-agent-log--end))))
+    (romacs-agent-log--writing
+      (save-excursion
+        (goto-char (point-min))
+        (let ((line-end (line-beginning-position 2)))
+          (when (get-text-property (point) 'romacs-agent-log-earlier) (delete-region (point) line-end)))
+        (insert (if from (romacs-agent-log--earlier-line from) "") text))))
+  (setq romacs-agent-log--from from))
 
 ;;; The chat
 
@@ -1008,6 +1014,18 @@ where the chat reads and acts on SESSION, this editor by default
         (add-hook 'window-buffer-change-functions #'romacs-agent-log--shown nil t)))
     (unless later (with-current-buffer buffer (romacs-agent-log--ensure-filled)))
     buffer))
+
+(defun romacs-agent-log--clear ()
+  "Empty the current chat's transcript, to draw its session afresh: what it
+drew forgotten, its markers let go, its composer kept."
+  (romacs-agent-log--close-stream)
+  (when romacs-agent-log--blocks
+    (mapc #'romacs-agent-log--close-block (hash-table-values romacs-agent-log--blocks)))
+  (pcase-dolist (`(,_ ,start . ,end) romacs-agent-log--asks) (set-marker start nil) (set-marker end nil))
+  (romacs-agent-log--writing (delete-region (point-min) romacs-agent-log--end))
+  (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
+        romacs-agent-log--attributed nil romacs-agent-log--prompts nil romacs-agent-log--seq 0
+        romacs-agent-log--from nil))
 
 (defun romacs-agent-log--ensure-filled ()
   (unless romacs-agent-log--filled
