@@ -372,14 +372,19 @@ fn an_edited_file_gets_no_lock_file_beside_it() {
                (with-current-buffer b (oob-kill))
                (list (oob-locks) (oob-none-seen) (buffer-live-p b)))",
             // A warm restore relocks every modified file it restores. The
-            // fixture is made modified with no lock attempt of its own; the
-            // relock records no problem; the same path with locks on writes
+            // fixture is made modified with `create-lockfiles' bound nil, so
+            // its own `lock-file' call (`set-buffer-modified-p' makes one)
+            // writes no lock. Its file then changes on disk: the default
+            // relock still runs the supersession check, so it names that
+            // change, and writes no lock; the same path with locks on writes
             // the lock (the control), and unlocking removes it.
             "(let ((b (find-file-noselect (oob-file \"b.txt\"))))
                (with-current-buffer b (let ((create-lockfiles nil)) (set-buffer-modified-p t)))
+               (write-region \"changed on disk\\n\" nil (oob-file \"b.txt\") nil 'quiet)
                (setq warm-restart-last-report nil)
                (warm-restart--lock (list b))
-               (list (oob-locks) (plist-get warm-restart-last-report :locks)
+               (list (oob-locks)
+                     (mapcar (lambda (p) (plist-get p :reason)) (plist-get warm-restart-last-report :locks))
                      (let ((create-lockfiles t))
                        (warm-restart--lock (list b))
                        (prog1 (oob-locks) (with-current-buffer b (unlock-buffer))))))",
@@ -402,7 +407,7 @@ fn an_edited_file_gets_no_lock_file_beside_it() {
         "(nil t)",
         "(nil t)",
         "(nil t nil)",
-        "(nil nil (\".#b.txt\"))",
+        "(nil (\"changed on disk since it was read; saving asks first\") (\".#b.txt\"))",
         "(\".#a.txt\")",
         "nil",
         "(\"someone\" nil \"someone@elsewhere.1:0\" (\".#c.txt\"))",
