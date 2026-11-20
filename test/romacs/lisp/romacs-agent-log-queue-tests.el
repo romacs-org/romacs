@@ -40,10 +40,13 @@
            romacs-agent-log--input (point-min-marker)
            romacs-agent-log--filled t)
      (set-marker-insertion-type romacs-agent-log--end t)
+     ;; Loaded, as a session a chat shows live is.
+     (puthash (romacs-agent-id ,session) ,session romacs-agent--sessions)
      (puthash (romacs-agent-id ,session) (current-buffer) romacs-agent-log--chats)
      (unwind-protect
          (progn (romacs-agent-log--separator t) ,@body)
-       (remhash (romacs-agent-id ,session) romacs-agent-log--chats))))
+       (remhash (romacs-agent-id ,session) romacs-agent-log--chats)
+       (remhash (romacs-agent-id ,session) romacs-agent--sessions))))
 
 (defun romacs-agent-log-queue-tests--rows ()
   "The texts of the queued rows the chat shows, in order."
@@ -189,6 +192,40 @@
       (romacs-agent-log-queue-tests--row 1)
       (should-error (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e") :type 'user-error)
       (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "a draft")))))
+
+(ert-deftest romacs-agent-log-queue-acts-only-on-the-row-at-point ()
+  ;; From the composer the menu's rows are inapt and the commands say
+  ;; where to go; on a row they act on it, and at an end a move is inapt.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "c4c4c4c4-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                  t)))
+    (romacs-agent-log-queue-tests--chat session
+      (romacs-agent-log-queue-tests--queue "a")
+      (romacs-agent-log-queue-tests--queue "b")
+      (goto-char (point-max))
+      (should (romacs-agent-log-queue-not-here-p))
+      (should-error (romacs-agent-log-queue-drop) :type 'user-error)
+      (should-error (romacs-agent-log-queue-sooner) :type 'user-error)
+      (should (equal (romacs-agent-log-queue-tests--rows) '("a" "b")))
+      (romacs-agent-log-queue-tests--row 1)
+      (should-not (romacs-agent-log-queue-not-here-p))
+      (should (romacs-agent-log-queue-not-here-p -1))
+      (should-not (romacs-agent-log-queue-not-here-p 1)))))
+
+(ert-deftest romacs-agent-log-queue-a-held-message-gone-leaves-a-draft ()
+  ;; Taken from the queue while held (its records failed it): putting it
+  ;; back says so, and the composer keeps its text as a draft.
+  (let ((session (romacs-agent-test-attach
+                  (romacs-agent--make :id "c5c5c5c5-0000-4000-8000-000000000000" :harness 'claude :state 'running)
+                  t)))
+    (romacs-agent-log-queue-tests--chat session
+      (romacs-agent-log-queue-tests--queue "gone soon")
+      (romacs-agent-log-queue-tests--row 1)
+      (romacs-agent-log-queue-tests--key romacs-agent-log-queue-map "e")
+      (romacs-agent--dequeue session (car (romacs-agent-queue session)))
+      (should-error (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET") :type 'user-error)
+      (should-not romacs-agent-log-queue--editing)
+      (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "gone soon")))))
 
 (ert-deftest romacs-agent-log-queue-keys-run-in-the-chat ()
   ;; Its row's keys and the menu's rows run commands of this mode.

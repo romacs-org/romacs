@@ -4313,6 +4313,9 @@ while it waits.  `user-error' when its harness ended: resume it."
   (romacs-agent--admit session (romacs-agent-item text :images images :messages messages
                                                   :delivered delivered :valid valid :user user)))
 
+(defvar romacs-agent--queue-quiet nil
+  "Non-nil while a queue is rebuilt whole: its views are told once, after.")
+
 (defun romacs-agent--enqueue-first (session item)
   "Put ITEM ahead of what waits for SESSION's harness."
   (setf (romacs-agent-item-front item) t)
@@ -4324,7 +4327,7 @@ while it waits.  `user-error' when its harness ended: resume it."
   (cl-incf (romacs-agent-queue-length session))
   (unless (romacs-agent-queue-tail session) (setf (romacs-agent-queue-tail session) (romacs-agent-queue session)))
   (romacs-agent--keep-item session item)
-  (romacs-agent--changed session))
+  (unless romacs-agent--queue-quiet (romacs-agent--changed session)))
 
 (defun romacs-agent--enqueue (session item)
   (unless (romacs-agent-item-position item)
@@ -4340,7 +4343,7 @@ while it waits.  `user-error' when its harness ended: resume it."
       (setf (romacs-agent-queue session) cell))
     (setf (romacs-agent-queue-tail session) cell))
   (romacs-agent--keep-item session item)
-  (romacs-agent--changed session))
+  (unless romacs-agent--queue-quiet (romacs-agent--changed session)))
 
 (defun romacs-agent--dequeue (session item)
   "Take ITEM (by identity) out of SESSION's queue; non-nil when it was there."
@@ -4353,7 +4356,7 @@ while it waits.  `user-error' when its harness ended: resume it."
             (romacs-agent-queue-tail session) (last (romacs-agent-queue session))))
     (cl-decf (romacs-agent-queue-length session))
     (romacs-agent--unkeep-item session item)
-    (romacs-agent--changed session)
+    (unless romacs-agent--queue-quiet (romacs-agent--changed session))
     t))
 
 ;;; The queue as its user changes it
@@ -4383,12 +4386,14 @@ no longer waiting, or not its user's to change."
 
 (defun romacs-agent-queue-edit (session item text)
   "Make ITEM, waiting for SESSION, say TEXT, in its place, and let it go:
-its kept record's text too, never its place.  Nil when ITEM is no
+its kept record too.  Nil when ITEM is no
 longer waiting, or not its user's to change."
   (when (romacs-agent--queue-mine session item)
     (setf (romacs-agent-item-text item) text)
+    ;; Its row as it is now, under the one key all its writes share: a
+    ;; retry of an older write never lands after this one.
     (when (romacs-agent-item-kept item)
-      (romacs-agent-store-queued-text (romacs-agent-id session) item))
+      (romacs-agent-store-queued-put (romacs-agent-id session) item))
     (romacs-agent-queue-hold session item nil)))
 
 (defun romacs-agent-queue-drop (session item)
@@ -4402,8 +4407,8 @@ when ITEM is no longer waiting, or not its user's to change."
 (defun romacs-agent-queue-move (session item delta)
   "Move ITEM DELTA places in SESSION's queue (-1 one sooner, 1 one later):
 it and the one there change places, positions and being put first, so
-a load merging kept messages keeps the order chosen; the kept records'
-whole order with them.  Nil when ITEM is no longer waiting, not its
+a load merging kept messages keeps the order chosen; their kept rows
+with them.  Nil when ITEM is no longer waiting, not its
 user's to change, or has no place there."
   (let* ((queue (romacs-agent-queue session))
          (at (and (romacs-agent--queue-mine session item) (cl-position item queue)))
@@ -4418,9 +4423,11 @@ user's to change, or has no place there."
               (romacs-agent-item-position other) position
               (romacs-agent-item-front item) (romacs-agent-item-front other)
               (romacs-agent-item-front other) front)
-        ;; Every kept one's place, in one write that stands for all.
-        (romacs-agent-store-queued-reorder (romacs-agent-id session)
-                                           (cl-remove-if-not #'romacs-agent-item-kept queue))
+        ;; The two rows as they are now, each under the one key all its
+        ;; writes share: an older write's retry never lands after these.
+        (dolist (moved (list item other))
+          (when (romacs-agent-item-kept moved)
+            (romacs-agent-store-queued-put (romacs-agent-id session) moved)))
         (romacs-agent--dispatch-soon session)
         (romacs-agent--changed session)
         t))))
@@ -4483,7 +4490,6 @@ loaded or not."
 
 (declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-reorder "romacs-agent-store" (id items))
-(declare-function romacs-agent-store-queued-text "romacs-agent-store" (id item))
 (declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
 (declare-function romacs-agent-store--file "romacs-agent-store" ())
 (declare-function romacs-agent-store-queued-clear "romacs-agent-store" (id))

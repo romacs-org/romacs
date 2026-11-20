@@ -41,7 +41,9 @@ by default: a followed chat's queue is where it runs."
   (user-error "A followed chat's queue is changed where it runs"))
 
 (cl-defmethod romacs-agent-log-source-queue ((_source romacs-agent-log-local-source) session)
-  (romacs-agent-queue (romacs-agent-log--loaded session)))
+  ;; What waits for it when it is loaded: shown, never loaded to be shown.
+  (when-let* ((live (romacs-agent-loaded (romacs-agent-id session))))
+    (romacs-agent-queue live)))
 
 (cl-defmethod romacs-agent-log-source-queue-change ((_source romacs-agent-log-local-source) session op item &rest args)
   (apply (pcase op
@@ -84,11 +86,18 @@ a newline; the empty string when none wait.  A row carries its item
                    'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
    items ""))
 
+(defvar-local romacs-agent-log-queue--drawn nil
+  "The messages the rows were last drawn for, by identity.")
+
 (defun romacs-agent-log-queue--shown ()
-  "The rows of what waits for this chat's session, for the separator."
-  (romacs-agent-log-queue-rows (and romacs-agent-log--session
-                                    (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
-                               (romacs-agent-log--rule-width)))
+  "The rows of what waits for this chat's session, for the separator: drawn
+anew when the messages are others, even ones that read the same."
+  (let ((items (and romacs-agent-log--session
+                    (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))))
+    (unless (and (= (length items) (length romacs-agent-log-queue--drawn))
+                 (cl-every #'eq items romacs-agent-log-queue--drawn))
+      (setq romacs-agent-log--rows nil romacs-agent-log-queue--drawn (copy-sequence items)))
+    (romacs-agent-log-queue-rows items (romacs-agent-log--rule-width))))
 
 (setq romacs-agent-log-separator-rows-function #'romacs-agent-log-queue--shown)
 
@@ -104,11 +113,15 @@ a newline; the empty string when none wait.  A row carries its item
     (goto-char at)))
 
 (defun romacs-agent-log-queue--target ()
-  "The queued message to act on: the one at point, else the first; a
-`user-error' when none waits."
-  (or (romacs-agent-log-queue--item-at)
-      (car (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
-      (user-error "Nothing is queued")))
+  "The queued message on the row at point, by identity; a `user-error'
+when point is on none (n and p reach them), or it went meanwhile."
+  (let ((item (or (romacs-agent-log-queue--item-at)
+                  (user-error (if (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session)
+                                  "Move to a queued message first (n, p)"
+                                "Nothing is queued")))))
+    (unless (memq item (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
+      (user-error "That message is no longer waiting"))
+    item))
 
 (defun romacs-agent-log-queue--own (item)
   "ITEM, when its user may change it; else a `user-error'."
@@ -137,6 +150,15 @@ a newline; the empty string when none wait.  A row carries its item
 
 ;;; Changing them
 
+(defun romacs-agent-log-queue-not-here-p (&optional delta)
+  "Whether no queued message of its user's is on the row at point, or,
+with DELTA, it has no place DELTA away: a menu row's own test."
+  (let* ((item (romacs-agent-log-queue--item-at))
+         (items (and item (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session)))
+         (at (and item (cl-position item items))))
+    (not (and at (romacs-agent-queue-own-p item)
+              (or (null delta) (< -1 (+ at delta) (length items)))))))
+
 (defun romacs-agent-log-queue-edit ()
   "Edit the queued message at point (else the first) in the composer: held
 where it waits meanwhile; RET there puts it back in its place."
@@ -158,6 +180,12 @@ as the composer says it; an empty composer leaves it as it was."
   (interactive nil romacs-agent-log-mode)
   (let ((item (or romacs-agent-log-queue--editing (user-error "The composer holds no queued message")))
         (text (string-trim (buffer-substring-no-properties romacs-agent-log--input (point-max)))))
+    ;; Gone meanwhile (its session's records failed it): the composer's
+    ;; text is a draft again, sent by RET as any other.
+    (unless (memq item (romacs-agent-log-source-queue romacs-agent-log--source romacs-agent-log--session))
+      (setq romacs-agent-log-queue--editing nil)
+      (romacs-agent-log--separator t)
+      (user-error "That message went meanwhile: the composer keeps your text as a draft"))
     ;; Held to edit until it is back: a failure leaves the composer as it
     ;; is, still putting it back.
     (if (string-empty-p text)
