@@ -661,7 +661,7 @@ def check_indicators(args, output, report, env, process, state, keys, glyphs):
 def check_which_key(args, output, report, env, process, state, keys, glyphs):
     """which-key's automatic hint is the key-hint card: after C-x, at the
     selected pane's bottom right 12 px in and above the status bar, titled
-    by the prefix, prefixes first; C-h pages it in place and the command
+    by the prefix, in which-key-sort-order's order; C-h pages it in place and the command
     still runs; a sub-prefix key hides it at once and a card for the longer
     prefix follows; C-g ends it.  Then C-c in org, C-h as a prefix, a narrow
     pane, and point at the bottom right (the card flips to the bottom left)."""
@@ -711,7 +711,7 @@ def check_which_key(args, output, report, env, process, state, keys, glyphs):
     shown = card_rows()
     report['captures'].append({'name': 'C-x', 'rows': shown, 'state': cx})
     placed(cx)
-    if not any('+' in row for row in shown[1:3]) or not any('switch-to-buffer' in row for row in shown):
+    if not any('+' in row for row in shown[1:]) or not any('switch-to-buffer' in row for row in shown):
         raise AssertionError(f'C-x card rows {shown}')
     keys('-M', 'ctrl', 'h', '-m', 'ctrl')
     fio.wait(lambda: read().get('page') == 1 and card_rows(), args.timeout, 'C-h pages the card', process)

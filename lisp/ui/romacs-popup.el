@@ -737,23 +737,17 @@ apart, or two anonymous functions, stay apart.  Linear in ENTRIES."
           (push (puthash id (copy-sequence e) labels) out))))))
 
 (defun romacs-popup--card-entries (prefix)
-  "The entries PREFIX's card shows, in its order: prefixes first, then
-commands; within each a mode's before global ones, then as
+  "The entries PREFIX's card shows, in its order: as
 `which-key-sort-order' sorts which-key's bindings (Romacs's
-`romacs-popup-key-order'; nil keeps the maps' order), one command's keys
-in one row (`romacs-popup--card-merge')."
+`romacs-popup-key-order'; nil keeps the maps' order: a mode's before
+global ones), one command's keys in one row (`romacs-popup--card-merge')."
   (romacs-popup--map-names-refresh)
-  (let* ((entries (delq nil (mapcar (lambda (w) (romacs-popup--card-entry prefix w)) (romacs-popup--card-winners prefix))))
-         (order (bound-and-true-p which-key-sort-order))
-         ;; Each entry with its group and the binding which-key's sort sees.
-         (decorated (mapcar (lambda (e) (list (+ (if (nth 2 e) 0 2) (if (eq (nth 3 e) 'mode) 0 1))
-                                              (nth 7 e) e))
-                            (sort entries (lambda (a b) (< (nth 4 a) (nth 4 b)))))))
+  (let ((entries (sort (delq nil (mapcar (lambda (w) (romacs-popup--card-entry prefix w)) (romacs-popup--card-winners prefix)))
+                       (lambda (a b) (< (nth 4 a) (nth 4 b)))))
+        (order (bound-and-true-p which-key-sort-order)))
     (romacs-popup--card-merge
-     (mapcar #'caddr
-             ;; Stable: what the order leaves tied keeps the maps' order.
-             (sort decorated (lambda (a b) (if (/= (car a) (car b)) (< (car a) (car b))
-                                             (and order (funcall order (cadr a) (cadr b))))))))))
+     ;; Stable: what the order leaves tied keeps the maps' order.
+     (if order (sort entries (lambda (a b) (funcall order (nth 7 a) (nth 7 b)))) entries))))
 
 ;;; Layout
 
@@ -764,8 +758,8 @@ after `+') and, unless BARE, the command's other keys
   (concat (propertize (if (nth 2 entry) (concat "+" (nth 1 entry)) (nth 1 entry))
                       'face (if (nth 2 entry) 'romacs-popup-group 'romacs-popup-description))
           (and (nth 6 entry) (not bare)
-               (concat "  " (mapconcat (lambda (k) (propertize k 'face 'romacs-popup-key)) (nth 6 entry)
-                                       (propertize ", " 'face 'romacs-popup-dim))))))
+               ;; Dim: what else runs it, not another key column.
+               (propertize (concat "  " (string-join (nth 6 entry) ", ")) 'face 'romacs-popup-dim))))
 
 (defun romacs-popup--card-column (entries width)
   "ENTRIES as one card column of lines at most WIDTH columns wide: keys
