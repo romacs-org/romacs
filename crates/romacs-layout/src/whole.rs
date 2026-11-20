@@ -32,7 +32,7 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
     // repaired to prevent. A window whose *total* geometry does not fit its
     // parent is still rejected, by layout_frame's placement check.
     if snapshot.width == 0 {
-        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], point: None });
+        return Ok(WindowEnd { id: snapshot.id, end: snapshot.start_byte, visible_end: snapshot.start_byte, body_height: 0.0, rows: vec![], origin_y: 0.0, point: None });
     }
     validate_runs(&snapshot.text, snapshot.faces.len())?;
     if snapshot.stretches.windows(2).any(|w| w[0].byte >= w[1].byte)
@@ -580,7 +580,7 @@ pub(super) fn append_window(snapshot: &WindowSnapshot, frame: &mut FrameGlyphBuf
         let stretches = (&snapshot.band_stretches.mode_line[..], left as f32);
         paint_band(frame, snapshot, band, snapshot.mode_line_face, bounds, stretches, GlyphRowRole::ModeLine, (face_base, copy), (&metrics, &glyphless))?;
     }
-    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, point: place })
+    Ok(WindowEnd { id: snapshot.id, end: end_byte, visible_end, body_height, rows, origin_y: oy, point: place })
 }
 
 /// Whether any character of TEXT shows in a face of FACES with a box: the

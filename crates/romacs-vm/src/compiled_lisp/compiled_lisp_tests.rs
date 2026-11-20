@@ -56,6 +56,47 @@ fn units_round_trip() {
     }
 }
 
+/// A char-table constant round-trips: its subtype, default, parent, extra
+/// slots and own values, the default not baked into them, so
+/// `map-char-table' sees what the original holds.
+#[test]
+fn char_tables_round_trip() {
+    let mut vm = Vm::new();
+    vm.eval_source("(put 'unit-test-ct 'char-table-extra-slots 2)").unwrap();
+    vm.eval_source("(setq unit-test-parent (make-char-table 'unit-test-ct 'from-parent))").unwrap();
+    vm.eval_source("(setq unit-test-table (let ((c (make-char-table 'unit-test-ct)))
+      (set-char-table-range c '(?a . ?z) 'low) (aset c ?é \"e\") (aset c #x1F600 '(face . 1))
+      (set-char-table-range c nil 'dflt) (set-char-table-extra-slot c 1 'extra)
+      (set-char-table-parent c unit-test-parent) c))").unwrap();
+    let probe = "(list (aref c ?b) (aref c ?é) (aref c #x1F600) (aref c ?A) (char-table-subtype c)
+                       (char-table-extra-slot c 0) (char-table-extra-slot c 1) (char-table-range c nil)
+                       (aref (char-table-parent c) ?A)
+                       (let ((n 0)) (map-char-table (lambda (_k _v) (setq n (1+ n))) c) n))";
+    let expected = vm.eval_source_raw(&format!("(let ((c unit-test-table)) {probe})")).unwrap();
+    let expected = vm.display(expected).unwrap();
+    assert_eq!(through_unit(&mut vm, &format!("`(let ((c ',unit-test-table)) {probe})")), expected);
+    assert!(expected.starts_with("(low \"e\" (face . 1) dflt unit-test-ct nil extra dflt from-parent "), "{expected}");
+}
+
+/// Char-tables are mutable: two equal ones stay two through a unit, one
+/// stays one. A table runs cannot keep is not stored: a literal whose
+/// ASCII slot is not its root's, and one whose parent is no char-table.
+#[test]
+fn char_tables_keep_identity_and_refuse_what_runs_cannot_keep() {
+    let mut vm = Vm::new();
+    vm.eval_source("(setq unit-test-a (make-char-table 'unit-test-ct) unit-test-b (make-char-table 'unit-test-ct))").unwrap();
+    assert_eq!(through_unit(&mut vm, "`(let ((x ',unit-test-a) (y ',unit-test-b) (z ',unit-test-a)) (list (equal x y) (eq x y) (eq x z)))"),
+               "(t nil t)");
+    let slots = " nil".repeat(64);
+    for (literal, why) in [(format!("#^[nil nil test 7{slots}]"), "ASCII slot"), (format!("#^[nil 5 test nil{slots}]"), "parent")] {
+        let datum = vm.eval_source_raw(&format!("(list 'quote (car (read-from-string {:?})))", literal)).unwrap();
+        let form = vm.expansion_form(datum, 0).unwrap();
+        let mut names = unit::Names::default();
+        let refused = vm.compile_unit(&form, NameSet::default(), &mut names).expect_err(why);
+        assert!(refused.to_string().contains("cannot be serialised") && refused.to_string().contains(why), "{refused}");
+    }
+}
+
 /// A closure constant materialized from a unit is charged its captures,
 /// which are filled in after the funnel made it empty: a constant closing
 /// over nine variables costs eight Values more than one closing over one.

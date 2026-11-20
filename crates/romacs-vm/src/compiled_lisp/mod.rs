@@ -49,7 +49,9 @@ pub struct Config {
     /// Empty when this process compiles nothing: it loads what is
     /// compiled already, and source otherwise.
     pub compiler: Vec<OsString>,
-    /// A compile process's whole environment.
+    /// A compile process's whole environment, compiled Lisp on in it
+    /// (ROMACS_COMPILED_LISP=on), but for what each compile adds
+    /// (`compile_command`).
     pub environment: Vec<(OsString, OsString)>,
     /// The variables of ENVIRONMENT that come from the session starting
     /// the compile: a compile's reads of them are observed inputs. The
@@ -200,7 +202,6 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
         (CHAIN.into(), format!("{}{name}\n", configured.chain).into()),
         (LOAD_PATH.into(), load_path.join("\n").into()),
         (PARENT.into(), host::pid().to_string().into()),
-        ("ROMACS_COMPILED_LISP".into(), "on".into()),
     ]);
     if configured.no_prune {
         environment.push((NO_PRUNE.into(), "1".into()));
@@ -337,7 +338,7 @@ fn inputs_hold(store: &Path, artifact: &store::Artifact, load_path: &str,
             }),
             _ => {
                 let now = host::replay(record);
-                let holds = now.as_ref() == Some(record);
+                let holds = now.as_ref().is_some_and(|now| host::same_fact(record, now));
                 if !holds && configured().is_some_and(|c| c.trace) {
                     crate::host::event_line("romacs-compiled-lisp", &json!({"stale": record, "now": now}));
                 }
