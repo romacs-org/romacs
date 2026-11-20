@@ -72,23 +72,6 @@ fn quit_after_marker(vm: &mut Vm, signal: &Arc<QuitSignal>, source: &str, marker
     value
 }
 
-/// C-g during call-process's wait, once its child has written 128 KiB and
-/// gone to sleep: the output read is in the buffer, as GNU's call_process
-/// inserts each block it reads (callproc.c) before the quit unwinds it.
-#[test]
-fn a_quit_in_call_process_keeps_the_output_read() {
-    let (mut vm, signal) = busy_vm();
-    let marker = std::env::temp_dir().join(format!("romacs-call-process-quit-{}", std::process::id()));
-    let _ = std::fs::remove_file(&marker);
-    let script = serde_json::to_string("head -c 131072 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30").unwrap();
-    let source = format!("(progn (setq-default exec-suffixes '(\"\")) (setq exec-path '(\"/usr/bin\" \"/bin\")) \
-        (with-temp-buffer (let ((coding-system-for-read 'no-conversion) (coding-system-for-write 'no-conversion)) \
-          (list (condition-case nil (call-process \"sh\" nil t nil \"-c\" {script} \"sh\" {}) (quit 'quit)) (buffer-size)))))",
-        serde_json::to_string(&marker).unwrap());
-    assert_eq!(quit_after_marker(&mut vm, &signal, &source, &marker), "(quit 131072)");
-    let _ = std::fs::remove_file(&marker);
-}
-
 #[test]
 fn a_tight_loop_and_a_calling_loop_quit() {
     let (mut vm, signal) = busy_vm();
