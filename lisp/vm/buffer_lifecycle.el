@@ -65,12 +65,14 @@
                                        (buffer-name other))))))
                     (setq tail (cdr tail)))))
             ;; replace_buffer_in_windows (buffer.c:2044), absent before
-            ;; window.el; then the buffer stops being current, for
+            ;; window.el, and skipped for a buffer no window named while
+            ;; window.el's definition stands (`romacs--windows-may-name-p');
+            ;; then the buffer stops being current, for
             ;; `other-buffer''s choice (buffer.c:2059), or for the
             ;; finish's other_buffer_safely where it has none.  A buffer
             ;; that is its own choice, or the minibuffer's only fallback,
             ;; is not killed.
-            (if (and (buffer-live-p buffer) (fboundp 'replace-buffer-in-windows))
+            (if (and (buffer-live-p buffer) (romacs--windows-may-name-p buffer))
                 (replace-buffer-in-windows buffer))
             (if (and (buffer-live-p buffer) (eq buffer (current-buffer)))
                 (let ((other (other-buffer buffer)))
