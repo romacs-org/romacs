@@ -2848,11 +2848,12 @@ impl Vm {
         for window in self.displayed_windows() {
             let buffer = self.window(window)?.buffer;
             let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
+            let treeless = !self.treesit_has_tree(buffer)?;
             match self.treesit_run_ahead(buffer, due)? {
                 State::Running => {
                     running = true;
                     // Its landing wakes the frame that runs the hooks this one defers.
-                    if self.treesit_first_running(buffer)? {
+                    if treeless {
                         let id = self.window(window)?.id;
                         if !self.treesit_plain.contains(&id) {
                             self.treesit_plain.push(id);

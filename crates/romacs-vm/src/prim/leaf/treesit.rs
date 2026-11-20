@@ -565,7 +565,10 @@ impl Leaf<'_> {
         if self.ts_registry_mut(base).early.as_mut().is_some_and(crate::treesit::Early::pending) {
             return Ok(Value::TRUE);
         }
-        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready()))))
+        Ok(flag(self.ts_registry(base).parsers.iter().any(|(_, core)| {
+            let mut c = core.borrow_mut();
+            (c.tree.is_none() && c.waiting_slot) || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+        })))
     }
     /// The tree of the early parse of PARSER's buffer, which only a first
     /// parse uses: a parser that sees what that parse saw waits for it, and

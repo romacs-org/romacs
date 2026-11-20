@@ -707,6 +707,37 @@ fn a_first_parse_on_a_thread_reads_the_accessible_text() {
         "the evaluator parsed only the check's own buffer, not the narrowed text again");
 }
 
+/// A first parse that finds every parse thread busy waits for one: the
+/// window shows the text, Lisp sees a parse pending, and the frame after a
+/// thread ends starts it on its thread. The evaluator never parses it.
+#[test]
+fn a_first_parse_waits_for_a_free_thread() {
+    let mut vm = first_parse_vm("ts-wait", 400, false);
+    // Four early parses of large texts hold every thread.
+    vm.eval_source("(let ((text (apply #'concat (make-list 64000 \"int g (int a) { return a - 1; }\\n\")))) \
+        (dotimes (n 4) (with-current-buffer (get-buffer-create (format \"ts-hold-%d\" n)) (insert text))) \
+        (dotimes (n 4) (with-current-buffer (format \"ts-hold-%d\" n) (romacs--treesit-parse-early 'c))))").unwrap();
+    let held = vm.eval_source("(let ((n 0)) (dotimes (i 4) (with-current-buffer (format \"ts-hold-%d\" i) \
+        (when (romacs--treesit-parsing-p) (setq n (1+ n))))) n)").unwrap().display().unwrap();
+    assert_eq!(held, "4", "every parse thread is busy");
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-wait\"))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    let waiting = vm.eval_source("(with-current-buffer \"ts-wait\" (romacs--treesit-parsing-p))").unwrap().display().unwrap();
+    assert_eq!(waiting, "t", "the buffer waits for a thread");
+    for _ in 0..40_000 {
+        if vm.eval_source("(with-current-buffer \"ts-hold-3\" (romacs--treesit-parsing-p))").unwrap().display().unwrap() == "nil" { break; }
+        std::thread::sleep(std::time::Duration::from_micros(500));
+    }
+    // The thread's end wakes a frame, which starts the waiting parse.
+    vm.land_treesit();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-wait");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-wait"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1, "the evaluator parsed only the check's own buffer");
+}
+
 /// A buffer no frame shows is not parsed at all: frames of other buffers
 /// start no parse of it, on any thread, and the frame that first shows it
 /// starts exactly one, off the evaluator. The parses are counted in a

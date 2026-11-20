@@ -150,17 +150,21 @@ impl Vm {
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
         Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready())))
     }
+    /// Whether a parser of BUFFER's text has a tree.
+    pub(crate) fn treesit_has_tree(&mut self, buffer: Value) -> crate::Result<bool> {
+        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| core.borrow().tree.is_some()))
+    }
     /// Whether BUFFER's text has no tree yet and a parser's first one is on
-    /// a thread: the frame shows the text without it meanwhile. A text with
-    /// a tree keeps the faces it has while a parser added since parses.
+    /// a thread, or waits for one: the frame shows the text without it
+    /// meanwhile. A text with a tree keeps the faces it has while a parser
+    /// added since parses.
     pub(crate) fn treesit_first_running(&mut self, buffer: Value) -> crate::Result<bool> {
-        let cores = self.treesit_cores(buffer)?;
-        if cores.iter().any(|(_, core)| core.borrow().tree.is_some()) {
+        if self.treesit_has_tree(buffer)? {
             return Ok(false);
         }
-        Ok(cores.iter().any(|(_, core)| {
+        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
             let mut c = core.borrow_mut();
-            c.tree.is_none() && c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
+            c.waiting_slot || c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
         }))
     }
     /// Bring the reparses of BUFFER's text up to the frame about to be
@@ -194,6 +198,8 @@ impl Vm {
                 None => continue,
             };
             if self.treesit_start_ahead(buffer, parser, &core, restarts, wake.clone())? {
+                state = State::Running;
+            } else if core.borrow().waiting_slot {
                 state = State::Running;
             } else if core.borrow().ahead.is_some() && state == State::None {
                 state = State::Landed;
@@ -238,9 +244,13 @@ impl Vm {
             Some((tree, region, ..)) if region == c.visible => Some(tree.loose()),
             _ => c.tree.as_ref().map(|tree| tree.share()),
         };
-        let Some(slot) = EarlySlot::take() else { return Ok(false) };
+        let Some(slot) = EarlySlot::take() else {
+            c.waiting_slot = c.tree.is_none();
+            return Ok(false);
+        };
         let job = Job { language, ranges, old, visible: c.visible };
         c.ahead = Ahead::start(slot, job, text.frozen(), restarts, wake);
+        c.waiting_slot = false;
         Ok(c.ahead.is_some())
     }
 }
