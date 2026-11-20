@@ -44,6 +44,26 @@ const CASES: &[&str] = &[
          (kill-buffer (get-buffer-create "kn-z"))
          (fset 'replace-buffer-in-windows old)
          n)"#,
+    // A configuration restore that brings back a `quit-restore' naming a
+    // buffer (edited in place while saved): the kill clears it.
+    r#"(let* ((w (selected-window)) (b (get-buffer-create "kn-cfg"))
+              (q (list 'window 'window w (window-buffer w)))
+              (window-persistent-parameters (cons (cons 'quit-restore t) window-persistent-parameters)))
+         (set-window-parameter w 'quit-restore q)
+         (let ((config (current-window-configuration)))
+           (set-window-parameter w 'quit-restore nil)
+           (setcar (nthcdr 3 q) b)
+           (set-window-configuration config))
+         (list (eq (nth 3 (window-parameter w 'quit-restore)) b)
+               (progn (kill-buffer b) (window-parameter w 'quit-restore))))"#,
+    // Advice kept across a reload of window.el sees the next kill. Last: it
+    // reloads window.el.
+    r#"(let* ((n 0) (counter (lambda (&rest _) (setq n (1+ n)))))
+         (advice-add 'replace-buffer-in-windows :before counter)
+         (load "window" nil t)
+         (kill-buffer (get-buffer-create "kn-reload"))
+         (advice-remove 'replace-buffer-in-windows counter)
+         n)"#,
 ];
 
 #[test]
@@ -62,7 +82,8 @@ fn kill_cleans_every_window_naming_as_pinned_gnu() {
 /// Romacs only (GNU walks the windows at every kill): window.el's walk, seen
 /// through its `window-list-1`, runs for a buffer a window named and not for
 /// one none did, including a temporary buffer; advised, it runs for both;
-/// with the advice removed the skip comes back.
+/// with the advice removed the skip comes back, also after window.el was
+/// reloaded under advice.
 #[test]
 fn kill_skips_windows_for_a_buffer_no_window_named() {
     let actual = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
@@ -81,9 +102,13 @@ fn kill_skips_windows_for_a_buffer_no_window_named() {
                       (progn (advice-add 'replace-buffer-in-windows :before ignore)
                              (funcall count (lambda () (kill-buffer (get-buffer-create "ks-advised")))))
                       (progn (advice-remove 'replace-buffer-in-windows ignore)
-                             (funcall count (lambda () (kill-buffer (get-buffer-create "ks-after"))))))
+                             (funcall count (lambda () (kill-buffer (get-buffer-create "ks-after")))))
+                      (progn (advice-add 'replace-buffer-in-windows :before ignore)
+                             (load "window" nil t)
+                             (advice-remove 'replace-buffer-in-windows ignore)
+                             (funcall count (lambda () (kill-buffer (get-buffer-create "ks-reloaded"))))))
               (advice-remove 'window-list-1 walk))))"#).and_then(romacs_vm::Local::display)
             .map_or_else(|e| format!("error: {e}"), |s| serde_json::from_str::<String>(&s).unwrap_or(s))
     }).unwrap().join().unwrap();
-    assert_eq!(actual, "(0 0 1 1 0)");
+    assert_eq!(actual, "(0 0 1 1 0 0)");
 }

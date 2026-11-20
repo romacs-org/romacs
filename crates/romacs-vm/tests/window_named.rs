@@ -31,7 +31,7 @@ fn every_way_a_window_names_a_buffer_is_recorded() {
         (list
           (funcall named shown)
           (progn (fset 'replace-buffer-in-windows (lambda (&optional _) nil))
-                 (romacs--window-replacer-defined)
+                 (romacs--window-replacer-defined (symbol-function 'replace-buffer-in-windows))
                  (funcall named (get-buffer-create "wn-none")))
           (funcall named shown)
           (let ((b (get-buffer-create "wn-set"))) (set-window-buffer w b) (funcall named b))
@@ -52,4 +52,37 @@ fn every_way_a_window_names_a_buffer_is_recorded() {
           (progn (fset 'replace-buffer-in-windows (lambda (&optional _) t))
                  (funcall named (get-buffer-create "wn-redefined")))))"#),
         "(nil nil t t t t t t nil (t nil) t t)");
+}
+
+/// A circular previous- or next-buffers list, or a circular `quit-restore` or
+/// `quit-restore-prev` value, ends the record's walk: each setter returns,
+/// within a time bound, having recorded the buffers it holds, a cycle
+/// reached after a tail included.
+#[test]
+fn circular_window_lists_are_recorded_and_return() {
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+        let mut vm = Vm::new();
+        vm.install_lisp_prelude().unwrap();
+        vm.set_frame_geometry(800, 600, 20, 10).unwrap();
+        sent.send(printed(&mut vm, r#"(let* ((w (selected-window)) (named (lambda (b) (romacs--windows-may-name-p b))))
+          (fset 'replace-buffer-in-windows (lambda (&optional _) nil))
+          (romacs--window-replacer-defined (symbol-function 'replace-buffer-in-windows))
+          (list
+            (let* ((b (get-buffer-create "cy-next")) (x (list b)))
+              (setcdr x x) (set-window-next-buffers w x) (set-window-next-buffers w nil) (funcall named b))
+            (let* ((b (get-buffer-create "cy-prev")) (x (list (list b 1 1))))
+              (setcdr x x) (set-window-prev-buffers w x) (set-window-prev-buffers w nil) (funcall named b))
+            (let* ((a (get-buffer-create "cy-tail")) (b (get-buffer-create "cy-loop")) (x (list a b (window-buffer w))))
+              (setcdr (nthcdr 2 x) (cdr x)) (set-window-next-buffers w x) (set-window-next-buffers w nil)
+              (and (funcall named a) (funcall named b)))
+            (let* ((b (get-buffer-create "cy-qr")) (x (list 'window 'window w b)))
+              (setcdr (nthcdr 3 x) x) (set-window-parameter w 'quit-restore x) (set-window-parameter w 'quit-restore nil)
+              (funcall named b))
+            (let* ((b (get-buffer-create "cy-qrp")) (x (list 'same (list b 1 1 10) w (window-buffer w))))
+              (setcdr (nthcdr 3 x) x) (set-window-parameter w 'quit-restore-prev x) (set-window-parameter w 'quit-restore-prev nil)
+              (funcall named b))))"#)).ok();
+    }).unwrap();
+    let printed = received.recv_timeout(std::time::Duration::from_secs(60)).expect("a circular window list hangs the record's walk");
+    assert_eq!(printed, "(t t t t t)");
 }

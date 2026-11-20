@@ -5342,8 +5342,12 @@ buffer by itself."
 	(unrecord-window-buffer window buffer t)))))
 
 ;; Recorded as the definition a kill may skip for a buffer no window has
-;; named; advice or a redefinition runs at every kill, as in GNU.
-(romacs--window-replacer-defined)
+;; named; advice or a redefinition runs at every kill, as in GNU.  On a
+;; reload, advice already on the symbol wraps the new definition as it is
+;; made, so the record is the definition inside it.
+(romacs--window-replacer-defined
+ (let ((definition (symbol-function 'replace-buffer-in-windows)))
+   (if (fboundp 'advice--cd*r) (advice--cd*r definition) definition)))
 
 (defcustom quit-window-hook nil
   "Hook run before performing any other actions in the `quit-window' command."

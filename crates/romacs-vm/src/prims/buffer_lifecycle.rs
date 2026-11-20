@@ -125,11 +125,12 @@ fn windows_may_name_p(cx, buffer: Value) {
     Ok(if cx.windows_may_name(buffer) { Value::TRUE } else { Value::NIL })
 }}
 // window.el, right after defining `replace-buffer-in-windows', which
-// window.c's replace_buffer_in_windows calls by name: the definition a kill
+// window.c's replace_buffer_in_windows calls by name: DEFINITION, the one it
+// made, unwrapped from any advice a reload kept around it, is what a kill
 // may skip for a buffer no window names.
 defsubr! { name = "romacs--window-replacer-defined", gnu = "window.c:3722", effect = Global,
-fn window_replacer_defined(cx) {
-    cx.note_window_replacer();
+fn window_replacer_defined(cx, definition: Value) {
+    cx.note_window_replacer(definition);
     Ok(Value::NIL)
 }}
 

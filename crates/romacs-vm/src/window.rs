@@ -294,16 +294,37 @@ impl Vm {
     pub(crate) fn note_window_named(&mut self, buffer: Value) {
         if let Ok(state) = self.buffer_state_mut(buffer) { state.window_named = true; }
     }
-    /// `note_window_named` for each buffer LIST names, as an element or as
-    /// an element's car: a previous-buffers alist, a next-buffers list, a
-    /// `quit-restore` parameter (whose second element's car may be one).
-    pub(crate) fn note_window_names_in(&mut self, list: Value) {
-        let mut tail = list;
+    /// `note_window_named` for each buffer a window's previous-buffers
+    /// alist or next-buffers list names, as an element or an element's car.
+    /// A circular list ends the walk where it comes round (Floyd: the tail
+    /// steps one cell, a second pointer one cell every other step), after
+    /// every cell has been seen.
+    pub(crate) fn note_window_history(&mut self, list: Value) {
+        let (mut tail, mut slow, mut odd) = (list, list, false);
         while let Ok((element, rest)) = self.cons_pair(tail) {
             self.note_window_named(element);
             if let Ok((car, _)) = self.cons_pair(element) { self.note_window_named(car); }
             tail = rest;
+            if odd { slow = self.cons_pair(slow).map_or(Value::NIL, |(_, rest)| rest); }
+            odd = !odd;
+            if tail == slow { break; }
         }
+    }
+    /// `note_window_named` for the buffers window parameter KEY's VALUE
+    /// names, where a kill's discard looks (`discard_buffer`): the fourth
+    /// element of a `quit-restore` or `quit-restore-prev` value, and the car
+    /// of its second. Every write of those two parameters calls this: the
+    /// setter and the configuration restore.
+    pub(crate) fn note_window_parameter(&mut self, key: Value, value: Value) {
+        if key != self.intern("quit-restore") && key != self.intern("quit-restore-prev") { return; }
+        let mut items = [Value::NIL; 4];
+        let mut tail = value;
+        for item in &mut items {
+            let Ok((element, rest)) = self.cons_pair(tail) else { break };
+            (*item, tail) = (element, rest);
+        }
+        self.note_window_named(items[3]);
+        if let Ok((car, _)) = self.cons_pair(items[1]) { self.note_window_named(car); }
     }
     /// Window V shows BUFFER now, named by it.
     pub(crate) fn show_in_window(&mut self, v: Value, buffer: Value) -> Result<()> {
@@ -1676,9 +1697,7 @@ impl Vm {
                 .map(|(_, v)| *v)
                 .unwrap_or(Value::NIL),
             SetWindowParameter => {
-                if b == self.intern("quit-restore") || b == self.intern("quit-restore-prev") {
-                    self.note_window_names_in(c);
-                }
+                self.note_window_parameter(b, c);
                 let w = self.window_mut(v)?;
                 if let Some((_, value)) = w.parameters.iter_mut().find(|(k, _)| *k == b) {
                     *value = c;
@@ -2645,7 +2664,7 @@ impl<'a> Windows<'a> {
     /// GNU `set-window-prev-buffers` (NEXT false) / `set-window-next-buffers`.
     pub(crate) fn set_window_buffers(&mut self, window: Value, buffers: Value, next: bool) -> Out {
         let v = self.live(window)?;
-        self.vm.note_window_names_in(buffers);
+        self.vm.note_window_history(buffers);
         let w = self.get_mut(v)?;
         if next { w.next_buffers = buffers } else { w.prev_buffers = buffers }
         Ok(buffers)

@@ -83,8 +83,8 @@ impl Leaf<'_> {
     }
     /// Whether a kill of BUFFER calls `replace-buffer-in-windows`
     /// (buffer.c:2044): it is defined, and a window has named BUFFER
-    /// (`BufferState::window_named`) or the function is no longer the one
-    /// window.el defined. Advice or a redefinition expects every kill, as
+    /// (`BufferState::window_named`) or the function cell holds anything but
+    /// the definition window.el made. Advice or a redefinition expects every kill, as
     /// GNU calls it at each; window.el's own does nothing for a buffer no
     /// window names but walk the windows.
     pub fn windows_may_name(&mut self, buffer: Value) -> bool {
@@ -95,12 +95,12 @@ impl Leaf<'_> {
         function != self.vm.slots[slot].value
             || self.vm.buffer_state(buffer).is_ok_and(|s| s.window_named)
     }
-    /// window.el's `replace-buffer-in-windows`, recorded as it defines it.
-    pub fn note_window_replacer(&mut self) {
-        let symbol = self.intern("replace-buffer-in-windows");
-        let function = self.symbol_function(symbol).unwrap_or(Value::NIL);
+    /// DEFINITION, window.el's own `replace-buffer-in-windows`, recorded as
+    /// window.el makes it: the function a kill may skip while the cell holds
+    /// exactly it, not advice around it.
+    pub fn note_window_replacer(&mut self, definition: Value) {
         let slot = self.vm.slot(WINDOW_REPLACER);
-        self.vm.slots[slot].value = function;
+        self.vm.slots[slot].value = definition;
     }
     /// buffer.c candidate_buffer: B can be `other-buffer''s choice against
     /// BUFFER, being a live buffer other than BUFFER whose name does not

@@ -337,6 +337,7 @@ impl Vm {
                     }
                 }
             }
+            for &(parameter, value) in &p.parameters { self.note_window_parameter(parameter, value); }
             if p.buffer == Value::NIL && !p.children.is_empty() {
                 self.window_mut(p.window)?.buffer = Value::NIL;
                 continue;
