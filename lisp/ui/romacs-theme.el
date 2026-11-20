@@ -198,7 +198,7 @@ on a white one.  Nil when no band does that and keeps FG readable on it
       (setq amount (+ amount 0.02)))
     ;; The least mix that stands apart, between the last step and this:
     ;; the most room left for the text.
-    (let ((low (- amount 0.02)) (high (min amount 1.0)))
+    (let ((low (if (= amount 0.05) 0.0 (- amount 0.02))) (high (min amount 1.0)))
       (when (>= (romacs-color-contrast band bg) contrast)
         (dotimes (_ 8)
           (let* ((mid (/ (+ low high) 2)) (try (romacs-color-mix bg fg mid)))

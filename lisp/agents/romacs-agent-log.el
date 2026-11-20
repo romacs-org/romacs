@@ -93,6 +93,8 @@ line above them brings earlier ones."
 
 (defface romacs-agent-log-prompt '((t :inherit bold))
   "A message the user sent.")
+(defface romacs-agent-log-prompt-mark '((t :inherit (romacs-working-running bold)))
+  "The mark before a message the user sent: the theme's colour for work.")
 (defface romacs-agent-log-thinking '((t :inherit (shadow italic)))
   "What the agent thinks.")
 (defface romacs-agent-log-tool '((t :inherit romacs-working-running))
@@ -174,10 +176,15 @@ goes on.")
 (defvar-local romacs-agent-log--early nil
   "Output that came before its call, an alist of ID to TEXT.")
 (defvar-local romacs-agent-log--stream nil
-  "What streams at the transcript's end: (KIND START AT NEWLINES), KIND
-`text' or `thinking', START a marker where its text began, AT one where
-the next text goes, before the newline that ends its line so far, and
-NEWLINES the line breaks it ended in so far, held until text follows.")
+  "What streams at the transcript's end: (KIND START AT NEWLINES SHOWN),
+KIND `text' or `thinking', START a marker where its text began, AT one
+where the next text goes, before the newline that ends its line so far,
+NEWLINES the line breaks it ended in so far, held until text follows,
+and SHOWN whether any of its text is in, its entry marked.")
+
+(defvar-local romacs-agent-log--root-kind nil
+  "The kind of the last entry drawn at the transcript's top level, not
+under a call: what the agent's next words stand apart from.")
 (defvar-local romacs-agent-log--asks nil
   "Approval blocks drawn, by request id: (START . END) markers.")
 (defvar-local romacs-agent-log--attributed nil
@@ -350,21 +357,12 @@ else (nil . 0), at the end."
   "End what streams: a message gets its Markdown faces, unless DISCARD,
 its text about to go."
   (when romacs-agent-log--stream
-    (pcase-let ((`(,kind ,start ,at ,_) romacs-agent-log--stream))
+    (pcase-let ((`(,kind ,start ,at . ,_) romacs-agent-log--stream))
       (setq romacs-agent-log--stream nil)
       (if discard (romacs-agent-log-faces-drop)
         (when (eq kind 'text) (romacs-agent-log-faces-end start at)))
       (set-marker start nil)
       (set-marker at nil))))
-
-(defun romacs-agent-log--kind-before (pos)
-  "The kind of the entry POS ends, or nil: an entry is marked at its first
-character (`romacs-agent-log--entry')."
-  (let ((at pos) (kind nil))
-    (while (and (not kind) (> at (point-min)))
-      (setq at (previous-single-property-change at 'romacs-agent-log-entry nil (point-min))
-            kind (get-text-property at 'romacs-agent-log-entry)))
-    kind))
 
 (defun romacs-agent-log--entry (text kind event)
   "TEXT as one entry of KIND for EVENT: a line or more, ending in a newline,
@@ -378,6 +376,7 @@ known to n and p."
   "Draw TEXT, in FACE, as EVENT's entry of KIND, where EVENT goes."
   (pcase-let ((`(,at . ,depth) (romacs-agent-log--where event)))
     (if at (romacs-agent-log--flush at) (romacs-agent-log--close-stream))
+    (when (zerop depth) (setq romacs-agent-log--root-kind kind))
     (romacs-agent-log--put (romacs-agent-log--indent
                             (romacs-agent-log--entry (if face (propertize text 'face face) text) kind event)
                             depth)
@@ -408,22 +407,28 @@ parent call."
           (romacs-agent-log--close-stream)
           ;; The agent's words after its thinking or its work stand a blank
           ;; line apart, not run on from them.
-          (when (and (eq kind 'text) (memq (romacs-agent-log--kind-before romacs-agent-log--end) '(thinking tool)))
+          (when (and (eq kind 'text) (memq romacs-agent-log--root-kind '(thinking tool)))
             (romacs-agent-log--put "\n"))
           ;; Its line ended at once, its text put before that newline: the
           ;; separator is never on its line.
           (let ((start (copy-marker romacs-agent-log--end)))
             (romacs-agent-log--put "\n")
-            (setq romacs-agent-log--stream (list kind start (copy-marker start t) 0))))
+            (setq romacs-agent-log--stream (list kind start (copy-marker start t) 0 nil))))
         (if (string-empty-p body)
             (setcar (nthcdr 3 romacs-agent-log--stream) held)
-          (let* ((trail (- (length text) lead (length body)))
+          (let* ((first (not (nth 4 romacs-agent-log--stream)))
+                 (trail (- (length text) lead (length body)))
                  (body (replace-regexp-in-string "\n\n\n+" "\n\n" body))
-                 (chunk (concat (if new (if (eq kind 'thinking) (propertize "∴ " 'face 'romacs-agent-log-thinking) "")
+                 ;; Its first text has no line breaks before it: the
+                 ;; separator is its one.
+                 (chunk (concat (if first (if (eq kind 'thinking) (propertize "∴ " 'face 'romacs-agent-log-thinking) "")
                                   (make-string (min held 2) ?\n))
                                 (if (eq kind 'thinking) (propertize body 'face 'romacs-agent-log-thinking) body))))
             ;; Its first character starts the entry.
-            (when new (put-text-property 0 1 'romacs-agent-log-entry kind chunk))
+            (when first
+              (put-text-property 0 1 'romacs-agent-log-entry kind chunk)
+              (setcar (nthcdr 4 romacs-agent-log--stream) t)
+              (setq romacs-agent-log--root-kind kind))
             (romacs-agent-log--writing
               (save-excursion
                 (goto-char (nth 2 romacs-agent-log--stream))
@@ -620,7 +625,7 @@ its call, in place of those shown before."
            ;; same place, goes before it.
            (set-marker-insertion-type start t)
            (unless romacs-agent-log--blocks (setq romacs-agent-log--blocks (make-hash-table :test #'equal)))
-           (when (zerop depth) (setq romacs-agent-log--current id))
+           (when (zerop depth) (setq romacs-agent-log--current id romacs-agent-log--root-kind 'tool))
            ;; What comes under it goes here, in order, before what follows it.
            (puthash id (list id :under (copy-marker (if at (plist-get (cdr at) :under) romacs-agent-log--end))
                              :start start :depth depth :input input :parent (car at)
@@ -903,7 +908,7 @@ from elsewhere, opening one of its own."
          (images (plist-get event :images))
          (_ (push (string-trim text) romacs-agent-log--prompts))
          (head (cond ((plist-get event :steer) (propertize "↪ " 'face 'romacs-agent-log-prompt))
-                     (t (propertize "❯ " 'face 'romacs-agent-log-prompt)))))
+                     (t (propertize "❯ " 'face 'romacs-agent-log-prompt-mark)))))
     (romacs-agent-log--line event 'prompt
                             (let ((line (concat (if (> romacs-agent-log--end (point-min)) "\n" "")
                                                 head
@@ -1335,7 +1340,7 @@ drew forgotten, its markers let go, its composer kept."
   (setq romacs-agent-log--current nil romacs-agent-log--early nil romacs-agent-log--asks nil
         romacs-agent-log--attributed nil romacs-agent-log--ended-asks nil
         romacs-agent-log--prompts nil romacs-agent-log--seq 0
-        romacs-agent-log--from nil))
+        romacs-agent-log--from nil romacs-agent-log--root-kind nil))
 
 (defun romacs-agent-log--ensure-filled ()
   (unless romacs-agent-log--filled

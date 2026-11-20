@@ -72,7 +72,7 @@
     (draw :type 'message-end)
     (draw :type 'input :text "next")
     (should (equal (romacs-agent-log-tests--transcript)
-                   "∴ I think.\n\nPara one.\n\nPara two.\n\n❯ next\n"))))
+                   "∴ I think.\n\nPara one.\n\nPara two.\n\n❯ next\n\n"))))
 
 (ert-deftest romacs-agent-log-long-output-says-how-much-more ()
   (romacs-agent-log-tests--with
@@ -1369,6 +1369,23 @@ none when dropped.")
     (goto-char (point-min))
     (search-forward "Go on")
     (should (equal (filter-buffer-substring (line-beginning-position) (line-end-position)) "Go on"))))
+
+;;; A stream that starts with line breaks
+
+(ert-deftest romacs-agent-log-stream-marks-its-first-text ()
+  ;; Line breaks first, then text: the entry starts at the text, with no
+  ;; blank lines before it; a later reply after work stands apart.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "\n\n")
+    (draw :type 'delta :text "Hello")
+    (should (string-match-p "❯ go\n\nHello" (romacs-agent-log-tests--transcript)))
+    (goto-char (point-min))
+    (search-forward "Hello")
+    (should (eq (get-text-property (match-beginning 0) 'romacs-agent-log-entry) 'text))
+    (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'delta :text "After.")
+    (should (string-match-p "\n\nAfter\\." (romacs-agent-log-tests--transcript)))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
