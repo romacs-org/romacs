@@ -203,7 +203,9 @@ raised: each sent field as it held it, the last of them marked :last."
               :questions '(("Tea or coffee?" :header "Drink" :options ("Tea" "Coffee") :notes (("Tea" . "hot")) :multi nil)))
         (list :type 'answered :request-id "req-2" :run 1 :behavior "allow"
               :answers (json-parse-string "{\"Tea or coffee?\":\"Tea\"}"))
-        (list :type 'attributed :request-id "req-1" :run 1 :by "user" :decision "allow" :scope "once" :reason nil :answers nil))
+        (list :type 'answered :request-id "req-1" :run 1 :how 'harness)
+        (list :type 'attributed :request-id "req-1" :run 1 :actor '(:kind "user" :login "ada" :client "x220")
+              :decision "allow" :scope "once" :reason nil :answers nil))
   "An event of each type sent, with values of each kind its fields hold.")
 
 (ert-deftest romacs-agent-wire-reads-back-each-type ()

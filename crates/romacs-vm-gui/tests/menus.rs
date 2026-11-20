@@ -419,7 +419,7 @@ fn key_hint_cards() {
         let mut report = vec![];
         // Precedence: within the local map a child's nil hides its parent's
         // binding, which falls through to the global one; `ignore' wins and
-        // hides; prefixes first, then a mode's commands, then global ones.
+        // hides; in `which-key-sort-order''s order (here which-key's own).
         report.push(printed(&mut vm, "(let ((global (make-sparse-keymap)) (parent (make-sparse-keymap)) (local (make-sparse-keymap))
                   (sub (make-sparse-keymap)) (old (current-global-map)))
             (define-key global [f12 ?a] #'forward-char) (define-key global [f12 ?b] #'backward-char)
@@ -568,7 +568,7 @@ fn key_hint_cards() {
     }).unwrap().join().unwrap();
     for line in &report { println!("{line}"); }
     assert_eq!(report, [
-        "((\"p\" \"prefix\" t global) (\"d\" \"undo\" nil mode) (\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global))",
+        "((\"a\" \"forward-char\" nil global) (\"b\" \"backward-char\" nil global) (\"d\" \"undo\" nil mode) (\"p\" \"prefix\" t global))",
         "((\"4\" . \"other-window\") (\"m\" . \"Do the menu thing\") (\"r\" . \"copy\") (\"w\" . \"card-thing\"))",
         // Pages of near-even columns, each saying where it is and where
         // the help key goes.
