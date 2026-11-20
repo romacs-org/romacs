@@ -263,6 +263,8 @@
           (narrow-to-region (point-min) (1+ (point-min)))
           (should (romacs-agent-log--proceed-offered)))
         (should (= (romacs-agent-log--waiting-count) 1))
+        ;; Its header's mark is a request's: it waits on the user.
+        (should (eq (plist-get (romacs-agent-log--header-inputs session) :state) 'approval))
         ;; A failed turn says it failed, the offer or not.
         (setf (romacs-agent-failed session) t)
         (should (equal (cdr (romacs-agent-log--doing session)) "failed"))

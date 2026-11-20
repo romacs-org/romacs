@@ -950,7 +950,7 @@ back in the mode it had, and the next message carries it out."
                (t (romacs-agent-state session)))
     ('plan-offered
      (cons 'waiting (substitute-command-keys
-                     "⚠ plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode")))
+                     "⚠ plan ready: \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode · type to keep planning")))
     ('waiting-approval
      (let ((question (when-let* ((ask (car (romacs-agent-log--pending))))
                        (get-text-property (cadr ask) 'romacs-agent-log-questions))))
@@ -1023,6 +1023,14 @@ windows showing it leave, changed."
 (defvar-local romacs-agent-log--header-made nil
   "What the header was last made from: made again only when it differs.")
 
+(defun romacs-agent-log--header-inputs (session)
+  "What SESSION's header reads (`romacs-agent-ui--header-inputs'), as this
+chat shows it: a plan it offers waits on the user, as a request does."
+  (let ((inputs (romacs-agent-ui--header-inputs session)))
+    (if (and (romacs-agent-log--proceed-offered) (not (memq (plist-get inputs :state) '(approval question))))
+        (plist-put (copy-sequence inputs) :state 'approval)
+      inputs)))
+
 (defun romacs-agent-log--waiting-count ()
   "How many things wait on the user here: its approvals, and a plan offered."
   (+ (length romacs-agent-log--asks) (if (romacs-agent-log--proceed-offered) 1 0)))
@@ -1033,7 +1041,7 @@ so a redisplay runs no Lisp for it; made only when what it reads changed."
   (let* ((session romacs-agent-log--session)
          (start (romacs-agent-turn-start session))
          (running (and (null romacs-agent-log--asks) (memq (romacs-agent-state session) '(starting running))))
-         (inputs (list (romacs-agent-ui--header-inputs session) (romacs-agent-log--waiting-count)
+         (inputs (list (romacs-agent-log--header-inputs session) (romacs-agent-log--waiting-count)
                        (and start running (round (- (float-time) start))))))
     (unless (equal inputs romacs-agent-log--header-made)
       (setq romacs-agent-log--header-made inputs)
@@ -1048,7 +1056,7 @@ how long the turn has run."
   (let* ((session romacs-agent-log--session)
          (pending (romacs-agent-log--waiting-count))
          (start (romacs-agent-turn-start session)))
-    (concat (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs session))
+    (concat (romacs-agent-ui--header-text (romacs-agent-log--header-inputs session))
             (if (> pending 0)
                 (propertize (format "  ⚠ %d wait%s on you" pending (if (= pending 1) "s" ""))
                             'face 'romacs-agent-log-ask)
