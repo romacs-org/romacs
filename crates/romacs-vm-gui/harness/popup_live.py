@@ -31,9 +31,11 @@ goes.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import time
+import traceback
 
 import fileio_live as fio
 
@@ -165,7 +167,9 @@ LAYER_INIT = SHOW + '''(setq keymap-popup-backend #'keymap-popup-backend-layer)
               :chrome-bottom (romacs-chrome-bottom (frame-parent frame))
               :inset (frame-internal-border-width (frame-parent frame))
               :parent-text-width (frame-text-width (frame-parent frame))
-              :kind (frame-parameter frame 'romacs-popup-kind)))
+              :kind (frame-parameter frame 'romacs-popup-kind)
+              :margin (romacs-layer-float-gap (frame-parent frame))
+              :description (keymap-popup--active-get buffer :resolved-docstring)))
        nil {state} nil (quote quiet)))))
 (with-eval-after-load 'keymap-popup
   (advice-add 'keymap-popup--fit-layer :after
@@ -817,13 +821,24 @@ def multiset(runs):
     return sorted((text, tuple(faces or ())) for text, faces in runs)
 
 
+def romacs_menu(gnu):
+    """GNU's runs as Romacs's menu deliberately draws them
+    (ledger/divergences/VM2-MENU-LAYERS.md): the title is the menu's
+    description in `keymap-popup-title', without the exit key the footer
+    already shows, and a submenu's label ends in ` ›' instead of a syntax
+    face's colour."""
+    title = [[text, ['keymap-popup-title']] for text, faces in gnu['title'] if faces != ['keymap-popup-key']]
+    body = [[text + ' ›', faces] if faces == ['keymap-popup-submenu'] else [text, faces] for text, faces in gnu['body']]
+    return {'title': title, 'body': body}
+
+
 def check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs):
     """keymap_popup_fixture.el's menu in Romacs's panel shows every key,
     heading, entry, exit row and title in the faces pinned GNU X11 shows
     them in (keymap_popup_faces.gnu): the same runs, as multisets (the
     panel's width may lay columns out differently), the title its first
     row; and each run is painted in its face's colour."""
-    gnu = json.loads(lisp_string([l for l in (HERE / 'keymap_popup_faces.gnu').read_text().splitlines() if l and not l.startswith(';')][-1]))
+    gnu = romacs_menu(json.loads(lisp_string([l for l in (HERE / 'keymap_popup_faces.gnu').read_text().splitlines() if l and not l.startswith(';')][-1])))
     keys('-M', 'ctrl', 'c', '-m', 'ctrl', 'k')
     fio.wait(faces_state.exists, args.timeout, 'fixture popup', process)
     time.sleep(1.5)
@@ -892,7 +907,11 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
         painted.append((carry + text).rstrip())
         carry = ''
     painted = [text for text in painted if text.strip()]
-    if painted != lines:
+    # Romacs's panel pads its columns with `:align-to' stretches
+    # (romacs-grid.el), which the scene lists as no characters: its rows
+    # are compared without their blanks.
+    same = (lambda a, b: [''.join(t.split()) for t in a] == [''.join(t.split()) for t in b]) if args.layer else (lambda a, b: a == b)
+    if not same(painted, lines):
         raise AssertionError(f'popup painted {painted} for its lines {lines}')
     # Its rows start at its window's top inside the frame's rect, a line apart.
     left, top = probe['position']
@@ -910,15 +929,17 @@ def check_child_frame(args, output, report, env, process, state, keys, glyphs, l
     if ys[-1] + line > top + height:
         raise AssertionError(f'last popup row {ys[-1]} below the frame bottom {top + height}')
     if args.layer:
-        # Romacs's panel: across the frame's bottom above the status bar,
-        # its title (the popup's mode-line text) its first row, no mode
-        # line of its own, and no context segment in the status bar.
+        # Romacs's panel: a card centred on the frame, floating
+        # `romacs-layer-float-gap' above the status bar, its title (the
+        # menu's description) its first row, no mode line of its own, and
+        # no context segment in the status bar.
         if probe['kind'] != 'panel' or probe['mode-line']:
             raise AssertionError(f"panel kind {probe['kind']}, mode line {probe['mode-line']}")
-        if (left, top + height) != (probe['inset'], probe['chrome-bottom']):
-            raise AssertionError(f"panel at {left},{top} {width}x{height}, chrome bottom {probe['chrome-bottom']}")
-        if not lines or not lines[0].lstrip().startswith('q'):
-            raise AssertionError(f'title row {lines[:1]}')
+        centre = probe['inset'] + probe['parent-text-width'] / 2
+        if abs(left + width / 2 - centre) > 1 or top + height != probe['chrome-bottom'] - probe['margin']:
+            raise AssertionError(f"panel at {left},{top} {width}x{height}, centre {centre}, chrome bottom {probe['chrome-bottom']}")
+        if not lines or lines[0].strip() != probe['description']:
+            raise AssertionError(f'title row {lines[:1]}, description {probe["description"]!r}')
         bar = ' '.join(t for _, t in shown['root_mode_lines'])
         if 'Dismiss' in bar or lines[0].strip() in bar:
             raise AssertionError(f'status bar shows the popup: {bar!r}')
@@ -974,139 +995,174 @@ def main():
             else init.format(state=json.dumps(str(state)), scenes=json.dumps(str(HERE / 'prompt_scenes.el'))) if args.prompts
             else init.format(state=json.dumps(str(state)), fixture=json.dumps(str(HERE / 'keymap_popup_fixture.el'))))
 
-    with live.session(binary, output, prefix='popup-live-', size=f'{args.width}x800', prepare=prepare, report=report,
-                      env={'ROMACS_GUI_FONT': args.font, 'ROMACS_GUI_FONT_SIZE': args.font_size}) as live_session:
-        process, env, log_path, root, work = live_session.process, live_session.env, live_session.log, live_session.root, live_session.work
-        state, faces_state = paths['state'], paths['faces']
-        # Every client below connects to XDG_RUNTIME_DIR/WAYLAND_DISPLAY:
-        # the private compositor's socket, never the user's display.
-        socket = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
-        assert socket.is_socket() and socket.parent == root, socket
-        assert 'DISPLAY' not in env
-        report['wayland_socket'] = str(socket)
+    # Which case this run checks, named in its one-line verdict.
+    variant = next((flag for flag in ('prompts', 'toasts', 'indicators', 'repeat', 'which_key', 'child_frame', 'layer')
+                    if getattr(args, flag)), 'side-window')
+    try:
+        with live.session(binary, output, prefix='popup-live-', size=f'{args.width}x800', prepare=prepare, report=report,
+                          env={'ROMACS_GUI_FONT': args.font, 'ROMACS_GUI_FONT_SIZE': args.font_size}) as live_session:
+            try:
+                process, env, log_path, root, work = live_session.process, live_session.env, live_session.log, live_session.root, live_session.work
+                state, faces_state = paths['state'], paths['faces']
+                # Every client below connects to XDG_RUNTIME_DIR/WAYLAND_DISPLAY:
+                # the private compositor's socket, never the user's display.
+                socket = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
+                assert socket.is_socket() and socket.parent == root, socket
+                assert 'DISPLAY' not in env
+                report['wayland_socket'] = str(socket)
 
-        def glyphs():
-            return scene_glyphs(log_path.read_text(errors='replace'))
+                def glyphs():
+                    return scene_glyphs(log_path.read_text(errors='replace'))
 
-        def keys(*parts):
-            subprocess.run(['wtype', '-d', '40', *parts], env=env, check=True, timeout=20)
-            time.sleep(.15)
+                def keys(*parts):
+                    subprocess.run(['wtype', '-d', '40', *parts], env=env, check=True, timeout=20)
+                    time.sleep(.15)
 
-        def text_rows():
-            return [text for _, text, _ in rows(glyphs(), 'Text')]
+                def text_rows():
+                    return [text for _, text, _ in rows(glyphs(), 'Text')]
 
-        def mode_lines():
-            # The status bar is the mode line (VM2-STATUS-BAR): the
-            # selected window's alone.
-            return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
+                def mode_lines():
+                    # The status bar is the mode line (VM2-STATUS-BAR): the
+                    # selected window's alone.
+                    return [text for _, text, _ in rows(glyphs(), 'StatusBar') + rows(glyphs(), 'ModeLine')]
 
-        fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
-        if args.prompts:
-            time.sleep(1)
-            check_prompts(args, output, report, env, process, state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        if args.toasts:
-            time.sleep(1)
-            check_toasts(args, output, report, env, process, state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        if args.indicators:
-            check_indicators(args, output, report, env, process, state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        if args.repeat:
-            time.sleep(1)
-            check_repeat(args, output, report, env, process, state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        if args.which_key:
-            time.sleep(1)
-            check_which_key(args, output, report, env, process, state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        time.sleep(1)
-        report['captures'].append({'name': 'started', 'rows': text_rows(), 'mode_lines': mode_lines()})
-        show_popup(keys)
-        if args.child_frame or args.layer:
-            check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path)
-            if args.layer:
-                check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs)
-            report['status'] = 'PASS'
-            return
-        # Shown, dismissed and shown again, refitting.
-        fio.wait(state.exists, args.timeout, 'first popup fit', process)
-        report['first_fit'] = state.read_text()
-        state.unlink()
-        keys('q')
-        show_popup(keys)
-        fio.wait(state.exists, args.timeout, 'popup fit', process)
-        fio.wait(lambda: mode_lines() and any('Navigate' in row for row in text_rows()),
-                 args.timeout, 'popup painted', process)
-        time.sleep(1.5)
-        fio.shot(output / 'popup.png', env, report)
-        painted = glyphs()
-        report['captures'].append({'name': 'popup', 'rows': text_rows(), 'mode_lines': mode_lines()})
-        probe = read_plist(state.read_text())
-        report['probe'] = probe
-        report['probe_source'] = state.read_text()
-        if probe['outcome'] != 'fitted':
-            raise AssertionError(f"fit-window-to-buffer: {probe['outcome']}")
-        # The popup is the bottom window: its text is the rows between
-        # its top and its body's bottom edge.  A GUI window has no
-        # mode-line row (the status bar is its mode line), so the
-        # edge comes from the window's geometry, not a painted band.
-        text = rows(painted, 'Text')
-        line = probe['frame-char-height']
-        top = probe['window-pixel-top']
-        # The text-size counts the window's mode line (none under
-        # the status bar); the body excludes it and the divider.
-        band = probe['mode-line-height']
-        edge = top + probe['window-body-pixel-height']
-        popup_rows = [r for r in text if top <= r[0] < edge]
-        report['checks'].append({'popup_rows': [t for _, t, _ in popup_rows], 'edge': edge, 'top': top})
-        # Each line's painted row is where posn-at-point puts it,
-        # every nonblank line is painted, and nothing is cut.
-        starts = probe['line-starts']
-        if not isinstance(starts, list):
-            raise AssertionError(f'line starts: {starts}')
-        painted_at = {y: text for y, text, _ in popup_rows}
-        for line_text, y in starts:
-            if line_text.strip() and painted_at.get(top + y, '').rstrip() != line_text.rstrip():
-                raise AssertionError(f'line {line_text!r} at {top + y}: painted {painted_at.get(top + y)!r}')
-        if len([t for t, _ in starts if t.strip()]) != len(popup_rows):
-            raise AssertionError(f'{len(popup_rows)} painted rows for lines {starts}')
-        width, height = probe['text-size']
-        text_bottom = top + height - band
-        if text_bottom > edge:
-            raise AssertionError(f'text ends at {text_bottom}, below the body edge at {edge}')
-        # fit-window-to-buffer rounds to whole lines (pixelwise nil),
-        # fitting the text and what the window has besides its body
-        # (its bottom divider under the pane chrome), as GNU's does.
-        needed = height - band + probe['window-pixel-height'] - probe['window-body-pixel-height']
-        if probe['window-pixel-height'] != -(-needed // line) * line:
-            raise AssertionError(f"window {probe['window-pixel-height']}px for {height}px of text and {needed - height}px besides")
-        if edge - text_bottom >= line:
-            raise AssertionError(f'{edge - text_bottom}px of blank rows above the body edge')
-        widest = max(x for _, _, row in popup_rows for x, _ in row)
-        report['checks'].append({'text_size': [width, height], 'painted_last_glyph_x': widest})
-        # Each posn's X, Y is where the painter drew its glyph: X and
-        # Y count from the window's text area, which starts after
-        # its left margin (keymap-popup's buffer has one) and
-        # includes its header line (posn-at-x-y's doc).
-        for name, window_top, text_left in (('posn-first', top, probe['text-left']),
-                                            ('posn-last', top, probe['text-left']),
-                                            ('main-posn', probe['main-top'], probe['main-text-left'])):
-            posn = probe[name]
-            if not isinstance(posn, list):
-                raise AssertionError(f'{name}: {posn}')
-            _, (x, y), _, _ = posn
-            at = [g for g in painted if g['role'] == 'Text' and g['x'] == text_left + x and g['y'] == window_top + y]
-            report['checks'].append({name: posn, 'text_left': text_left, 'painted': [g['char'] for g in at]})
-            if name != 'main-posn' and not at:
-                raise AssertionError(f'{name} {posn}: no glyph painted at ({text_left + x}, {window_top + y})')
-        report['status'] = 'PASS'
-    print(report['status'])
+                fio.wait(lambda: text_rows(), args.timeout, 'first frame', process)
+                if args.prompts:
+                    time.sleep(1)
+                    check_prompts(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                if args.toasts:
+                    time.sleep(1)
+                    check_toasts(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                if args.indicators:
+                    check_indicators(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                if args.repeat:
+                    time.sleep(1)
+                    check_repeat(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                if args.which_key:
+                    time.sleep(1)
+                    check_which_key(args, output, report, env, process, state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                time.sleep(1)
+                report['captures'].append({'name': 'started', 'rows': text_rows(), 'mode_lines': mode_lines()})
+                show_popup(keys)
+                if args.child_frame or args.layer:
+                    check_child_frame(args, output, report, env, process, state, keys, glyphs, log_path)
+                    if args.layer:
+                        check_layer_faces(args, output, report, env, process, faces_state, keys, glyphs)
+                    report['status'] = 'PASS'
+                    return
+                # Shown, dismissed and shown again, refitting.
+                fio.wait(state.exists, args.timeout, 'first popup fit', process)
+                report['first_fit'] = state.read_text()
+                state.unlink()
+                keys('q')
+                show_popup(keys)
+                fio.wait(state.exists, args.timeout, 'popup fit', process)
+                fio.wait(lambda: mode_lines() and any('Navigate' in row for row in text_rows()),
+                         args.timeout, 'popup painted', process)
+                time.sleep(1.5)
+                fio.shot(output / 'popup.png', env, report)
+                painted = glyphs()
+                report['captures'].append({'name': 'popup', 'rows': text_rows(), 'mode_lines': mode_lines()})
+                probe = read_plist(state.read_text())
+                report['probe'] = probe
+                report['probe_source'] = state.read_text()
+                if probe['outcome'] != 'fitted':
+                    raise AssertionError(f"fit-window-to-buffer: expected fitted, got {probe['outcome']}")
+                # The popup is the bottom window: its text is the rows between
+                # its top and its body's bottom edge.  A GUI window has no
+                # mode-line row (the status bar is its mode line), so the
+                # edge comes from the window's geometry, not a painted band.
+                text = rows(painted, 'Text')
+                line = probe['frame-char-height']
+                top = probe['window-pixel-top']
+                # The text-size counts the window's mode line (none under
+                # the status bar); the body excludes it and the divider.
+                band = probe['mode-line-height']
+                edge = top + probe['window-body-pixel-height']
+                popup_rows = [r for r in text if top <= r[0] < edge]
+                report['checks'].append({'popup_rows': [t for _, t, _ in popup_rows], 'edge': edge, 'top': top})
+                # Each line's painted row is where posn-at-point puts it,
+                # every nonblank line is painted, and nothing is cut.
+                starts = probe['line-starts']
+                if not isinstance(starts, list):
+                    raise AssertionError(f'line starts: {starts}')
+                painted_at = {y: text for y, text, _ in popup_rows}
+                # Columns are padded with `:align-to' stretches (romacs-grid.el),
+                # which the scene lists as no characters: rows compare without
+                # their blanks, and each run of text starts at its column.
+                bare = lambda t: ''.join(t.split())
+                column = probe['posn-first'][3][0]
+                for line_text, y in starts:
+                    if line_text.strip() and bare(painted_at.get(top + y, '')) != bare(line_text):
+                        raise AssertionError(f'line {line_text!r} at {top + y}: painted {painted_at.get(top + y)!r}')
+                glyphs_at = {y: row for y, _, row in popup_rows}
+                for line_text, y in starts:
+                    row = glyphs_at.get(top + y)
+                    if not row:
+                        continue
+                    # Column 0 is the window's text left (a row that starts
+                    # with an empty column starts with a stretch, no glyph).
+                    left = probe['text-left']
+                    for start in (m.start() for m in re.finditer(r'(?<=  )\S', line_text)):
+                        x = left + start * column
+                        if not any(abs(gx - x) < 1.5 and ch == line_text[start] for gx, ch in row):
+                            raise AssertionError(f'line {line_text!r}: {line_text[start]!r} not painted at column {start} (x {x})')
+                if len([t for t, _ in starts if t.strip()]) != len(popup_rows):
+                    raise AssertionError(f'{len(popup_rows)} painted rows for lines {starts}')
+                width, height = probe['text-size']
+                text_bottom = top + height - band
+                if text_bottom > edge:
+                    raise AssertionError(f'text ends at {text_bottom}, below the body edge at {edge}')
+                # fit-window-to-buffer rounds to whole lines (pixelwise nil),
+                # fitting the text and what the window has besides its body
+                # (its bottom divider under the pane chrome), as GNU's does.
+                needed = height - band + probe['window-pixel-height'] - probe['window-body-pixel-height']
+                if probe['window-pixel-height'] != -(-needed // line) * line:
+                    raise AssertionError(f"window {probe['window-pixel-height']}px for {height}px of text and {needed - height}px besides")
+                if edge - text_bottom >= line:
+                    raise AssertionError(f'{edge - text_bottom}px of blank rows above the body edge')
+                widest = max(x for _, _, row in popup_rows for x, _ in row)
+                report['checks'].append({'text_size': [width, height], 'painted_last_glyph_x': widest})
+                # Each posn's X, Y is where the painter drew its glyph: X and
+                # Y count from the window's text area, which starts after
+                # its left margin (keymap-popup's buffer has one) and
+                # includes its header line (posn-at-x-y's doc).
+                for name, window_top, text_left in (('posn-first', top, probe['text-left']),
+                                                    ('posn-last', top, probe['text-left']),
+                                                    ('main-posn', probe['main-top'], probe['main-text-left'])):
+                    posn = probe[name]
+                    if not isinstance(posn, list):
+                        raise AssertionError(f'{name}: {posn}')
+                    _, (x, y), _, _ = posn
+                    at = [g for g in painted if g['role'] == 'Text' and g['x'] == text_left + x and g['y'] == window_top + y]
+                    report['checks'].append({name: posn, 'text_left': text_left, 'painted': [g['char'] for g in at]})
+                    if name != 'main-posn' and not at:
+                        raise AssertionError(f'{name} {posn}: no glyph painted at ({text_left + x}, {window_top + y})')
+                report['status'] = 'PASS'
+            except Exception as failed:
+                # The check that failed: the innermost line of this file
+                # the error came through, for the verdict.
+                here = [f for f in traceback.extract_tb(failed.__traceback__) if f.filename == __file__]
+                if here:
+                    report['failed_check'] = f'{here[-1].name}:{here[-1].lineno}'
+                raise
+    finally:
+        # The verdict says which case ran and, failing, why: the error the
+        # check raised, and where its report and shots are.
+        print(f"{report['status']} popup_live {variant}" +
+              ('' if report['status'] == 'PASS' else
+               f": {report.get('failed_check', 'before any check')}: {report.get('error', 'no check completed')}"
+               f" (report {output / 'report.json'})"))
     return 0 if report['status'] == 'PASS' else 1
 
 
