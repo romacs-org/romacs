@@ -224,10 +224,12 @@ fn local_sockets_match_pinned_gnu() {
 #[test]
 fn a_quit_in_call_process_keeps_the_output_read() {
     use std::time::{Duration, Instant};
+    // The boot first: a missing world is built by this test run again,
+    // which ends inside `gnu_lisp`, before any of the test's own setup.
+    let mut vm = gnu_lisp(&[]);
     let base = scratch("quit");
     std::fs::create_dir_all(&base).unwrap();
     let marker = base.join("written");
-    let mut vm = gnu_lisp(&[]);
     let signal = std::sync::Arc::new(romacs_vm::QuitSignal::new());
     vm.share_quit_signal(signal.clone());
     vm.enter_busy();
