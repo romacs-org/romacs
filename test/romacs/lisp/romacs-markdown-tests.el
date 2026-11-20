@@ -99,8 +99,9 @@ ends faced as the whole would be, and earlier blocks are not rewritten."
       (should (memq 'font-lock-string-face (ensure-list (romacs-markdown-tests--face-at "\"hi"))))
       (should (memq 'font-lock-comment-face (ensure-list (romacs-markdown-tests--face-at "; c"))))
       (should (memq 'romacs-lexical-head (ensure-list (romacs-markdown-tests--face-at "message"))))
-      (should (memq 'romacs-lexical-added (ensure-list (romacs-markdown-tests--face-at "+new"))))
-      (should (memq 'romacs-lexical-removed (ensure-list (romacs-markdown-tests--face-at "-old")))))))
+      (should (memq 'romacs-lexical-added-sign (ensure-list (romacs-markdown-tests--face-at "+new"))))
+      (should (memq 'romacs-lexical-added (ensure-list (romacs-markdown-tests--face-at "new\n```"))))
+      (should (memq 'romacs-lexical-removed (ensure-list (romacs-markdown-tests--face-at "old")))))))
 
 (ert-deftest romacs-markdown-blocks-describe-structure ()
   (with-temp-buffer
