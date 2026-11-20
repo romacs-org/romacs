@@ -1,5 +1,5 @@
 //! A test that owns Fontconfig runs again in a child process whose
-//! environment holds FONTCONFIG_FILE from its start: Fontconfig reads it
+//! environment holds `FONTCONFIG_FILE` from its start: Fontconfig reads it
 //! once, when it starts, and no thread of the test process sees its own
 //! environment change.
 

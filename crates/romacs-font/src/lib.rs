@@ -17,7 +17,7 @@
 //! why the renderer's font helpers live here too.
 //!
 //! Foreign calls stay in their safe wrappers, `fc` (Fontconfig) and
-//! `probe::variations` (FreeType's variation calls); unsafe code anywhere
+//! `probe::variations` (`FreeType`'s variation calls); unsafe code anywhere
 //! else fails the build.
 
 #![deny(unsafe_code)]

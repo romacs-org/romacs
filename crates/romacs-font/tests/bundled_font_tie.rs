@@ -1,6 +1,6 @@
 //! A font Romacs registers against a system copy of the same face: the
 //! bundled Iosevka (assets/fonts) and an Iosevka the system has as well.
-//! The test runs again in a child whose FONTCONFIG_FILE names a
+//! The test runs again in a child whose `FONTCONFIG_FILE` names a
 //! configuration whose only font directory holds a copy of the bundled
 //! Regular, so the "system" face is the same family, style and version, and
 //! only the order Fontconfig lists them in could decide.

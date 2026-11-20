@@ -1,6 +1,6 @@
 //! The bundled Iosevka (assets/fonts) resolves to itself as pinned GNU's
 //! does, with only those four files in Fontconfig: the test runs again in a
-//! child whose FONTCONFIG_FILE names a configuration with no font
+//! child whose `FONTCONFIG_FILE` names a configuration with no font
 //! directory, and registers the files as the GUI does. No host font takes
 //! part.
 

@@ -145,7 +145,7 @@ fn reading_tables_answers_as_the_whole_file_does() {
         let second_offset = 20 + first.len() + gap;
         let mut bytes = b"ttcf\0\x01\0\0\0\0\0\x02".to_vec();
         bytes.extend(20u32.to_be_bytes());
-        bytes.extend((second_offset as u32).to_be_bytes());
+        bytes.extend(u32::try_from(second_offset).unwrap().to_be_bytes());
         bytes.extend(first);
         bytes.extend(vec![0; gap]);
         bytes.extend(sfnt(second_offset, b"calt"));
@@ -161,8 +161,8 @@ fn reading_tables_answers_as_the_whole_file_does() {
         Fixture::new(b""),
         Fixture::new(b"not a font at all"),
     ];
-    let real = [romacs_test_fonts::noto_sans_mono_variable().to_path_buf(), romacs_test_fonts::bundled_iosevka()[0].clone()];
-    let paths = fixtures.iter().map(|fixture| fixture.path().to_owned()).chain(real.iter().map(|path| path.to_str().unwrap().to_owned()));
+    let installed = [romacs_test_fonts::noto_sans_mono_variable().to_path_buf(), romacs_test_fonts::bundled_iosevka()[0].clone()];
+    let paths = fixtures.iter().map(|fixture| fixture.path().to_owned()).chain(installed.iter().map(|path| path.to_str().unwrap().to_owned()));
     let mut found = 0;
     for path in paths {
         let whole = std::fs::read(&path).unwrap();

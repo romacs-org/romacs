@@ -472,6 +472,7 @@ pub fn probe_font_px_metrics(
 /// The GSUB/GPOS capability of `file`[`face_index`], read once per
 /// unchanged file. A malformed but readable file caches `None`; a read
 /// error stays retryable.
+#[must_use]
 pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
     otf_capability_in(otf_capability_cache(), file, face_index, |file| read_capability(file, face_index))
 }
@@ -480,7 +481,7 @@ pub fn otf_capability(file: &str, face_index: u32) -> Option<OtfCapability> {
 /// megabytes, and a larger one (a sparse file's, say) is not allocated.
 const LAYOUT_TABLE_LIMIT: u64 = 64 << 20;
 
-/// The capability of FILE[FACE_INDEX], read table by table rather than
+/// The capability of `file`'s face `face_index`, read table by table rather than
 /// whole: a font collection runs to tens of megabytes, of which the table
 /// directory and the tables a face needs are a small part. Ok(None) for a
 /// face ttf-parser refuses, as `otf_capability_from_bytes` would.
@@ -570,6 +571,7 @@ fn otf_capability_in(
 #[path = "probe/tests/otf_cache_test.rs"]
 mod otf_cache_tests;
 
+#[must_use]
 pub fn otf_capability_from_bytes(data: &[u8], face_index: u32) -> Option<OtfCapability> {
     ttf_parser::Face::parse(data, face_index).ok().map(|face| capability_of(&face))
 }

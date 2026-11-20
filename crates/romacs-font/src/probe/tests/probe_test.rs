@@ -88,7 +88,7 @@ fn noto_sans_named_instances_cover_thin_to_black() {
     assert!(!weights.contains(&950), "950 is not a named instance");
 }
 
-/// The variation data FreeType reads from a pinned variable font: its named
+/// The variation data `FreeType` reads from a pinned variable font: its named
 /// instances' weights and axis tuples, and the `wght` the probe applies,
 /// seen in the glyph outline it draws.
 #[test]

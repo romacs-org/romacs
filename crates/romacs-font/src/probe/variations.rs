@@ -1,5 +1,5 @@
-//! A FreeType face's variation axes and named instances, and setting its
-//! design coordinates: the two FreeType calls freetype-rs does not wrap,
+//! A `FreeType` face's variation axes and named instances, and setting its
+//! design coordinates: the two `FreeType` calls freetype-rs does not wrap,
 //! made here once so the probe is safe code.
 
 use freetype::Library;
@@ -12,7 +12,7 @@ pub(super) struct Axis {
     pub default: ft::FT_Fixed,
 }
 
-/// A face's variation data, copied out of FreeType's `FT_MM_Var`.
+/// A face's variation data, copied out of `FreeType`'s `FT_MM_Var`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Variations {
     pub axes: Vec<Axis>,
