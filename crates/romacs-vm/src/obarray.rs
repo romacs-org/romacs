@@ -118,10 +118,19 @@ fn bucket(bytes: &[u8], size: usize) -> usize {
 }
 
 impl Vm {
+    /// The value of `obarray`, the variable: the obarray a nil OBARRAY
+    /// argument means.
     pub(super) fn initial_obarray(&mut self) -> Value {
-        let slot = self.slot("obarray");
-        // The slot constructor installs the lazy wrapper exactly once.
+        let slot = self.obarray_slot();
         self.slots[slot].value
+    }
+    /// The slot of `obarray`, the variable: kept since the symbol was made
+    /// (`Vm::slot`, which installs the initial obarray), else made now, so
+    /// a VM makes the obarray only when something asks for it. Kept, it
+    /// survives `obarray-clear` and an `unintern` of `obarray` itself.
+    fn obarray_slot(&mut self) -> usize {
+        if self.obarray_slot == usize::MAX { self.obarray_slot = self.slot("obarray"); }
+        self.obarray_slot
     }
     pub(super) fn resolve_obarray(&mut self, mut value: Value) -> std::result::Result<Value, prim::Fault> {
         if value == Value::NIL { value = self.initial_obarray(); }
@@ -142,17 +151,21 @@ impl Vm {
         let Object::Obarray(table) = self.object_if(table)? else { return None };
         if table.initial {
             let name = symbol_key(bytes, chars)?;
-            match name.as_str() { "nil" => Some(Value::NIL), "t" => Some(Value::TRUE), _ => self.names.get(&name).map(|&s| Value::reference(s + 1, 7)) }
+            match &*name { "nil" => Some(Value::NIL), "t" => Some(Value::TRUE), name => self.names.get(name).map(|&s| Value::reference(s + 1, 7)) }
         } else { table.lookup(bytes, chars) }
     }
     pub(super) fn obarray_intern(&mut self, table: Value, name: Value) -> std::result::Result<Value, prim::Fault> {
         let view = self.str_view(name).ok_or(prim::Fault::Wrong("stringp", name))?;
+        // Looked up in place: the name is copied only for a new symbol.
+        if let Some(found) = self.obarray_lookup_value(table, view.bytes, view.chars) { return Ok(found); }
         let (bytes, chars) = (view.bytes.to_vec(), view.chars);
-        if let Some(found) = self.obarray_lookup_value(table, &bytes, chars) { return Ok(found); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         let text = symbol_key(&bytes, chars).ok_or(prim::Fault::NotUnicode(name))?;
-        let text = text.as_str();
-        let symbol = if initial { self.intern(text) } else {
+        // The initial obarray's names are the VM's own (`Vm::names`); its
+        // Obarray object holds none of them.
+        if initial { return Ok(self.intern(&text)); }
+        let text = &*text;
+        let symbol = {
             let id = expand::generated_id();
             let slot = if let Some(slot) = self.obarray_free_slots.pop() { self.allocation.consed.reused_symbols += 1; slot } else {
                 let slot = self.slots.len();
@@ -191,12 +204,23 @@ impl Vm {
         if Self::image_value(table) { return Err(self.read_only_fault(table)); }
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         if initial {
+            // Found before the names go (a code image's names were not made
+            // through `Vm::slot`), so the variable keeps its obarray.
+            self.obarray_slot();
             let slots: Vec<usize> = self.names.drain().map(|(_, slot)| slot).collect();
             for slot in slots { self.set_initial_obarray(slot, false); }
             return Ok(());
         }
         if let Object::Obarray(t) = self.object_mut(table).map_err(prim::Fault::Error)? { t.clear(); }
         Ok(())
+    }
+    /// How many symbols TABLE, an obarray, holds, as `obarray_next` walks
+    /// them: the initial obarray's are `nil`, `t` and the VM's other names,
+    /// counted without a walk (a backing slot named "nil" or "t" is not
+    /// walked).
+    pub(super) fn obarray_count(&self, table: &Obarray) -> usize {
+        if !table.initial { return table.len(); }
+        2 + self.names.len() - ["nil", "t"].iter().filter(|name| self.names.contains_key(**name)).count()
     }
     pub(super) fn obarray_next(&self, table: Value, bucket_index: usize, current: Value) -> Option<(usize, Value)> {
         let Object::Obarray(t) = self.object_if(table)? else { return None };
@@ -222,10 +246,14 @@ impl Vm {
 }
 
 /// The symbol-table key of a name's BYTES (CHARS characters): multibyte
-/// internal text through symkey.rs; a unibyte name must be ASCII.
-pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<String> {
-    if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(text.to_owned()); }
-    if chars < bytes.len() || bytes.is_ascii() { return Some(crate::symkey::from_internal(bytes)); }
+/// internal text through symkey.rs; a unibyte name must be ASCII. The
+/// name's own bytes, borrowed, when they are their key: ASCII (the key's
+/// escape is not), or Unicode text without the escape.
+pub(super) fn symbol_key(bytes: &[u8], chars: usize) -> Option<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
+    if bytes.is_ascii() { return std::str::from_utf8(bytes).ok().map(Cow::Borrowed); }
+    if let Ok(text) = std::str::from_utf8(bytes) && !text.contains(crate::symkey::ESC) { return Some(Cow::Borrowed(text)); }
+    if chars < bytes.len() { return Some(Cow::Owned(crate::symkey::from_internal(bytes))); }
     // A unibyte name: its bytes above 127 name raw-byte characters.
-    Some(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes)))
+    Some(Cow::Owned(crate::symkey::from_internal(&crate::text::octets_to_multibyte(bytes))))
 }

@@ -272,8 +272,10 @@ The other commands:
 - Lisp lint on a prebuilt or installed host: `python3 tools/romacs-lint FILE ...`,
   what the change adds since its merge-base with beta. `--all` shows older findings
   too, `--binary` names the host; an installed host answers in about a second.
-- Editable Lisp checks on a prebuilt host: `python3 tools/test-elisp`. Its
-  `--test`, `--match`, file arguments, and `--core` option support smaller checks.
+- Romacs's own `romacs-test` files (`romacs-deftest`, in `test/romacs/romacs-test/`)
+  on a prebuilt host: `python3 tools/test-elisp`. Its `--test`, `--match`, file
+  arguments, and `--core` (the bare VM) support smaller checks. ERT files run with
+  `tools/test-ert`.
 - Bundled packages' real ERT suites on a prebuilt host, as GNU's `make check`:
   `make check`, `make check-expensive`, `make check-all`, `make check-MODULE`
   (`make check-list` names the modules: a package like `gnosis`, or one library),

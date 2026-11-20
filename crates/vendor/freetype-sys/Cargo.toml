@@ -1,0 +1,24 @@
+# freetype-sys 0.23.0 from the eval-exec/freetype-sys fork (a4eb0a7c), as
+# Romacs carries it: FreeType 2.13.2 and libpng built from source with
+# hidden symbols (ROMACS.md).
+[package]
+name = "freetype-sys"
+version = "0.23.0"
+authors = ["Coeuvre <coeuvre@gmail.com>"]
+links = "freetype"
+build = "build.rs"
+description = "Low level binding for FreeType font library"
+license = "MIT"
+repository = "https://github.com/PistonDevelopers/freetype-sys.git"
+edition = "2018"
+
+[features]
+# freetype-rs forwards its `bundled` feature here. This copy always builds
+# from source, so the feature changes nothing.
+bundled = []
+
+[dependencies]
+libz-sys = "1.1.20"
+
+[build-dependencies]
+cc = "1"

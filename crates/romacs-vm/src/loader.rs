@@ -291,20 +291,7 @@ impl Vm {
         } else {
             self.load_path_roots()?.into_iter().map(PathBuf::from).collect()
         };
-        for root in roots {
-            let base = root.join(path);
-            let candidates = if nosuffix {
-                vec![base]
-            } else {
-                vec![PathBuf::from(format!("{}.el", base.display())), base]
-            };
-            for (i, p) in candidates.into_iter().enumerate() {
-                if crate::host::probe(crate::host::Probe::IsFile, &p) {
-                    return Ok(Some((p, !nosuffix && i == 0)));
-                }
-            }
-        }
-        Ok(None)
+        Ok(find_source(&roots, path, nosuffix))
     }
     /// `featurep`, and the bootstrap's `#:vm2-provide`: data only, so no Lisp
     /// runs (the `provide` Lisp calls runs `after-load-alist` as a continuation,
@@ -1088,6 +1075,25 @@ pub(crate) fn leave_bindings<'b, T>(m: &mut Mx<'_, 'b, Vm>, gc: Gc<'_, 'b>, mark
             Err(error)
         }
     }
+}
+/// The library PATH (absolute, or relative to each of ROOTS in turn) as a
+/// load finds it (lread.c openp): `PATH.el', then PATH unless NOSUFFIX,
+/// and whether the suffix was added.
+pub(crate) fn find_source(roots: &[PathBuf], path: &Path, nosuffix: bool) -> Option<(PathBuf, bool)> {
+    for root in roots {
+        let base = root.join(path);
+        let candidates = if nosuffix {
+            vec![base]
+        } else {
+            vec![PathBuf::from(format!("{}.el", base.display())), base]
+        };
+        for (i, p) in candidates.into_iter().enumerate() {
+            if crate::host::probe(crate::host::Probe::IsFile, &p) {
+                return Some((p, !nosuffix && i == 0));
+            }
+        }
+    }
+    None
 }
 /// An absolute file name with `.' and `..' resolved lexically, as
 /// expand-file-name would leave openp's result.

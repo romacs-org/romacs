@@ -10,12 +10,18 @@
 //! policy, nested compiles of missing dependencies included); they only
 //! publish without pruning (`NO_PRUNE`). A parent blocks while its nested
 //! compile runs, so at most JOBS compile processes run at once.
+//!
+//! A file whose artifact holds already starts no compile process: the
+//! tree's process checks the artifact's inputs as a session's load does,
+//! on the `load-path' the first compile process said it searches. What it
+//! cannot tell (no such `load-path', a library name under `~') goes to a
+//! compile process, which tells.
 use super::*;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Mutex;
 
 /// What became of one file.
-enum Outcome {
+pub(super) enum Outcome {
     /// Its artifact: whether it held already, and its status.
     Published { artifact: PathBuf, held: bool, status: store::Status },
     /// The compile process failed, or published nothing: why.
@@ -42,18 +48,25 @@ pub fn compile_tree(jobs: usize) -> std::result::Result<Json, String> {
     files.sort_by_key(|path| std::cmp::Reverse(host::metadata(path).map(|m| m.len()).unwrap_or(0)));
     let mut outcomes = Vec::with_capacity(files.len());
     let mut queue: VecDeque<PathBuf> = files.into();
-    // The compile world is made once, by the first compile, before the rest
-    // are admitted: no two children build it.
-    if configured.identity().is_none()
-        && let Some(first) = queue.pop_front()
-    {
-        outcomes.push((first.clone(), compile_child(configured, &first)));
+    // The first compile runs alone: it makes the compile world when there
+    // is none, so no two children build it, and says the `load-path' every
+    // compile of the tree searches.
+    let mut load_path = None;
+    if let Some(first) = queue.pop_front() {
+        let (outcome, searched) = compile_child(configured, &first);
+        outcomes.push((first, outcome));
+        load_path = searched;
         if configured.identity().is_none() {
             return Err(format!("no compile world in {}: the first compile made none (its log is {})",
                                config.store.display(), store::generation(&config.store).join("compile.log").display()));
         }
     }
-    outcomes.extend(pool(queue, jobs, |path| compile_child(configured, path)));
+    // A file whose artifact holds is decided here, as a session's load
+    // decides it; a compile process runs for the rest.
+    outcomes.extend(pool(queue, jobs, |path| {
+        load_path.as_deref().and_then(|load_path| held(configured, path, load_path))
+            .unwrap_or_else(|| compile_child(configured, path).0)
+    }));
     // Every artifact the run stands for is used now, as far as pruning
     // goes, and kept by this maintenance whatever the budget.
     let keep: HashSet<PathBuf> = outcomes.iter().filter_map(|(source, outcome)| match outcome {
@@ -115,23 +128,48 @@ pub(super) fn pool<T: Send, R: Send>(items: VecDeque<T>, jobs: usize, work: impl
     done.into_inner().unwrap()
 }
 
-/// Compile PATH in a compile process of the tree's, and what came of it.
-fn compile_child(configured: &Configured, path: &Path) -> Outcome {
+/// PATH's artifact, when one whose inputs hold on LOAD_PATH (a compile
+/// process's) is in the store: what its compile process would answer,
+/// decided without one. None when there is none, or a record needs the
+/// compile process to tell (a library name under `~', its HOME's).
+pub(super) fn held(configured: &Configured, path: &Path, load_path: &[String]) -> Option<Outcome> {
+    let config = &configured.config;
+    let digest = store::source_digest(&config.store, path).ok()?;
+    let key = store::key(configured.identity()?, config.root.as_deref(), path, &digest);
+    let roots: Vec<PathBuf> = load_path.iter().map(PathBuf::from).collect();
+    let resolve = |name: &str, nosuffix: bool| {
+        let name = Path::new(name);
+        if name.starts_with("~") { return None; }
+        let roots = if name.is_absolute() { vec![PathBuf::new()] } else { roots.clone() };
+        Some(crate::loader::find_source(&roots, name, nosuffix).map(|(found, _)| found))
+    };
+    let (artifact, data) = store::lookup(&config.store, &key, |artifact| {
+        inputs_hold(&config.store, artifact, &load_path.join("\n"), &resolve)
+    })?;
+    Some(Outcome::Published { artifact, held: true, status: data.status })
+}
+
+/// Compile PATH in a compile process of the tree's: what came of it, and
+/// the `load-path' the process searched, when it said.
+fn compile_child(configured: &Configured, path: &Path) -> (Outcome, Option<Vec<String>>) {
     let Some((program, args, mut environment)) = compile_command(configured, path, &[]) else {
-        return Outcome::Failed("not compiled by this process".into());
+        return (Outcome::Failed("not compiled by this process".into()), None);
     };
     environment.push((NO_PRUNE.into(), "1".into()));
     let Some(out) = run_compile(&configured.config.store, program, args, environment) else {
-        return Outcome::Failed("the compile process failed (see the compile log)".into());
+        return (Outcome::Failed("the compile process failed (see the compile log)".into()), None);
     };
+    let load_path = out.lines().find_map(|line| line.strip_prefix("romacs-compile-load-path: "))
+        .and_then(|text| serde_json::from_str(text).ok());
     let held = out.lines().any(|line| line == "romacs-compile-held");
     let Some(artifact) = out.lines().rev().find_map(|line| line.strip_prefix("romacs-compiled: ")).map(PathBuf::from) else {
-        return Outcome::Failed("the compile process published nothing".into());
+        return (Outcome::Failed("the compile process published nothing".into()), load_path);
     };
-    match store::open(&artifact) {
+    let outcome = match store::open(&artifact) {
         Ok(data) => Outcome::Published { artifact, held, status: data.status },
         Err(why) => Outcome::Failed(why),
-    }
+    };
+    (outcome, load_path)
 }
 
 /// The `.el` files of the trees ROOTS, each once by its canonical name.
