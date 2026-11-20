@@ -243,7 +243,18 @@
         (call-interactively (lookup-key (get-text-property (point) 'keymap) "y"))
         (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
         ;; The plan's own text whole.
-        (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))))
+        (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
+        ;; A plan offered at rest: the separator says so, and C-c C-y
+        ;; from anywhere proceeds, as it allows a request.
+        (romacs-agent-set-plan session t)
+        (setf (romacs-agent-state session) 'idle)
+        (romacs-agent-log-draw session '(:type plan :text "2. again" :proceed t))
+        (should (string-match-p "plan ready" (cdr (romacs-agent-log--doing session))))
+        (goto-char (point-max))
+        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y"))
+        (should-not (romacs-agent-log--proceed-offered))
+        (should-not (plist-get (romacs-agent-options session) :plan))
+        (should (equal (cdr (romacs-agent-log--doing session)) "idle"))))
     (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
                    "default"))))
 

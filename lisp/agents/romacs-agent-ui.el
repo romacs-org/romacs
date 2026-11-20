@@ -85,8 +85,9 @@ colour, which no theme's syntax faces can make read as an error.")
 (defface romacs-agent-effort-ultra '((t :inherit (romacs-agent-effort error) :underline t)) "Effort ultra.")
 (defface romacs-agent-context '((t :inherit font-lock-number-face))
   "Context tokens in a chat's header.")
-(defface romacs-agent-mode '((t :inherit font-lock-builtin-face))
-  "The harness's permission mode in a chat's header.")
+(defface romacs-agent-mode '((t :inherit default))
+  "The harness's permission mode in a chat's header: the text's own
+colour, never a syntax face's, which a theme may draw as an error.")
 (defface romacs-agent-section '((t :inherit font-lock-function-name-face :weight bold))
   "A project heading on the home page.")
 (defface romacs-agent-delegate '((t :inherit font-lock-function-name-face :weight bold))
@@ -743,7 +744,8 @@ display clipping the band where the window ends."
                                      'face 'romacs-agent-model 'help-echo (and provider (format "account %s" provider)))
                          (if effort (concat " " (romacs-agent-ui--effort effort)) ""))
                  (cond ((eq mode 'plan) (propertize "plan" 'face 'bold))
-                       ((and mode (not (equal mode "bypassPermissions"))) (propertize mode 'face 'romacs-agent-mode)))
+                       ;; The usual modes go unsaid; another in the text's own colour.
+                       ((and mode (not (member mode '("default" "bypassPermissions")))) (propertize mode 'face 'romacs-agent-mode)))
                  (and switch (propertize (format "→ %s" switch) 'face 'warning))
                  (and resume (propertize (format-time-string "⏰%H:%M" resume) 'face 'warning
                                          'help-echo "Resumes by itself when its limit resets; z in the actions menu cancels"))

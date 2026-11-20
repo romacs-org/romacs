@@ -826,14 +826,19 @@ the plan is live, the latest: an older one's row goes."
       (delete-region at (or (next-single-property-change at 'romacs-agent-log-proceed nil romacs-agent-log--end)
                             romacs-agent-log--end)))))
 
+(defun romacs-agent-log--proceed-offered ()
+  "Where the chat offers to proceed with a plan by leaving plan mode, or nil."
+  (text-property-any (point-min) romacs-agent-log--end 'romacs-agent-log-proceed t))
+
 (defun romacs-agent-log-proceed ()
-  "Proceed with the plan presented at point: its session leaves plan mode,
+  "Proceed with the plan the chat offers: its session leaves plan mode,
 back in the mode it had, and the next message carries it out."
   (interactive nil romacs-agent-log-mode)
-  (unless (get-text-property (point) 'romacs-agent-log-proceed) (user-error "No plan to proceed with here"))
+  (unless (romacs-agent-log--proceed-offered) (user-error "No plan to proceed with"))
   (romacs-agent-set-plan (romacs-agent-menu--session) nil)
-  ;; Switched: its row offers nothing more.
-  (romacs-agent-log--retire-proceed))
+  ;; Switched: its row offers nothing more, nor the separator.
+  (romacs-agent-log--retire-proceed)
+  (romacs-agent-log--separator))
 
 (defun romacs-agent-log-draw (session event)
   "Draw SESSION's EVENT in the current chat."
@@ -941,7 +946,11 @@ back in the mode it had, and the next message carries it out."
                         (format "running %s" (plist-get (cdr block) :name))
                       "working")))
     ;; A turn that failed and is not yet seen: said so, until the next.
-    ('idle (if (romacs-agent-failed session) (cons 'failed "failed") (cons 'idle "idle")))
+    ('idle (cond ((romacs-agent-failed session) (cons 'failed "failed"))
+                 ((romacs-agent-log--proceed-offered)
+                  (cons 'idle (substitute-command-keys
+                               "plan ready · \\<romacs-agent-log-mode-map>\\[romacs-agent-log-allow] proceeds, leaving plan mode")))
+                 (t (cons 'idle "idle"))))
     (state (cons 'idle (format "%s" state)))))
 
 (defconst romacs-agent-log--thread-cols 8
@@ -1427,6 +1436,15 @@ block is shown, and it is checked the session still waits on it."
   "Allow the request at point, else the oldest pending; with ALWAYS, for
 the session.  Questions open their answering layer."
   (interactive nil romacs-agent-log-mode)
+  (if (and (not always) (not (romacs-agent-log--pending)) (romacs-agent-log--proceed-offered))
+      ;; Nothing asked, a plan offered (a harness whose plan is no
+      ;; request): allowing is proceeding with it.
+      (romacs-agent-log-proceed)
+    (romacs-agent-log--allow-ask always)))
+
+(defun romacs-agent-log--allow-ask (always)
+  "Allow the request at point, else the oldest pending; with ALWAYS, for
+the session."
   (let* ((id (romacs-agent-log--ask-here))
          (questions (get-text-property (point) 'romacs-agent-log-questions)))
     (cond (questions (romacs-agent-log--act #'romacs-agent-log-source-ask id questions))
