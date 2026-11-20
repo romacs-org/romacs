@@ -81,6 +81,44 @@ def span(file='src/lib.rs', line=1, called_from=None):
 FINISHED = json.dumps({'reason': 'build-finished', 'success': True})
 
 
+class VmReplacementTest(unittest.TestCase):
+    """The engine's modules may not make a second `Vm` or `Registers`, nor swap
+    one away: a register capability would outlive its file (§13.6 I6)."""
+    def test_each_way_to_replace_a_vm_fires(self):
+        src = '''fn f(e: &mut Eng) {
+    let mut other = Vm::new();
+    std::mem::swap(e.vm, &mut other);
+    *e.vm = Vm::default();
+    let file = mem::replace(&mut e.vm.stack, Registers::new());
+    std::mem::take(&mut *self.vm);
+}
+'''
+        self.assertEqual(smells.vm_replacements(src), [2, 3, 4, 4, 5, 5, 6])
+
+    def test_tests_comments_and_ordinary_moves_are_left_alone(self):
+        src = '''// Vm::new() in a comment, and "std::mem::swap(e.vm, x)" in a string
+let code = std::mem::take(&mut e.code);
+let regs = std::mem::take(&mut e.vm.suspended);
+if *e.vm == other {}
+#[cfg(test)]
+mod tests {
+    fn t() { let vm = Vm::new(); std::mem::swap(&mut vm, &mut Vm::new()); }
+}
+#[cfg(test)]
+use crate::Vm;
+fn after() { let _ = Vm::new(); }
+'''
+        self.assertEqual(smells.vm_replacements(src), [11])
+
+    def test_the_engines_modules_are_its_own_files_less_tests(self):
+        engine = [n for n in ('crates/romacs-vm/src/threaded.rs', 'crates/romacs-vm/src/threaded_hot.rs',
+                              'crates/romacs-vm/src/traversal.rs', 'crates/romacs-vm/src/threaded_reader_gc_tests.rs',
+                              'crates/romacs-vm/src/gc.rs', 'crates/romacs-vm/src/prims/threaded.rs')
+                  if smells.ENGINE.fullmatch(n) and not smells.TEST_FILE.search(n)]
+        self.assertEqual(engine, ['crates/romacs-vm/src/threaded.rs', 'crates/romacs-vm/src/threaded_hot.rs',
+                                  'crates/romacs-vm/src/traversal.rs'])
+
+
 class LintCensusTest(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()
@@ -152,13 +190,14 @@ class GeneratedTest(unittest.TestCase):
 
 
 def now(allows=2, todos=1, long_files=1, lint=3, root=('crates', 'tools'), outside=(), legacy=5,
-        strays=2, generated=('fixture.txt',), sites=4, undocumented=1, declared=0, crate='a'):
+        strays=2, generated=('fixture.txt',), sites=4, undocumented=1, declared=0, crate='a', replacements=0):
     """A measure of a tree, its smells in CRATE."""
     return {'crates': {crate: Counter(allows=allows, todos=todos, long_files=long_files)},
             'unsafe': {crate: Counter(sites=sites, undocumented=undocumented, declared=declared)},
             'lints': Counter({'clippy::doc_markdown': lint}) if lint else Counter(),
             'layout': {'root': list(root), 'members_outside_crates': list(outside), 'legacy_primitives': legacy,
-                       'primitives_outside_prims': strays, 'generated': list(generated)},
+                       'primitives_outside_prims': strays, 'generated': list(generated),
+                       'vm_replacements': replacements},
             'strays': {}, 'long': [], 'lints_by_crate': {}}
 
 
@@ -175,7 +214,8 @@ class RatchetTest(unittest.TestCase):
         tree['unsafe']['b'] = Counter(sites=2, undocumented=0, declared=1)
         self.assertEqual(smells.summary(tree), {
             'totals': {'allows': 3, 'todos': 1, 'long_files': 1, 'unsafe_sites': 4, 'unsafe_undocumented': 1,
-                       'legacy_primitives': 5, 'primitives_outside_prims': 2, 'lint clippy::doc_markdown': 3},
+                       'legacy_primitives': 5, 'primitives_outside_prims': 2, 'vm_replacements': 0,
+                       'lint clippy::doc_markdown': 3},
             'generated': ['fixture.txt']})
 
     def test_at_the_merge_base(self):
@@ -195,6 +235,11 @@ class RatchetTest(unittest.TestCase):
             'its SAFETY: comment',
             'unsafe_undocumented: 2, above the 1 of its merge-base; remove 1, or put a `// SAFETY:` comment on the '
             'line above its `unsafe`'])
+
+    def test_a_vm_replacement_in_the_engine_fails(self):
+        self.assertEqual(rises(now(), now(replacements=1)), [
+            'vm_replacements: 1, above the 0 of its merge-base; remove 1, or remove it: the engine never makes or '
+            'swaps a `Vm` or its `Registers`'])
 
     def test_a_declared_unsafe_site_is_not_counted(self):
         self.assertEqual(rises(now(), now(sites=5, declared=1)), [])
