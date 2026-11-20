@@ -29,9 +29,10 @@ those removed, after its list changed.")
 
 (defvar romacs-agent-client-session-functions nil
   "Functions called with a client, a session's id, and what came of it:
-\=(opened REPLY), (event PARAMS) or (changed PARAMS), each in the order
-its revisions give, or (failed ERROR) when an open, the first or one to
-recover, is refused: nothing more comes of it until it is opened again.")
+\=(opened REPLY), (event PARAMS), (changed PARAMS), (pending-added PARAMS)
+or (pending-resolved PARAMS), each in the order its revisions give, or
+\(failed ERROR) when an open, the first or one to recover, is refused:
+nothing more comes of it until it is opened again.")
 
 (defvar romacs-agent-client-instance nil
   "This process's name as a client, kept across its connections: a UUID
@@ -130,7 +131,7 @@ result and nil, or nil and the error, once its reply comes."
       (let ((callback (gethash id (romacs-agent-client-pending client))))
         (remhash id (romacs-agent-client-pending client))
         (funcall callback (gethash "result" message) (gethash "error" message))))
-     ((member method '("agents/event" "agents/session.changed"))
+     ((member method '("agents/event" "agents/session.changed" "agents/pending.added" "agents/pending.resolved"))
       (romacs-agent-client--session-notice client method (gethash "params" message)))
      ((equal method "agents/sessions.changed")
       (let ((params (gethash "params" message)) (watch (romacs-agent-client-watch client)))
@@ -266,7 +267,10 @@ history is read, against the open's."
      (t
       (aset state 0 revision)
       (run-hook-with-args 'romacs-agent-client-session-functions client id
-                          (list (if (equal method "agents/event") 'event 'changed) params))))))
+                          (list (pcase method
+                                  ("agents/event" 'event) ("agents/pending.added" 'pending-added)
+                                  ("agents/pending.resolved" 'pending-resolved) (_ 'changed))
+                                params))))))
 
 (defun romacs-agent-client-history (client id params callback &optional expect)
   "Ask CLIENT's service for session ID's history (`agents/session.history'
@@ -307,16 +311,18 @@ units are not to be joined to that history."
   "Functions called with a client, a session's id and what came of
 following it: (drawn UNITS FROM), all of it to draw afresh, its units
 beginning at seq FROM (nil, at its start); (more UNITS), units that
-follow those drawn; (row ROW), its row now; (failed ERROR), not
-followed; (ended), the connection gone.")
+follow those drawn; (pending REQUESTS), what it waits on now, a table of
+handle id to request, told in order with its units; (row ROW), its row
+now; (failed ERROR), not followed; (ended), the connection gone.")
 
 (cl-defstruct (romacs-agent-client--follow (:constructor romacs-agent-client--follow-make) (:copier nil))
   "A session followed: the TURNS and RECORDS its drawing begins with, the
 GENERATION of its open, the CURSOR the open answered (its epoch and
 adapter what history must be read under), the SEQ of the last record
-drawn, and while history is read (PULLING), the live notices HELD,
-newest first."
-  turns records (generation 0) cursor (seq 0) pulling held)
+drawn, the requests it waits on (PENDING, by handle id), and while
+history is read (PULLING), the live notices HELD, newest first, each
+\(KIND . PARAMS)."
+  turns records (generation 0) cursor (seq 0) (pending (make-hash-table :test #'equal)) pulling held)
 
 (defun romacs-agent-client-follow (client id turns records)
   "Follow session ID on CLIENT, drawn from its last TURNS turns, no more
@@ -344,15 +350,19 @@ than RECORDS records: `romacs-agent-client-follow-functions' is told."
                (romacs-agent-client--follow-pulling follow) t
                (romacs-agent-client--follow-held follow) nil)
          (when (hash-table-p (gethash "row" reply)) (romacs-agent-client--tell client id (list 'row (gethash "row" reply))))
+         (let ((pending (romacs-agent-client--follow-pending follow)))
+           (clrhash pending)
+           (seq-doseq (request (gethash "pending" reply)) (puthash (gethash "id" (gethash "handle" request)) request pending))
+           (romacs-agent-client--tell client id (list 'pending pending)))
          (romacs-agent-client--read
           client id follow generation 'drawn (gethash "seq" (gethash "cursor" reply))
           (romacs-agent-rpc-object "upto" (gethash "seq" (gethash "cursor" reply))
                                    "turns" (romacs-agent-client--follow-turns follow)
                                    "records" (romacs-agent-client--follow-records follow)))))
-      (`(event ,params)
+      (`(,(and kind (or 'event 'pending-added 'pending-resolved)) ,params)
        (if (romacs-agent-client--follow-pulling follow)
-           (push params (romacs-agent-client--follow-held follow))
-         (romacs-agent-client--apply client id follow params)))
+           (push (cons kind params) (romacs-agent-client--follow-held follow))
+         (romacs-agent-client--apply client id follow (cons kind params))))
       (`(changed ,params) (romacs-agent-client--tell client id (list 'row (gethash "row" params))))
       (`(failed ,error)
        (remhash id (romacs-agent-client-follows client))
@@ -360,11 +370,19 @@ than RECORDS records: `romacs-agent-client-follow-functions' is told."
 
 (add-hook 'romacs-agent-client-session-functions #'romacs-agent-client--followed)
 
-(defun romacs-agent-client--apply (client id follow params)
-  "Apply PARAMS, a live `agents/event' of session ID, to its FOLLOW: a gap
-read as history, a unit past what is drawn passed on."
-  (let ((gap (gethash "gap" params)) (seq (gethash "seq" params)))
+(defun romacs-agent-client--apply (client id follow notice)
+  "Apply NOTICE, (KIND . PARAMS), live of session ID, to its FOLLOW: a
+request it waits on or no longer; an event's gap read as history, a unit
+past what is drawn passed on."
+  (let* ((kind (car notice)) (params (cdr notice)) (gap (gethash "gap" params)) (seq (gethash "seq" params))
+         (pending (romacs-agent-client--follow-pending follow)))
     (cond
+     ((eq kind 'pending-added)
+      (puthash (gethash "id" (gethash "handle" (gethash "request" params))) (gethash "request" params) pending)
+      (romacs-agent-client--tell client id (list 'pending pending)))
+     ((eq kind 'pending-resolved)
+      (remhash (gethash "id" (gethash "handle" params)) pending)
+      (romacs-agent-client--tell client id (list 'pending pending)))
      ((hash-table-p gap)
       (let ((after (max (romacs-agent-client--follow-seq follow) (gethash "after" gap))) (upto (gethash "upto" gap)))
         (when (< after upto)

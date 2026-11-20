@@ -610,8 +610,10 @@ event saying how long it was (Framing).")
 
 (cl-defstruct (romacs-agent-service--subscription (:constructor romacs-agent-service--subscription-make)
                                                   (:copier nil))
-  "A connection's subscription to a session: its CUTOFF seq and REVISION."
-  cutoff (revision 0))
+  "A connection's subscription to a session: its CUTOFF seq, REVISION,
+and the requests it was told are PENDING, by harness id: each (EVENT .
+REQUEST), the approval event raised of it and its wire request."
+  cutoff (revision 0) (pending (make-hash-table :test #'equal)))
 
 (defun romacs-agent-service--subscriptions (id)
   "Each (RPC . SUBSCRIPTION) to session ID."
@@ -693,14 +695,27 @@ and encodable where they stand in it (a harness's JSON may nest too deep)."
           romacs-agent-service--unit-limit)
     (error nil)))
 
-(defun romacs-agent-service--bounded (events)
-  "EVENTS as sent, a vector of wire objects, within the unit's limit: each
+(defun romacs-agent-service--asked (session events)
+  "EVENTS with what the protocol says of SESSION's requests: the run each
+approval, answer and who gave it was asked in, and whether this editor's
+policy answers an approval (the policy runs here alone)."
+  (mapcar (lambda (event)
+            (if (memq (plist-get event :type) '(approval answered attributed))
+                (append event (list :run (plist-get (romacs-agent-driver-state session) :run))
+                        (and (eq (plist-get event :type) 'approval)
+                             (list :policy (romacs-agent--auto-answer-p session event))))
+              event))
+          events))
+
+(defun romacs-agent-service--bounded (events &optional session)
+  "EVENTS, SESSION's, as sent, a vector of wire objects, within the unit's
+limit (`romacs-agent-service--asked' of SESSION when given): each
 string cut to the string limit, then to less while the unit is over, an
 event with a cut string naming each by its JSON Pointer under `truncated',
 with the length it had.  A unit still over, or not encodable, is
 `oversize': its events are not sent."
   (or (ignore-errors
-        (let ((unit (romacs-agent-wire-unit events)))
+        (let ((unit (romacs-agent-wire-unit (if session (romacs-agent-service--asked session events) events))))
           (cl-loop for limit in (list romacs-agent-service--string-limit 8192 1024)
                    for bounded = (vconcat (mapcar (lambda (event)
                                                     (let* ((cut (list nil))
@@ -738,11 +753,72 @@ event."
       (let ((events (nreverse (gethash id romacs-agent-service--units))) (seq (plist-get event :seq)))
         ;; Taken before it is encoded: a failure never leaves it for the next.
         (remhash id romacs-agent-service--units)
-        (let ((sent (romacs-agent-service--bounded events)))
-          (unless (equal sent [])
-            (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
-              (when (> seq (romacs-agent-service--subscription-cutoff subscription))
-                (romacs-agent-service--send-unit rpc subscription id seq sent)))))))))
+        (let ((sent (romacs-agent-service--bounded events session)))
+          (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
+            (when (> seq (romacs-agent-service--subscription-cutoff subscription))
+              (unless (equal sent []) (romacs-agent-service--send-unit rpc subscription id seq sent))
+              (romacs-agent-service--pending-changed rpc subscription session events))))))))
+
+;;; Pending requests
+
+(defun romacs-agent-service--requests (session &optional events)
+  "What SESSION waits on now, by its harness's request id: each (EVENT .
+REQUEST), the approval event asking it (EVENTS' own when one is there,
+with its time), and its wire request (Pending requests)."
+  (let ((requests (make-hash-table :test #'equal)) (approvals (romacs-agent-approvals session)))
+    (when (hash-table-p approvals)
+      (maphash (lambda (id request)
+                 (let ((event (car (romacs-agent-service--asked
+                                    session (list (or (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'approval)
+                                                                                       (equal (plist-get event :request-id) id)))
+                                                                  events)
+                                                      (romacs-agent-request-event id request)))))))
+                   (puthash id (cons event (romacs-agent-wire-request event)) requests)))
+               approvals))
+    requests))
+
+(defun romacs-agent-service--resolution (id events)
+  "How request ID left, as EVENTS, the record unit it left in, say:
+`pending.resolved''s params but the session's and its revision's."
+  (let ((answered (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'answered) (equal (plist-get event :request-id) id)))
+                              events))
+        (attributed (cl-find-if (lambda (event) (and (eq (plist-get event :type) 'attributed) (equal (plist-get event :request-id) id)))
+                                events)))
+    (romacs-agent-rpc-object
+     "how" (cond ((and answered (plist-get answered :behavior)) "answered")
+                 (answered "harness")
+                 ((cl-find 'exit events :key (lambda (event) (plist-get event :type))) "exit")
+                 ((cl-find 'done events :key (lambda (event) (plist-get event :type))) "turn-end")
+                 (t "harness"))
+     "actor" (romacs-agent-rpc-object "kind" (cond ((null answered) (if attributed "user" "harness"))
+                                                   ((member (plist-get attributed :by) '("user" "policy")) (plist-get attributed :by))
+                                                   (attributed "user")
+                                                   ((plist-get answered :behavior) "unknown")
+                                                   (t "harness"))
+                                      "login" :null "client" :null)
+     "decision" (or (plist-get attributed :decision) (plist-get answered :behavior) :null)
+     "scope" (or (plist-get attributed :scope) :null)
+     "reason" (or (plist-get attributed :reason) :null)
+     "answers" (or (plist-get attributed :answers) (plist-get answered :answers) :null))))
+
+(defun romacs-agent-service--pending-changed (rpc subscription session events)
+  "Tell RPC what SESSION waits on that SUBSCRIPTION was not told, and what
+it no longer waits on, EVENTS the record unit that changed it, if any."
+  (let ((known (romacs-agent-service--subscription-pending subscription))
+        (now (romacs-agent-service--requests session events)) (id (romacs-agent-id session)))
+    (maphash (lambda (harness-id asked)
+               (unless (gethash harness-id now)
+                 (remhash harness-id known)
+                 (let ((params (romacs-agent-service--resolution harness-id events)))
+                   (puthash "handle" (gethash "handle" (cdr asked)) params)
+                   (romacs-agent-service--notify rpc subscription id "agents/pending.resolved" params))))
+             (copy-hash-table known))
+    (maphash (lambda (harness-id asked)
+               (unless (gethash harness-id known)
+                 (puthash harness-id asked known)
+                 (romacs-agent-service--notify rpc subscription id "agents/pending.added"
+                                               (romacs-agent-rpc-object "request" (cdr asked)))))
+             now)))
 
 (defun romacs-agent-service--loaded (session _manifest)
   "SESSION is loaded, its records folded to its seq with no events raised
@@ -754,7 +830,8 @@ It reads nothing."
       (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
         (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
           (when (> seq cutoff)
-            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq))))))))
+            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq))
+            (romacs-agent-service--pending-changed rpc subscription session nil)))))))
 
 (defun romacs-agent-service--row-changed (row)
   "Tell the subscribers of ROW's session its row."
@@ -775,10 +852,13 @@ a session not loaded stays so."
            (reply (romacs-agent-rpc-object
                    "revision" 0 "cursor" cursor
                    "row" (or (gethash id (romacs-agent-service--list-rows romacs-agent-service--list)) :null)
-                   "pending" [] "answering" [] "queue" [] "undelivered" [] "more" :null)))
+                   "pending" [] "answering" [] "queue" [] "undelivered" [] "more" :null))
+           (subscription (romacs-agent-service--subscription-make :cutoff seq)))
+      (let ((requests (romacs-agent-service--requests session)))
+        (puthash "pending" (vconcat (mapcar #'cdr (hash-table-values requests))) reply)
+        (setf (romacs-agent-service--subscription-pending subscription) requests))
       ;; Made only once its reply is: a reply that fails subscribes nothing.
-      (puthash id (romacs-agent-service--subscription-make :cutoff seq)
-               (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))
+      (puthash id subscription (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))
       reply)))
 
 (defun romacs-agent-service--close (rpc params)
@@ -925,11 +1005,11 @@ RPC's connection or the service is gone."
                         (setq done 'gone))
                        (t
                         (let ((romacs-agent-event-functions
-                               (list (lambda (_ event)
+                               (list (lambda (copy event)
                                        (when-let* ((seq (plist-get event :seq)))
                                          (when (> seq after) (push event unit))
                                          (when (and (plist-get event :last) unit)
-                                           (let ((sent (romacs-agent-service--bounded (nreverse unit))))
+                                           (let ((sent (romacs-agent-service--bounded (nreverse unit) copy)))
                                              ;; A unit of no events sent is none.
                                              (unless (equal sent [])
                                                (setq bytes (+ bytes (if (vectorp sent) (string-bytes (json-serialize sent)) 0)))

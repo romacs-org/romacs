@@ -663,6 +663,58 @@ a state root of its own, and a service of its own on `socket'."
         (kill-buffer local)
         (when remote (kill-buffer remote))))))
 
+(ert-deftest romacs-agent-service-a-remote-chat-shows-what-waits ()
+  ;; A question the session waits on when its remote chat opens is drawn
+  ;; there as here; one that comes live is added, then resolved with how
+  ;; and by whom, the chat settling it.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask)
+           (question (lambda (id text)
+                       (let ((request (make-hash-table :test #'equal)))
+                         (puthash "tool_name" "AskUserQuestion" request)
+                         (puthash "input" (json-parse-string (format "{\"questions\":[{\"question\":%S,\"options\":[{\"label\":\"Tea\"},{\"label\":\"Coffee\"}]}]}" text)) request)
+                         (puthash id request (romacs-agent-approvals session)))))
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max)))))
+           (source nil) (client nil) (local nil) (remote nil))
+      (funcall question "q-old" "Tea or coffee?")
+      (setq source (romacs-agent-remote-connect socket) client (romacs-agent-remote-client source)
+            local (romacs-agent-log-chat session))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision client)))
+            (setq remote (romacs-agent-remote-chat id))
+            (should (wait (string-search "Tea or coffee?" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            (let ((follow (gethash id (romacs-agent-client-follows client))))
+              (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 1))
+              ;; One asked live: its approval event, and it waits.
+              (funcall question "q-new" "Milk?")
+              (run-hook-with-args 'romacs-agent-event-functions session
+                                  (list :type 'approval :request-id "q-new" :tool "AskUserQuestion" :user t
+                                        :input (romacs-agent-rpc-object)
+                                        :questions '(("Milk?" :header nil :options ("Tea" "Coffee") :notes nil :multi nil))
+                                        :seq 20 :last t :time (float-time)))
+              (should (wait (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2)))
+              (should (string-search "Milk?" (funcall text remote)))
+              ;; Answered: it leaves, answered, by the user.
+              (let ((resolved nil))
+                (add-hook 'romacs-agent-client-session-functions
+                          (lambda (_c _id notice) (when (eq (car notice) 'pending-resolved) (setq resolved (cadr notice)))))
+                (remhash "q-new" (romacs-agent-approvals session))
+                (run-hook-with-args 'romacs-agent-event-functions session
+                                    (list :type 'attributed :request-id "q-new" :by "user" :decision "allow" :seq 21 :last nil :time (float-time)))
+                (run-hook-with-args 'romacs-agent-event-functions session
+                                    (list :type 'answered :request-id "q-new" :behavior "allow" :seq 21 :last t :time (float-time)))
+                (should (wait resolved))
+                (should (equal (gethash "how" resolved) "answered"))
+                (should (equal (gethash "kind" (gethash "actor" resolved)) "user"))
+                (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 1)))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
+
 (ert-deftest romacs-agent-service-history-stops-at-its-bound ()
   ;; Past its bytes' bound a reply stops, its cursor where; the client asks
   ;; on from there.  A reply under another epoch than the history held is

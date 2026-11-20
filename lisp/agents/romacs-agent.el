@@ -495,6 +495,19 @@ the user, not a tool call to approve."
 (defun romacs-agent--set-questions (session questions)
   (setf (romacs-agent-driver-state session) (plist-put (romacs-agent-driver-state session) :questions questions)))
 
+(defun romacs-agent-request-event (id request)
+  "An approval event for request ID, REQUEST as its harness asked it: a
+table (Claude Code's), else (WIRE METHOD PARAMS) (Codex's); its questions
+read as its harness's events read them."
+  (if (hash-table-p request)
+      (let ((tool (gethash "tool_name" request)) (input (gethash "input" request)))
+        (list :type 'approval :request-id id :tool tool :input input
+              :description (gethash "description" request) :plan (equal tool "ExitPlanMode")
+              :questions (and (equal tool "AskUserQuestion") (romacs-agent--claude-questions input))))
+    (pcase-let ((`(,_ ,method ,params) request))
+      (list :type 'approval :request-id id :tool method :input params
+            :questions (and (equal method "item/tool/requestUserInput") (romacs-agent--codex-questions params))))))
+
 (defun romacs-agent--auto-answer-p (session event)
   "Whether Romacs answers SESSION's approval EVENT itself: a tool call,
 under the `allow' policy, out of plan mode.  A plan presented, a question,

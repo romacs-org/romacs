@@ -480,8 +480,8 @@ paging ever holds live delivery back.
    "plan": null,
    "choices": [{"decision": "allow|deny", "scope": "once|turn|session"}]}
   #+end_src
-  - =tool=, =questions= and =plan= are present as the kind needs, else
-    =null=.
+  - =tool= is the call that asks; =questions= and =plan= are present as
+    the kind needs, else =null=.
   - =handle.run= is the seq of the harness run's =run= note, so a
     request id reused by a later run is a different request.
     =handle.id= is the service's short id for the request; the harness's
@@ -704,14 +704,14 @@ paging ever holds live delivery back.
 | =rolled-back= | =to turns prompt files= |
 | =replied= | =message reply by_user= |
 | =unknown= | =raw method= (a harness line Romacs does not read) |
+| =approval= | =request parent policy= (=policy=: the serving editor's policy answers it) |
+| =answered=, =attributed= | =handle behavior answers=; =handle by decision scope reason answers= |
 
 - *Reading back.*  =romacs-agent-wire-decode= reads an event as it was
   raised: the schema names the fields read back as a name or as data.
 - *Vectors.*  =test/romacs/lisp/romacs-agent-wire-tests.el=: a turn of
   each harness, each record with the events sent for it, read back and
   drawn as the chat draws them raised.
-- *Requests add* =approval=, =answered= and =attributed=, keyed by
-  service handles (Pending requests).
 - A tool's output is its completed item's, as its harness caps it:
   streamed output is live only; compaction removes it once the item
   completes.

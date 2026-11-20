@@ -119,7 +119,8 @@ as its live events are drawn."
   (when-let* ((source romacs-agent-remote--source)
               ((eq client (romacs-agent-remote-client source))))
     (pcase notice
-      (`(row ,row) (romacs-agent-remote--mirror source row)))
+      (`(row ,row) (romacs-agent-remote--mirror source row))
+      (`(pending ,requests) (romacs-agent-remote--waits source id requests)))
     (when-let* ((buffer (romacs-agent-remote--chat source id)))
       (with-current-buffer buffer
         (let ((session romacs-agent-log--session))
@@ -127,6 +128,9 @@ as its live events are drawn."
             (`(drawn ,units ,from) (romacs-agent-remote--drawn session units from))
             (`(more ,units) (dolist (unit units) (romacs-agent-remote--draw-unit session unit t)))
             (`(row ,_) (romacs-agent-log--separator) (romacs-agent-log--header-show))
+            (`(pending ,_)
+             (when romacs-agent-log--filled (romacs-agent-log--sync-asks session))
+             (romacs-agent-log--separator))
             (`(failed ,error)
              (romacs-agent-log--writing
                (romacs-agent-log--note nil (format "not followed: %s" (gethash "message" error)))))
@@ -164,6 +168,24 @@ the chat is killed."
              (`(,units ,from)
               (romacs-agent-log--draw-above
                session from (lambda () (dolist (unit units) (romacs-agent-remote--draw-unit session unit))))))))))))
+
+(defun romacs-agent-remote--waits (source id requests)
+  "SOURCE's session ID waits on REQUESTS, a table of handle id to request:
+its mirror's approvals, each the approval event that asks it."
+  (when-let* ((session (gethash id (romacs-agent-remote-sessions source))))
+    (let ((approvals (make-hash-table :test #'equal)))
+      (maphash (lambda (handle request)
+                 (puthash handle (append (list :type 'approval) (romacs-agent-wire--asked request)) approvals))
+               requests)
+      (setf (romacs-agent-approvals session) approvals))))
+
+(cl-defmethod romacs-agent-log-source-request-event ((_source romacs-agent-remote) _id request)
+  "REQUEST, of a mirror's approvals, is its approval event."
+  request)
+
+(cl-defmethod romacs-agent-log-source-answers-p ((_source romacs-agent-remote) _session event)
+  "Whether the policy of the editor serving EVENT answers it, as it said."
+  (eq (plist-get event :policy) t))
 
 (cl-defmethod romacs-agent-log-source-chats ((source romacs-agent-remote))
   (romacs-agent-remote-chats source))
