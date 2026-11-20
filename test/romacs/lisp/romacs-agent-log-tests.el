@@ -1033,6 +1033,17 @@
           :input (romacs-agent-log-tests--input "title" "two\nlines"))
     (draw :type 'tool :state 'completed :id "d" :output "{\"title\":\"two\\nlines\",\"state\":\"running\"}")
     (should (string-match-p "⑂ two lines · running\n" (romacs-agent-log-tests--transcript)))
+    ;; A subagent's call: RET on its rewritten row shows its details too.
+    (draw :type 'tool :state 'started :id "a" :name "Agent" :input (romacs-agent-log-tests--input "description" "sub"))
+    (draw :type 'tool :state 'started :id "n" :name "mcp__romacs__romacs_task_status" :parent "a"
+          :input (romacs-agent-log-tests--input "taskId" "t2"))
+    (draw :type 'tool :state 'completed :id "n" :parent "a" :output "{\"title\":\"inner\",\"status\":\"done\",\"result\":\"nested report\"}")
+    (goto-char (point-min))
+    (search-forward "◷ inner")
+    (save-window-excursion (romacs-agent-log-open))
+    (with-current-buffer "*agent output*"
+      (should (string-match-p "nested report\n\nInput:" (buffer-string)))
+      (kill-buffer))
     (should-not (string-match-p "^lines" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-a-streamed-reply-keeps-its-link-definitions ()

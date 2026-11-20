@@ -517,9 +517,12 @@ of it (`romacs-agent-rows-ended'), after its mark."
         (goto-char start)
         (let ((end (line-end-position)))
           (when (search-forward "● " end t)
-            (let ((properties (list 'romacs-agent-log-seq (get-text-property start 'romacs-agent-log-seq)
-                                    'romacs-agent-log-full (get-text-property start 'romacs-agent-log-full)
-                                    'romacs-agent-log-tool (get-text-property start 'romacs-agent-log-tool))))
+            ;; The row's own, at its mark: a subagent's row starts with
+            ;; its indentation.
+            (let* ((mark (match-beginning 0))
+                   (properties (list 'romacs-agent-log-seq (get-text-property mark 'romacs-agent-log-seq)
+                                     'romacs-agent-log-full (get-text-property mark 'romacs-agent-log-full)
+                                     'romacs-agent-log-tool (get-text-property mark 'romacs-agent-log-tool))))
               (romacs-agent-log--writing
                 (delete-region (point) end)
                 (insert (romacs-agent-log--sealed (apply #'propertize ended properties)))))))))))
