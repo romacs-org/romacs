@@ -43,24 +43,12 @@
 (require 'romacs-agent-rows)
 (require 'romacs-agent-store)
 
-(require 'keymap-popup)
 (require 'romacs-working)
 
 ;; The actions the chat's menu offers on its session are the chat's of
 ;; before (romacs-agent-ui.el), which read the session from here too.
 (defvar romacs-agent-ui--session)
 (defvar romacs-agent-ui-changed-hook)
-(declare-function romacs-agent-chat-model "romacs-agent-ui" (model effort))
-(declare-function romacs-agent-chat-effort "romacs-agent-ui" (effort))
-(declare-function romacs-agent-chat-plan "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-handoff "romacs-agent-ui" (provider model next))
-(declare-function romacs-agent-chat-next-account "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-new "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-rename "romacs-agent-ui" (title))
-(declare-function romacs-agent-chat-fork "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-renew "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-resume "romacs-agent-ui" ())
-(declare-function romacs-agent-chat-stop "romacs-agent-ui" ())
 (declare-function romacs-markdown-fontify-region "romacs-markdown" (beg end &optional from))
 (declare-function romacs-agent-ask-open "romacs-agent-ask" (session id questions &optional place))
 (declare-function romacs-agent-ui--header-text "romacs-agent-ui" (inputs))
@@ -1430,46 +1418,13 @@ transcript's comes with it."
 
 ;;; Keys and mode
 
-(keymap-popup-define romacs-agent-log-actions-map
-  "Actions of an agent chat: what waits on you, the turn, what it runs on,
-the session, the view."
-  :popup-key "?"
-  :exit-key "C-g"
-  :group ("Waits on you" :if (lambda () (and romacs-agent-log--session (romacs-agent-log--pending))))
-  "y" ("Allow" romacs-agent-log-allow)
-  "!" ("Allow for this session" romacs-agent-log-allow-always)
-  "d" ("Deny" romacs-agent-log-deny)
-  "j" ("Go to it" romacs-agent-log-next-ask)
-  :group "Turn"
-  "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
-  "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
-  "q" ("Send when the turn ends" romacs-agent-log-queue)
-  :group ("Runs on" :if #'romacs-agent-log--commands-p)
-  "m" ("Model" romacs-agent-chat-model)
-  "E" ("Effort" romacs-agent-chat-effort)
-  "P" ("Plan mode on or off" romacs-agent-chat-plan)
-  "H" ("Go on under another instance" romacs-agent-chat-handoff)
-  "N" ("Next account with room" romacs-agent-chat-next-account)
-  :row
-  :group ("Session" :if #'romacs-agent-log--commands-p)
-  "b" ("Agent board" romacs-agents)
-  "n" ("New session" romacs-agent-chat-new)
-  "R" ("Rename" romacs-agent-chat-rename)
-  "f" ("Fork" romacs-agent-chat-fork)
-  "F" ("Fresh conversation, briefed" romacs-agent-chat-renew)
-  "r" ("Resume" romacs-agent-chat-resume :inapt-if #'romacs-agent-log--running-p)
-  "x" ("Stop" romacs-agent-chat-stop)
-  :group "View"
-  "e" ("Earlier turns" romacs-agent-log-earlier)
-  "w" ("Copy the entry at point" romacs-agent-log-copy))
-
 (defvar-keymap romacs-agent-log-transcript-map
   :doc "Keys of a chat's transcript: a `keymap' text property, as a view's.
 A character typed on it goes to the composer."
   "<remap> <self-insert-command>" #'romacs-agent-log-type
   "SPC" #'scroll-up-command
   "DEL" #'scroll-down-command
-  "?" #'romacs-agent-log-actions-map-popup
+  "?" #'romacs-agent-menu-map-popup
   "n" #'romacs-agent-log-next
   "p" #'romacs-agent-log-previous
   "M-n" #'romacs-agent-log-next-prompt
@@ -1499,11 +1454,10 @@ A character typed on it goes to the composer."
   "C-c C-p" #'romacs-agent-log-next-ask
   "C-c C-j" #'romacs-agent-log-composer
   "C-c C-b" #'romacs-agents
-  "C-c C-o" #'romacs-agent-log-actions-map-popup
+  "C-c C-o" #'romacs-agent-menu-map-popup
   "M-p" #'romacs-agent-log-history-previous
   "M-n" #'romacs-agent-log-history-next)
 
-(put 'romacs-agent-log-actions-map-popup 'command-modes '(romacs-agent-log-mode))
 
 (define-derived-mode romacs-agent-log-mode fundamental-mode "Agent"
   "An agent session's chat: its transcript, and below, the composer.
