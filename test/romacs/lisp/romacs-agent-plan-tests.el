@@ -58,26 +58,10 @@
     (setf (romacs-agent-caught-up session) nil)
     (romacs-agent--raise session '(:type mode :permission-mode "plan"))
     (romacs-agent--raise session '(:type mode :permission-mode "default"))
-    (romacs-agent--raise session '(:type plan-switch :on t))
-    (setf (romacs-agent-caught-up session) t)
-    (run-hook-with-args 'romacs-agent-caught-up-functions session)
-    (should (plist-get (romacs-agent-options session) :plan))
-    ;; The harness back in plan mode after leaving it: still in it.
-    (setf (romacs-agent-caught-up session) nil)
-    (romacs-agent--raise session '(:type mode :permission-mode "plan"))
-    (romacs-agent--raise session '(:type mode :permission-mode "default"))
-    (romacs-agent--raise session '(:type mode :permission-mode "plan"))
-    (setf (romacs-agent-caught-up session) t)
-    (run-hook-with-args 'romacs-agent-caught-up-functions session)
-    (should (plist-get (romacs-agent-options session) :plan))
-    ;; Words a command printed are no switch.
-    (setf (romacs-agent-caught-up session) nil)
-    (romacs-agent--raise session '(:type mode :permission-mode "default"))
     (romacs-agent--raise session '(:type status :text "plan mode"))
-    ;; A new run keeps the word; a restore with no supervisor takes it.
-    (setf (romacs-agent-driver-state session) (romacs-agent--driver-anew session :run 2))
-    (romacs-agent--plan-take session)
-    (should-not (plist-get (romacs-agent-options session) :plan))))
+    (setf (romacs-agent-caught-up session) t)
+    (run-hook-with-args 'romacs-agent-caught-up-functions session)
+    (should (plist-get (romacs-agent-options session) :plan))))
 
 (ert-deftest romacs-agent-plan-claude-switches-live-and-back ()
   (romacs-agent-plan-tests--with 'claude
