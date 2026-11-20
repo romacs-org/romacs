@@ -279,6 +279,33 @@ fn a_quit_in_call_process_keeps_the_output_read() {
     assert!(latency < Duration::from_millis(100), "the call ended {latency:?} after C-g");
 }
 
+/// C-g during a call-process a macro's expansion runs, as `eval' compiles
+/// the form that calls it, with output read: the quit stays C-g's through
+/// the output's insertion and its signal, so the expansion defers it to the
+/// call's reach (`quit_watched'), which raises it without expanding the
+/// macro, and running its child, a second time. The child counts its runs
+/// in a file; only the first writes and waits.
+#[test]
+fn a_quit_in_an_expansions_call_process_runs_its_child_once() {
+    let (mut vm, signal, base) = busy_gnu_vm("expansion");
+    let (marker, pidfile, count) = (base.join("written"), base.join("pid"), base.join("count"));
+    let script = "n=$(cat \"$3\" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > \"$3\"; \
+                  if [ $n = 1 ]; then echo $$ > \"$2\"; head -c 4096 /dev/zero | tr '\\000' a; : > \"$1\"; exec sleep 30; fi";
+    let [marker_name, pid_name, count_name] = [&marker, &pidfile, &count].map(|path| path.display().to_string());
+    vm.eval_source(&format!(r#"(progn (setq default-directory "/")
+        (defmacro quit-expansion-child ()
+          (with-temp-buffer (let ((coding-system-for-read 'no-conversion))
+            (call-process "sh" nil t nil "-c" {script:?} "sh" {marker_name:?} {pid_name:?} {count_name:?})))
+          ''expanded))"#)).unwrap();
+    let presser = press_once_drained(&signal, &marker, &pidfile);
+    let value = vm.eval_source("(condition-case nil (eval '(list (quit-expansion-child)) t) (quit 'quit))")
+        .and_then(romacs_vm::Local::display);
+    presser.join().unwrap();
+    let runs = std::fs::read_to_string(&count).unwrap();
+    std::fs::remove_dir_all(&base).unwrap();
+    assert_eq!((value.as_deref(), runs.trim()), (Ok("quit"), "1"), "one C-g quits the call, its child run once");
+}
+
 // A host outlives its VM: children the VM leaves, running or deleted, are
 // still reaped once they exit, not left as zombies.
 #[test]
