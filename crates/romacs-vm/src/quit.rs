@@ -194,10 +194,13 @@ impl Vm {
         self.quit_fault()
     }
 
-    /// Whether a native poll quits now: a press while `inhibit-quit` is nil
-    /// (under it the press stays pending), or a debug event whatever it is.
+    /// Whether a native poll quits now: a press, or `quit-flag` already set
+    /// (a C-g an `inhibit-quit` held, then released), while `inhibit-quit`
+    /// is nil (under it either stays pending), or a debug event whatever it
+    /// is. GNU's `maybe_quit` reads `Vquit_flag` the same way.
     fn native_quit_wanted(&self) -> bool {
-        let press = self.quit.due() && self.quit_variables()[1] == Value::NIL;
+        let [flag, inhibit, _] = self.quit_variables();
+        let press = (self.quit.due() || flag != Value::NIL) && inhibit == Value::NIL;
         press || crate::host::user_signal_waiting(self.debug_event_mask())
     }
 
@@ -266,8 +269,8 @@ impl Vm {
     pub(crate) fn own_stop_due(&self) -> bool {
         if !self.native_quit_reached() { return false; }
         crate::gap_probe::safepoint(None);
-        let held = self.quit_variables()[1] != Value::NIL;
-        (!held && (self.quit.pressed() || self.quit.deadline_current()))
+        let [flag, inhibit, _] = self.quit_variables();
+        (inhibit == Value::NIL && (self.quit.pressed() || self.quit.deadline_current() || flag != Value::NIL))
             || crate::host::user_signal_waiting(self.debug_event_mask())
     }
 
@@ -275,10 +278,11 @@ impl Vm {
     /// without the VM: armed only where the poll would act, so a stop it
     /// asks for always ends in `quit`.
     pub(crate) fn native_stop(&self) -> NativeStop {
-        let inhibit = self.quit_variables()[1];
+        let [flag, inhibit, _] = self.quit_variables();
         let armed = self.native_quit && self.native_quit_reached();
         NativeStop {
             quit: (armed && inhibit == Value::NIL).then(|| self.quit.clone()),
+            latched: armed && inhibit == Value::NIL && flag != Value::NIL,
             debug_events: if armed { self.debug_event_mask() } else { 0 },
         }
     }
@@ -580,13 +584,16 @@ pub(crate) struct Stopped;
 #[derive(Clone)]
 pub(crate) struct NativeStop {
     quit: Option<std::sync::Arc<QuitSignal>>,
+    /// `quit-flag` was already set when the probe was made, with
+    /// `inhibit-quit` nil: the first ask stops.
+    latched: bool,
     debug_events: u8,
 }
 
 impl NativeStop {
     /// A probe that never stops: for a loop no quit may reach.
     pub(crate) fn never() -> Self {
-        Self { quit: None, debug_events: 0 }
+        Self { quit: None, latched: false, debug_events: 0 }
     }
 
     /// Whether it may ever say to stop: a probe that cannot needs no
@@ -601,7 +608,7 @@ impl NativeStop {
     #[inline]
     pub(crate) fn due(&self) -> bool {
         if self.quit.is_some() { crate::gap_probe::safepoint(None); }
-        self.quit.as_ref().is_some_and(|quit| quit.pressed() || quit.deadline_current())
+        self.latched || self.quit.as_ref().is_some_and(|quit| quit.pressed() || quit.deadline_current())
             || crate::host::user_signal_waiting(self.debug_events)
     }
 }

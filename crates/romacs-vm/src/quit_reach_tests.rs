@@ -422,6 +422,42 @@ fn kernels_the_engine_runs_quit_per_chunk() {
     }
 }
 
+/// A C-g an `inhibit-quit` held, released before the call, leaves
+/// `quit-flag` set and no press: a native poll quits for it at once, as GNU's
+/// `maybe_quit` reads `Vquit_flag`, through the mutable poll (`append`'s
+/// kernel) and the borrowed probe (base64's decoder) alike. Under
+/// `inhibit-quit` the call runs to its end.
+#[test]
+fn a_native_poll_quits_for_a_latched_quit_flag() {
+    use crate::Primitive::Append;
+    let (mut vm, signal) = busy_vm();
+    let list = eval(&mut vm, "(make-list 50000 1)");
+    let (flag, inhibit) = (vm.slot("quit-flag"), vm.slot("inhibit-quit"));
+    let append = |vm: &mut Vm| {
+        let start = vm.stack.len();
+        vm.stack.extend_from_slice(&[list, Value::NIL]);
+        let outcome = vm.inside_quit_scope(|vm| vm.primitive(Append, start, 2));
+        vm.stack.truncate(start);
+        outcome
+    };
+    vm.slots[flag].value = Value::TRUE;
+    assert!(!signal.due(), "no press, only the flag");
+    assert_eq!(append(&mut vm).err().as_deref(), Some(crate::quit::ESCAPED), "append did not quit for quit-flag");
+    assert_eq!(vm.slots[flag].value, Value::NIL, "the quit took the flag");
+    vm.propagated_escape = None;
+    vm.quit_unwinding = false;
+    let call = prepare(&mut vm, "base64-decode-string", "(list (base64-encode-string (make-string 100000 ?a) t))");
+    vm.slots[flag].value = Value::TRUE;
+    let outcome = invoke(&mut vm, call);
+    assert!(quit_signalled(&mut vm, &outcome), "base64's probe did not stop for quit-flag");
+    vm.quit_unwinding = false;
+    vm.slots[inhibit].value = Value::TRUE;
+    vm.slots[flag].value = Value::TRUE;
+    assert!(append(&mut vm).is_ok(), "under inhibit-quit append ends with a value");
+    vm.slots[inhibit].value = Value::NIL;
+    vm.slots[flag].value = Value::NIL;
+}
+
 /// A C-g that lands in a kernel's poll reaches Lisp as `quit`, never as an
 /// error made of the poll's text: through `append` the engine runs, `apply`'s
 /// spread, and the loader's read of one long form.
