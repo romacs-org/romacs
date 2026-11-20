@@ -689,10 +689,9 @@ recorded answer settles its block."
                (romacs-agent-log--drop-ended id))
               ;; Still listed by a source that says so later, or drawn
               ;; from a source's history before what it waits on now:
-              ;; said, where it ended, once it lets it go, unless an
-              ;; answer settles it.
-              ((not romacs-agent-log--replaying)
-               (romacs-agent-log--drop-ended id)
+              ;; said, where it first ended, once it lets it go, unless
+              ;; an answer settles it.  A later turn's end is not its.
+              ((and (not romacs-agent-log--replaying) (not (assoc id romacs-agent-log--ended-asks)))
                (romacs-agent-log--close-stream)
                (push (cons id (cons (romacs-agent-log--entry (propertize (concat "· " why) 'face 'romacs-agent-log-note)
                                                              'note event)

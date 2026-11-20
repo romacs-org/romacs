@@ -416,6 +416,22 @@
       (should (string-match-p "Hello there" text))
       (should (< (string-search "the turn ended with it unanswered" text) (string-search "Hello" text))))))
 
+(ert-deftest romacs-agent-log-an-ask-ends-where-it-first-ended ()
+  ;; Its harness exited with it open; a later run's turn ends: it ended
+  ;; at the exit, said once.
+  (romacs-agent-log-tests--with
+    (let ((romacs-agent-log--closes-deferred t))
+      (draw :type 'approval :request-id "i" :tool "Bash")
+      (draw :type 'exit :status 1)
+      (draw :type 'delta :message "m2" :text "later run")
+      (draw :type 'done))
+    (romacs-agent-log--sync-asks session)
+    (let ((text (romacs-agent-log-tests--transcript)))
+      (should (string-match-p "the harness exited with it unanswered" text))
+      (should-not (string-match-p "the turn ended with it unanswered" text))
+      (should (< (string-search "exited with it unanswered" text) (string-search "later run" text))))
+    (should-not romacs-agent-log--ended-asks)))
+
 (ert-deftest romacs-agent-log-an-answer-without-its-actor-says-who ()
   ;; A service older than :actor sends who alone.
   (romacs-agent-log-tests--with
