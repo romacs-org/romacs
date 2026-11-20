@@ -11,9 +11,20 @@
           (sort (copy-sequence events)
                 (lambda (a b) (romacs-popup--rank< (romacs-popup--event-rank a) (romacs-popup--event-rank b))))))
 
+(ert-deftest romacs-popup-card-key-order-reads-which-key-s-keys ()
+  "As `which-key-sort-order', the order reads which-key's own bindings:
+a whole sequence by its last key, a range by its first; a description
+naming no key goes last."
+  (should (equal (mapcar #'car (sort (list (cons "C-x C-f" "") (cons "REM" "") (cons "C-x C-<left>" "") (cons "C-x a .. z" "")
+                                           (cons "C-x <left>" "") (cons "C-x TAB" "") (cons "C-x M-x" "") (cons "C-x 0 .. 9" ""))
+                                     #'romacs-popup-key-order))
+                 '("C-x a .. z" "C-x 0 .. 9" "C-x TAB" "C-x <left>" "C-x C-f" "C-x C-<left>" "C-x M-x" "REM")))
+  ;; A card's key carries its event: no parsing.
+  (should (eq (romacs-popup--key-event (propertize "x" 'romacs-popup-event 'f12)) 'f12)))
+
 (defun romacs-popup-card-tests--entry (key label binding &optional prefix-p source)
   "An entry as `romacs-popup--card-entry' makes it."
-  (list key label prefix-p (or source 'global) 0 binding nil))
+  (list key label prefix-p (or source 'global) 0 binding nil (cons key label)))
 
 (ert-deftest romacs-popup-card-keys-group-by-modifier ()
   "Unmodified keys first (letters, digits, punctuation, named keys), then
@@ -27,7 +38,7 @@ each modifier's together: C-SPC and C-+ sit with C-a."
 
 (defun romacs-popup-card-tests--keys (rows)
   "Each of ROWS as its keys: the first, then the others."
-  (mapcar (lambda (e) (cons (car e) (nth 7 e))) rows))
+  (mapcar (lambda (e) (cons (car e) (nth 6 e))) rows))
 
 (ert-deftest romacs-popup-card-one-command-one-row ()
   "Keys bound to one command share its first key's row, the others drawn

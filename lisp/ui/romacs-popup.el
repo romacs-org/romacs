@@ -561,7 +561,10 @@ precedence order."
 
 (defun romacs-popup--card-entry (prefix winner)
   "WINNER of PREFIX as the card shows it: (KEY LABEL PREFIX-P SOURCE ORDER
-BINDING EVENT), EVENT its key's (a range's first), or nil to leave it out
+BINDING ALSO SORT), ALSO nil (`romacs-popup--card-merge' fills it),
+SORT the binding as which-key's own sort sees it, (FULL-KEY . NAME): the
+whole sequence (a range `a .. z'), carrying its event (a range's first)
+as `romacs-popup-event', and the command's name; or nil to leave it out
 \(`ignore', `undefined', a which-key replacement to nil)."
   (pcase-let* ((`(,key ,binding ,source ,order) winner)
                (item (and (eq (car-safe binding) 'menu-item) binding))
@@ -575,10 +578,14 @@ BINDING EVENT), EVENT its key's (a range's first), or nil to leave it out
                (name (cond ((and binding (symbolp binding)) (symbol-name binding))
                            (prefix-p "prefix")
                            (t (or (romacs-popup--hint-label binding) "function"))))
-               (map (and prefix-p (if (symbolp binding) (indirect-function binding) binding))))
+               (map (and prefix-p (if (symbolp binding) (indirect-function binding) binding)))
+               (sort-key (cons (propertize (string-trim (concat (key-description prefix) " "
+                                                                (string-replace ".." " .. " key-desc)))
+                                           'romacs-popup-event (aref key 0))
+                               name)))
     (unless (memq binding '(ignore undefined))
       (cond
-       ((and item (stringp (nth 1 item))) (list key-desc (nth 1 item) prefix-p source order binding (aref key 0)))
+       ((and item (stringp (nth 1 item))) (list key-desc (nth 1 item) prefix-p source order binding nil sort-key))
        (t
         (let* ((full (string-trim (concat (key-description prefix) " " key-desc)))
                (replaced (if (fboundp 'which-key--maybe-replace) (which-key--maybe-replace (cons full name)) (cons full name))))
@@ -593,7 +600,7 @@ BINDING EVENT), EVENT its key's (a range's first), or nil to leave it out
                     (cond ((not (equal (cdr replaced) name)) (cdr replaced))
                           (prefix-p (romacs-popup--prefix-name binding map key full))
                           (t (romacs-popup--humanise name)))
-                    prefix-p source order binding (aref key 0))))))))))
+                    prefix-p source order binding nil sort-key)))))))))
 
 (defcustom romacs-popup-prefix-keys '(("C-x 8" . "char"))
   "Names of GNU's own anonymous prefix maps in a key-hint card, (KEY .
@@ -679,6 +686,25 @@ element by element, numbers by `<', strings by `string-version-lessp'
           (setq result (list (if (numberp x) (< x y) (string-version-lessp x y)))))))
     (car result)))
 
+(defun romacs-popup--key-event (key)
+  "The event KEY, a key sequence's description as which-key sorts it
+\(`C-x a', a range `C-x a .. z'), ends with (a range's first): its
+`romacs-popup-event' property, else read; nil when it names none."
+  (or (and (> (length key) 0) (get-text-property 0 'romacs-popup-event key))
+      (let ((keys (ignore-errors (key-parse (replace-regexp-in-string "\\(?: \\.\\. \\|\\.\\.\\)\\S-+\\'" "" key)))))
+        (and (> (length keys) 0) (aref keys (1- (length keys)))))))
+
+(defun romacs-popup-key-order (a b)
+  "Whether which-key binding A, (KEY . DESCRIPTION), sorts before B: by
+key, unmodified keys first, then C-, M-, C-M- and the rest; within each,
+letters (lower case before upper), digits, punctuation, then named keys
+\(`romacs-popup--event-rank').  A value for `which-key-sort-order', and
+Romacs's: a key-hint card sorts within its groups by that option."
+  (let ((ea (romacs-popup--key-event (car a))) (eb (romacs-popup--key-event (car b))))
+    (cond ((and ea eb) (romacs-popup--rank< (romacs-popup--event-rank ea) (romacs-popup--event-rank eb)))
+          ((or ea eb) (and ea t))
+          (t (string< (car a) (car b))))))
+
 (defconst romacs-popup--merged-key-width 18
   "The widest a command's keys in one row grow, its first key and the
 others after its label with their separators: four two-cell modified
@@ -686,7 +712,7 @@ keys.  A key past it starts the command's next row.")
 
 (defun romacs-popup--card-merge (entries)
   "ENTRIES with the keys of one command in one row, at its first key's
-place, the others its eighth element (ALSO), drawn after its label
+place, the others its seventh element (ALSO), drawn after its label
 \(`romacs-popup--card-text'), while the row's keys stay within
 `romacs-popup--merged-key-width': one command is one binding (`eq') with
 one label, prefix-ness and source, so two keys a replacement labels
@@ -698,23 +724,29 @@ apart, or two anonymous functions, stay apart.  Linear in ENTRIES."
              (id (list (nth 1 e) (nth 2 e) (nth 3 e)))
              (row (gethash id labels)))
         (if (and row (<= (+ (string-width (car row)) (string-width (car e))
-                            (seq-reduce (lambda (w k) (+ w 2 (string-width k))) (nth 7 row) 2))
+                            (seq-reduce (lambda (w k) (+ w 2 (string-width k))) (nth 6 row) 2))
                          romacs-popup--merged-key-width))
-            (setcdr (nthcdr 6 row) (list (append (nth 7 row) (list (car e)))))
-          (push (puthash id (append (seq-take e 7) (list nil)) labels) out))))))
+            (setcar (nthcdr 6 row) (append (nth 6 row) (list (car e))))
+          (push (puthash id (copy-sequence e) labels) out))))))
 
 (defun romacs-popup--card-entries (prefix)
   "The entries PREFIX's card shows, in its order: prefixes first, then
-commands; within each a mode's before global ones, then by key
-\(`romacs-popup--event-rank'), one command's keys in one row
-\(`romacs-popup--card-merge')."
+commands; within each a mode's before global ones, then as
+`which-key-sort-order' sorts which-key's bindings (Romacs's
+`romacs-popup-key-order'; nil keeps the maps' order), one command's keys
+in one row (`romacs-popup--card-merge')."
   (romacs-popup--map-names-refresh)
   (let* ((entries (delq nil (mapcar (lambda (w) (romacs-popup--card-entry prefix w)) (romacs-popup--card-winners prefix))))
-         (ranked (mapcar (lambda (e) (cons (append (list (if (nth 2 e) 0 1) (if (eq (nth 3 e) 'mode) 0 1))
-                                                   (romacs-popup--event-rank (nth 6 e)) (list (nth 4 e)))
-                                           e))
-                         entries)))
-    (romacs-popup--card-merge (mapcar #'cdr (sort ranked (lambda (a b) (romacs-popup--rank< (car a) (car b))))))))
+         (order (bound-and-true-p which-key-sort-order))
+         ;; Each entry with its group and the binding which-key's sort sees.
+         (decorated (mapcar (lambda (e) (list (+ (if (nth 2 e) 0 2) (if (eq (nth 3 e) 'mode) 0 1))
+                                              (nth 7 e) e))
+                            (sort entries (lambda (a b) (< (nth 4 a) (nth 4 b)))))))
+    (romacs-popup--card-merge
+     (mapcar #'caddr
+             ;; Stable: what the order leaves tied keeps the maps' order.
+             (sort decorated (lambda (a b) (if (/= (car a) (car b)) (< (car a) (car b))
+                                             (and order (funcall order (cadr a) (cadr b))))))))))
 
 ;;; Layout
 
@@ -724,8 +756,8 @@ after `+') and, unless BARE, the command's other keys
 \(`romacs-popup--card-merge') after it."
   (concat (propertize (if (nth 2 entry) (concat "+" (nth 1 entry)) (nth 1 entry))
                       'face (if (nth 2 entry) 'romacs-popup-group 'romacs-popup-description))
-          (and (nth 7 entry) (not bare)
-               (concat "  " (mapconcat (lambda (k) (propertize k 'face 'romacs-popup-key)) (nth 7 entry)
+          (and (nth 6 entry) (not bare)
+               (concat "  " (mapconcat (lambda (k) (propertize k 'face 'romacs-popup-key)) (nth 6 entry)
                                        (propertize ", " 'face 'romacs-popup-dim))))))
 
 (defun romacs-popup--card-column (entries width)
@@ -739,7 +771,7 @@ command's other keys, then cut at a word (the key never is)."
               (let* ((text (romacs-popup--card-text e))
                      ;; Other keys only where they fit, in cells and as painted.
                      (text (if (and (<= (string-width text) room)
-                                    (or (null (nth 7 e)) (<= (romacs-layer--toast-width text) room)))
+                                    (or (null (nth 6 e)) (<= (romacs-layer--toast-width text) room)))
                                text
                              (romacs-popup--card-text e t))))
                 (concat (make-string (- key-width (string-width (car e))) ?\s)
@@ -764,7 +796,7 @@ so the breaks are scored as the columns will be."
                                   (let ((full (+ k 2 (string-width (romacs-popup--card-text e)))))
                                     ;; Only a label cut to the room, or one with other
                                     ;; keys (measured as painted), needs drawing.
-                                    (if (and (<= full width) (null (nth 7 e))) full
+                                    (if (and (<= full width) (null (nth 6 e))) full
                                       (string-width (car (romacs-popup--card-column
                                                           (list (cons (make-string k ?x) (cdr e))) width)))))))))
 
