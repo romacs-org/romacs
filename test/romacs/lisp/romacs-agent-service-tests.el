@@ -288,7 +288,9 @@ and `wait' waiting until its form holds (5 s at most)."
   "What CLIENT hears of its sessions, oldest first, under its `log' property."
   (let ((log (list nil)))
     (add-hook 'romacs-agent-client-session-functions
-              (lambda (c id notice) (when (eq c client) (setcar log (append (car log) (list (cons id notice)))))))
+              (lambda (c id notice)
+                (when (and (eq c client) (not (equal notice '(opening))))
+                  (setcar log (append (car log) (list (cons id notice)))))))
     log))
 
 (ert-deftest romacs-agent-service-sends-a-session-s-record-units ()
@@ -413,5 +415,517 @@ and `wait' waiting until its form holds (5 s at most)."
         (run-hook-with-args 'romacs-agent-event-functions busy '(:type changed))
         (should (wait (cl-find 'changed (car log) :key #'cadr)))
         (should (equal (gethash "state" (gethash "row" (nth 2 (cl-find 'changed (car log) :key #'cadr)))) "idle"))))))
+
+(ert-deftest romacs-agent-service-binds-a-relay-s-caller ()
+  ;; On the relay's socket the first message says who called; hello then
+  ;; answers that identity.  Anything else first closes the connection.
+  (romacs-agent-service-tests--with
+    (romacs-agent-service-start socket)
+    (let* ((relay (expand-file-name "service-relay.sock" (file-name-directory socket)))
+           (named (romacs-agent-service-tests--raw relay))
+           (unnamed (romacs-agent-service-tests--raw relay)))
+      (process-send-string named "{\"jsonrpc\":\"2.0\",\"method\":\"agents/transport\",\"params\":{\"via\":\"tailnet\",\"login\":\"me@example\",\"peer\":\"Me\"}}\n")
+      (process-send-string named "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (process-get named 'lines)))
+      (should (equal (json-serialize (gethash "identity" (gethash "result" (car (process-get named 'lines)))))
+                     "{\"via\":\"tailnet\",\"login\":\"me@example\",\"peer\":\"Me\"}"))
+      (process-send-string unnamed "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agents/hello\",\"params\":{\"protocol\":\"romacs-agents\",\"version\":[1,0]}}\n")
+      (should (wait (not (process-live-p unnamed))))
+      (should-not (process-get unnamed 'lines))
+      (delete-process named))))
+
+;;; History
+
+(defun romacs-agent-service-tests--line (seq key value)
+  (concat (json-serialize (romacs-mcp--object key value "seq" seq "t" (+ 1794600000.25 seq))) "\n"))
+
+(defun romacs-agent-service-tests--turn (seq n)
+  "A Claude turn from SEQ: its prompt, its reply streamed in two deltas,
+the whole reply, its result."
+  (let ((id (format "m%d" n)) (text (format "answer %d" n)))
+    (concat (romacs-agent-service-tests--line
+             seq "in" (romacs-mcp--object "message" (romacs-mcp--object "content" (format "question %d" n) "role" "user")
+                                          "romacsRequest" n "type" "user"))
+            (romacs-agent-service-tests--line
+             (+ seq 1) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "message_start"
+                                                                             "message" (romacs-mcp--object "id" id))))
+            (romacs-agent-service-tests--line
+             (+ seq 2) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" "answer "))))
+            (romacs-agent-service-tests--line
+             (+ seq 3) "out" (romacs-mcp--object "type" "stream_event" "parent_tool_use_id" :null "api_message_id" id
+                                                 "event" (romacs-mcp--object "type" "content_block_delta" "index" 0
+                                                                             "delta" (romacs-mcp--object "type" "text_delta" "text" (number-to-string n)))))
+            (romacs-agent-service-tests--line
+             (+ seq 4) "out" (romacs-mcp--object "type" "assistant" "parent_tool_use_id" :null
+                                                 "message" (romacs-mcp--object "id" id "content"
+                                                                               (vector (romacs-mcp--object "type" "text" "text" text)))))
+            (romacs-agent-service-tests--line (+ seq 5) "out" (romacs-mcp--object "type" "result" "result" text)))))
+
+(defmacro romacs-agent-service-tests--with-stored (&rest body)
+  "BODY with `session', a Claude session of three turns kept in SQLite, in
+a state root of its own, and a service of its own on `socket'."
+  (declare (indent 0))
+  `(let* ((root (make-temp-file "rsv-store" t))
+          (socket (expand-file-name "s.sock" root))
+          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state")
+                                             (concat "XDG_RUNTIME_DIR=" root "/run"))
+                                       process-environment))
+          (romacs-agent--sessions (make-hash-table :test #'equal))
+          (romacs-agent--launched (make-hash-table :test #'equal))
+          (romacs-agent--held-notes (make-hash-table :test #'equal))
+          (romacs-agent-store--db nil) (romacs-agent-events--made nil)
+          (romacs-agent-events--imported (make-hash-table :test #'equal))
+          (romacs-agent-event-functions nil)
+          (id "e7e70000-2222-4333-8444-555566667778")
+          (dir (expand-file-name id (romacs-agent--state-root))))
+     (unwind-protect
+         (progn
+           (make-directory dir t)
+           (romacs-agent--write-json (expand-file-name "manifest.json" dir)
+                                     (romacs-mcp--object "id" id "harness" "claude" "provider" "claude" "cwd" root
+                                                         "title" "stored" "titleAuto" :false "argv" []
+                                                         "options" (romacs-mcp--object)))
+           (let ((coding-system-for-write 'utf-8-unix))
+             (write-region (concat (romacs-agent-service-tests--line 1 "note" (romacs-mcp--object "type" "run"))
+                                   (romacs-agent-service-tests--turn 2 1) (romacs-agent-service-tests--turn 8 2)
+                                   (romacs-agent-service-tests--turn 14 3))
+                           nil (expand-file-name "journal.jsonl" dir) nil 'silent))
+           (romacs-agent--load dir)
+           (let ((session (romacs-agent-get id)))
+             (romacs-agent-events-import session)
+             (require 'romacs-agent-turns)
+             (romacs-agent-turns-fill session)
+             (cl-macrolet ((wait (form) `(let ((deadline (+ (float-time) 5)))
+                                            (while (and (not ,form) (< (float-time) deadline))
+                                              (accept-process-output nil 0.02))
+                                            ,form)))
+               ,@body)))
+       (romacs-agent-service-stop)
+       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
+       (delete-directory root t))))
+
+(defun romacs-agent-service-tests--live (session)
+  "SESSION's records as live delivery sends them: each unit (SEQ . JSON)."
+  (let ((units nil) (unit nil))
+    (dolist (event (romacs-agent-events session))
+      (push event unit)
+      (when (plist-get event :last)
+        (let ((sent (romacs-agent-service--bounded (nreverse unit))))
+          (unless (equal sent []) (push (cons (plist-get event :seq) (json-serialize sent)) units)))
+        (setq unit nil)))
+    (nreverse units)))
+
+(defun romacs-agent-service-tests--history (client id params)
+  "Session ID's history through CLIENT, each unit (SEQ . JSON), and its reset."
+  (let ((answer nil))
+    (romacs-agent-client-history client id params (lambda (result) (setq answer result)))
+    (let ((deadline (+ (float-time) 5)))
+      (while (and (not answer) (< (float-time) deadline)) (accept-process-output nil 0.02)))
+    (cons (mapcar (lambda (unit) (cons (gethash "seq" unit) (json-serialize (gethash "events" unit)))) (car answer))
+          (nth 2 answer))))
+
+(ert-deftest romacs-agent-service-history-is-what-live-sent ()
+  ;; A session's history is its records' units as live delivery sent
+  ;; them; from a place mid-message, folded from its turn's start, its
+  ;; text never comes twice; too far behind, a reset.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (should (> (length live) 9))
+      (should (equal (car (romacs-agent-service-tests--history
+                           client id (romacs-agent-rpc-object "upto" 19 "turns" 10)))
+                     live))
+      ;; The last turn alone.
+      (should (equal (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1)))
+                     (seq-filter (lambda (unit) (>= (car unit) 14)) live)))
+      ;; After seq 10, the first delta of turn 2: its second delta, then the
+      ;; whole message raising no text, as live.
+      (let ((after (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 10)))))
+        (should (equal after (seq-filter (lambda (unit) (> (car unit) 10)) live)))
+        (should-not (string-search "answer 2" (cdr (assoc 12 after)))))
+      (let ((romacs-agent-service--catch-up 5))
+        (should (cdr (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 2)))))
+      ;; Where a chat begins is read from the turns' rows, an end given
+      ;; or not: a running session's history read up to a seq before its
+      ;; end starts as its chat does.
+      (should (equal (romacs-agent-tail-start session 1 100) 14))
+      (should (equal (romacs-agent-tail-start session 1 100 20) 14))
+      (cl-letf (((symbol-function 'romacs-agent-events-tail) (lambda (&rest _) (error "Prompts scanned"))))
+        (should (equal (romacs-agent-tail-start session 1 100 14) 8)))
+      ;; A read from the end begins where a chat of its turns does
+      ;; (`romacs-agent-tail-start'): a turn within RECORDS of the end from
+      ;; its start (14, six records before 20), one longer from within it,
+      ;; its first records left out; a catch-up folds from its turn's start
+      ;; whatever RECORDS.
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1 "records" 6))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 3 "records" 6))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 14)) live) nil)))
+      (should (equal (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "turns" 1 "records" 3))
+                     (cons (seq-filter (lambda (unit) (>= (car unit) 17)) live) nil)))
+      (should (equal (car (romacs-agent-service-tests--history client id (romacs-agent-rpc-object "upto" 19 "after" 17)))
+                     (seq-filter (lambda (unit) (> (car unit) 17)) live))))))
+
+(ert-deftest romacs-agent-service-a-remote-chat-draws-as-the-local-one ()
+  ;; A chat of the session drawn through the service (another machine's,
+  ;; here this one's) is the chat this editor draws of it: its history,
+  ;; then a unit that comes live.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (add-hook 'romacs-agent-event-functions #'romacs-agent-log--on-event)
+    (let* ((romacs-agent-remote--source nil)
+           (source (romacs-agent-remote-connect socket))
+           (local (romacs-agent-log-chat session))
+           (remote nil)
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max))))))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision (romacs-agent-remote-client source))))
+            (setq remote (romacs-agent-remote-chat id))
+            (should-not (eq remote local))
+            (should (wait (string-search "answer 3" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            (run-hook-with-args 'romacs-agent-event-functions session
+                                (list :type 'status :text "live now" :seq 20 :last t :time (float-time)))
+            (should (wait (string-search "live now" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            ;; Its board too: the rows, their keys the service's.
+            (require 'romacs-agent-board)
+            (cl-flet ((board (source)
+                        (let ((romacs-agent-board-source source) (buffer (romacs-agent-board--buffer)))
+                          (romacs-agent-board--render buffer 100)
+                          (funcall text buffer))))
+              (should (string-search "stored" (board source)))
+              (should (equal (board source) (board romacs-agent-log-local)))
+              ;; Running a tool: what it runs and how long, as drawn here.
+              (setf (romacs-agent-state session) 'running (romacs-agent-activity session) "Grep"
+                    (romacs-agent-turn-start session) (- (float-time) 75))
+              (run-hook-with-args 'romacs-agent-event-functions session
+                                  (list :type 'status :text "working" :seq 21 :last t :time (float-time)))
+              (should (wait (equal (gethash "activity" (gethash id (romacs-agent-client-rows (romacs-agent-remote-client source))))
+                                   "Grep")))
+              (should (string-search "Grep" (board source)))
+              (should (equal (board source) (board romacs-agent-log-local)))
+              ;; Shown, not acted on: no command of this editor's reaches it,
+              ;; nor once the board's source is this editor's again, until
+              ;; the board is drawn of its sessions.
+              (let ((romacs-agent-board-source source))
+                (with-current-buffer (romacs-agent-board--buffer)
+                  (romacs-agent-board--render (current-buffer) 100)
+                  (goto-char (point-min))
+                  (romacs-agent-board-next 2)
+                  (should-error (romacs-agent-board-settle) :type 'user-error)
+                  (should-error (romacs-agent-board-settle-finished) :type 'user-error)))
+              (with-current-buffer (romacs-agent-board--buffer)
+                (should-error (romacs-agent-board-settle-finished) :type 'user-error))
+              ;; The rows it serves are its own board's, whatever its board shows.
+              (let ((romacs-agent-board-source source))
+                (should (equal (gethash "key" (gethash id (romacs-agent-service--whole-rows)))
+                               (let ((romacs-agent-board-source romacs-agent-log-local))
+                                 (gethash "key" (gethash id (romacs-agent-service--whole-rows)))))))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-service-a-remote-chat-reads-all-it-is-told ()
+  ;; A remote chat is drawn whole when its history comes in replies cut
+  ;; short; its earlier turns are read as the local chat's are; killed,
+  ;; it follows the session no longer.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-log-turns 1)
+           (source (romacs-agent-remote-connect socket))
+           (client (romacs-agent-remote-client source))
+           (local (romacs-agent-log-chat session))
+           (remote nil)
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max))))))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision client)))
+            ;; Read a unit a reply, on in ranges the service reads whole.
+            (let ((romacs-agent-service--history-bytes 1) (romacs-agent-service--catch-up 2)
+                  (romacs-agent-client--catch-up 2))
+              (setq remote (romacs-agent-remote-chat id))
+              (should (wait (string-search "answer 3" (funcall text remote))))
+              ;; Opened again while it reads: drawn once, afresh.
+              (romacs-agent-client-open client id)
+              (romacs-agent-client-open client id)
+              (should (wait (let ((follow (gethash id (romacs-agent-client-follows client))))
+                              (and follow (not (romacs-agent-client--follow-pulling follow)))))))
+            (should (string-search "earlier turns" (funcall text remote)))
+            (should (equal (funcall text remote) (funcall text local)))
+            (with-current-buffer local (romacs-agent-log-earlier))
+            (with-current-buffer remote
+              (romacs-agent-log-earlier)
+              ;; Asked again while they are read: once.
+              (should-error (romacs-agent-log-earlier) :type 'user-error))
+            (should (wait (string-search "answer 2" (funcall text remote))))
+            (should (equal (funcall text remote) (funcall text local)))
+            ;; The connection gone, the chat says so; connected again, it
+            ;; is drawn afresh.
+            (romacs-agent-client-close client)
+            (should (wait (string-search "connection ended" (funcall text remote))))
+            (setq client (romacs-agent-remote-client (romacs-agent-remote-connect socket)))
+            (should (wait (not (string-search "connection ended" (funcall text remote)))))
+            (should (wait (string-search "answer 3" (funcall text remote))))
+            (with-current-buffer local (romacs-agent-log--clear) (romacs-agent-log-source-fill romacs-agent-log-local session))
+            (should (equal (funcall text remote) (funcall text local)))
+            (kill-buffer remote)
+            (setq remote nil)
+            (should-not (gethash id (romacs-agent-client-follows client)))
+            (should (wait (null (romacs-agent-service--subscriptions id)))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-service-a-remote-chat-shows-what-waits ()
+  ;; A question the session waits on when its remote chat opens is drawn
+  ;; there as here; one that comes live is added, then resolved with how
+  ;; and by whom, the chat settling it.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask)
+           (question (lambda (id text)
+                       (let ((request (make-hash-table :test #'equal)))
+                         (puthash "tool_name" "AskUserQuestion" request)
+                         (puthash "input" (json-parse-string (format "{\"questions\":[{\"question\":%S,\"options\":[{\"label\":\"Tea\"},{\"label\":\"Coffee\"}]}]}" text)) request)
+                         (puthash id request (romacs-agent-approvals session)))))
+           (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max)))))
+           (source nil) (client nil) (local nil) (remote nil))
+      (funcall question "q-old" "Tea or coffee?")
+      (funcall question "q-old2" "Sugar?")
+      (setq source (romacs-agent-remote-connect socket) client (romacs-agent-remote-client source)
+            local (romacs-agent-log-chat session))
+      (unwind-protect
+          (progn
+            (should (wait (romacs-agent-client-revision client)))
+            ;; What waits, a request a reply: paged; told with its history,
+            ;; never before it.
+            (let ((romacs-agent-service--unit-budget 1) (told nil))
+              (add-hook 'romacs-agent-client-follow-functions
+                        (lambda (c id notice)
+                          (unless (eq (car notice) 'row)
+                            ;; With each notice, how far its history is read.
+                            (push (cons (car notice) (romacs-agent-client--follow-seq (gethash id (romacs-agent-client-follows c))))
+                                  told))))
+              (setq remote (romacs-agent-remote-chat id))
+              ;; Drawn whole: its history, then what it waits on.
+              (should (wait (and (string-search "answer 3" (funcall text remote))
+                                 (string-search "Tea or coffee?" (funcall text remote))
+                                 (string-search "Sugar?" (funcall text remote)))))
+              (should (equal (mapcar #'car (reverse told)) '(pending drawn)))
+              (should (> (cdr (car (last told))) 0)))
+            (should (equal (funcall text remote) (funcall text local)))
+            (let ((follow (gethash id (romacs-agent-client-follows client))))
+              (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2))
+              ;; One asked live: its approval event, and it waits.
+              (funcall question "q-new" "Milk?")
+              (run-hook-with-args 'romacs-agent-event-functions session
+                                  (list :type 'approval :request-id "q-new" :tool "AskUserQuestion" :user t
+                                        :input (romacs-agent-rpc-object)
+                                        :questions '(("Milk?" :header nil :options ("Tea" "Coffee") :notes nil :multi nil))
+                                        :seq 20 :last t :time (float-time)))
+              (should (wait (= (hash-table-count (romacs-agent-client--follow-pending follow)) 3)))
+              (should (string-search "Milk?" (funcall text remote)))
+              ;; Answered: it leaves, answered, by the user.
+              (let ((resolved nil))
+                (add-hook 'romacs-agent-client-session-functions
+                          (lambda (_c _id notice) (when (eq (car notice) 'pending-resolved) (setq resolved (cadr notice)))))
+                ;; Who answered is said a unit before the answer: kept for it.
+                (run-hook-with-args 'romacs-agent-event-functions session
+                                    (list :type 'attributed :request-id "q-new" :by "user" :decision "deny" :reason "no milk"
+                                          :seq 21 :last t :time (float-time)))
+                (remhash "q-new" (romacs-agent-approvals session))
+                (run-hook-with-args 'romacs-agent-event-functions session
+                                    (list :type 'answered :request-id "q-new" :behavior "deny" :seq 22 :last t :time (float-time)))
+                (should (wait resolved))
+                (should (equal (gethash "how" resolved) "answered"))
+                (should (equal (gethash "kind" (gethash "actor" resolved)) "user"))
+                (should (equal (gethash "reason" resolved) "no milk"))
+                (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2)))))
+        (romacs-agent-remote-disconnect)
+        (kill-buffer local)
+        (when remote (kill-buffer remote))))))
+
+(ert-deftest romacs-agent-service-runs-a-command-once ()
+  ;; A command runs once by its cid: again, its kept result; the cid with
+  ;; other params, refused.  An answer reserves its request: a second
+  ;; finds it gone.  A remote chat's keys are commands.
+  (require 'romacs-agent-remote)
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((romacs-agent-remote--source nil) (romacs-agent-approval-policy 'ask) (calls nil)
+           (romacs-agent-service--commands (make-hash-table :test #'equal))
+           (romacs-agent-service--answering (make-hash-table :test #'equal))
+           (source (romacs-agent-remote-connect socket)) (client (romacs-agent-remote-client source))
+           (remote nil)
+           (ask (lambda (method params)
+                  (let ((answer nil))
+                    (romacs-agent-client-request client method params (lambda (r e) (setq answer (list r e))))
+                    (wait answer)
+                    answer))))
+      (cl-letf (((symbol-function 'romacs-agent-send) (lambda (_s text &rest _) (push (list 'send text) calls) 'item))
+                ((symbol-function 'romacs-agent-send-later) (lambda (_s text &rest _) (push (list 'later text) calls) 'item))
+                ((symbol-function 'romacs-agent-interrupt) (lambda (_s) (push '(interrupt) calls)))
+                ;; Answered as the harness is written to: its line.
+                ((symbol-function 'romacs-agent--line)
+                 (lambda (_s line &rest _) (push (list 'line (if (stringp line) line (json-serialize line))) calls)))
+                ((symbol-function 'romacs-agent--note) #'ignore))
+        (unwind-protect
+            (progn
+              (should (wait (romacs-agent-client-revision client)))
+              (let ((send (romacs-agent-rpc-object "cid" "c1" "id" id "text" "hi" "mode" "now")))
+                (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
+                (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
+                (should (equal calls '((send "hi"))))
+                ;; Kept in the store too: a service started again runs it no second time.
+                (clrhash romacs-agent-service--commands)
+                (should (equal (gethash "state" (car (funcall ask "agents/send" send))) "written"))
+                (should (equal calls '((send "hi"))))
+                (puthash "text" "other" send)
+                (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/send" send)))) "cid-conflict"))
+                ;; Another method by the same cid is another command: refused.
+                (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/interrupt"
+                                                                              (romacs-agent-rpc-object "cid" "c1" "id" id)))))
+                               "cid-conflict")))
+              ;; A question waits; answered by its handle, then again.
+              (let ((request (make-hash-table :test #'equal)))
+                (puthash "tool_name" "AskUserQuestion" request)
+                (puthash "input" (json-parse-string "{\"questions\":[{\"question\":\"Tea or coffee?\",\"options\":[{\"label\":\"Tea\"},{\"label\":\"Coffee\"}]}]}") request)
+                (puthash "q-1" request (romacs-agent-approvals session)))
+              (let* ((handle (romacs-agent-wire-handle (plist-get (romacs-agent-driver-state session) :run) "q-1"))
+                     (stale (romacs-agent-wire-handle 999 "q-1"))
+                     (answer (lambda (cid)
+                               (funcall ask "agents/answer"
+                                        (romacs-agent-rpc-object "cid" cid "id" id "handle" handle "decision" "allow"
+                                                                 "answers" (romacs-agent-rpc-object
+                                                                            "q1" (romacs-agent-rpc-object "options" ["o2"] "text" :null)))))))
+                ;; Its handle whole: another run's is no request.
+                (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/answer"
+                                                                              (romacs-agent-rpc-object "cid" "c9" "id" id "handle" stale
+                                                                                                       "decision" "allow")))))
+                               "request-gone"))
+                (should (equal (gethash "state" (car (funcall answer "c2"))) "written"))
+                (should (eq (car (car calls)) 'line))
+                (should (string-search "Coffee" (cadr (car calls))))
+                (should (equal (gethash "kind" (gethash "data" (cadr (funcall answer "c3")))) "request-gone")))
+              ;; The remote chat's keys: a send, and an answer through its layer.
+              (setq remote (romacs-agent-remote-chat id))
+              (should (wait (string-search "answer 3" (with-current-buffer remote (buffer-string)))))
+              (with-current-buffer remote
+                (goto-char (point-max))
+                (insert "from afar")
+                (romacs-agent-log-send))
+              (should (wait (equal (car calls) '(send "from afar"))))
+              ;; Refused: the text is the composer's again.
+              (cl-letf (((symbol-function 'romacs-agent-send) (lambda (&rest _) (user-error "Its harness ended"))))
+                (with-current-buffer remote
+                  (goto-char (point-max))
+                  (insert "not sent")
+                  (romacs-agent-log-send)
+                  (should (equal (romacs-agent-log--draft) ""))
+                  (should (wait (equal (romacs-agent-log--draft) "not sent"))))))
+          (romacs-agent-remote-disconnect)
+          (when remote (kill-buffer remote)))))))
+
+(ert-deftest romacs-agent-service-starts-a-session-once ()
+  ;; agents/start starts a session, its host tracked, once by its cid: a
+  ;; repeat names the same session.  The lists say where and under what.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let* ((home (make-temp-file "rsv-claude" t)) (cwd (make-temp-file "rsv-project" t))
+           (romacs-agent-providers (list (cons "claude" home))) (romacs-agent-default-provider "claude")
+           (romacs-agent-start-deadline 0.5)
+           (romacs-agent-service--commands (make-hash-table :test #'equal))
+           (client (romacs-agent-client-connect socket)) (launched nil)
+           (ask (lambda (method params)
+                  (let ((answer nil))
+                    (romacs-agent-client-request client method params (lambda (r e) (setq answer (list r e))))
+                    (wait answer)
+                    answer))))
+      (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                 (lambda (session _launch) (push (romacs-agent-options session) launched)))
+                ((symbol-function 'romacs-agent--check-companions) #'ignore))
+        (should (wait (romacs-agent-client-revision client)))
+        (let* ((params (romacs-agent-rpc-object "cid" "s1" "cwd" cwd "title" "far start"))
+               (first (car (funcall ask "agents/start" params)))
+               (again (car (funcall ask "agents/start" params))))
+          (should (stringp (gethash "id" first)))
+          ;; Its launch still waited for at its deadline: queued.
+          (should (equal (gethash "state" first) "queued"))
+          (should (equal (gethash "id" again) (gethash "id" first)))
+          ;; Kept in the store: a service started again names the same one.
+          (clrhash romacs-agent-service--commands)
+          (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first)))
+          ;; Found by the writer as it is admitted, the reader seeing none:
+          ;; a repeat all the same.
+          (clrhash romacs-agent-service--commands)
+          (cl-letf (((symbol-function 'romacs-agent-store-command) #'ignore))
+            (should (equal (gethash "id" (car (funcall ask "agents/start" params))) (gethash "id" first))))
+          (should (= (length launched) 1))
+          (should (plist-get (car launched) :tracked))
+          (should (equal (romacs-agent-title (romacs-agent-loaded (gethash "id" first))) "far start")))
+        (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" (romacs-agent-rpc-object "cid" "s2" "cwd" "relative")))))
+                       "bad-params"))
+        ;; One that fails after the deadline: queued, then its repeats say so.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch)
+                     (run-at-time 1 nil (lambda () (setf (romacs-agent-state session) 'unstarted))))))
+          (let ((params (romacs-agent-rpc-object "cid" "s4" "cwd" cwd)))
+            (should (equal (gethash "state" (car (funcall ask "agents/start" params))) "queued"))
+            (should (wait (let ((error (cadr (funcall ask "agents/start" params))))
+                            (and error (equal (gethash "kind" (gethash "data" error)) "not-live")))))))
+        ;; A host that does not start: the start says so, and so does its repeat.
+        (cl-letf (((symbol-function 'romacs-agent--launch-when-placed)
+                   (lambda (session _launch) (setf (romacs-agent-state session) 'unstarted))))
+          (let ((params (romacs-agent-rpc-object "cid" "s3" "cwd" cwd)))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))
+            (should (equal (gethash "kind" (gethash "data" (cadr (funcall ask "agents/start" params)))) "not-live"))))
+        (should (seq-some (lambda (p) (equal (gethash "cwd" p) root))
+                          (gethash "projects" (car (funcall ask "agents/projects.list" (romacs-agent-rpc-object))))))
+        (should (equal (mapcar (lambda (p) (gethash "name" p))
+                               (gethash "providers" (car (funcall ask "agents/providers.list" (romacs-agent-rpc-object)))))
+                       '("claude")))))))
+
+(ert-deftest romacs-agent-service-history-stops-at-its-bound ()
+  ;; Past its bytes' bound a reply stops, its cursor where; the client asks
+  ;; on from there.  A reply under another epoch than the history held is
+  ;; a reset for it.
+  (romacs-agent-service-tests--with-stored
+    (romacs-agent-service-start socket)
+    (let ((client (romacs-agent-client-connect socket)) (live (romacs-agent-service-tests--live session)))
+      (should (wait (romacs-agent-client-revision client)))
+      (let ((romacs-agent-service--history-bytes 1) (answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r)))
+        (should (wait answer))
+        (should (= (length (car answer)) 1))
+        (should (equal (gethash "seq" (nth 1 answer)) (car (car live))))
+        (should (equal (gethash "seq" (car (car answer))) (car (car live)))))
+      (let ((answer nil))
+        (romacs-agent-client-history client id (romacs-agent-rpc-object "upto" 19 "turns" 10) (lambda (r) (setq answer r))
+                                     (romacs-agent-rpc-object "epoch" 99 "adapter" "other"))
+        (should (wait answer))
+        (should (nth 2 answer))
+        (should-not (car answer))))))
+
+(ert-deftest romacs-agent-replay-copies-touch-nothing-live ()
+  ;; A replay's copy starts with no turn under way, whatever the session
+  ;; does; folding a note there never lets go of the live session's held
+  ;; note of the same id.
+  (let* ((romacs-agent--held-notes (make-hash-table :test #'equal))
+         (session (romacs-agent--make :id "live" :harness 'claude :input-seq 40 :completed-seq 30))
+         (copy (romacs-agent-replay-copy session nil))
+         (held (romacs-mcp--object "romacsNote" 1 "type" "selection")))
+    (should (equal (list (romacs-agent-input-seq copy) (romacs-agent-completed-seq copy)) '(0 0)))
+    (puthash "live" (list held) romacs-agent--held-notes)
+    (romacs-agent-replay-record copy (json-parse-string "{\"note\":{\"romacsNote\":1,\"type\":\"selection\"},\"seq\":3,\"t\":1.0}"))
+    (should (equal (gethash "live" romacs-agent--held-notes) (list held)))))
 
 ;;; romacs-agent-service-tests.el ends here

@@ -1600,6 +1600,12 @@ pub struct Vm {
     resolved_buffer: Option<(Value, usize)>,
     pub(crate) multibyte_slot: usize,
     truncate_lines_slot: usize,
+    /// The slots of `permanent-local' and `permanent-local-hook', the
+    /// properties `kill-all-local-variables' asks each Lisp local about, and
+    /// of the hook it runs first.
+    pub(crate) permanent_local_slot: usize,
+    pub(crate) permanent_local_hook_slot: usize,
+    pub(crate) change_major_mode_hook_slot: usize,
     /// The slot of `obarray`, the variable, kept from its making
     /// (`Vm::slot`); `usize::MAX` until then (`Vm::initial_obarray`).
     obarray_slot: usize,
@@ -1918,6 +1924,9 @@ impl Vm {
             resolved_buffer: None,
             multibyte_slot: 0,
             truncate_lines_slot: usize::MAX,
+            permanent_local_slot: usize::MAX,
+            permanent_local_hook_slot: usize::MAX,
+            change_major_mode_hook_slot: usize::MAX,
             obarray_slot: usize::MAX,
             defun_start_epoch: 0,
             variable_redirects: Vec::new(),
@@ -2119,6 +2128,9 @@ impl Vm {
         }
         vm.declare_special_raw("macroexp--dynvars", Value::NIL);
         vm.truncate_lines_slot = vm.slot("truncate-lines");
+        vm.permanent_local_slot = vm.slot("permanent-local");
+        vm.permanent_local_hook_slot = vm.slot("permanent-local-hook");
+        vm.change_major_mode_hook_slot = vm.slot("change-major-mode-hook");
         vm.declare_special_raw("menu-bar-lines", Value::integer(0).unwrap());
         vm.specials.insert("major-mode".into());
         // GNU's DEFVAR macros mark every built-in variable special.

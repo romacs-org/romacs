@@ -18,8 +18,10 @@ fn buffer_local_variables(cx; optional buffer: Value) {
 }}
 defsubr! { name = "kill-all-local-variables", gnu = "buffer.c:3031", effect = Global,
 fn kill_all_local_variables(cx; optional permanent: Value) -> Step {
+    // run_hook (eval.c) returns at once for a void or nil hook, so a buffer
+    // whose `change-major-mode-hook' is empty, as most are, makes no call.
+    let Some(hook) = cx.change_major_mode_hook()? else { return cx.reset_buffer_locals(permanent).map(Step::Done) };
     let f = cx.intern("run-hooks");
-    let hook = cx.intern("change-major-mode-hook");
     Ok(Step::Call { f, args: vec![hook], then: reset_locals, saved: vec![permanent] })
 }}
 fn reset_locals(cx: &mut Leaf<'_>, _: Value, saved: &[Value]) -> Next {

@@ -50,7 +50,8 @@ fn menus_share_one_look_and_motion() {
                   24)))
             (list (string-to-multibyte (substring-no-properties g)) (get-text-property 0 'face g)
                   (get-text-property (string-search \"RET\" g) 'face g) (get-text-property (string-search \"Open\" g) 'face g)))"));
-        // which-key's custom popup is a `panel': glass, slide, the bottom.
+        // which-key's custom popup is a `panel': glass, slide, floating a
+        // margin above the bottom.
         report.push(printed(&mut vm, "(progn (setq which-key--buffer (get-buffer-create \" *which-key*\"))
             (with-current-buffer which-key--buffer (insert \"C-x f  find-file\"))
             (romacs-popup-which-key-show '(1 . 40))
@@ -59,7 +60,7 @@ fn menus_share_one_look_and_motion() {
                            (frame-parameter f 'romacs-popup-kind) (frame-parameter f 'romacs-layer-radius)
                            (frame-parameter f 'child-frame-border-width) (frame-parameter f 'romacs-layer-motion)
                            (frame-parameter f 'romacs-layer-edge)
-                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (romacs-chrome-bottom)))
+                           (= (+ (cdr (frame-position f)) (frame-pixel-height f)) (- (romacs-chrome-bottom) (romacs-layer-float-gap (frame-parent f)))))
                 (romacs-popup-which-key-hide))))"));
         report.push(printed(&mut vm, "(romacs-popup-panel-p which-key--buffer)"));
         // A which-key page as wide as it is told it may be fits its panel's
@@ -156,47 +157,62 @@ fn menus_share_one_look_and_motion() {
             (mapcar (lambda (toast) (nth 1 toast)) romacs-layer--toasts))"));
         keys(&mut vm, &engine, &[7]);
         report.push(printed(&mut vm, "(list (frame-visible-p (romacs-layer--frame (romacs-eval-chip--buffer))) (romacs-eval-chip--live-claim))"));
-        // keymap-popup's menus are `panel's by default here: one taller than
-        // the panel pages with C-M-v, keeps its viewport when it refreshes,
-        // and leaves no layer behind once its buffer dies, a mode change first.
+        // keymap-popup's menus are `panel's by default here: a card floating
+        // inside the frame's usable rect; one too big for its room pages with
+        // C-v and M-v (C-M-v and C-M-S-v too), keeps its page when it
+        // refreshes, and leaves no layer behind once its buffer dies, a mode
+        // change first.
         vm.eval_source("(progn (delete-other-windows) (switch-to-buffer \"menu.el\")
             (keymap-popup-define chip-small-map \"Small\" :group \"Few\" \"a\" (\"One\" ignore) \"b\" (\"Two\" ignore))
             (eval `(keymap-popup-define chip-big-map \"Big\" :group \"All\"
                      \"0\" (\"Submenu\" :keymap chip-small-map)
-                     \"C-M-v\" (\"Shadowed by paging\" ignore)
-                     ,@(apply #'append (mapcar (lambda (c) (list (string c) (list (format \"Entry %c\" c) 'ignore)))
-                                               (string-to-list \"abcdefgijklmnoprstuvwxyzABCDEFGIJKLMNOPRSTUVWXYZ\"))))
+                     \"C-v\" (\"Shadowed by paging\" ignore)
+                     ,@(apply #'append
+                              (mapcan (lambda (prefix)
+                                        (mapcar (lambda (c) (list (format \"%c %c\" prefix c)
+                                                                  (list (format \"Entry %c%c, a description of some forty columns\" prefix c) 'ignore)))
+                                                (string-to-list \"abcdefgijklmnoprstuvwxyz\")))
+                                      (string-to-list \"wxyz\"))))
                   t)
             (defvar chip-layers (hash-table-count romacs-layer--frames))
             (local-set-key (kbd \"C-c k\") (lambda () (interactive) (keymap-popup chip-big-map))))").unwrap();
         keys(&mut vm, &engine, &[3, 'k' as i64]);
+        // Shown, its kind, its page and whether there are more, and whether
+        // its card lies inside the frame's text area, below the top chrome
+        // and above the status bar.
         let popup = "(let* ((buf (keymap-popup--popup-buffer)) (f (and buf (romacs-layer--frame-of buf))))
             (list (and f (frame-visible-p f) t) (and f (frame-parameter f 'romacs-popup-kind))
-                  (and buf (with-current-buffer buf (line-number-at-pos (window-start (frame-root-window f)))))
-                  (and f (< (frame-text-lines f) (with-current-buffer buf (count-lines (point-min) (point-max)))))))";
+                  (and buf (keymap-popup--session-get buf :page))
+                  (and buf (> (keymap-popup--session-get buf :pages) 1))
+                  (and f (let ((root (frame-parent f)) (p (frame-position f)))
+                           (and (>= (car p) 0) (<= (+ (car p) (frame-pixel-width f)) (frame-native-width root))
+                                (>= (cdr p) (romacs-chrome-top root))
+                                (<= (+ (cdr p) (frame-pixel-height f)) (romacs-chrome-bottom root)))))))";
         report.push(printed(&mut vm, "(eq keymap-popup-backend 'keymap-popup-backend-layer)"));
         report.push(printed(&mut vm, popup));
-        keys(&mut vm, &engine, &[META | 22]);
+        keys(&mut vm, &engine, &[22]);
         report.push(printed(&mut vm, popup));
         report.push(printed(&mut vm, &format!("(progn (keymap-popup--refresh (keymap-popup--popup-buffer)) {popup})")));
-        keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25)]);
+        keys(&mut vm, &engine, &[META | 'v' as i64]);
         report.push(printed(&mut vm, popup));
         // A source action under a paging control is not advertised.
         report.push(printed(&mut vm, "(with-current-buffer (keymap-popup--popup-buffer) (and (string-search \"Shadowed\" (buffer-string)) t))"));
-        // Paging stops at the last full page and at the top.
-        let page_bounds = "(let* ((buf (keymap-popup--popup-buffer)) (w (frame-root-window (romacs-layer--frame-of buf))))
-            (with-current-buffer buf (list (line-number-at-pos (window-start w))
-                                           (= (line-number-at-pos (window-start w)) (max 1 (- (count-lines (point-min) (point-max)) (window-body-height w) -1))))))";
+        // Paging stops at the last page and at the first; the footer says
+        // which page shows.
+        let page_bounds = "(let ((buf (keymap-popup--popup-buffer)))
+            (list (keymap-popup--session-get buf :page)
+                  (= (keymap-popup--session-get buf :page) (1- (keymap-popup--session-get buf :pages)))
+                  (with-current-buffer buf (and (string-search (format \"%d/%d\" (1+ (keymap-popup--session-get buf :page)) (keymap-popup--session-get buf :pages)) (buffer-string)) t))))";
         keys(&mut vm, &engine, &[META | 22, META | 22, META | 22, META | 22, META | 22]);
         report.push(printed(&mut vm, page_bounds));
         keys(&mut vm, &engine, &[META | ('V' as i64 & 31) | (1 << 25); 5]);
         report.push(printed(&mut vm, page_bounds));
-        // A submenu opened from a paged menu starts at its top, and so does
-        // its parent again on Back; paging a menu that fits does nothing.
-        keys(&mut vm, &engine, &[META | 22, '0' as i64]);
+        // A submenu opened from a paged menu starts at its first page, and so
+        // does its parent again on Back; paging a menu that fits does nothing.
+        keys(&mut vm, &engine, &[22, '0' as i64]);
         report.push(printed(&mut vm, popup));
-        keys(&mut vm, &engine, &[META | 22]);
-        report.push(printed(&mut vm, page_bounds));
+        keys(&mut vm, &engine, &[22]);
+        report.push(printed(&mut vm, popup));
         keys(&mut vm, &engine, &['q' as i64]);
         report.push(printed(&mut vm, popup));
         keys(&mut vm, &engine, &['q' as i64]);
@@ -350,16 +366,16 @@ fn menus_share_one_look_and_motion() {
         "(nil (\"error in process filter: Filter boom\"))",
         "(nil nil)",
         "t",
-        "(t panel 1 t)",
-        "(t panel 20 t)",
-        "(t panel 20 t)",
-        "(t panel 1 t)",
+        "(t panel 0 t t)",
+        "(t panel 1 t t)",
+        "(t panel 1 t t)",
+        "(t panel 0 t t)",
         "nil",
-        "(20 t)",
-        "(1 nil)",
-        "(t panel 1 nil)",
-        "(1 t)",
-        "(t panel 1 t)",
+        "(1 t t)",
+        "(0 nil t)",
+        "(t panel 0 nil t)",
+        "(t panel 0 nil t)",
+        "(t panel 0 t t)",
         "(nil t)",
         "t",
         "(t t t t nil t nil)",

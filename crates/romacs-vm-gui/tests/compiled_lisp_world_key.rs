@@ -3,7 +3,8 @@
 //! (`World::lisp_files_digest`): a library compiled against a macro that
 //! world preloads is not run once the macro's file has changed, in a
 //! session that boots from source as in a tree's compile, though nothing
-//! the library's own compile read has changed.
+//! the library's own compile read has changed. A user's session (LOGNAME
+//! set, as no compile process has it) takes what an earlier one compiled.
 use std::path::Path;
 use std::process::Command;
 
@@ -32,8 +33,9 @@ fn tree(root: &Path, value: u8) {
 }
 
 /// A batch session in the fresh HOME ROOT/NAME over ROOT's tree and
-/// store: what `(t-key-f)' gives.
-fn session(root: &Path, name: &str) -> String {
+/// store, of a user (LOGNAME and USER set, which no compile process has):
+/// what `(t-key-f)' gives, and how many files it compiled (traced).
+fn session(root: &Path, name: &str) -> (String, usize) {
     let home = root.join(name);
     for dir in ["config", "cache", "tmp"] {
         std::fs::create_dir_all(home.join(dir)).unwrap();
@@ -45,10 +47,13 @@ fn session(root: &Path, name: &str) -> String {
         .env("XDG_CACHE_HOME", home.join("cache")).env("TMPDIR", home.join("tmp")).env("LANG", "C.UTF-8")
         .env("ROMACS_RUNTIME_ROOT", root.join("tree"))
         .env("ROMACS_COMPILED_LISP", "on").env("ROMACS_COMPILED_LISP_STORE", root.join("store"))
+        .env("ROMACS_COMPILED_LISP_TRACE", "1").env("LOGNAME", "romacs-user").env("USER", "romacs-user")
         .envs(std::env::var_os("LD_LIBRARY_PATH").map(|v| ("LD_LIBRARY_PATH", v)))
         .output().unwrap();
-    assert!(output.status.success(), "{name}: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{name}: {stderr}");
+    let compiled = stderr.lines().filter(|line| line.starts_with("romacs-compiled-lisp: {\"compile\"")).count();
+    (String::from_utf8_lossy(&output.stdout).into_owned(), compiled)
 }
 
 /// The lines of ROOT's store's use logs that name the library.
@@ -68,12 +73,13 @@ fn a_changed_preloaded_macro_is_not_run_from_a_stale_world_key() {
     // A sibling `.elc`: GNU would load compiled code, so Romacs does.
     std::fs::write(root.join("lib/t-key-user.elc"), "").unwrap();
     tree(&root, 1);
-    assert_eq!(session(&root, "a"), "1");
+    assert_eq!(session(&root, "a").0, "1");
     let before = uses(&root);
-    assert_eq!(session(&root, "b"), "1");
+    // The second session takes the first's artifact: it compiles nothing.
+    assert_eq!(session(&root, "b"), ("1".to_owned(), 0), "the second session compiled again");
     assert!(uses(&root) > before, "the second session did not load the library's artifact");
     // The macro the compile world preloaded changes; the library does not.
     tree(&root, 2);
-    assert_eq!(session(&root, "c"), "2", "a session ran the expansion of a superseded world");
+    assert_eq!(session(&root, "c").0, "2", "a session ran the expansion of a superseded world");
     let _ = std::fs::remove_dir_all(&root);
 }
