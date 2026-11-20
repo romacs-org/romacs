@@ -599,6 +599,10 @@ impl Leaf<'_> {
         let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
         let slice = crate::quit::QUIT_SLICE;
         loop {
+            // A worker's interrupt or termination, as its process waits take it.
+            if let Some(quit) = self.vm.worker_quit() {
+                return Err(quit);
+            }
             let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
             let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
             // Only an early parse this parser can take is worth its wait.
