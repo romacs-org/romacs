@@ -187,6 +187,16 @@ colours (no `color-values')."
         ((and (fboundp 'color-values) (color-values color))
          (apply #'format "#%02x%02x%02x" (mapcar (lambda (v) (ash v -8)) (color-values color))))))
 
+(defun romacs-color-band (bg fg &optional contrast)
+  "BG, #rrggbb, mixed toward FG until it stands CONTRAST (1.15 by default)
+apart from BG, or a third of the way there: a surface or a band that
+shows on a black background as on a white one."
+  (let ((contrast (or contrast 1.15)) (amount 0.05) band)
+    (while (progn (setq band (romacs-color-mix bg fg amount))
+                  (and (< (romacs-color-contrast band bg) contrast) (< amount 0.33)))
+      (setq amount (+ amount 0.02)))
+    band))
+
 (defun romacs-color-legible (color &optional background contrast)
   "COLOR moved in lightness until it reads on BACKGROUND (the default
 face's, by default) at CONTRAST (WCAG's 4.5:1 for text, by default), its

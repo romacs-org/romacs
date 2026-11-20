@@ -1296,5 +1296,23 @@ none when dropped.")
       (should (memq 'error (ensure-list (get-text-property at 'face text)))))
     (should-not (memq 'error (ensure-list (get-text-property (- (length text) 2) 'face text))))))
 
+;;; The user's surface
+
+(ert-deftest romacs-agent-log-rounds-surface-is-a-block-that-shows ()
+  ;; On black as on white, apart from the background.
+  (dolist (pair '(("#000000" . "#e0e0e0") ("#ffffff" . "#202020") ("#121212" . "#bebebe")))
+    (should (>= (romacs-color-contrast (romacs-color-band (car pair) (cdr pair)) (car pair)) 1.15)))
+  ;; From its first line through its newline, the blank line before it
+  ;; the transcript's.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "first" :request 1)
+    (draw :type 'input :text "second" :request 2)
+    (goto-char (point-min))
+    (search-forward "second")
+    (let ((line (line-beginning-position)))
+      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property line 'face))))
+      (should (memq 'romacs-agent-log-you (ensure-list (get-text-property (line-end-position) 'face))))
+      (should-not (memq 'romacs-agent-log-you (ensure-list (get-text-property (1- line) 'face)))))))
+
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here

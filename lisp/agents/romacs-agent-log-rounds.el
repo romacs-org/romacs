@@ -37,11 +37,12 @@ agent's own.")
   :group 'romacs-agent)
 
 (defun romacs-agent-log-rounds--derive (&rest _)
-  "Make the user's surface the background mixed toward the text, as its
-default spec: told from the transcript on every theme, light or dark."
+  "Make the user's surface the background mixed toward the text until it
+stands apart (`romacs-color-band'), as its default spec: told from the
+transcript on every theme, light, dark or black."
   (let* ((bg (romacs-color-hex (face-background 'default nil t)))
          (fg (romacs-color-hex (face-foreground 'default nil t)))
-         (surface (and bg fg (romacs-color-mix bg fg 0.08))))
+         (surface (and bg fg (romacs-color-band bg fg))))
     (face-spec-set 'romacs-agent-log-you
                    (if surface `((t :background ,surface :extend t)) '((t :extend t)))
                    'face-defface-spec)))
@@ -52,11 +53,13 @@ default spec: told from the transcript on every theme, light or dark."
 
 (defun romacs-agent-log-rounds-you (text)
   "TEXT, the user's message as a chat draws it, as its round's opener:
-its surface.  The round before it ends."
+its surface, a block to the window's edge from its first line through
+its newline; a blank line before it stays the transcript's.  The round
+before it ends."
   (romacs-agent-log-rounds-end)
-  (let ((text (copy-sequence text)))
+  (let ((text (if (string-suffix-p "\n" text) (copy-sequence text) (concat text "\n"))))
     (put-text-property 0 1 'romacs-agent-log-round t text)
-    (add-face-text-property 0 (length text) 'romacs-agent-log-you t text)
+    (add-face-text-property (or (string-match "[^\n]" text) 0) (length text) 'romacs-agent-log-you t text)
     text))
 
 (defun romacs-agent-log-rounds--head (incoming)
