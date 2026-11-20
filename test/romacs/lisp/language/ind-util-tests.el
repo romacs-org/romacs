@@ -96,4 +96,26 @@ table's, none checked against IS 13194:1991 itself.")
   (should (eq (coding-system-get 'in-is13194-devanagari :post-read-conversion)
               'in-is13194-post-read-conversion)))
 
+(ert-deftest ind-util-iscii-decoding-refuses-a-unibyte-buffer ()
+  ;; Its bytes would be lost: the Devanagari they decode to needs a
+  ;; multibyte buffer.
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert "\xb3\xe8\xd1")
+    (should-error (indian-iscii-to-ucs-region (point-min) (point-max)))
+    (should (equal (buffer-string) "\xb3\xe8\xd1"))))
+
+(ert-deftest ind-util-itrans-matches-as-gnu-does ()
+  ;; Transliteration keeps `regexp-opt' over its keys, case folding as
+  ;; GNU's does: pinned GNU's answers.
+  (dolist (case '(("chh" . "\u091a\u094d\u0939\u094d")
+                  ("Chh" . "\u091b\u094d\u0939\u094d")
+                  ("kSh" . "\u0915\u094d\u0937\u094d")
+                  ("shrI" . "\u0936\u094d\u0930\u0940")))
+    (with-temp-buffer
+      (insert (car case))
+      (indian-dev-itrans-v5-decode-region (point-min) (point-max))
+      (should (equal (list (car case) (buffer-substring-no-properties (point-min) (point-max)))
+                     (list (car case) (cdr case)))))))
+
 ;;; ind-util-tests.el ends here

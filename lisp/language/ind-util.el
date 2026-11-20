@@ -45,7 +45,13 @@
 (eval-and-compile
 
 (defun indian-regexp-of-hashtbl-keys (hashtbl)
-  "Return the regular expression of hash table keys.
+  "Return the regular expression of hash table keys."
+  (let (keys)
+    (maphash (lambda (key _val) (push key keys)) hashtbl)
+    (regexp-opt keys)))
+
+(defun indian-is13194-regexp-of-hashtbl-keys (hashtbl)
+  "Return the regular expression of HASHTBL's ISCII byte-string keys.
 It matches the longest key at a position: its alternatives come
 longest first, so an ISCII letter written as two bytes (one followed
 by nukta) is never read as its first byte."
@@ -823,7 +829,7 @@ with no ISCII form) is not decoded either.")
        (unless (or (string-match-p "\\`[[:ascii:]]*\\'" (cdr x))
                    (memq (car x) indian-is13194-decode-exclusions))
          (puthash (string-to-multibyte (cdr x)) (char-to-string (car x)) (eval hashtable))))
-      (set regexp (indian-regexp-of-hashtbl-keys (eval hashtable))))))
+      (set regexp (indian-is13194-regexp-of-hashtbl-keys (eval hashtable))))))
 
 (defvar is13194-default-repertory 'devanagari)
 
@@ -891,6 +897,10 @@ Return new end position."
   "Convert the ISCII characters in the region to UCS.
 Return new end position."
   (interactive "r")
+  ;; ISCII is raw bytes in a multibyte buffer, as decoding leaves it: a
+  ;; unibyte buffer cannot hold the Devanagari they become.
+  (unless enable-multibyte-characters
+    (error "Decoding ISCII needs a multibyte buffer"))
   ;; only Devanagari is supported now.
   (save-excursion
     (save-restriction
@@ -906,7 +916,9 @@ Return new end position."
 	     (re (eval current-regexp))
 	     (hash (eval current-hashtable)))
 	(while (re-search-forward re nil t)
-	  (replace-match (gethash (match-string 0) hash "") t t)))
+	  (let ((ucs (gethash (string-to-multibyte (match-string 0)) hash)))
+	    (when ucs
+	      (replace-match ucs t t)))))
       (point-max))))
 
 ;;;###autoload
