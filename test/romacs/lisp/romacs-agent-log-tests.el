@@ -28,6 +28,10 @@
        (cl-flet ((draw (&rest event) (romacs-agent-log-draw session event) (romacs-agent-log--separator)))
          ,@body))))
 
+;; What runs before a redisplay: a batch session has no host to run it.
+(unless (fboundp 'romacs--run-window-change-functions)
+  (load (expand-file-name "../vm/window-change.el" (file-name-directory (locate-library "romacs-agent.el"))) nil t))
+
 (defun romacs-agent-log-tests--transcript ()
   (buffer-substring-no-properties (point-min) romacs-agent-log--end))
 
@@ -248,15 +252,18 @@
           (save-window-excursion
             (delete-other-windows)
             (switch-to-buffer chat)
+            ;; The hooks run as the host delivers window changes before a
+            ;; redisplay.
+            (romacs--run-window-change-functions)
             (let ((narrow (split-window-right (- (window-total-width) 30))))
               (set-window-buffer narrow chat)
-              (romacs-agent-log--refit nil)
+              (romacs--run-window-change-functions)
               (let ((short (funcall rule)))
                 ;; The narrower window leaves no room for the rule to wrap in.
                 (should (< (+ romacs-agent-log--thread-cols short) (window-body-width narrow)))
                 ;; It shows another buffer: the rule fits the wider one again.
                 (set-window-buffer narrow (get-buffer-create "*romacs-agent-log-tests other*"))
-                (romacs-agent-log--refit nil)
+                (romacs--run-window-change-functions)
                 (should (> (funcall rule) short)))))
         (remhash "L" romacs-agent-log--chats)))))
 

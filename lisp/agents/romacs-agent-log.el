@@ -1011,8 +1011,8 @@ records now, or with LATER when a window first shows it."
     (romacs-agent-log--header-show)))
 
 (defun romacs-agent-log--refit (_frame)
-  "A window started or stopped showing a buffer, or went: each chat's rule
-fits the windows that still show it."
+  "A window started or stopped showing a buffer, or it or its frame went:
+each chat's rule fits the windows that still show it."
   (maphash (lambda (_id buffer)
              (when (buffer-live-p buffer)
                (with-current-buffer buffer
@@ -1020,6 +1020,7 @@ fits the windows that still show it."
            romacs-agent-log--chats))
 
 (add-hook 'window-buffer-change-functions #'romacs-agent-log--refit)
+(add-hook 'after-delete-frame-functions #'romacs-agent-log--refit)
 
 (defun romacs-agent-log--shown (_window)
   "A window shows this chat: drawn now, when it was not, its header made
