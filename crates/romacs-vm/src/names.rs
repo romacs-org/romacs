@@ -1,17 +1,49 @@
 //! The initial obarray's name table: each interned name's slot, keyed by the
 //! name's internal multibyte bytes, so a Lisp string is looked up by its own
 //! bytes and a name makes text only when it makes a symbol.
-use crate::NameMap;
+use std::hash::{BuildHasher, Hasher};
 use std::borrow::Cow;
 
 #[derive(Default, romacs_snapshot::Snapshot)]
 pub(crate) struct Names {
     /// By a name's internal multibyte bytes (`key_of`, `text_key`), its slot.
-    slots: NameMap<Box<[u8]>, usize>,
+    slots: std::collections::HashMap<Box<[u8]>, usize, KeyState>,
     /// Whether some key interned holds the escape's bytes (`symkey::ESC`):
     /// only such a key could equal, byte for byte, key text that escapes
     /// (`get`).
     escaped: bool,
+}
+
+/// The names table's hashing: `NameState`'s (a random seed per table) over
+/// a key's bytes alone. A byte slice's `Hash` writes its length before its
+/// bytes; the table compares keys whose hashes meet anyway, so the length
+/// tells it nothing, and one write is what a lookup of a hit costs.
+#[derive(Clone, Default, romacs_snapshot::Snapshot)]
+pub(crate) struct KeyState(crate::NameState);
+
+impl BuildHasher for KeyState {
+    type Hasher = KeyHasher;
+    #[inline]
+    fn build_hasher(&self) -> KeyHasher {
+        KeyHasher(self.0.build_hasher())
+    }
+}
+
+/// `KeyState`'s hasher: a key's bytes, its length prefix left out.
+pub(crate) struct KeyHasher(<crate::NameState as BuildHasher>::Hasher);
+
+impl Hasher for KeyHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.write(bytes);
+    }
+    /// A key's length prefix (`[u8]`'s `Hash`): left out.
+    #[inline]
+    fn write_usize(&mut self, _: usize) {}
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0.finish()
+    }
 }
 
 /// `symkey::ESC` in UTF-8.
