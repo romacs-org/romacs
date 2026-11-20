@@ -97,8 +97,10 @@ fn gui_control_keys_are_their_own_keys_and_fall_back_to_ret_tab_and_esc() {
                                           (progn (setq unread-command-events (list 'C-m)) (read-event)))"),
                    "(13 134217741 13 C-m)");
 
-        // In the minibuffer, Ctrl+m ends the read as RET does.
-        vm.eval_source("(setq gk-read nil)").unwrap();
+        // In the minibuffer, Ctrl+m ends the read as RET does (with no
+        // global binding of its own, which would come first, as a global
+        // [return] does in GNU).
+        vm.eval_source("(keymap-unset global-map \"C-<m>\") (setq gk-read nil)").unwrap();
         let mut keys = vec![press(FrontendKey::Character(':'), ROMACS_META_MASK)];
         keys.extend("(setq gk-read 1)".chars().map(plain));
         keys.push(ctrl('m'));
@@ -106,7 +108,7 @@ fn gui_control_keys_are_their_own_keys_and_fall_back_to_ret_tab_and_esc() {
         assert_eq!(printed(&mut vm, "gk-read"), "1");
 
         // A keyboard macro keeps the key and replays it.
-        vm.eval_source("(keymap-unset global-map \"C-<m>\") (erase-buffer)").unwrap();
+        vm.eval_source("(erase-buffer)").unwrap();
         let keys = vec![ctrl('x'), plain('('), plain('a'), ctrl('m'), ctrl('x'), plain(')'), ctrl('x'), plain('e')];
         assert_eq!(type_keys(&mut vm, keys, 5), ["kmacro-start-macro", "self-insert-command", "newline", "kmacro-end-macro", "kmacro-end-and-call-macro"]);
         assert_eq!(printed(&mut vm, "(list (buffer-string) last-kbd-macro)"), "(\"a\\na\\n\" [97 C-m])");
