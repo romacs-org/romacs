@@ -3227,7 +3227,6 @@ dependencies = [
  "wgpu",
  "wgpu-hal",
  "winit",
- "x11-dl",
 ]
 
 [[package]]
