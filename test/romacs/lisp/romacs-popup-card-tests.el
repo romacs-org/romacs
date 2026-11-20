@@ -60,7 +60,7 @@ among them), then each modifier's together: C-SPC and C-+ sit with C-a."
                         (aref (kbd "C-+") 0) (aref (kbd "M-x") 0) (aref (kbd "C-M-x") 0) 'f10 'f2 ?\e
                         (aref (kbd "M-RET") 0) (aref (kbd "M-DEL") 0) 'C-M-left ?\C-@))
                  '("a" "b" "B" "1" "+" "DEL" "ESC" "SPC" "TAB" "<f2>" "<f10>" "<left>"
-                   "C-a" "C-+" "C-@" "C-SPC" "C-<left>" "M-x" "M-DEL" "M-RET" "C-M-x" "C-M-<left>"))))
+                   "C-a" "C-+" "C-SPC" "C-@" "C-<left>" "M-x" "M-DEL" "M-RET" "C-M-x" "C-M-<left>"))))
 
 (defun romacs-popup-card-tests--keys (rows)
   "Each of ROWS as its keys: the first, then the others."

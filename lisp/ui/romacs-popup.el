@@ -681,7 +681,8 @@ command's name; `romacs-popup-prefix-keys' for an anonymous one; else
 unmodified keys, then C-, M-, C-M- and other modifiers; within each,
 letters (lower case before upper), digits, punctuation, then named keys
 \(SPC, TAB, RET, ESC, DEL, <left>, <f1>...).  SPC, TAB, RET, ESC and
-DEL are named keys whatever their modifiers (M-RET is M-, not C-M-)."
+DEL are named keys whatever their modifiers (M-RET is M-, not C-M-); C-@
+ranks just after C-SPC, the key that types it."
   (let* ((char (and (integerp event) (logand event #x3fffff)))
          (named-char (memq char '(?\t ?\r ?\e ?\d ?\s)))
          ;; A character's modifiers are its bits, Control too for C-a
@@ -690,7 +691,10 @@ DEL are named keys whatever their modifiers (M-RET is M-, not C-M-)."
                    (append (event-modifiers (logior (- event char) ?a))
                            (and (< char ?\s) (not named-char) '(control)))
                  (event-modifiers event)))
+         ;; C-@ is NUL, the key C-SPC types: SPC, just after C-SPC.
+         (nul (eql char 0))
          (base (cond (named-char (single-key-description char))
+                     (nul "SPC")
                      (char (if (< char ?\s) (event-basic-type char) char))
                      (t (symbol-name (event-basic-type event)))))
          ;; One order whatever the event's representation.
@@ -702,7 +706,7 @@ DEL are named keys whatever their modifiers (M-RET is M-, not C-M-)."
                 ((string-match-p "[[:alpha:]]" (string base)) 0)
                 (t 2))
           (if (stringp base) base (downcase base))
-          (if (and (integerp base) (/= base (downcase base))) 1 0))))
+          (if (or nul (and (integerp base) (/= base (downcase base)))) 1 0))))
 
 (defun romacs-popup--rank< (a b)
   "Whether rank A, a list of numbers and strings, sorts before rank B:
