@@ -90,12 +90,18 @@ CRATE_RULES = {'romacs-display-runtime': 'package(romacs-display-runtime) & test
 # (Vm::compile, build_function and the rest) and the reader (reader/, which
 # the compile walk reads each form through), both shared by every load and
 # read by every other test; and the compile pipeline outside these paths
-# (world/, batch.rs).
+# (world/, batch.rs). An installer's tree compile, in a fresh store beside
+# an installation and a user's environment, then a session over it
+# (compiled_lisp_install), runs for the compiled-Lisp store and the compile
+# world's identity: compiled_lisp/, the world store and batch.rs, which
+# configures both; the rest of world/ is left to the full gate.
 PATH_GATED = {
     'romacs-vm-gui::lisp_tree_compiles': re.compile(
         r'^(?:crates/romacs-vm/src/compiled_lisp/'
         r'|crates/romacs-vm/src/(?:request_code|expand|variable_definitions|capture|sealed|closure_key)\.rs$'
         r'|lisp/emacs-lisp/(?:romacs-compile|macroexp|byte-run|bytecomp|cconv)\.el$)'),
+    'romacs-vm-gui::compiled_lisp_install': re.compile(
+        r'^(?:crates/romacs-vm/src/compiled_lisp/|crates/romacs-vm/src/world/store\.rs$|crates/romacs-vm-gui/src/batch\.rs$)'),
 }
 
 # The live harnesses a check runs for any change that reaches the editor
