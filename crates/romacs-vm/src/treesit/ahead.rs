@@ -150,10 +150,15 @@ impl Vm {
     pub(crate) fn treesit_ahead_running(&mut self, buffer: Value) -> crate::Result<bool> {
         Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| core.borrow_mut().ahead.as_mut().is_some_and(|ahead| !ahead.ready())))
     }
-    /// Whether a parser of BUFFER's text is waiting for its first tree from
-    /// a thread: the frame shows the text without it meanwhile.
+    /// Whether BUFFER's text has no tree yet and a parser's first one is on
+    /// a thread: the frame shows the text without it meanwhile. A text with
+    /// a tree keeps the faces it has while a parser added since parses.
     pub(crate) fn treesit_first_running(&mut self, buffer: Value) -> crate::Result<bool> {
-        Ok(self.treesit_cores(buffer)?.iter().any(|(_, core)| {
+        let cores = self.treesit_cores(buffer)?;
+        if cores.iter().any(|(_, core)| core.borrow().tree.is_some()) {
+            return Ok(false);
+        }
+        Ok(cores.iter().any(|(_, core)| {
             let mut c = core.borrow_mut();
             c.tree.is_none() && c.ahead.as_mut().is_some_and(|ahead| !ahead.ready())
         }))
@@ -203,15 +208,21 @@ impl Vm {
     /// thread is free.
     fn treesit_start_ahead(&mut self, buffer: Value, parser: Value, core: &Rc<std::cell::RefCell<Core>>, restarts: u8,
                            wake: crate::process_jobs::Wake) -> crate::Result<bool> {
-        let (language, ranges) = match self.object(parser)? {
+        let (language, ranges, own) = match self.object(parser)? {
             data::Object::Treesit(object) => match &**object {
                 super::Object::Parser(p) if !p.deleted && !p.within_reparse => {
                     let native = p.native.borrow();
                     let Some(language) = native.language() else { return Ok(false) };
-                    (language, native.included_ranges())
+                    (language, native.included_ranges(), p.buffer)
                 }
                 _ => return Ok(false),
             },
+            _ => return Ok(false),
+        };
+        // A parser without a tree follows no edit: its view is its buffer's
+        // accessible region now (treesit_sync_visible_region).
+        let region = match self.object(own)? {
+            data::Object::Buffer(b) => b.accessible(),
             _ => return Ok(false),
         };
         let Some(text) = self.treesit_text_of(buffer)? else { return Ok(false) };
@@ -219,6 +230,9 @@ impl Vm {
         let mut c = core.borrow_mut();
         if !c.need_reparse || c.linecols.is_some() {
             return Ok(false);
+        }
+        if c.tree.is_none() {
+            c.visible = (region.start.0 as i64 + 1, region.end.0 as i64 + 1);
         }
         let old = match behind.and_then(|ahead| ahead.finish(text)) {
             Some((tree, region, ..)) if region == c.visible => Some(tree.loose()),

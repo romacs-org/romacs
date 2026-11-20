@@ -2849,7 +2849,16 @@ impl Vm {
             let buffer = self.window(window)?.buffer;
             let due = self.treesit_text_of(buffer)?.is_some_and(|text| text.treesit.small_edit_due(limit));
             match self.treesit_run_ahead(buffer, due)? {
-                State::Running => running = true,
+                State::Running => {
+                    running = true;
+                    // Its landing wakes the frame that runs the hooks this one defers.
+                    if self.treesit_first_running(buffer)? {
+                        let id = self.window(window)?.id;
+                        if !self.treesit_plain.contains(&id) {
+                            self.treesit_plain.push(id);
+                        }
+                    }
+                }
                 // The trees are there: this frame's parsers take them.
                 State::Landed => {}
                 State::None => small |= due,

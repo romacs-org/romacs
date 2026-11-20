@@ -593,15 +593,18 @@ impl Leaf<'_> {
     /// through the asker, and the parses run on for the next ask.
     fn ts_wait_threads(&mut self, parser: Value) -> R<()> {
         let p = self.ts_parser(parser)?;
-        let (core, base) = (p.core.clone(), self.ts_base(p.buffer));
+        let (core, base, native) = (p.core.clone(), self.ts_base(p.buffer), p.native.clone());
         let slice = crate::quit::QUIT_SLICE;
         loop {
-            let first = core.borrow().tree.is_none();
+            let (first, length) = { let c = core.borrow(); (c.tree.is_none(), c.visible.1 - c.visible.0) };
             let ahead = core.borrow_mut().ahead.as_mut().is_none_or(|ahead| ahead.wait(slice));
-            let early = !first || self.ts_registry_mut(base).early.as_mut().is_none_or(|early| early.wait(slice));
-            if ahead && early {
-                return Ok(());
-            }
+            // Only an early parse this parser can take is worth its wait.
+            let early = !first || {
+                let native = native.borrow();
+                let (language, sees_all) = (native.language(), native.sees_all(u32::try_from(length).unwrap_or(u32::MAX)));
+                !self.ts_registry_mut(base).early.as_mut().is_some_and(|early| early.pending_for(language.as_ref(), sees_all) && !early.wait(slice))
+            };
+            // A press during the slice that got the tree quits too.
             if self.vm.quit_input_pending() {
                 match self.vm.maybe_quit() {
                     None => {}
@@ -611,6 +614,9 @@ impl Leaf<'_> {
                         return Err(Fault::Escape);
                     }
                 }
+            }
+            if ahead && early {
+                return Ok(());
             }
         }
     }

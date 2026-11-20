@@ -201,6 +201,11 @@ impl Early {
         }
         self.landed.is_some()
     }
+    /// Whether a parser of LANGUAGE that sees LENGTH bytes whole can use
+    /// this parse's tree (`ts_early_tree'), and the thread is still on it.
+    pub(crate) fn pending_for(&mut self, language: Option<&native::Language>, sees_all: bool) -> bool {
+        sees_all && language == Some(&self.language) && self.pending()
+    }
     /// Whether a parser asking now would wait for a tree it can use.
     pub(crate) fn pending(&mut self) -> bool {
         self.changes.borrow().is_some() && !self.ready()

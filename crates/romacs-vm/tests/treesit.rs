@@ -688,6 +688,25 @@ fn a_shown_buffer_without_a_tree_takes_its_first_parse_off_the_evaluator() {
         "the evaluator parsed only the check's own buffer, not the first parse");
 }
 
+/// A parser made while its buffer was widened, then narrowed before the
+/// buffer is shown (as warm-restart's wake leaves a restored buffer), parses
+/// the accessible text on its thread: the tree that lands is the one the
+/// query wants, and the evaluator parses nothing.
+#[test]
+fn a_first_parse_on_a_thread_reads_the_accessible_text() {
+    let mut vm = first_parse_vm("ts-narrow", 4000, false);
+    vm.eval_source("(with-current-buffer \"ts-narrow\" (goto-char (point-min)) (forward-line 100) \
+        (narrow-to-region (point) (progn (forward-line 2000) (point))))").unwrap();
+    vm.eval_source("(set-window-buffer nil (get-buffer \"ts-narrow\"))").unwrap();
+    let before = romacs_vm::treesit_parses_on_this_thread();
+    deferred_frame(&mut vm);
+    wait_landed(&mut vm, "ts-narrow");
+    while deferred_frame(&mut vm) {}
+    assert_eq!(tree_is_a_parse(&mut vm, "ts-narrow"), "t");
+    assert_eq!(romacs_vm::treesit_parses_on_this_thread(), before + 1,
+        "the evaluator parsed only the check's own buffer, not the narrowed text again");
+}
+
 /// A buffer no frame shows is not parsed at all: frames of other buffers
 /// start no parse of it, on any thread, and the frame that first shows it
 /// starts exactly one, off the evaluator. The parses are counted in a
