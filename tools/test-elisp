@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,90 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPLETE = 'ROMACS-TEST-COMPLETE'
+
+
+DELIMITERS = set(' \t\n\r\f()[]\'`,";')
+
+
+def code_only(text):
+    """TEXT with its comments, strings and character literals blanked, so a
+    form's head is found only where the reader would read it."""
+    out = list(text)
+    i, n = 0, len(text)
+
+    def blank(start, end):
+        for k in range(start, min(end, n)):
+            if out[k] != '\n':
+                out[k] = ' '
+
+    while i < n:
+        c = text[i]
+        if c == ';':
+            end = text.find('\n', i)
+            end = n if end < 0 else end
+            blank(i, end)
+            i = end
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == '\\' else 1
+            blank(i, j + 1)
+            i = j + 1
+        elif c == '?' and (i == 0 or text[i - 1] in DELIMITERS):
+            width = 3 if text[i + 1:i + 2] == '\\' else 2
+            blank(i, i + width)
+            i += width
+        elif c == '\\':
+            i += 2
+        else:
+            i += 1
+    return ''.join(out)
+
+
+def defines_ert_tests(text):
+    """Whether TEXT defines ERT tests: an `(ert-deftest' read as a top-level
+    form, not quoted and not inside another form. Such a file cannot load
+    here, so it is refused before any host runs."""
+    code = code_only(text)
+    depth = 0
+    for i, c in enumerate(code):
+        if c == '(':
+            before = code[:i].rstrip()[-1:]
+            if depth == 0 and before not in ("'", '`', ',', '#', '@') \
+               and re.match(r'\(ert-deftest(?![^\s()])', code[i:]):
+                return True
+            depth += 1
+        elif c == ')':
+            depth = max(depth - 1, 0)
+    return False
+
+
+def needs_editor(text):
+    """Whether TEXT declares, in its leading comment header, that it needs
+    the editor's startup: a `;; romacs-test: editor' line."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(';'):
+            return False
+        if re.match(r';+\s*romacs-test:\s*editor\b', stripped):
+            return True
+    return False
+
+
+def selection(files, texts, core, named):
+    """The FILES to run, given their TEXTS, or an error: the bare VM (CORE)
+    skips a file whose header needs the editor, and refuses one NAMED."""
+    for path, text in zip(files, texts):
+        if defines_ert_tests(text):
+            return None, f'{path}: it defines ERT tests (ert-deftest); this runner runs romacs-test files (romacs-deftest), and ERT files run with tools/test-ert'
+    if core:
+        editor = [p for p, t in zip(files, texts) if needs_editor(t)]
+        if named and editor:
+            return None, f'{editor[0]}: declares "romacs-test: editor", which the bare VM (--core) cannot run'
+        files = [p for p in files if p not in editor]
+    if not files:
+        return None, 'No Elisp test files selected'
+    return files, None
 
 
 def main():
@@ -26,12 +111,13 @@ def main():
     if args.timeout <= 0:
         parser.error('--timeout must be positive')
     files = args.files or sorted((ROOT / 'test/romacs/romacs-test').glob('*-test.el'))
-    if not files:
-        parser.error('No Elisp test files selected')
     files = [p.resolve() for p in files]
     for path in files:
         if not path.is_file():
             parser.error(f'Test file does not exist: {path}')
+    files, problem = selection(files, [p.read_text(errors='replace') for p in files], args.core, bool(args.files))
+    if problem:
+        parser.error(problem)
     binary = args.binary or os.environ.get('ROMACS_TEST_BINARY')
     if not binary:
         target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
@@ -45,7 +131,9 @@ def main():
     if args.test and not all(c.isalnum() or c in '-_/:.' for c in args.test):
         parser.error('--test must be a test symbol name')
     source = f'(setq load-path (cons {quote(ROOT / "lisp/emacs-lisp")} load-path))\n(require \'romacs-test)\n'
-    source += ''.join(f'(load {quote(path)} nil t)\n' for path in files)
+    # Each file must register a test as it loads (a replaced one counts):
+    # a file that registers none is an error that names it.
+    source += ''.join(f'(let ((before romacs-test--registry)) (load {quote(path)} nil t) (when (eq before romacs-test--registry) (error "%s registered no romacs-test; ERT files run with tools/test-ert" {quote(path)})))\n' for path in files)
     source += f'(let ((summary (romacs-test-run {selector}))) (when (or (> (plist-get summary :failed) 0) (> (plist-get summary :errors) 0)) (error "Selected Elisp tests failed")))\n(princ "{COMPLETE}\\n")\n'
     command = [str(binary), '--source'] if args.core else [str(binary), '--batch', str(ROOT / 'lisp')]
     started = time.perf_counter()

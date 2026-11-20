@@ -112,7 +112,7 @@ the session, the view."
   "i" ("Interrupt" romacs-agent-log-interrupt :inapt-if (lambda () (not (romacs-agent-log--running-p))))
   "k" ("Interrupt, then send" romacs-agent-log-interrupt-and-send)
   "q" ("Send when the turn ends" romacs-agent-log-queue)
-  :group "Runs on"
+  :group ("Runs on" :if #'romacs-agent-log--commands-p)
   "m" (#'romacs-agent-ui--model-label romacs-agent-chat-model)
   "E" (#'romacs-agent-ui--effort-label romacs-agent-chat-effort)
   "P" (#'romacs-agent-ui--plan-label romacs-agent-chat-plan)
@@ -134,7 +134,7 @@ the session, the view."
                     (and (> n 9) (format "All %d at work" n))))
        romacs-agent-menu-workers)
   :row
-  :group "Session"
+  :group ("Session" :if #'romacs-agent-log--commands-p)
   "b" ("Agent board" romacs-agents)
   "n" ("New session" romacs-agent-chat-new)
   "R" ("Rename" romacs-agent-chat-rename)

@@ -57,13 +57,11 @@ impl Vm {
 /// directory. None when it cannot be determined, or names an unreachable
 /// directory (a leading `(', emacs_get_current_dir_name).
 pub(crate) fn startup_directory() -> Option<&'static [u8]> {
-    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+    use std::os::unix::ffi::OsStrExt;
     static DIRECTORY: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
     DIRECTORY.get_or_init(|| {
-        let dot = crate::host::metadata(".").ok();
-        if let (Some(pwd), Some(dot)) = (crate::host::getenv("PWD"), dot.as_ref())
-            && let Ok(meta) = crate::host::metadata(&pwd)
-            && meta.dev() == dot.dev() && meta.ino() == dot.ino()
+        if let Some(pwd) = crate::host::getenv("PWD")
+            && crate::host::names_working_directory(std::path::Path::new(&pwd))
         {
             return Some(pwd.as_bytes().to_vec());
         }

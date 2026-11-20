@@ -763,7 +763,8 @@ PROPERTIES may supply active-state and session values used by a test."
       (should (= b-pos d-pos)))))
 
 (ert-deftest keymap-popup-test-wrapped-columns-stay-aligned ()
-  "Automatic rows retain declared column alignment."
+  "Rows too wide for the width flow their groups column-major, and each
+column starts at one place on every row (romacs-grid.el)."
   (let* ((entry (lambda (key description)
                   (list :key key :description description
                         :type 'suffix :command 'ignore)))
@@ -776,25 +777,14 @@ PROPERTIES may supply active-state and session values used by a test."
                       (list :name "Delta" :entries (list (funcall entry "d" "Ddd")))
                       (list :name "Epsilon" :entries (list (funcall entry "e" "Eee"))))))
          (lines (split-string
-                 (substring-no-properties (keymap-popup--render rows nil 22))
-                 "\n" t))
-         (alpha-line (cl-find-if (lambda (line) (string-match-p "Alpha" line)) lines))
-         (longer-line (cl-find-if (lambda (line) (string-match-p "Longer Name" line)) lines)))
-    (should (= (string-match "Beta" alpha-line)
-               (string-match "Delta" longer-line)))
-    (should-not (string-match-p "Gamma" alpha-line))
-    (should-not (string-match-p "Epsilon" longer-line))))
-
-(ert-deftest keymap-popup-test-join-columns ()
-  (let* ((col-a '("Header A" "  a  Aaa" "  b  Bbb"))
-         (col-b '("Header B" "  c  Ccc"))
-         (widths (list (keymap-popup--column-width col-a)
-                       (keymap-popup--column-width col-b)))
-         (result (keymap-popup--join-columns (list col-a col-b) "  " widths)))
-    (should (= (length result) 3))
-    (should (string-match-p "Header A" (nth 0 result)))
-    (should (string-match-p "Header B" (nth 0 result)))
-    (should (string-match-p "Bbb" (nth 2 result)))))
+                 (substring-no-properties (keymap-popup--render rows nil 30))
+                 "\n"))
+         (at (lambda (name) (cl-some (lambda (line) (string-match (regexp-quote name) line)) lines))))
+    (should (seq-every-p (lambda (line) (<= (string-width line) 30)) lines))
+    ;; Alpha, Beta, Gamma down the first column; the rest in the second.
+    (should (= (funcall at "Alpha") (funcall at "Beta") (funcall at "Gamma") 0))
+    (should (= (funcall at "Longer Name") (funcall at "Delta") (funcall at "Epsilon")))
+    (should (> (funcall at "Delta") 0))))
 
 ;;; Lookup helper tests
 
@@ -1602,6 +1592,30 @@ come from the wrapper."
             (should (eq (keymap-lookup wrapper "q") #'ignore))
             (should (eq (keymap-lookup wrapper "C-u")
                         #'keymap-popup--prefix-argument))))
+      (kill-buffer buf))))
+
+(ert-deftest keymap-popup-test-exit-key-wins-over-paging ()
+  "An exit key that is also a paging key exits; the other paging keys
+still turn pages."
+  (let* ((map (make-sparse-keymap))
+         (buf (get-buffer-create keymap-popup--buffer-name))
+         (descs '(((:name nil :entries ((:key "a" :type suffix :stay-open t)))))))
+    (unwind-protect
+        (progn
+          (keymap-popup-test--session buf descs :keymap map)
+          (let ((wrapper (keymap-popup--build-wrapper-map map descs buf "C-v")))
+            (should (eq (keymap-lookup wrapper "C-v") #'ignore))
+            (should (eq (keymap-lookup wrapper "M-v") #'keymap-popup-previous-page))
+            (should (eq (keymap-lookup wrapper "C-M-v") #'keymap-popup-next-page)))
+          ;; An exit sequence keeps its prefix: C-v does not page.
+          (let ((wrapper (keymap-popup--build-wrapper-map map descs buf "C-v q")))
+            (should-not (eq (keymap-lookup wrapper "C-v") #'keymap-popup-next-page))
+            (should (equal (keymap-popup--paging-hint "C-v q") '("C-M-v" "M-v"))))
+          ;; ESC as the exit: M-v and C-M-v (ESC v, ESC C-v) give way.
+          (let ((wrapper (keymap-popup--build-wrapper-map map descs buf "ESC")))
+            (should (eq (keymap-lookup wrapper "ESC") #'ignore))
+            (should (eq (keymap-lookup wrapper "C-v") #'keymap-popup-next-page))
+            (should (equal (keymap-popup--paging-hint "ESC") '("C-v")))))
       (kill-buffer buf))))
 
 (ert-deftest keymap-popup-test-push-submenu-state ()
