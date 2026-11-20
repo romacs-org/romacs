@@ -37,6 +37,7 @@
 (require 'romacs-agent-turns)
 (require 'romacs-agent-drawn)
 (require 'romacs-agent-log)
+(require 'romacs-agent-menu)
 
 ;;;###autoload
 (defvar romacs-agents-map
