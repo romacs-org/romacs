@@ -587,27 +587,33 @@ Live, in a chat no window shows, the echo area says so too."
         (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 
-(defun romacs-agent-log--answer-text (by decision scope reason &optional answers)
-  "Who answered, and how: BY `user' or `policy', DECISION allow or deny;
+(defun romacs-agent-log--answer-text (actor decision scope reason &optional answers)
+  "Who answered, and how: ACTOR a plist of :kind (\"user\", \"policy\",
+\"harness\" or \"unknown\"), :login and :client; DECISION allow or deny;
 ANSWERS, a table of question to answer, what was answered: a question's
-answer says what was chosen, never that a tool was allowed."
-  (if (and (hash-table-p answers) (equal decision "allow"))
-      (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
-              (if (equal by "user") "answered: " "answered by Romacs: ")
-              ;; One question: its answer; more: each question with its own.
-              (let ((one (= (hash-table-count answers) 1)))
-                (mapconcat (lambda (question)
-                             (if one (format "%s" (gethash question answers))
-                               (format "%s → %s" question (gethash question answers))))
-                           (hash-table-keys answers) " · ")))
-  (let ((allowed (equal decision "allow")))
-    (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
-            (pcase by ("user" (if allowed "allowed by you" "denied by you"))
-                   ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
-                   (_ (if allowed "allowed" "denied")))
-            (if (equal scope "session") " for this session" "")
-            (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")
-            ""))))
+answer says what was chosen, never that a tool was allowed.  An answer
+from a client other than this editor says which."
+  (let* ((by (plist-get actor :kind))
+         (client (plist-get actor :client))
+         (via (if (and client (not (equal client "editor"))) (format " (via %s)" client) ""))
+         (allowed (equal decision "allow")))
+    (if (and (hash-table-p answers) allowed)
+        (concat (propertize "✔ " 'face 'romacs-agent-log-allowed)
+                (if (equal by "user") (concat "answered" via ": ") "answered by Romacs: ")
+                ;; One question: its answer; more: each question with its own.
+                (let ((one (= (hash-table-count answers) 1)))
+                  (mapconcat (lambda (question)
+                               (if one (format "%s" (gethash question answers))
+                                 (format "%s → %s" question (gethash question answers))))
+                             (hash-table-keys answers) " · ")))
+      (concat (propertize (if allowed "✔ " "✘ ") 'face (if allowed 'romacs-agent-log-allowed 'romacs-agent-log-denied))
+              (pcase by
+                ("user" (concat (if allowed "allowed by you" "denied by you") via))
+                ("policy" (if allowed "allowed by Romacs (romacs-agent-approval-policy)" "denied by Romacs"))
+                ("harness" (if allowed "allowed by the harness" "denied by the harness"))
+                (_ (if allowed "allowed" "denied")))
+              (if (equal scope "session") " for this session" "")
+              (if (and reason (not (string-empty-p reason))) (concat ": " reason) "")))))
 
 (defun romacs-agent-log--answered (event)
   "Draw answer EVENT, from the harness's records: its block settled, and,
@@ -619,7 +625,10 @@ unless a note said who gave it, that it was answered."
                               (pcase (plist-get event :behavior)
                                 ("allow" (concat (propertize "✔ " 'face 'romacs-agent-log-allowed) "allowed (who: not recorded)"))
                                 ("deny" (concat (propertize "✘ " 'face 'romacs-agent-log-denied) "denied (who: not recorded)"))
-                                (_ (propertize "· settled: the harness no longer asks" 'face 'romacs-agent-log-note)))))))
+                                (_ (propertize (if (eq (plist-get event :how) 'harness)
+                                                   "· settled by the harness: no longer asked"
+                                                 "· settled: the harness no longer asks")
+                                               'face 'romacs-agent-log-note)))))))
 
 (defun romacs-agent-log--prompt (event)
   "Draw input EVENT: the user's message, or one from another session."
@@ -680,7 +689,7 @@ unless a note said who gave it, that it was answered."
     ;; Who answered: said, the block settled once its answer is written.
     ('attributed (push (plist-get event :request-id) romacs-agent-log--attributed)
                  (romacs-agent-log--line event 'answer
-                                         (romacs-agent-log--answer-text (plist-get event :by) (plist-get event :decision)
+                                         (romacs-agent-log--answer-text (plist-get event :actor) (plist-get event :decision)
                                                                         (plist-get event :scope) (plist-get event :reason)
                                                                         (plist-get event :answers))))
     ('answered (romacs-agent-log--answered event))

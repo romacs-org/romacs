@@ -1971,7 +1971,11 @@ is let go, however it is read (live, a replay, a journal read here)."
                                ("plan" (list (list :type 'status :text (if (eq (gethash "on" note) t) "plan mode" "plan mode off"))))
                                ;; Who answered an approval, and how (`romacs-agent-respond').
                                ("answer" (list (list :type 'attributed :request-id (gethash "request" note)
-                                                     :by (gethash "by" note) :decision (gethash "decision" note)
+                                                     ;; Older notes name only who.
+                                                     :actor (list :kind (or (romacs-agent--value (gethash "by" note)) "unknown")
+                                                                  :login (romacs-agent--value (gethash "login" note))
+                                                                  :client (romacs-agent--value (gethash "client" note)))
+                                                     :decision (gethash "decision" note)
                                                      :scope (gethash "scope" note)
                                                      :reason (romacs-agent--value (gethash "reason" note))
                                                      :answers (let ((answers (gethash "answers" note)))
@@ -4412,19 +4416,29 @@ its thread.  One a worker folds still is interrupted once it is folded."
         ('nil (user-error "Session %s has no turn to interrupt yet" (romacs-agent-title session)))
         (_ (romacs-agent--line session how))))))
 
+(defun romacs-agent--actor (by)
+  "BY, who answers (`romacs-agent-respond'), as an actor: this editor's
+user or policy, or the actor BY is; nil for nil."
+  (cond ((null by) nil)
+        ((symbolp by) (list :kind by :login (user-login-name) :client "editor"))
+        (t by)))
+
 (defun romacs-agent-respond (session request-id allow &optional message by)
   "Answer SESSION's approval REQUEST-ID: ALLOW, as a driver's :respond
 takes it, allows (t, or a plist of :answers or :always), else it is denied
-with MESSAGE.  BY, `user' or `policy', is who answered: a note says so in
-SESSION's records first, so every view shows who decided."
+with MESSAGE.  BY is who answered: `user' or `policy' (this editor's), or
+an actor, a plist of :kind (`user' or `policy'), :login and :client.  A
+note says so in SESSION's records first, so every view shows who decided
+(doc/agent-protocol.org, Attribution)."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
   (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
          ;; A plan is proceeded with once: no rule for the session.
          (allow (if (and plan allow) t allow))
          (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
-    (when by
+    (when-let* ((actor (romacs-agent--actor by)))
       (romacs-agent--note session (romacs-mcp--object
-                                   "type" "answer" "request" request-id "by" (symbol-name by)
+                                   "type" "answer" "request" request-id "by" (symbol-name (plist-get actor :kind))
+                                   "login" (or (plist-get actor :login) :null) "client" (or (plist-get actor :client) :null)
                                    "decision" (if allow "allow" "deny")
                                    "scope" (if (and (consp allow) (plist-get allow :always)) "session" "once")
                                    "reason" (or message :null)

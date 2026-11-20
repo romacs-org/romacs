@@ -127,7 +127,7 @@
     (should (string-match-p "1 waits on you" (romacs-agent-log--header)))
     ;; Answered by the user: who and how, and the block no longer waits.
     (remhash "b1" (romacs-agent-approvals session))
-    (draw :type 'attributed :request-id "b1" :by "user" :decision "deny" :scope "once" :reason "not now")
+    (draw :type 'attributed :request-id "b1" :actor '(:kind "user" :client "editor") :decision "deny" :scope "once" :reason "not now")
     (draw :type 'answered :request-id "b1" :behavior "deny")
     (should (string-match-p "✘ denied by you: not now" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "not recorded" (romacs-agent-log-tests--transcript)))
@@ -135,7 +135,7 @@
 
 (ert-deftest romacs-agent-log-an-answer-says-who-gave-it ()
   (romacs-agent-log-tests--with
-    (draw :type 'attributed :request-id "x" :by "policy" :decision "allow" :scope "once")
+    (draw :type 'attributed :request-id "x" :actor '(:kind "policy") :decision "allow" :scope "once")
     (draw :type 'answered :request-id "x" :behavior "allow")
     (draw :type 'answered :request-id "y" :behavior "deny")
     (let ((text (romacs-agent-log-tests--transcript)))
@@ -287,10 +287,24 @@
     (puthash "Colour?" "Blue" one)
     (puthash "Colour?" "Blue" two)
     (puthash "Size?" "Large" two)
-    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text "user" "allow" "once" nil one)))
-    (let ((text (romacs-agent-log--answer-text "user" "allow" "once" nil two)))
+    (should (string-suffix-p "answered: Blue" (romacs-agent-log--answer-text '(:kind "user") "allow" "once" nil one)))
+    (let ((text (romacs-agent-log--answer-text '(:kind "user") "allow" "once" nil two)))
       (should (string-match-p "Colour\\? → Blue" text))
       (should (string-match-p "Size\\? → Large" text)))))
+
+(ert-deftest romacs-agent-log-an-answer-says-its-actor ()
+  ;; Another client's answer says which; the harness's own says so.
+  (should (string-match-p "allowed by you (via phone)"
+                          (romacs-agent-log--answer-text '(:kind "user" :client "phone") "allow" "once" nil)))
+  (should (string-match-p "denied by the harness" (romacs-agent-log--answer-text '(:kind "harness") "deny" "once" nil)))
+  (should (string-match-p "\\`✔ allowed\\'" (substring-no-properties
+                                               (romacs-agent-log--answer-text '(:kind "unknown") "allow" "once" nil))))
+  (romacs-agent-log-tests--with
+    (puthash "h" t (romacs-agent-approvals session))
+    (draw :type 'approval :request-id "h" :tool "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (remhash "h" (romacs-agent-approvals session))
+    (draw :type 'answered :request-id "h" :how 'harness)
+    (should (string-match-p "settled by the harness" (romacs-agent-log-tests--transcript)))))
 
 (ert-deftest romacs-agent-log-a-block-waits-until-its-answer-is-written ()
   (romacs-agent-log-tests--with
@@ -299,7 +313,7 @@
           :questions '(("Colour?" :options ("Red" "Blue"))))
     (let ((answers (make-hash-table :test #'equal)))
       (puthash "Colour?" "Blue" answers)
-      (draw :type 'attributed :request-id "q" :by "user" :decision "allow" :scope "once" :answers answers))
+      (draw :type 'attributed :request-id "q" :actor '(:kind "user" :client "editor") :decision "allow" :scope "once" :answers answers))
     ;; Said who answered, and what; still answerable until the harness has it.
     (should (string-match-p "✔ answered: Blue" (romacs-agent-log-tests--transcript)))
     (should-not (string-match-p "allowed by you" (romacs-agent-log-tests--transcript)))
@@ -468,6 +482,39 @@
       ;; Proceeding, however answered (here, the board's way): out of it.
       (romacs-agent-respond session "p" t nil 'user)
       (should (equal planned '(nil))))))
+
+(ert-deftest romacs-agent-log-an-answer-is-noted-with-its-actor ()
+  (let ((session (romacs-agent--make :id "N" :harness 'claude :seq 0
+                                     :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
+        (request (make-hash-table :test #'equal))
+        notes raised)
+    (puthash "tool_name" "Bash" request)
+    (puthash "b" request (romacs-agent-approvals session))
+    (cl-letf (((symbol-function 'romacs-agent--line) #'ignore)
+              ((symbol-function 'romacs-agent--note) (lambda (_s note) (push note notes))))
+      (romacs-agent-respond session "b" t nil 'user)
+      (romacs-agent-respond session "b" nil "no" '(:kind policy :login "ci" :client "phone")))
+    (pcase-let ((`(,second ,first) notes))
+      (should (equal (gethash "by" first) "user"))
+      (should (equal (gethash "login" first) (user-login-name)))
+      (should (equal (gethash "client" first) "editor"))
+      (should (equal (gethash "client" second) "phone"))
+      ;; Read back, the note says its actor; an older one only who.
+      (cl-letf (((symbol-function 'romacs-agent--raise) (lambda (_s event) (push event raised))))
+        (let ((record (make-hash-table :test #'equal)))
+          (puthash "seq" 1 record)
+          (puthash "note" second record)
+          (romacs-agent--record session record))
+        (let ((record (make-hash-table :test #'equal)) (old (make-hash-table :test #'equal)))
+          (puthash "type" "answer" old)
+          (puthash "request" "b" old)
+          (puthash "decision" "allow" old)
+          (puthash "seq" 2 record)
+          (puthash "note" old record)
+          (romacs-agent--record session record)))
+      (let ((events (seq-filter (lambda (event) (eq (plist-get event :type) 'attributed)) (reverse raised))))
+        (should (equal (plist-get (car events) :actor) '(:kind "policy" :login "ci" :client "phone")))
+        (should (equal (plist-get (cadr events) :actor) '(:kind "unknown" :login nil :client nil)))))))
 
 (ert-deftest romacs-agent-log-a-turn-end-ends-what-runs ()
   (romacs-agent-log-tests--with

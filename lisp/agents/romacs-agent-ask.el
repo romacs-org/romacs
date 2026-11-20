@@ -27,7 +27,7 @@
 (require 'cl-lib)
 (require 'romacs-popup)
 
-(declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message))
+(declare-function romacs-agent-respond "romacs-agent" (session request-id allow &optional message by))
 (declare-function romacs-agent-title "romacs-agent" (session))
 (declare-function romacs-agent-id "romacs-agent" (session))
 

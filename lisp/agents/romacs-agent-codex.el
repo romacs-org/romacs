@@ -577,11 +577,12 @@ an approval or questions for the user, anything else refused."
              (list (list :type 'status :text (format "Retrying: %s" text)))
            (list (list :type 'error :text text)))))
       ("serverRequest/resolved"
-       ;; Settled without the user (its turn ended): no longer theirs to answer.
+       ;; Settled by the harness before any answer (its turn ended, it
+       ;; was cancelled): no longer the user's to answer.
        (let ((id (romacs-agent--codex-approval-id session (gethash "requestId" params))))
          (when (gethash id (romacs-agent-approvals session))
            (remhash id (romacs-agent-approvals session))
-           (list (list :type 'answered :request-id id)))))
+           (list (list :type 'answered :request-id id :how 'harness)))))
       ("model/rerouted"
        (list (list :type 'status :text (format "Model rerouted to %s" (gethash "toModel" params)))))
       ((or "warning" "configWarning" "deprecationNotice")
