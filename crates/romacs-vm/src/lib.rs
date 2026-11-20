@@ -2162,11 +2162,16 @@ impl Vm {
         self.initial_obarray.get(slot).copied().unwrap_or(false)
     }
     fn slot(&mut self, name: &str) -> usize {
-        if let Some(&i) = self.names.get(name) {
-            return i;
+        match self.names.get(name) {
+            Some(&i) => i,
+            None => self.new_slot(name, names::text_key(name)),
         }
+    }
+    /// The slot of a new symbol interned in the initial obarray, named NAME
+    /// (key text) whose key (names.rs) is KEY: no name names it yet.
+    fn new_slot(&mut self, name: &str, key: Box<[u8]>) -> usize {
         let i = self.slots.len();
-        self.names.insert(name, i);
+        self.names.insert_key(key, i);
         // A reused slot names another symbol now (Vm::special_cache).
         self.special_changes += 1;
         self.set_initial_obarray(i, true);

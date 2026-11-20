@@ -21,15 +21,22 @@ pub(crate) fn key_of(bytes: &[u8], chars: usize) -> Cow<'_, [u8]> {
 
 /// The key of a name given as key text (`symkey`): its own bytes when it is
 /// plain Unicode text, else the internal bytes its escapes stand for.
-fn text_key(name: &str) -> Cow<'_, [u8]> {
-    if name.is_ascii() { return Cow::Borrowed(name.as_bytes()); }
-    crate::symkey::to_internal(name).map_or(Cow::Borrowed(name.as_bytes()), Cow::Owned)
+pub(crate) fn text_key(name: &str) -> Box<[u8]> {
+    crate::symkey::to_internal(name).map_or_else(|| name.as_bytes().into(), Vec::into_boxed_slice)
 }
 
 impl Names {
-    /// The slot of the name with key text NAME, when it is interned.
+    /// The slot of the name with key text NAME, when it is interned. An ASCII
+    /// name, as nearly every name a Rust caller gives, is its own key.
+    #[inline]
     pub(crate) fn get(&self, name: &str) -> Option<&usize> {
-        self.slots.get(&*text_key(name))
+        if name.is_ascii() { self.slots.get(name.as_bytes()) } else { self.get_text(name) }
+    }
+    fn get_text(&self, name: &str) -> Option<&usize> {
+        match crate::symkey::to_internal(name) {
+            Some(key) => self.slots.get(&key[..]),
+            None => self.slots.get(name.as_bytes()),
+        }
     }
     /// The slot of the name whose key (`key_of`) is KEY, when it is interned.
     pub(crate) fn get_bytes(&self, key: &[u8]) -> Option<&usize> {
@@ -41,7 +48,11 @@ impl Names {
     /// Make the name with key text NAME name SLOT: the slot it named before,
     /// as `HashMap::insert`.
     pub(crate) fn insert(&mut self, name: &str, slot: usize) -> Option<usize> {
-        self.slots.insert(text_key(name).into_owned().into_boxed_slice(), slot)
+        self.insert_key(text_key(name), slot)
+    }
+    /// Make the name whose key (`key_of`, `text_key`) is KEY name SLOT.
+    pub(crate) fn insert_key(&mut self, key: Box<[u8]>, slot: usize) -> Option<usize> {
+        self.slots.insert(key, slot)
     }
     /// Forget the name with key text NAME.
     pub(crate) fn remove(&mut self, name: &str) {

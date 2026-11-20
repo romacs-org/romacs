@@ -166,8 +166,12 @@ impl Vm {
         let initial = matches!(self.object_if(table), Some(Object::Obarray(t)) if t.initial);
         let text = symbol_key(&bytes, chars).ok_or(prim::Fault::NotUnicode(name))?;
         // The initial obarray's names are the VM's own (`Vm::names`); its
-        // Obarray object holds none of them.
-        if initial { return Ok(self.intern(&text)); }
+        // Obarray object holds none of them. The lookup above missed (and
+        // answers nil and t), so the new symbol takes the key it used.
+        if initial {
+            let key = crate::names::key_of(&bytes, chars).into_owned().into_boxed_slice();
+            return Ok(Value::reference(self.new_slot(&text, key) + 1, 7));
+        }
         let text = &*text;
         let symbol = {
             let id = expand::generated_id();
