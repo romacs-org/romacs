@@ -57,15 +57,16 @@ says whether the program runs.")
   "Keys that keep their Emacs bindings in a terminal running a program.
 Each is a `kbd' string.  While the window follows the cursor on the normal
 screen, every other key not bound in `romacs-term-mode-map' goes to the
-program, but for
-`romacs-term-shell-exceptions' and `romacs-term-history-map' at the
-shell's prompt; the alternate screen keeps `romacs-term-alternate-exceptions'
+program (M-ESC aside), but for `romacs-term-shell-exceptions' and
+`romacs-term-history-map' at the shell's prompt; the alternate screen
+keeps `romacs-term-alternate-exceptions' and `romacs-term-alternate-map'
 instead.  After changing this outside Customize, run
 `romacs-term-update-keymaps'.")
 
 (defvar romacs-term-shell-exceptions '("C-p" "C-n" "M-<" "M->")
   "Keys that also keep their Emacs bindings while the shell itself has the
-terminal: its process group is the terminal's foreground one, as at its
+terminal on the normal screen and the window follows the cursor: the
+shell's process group is the terminal's foreground one, as at its
 prompt.  They move point, as in shell-mode, which leaves the cursor for
 the scrollback until typing returns; the shell's history is on M-p and
 M-n (`romacs-term-history-map'), and Up and Down.  A program the shell runs
@@ -481,16 +482,17 @@ exited.  Any other buffer of that name is someone's text: a `user-error'."
 
 (defun romacs-term (&optional shell arg)
   "Switch to the terminal *romacs-term*, or start it running SHELL in
-`default-directory'.  With a numeric prefix ARG N, *romacs-term*<N> instead;
-with \\[universal-argument] alone, a new terminal.  A terminal whose program
-has exited starts afresh.
+`default-directory'.  With a numeric prefix ARG N, *romacs-term*<N>
+instead; with \\[universal-argument] alone, a new terminal.  A terminal
+whose program has exited starts afresh.
 While the window follows the cursor on the normal screen, keys go to the
 program, except `romacs-term-keymap-exceptions' and the keys of
 `romacs-term-mode-map'; the shell's prompt and the alternate screen keep
-the keys their own lists name.  C-c C-c
-sends Ctrl-C; C-y and M-y send kills; M-p and M-n recall the shell's
-history.  C-c C-j, moving point off the cursor, or scrolling back makes the
-window a plain Emacs buffer until you type or press C-c C-j again."
+the keys their own lists name.  On the normal screen C-c C-c sends
+Ctrl-C and C-y and M-y send kills; at the shell's prompt, or away from
+the cursor, M-p and M-n recall the shell's history.  C-c C-j, moving
+point off the cursor, or scrolling back makes the window a plain Emacs
+buffer until you type or press C-c C-j again."
   (interactive (list nil current-prefix-arg))
   (romacs-term--ensure-keymaps)
   (let* ((name (romacs-term--buffer-name arg))

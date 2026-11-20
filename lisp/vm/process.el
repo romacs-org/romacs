@@ -20,8 +20,9 @@ each `romacs-process-start' started and neither
 Once it completes, `romacs-process-dispatch-ready' calls CALLBACK on the
 evaluator with one argument, the list (STATUS STDOUT STDERR ERROR):
 STATUS its exit code or nil, STDOUT and STDERR decoded as UTF-8 with
-invalid bytes replaced, and ERROR a string saying why it failed (it did
-not start, ran past TIMEOUT, or its output overflowed) or nil.  A non-nil
+invalid bytes replaced, and ERROR a string saying why it failed (for
+example, it did not start, ran past TIMEOUT, or its output overflowed) or
+nil.  A non-nil
 value from CALLBACK says it changed what is shown.  TIMEOUT is a whole
 number of seconds, 1 to 120; a request the runtime refuses signals here.  A
 command `romacs-process-forget' retires first is never called back.  The

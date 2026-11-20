@@ -86,7 +86,7 @@ whether another must follow it (AGAIN: t, or `whole' for all the list)."
   "Close CLIENT's connection to its service, dropping what it held unsent.
 Closing ends the connection at once: its sentinel calls each request
 still waiting on a reply with the `disconnected' error, then runs
-`romacs-agent-client-follow-functions' with (ended) for each session
+`romacs-agent-client-follow-functions' with (ended) for the sessions
 followed through it."
   (romacs-agent-rpc-close (romacs-agent-client-rpc client)))
 
