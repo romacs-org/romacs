@@ -64,7 +64,14 @@
 //! # One spawn mechanism, two hosts
 //!
 //! [`spawn`] is a library. A process that keeps no children (`--batch`, a
-//! test, a worker VM) calls it in process and uses no keeper.
+//! test, a worker VM) calls it in process and uses no keeper.//!
+//! # Unsafe code
+//!
+//! Denied crate-wide. What remains is the system calls no crate in the
+//! lock file makes safely, each in one small function that says so with
+//! `#[expect(unsafe_code)]` and an `UNSAFE(reason)`.
+
+#![deny(unsafe_code)]
 
 pub mod address;
 pub mod client;

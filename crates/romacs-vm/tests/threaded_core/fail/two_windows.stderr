@@ -1,0 +1,19 @@
+error[E0499]: cannot borrow `r` as mutable more than once at a time
+  --> tests/threaded_core/fail/two_windows.rs:11:21
+   |
+10 |         let regs = r.window(&mut e);
+   |                    - first mutable borrow occurs here
+11 |         let other = r.window(&mut e);
+   |                     ^ second mutable borrow occurs here
+12 |         regs[pc.a()] = other[pc.b()];
+   |         ------------ first borrow later used here
+
+error[E0499]: cannot borrow `e` as mutable more than once at a time
+  --> tests/threaded_core/fail/two_windows.rs:11:30
+   |
+10 |         let regs = r.window(&mut e);
+   |                             ------ first mutable borrow occurs here
+11 |         let other = r.window(&mut e);
+   |                              ^^^^^^ second mutable borrow occurs here
+12 |         regs[pc.a()] = other[pc.b()];
+   |         ------------ first borrow later used here

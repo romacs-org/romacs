@@ -10,7 +10,7 @@
 //! wrote; a build refuses a table newer than [`TABLE_VERSION`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 
 use romacs_record::{Error, Handle, HandleAllocator, Reader, Writer};
 
@@ -79,17 +79,6 @@ pub struct Table {
 
 fn fd_number(fd: Option<&OwnedFd>) -> i64 { fd.map_or(-1, |fd| i64::from(fd.as_raw_fd())) }
 
-/// The descriptor a table names by NUMBER, adopted. A resumed keeper
-/// inherits its descriptors across the exec by number, and only
-/// `from_raw_fd` can own a descriptor this image did not open.
-///
-/// # Safety
-/// NUMBER, when not negative, must be an open descriptor nothing else owns.
-unsafe fn fd_owned(number: i64) -> Option<OwnedFd> {
-    // SAFETY: the caller's contract.
-    RawFd::try_from(number).ok().filter(|fd| *fd >= 0).map(|fd| unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
 impl Table {
     #[must_use]
     pub fn owner_alive(&self, owner: u64) -> bool {
@@ -128,7 +117,10 @@ impl Table {
 
     pub fn remove(&mut self, handle: Handle) {
         self.set_owner(handle, 0);
-        if let Some(child) = self.handles.remove(&handle).and_then(|entry| entry.child) { self.pids.remove(&child.pid); }
+        if let Some(child) = self.handles.remove(&handle).and_then(|entry| entry.child) {
+            // A reaped child's pid may name another's by now.
+            if self.pids.get(&child.pid) == Some(&handle) { self.pids.remove(&child.pid); }
+        }
     }
 
     /// The table as a flat buffer, and every descriptor it names: those
@@ -169,25 +161,31 @@ impl Table {
     /// # Errors
     /// What is wrong with the table, in words.
     pub fn check(bytes: &[u8], newest: u16) -> Result<(), String> {
-        Self::parse(bytes, newest, false).map(drop)
+        Self::parse(bytes, newest, &mut |_| None).map(drop)
     }
 
-    /// Read a table [`Self::export`] wrote, taking its descriptors. A table
-    /// that does not read takes none: it is checked whole first.
+    /// The descriptor numbers a table names, in its order.
     ///
     /// # Errors
     /// What is wrong with the table, in words.
-    ///
-    /// # Safety
-    /// Every descriptor number in BYTES must be open in this process and
-    /// owned by nothing else: true in the process that exported the table
-    /// and then exec'd with them inherited.
-    pub unsafe fn import(bytes: &[u8], newest: u16) -> Result<Self, String> {
-        Self::check(bytes, newest)?;
-        Self::parse(bytes, newest, true)
+    pub fn descriptors(bytes: &[u8], newest: u16) -> Result<Vec<RawFd>, String> {
+        let mut numbers = Vec::new();
+        Self::parse(bytes, newest, &mut |number| { numbers.push(number); None })?;
+        Ok(numbers)
     }
 
-    fn parse(bytes: &[u8], newest: u16, own: bool) -> Result<Self, String> {
+    /// Read a table [`Self::export`] wrote, each descriptor number it names
+    /// given to ADOPT for the descriptor it stands for. A table that does
+    /// not read adopts none: it is checked whole first.
+    ///
+    /// # Errors
+    /// What is wrong with the table, in words.
+    pub fn import(bytes: &[u8], newest: u16, mut adopt: impl FnMut(RawFd) -> Option<OwnedFd>) -> Result<Self, String> {
+        Self::check(bytes, newest)?;
+        Self::parse(bytes, newest, &mut adopt)
+    }
+
+    fn parse(bytes: &[u8], newest: u16, adopt: &mut dyn FnMut(RawFd) -> Option<OwnedFd>) -> Result<Self, String> {
         let truncated = |e: Error| format!("keeper table: {e}");
         if bytes.len() < 8 || &bytes[..8] != TABLE_MAGIC { return Err("not a keeper table".into()); }
         let mut r = Reader(&bytes[8..]);
@@ -195,14 +193,13 @@ impl Table {
         if version == 0 || version > newest {
             return Err(format!("keeper table version {version} is newer than this build reads ({newest})"));
         }
-        Self::read(&mut r, own).map_err(truncated)
+        Self::read(&mut r, adopt).map_err(truncated)
     }
 
-    /// With OWN, wrap each descriptor number; without, only read the bytes.
-    fn read(r: &mut Reader<'_>, own: bool) -> Result<Self, Error> {
-        // SAFETY: OWN is set only by `import`, whose caller promises every
-        // number in the table is an open descriptor owned by nothing else.
-        let fd = |number: i64| if own { unsafe { fd_owned(number) } } else { None };
+    /// Each descriptor number not negative goes to ADOPT; a number no
+    /// descriptor can have is no descriptor.
+    fn read(r: &mut Reader<'_>, adopt: &mut dyn FnMut(RawFd) -> Option<OwnedFd>) -> Result<Self, Error> {
+        let mut fd = |number: i64| RawFd::try_from(number).ok().filter(|fd| *fd >= 0).and_then(&mut *adopt);
         let mut table = Table { epoch: r.u64()?, allocator: HandleAllocator::resume(r.u64()?), ..Table::default() };
         (table.last_attachment, table.idle_ms) = (r.u64()?, r.u64()?);
         table.listener = fd(r.i64()?);
@@ -224,7 +221,8 @@ impl Table {
                 if number < 0 { return Err(Error::Truncated); }
                 let pidfd = fd(number);
                 let (status, leader, unreported) = (Status::read(&mut e)?, e.u8()? != 0, e.u8()? != 0);
-                table.pids.insert(pid, handle);
+                // A reaped child's pid may name another process by now.
+                if !status.ended() { table.pids.insert(pid, handle); }
                 entry.child = pidfd.map(|pidfd| Child { pid, pidfd, status, leader, unreported });
             }
             if let Some(a) = table.attachments.get_mut(&entry.owner) { a.owned += 1; }

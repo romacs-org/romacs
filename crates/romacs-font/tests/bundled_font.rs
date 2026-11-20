@@ -1,8 +1,15 @@
 //! The bundled Iosevka (assets/fonts) resolves to itself as pinned GNU's
-//! does, with only those four files in Fontconfig: this binary's one test
-//! owns the process's Fontconfig and points FONTCONFIG_FILE, before
-//! Fontconfig starts, at a configuration with no font directory, then
-//! registers the files as the GUI does. No host font takes part.
+//! does, with only those four files in Fontconfig: the test runs again in a
+//! child whose `FONTCONFIG_FILE` names a configuration with no font
+//! directory, and registers the files as the GUI does. No host font takes
+//! part.
+
+#![forbid(unsafe_code)]
+
+#[path = "../../romacs-vm/tests/support/own_test.rs"]
+mod own_test;
+#[path = "support/fontconfig_child.rs"]
+mod fontconfig_child;
 
 use romacs_display_protocol::font::FontSlantKind::Italic;
 use romacs_font::{FontRequest, FontResolver};
@@ -14,11 +21,14 @@ fn the_bundled_iosevka_resolves_to_itself_as_gnu_does() {
     // of "Καλημέρα Жж A" from its own file, "Καλημέρα" is 64px in each at
     // 16px, and an expanded or condensed request takes the normal face, the
     // only width Romacs ships.
-    let root = std::env::temp_dir().join(format!("romacs-bundled-font-{}", std::process::id()));
-    let config = romacs_test_fonts::isolated_fontconfig(&root, &[]).unwrap();
-    // SAFETY: the binary's only test, before anything reads the environment
-    // on another thread.
-    unsafe { std::env::set_var("FONTCONFIG_FILE", &config) };
+    if fontconfig_child::root().is_none() {
+        let root = std::env::temp_dir().join(format!("romacs-bundled-font-{}", std::process::id()));
+        let config = romacs_test_fonts::isolated_fontconfig(&root, &[]).unwrap();
+        let test = own_test::name(module_path!(), "the_bundled_iosevka_resolves_to_itself_as_gnu_does");
+        fontconfig_child::run(&test, &root, &config);
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
     let bundled = romacs_test_fonts::bundled_iosevka();
     for path in &bundled {
         assert!(romacs_font::register_font_file(path), "Fontconfig refused {path:?}");
@@ -47,5 +57,4 @@ fn the_bundled_iosevka_resolves_to_itself_as_gnu_does() {
         }
         assert_eq!(greek, 64.0, "{request:?}: Greek pixel width");
     }
-    let _ = std::fs::remove_dir_all(&root);
 }

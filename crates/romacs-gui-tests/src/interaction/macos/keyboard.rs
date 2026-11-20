@@ -8,6 +8,9 @@ use core_foundation::{
     string::{CFString, CFStringRef},
 };
 
+// SAFETY: these are the Text Input Sources declarations of Carbon's
+// TextInputSources.h; each caller below upholds its C contract.
+// UNSAFE(FFI: no crate in Cargo.lock binds Carbon's Text Input Sources)
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
     static kTISPropertyInputSourceID: CFStringRef;

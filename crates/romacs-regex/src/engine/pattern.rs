@@ -89,6 +89,16 @@ pub struct CompiledPattern {
     /// (`\w`, `\sC`) set `can_be_null` via `analyze_first` instead.
     pub(crate) uses_syntax: bool,
 
+    /// True if the pattern tests a character's categories (`\cC`, `\CC`),
+    /// which the matcher reads through its `SyntaxLookup`.
+    pub(crate) uses_categories: bool,
+
+    /// True if matching reads the syntax table: a syntax class, a word or
+    /// symbol boundary, or a bracket class that reads it (`[:space:]`,
+    /// `[:word:]`, `[:punct:]`). Unlike `uses_syntax`, which every bracket
+    /// class sets, this is exact.
+    pub(crate) reads_table: bool,
+
     /// True if the compiled artifacts hardcode syntax-table CONTENT, so
     /// the pattern is only valid for the syntax table it was compiled
     /// against and the compile cache must key such entries by table.
@@ -337,6 +347,17 @@ impl CompiledPattern {
     #[inline]
     pub fn uses_syntax(&self) -> bool {
         self.uses_syntax
+    }
+
+    /// Whether matching may consult the `SyntaxLookup` it is given: for a
+    /// syntax class, a word or symbol boundary, a bracket class that reads
+    /// the table, or a category. A pattern that does not reads the same
+    /// under any table, so a host may pass `DefaultSyntaxLookup` in place of
+    /// the one it would otherwise prepare. Conservative: a construct the
+    /// compiler then removes (`\w\{0\}`) still counts.
+    #[inline]
+    pub fn reads_lookup(&self) -> bool {
+        self.reads_table || self.uses_categories
     }
 
     /// GNU `used_syntax` (regex-emacs.c): the compiled artifact itself baked
