@@ -134,7 +134,8 @@ fn binary_scratch_replacement_does_not_panic() {
 /// Lisp, against pinned GNU: BUFFER absent, current or another, a hidden
 /// buffer, a buffer a window shows (VISIBLE-OK and the "not so good" choice),
 /// a bury and a kill; then a predicate rejecting every buffer, so the
-/// `get-scratch-buffer-create' fallback runs, and nil when it signals. Each
+/// `get-scratch-buffer-create' fallback runs: nil when it signals, its throw
+/// reaching the caller, and redisplay inhibited around it. Each
 /// engine's own buffers are killed first; a bare VM has no simple.el, so it
 /// gets a stand-in for the fallback's function.
 #[test]
@@ -163,7 +164,14 @@ fn other_buffer_without_predicate_matches_pinned_gnu() {
               (let ((old (symbol-function 'get-scratch-buffer-create)))
                 (kill-buffer "*scratch*")
                 (fset 'get-scratch-buffer-create (lambda () (error "No scratch")))
-                (prog1 (other-buffer b) (fset 'get-scratch-buffer-create old)))))) nil)"#;
+                (prog1 (other-buffer b) (fset 'get-scratch-buffer-create old)))
+              (let ((old (symbol-function 'get-scratch-buffer-create)))
+                (fset 'get-scratch-buffer-create (lambda () (throw 'done :escaped)))
+                (prog1 (catch 'done (other-buffer b)) (fset 'get-scratch-buffer-create old)))
+              (let ((old (symbol-function 'get-scratch-buffer-create)))
+                (fset 'get-scratch-buffer-create
+                      (lambda () (get-buffer-create (if inhibit-redisplay "ob-inhibited" "ob-redisplayed"))))
+                (prog1 (funcall names (other-buffer b)) (fset 'get-scratch-buffer-create old)))))) nil)"#;
     let binary = std::env::var("ROMACS_GNU_ORACLE").expect("pinned GNU oracle");
     let output = std::process::Command::new(&binary).args(["-Q", "--batch", "--eval", &format!("(prin1 {source})")]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

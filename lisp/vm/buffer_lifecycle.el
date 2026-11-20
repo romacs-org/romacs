@@ -91,6 +91,12 @@
                   (romacs--kill-buffer-processes buffer))
               (romacs--kill-buffer-finish buffer)))
         nil)))
+  (defun romacs--scratch-safely ()
+    ;; `other-buffer''s last resort (buffer.c:1812): safe_calln of
+    ;; `get-scratch-buffer-create', redisplay inhibited, nil for any
+    ;; signal; a throw passes.
+    (let ((inhibit-redisplay t))
+      (condition-case nil (get-scratch-buffer-create) (t nil))))
   (defun romacs--indirect-buffer-made (buffer base clone inhibit)
     ;; Fmake_indirect_buffer after its buffer exists (buffer.c:938): a
     ;; clone forgets its base's save query and file number and runs its

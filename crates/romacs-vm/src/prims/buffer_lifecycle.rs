@@ -60,7 +60,7 @@ fn kill_buffer(cx; optional arg: Value) -> Step {
 
 // The first candidate (`other_buffer_candidate') in the buffer list that
 // FRAME's `buffer-predicate' accepts, preferring one no visible window shows
-// unless VISIBLE-OK; else `get-scratch-buffer-create''s, nil if it fails.
+// unless VISIBLE-OK; else `get-scratch-buffer-create''s, nil if it signals.
 // VM2 keeps no frame buffer list (VM2-FRAME1), so the buffer list alone is
 // scanned, read once at entry. With no predicate no Lisp runs during the
 // scan, so one walk of the windows finds the visible buffers; with one, each
@@ -82,7 +82,7 @@ fn other_buffer(cx; optional buffer: Value, visible_ok: Value, frame: Value) -> 
         if !visible.contains(&b) { return Ok(Step::Done(b)); }
         notsogood.get_or_insert(b);
     }
-    Ok(Step::Done(notsogood.unwrap_or_else(|| other_buffer_fallback(cx))))
+    match notsogood { Some(b) => Ok(Step::Done(b)), None => other_buffer_fallback(cx) }
 }}
 /// `other-buffer''s scan under a frame predicate, SCAN being BUFFER,
 /// VISIBLE-OK, the predicate, the first accepted buffer a visible window
@@ -97,7 +97,7 @@ fn other_buffer_ask(cx: &mut Leaf<'_>, scan: [Value; 5]) -> Next {
         }
         tail = rest;
     }
-    Ok(Step::Done(if notsogood == Value::NIL { other_buffer_fallback(cx) } else { notsogood }))
+    if notsogood == Value::NIL { other_buffer_fallback(cx) } else { Ok(Step::Done(notsogood)) }
 }
 /// The predicate's ANSWER for the buffer at the head of the scan's tail.
 fn other_buffer_answered(cx: &mut Leaf<'_>, answer: Value, saved: &[Value]) -> Next {
@@ -112,10 +112,10 @@ fn other_buffer_answered(cx: &mut Leaf<'_>, answer: Value, saved: &[Value]) -> N
     }
     other_buffer_ask(cx, [buffer, visible_ok, pred, notsogood, rest])
 }
-/// buffer.c safe_calln (Qget_scratch_buffer_create): nil when it fails.
-fn other_buffer_fallback(cx: &mut Leaf<'_>) -> Value {
-    let f = cx.intern("get-scratch-buffer-create");
-    cx.safe_call(f, &[])
+/// buffer.c safe_calln (Qget_scratch_buffer_create), in the lifecycle
+/// half: nil when it signals; a throw reaches the caller, as in GNU.
+fn other_buffer_fallback(cx: &mut Leaf<'_>) -> Next {
+    lifecycle_lisp(cx, "romacs--scratch-safely", vec![])
 }
 
 defsubr! { name = "make-indirect-buffer", gnu = "buffer.c:807", effect = Global,
