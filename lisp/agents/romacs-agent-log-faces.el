@@ -85,7 +85,7 @@ one before where it last ended written again; keep why, should it fail."
       (when (timerp romacs-agent-log-faces--timer) (cancel-timer romacs-agent-log-faces--timer))
       (setq romacs-agent-log-faces--timer nil)
       (pcase romacs-agent-log--stream
-        (`(text ,start ,at . ,_) (romacs-agent-log-faces--reface start at))))))
+        (`(text ,(and start (pred markerp)) ,at . ,_) (romacs-agent-log-faces--reface start at))))))
 
 (defun romacs-agent-log-faces-soon ()
   "Face the streaming reply's text once the batch it came in is in."

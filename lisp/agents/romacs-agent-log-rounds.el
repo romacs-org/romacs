@@ -79,7 +79,8 @@ The round before it ends."
   "Draw INCOMING, from EVENT, a message from elsewhere: a round of its own,
 not the user's; its first lines dim, RET shows all."
   (let* ((bar (propertize "┃ " 'face 'romacs-agent-log-other-mark 'romacs-agent-decor t))
-         (parent (plist-get event :parent))
+         ;; Under its call, if that is drawn; else at the top level.
+         (parent (car (romacs-agent-log--where event)))
          ;; A row's room less its bar and a subagent's indentation.
          (width (- romacs-agent-log-output-width (length bar) (* 2 (cdr (romacs-agent-log--where event)))))
          (body (string-trim (or (plist-get incoming :text) "")))
@@ -88,10 +89,7 @@ not the user's; its first lines dim, RET shows all."
          (more (- (length lines) (length shown)))
          ;; One blank line before it: an arrival before ends in its own.
          ;; Its bar from its head down: the mark of what came in.
-         (text (concat (if (and (not parent) (> romacs-agent-log--end (+ (point-min) 1))
-                                (equal (buffer-substring-no-properties (- romacs-agent-log--end 2) romacs-agent-log--end) "\n\n"))
-                           ""
-                         "\n")
+         (text (concat (if (and (not parent) (romacs-agent-log--blank-p)) "" "\n")
                        bar (romacs-agent-log-rounds--head incoming) "\n"
                        ;; Quoted, each line one row, so its bar runs unbroken.
                        (mapconcat (lambda (line)
@@ -111,10 +109,10 @@ not the user's; its first lines dim, RET shows all."
                        (if parent "\n" "\n\n"))))
     ;; A top-level arrival opens a round, the one before it ended; one
     ;; under a subagent's call is that call's.
-    (unless (plist-get event :parent) (romacs-agent-log-rounds-end))
+    (unless parent (romacs-agent-log-rounds-end))
     (romacs-agent-log--line event 'arrival
                             (let ((text (propertize text 'romacs-agent-log-full (cons nil (or (plist-get incoming :full) body)))))
-                              (unless (plist-get event :parent)
+                              (unless parent
                                 (put-text-property 0 1 'romacs-agent-log-round t text))
                               ;; A journaled input's turn: diff and rollback read it.
                               (if-let* ((request (plist-get event :request)))

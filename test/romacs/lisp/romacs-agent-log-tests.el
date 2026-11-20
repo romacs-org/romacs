@@ -1306,6 +1306,8 @@ none when dropped.")
   (should-not (romacs-color-band "#000000" "#141414"))
   ;; Apart, but the text would not read on it.
   (should-not (romacs-color-band "#000000" "#505050"))
+  ;; Below the first step: the least mix, not the step's.
+  (should (< (romacs-color-contrast (romacs-color-band "#ffffff" "#000000" 1.01) "#ffffff") 1.05))
   ;; The least band that stands apart, found between steps.
   (let ((band (romacs-color-band "#090909" "#696969" 1.2)))
     (should band)
@@ -1323,11 +1325,11 @@ none when dropped.")
         (progn
           (enable-theme base)
           (let ((before (face-attribute 'romacs-agent-log-you :background nil t)))
-            (should (>= (romacs-color-contrast before "#ffffff") 1.2))
+            (should (>= (romacs-color-contrast before "#ffffff") 1.3))
             (enable-theme theme)
             (should (eq (face-attribute 'romacs-agent-log-you :extend nil t) t))
             (let ((surface (face-attribute 'romacs-agent-log-you :background nil t)))
-              (should (>= (romacs-color-contrast surface "#000000") 1.2))
+              (should (>= (romacs-color-contrast surface "#000000") 1.3))
               (should (>= (romacs-color-contrast "#767676" surface) 3.0)))
             (disable-theme theme)
             (should (equal (face-attribute 'romacs-agent-log-you :background nil t) before))))
@@ -1367,7 +1369,7 @@ none when dropped.")
                                      "Reply to this message with romacs_task_reply(messageId=\"m-3\", text=...)."))
     (should (string-match-p "┃ Again\n\n┃ ← lead · parent\n┃ Third" (romacs-agent-log-tests--transcript)))
     ;; A line cut short: RET shows the rest.
-    (let ((romacs-agent-log-output-width 20))
+    (let ((romacs-agent-log-output-width 20) (truncate-string-ellipsis "…"))
       (draw :type 'input :text (concat "<romacs-message id=\"m-4\" kind=\"parent\" from=\"lead\">\n" (make-string 40 ?x) "\n</romacs-message>\n"
                                        "Reply to this message with romacs_task_reply(messageId=\"m-4\", text=...).")))
     (should (string-match-p "┃ x+…\n┃ … [^\n]* shows all" (romacs-agent-log-tests--transcript)))
@@ -1391,6 +1393,35 @@ none when dropped.")
     (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
     (draw :type 'delta :text "After.")
     (should (string-match-p "\n\nAfter\\." (romacs-agent-log-tests--transcript)))))
+
+;;; Blank lines, one at a time
+
+(ert-deftest romacs-agent-log-blank-lines-are-one ()
+  (romacs-agent-log-tests--with
+    ;; Two prompts: one blank line between.
+    (draw :type 'input :text "one" :request 1)
+    (draw :type 'input :text "two" :request 2)
+    (should (equal (romacs-agent-log-tests--transcript) "❯ one\n\n❯ two\n\n"))
+    ;; Thinking of line breaks only, a call, then the reply: no trace of
+    ;; the thinking, one blank line before the reply.
+    (draw :type 'thinking :text "\n\n")
+    (draw :type 'tool :state 'started :id "t1" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'delta :text "Done.")
+    (should (string-match-p "\\`❯ one\n\n❯ two\n\n● [^\n]*\n\nDone\\.\n\\'" (romacs-agent-log-tests--transcript)))))
+
+(ert-deftest romacs-agent-log-rounds-arrival-without-its-call-is-top-level ()
+  ;; Its parent call never drawn: a round of its own at the top level.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (dolist (event (romacs-agent--claude-injected "<task-notification>\n<status>completed</status>\n<summary>Build done</summary>\n</task-notification>" "missing-call"))
+      (romacs-agent-log-draw session event))
+    (goto-char (point-min))
+    (search-forward "background task")
+    (should (text-property-any (point-min) (point) 'romacs-agent-log-round t))
+    (let ((round (text-property-any (1+ (text-property-any (point-min) (point-max) 'romacs-agent-log-round t)) (point-max) 'romacs-agent-log-round t)))
+      (should round)
+      (should (< round (point))))
+    (should (string-match-p "Build done\n\n\\'" (romacs-agent-log-tests--transcript)))))
 
 (provide 'romacs-agent-log-tests)
 ;;; romacs-agent-log-tests.el ends here
