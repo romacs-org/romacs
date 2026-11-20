@@ -1,6 +1,7 @@
 //! An installer's `--compile-lisp-tree`, as forge's install runs it: the
 //! executable in an installation's `bin/` with its fresh compiled-Lisp
-//! store beside it, the runtime tree in `share/romacs`, and the installer's
+//! store beside it, the runtime tree in `share/romacs` (a copy of the
+//! checkout's lisp/ and etc/, as an installation has), and the installer's
 //! own environment, a user's: the test's own without its ROMACS_ variables
 //! but the tree's two, a private HOME, XDG directories and TMPDIR, and
 //! LOGNAME and USER set, which no compile process has (src/batch.rs
@@ -10,8 +11,25 @@
 //! ended after its first compile; and a session of that user, judging it
 //! so, took no artifact and compiled every file it loaded again. The
 //! session's own count says so (`romacs-compiled-lisp-stats`).
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The `.el` files under DIR, by their true names, as the tree's compile
+/// walks it: names starting with a dot left out, at every level.
+fn lisp_files(dir: &Path, found: &mut HashSet<PathBuf>) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let (path, name) = (entry.path(), entry.file_name());
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            lisp_files(&path, found);
+        } else if path.extension().is_some_and(|e| e == "el") {
+            found.insert(path.canonicalize().unwrap());
+        }
+    }
+}
 
 #[test]
 fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
@@ -26,8 +44,16 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
     let exe = bin.join("romacs-vm-gui");
     let source = Path::new(env!("CARGO_BIN_EXE_romacs-vm-gui"));
     std::fs::hard_link(source, &exe).or_else(|_| std::fs::copy(source, &exe).map(drop)).unwrap();
-    let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    std::os::unix::fs::symlink(&tree, root.join("share/romacs")).unwrap();
+    // The runtime tree, a copy of the checkout's lisp/ and etc/ (shared
+    // extents where the file system has them), as an installation's is:
+    // nothing of the checkout around it (its .dir-locals.el files, its
+    // sources) is in reach.
+    let (checkout, share) = (Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap(), root.join("share/romacs"));
+    std::fs::create_dir_all(&share).unwrap();
+    for dir in ["lisp", "etc"] {
+        let copied = Command::new("cp").args(["-a", "--reflink=auto"]).arg(checkout.join(dir)).arg(&share).status().unwrap();
+        assert!(copied.success(), "copying {dir}");
+    }
     // forge's `isolated_environment`: this process's environment without
     // its ROMACS_ variables, a user's LOGNAME and USER.
     let user = |command: &mut Command| {
@@ -52,34 +78,59 @@ fn an_installers_tree_compile_keys_by_the_world_its_first_compile_built() {
             "the installation's store: {summary}");
     let empty = |field: &str| summary[field].as_array().is_none_or(Vec::is_empty);
     assert!(empty("failed") && empty("lost"), "files without a usable artifact: {summary}");
-    assert!(summary["files"].as_u64().is_some_and(|n| n > 1000) && summary["compiled"].as_u64().is_some_and(|n| n > 1000),
-            "the run did not compile the tree: {summary}");
-    // A session of the same user loads what the tree compiled: an artifact
-    // that holds is taken, and no load compiles (`romacs-compiled-lisp-stats',
-    // written to a file in its HOME). A load that reads source does so only
-    // for a file whose compile refused it (`not-compiled'), as the tree's
-    // compile found. With no compile identity, every load compiled again.
-    let form = "(progn (require 'dired-x)
+    // Every file of the runtime trees, lisp/ and the installation's themes,
+    // was reached, and each has an outcome.
+    let mut inventory = HashSet::new();
+    lisp_files(&share.join("lisp"), &mut inventory);
+    lisp_files(&share.join("etc/themes"), &mut inventory);
+    let count = |field: &str| summary[field].as_u64().or_else(|| summary[field].as_array().map(|list| list.len() as u64)).unwrap_or(0);
+    assert_eq!(count("files"), inventory.len() as u64, "the run did not reach every file of the tree: {summary}");
+    assert_eq!(["compiled", "compiled_before", "source_only", "errors", "failed"].iter().map(|field| count(field)).sum::<u64>(),
+               count("files"), "a file without an outcome: {summary}");
+    assert!(count("compiled") > 1000, "the run did not compile the tree: {summary}");
+    // The files whose compile refused them or signalled: a session reads them as source.
+    let source_only: HashSet<String> = ["source_only", "errors"].iter()
+        .flat_map(|field| summary[field].as_array().cloned().unwrap_or_default())
+        .filter_map(|entry| entry["file"].as_str().map(str::to_owned)).collect();
+    // A session of the same user loads what the tree compiled, the stock
+    // theme and dired-x: an artifact that holds is taken, and no load
+    // compiles (its compile trace, and `romacs-compiled-lisp-stats' written
+    // to a file in its HOME). A load that reads source does so for a file
+    // the tree's compile found refused (`not-compiled'). -Q: the system's
+    // site-lisp, which no installation holds, stays out. With no compile
+    // identity, every load compiled again.
+    let form = "(progn (load (expand-file-name \"themes/romacs-theme-rum\" data-directory) nil t)
+      (require 'dired-x)
       (let ((s (romacs-compiled-lisp-stats)))
         (with-temp-file (expand-file-name \"stats\" (getenv \"HOME\"))
           (prin1 (list (featurep 'dired-x) (plist-get s :taken) (plist-get s :compiled)
-                       (mapcar #'cdr (plist-get s :misses)))
+                       (plist-get s :source-on-miss) (plist-get s :misses))
                  (current-buffer)))))";
     let mut session = Command::new(&exe);
-    user(session.args(["--batch", "--eval", form]));
+    user(session.args(["-Q", "--batch", "--eval", form]));
     let output = session.env("ROMACS_COMPILED_LISP", "on").env("ROMACS_COMPILED_LISP_STORE", bin.join("romacs-vm-gui.lisp"))
-        .output().unwrap();
+        .env("ROMACS_COMPILED_LISP_TRACE", "1").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "the session: {}\n{stderr}", output.status);
+    let compiles: Vec<&str> = stderr.lines().filter(|line| line.starts_with("romacs-compiled-lisp: {\"compile\"")).collect();
+    assert!(compiles.is_empty(), "the session compiled what the tree did:\n{}", compiles.join("\n"));
     let written = std::fs::read_to_string(home.join("stats")).unwrap_or_else(|e| panic!("the session wrote no stats ({e}): {stderr}"));
     let inner = written.trim().strip_prefix('(').and_then(|text| text.strip_suffix(')')).unwrap_or_else(|| panic!("{written}"));
-    let mut fields = inner.splitn(4, ' ');
-    let (loaded, taken, compiled, misses) = (fields.next(), fields.next(), fields.next(), fields.next().unwrap_or("nil"));
-    assert_eq!(loaded, Some("t"), "the session did not load dired-x: {written}");
-    assert_eq!(compiled, Some("0"), "the session compiled what the tree did: {written}");
-    assert!(taken.and_then(|n| n.parse::<u64>().ok()).is_some_and(|n| n > 0), "the session took no artifact: {written}");
-    let reasons = misses.trim_start_matches('(').trim_end_matches(')');
-    assert!(reasons == "nil" || reasons.split_whitespace().all(|reason| reason == "not-compiled"),
-            "a load read source for want of an artifact: {written}");
+    let mut fields = inner.splitn(5, ' ');
+    let loaded = fields.next() == Some("t");
+    let mut number = || fields.next().and_then(|n| n.parse::<u64>().ok());
+    let (taken, compiled, on_miss) = (number(), number(), number());
+    let misses = fields.next().unwrap_or("nil");
+    assert!(loaded, "the session did not load dired-x: {written}");
+    assert_eq!(compiled, Some(0), "the session compiled what the tree did: {written}");
+    assert!(taken.is_some_and(|n| n > 0), "the session took no artifact: {written}");
+    // Each miss, (FILE . REASON), is a file the tree's compile refused; all
+    // are listed (at most 32 are kept).
+    let pairs: Vec<(&str, &str)> = misses.split("(\"").skip(1)
+        .filter_map(|pair| pair.split_once("\" . ")).map(|(file, rest)| (file, rest.trim_end_matches([')', ' ']))).collect();
+    assert_eq!(on_miss, Some(pairs.len() as u64), "misses not all listed: {written}");
+    for (file, reason) in &pairs {
+        assert!(*reason == "not-compiled" && source_only.contains(*file), "a load read {file} as source ({reason}): {written}");
+    }
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -112,7 +112,8 @@ class Select(unittest.TestCase):
     def test_runs_give_one_run_a_package_with_its_own_terms(self):
         runs = impact.runs(self.select('crates/romacs-vm-gui/src/main.rs', 'crates/romacs-vm/tests/quit_async.rs'), self.root)
         found = {package: (flags, terms) for package, flags, terms in runs}
-        gated = ' | '.join(impact.test_file(t) for t in ('romacs-vm-gui::compiled_lisp_install', 'romacs-vm-gui::lisp_tree_compiles'))
+        # main.rs dispatches the installer's tree compile, which runs; the tree check is left out.
+        gated = impact.test_file('romacs-vm-gui::lisp_tree_compiles')
         self.assertEqual(found['romacs-vm-gui'], (['--lib', '--bins', '--test', 'all'], f'(package(romacs-vm-gui)) & not ({gated})'))
         self.assertIn(impact.test_file('romacs-vm::quit_async'), found['romacs-vm'][1])
         self.assertNotIn('romacs-vm-gui', found['romacs-vm'][1])
@@ -169,9 +170,10 @@ class Select(unittest.TestCase):
                      'crates/romacs-vm-gui/tests/lisp_tree_compiles.rs'):
             with self.subTest(path):
                 self.assertNotIn(gated, self.select(path)['leave'])
-        # An installer's tree compile runs for the store, the world store and batch.rs.
+        # An installer's tree compile runs for the store, the world store, batch.rs and main.rs.
         for path in ('crates/romacs-vm/src/compiled_lisp/tree.rs', 'crates/romacs-vm/src/world/store.rs',
-                     'crates/romacs-vm-gui/src/batch.rs', 'crates/romacs-vm-gui/tests/compiled_lisp_install.rs'):
+                     'crates/romacs-vm-gui/src/batch.rs', 'crates/romacs-vm-gui/src/main.rs',
+                     'crates/romacs-vm-gui/tests/compiled_lisp_install.rs'):
             with self.subTest(path):
                 self.assertNotIn(install, self.select(path)['leave'])
         self.assertEqual(self.select('crates/romacs-vm/src/compiled_lisp/tree.rs')['leave'], [])
