@@ -221,8 +221,8 @@
     (romacs-should (equal custom-enabled-themes enabled))))
 
 (romacs-deftest romacs-theme-a-selected-row-keeps-a-shared-foreground ()
-  ;; A mid-grey background and a white accent leave no tint at which one
-  ;; colour reads on both the glass and the row: the row is the glass.
+  ;; A mid-grey background and a white accent: every tint down to 6%
+  ;; leaves no colour reading on both the glass and the row; 3% does.
   (let* ((resolved (romacs-theme-resolve
                     '((mode dark) (bg "#606060") (fg "#ffffff") (accent "#ffffff")
                       (red "#ff8080") (green "#80ff80") (yellow "#ffff80")
