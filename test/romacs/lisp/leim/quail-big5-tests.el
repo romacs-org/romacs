@@ -4,7 +4,7 @@
 ;; #x10FFFF, which no buffer here holds (ledger/divergences/VM2-BIG5-UNICODE.md):
 ;; the two duplicate ideographs are 十 and 卅, the eight ETEN box-drawing
 ;; characters are gone from a row that offers their Unicode forms already,
-;; and the 30 unassigned A3C3..A3E0 codes are gone.
+;; and the 30 control pictures A3C3..A3E0 are their Unicode forms, in place.
 
 (require 'ert)
 (require 'quail)
@@ -54,9 +54,33 @@
     (dolist (box '("═" "╞" "╪" "╡" "╭" "╮" "╰" "╯"))
       (should (= (seq-count (lambda (c) (equal c box)) row) 1)))))
 
-(ert-deftest quail-big5-punctuation-digits-keep-their-other-candidates ()
+(ert-deftest quail-big5-punctuation-digits-keep-their-candidates-in-place ()
+  ;; Each digit row offers its control pictures where GNU's Big5 codes were,
+  ;; so the selection digits are GNU's.
   (should (equal (mapcar (lambda (key) (apply #'concat (quail-big5-tests--candidates "chinese-punct-b5" key)))
-                         '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
-                 '("０Ⅹ十" "１Ⅰ〡卄" "２Ⅱ〢卅" "３Ⅲ〣" "４Ⅳ〤" "５Ⅴ〥" "６Ⅵ〦" "７Ⅶ〧" "８Ⅷ〨" "９Ⅸ〩"))))
+                         '("0" "1" "2" "9"))
+                 '("０\N{U+240C}\N{U+2416}\N{U+2421}Ⅹ十"
+                   "１\N{U+2403}\N{U+240D}\N{U+2417}Ⅰ〡卄"
+                   "２\N{U+2404}\N{U+240E}\N{U+2418}Ⅱ〢卅"
+                   "９\N{U+240B}\N{U+2415}\N{U+241F}Ⅸ〩"))))
+
+(defun quail-big5-tests--keyed (method keys)
+  "The text input method METHOD inserts for KEYS typed one by one."
+  (with-temp-buffer
+    (switch-to-buffer (current-buffer))
+    (activate-input-method method)
+    (let ((input-method-verbose-flag t) (events (listify-key-sequence keys)))
+      (while events
+        (setq unread-command-events (cdr events))
+        (let ((inserted (funcall input-method-function (car events))))
+          (setq events unread-command-events unread-command-events nil)
+          (dolist (char inserted) (when (characterp char) (insert char)))))
+      (buffer-substring-no-properties (point-min) (point-max)))))
+
+(ert-deftest quail-big5-punctuation-selection-digits-are-gnus ()
+  ;; Pinned GNU: 05 gives Ⅹ (U+2169), 15 Ⅰ, 25 Ⅱ, 06 its A2CC (here 十);
+  ;; 02 its A3CC, here SYMBOL FOR FORM FEED (U+240C).
+  (dolist (case '(("05" . "Ⅹ") ("15" . "Ⅰ") ("25" . "Ⅱ") ("06" . "十") ("02" . "\N{U+240C}")))
+    (should (equal (quail-big5-tests--keyed "chinese-punct-b5" (car case)) (cdr case)))))
 
 ;;; quail-big5-tests.el ends here
