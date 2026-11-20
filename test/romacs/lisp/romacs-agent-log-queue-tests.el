@@ -53,7 +53,7 @@
   (let ((at romacs-agent-log--end) (rows nil))
     (while (setq at (text-property-not-all at romacs-agent-log--input 'romacs-agent-log-queued nil))
       (let ((end (or (next-single-property-change at 'romacs-agent-log-queued nil romacs-agent-log--input) romacs-agent-log--input)))
-        (push (string-trim (substring (buffer-substring-no-properties at end) 4)) rows)
+        (push (replace-regexp-in-string "\\`[ »<]*[0-9]+ +" "" (string-trim (buffer-substring-no-properties at end))) rows)
         (setq at end)))
     (nreverse rows)))
 
@@ -102,7 +102,7 @@
           (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "second"))
           (should (romacs-agent-item-held (cadr (romacs-agent-queue session))))
           (should (text-property-search-backward 'romacs-agent-log-queued nil nil))
-          (should (string-match-p "✎ second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+          (should (string-match-p "»2 +second" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
           (romacs-agent-log-queue-tests--compose "second, edited")
           ;; RET: back in its place, said anew, nothing sent.
           (romacs-agent-log-queue-tests--key romacs-agent-log-mode-map "RET")
@@ -257,7 +257,8 @@
          (time (lambda (n) (let ((list (funcall items n)) (start (float-time)))
                              (romacs-agent-log-queue-rows list 80)
                              (- (float-time) start)))))
-    (should (= (length (split-string (romacs-agent-log-queue-rows (funcall items 50) 80) "\n" t)) 50))
+    ;; Its label, then one row each.
+    (should (= (length (split-string (romacs-agent-log-queue-rows (funcall items 50) 80) "\n" t)) 51))
     (funcall time 200)
     ;; Ten times the rows, well under a hundred times the time.
     (let ((small (max (funcall time 200) 1e-4)) (large (funcall time 2000)))

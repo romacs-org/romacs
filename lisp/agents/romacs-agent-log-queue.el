@@ -25,8 +25,10 @@
 
 (defface romacs-agent-log-queued '((t :inherit romacs-agent-log-note))
   "A message waiting for the turn under way to end.")
-(defface romacs-agent-log-queued-mark '((t :inherit romacs-working-waiting))
-  "The mark of a queued message: the theme's colour for what waits.")
+(defface romacs-agent-log-queued-mark '((t :inherit romacs-working-waiting :weight bold))
+  "A queued message's place: the theme's colour for what waits.")
+(defface romacs-agent-log-queued-held '((t :inherit romacs-working-waiting :slant italic))
+  "The queued message in the composer to edit, and its line.")
 
 ;;; The source's queue
 
@@ -69,22 +71,53 @@ a `user-error' when it went meanwhile, sent or dropped."
   "M-p" #'romacs-agent-log-queue-sooner
   "M-n" #'romacs-agent-log-queue-later)
 
-(defun romacs-agent-log-queue-rows (items width)
+(defun romacs-agent-log-queue--hint (&rest pairs)
+  "PAIRS of COMMAND and WORD, each the key its row binds the command to
+then the word, dim: what a queued row's keys do."
+  (mapconcat (lambda (pair)
+               (concat (propertize (romacs-agent-log--key (car pair) 'romacs-agent-log-queue-map) 'face 'help-key-binding)
+                       " " (propertize (cadr pair) 'face 'romacs-agent-log-queued)))
+             (seq-partition pairs 2) (propertize " · " 'face 'romacs-agent-log-queued)))
+
+(defun romacs-agent-log-queue-rows (items width &optional editing)
   "ITEMS, the messages waiting, as rows WIDTH columns wide, each ending in
-a newline; the empty string when none wait.  A row carries its item
-\(`romacs-agent-log-queued') and the keys that change it."
-  (mapconcat
-   (lambda (item)
-     (let* ((own (romacs-agent-queue-own-p item))
-            (mark (cond ((romacs-agent-item-held item) "✎ ") (own "⏵ ") (t "← ")))
-            (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
-            (room (max 8 (- width 2 (string-width mark)))))
-       (propertize (concat "  " (propertize mark 'face 'romacs-agent-log-queued-mark)
-                           (propertize (truncate-string-to-width line room nil nil (truncate-string-ellipsis))
-                                       'face (if own 'default 'romacs-agent-log-queued))
-                           "\n")
-                   'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
-   items ""))
+a newline, under a label saying how many wait and the keys that change
+them; the empty string when none wait.  A row says its place in the
+order, and carries its item (`romacs-agent-log-queued') and its keys.
+EDITING, the one the composer holds, is marked, and a line under the
+rows says how it goes back."
+  (if (null items) ""
+    (concat
+     (propertize (concat "  " (propertize (format "%d queued, next first" (length items)) 'face 'romacs-agent-log-queued)
+                         (propertize " · " 'face 'romacs-agent-log-queued)
+                         (romacs-agent-log-queue--hint 'romacs-agent-log-queue-next "move"
+                                                       'romacs-agent-log-queue-edit "edit"
+                                                       'romacs-agent-log-queue-drop "drop"
+                                                       'romacs-agent-log-queue-sooner "sooner")
+                         "\n")
+                 'romacs-agent-log-queue-label t)
+     (let ((place 0))
+       (mapconcat
+        (lambda (item)
+          (let* ((own (romacs-agent-queue-own-p item))
+                 (held (eq item editing))
+                 ;; Its place, two columns, a held one's marked: glyphs
+                 ;; of the text's own font, every row one height.
+                 (mark (format "%s%-2d" (cond (held "»") (own " ") (t "<")) (setq place (1+ place))))
+                 (line (car (split-string (string-trim (or (romacs-agent-item-text item) "")) "\n")))
+                 (room (max 8 (- width 3 (string-width mark)))))
+            (propertize (concat "  " (propertize mark 'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued-mark))
+                                " " (propertize (truncate-string-to-width line room nil nil (truncate-string-ellipsis))
+                                                'face (if held 'romacs-agent-log-queued-held 'romacs-agent-log-queued))
+                                "\n")
+                        'romacs-agent-log-queued item 'keymap romacs-agent-log-queue-map)))
+        items ""))
+     (if editing
+         (propertize (concat "  " (propertize "» in the composer: " 'face 'romacs-agent-log-queued-held)
+                             (propertize "RET puts it back, an empty one as it was" 'face 'romacs-agent-log-queued)
+                             "\n")
+                     'romacs-agent-log-queue-label t)
+       ""))))
 
 (defvar-local romacs-agent-log-queue--drawn nil
   "The messages the rows were last drawn for, by identity.")
@@ -97,7 +130,7 @@ anew when the messages are others, even ones that read the same."
     (unless (and (= (length items) (length romacs-agent-log-queue--drawn))
                  (cl-every #'eq items romacs-agent-log-queue--drawn))
       (setq romacs-agent-log--rows nil romacs-agent-log-queue--drawn (copy-sequence items)))
-    (romacs-agent-log-queue-rows items (romacs-agent-log--rule-width))))
+    (romacs-agent-log-queue-rows items (romacs-agent-log--rule-width) romacs-agent-log-queue--editing)))
 
 (setq romacs-agent-log-separator-rows-function #'romacs-agent-log-queue--shown)
 
@@ -182,11 +215,11 @@ where it waits meanwhile; RET there puts it back in its place."
       (user-error "The composer holds a draft: send or clear it first"))
     (romacs-agent-log-queue--change 'hold item t)
     (setq romacs-agent-log-queue--editing item)
-    ;; Its row says it is held, whatever tells views of the change.
+    ;; Its row says it is held, and the line under the rows how it goes
+    ;; back, whatever tells views of the change.
     (romacs-agent-log--separator t)
     (goto-char (point-max))
-    (insert (romacs-agent-item-text item))
-    (message "Editing a queued message: RET puts it back in its place, said anew")))
+    (insert (romacs-agent-item-text item))))
 
 (defun romacs-agent-log-queue-put-back ()
   "Put the message the composer holds back in its place in the queue, said
