@@ -832,7 +832,7 @@ impl Vm {
         Ok(accum)
     }
     /// ACCUM folded over ARGS; Break with a NaN that did not win.
-    #[inline(always)]
+    #[inline]
     fn minmax_fold(&mut self, mut accum: Value, args: &[Value], better: std::cmp::Ordering) -> Result<std::ops::ControlFlow<Value, Value>> {
         for &arg in args {
             let value = self.coerce_number(arg, true)?;

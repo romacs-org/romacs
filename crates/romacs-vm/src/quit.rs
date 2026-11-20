@@ -249,8 +249,7 @@ impl Vm {
     /// (a subr watcher). A primitive Lisp calls so starts outside one, and a
     /// predicate's `puthash` never quits inside the caller's scope. Lisp a
     /// primitive calls by `Step::Call` runs after the scope has closed.
-    // Inlined into each caller: a save, a store and a restore around BODY.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn outside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
         let outer = std::mem::replace(&mut self.native_quit, false);
         let result = body(self);
@@ -261,7 +260,7 @@ impl Vm {
     /// BODY inside a quit scope, granted at a primitive's own entry where
     /// its caller raises the escape a poll leaves (`Leaf::quittable` for a
     /// leaf, the engine's call target for a kernel, the reader's entry).
-    // Inlined, as `outside_quit_scope`: a call target grants it every call.
+    #[expect(clippy::inline_always, reason = "format's and equal's call targets grant it every call: out of line, its closure shim showed in the short calls' instruction profiles")]
     #[inline(always)]
     pub(crate) fn inside_quit_scope<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> T {
         let outer = std::mem::replace(&mut self.native_quit, true);
