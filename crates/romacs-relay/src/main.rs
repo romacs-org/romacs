@@ -31,6 +31,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -56,6 +57,11 @@ const DEADLINE: Duration = Duration::from_secs(10);
 /// The lines read from the Unix end and not yet sent on: past them, its
 /// reader waits, and so does the end it reads from.
 const QUEUE: usize = 64;
+
+/// The most bytes a WebSocket's stream gives one turn of the pump: past
+/// them its reads would block, so a message whose fragments never end
+/// still lets the pump carry the local lines and see their end.
+const BUDGET: usize = 64 * 1024;
 
 fn ws_config() -> WebSocketConfig {
     WebSocketConfig::default().max_message_size(Some(MESSAGE_LIMIT)).max_frame_size(Some(MESSAGE_LIMIT))
@@ -110,6 +116,39 @@ impl<S: Read> Read for Prefixed<S> {
 }
 
 impl<S: Write> Write for Prefixed<S> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> { self.inner.write(buf) }
+    fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
+}
+
+/// A stream whose reads give LEFT bytes, then would block until it is
+/// refilled (`refill`); unbounded until first refilled, for a handshake.
+struct Budgeted<S> {
+    inner: S,
+    left: Arc<AtomicUsize>,
+}
+
+impl<S> Budgeted<S> {
+    fn new(inner: S) -> Self { Budgeted { inner, left: Arc::new(AtomicUsize::new(usize::MAX)) } }
+
+    /// What gives the stream its next turn's bytes.
+    fn refill(&self) -> impl Fn() + use<S> {
+        let left = self.left.clone();
+        move || left.store(BUDGET, Ordering::Relaxed)
+    }
+}
+
+impl<S: Read> Read for Budgeted<S> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.left.load(Ordering::Relaxed);
+        if left == 0 { return Err(std::io::ErrorKind::WouldBlock.into()) }
+        let most = buf.len().min(left);
+        let n = self.inner.read(&mut buf[..most])?;
+        self.left.store(left.saturating_sub(n), Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
+impl<S: Write> Write for Budgeted<S> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> { self.inner.write(buf) }
     fn flush(&mut self) -> std::io::Result<()> { self.inner.flush() }
 }
@@ -198,11 +237,11 @@ fn read_line(reader: &mut BufReader<UnixStream>) -> Option<String> {
 /// Carry messages between WS and LOCAL, a Unix stream of lines, until either
 /// ends: each text message a line (those CARRY refuses not, one with a
 /// newline ending it all), each line a text message.  WS's stream reads with
-/// a timeout (`POLL`), so its reads give way to LOCAL's lines; both write
-/// with a deadline.  At the end LOCAL is shut, which ends its reader; LOCAL's
-/// end calls CLOSE-WS, which shuts WS's stream under whatever read it is in.
-fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&str) -> bool,
-                          close_ws: impl FnOnce() + Send + 'static) {
+/// a timeout (`POLL`) and within a budget each turn (REFILL, `Budgeted`), so
+/// its reads always give way to LOCAL's lines, which are carried in order to
+/// their end; both write with a deadline.  At the end LOCAL is shut, which
+/// ends its reader.
+fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&str) -> bool, refill: impl Fn()) {
     let (lines_tx, lines) = mpsc::sync_channel::<Option<String>>(QUEUE);
     let (Ok(reading), Ok(())) = (local.try_clone(), local.set_write_timeout(Some(DEADLINE))) else { return };
     let mut writing = local;
@@ -212,11 +251,9 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&st
             if lines_tx.send(Some(line)).is_err() { return }
         }
         let _ = lines_tx.send(None);
-        // The local end is gone: so is the WebSocket, whatever its read is
-        // doing (a message's fragments never ending).
-        close_ws();
     });
     'carrying: loop {
+        refill();
         match ws.read() {
             Ok(Message::Text(text)) => {
                 let text = text.as_str();
@@ -239,6 +276,7 @@ fn pump<S: Read + Write>(ws: &mut WebSocket<S>, local: UnixStream, carry: fn(&st
     }
     let _ = writing.shutdown(std::net::Shutdown::Both);
     drop(lines);
+    refill();
     let _ = ws.close(None);
     let _ = ws.flush();
 }
@@ -264,7 +302,9 @@ fn serve_one(mut stream: UnixStream, service: &Path, page: Option<&Path>, allowe
         "/agents" => {
             let login = head.header("tailscale-user-login").unwrap_or("").to_owned();
             let peer = head.header("tailscale-user-name").unwrap_or("").to_owned();
-            let prefixed = Prefixed { prefix: head.bytes, at: 0, inner: stream };
+            let budgeted = Budgeted::new(stream);
+            let refill = budgeted.refill();
+            let prefixed = Prefixed { prefix: head.bytes, at: 0, inner: budgeted };
             let Ok(mut ws) = tungstenite::accept_with_config(prefixed, Some(ws_config())) else { return };
             let Some(mut agents) = within(DEADLINE, { let service = service.to_owned(); move || UnixStream::connect(service).ok() })
             else {
@@ -278,9 +318,8 @@ fn serve_one(mut stream: UnixStream, service: &Path, page: Option<&Path>, allowe
             let transport = json!({"jsonrpc": "2.0", "method": "agents/transport",
                                    "params": {"via": "tailnet", "login": login, "peer": peer}});
             if agents.set_write_timeout(Some(DEADLINE)).is_err() || writeln!(agents, "{transport}").is_err() { return }
-            if ws.get_ref().inner.set_read_timeout(Some(POLL)).is_err() { return }
-            let Ok(closer) = ws.get_ref().inner.try_clone() else { return };
-            pump(&mut ws, agents, carried, move || { let _ = closer.shutdown(std::net::Shutdown::Both); });
+            if ws.get_ref().inner.inner.set_read_timeout(Some(POLL)).is_err() { return }
+            pump(&mut ws, agents, carried, refill);
         }
         _ => respond(&mut stream, "404 Not Found", "text/plain", b"not found\n"),
     }
@@ -304,6 +343,14 @@ fn private_dir(socket: &Path) -> Result<PathBuf, String> {
     let runtime = runtime_dir()?;
     let meta = std::fs::symlink_metadata(&runtime).map_err(|e| format!("{}: {e}", runtime.display()))?;
     if !private(&meta, uid) { return Err(format!("{}: the runtime directory is not the user's alone", runtime.display())) }
+    // No one else may replace it: each directory above it the user's or
+    // root's, and writable by others only when sticky.
+    for above in runtime.ancestors().skip(1) {
+        let meta = std::fs::symlink_metadata(above).map_err(|e| format!("{}: {e}", above.display()))?;
+        if !meta.is_dir() || (meta.uid() != uid && meta.uid() != 0) || (meta.mode() & 0o022 != 0 && meta.mode() & 0o1000 == 0) {
+            return Err(format!("{}: others could replace the runtime directory there", above.display()));
+        }
+    }
     let below = socket.parent().and_then(|dir| dir.strip_prefix(&runtime).ok())
         .ok_or_else(|| format!("{}: a socket lives under {}", socket.display(), runtime.display()))?;
     let mut dir = runtime;
@@ -323,7 +370,7 @@ fn private_dir(socket: &Path) -> Result<PathBuf, String> {
 /// the user's that refuses connections replaced only under it.
 fn listen(socket: &Path) -> Result<(UnixListener, std::fs::File), String> {
     private_dir(socket)?;
-    let lock_path = socket.with_extension("lock");
+    let lock_path = { let mut path = socket.as_os_str().to_owned(); path.push(".lock"); PathBuf::from(path) };
     let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&lock_path)
         .map_err(|e| format!("{}: {e}", lock_path.display()))?;
     lock.try_lock().map_err(|_| format!("{}: another relay holds it", socket.display()))?;
@@ -384,30 +431,33 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> Option<T> + Se
     rx.recv_timeout(limit).ok().flatten()
 }
 
-type ClientWs = WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>;
+type ClientWs = WebSocket<tungstenite::stream::MaybeTlsStream<Budgeted<std::net::TcpStream>>>;
 
 /// A WebSocket to URL at HOST:PORT, looked up, connected and shaken hands
-/// within the deadline, or none.
-fn open(url: String, (host, port): (String, u16), tls: Arc<rustls::ClientConfig>) -> Option<(ClientWs, std::net::TcpStream)> {
+/// within the deadline, or none; its stream polled once connected, and what
+/// refills its budget.
+fn open(url: String, (host, port): (String, u16), tls: Arc<rustls::ClientConfig>)
+        -> Option<(ClientWs, impl Fn() + Send + use<>)> {
     use std::net::ToSocketAddrs;
     within(DEADLINE, move || {
         let address = (host.as_str(), port).to_socket_addrs().ok()?.next()?;
         let tcp = std::net::TcpStream::connect_timeout(&address, DEADLINE).ok()?;
         tcp.set_read_timeout(Some(DEADLINE)).ok()?;
         tcp.set_write_timeout(Some(DEADLINE)).ok()?;
-        let closer = tcp.try_clone().ok()?;
-        let (ws, _) = tungstenite::client_tls_with_config(url.as_str(), tcp, Some(ws_config()),
+        let polled = tcp.try_clone().ok()?;
+        let budgeted = Budgeted::new(tcp);
+        let refill = budgeted.refill();
+        let (ws, _) = tungstenite::client_tls_with_config(url.as_str(), budgeted, Some(ws_config()),
                                                           Some(tungstenite::Connector::Rustls(tls))).ok()?;
-        Some((ws, closer))
+        polled.set_read_timeout(Some(POLL)).ok()?;
+        Some((ws, refill))
     })
 }
 
 /// Carry LOCAL, one connection to the local socket, over a WebSocket to URL.
 fn connect_one(local: UnixStream, url: &str, endpoint: (String, u16), tls: Arc<rustls::ClientConfig>) {
-    let Some((mut ws, closer)) = open(url.to_owned(), endpoint, tls) else { return };
-    // Polled once connected.
-    if closer.set_read_timeout(Some(POLL)).is_err() { return }
-    pump(&mut ws, local, |_| true, move || { let _ = closer.shutdown(std::net::Shutdown::Both); });
+    let Some((mut ws, refill)) = open(url.to_owned(), endpoint, tls) else { return };
+    pump(&mut ws, local, |_| true, refill);
 }
 
 fn connect(url: String, socket: &Path) -> Result<(), String> {
@@ -471,6 +521,20 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_budgeted_stream_gives_its_budget_a_turn() {
+        let mut stream = Budgeted::new(std::io::repeat(7));
+        let mut buf = vec![0; 3 * BUDGET];
+        // Unbounded until first refilled (a handshake).
+        assert_eq!(stream.read(&mut buf).unwrap(), 3 * BUDGET);
+        let refill = stream.refill();
+        refill();
+        assert_eq!(stream.read(&mut buf).unwrap(), BUDGET);
+        assert_eq!(stream.read(&mut buf).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        refill();
+        assert_eq!(stream.read(&mut buf[..10]).unwrap(), 10);
+    }
 
     fn head(lines: &[&str]) -> Head {
         let text = format!("GET /agents HTTP/1.1\r\n{}\r\n\r\n", lines.join("\r\n"));
