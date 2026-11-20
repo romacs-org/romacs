@@ -645,21 +645,21 @@ mod leaf {
         /// the symbol's key where it lies when the key holds no U+FDD0, as
         /// nearly every name's does, else the name decoded from the key
         /// (`symkey'), which escapes U+FDD0 and characters that are not
-        /// Unicode scalars.  One pass over the key either way.
+        /// Unicode scalars.  An ASCII key, the common case, is its own name
+        /// and counts one character a byte.
         pub(crate) fn symbol_name_text(&self, v: Value) -> Option<crate::lstring::Text<'_>> {
             use crate::lstring::{OwnedStr, StrView, Text};
             let key = if v == Value::NIL { "nil" } else if v == Value::TRUE { "t" }
                 else { self.vm.symbol_names[self.symbol_slot(v).ok()?].as_str() };
-            let mut chars = 0;
-            for c in key.chars() {
-                if c == crate::symkey::ESC {
-                    let bytes = crate::symkey::to_internal(key).expect("a key with an escape decodes");
+            let viewed = |chars| Text::Viewed(StrView { bytes: key.as_bytes(), chars, multibyte: true });
+            if key.is_ascii() { return Some(viewed(key.len())); }
+            Some(match crate::symkey::to_internal(key) {
+                None => viewed(key.chars().count()),
+                Some(bytes) => {
                     let chars = StrView { bytes: &bytes, chars: 0, multibyte: true }.chars().count();
-                    return Some(Text::Owned(OwnedStr { bytes, chars, multibyte: true }));
+                    Text::Owned(OwnedStr { bytes, chars, multibyte: true })
                 }
-                chars += 1;
-            }
-            Some(Text::Viewed(StrView { bytes: key.as_bytes(), chars, multibyte: true }))
+            })
         }
         /// Whether the current buffer's text is multibyte (a unibyte buffer
         /// is a byte buffer), as `enable-multibyte-characters' says.
