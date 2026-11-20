@@ -105,6 +105,16 @@ table's, none checked against IS 13194:1991 itself.")
     (should-error (indian-iscii-to-ucs-region (point-min) (point-max)))
     (should (equal (buffer-string) "\xb3\xe8\xd1"))))
 
+(ert-deftest ind-util-iscii-decoding-keeps-a-byte-it-cannot-map ()
+  ;; #xff is no ISCII byte, and #xf0 begins only #xf0 #xb5 and #xf0 #xb8:
+  ;; both stay raw bytes between the letters decoded around them.
+  (with-temp-buffer
+    (insert (string-to-multibyte "\xb3\xff\xd1\xf0\xd1"))
+    (indian-iscii-to-ucs-region (point-min) (point-max))
+    (should (equal (buffer-string)
+                   (concat "\u0915" (string-to-multibyte "\xff") "\u0932"
+                           (string-to-multibyte "\xf0") "\u0932")))))
+
 (ert-deftest ind-util-itrans-matches-as-gnu-does ()
   ;; Transliteration keeps `regexp-opt' over its keys, case folding as
   ;; GNU's does: pinned GNU's answers.
