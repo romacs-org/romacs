@@ -106,15 +106,18 @@ syntax face's, which a theme may draw as red as an error.")
 header line.")
 
 (defun romacs-agent-log--derive (&rest _)
-  "Make a tool's output the theme's dim colour raised to 4.5:1 on its
-background, read, never hidden; and a key the header names the theme's
-key colour raised to 4.5:1 on the header line: each as its default spec.
-A theme's or the user's own spec still wins."
+  "Make a tool's output, a chat's dim words, its thinking and its rules
+the theme's dim colour raised to 4.5:1 on its background, read, never
+hidden; and a key the header names the theme's key colour raised to
+4.5:1 on the header line: each as its default spec.  A theme's or the
+user's own spec still wins."
   (let ((colour (romacs-color-legible (face-foreground 'shadow nil t))))
-    ;; A tool's output, and every dim word of a chat's rows: read, 4.5:1.
-    (dolist (face '(romacs-agent-log-output romacs-agent-dim romacs-agent-log-note))
+    ;; A tool's output, every dim word of a chat's rows, its thinking and
+    ;; a turn's end: read, 4.5:1.
+    (pcase-dolist (`(,face . ,more) '((romacs-agent-log-output) (romacs-agent-dim) (romacs-agent-log-note)
+                                      (romacs-agent-log-rule) (romacs-agent-log-thinking :slant italic)))
       (when (facep face)
-        (face-spec-set face (if colour `((t :foreground ,colour)) '((t :inherit shadow))) 'face-defface-spec))))
+        (face-spec-set face (if colour `((t :foreground ,colour ,@more)) `((t :inherit shadow ,@more))) 'face-defface-spec))))
   (let* ((key (face-foreground 'help-key-binding nil t))
          (colour (and key (romacs-color-legible key (face-background 'header-line nil t)))))
     (face-spec-set 'romacs-agent-log-header-key
@@ -125,6 +128,8 @@ A theme's or the user's own spec still wins."
 (add-hook 'disable-theme-functions #'romacs-agent-log--derive)
 (defface romacs-agent-log-note '((t :inherit shadow))
   "A status line: what the harness or Romacs says of the session.")
+(defface romacs-agent-log-rule '((t :inherit shadow))
+  "A turn's end, and the separator above the composer.")
 ;; Its faces derived once its dim faces are defined.
 (romacs-agent-log--derive)
 (defface romacs-agent-log-ask '((t :inherit romacs-working-waiting :extend t :weight bold))
@@ -133,8 +138,6 @@ A theme's or the user's own spec still wins."
   "An answer that allowed.")
 (defface romacs-agent-log-denied '((t :inherit error))
   "An answer that denied, and an error.")
-(defface romacs-agent-log-rule '((t :inherit shadow))
-  "A turn's end, and the separator above the composer.")
 
 ;;; State
 

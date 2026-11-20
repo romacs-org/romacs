@@ -68,7 +68,11 @@ before it ends."
   "INCOMING's head: a mark, whom it is from, and its state."
   (let ((state (plist-get incoming :state)))
     (concat (propertize "← " 'face 'romacs-agent-log-other-mark)
-            (propertize (or (plist-get incoming :from) "elsewhere") 'face 'romacs-agent-log-other-head)
+            ;; Its name bold, a session's title after it plain.
+            (let* ((from (or (plist-get incoming :from) "elsewhere"))
+                   (cut (or (string-match " (" from) (length from))))
+              (concat (propertize (substring from 0 cut) 'face 'romacs-agent-log-other-head)
+                      (propertize (substring from cut) 'face 'romacs-agent-log-other)))
             (if (and state (not (string-empty-p state)))
                 (propertize (concat " · " state) 'face 'romacs-agent-log-other)
               ""))))
