@@ -578,7 +578,8 @@ fn call_process_s_reap_hands_a_live_child_on_at_its_deadline() {
 #[test]
 fn equal_polls_over_many_short_vectors() {
     let (mut vm, signal) = busy_vm();
-    eval(&mut vm, "(setq va (let (l) (dotimes (_ 512) (push (make-vector 512 1) l)) (vconcat l)) vb (copy-tree va t))");
+    eval(&mut vm, "(setq va (let (l) (dotimes (_ 512) (push (make-vector 512 1) l)) (vconcat l)) \
+                         vb (let (l) (dotimes (_ 512) (push (make-vector 512 1) l)) (vconcat l)))");
     let [va, vb] = ["va", "vb"].map(|name| eval(&mut vm, name));
     assert_eq!(vm.equal_site_kernel(va, vb), Value::TRUE, "with no press the walk ends");
     assert!(signal.interrupt(), "a busy evaluator takes the press");
