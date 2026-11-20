@@ -144,6 +144,13 @@ class Lint(unittest.TestCase):
         self.assertEqual(check.lint_stage(0, 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints\n', ''),
                          ('ok', '1 file, 0 errors, 0 warnings, 0 hints', []))
 
+    def test_a_lint_that_left_a_file_unjudged_is_incomplete_with_what_it_found(self):
+        output = 'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abc (0 older not shown; --all shows them); 1 more gave no result, so the lint is incomplete\n'
+        errors = 'invalid Unicode text\nromacs-lint: lisp/b.el gives no result (exit 255), nor did it at the base (exit 255)\n'
+        self.assertEqual(check.lint_stage(2, output, errors),
+                         ('SKIP', output.strip().removeprefix('romacs-lint: '),
+                          ['romacs-lint: lisp/b.el gives no result (exit 255), nor did it at the base (exit 255)']))
+
     def test_a_lint_that_gave_no_result_is_not_a_pass(self):
         status, summary, findings = check.lint_stage(2, '', 'usage: romacs-lint\nromacs-lint: error: no host at /x/romacs-vm-gui\n')
         self.assertEqual((status, summary), ('SKIP', 'tools/romacs-lint gave no result'))

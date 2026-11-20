@@ -14,11 +14,11 @@ whatever the judged code prints it from. By default it reports what the change
 adds: the files' text at the base (the
 merge-base with the trunk, or --base) is linted the same way, and a finding
 the base also gives is counted, not shown. --all shows every finding. Each
-file stands alone: a file the host gives no result for, here and at the base
-alike, is named and not judged, and the others are; a file the base gives no
-result for has every finding counted new. Exit 1 when an error or a warning is
-shown, 2 when the host gave no result for a file it lints at the base (any
-file, with --all or no base).
+file stands alone: one the host gives no result for is named, with its cause
+and whether the base gave none too, and the others are still judged; a file
+the base gives no result for has every finding counted new. Exit 1 when an
+error or a warning is shown, else 2 when a file was left unjudged (the check
+is incomplete, never passed), else 0.
 
 An installed host (one beside its `romacs-vm-gui.worlds`) restores its batch
 world, so a run takes about a second; a build's host boots from source.
@@ -38,13 +38,6 @@ SCRUBBED = ('DISPLAY', 'WAYLAND_DISPLAY', 'NOTMUCH_CONFIG', 'NOTMUCH_DATABASE', 
 FINDING = re.compile(r'^(?P<file>.+?):\d+: (?P<level>error|warning|hint): (?P<text>.*)$')
 FAILING = ('error', 'warning')
 COMPLETE = re.compile(r'^romacs-lint: \d+ files?, ', re.MULTILINE)
-# The one failure that names a file's own limit: the host cannot hold its text
-# (crates/romacs-vm/src/text.rs), as for charset text past Unicode, and the
-# judged file's own bytes are not UTF-8. The message alone names no file (the
-# host reads others too), so the file's text must show the same limit. Any
-# other early end, a signal or another message under the same status
-# included, says nothing about the file.
-UNREADABLE = 'unreadable text'
 
 
 def host(given):
@@ -102,14 +95,22 @@ def added(candidate, base):
     return fresh
 
 
-def summary(files, lines, base, older, quiet=0):
-    """The closing line: what was counted, against what, and how many files
-    gave no result here as at the base (QUIET)."""
+def summary(files, lines, base, older, unjudged=0):
+    """The closing line: what was counted, against what, and how many more
+    files the host gave no result for (UNJUDGED), which leave the run incomplete."""
     levels = Counter(FINDING.match(line)['level'] for line in lines)
     counts = ', '.join(f'{levels[level]} {level}{"" if levels[level] == 1 else "s"}' for level in ('error', 'warning', 'hint'))
     since = f' new since {base[:12]} ({older} older not shown; --all shows them)' if base else ''
-    unjudged = f'; {quiet} more gave no result, as at the base' if quiet else ''
-    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}{unjudged}'
+    left = f'; {unjudged} more gave no result, so the lint is incomplete' if unjudged else ''
+    return f'romacs-lint: {files} file{"" if files == 1 else "s"}, {counts}{since}{left}'
+
+
+def verdict(shown, unjudged):
+    """The exit status: 1 when a shown finding is an error or a warning, else 2
+    when a file was left UNJUDGED (incomplete, never passed), else 0."""
+    if any(FINDING.match(line)['level'] in FAILING for line in shown):
+        return 1
+    return 2 if unjudged else 0
 
 
 def failed(result):
@@ -121,17 +122,13 @@ def judged(names, results, based):
     """What to report of RESULTS, each file of NAMES's findings or the cause
     of its lint's giving none (`lint_each'), against BASED, the base's results
     by name (None: no base, every finding shown): (SHOWN, OLDER, QUIET,
-    BROKEN, UNBASED). A file whose text the host cannot hold, here and at the
-    base alike (UNREADABLE), is QUIET, named but not judged, while another
-    file has a result: when none has, the host itself may be what failed, so
-    each is BROKEN, as is any other file with no result here, whatever the
-    base gave. A file the base gave no result for has every finding new
-    (UNBASED names it); one the base lacks too."""
+    BROKEN, UNBASED). A file with no result here is left unjudged: QUIET when
+    the base gave none for it either, else BROKEN. A file the base gave no
+    result for has every finding new (UNBASED names it); one the base lacks too."""
     shown = [line for found in results if not failed(found) for line in found]
-    if based is None or all(failed(found) for found in results):
+    if based is None:
         return shown, 0, [], [name for name, found in zip(names, results) if failed(found)], []
-    quiet = [name for name, found in zip(names, results)
-             if found == UNREADABLE and based.get(name) == UNREADABLE]
+    quiet = [name for name, found in zip(names, results) if failed(found) and failed(based.get(name))]
     broken = [name for name, found in zip(names, results) if failed(found) and name not in quiet]
     unbased = [name for name, found in zip(names, results) if not failed(found) and failed(based.get(name))]
     before = [line for found in based.values() if not failed(found) for line in found]
@@ -156,8 +153,7 @@ def lint(binary, arguments, timeout, root=ROOT):
     another version, so the launcher, not the Lisp, says where a file is.
     STATUS is None unless the lint ran to its closing line: a host that did
     not start, a file that ended the host as it loaded, a timeout. CAUSE says
-    which: UNREADABLE when the host ended on the file's text, else `timeout'
-    or `exit N'; None when the lint finished."""
+    which, as `timeout' or `exit N', or is None when the lint finished."""
     command = [str(binary), '-Q', '--batch', '-l', str(ROOT / 'lisp/emacs-lisp/romacs-lint.el'), '-f', 'romacs-lint-batch']
     with tempfile.TemporaryDirectory(prefix='romacs-lint-') as home:
         try:
@@ -169,27 +165,7 @@ def lint(binary, arguments, timeout, root=ROOT):
     output = '\n'.join(named_from(line, home, root) for line in done.stdout.splitlines())
     return ((done.returncode if finished else None), output,
             done.stderr + ('' if finished else f'the host exited {done.returncode} before the lint finished\n'),
-            cause_of(finished, done.returncode, done.stderr, utf8(Path(arguments[-1]))))
-
-
-def cause_of(finished, status, errors, judged_utf8):
-    """Why a host that exited with STATUS, writing ERRORS, gave no result: UNREADABLE
-    when it ended on text it cannot hold and the judged file is not UTF-8
-    (JUDGED_UTF8 false), else `exit STATUS'; None when FINISHED."""
-    if finished:
-        return None
-    if status == 255 and errors.rstrip().splitlines()[-1:] == ['invalid Unicode text'] and not judged_utf8:
-        return UNREADABLE
-    return f'exit {status}'
-
-
-def utf8(path):
-    """Whether the file at PATH is UTF-8 text (an unreadable file is not)."""
-    try:
-        path.read_bytes().decode('utf-8')
-        return True
-    except (OSError, UnicodeDecodeError):
-        return False
+            None if finished else f'exit {done.returncode}')
 
 
 def lint_each(binary, options, files, timeout, root=ROOT, jobs=4):
@@ -275,20 +251,21 @@ def main():
                                             args.timeout, Path(directory))
         based = dict(zip(had, before))
     shown, older, quiet, broken, unbased = judged(names, results, based)
+    causes = dict(zip(names, results))
     if broken:
         sys.stderr.write(errors)
-        causes = dict(zip(names, results))
         print(f'romacs-lint: the host gave no result for {", ".join(f"{n} ({causes[n]})" for n in broken)}', file=sys.stderr)
-        return 2
+    for unjudged in quiet:
+        print(f'romacs-lint: {unjudged} gives no result ({causes[unjudged]}), nor did it at the base ({based[unjudged]})',
+              file=sys.stderr)
     if unbased:
         sys.stderr.write(base_errors)
         print(f'romacs-lint: the base did not lint {", ".join(unbased)}: its findings count as new', file=sys.stderr)
-    for unjudged in quiet:
-        print(f'romacs-lint: {unjudged} gives no result ({based[unjudged]}), as at the base', file=sys.stderr)
     for line in shown:
         print(line)
-    print(summary(len(files) - len(quiet), shown, None if args.all else base, older, len(quiet)))
-    return 1 if any(FINDING.match(line)['level'] in FAILING for line in shown) else 0
+    unjudged = len(quiet) + len(broken)
+    print(summary(len(files) - unjudged, shown, None if args.all else base, older, unjudged))
+    return verdict(shown, unjudged)
 
 
 if __name__ == '__main__':

@@ -65,66 +65,37 @@ class AddedTest(unittest.TestCase):
 
 
 class JudgedTest(unittest.TestCase):
-    """One file the host gives no result for leaves the others judged (romacs#334)."""
+    """One file the host gives no result for leaves the others judged (romacs#334), and the run incomplete."""
     A, B = 'lisp/session/a.el', 'lisp/session/b.el'
     DIED = 'exit 255'
 
-    def test_a_file_whose_text_the_host_cannot_hold_here_and_at_the_base_is_named_not_judged(self):
-        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], lint.UNREADABLE],
-                                                           {self.A: [OLD], self.B: lint.UNREADABLE})
+    def test_a_file_with_no_result_here_and_at_the_base_is_quiet_and_the_others_are_judged(self):
+        shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD, NEW], self.DIED],
+                                                           {self.A: [OLD], self.B: 'timeout'})
         self.assertEqual((shown, older, quiet, broken, unbased), ([NEW], 1, [self.B], [], []))
-
-    def test_a_like_failure_that_names_no_limit_of_the_file_is_broken(self):
-        # A signal (both runs killed), or the same status with another message, says nothing about the file.
-        for cause in ('exit -9', self.DIED):
-            self.assertEqual(lint.judged([self.A, self.B], [[OLD], cause], {self.A: [OLD], self.B: cause})[3], [self.B])
-
-    def test_only_the_hosts_text_error_on_a_file_not_utf8_names_its_own_limit(self):
-        text_error = 'Loading...\ninvalid Unicode text\n'
-        self.assertEqual(lint.cause_of(False, 255, text_error, False), lint.UNREADABLE)
-        # The same error while the judged file is UTF-8 came from another file the host read.
-        self.assertEqual(lint.cause_of(False, 255, text_error, True), 'exit 255')
-        self.assertEqual(lint.cause_of(False, 255, 'Symbol\u2019s value as variable is void: x\n', False), 'exit 255')
-        self.assertEqual(lint.cause_of(False, -9, '', False), 'exit -9')
-        self.assertIsNone(lint.cause_of(True, 1, '', True))
-
-    def test_a_file_is_utf8_by_its_own_bytes(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as directory:
-            good, bad = Path(directory) / 'good.el', Path(directory) / 'bad.el'
-            good.write_bytes('(defun f () "\u00e9")\n'.encode())
-            bad.write_bytes(b'(defconst c "\xf8\x88\x80\x80\x80")\n')  # a 5-byte charset sequence, past Unicode
-            self.assertEqual((lint.utf8(good), lint.utf8(bad), lint.utf8(Path(directory) / 'missing.el')), (True, False, False))
-
-    def test_a_timeout_is_never_as_at_the_base(self):
-        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: 'timeout'})[3], [self.B])
-        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'timeout'], {self.A: [OLD], self.B: self.DIED})[3], [self.B])
-
-    def test_a_failure_of_another_cause_than_the_bases_is_broken(self):
-        self.assertEqual(lint.judged([self.A, self.B], [[OLD], 'exit 2'], {self.A: [OLD], self.B: self.DIED})[3], [self.B])
 
     def test_a_file_the_base_gives_no_result_for_has_every_finding_new(self):
         shown, older, quiet, broken, unbased = lint.judged([self.A, self.B], [[OLD], [HINT]], {self.A: [OLD], self.B: self.DIED})
         self.assertEqual((shown, older, quiet, broken, unbased), ([HINT], 1, [], [], [self.B]))
 
-    def test_no_result_here_for_a_file_the_base_lints_is_broken(self):
+    def test_no_result_here_for_a_file_the_base_lints_or_lacks_is_broken(self):
         self.assertEqual(lint.judged([self.A], [self.DIED], {self.A: [OLD]})[3], [self.A])
-
-    def test_no_result_for_a_file_the_base_lacks_is_broken(self):
         self.assertEqual(lint.judged([self.A], [self.DIED], {})[3], [self.A])
 
     def test_with_no_base_every_file_without_a_result_is_broken(self):
         self.assertEqual(lint.judged([self.A, self.B], [[NEW], self.DIED], None), ([NEW], 0, [], [self.B], []))
 
-    def test_when_no_file_has_a_result_the_host_may_be_what_failed(self):
-        # A host that cannot start gives no result for every file, here and at the base alike.
-        self.assertEqual(lint.judged([self.A, self.B], [self.DIED, self.DIED], {self.A: self.DIED, self.B: self.DIED}),
-                         ([], 0, [], [self.A, self.B], []))
+    def test_an_unjudged_file_leaves_the_run_incomplete_never_passed(self):
+        # The contract (tools/AGENTS.md): a stage that could not run is incomplete, never passed.
+        self.assertEqual(lint.verdict([HINT], 1), 2)
+        self.assertEqual(lint.verdict([HINT], 0), 0)
+        # A real finding still fails, whatever was left unjudged.
+        self.assertEqual(lint.verdict([NEW], 1), 1)
 
-    def test_the_summary_names_the_files_left_unjudged(self):
+    def test_the_summary_counts_the_files_left_unjudged(self):
         self.assertEqual(lint.summary(1, [], 'abcdef0123456789', 2, 1),
                          'romacs-lint: 1 file, 0 errors, 0 warnings, 0 hints new since abcdef012345 '
-                         '(2 older not shown; --all shows them); 1 more gave no result, as at the base')
+                         '(2 older not shown; --all shows them); 1 more gave no result, so the lint is incomplete')
 
 
 if __name__ == '__main__':

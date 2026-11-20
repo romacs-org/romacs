@@ -206,8 +206,13 @@ def moved_unchanged(root, base):
 
 def lint_stage(status, output, errors):
     """(STATUS, SUMMARY, FINDINGS) of a tools/romacs-lint run that exited with STATUS:
-    its closing line is the summary, the lines before it the findings."""
+    its closing line is the summary, the lines before it the findings. Exit 2
+    with a closing line judged some files and left others unjudged: the stage
+    is incomplete, with what it found and the files it could not judge."""
     lines = output.splitlines()
+    if status == 2 and lines and lines[-1].startswith('romacs-lint: '):
+        unjudged = [line for line in errors.splitlines() if line.startswith('romacs-lint: ')]
+        return 'SKIP', lines[-1].removeprefix('romacs-lint: '), lines[:-1] + unjudged
     if status not in (0, 1) or not lines:
         why = (errors.strip().splitlines() or ['no output'])[-1]
         return 'SKIP', 'tools/romacs-lint gave no result', [f'{why}; fix: pass --binary HOST, or build one (cargo build --profile gate -p romacs-vm-gui)']
