@@ -57,9 +57,8 @@ TMPDIR, with fake_harness.py speaking Claude Code's stream-json in place of
              first row (a transcript where it has no thread), "more" shows
              every transcript, a thread gone since the board was drawn is
              said so and the board drawn again.
-  chat_view  a chat keeps its transcript in view as turns come in.
-  children   what runs under a session, in its header and C-c C-o menu,
-             by real keys.
+  chat_menu  the chat's actions menu by its key, its workers at work,
+             across the UI review's themes.
   select     a new model or effort in a running session: live between
              turns, armed during one, restarted when refused, carried by
              Codex's next turn, across a server restart.
@@ -3336,14 +3335,14 @@ def start_picker(args, base):
         def chat_shown():
             """Whether the selected window shows a chat, its composer the place to type."""
             return a.eval('(with-current-buffer (window-buffer (selected-window)) '
-                          '(and (bound-and-true-p romacs-agent-ui--session) (not (active-minibuffer-window)) t))') == 't'
+                          '(and (derived-mode-p (quote romacs-agent-log-mode)) romacs-agent-log--input (not (active-minibuffer-window)) t))') == 't'
 
         def composed(text):
             """TEXT typed in the chat a start opened: its first message."""
             until(chat_shown, 15, 'chat opened')
             a.keys(text)
             until(lambda: a.eval('(with-current-buffer (window-buffer (selected-window)) (string-suffix-p '
-                                 + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't', 15, f'{text} typed')
+                                 + lisp_text(text) + ' (buffer-substring-no-properties romacs-agent-log--input (point-max))))') == 't', 15, f'{text} typed')
 
         # The palette, as drawn.
         on_project(other)
@@ -3387,230 +3386,6 @@ def start_picker(args, base):
                         and result['codex_turn'] == ['gpt-6-luna', 'low']
                         and rows[0] == 'Claude Code · default' and 'Claude Code · Fake 1' in rows
                         and 'Codex · GPT-6.1 Sol' in rows and result['single'] == 'chat')
-        return result
-    finally:
-        a.close()
-
-
-def chat_view(args, base):
-    """A chat never hides its own transcript, by real keys: the first prompt
-    of a chat started with none, and a later turn in a window whose start
-    is the composer's line, alone and split beside a delegated child."""
-    a = Agents(args, base, 'cv')
-    try:
-        a.up()
-        a.work.mkdir(parents=True, exist_ok=True)
-        a.codex_instance()
-        result = {}
-
-        def shot(name):
-            path = base / f'chat-view-{name}.png'
-            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            return str(path)
-
-        def view(sid, text):
-            """Where SID's window starts, and whether it shows TEXT."""
-            return parity_live.read_sexp(a.eval(
-                f'(let* ((buffer (romacs-agent-buffer {a.s(sid)})) (window (get-buffer-window buffer))) '
-                '(with-current-buffer buffer (redisplay t) '
-                '(list (window-start window) (marker-position romacs-agent-ui--end) (point-max) '
-                f'(save-excursion (goto-char (point-min)) (and (search-forward {lisp_text(text)} nil t) '
-                '(pos-visible-in-window-p (match-beginning 0) window) t)))))'))
-
-        def typed_turn(sid, text, count):
-            a.keys(text)
-            until(lambda: a.eval(f'(with-current-buffer (romacs-agent-buffer {a.s(sid)}) '
-                                 '(string-suffix-p ' + lisp_text(text) + ' (romacs-agent-ui--composer-text)))') == 't',
-                  15, f'{text} typed')
-            a.keys('-k', 'Return')
-            until(lambda: len(a.results(sid) or []) >= count, 30, f'{text} answered')
-            a.idle(sid)
-            time.sleep(.5)
-
-        # The first prompt of a chat started with none, its window alone.
-        sid = a.eval(f'(let ((session (romacs-agent-start {lisp(a.work)}))) (romacs-agent-ui--show-chat session) '
-                     '(romacs-agent-id session))').strip('"')
-        a.eval('(progn (delete-other-windows) t)')
-        a.keyboard_ready()
-        typed_turn(sid, 'say hi', 1)
-        result['first'] = view(sid, 'say hi')
-        result['shot_first'] = shot('first')
-
-        # A later turn with the window's start at the composer.
-        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-        a.keys('0')
-        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
-        time.sleep(.5)
-        result['before_later'] = view(sid, 'say hi')
-        typed_turn(sid, 'say later', 2)
-        result['later'] = view(sid, 'say later')
-        result['shot_later'] = shot('later')
-
-        # The same, split beside a delegated child.
-        a.send(sid, 'call romacs_delegate_task ' + json.dumps(
-            {'task': 'say child', 'title': 'a child', 'target': {'provider': 'codex'}, 'clientRequestId': 'view'}))
-        a.idle(sid, 60)
-        child = json.loads(a.called('romacs_delegate_task')['text'])['taskId']
-        until(lambda: a.state(child) == 'idle', 20, 'child done')
-        a.idle(sid, 30)
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(sid)}) (delete-other-windows) (split-window-right) '
-               f'(other-window 1) (switch-to-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(child)}) (current-buffer))) '
-               f'(other-window 1) (goto-char (point-max)) t)')
-        a.keyboard_ready()
-        a.keys('-M', 'ctrl', '-k', 'u', '-m', 'ctrl')
-        a.keys('0')
-        a.keys('-M', 'ctrl', '-k', 'l', '-m', 'ctrl')
-        time.sleep(.5)
-        count = len(a.results(sid))
-        typed_turn(sid, 'say split', count + 1)
-        result['split'] = view(sid, 'say split')
-        result['shot_split'] = shot('split')
-
-        result['ok'] = all(result[k][3] == 't' or result[k][3] is True for k in ('first', 'later', 'split'))
-        return result
-    finally:
-        a.close()
-
-
-def children(args, base):
-    """What runs under a session, by real keys: the header counts and the
-    `C-c C-o' menu's rows of a parent's delegated tasks (running, waiting,
-    failed) and of its harness's own subagent, following their state with
-    the menu open; a digit opens a child's chat or a subagent's card, and
-    RET one chosen from the list of them; opening a failure takes it out
-    of the count."""
-    a = Agents(args, base, 'ch')
-    def old_chat(sid):
-        """The old chat's text, read with no view selected."""
-        return parity_live.read_sexp(a.eval(f'(with-current-buffer (save-window-excursion (romacs-agent-ui--show-chat {a.s(sid)})) '
-                                            '(buffer-substring-no-properties (point-min) (point-max)))'))
-    try:
-        a.up()
-        a.work.mkdir(parents=True, exist_ok=True)
-        a.codex_instance()
-        # A child waits for its approval only when the user is asked: every
-        # tool call is allowed by default.  Counts said in words, as read
-        # below (a glyph says them by default).
-        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
-        parent = a.start('say ready')
-        a.idle(parent)
-
-        def delegate(task, title, provider):
-            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
-                {'task': task, 'title': title, 'target': {'provider': provider}, 'clientRequestId': title}))
-            a.idle(parent, 60)
-            record = json.loads(a.called('romacs_delegate_task')['text'])
-            return record['taskId']
-
-        running = delegate('slow 300', 'long build', 'codex')
-        waiting = delegate('ask true', 'needs approval', 'claude')
-        failed = delegate('fail', 'broken task', 'codex')
-        a.until(failed, lambda: a.state(failed) == 'idle', 20, 'failed child ended')
-        done = delegate('say fine', 'finished task', 'codex')
-        a.until(done, lambda: a.state(done) == 'idle', 20, 'done child ended')
-        a.idle(parent, 60)
-        until(lambda: a.state(waiting) == 'waiting-approval', 20, 'child waiting')
-
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-        a.keyboard_ready()
-
-        def header():
-            return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (format-mode-line header-line-format)))'))
-
-        def menu():
-            return parity_live.read_sexp(a.eval(
-                '(and (buffer-live-p keymap-popup--buffer) (with-current-buffer keymap-popup--buffer '
-                '(buffer-substring-no-properties (point-min) (point-max))))')) or ''
-
-        def shot(name):
-            path = base / f'children-{name}.png'
-            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            return str(path)
-
-        def shown():
-            return parity_live.read_sexp(a.eval('(buffer-name (window-buffer (selected-window)))'))
-
-        def open_menu():
-            a.keys('-M', 'ctrl', '-k', 'c', '-k', 'o', '-m', 'ctrl')
-            until(lambda: 'Workers' in menu(), 15, 'menu open')
-
-        until(lambda: '1 needs approval' in header(), 15, 'counts in the header')
-        result = {'header': header()}
-        # The failure is counted while it is news: until a turn of the parent
-        # passes with it in view (the parent's own wake may be that turn).
-        unseen = lambda: a.eval(f'(romacs-agent-unseen-p {a.s(failed)})') != 'nil'
-        result['failure_counted'] = '1 failed' in result['header'] or not unseen()
-        result['shot_header'] = shot('header')
-        open_menu()
-        time.sleep(.5)
-        result['menu'] = menu()
-        result['shot_menu'] = shot('menu')
-
-        # With the menu open, the approval answered: its row and the title follow.
-        a.eval(f'(romacs-agent-respond {a.s(waiting)} (car (hash-table-keys (romacs-agent-approvals {a.s(waiting)}))) t)')
-        until(lambda: 'Needs approval' not in menu(), 15, 'menu follows the child')
-        result['menu_after'] = menu()
-        result['header_after'] = header()
-        result['shot_menu_after'] = shot('menu-after')
-
-        # A row's digit opens its worker: the failed one's.  (A failure is
-        # news until a turn of its parent passes, as one has here: its row
-        # is ranked among the finished, not first.)
-        rows = [line for line in result['menu_after'].splitlines() if 'broken task' in line]
-        a.keys(rows[0].split('broken task')[0].split()[-1] if rows else '1')
-        until(lambda: 'broken task' in (shown() or ''), 15, 'failed child opened')
-        result['opened'] = shown()
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-        until(lambda: 'failed' not in header(), 15, 'seen failure out of the count')
-        result['header_seen'] = header()
-
-        # The list of them, RET on the one typed for.
-        open_menu()
-        a.keys('o')
-        until(lambda: 'Worker' in (parity_live.read_sexp(a.eval(
-            '(if (active-minibuffer-window) (with-current-buffer (window-buffer (active-minibuffer-window)) '
-            '(substring-no-properties (minibuffer-prompt))) "")')) or ''), 15, 'palette open')
-        time.sleep(.5)
-        result['shot_palette'] = shot('palette')
-        a.keys('finished')
-        time.sleep(.5)
-        a.keys('-k', 'Return')
-        until(lambda: 'finished task' in (shown() or ''), 15, 'chosen child opened')
-        result['chosen'] = shown()
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-
-        # The harness's own subagent: counted while it runs; its row goes to its card.
-        a.send(parent, 'agent 6 read the code')
-        until(lambda: 'read the code' in old_chat(parent), 15, 'subagent card')
-        # The harness's own subagent counts apart from the delegated threads.
-        until(lambda: '1 working' in header(), 15, 'subagent counted')
-        result['header_subagent'] = header()
-        open_menu()
-        time.sleep(.3)
-        result['menu_subagent'] = menu()
-        result['shot_subagent'] = shot('subagent')
-        lines = [line for line in result['menu_subagent'].splitlines() if 'read the code' in line]
-        key = lines[0].split('read the code')[0].split()[-1] if lines else '1'
-        a.keys(key)
-        until(lambda: not menu(), 15, 'menu closed')
-        result['card_line'] = parity_live.read_sexp(a.eval(
-            f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-            '(buffer-substring-no-properties (line-beginning-position) (line-end-position)))'))
-        a.idle(parent, 30)
-
-        running_stopped = a.eval(f'(romacs-agent-stop {a.s(running)})')
-        result['header_end'] = header()
-        # The header counts in words (glyphs off): what wants the user, then
-        # the threads still live; the menu's group is the parent's workers.
-        result['ok'] = (all(w in result['header'] for w in ('1 needs approval', 'threads live')) and result['failure_counted']
-                        and all(w in result['menu'] for w in ('Workers', 'long build', 'Needs approval', 'broken task', 'finished task'))
-                        and 'threads live' in result['header_after'] and 'needs approval' not in result['header_after']
-                        and 'Needs approval' not in result['menu_after']
-                        and 'finished task' in result['chosen']
-                        and 'broken task' in result['opened'] and 'failed' not in result['header_seen']
-                        and 'read the code' in result['menu_subagent'] and 'read the code' in result['card_line'])
         return result
     finally:
         a.close()
@@ -3901,67 +3676,11 @@ def history_real(args, base):
         a.close()
 
 
-def live_rows(args, base):
-    """What a lead's delegates do now, above its composer: a row for each
-    one that works, its title, its turn's clock and what it does (the call
-    it started, or that it needs approval), with the lead idle; the clocks
-    move with no event from anyone; frames a second apart are kept."""
-    a = Agents(args, base, 'lr')
-    try:
-        a.up()
-        a.work.mkdir(parents=True, exist_ok=True)
-        a.eval("(setq romacs-agent-approval-policy 'ask romacs-agent-glyphs nil)")
-        parent = a.start('say ready')
-        a.idle(parent)
-
-        def delegate(task, title):
-            a.send(parent, 'call romacs_delegate_task ' + json.dumps(
-                {'task': task, 'title': title, 'target': {'provider': 'claude'}, 'clientRequestId': title}))
-            a.idle(parent, 60)
-            record = next(json.loads(e['text']) for e in reversed(a.logged()) if e.get('tool') == 'romacs_delegate_task')
-            return record['taskId']
-
-        # One runs a long call (its harness's own subagent), one asks.
-        held = delegate('agent 300 read the code', 'held call')
-        asking = delegate('ask true', 'asks approval')
-        until(lambda: a.state(asking) == 'waiting-approval', 30, 'child waiting')
-        until(lambda: a.state(held) == 'running', 30, 'child running')
-        a.idle(parent, 60)
-
-        a.eval(f'(progn (romacs-agent-ui--show-chat {a.s(parent)}) (delete-other-windows) t)')
-        a.keyboard_ready()
-
-        def rows():
-            return parity_live.read_sexp(a.eval(
-                f'(with-current-buffer (romacs-agent-buffer {a.s(parent)}) '
-                '(substring-no-properties (or (overlay-get romacs-agent-ui--composer (quote before-string)) "")))')) or ''
-
-        until(lambda: 'held call' in rows() and 'asks approval' in rows(), 20, 'rows above the composer')
-        result = {'rows': rows(), 'frames': []}
-        for i in range(4):
-            path = base / f'live-rows-{i}.png'
-            subprocess.run([f'{args.tools}/grim', str(path)], env=a.env, check=True, timeout=30)
-            result['frames'].append(str(path))
-            time.sleep(1)
-        result['rows_later'] = rows()
-        held_row = lambda text: next((line for line in text.splitlines() if 'held call' in line), '')
-        clock = lambda text: (lambda m: int(m.group(1)) if m else None)(re.search(r'held call  (\d+)s · ', held_row(text)))
-        result['clocks'] = [clock(result['rows']), clock(result['rows_later'])]
-        result['lead_state'] = a.state(parent)
-        result['ok'] = (None not in result['clocks'] and result['clocks'][1] > result['clocks'][0]
-                        and result['lead_state'] == 'idle' and 'thinking' not in held_row(result['rows'])
-                        and '◆ asks approval' in result['rows'] and 'needs approval' in result['rows']
-                        )
-        return result
-    finally:
-        a.close()
-
-
 WORKFLOWS = {'chat_menu': chat_menu, 'host': host, 'sockets': sockets, 'reap': reap, 'deadline': deadline, 'providers': providers, 'session': session, 'survive': survive, 'outcome': outcome, 'budget': budget, 'unit': unit, 'probe': probe,
              'tools': tools, 'delegate': delegate, 'real': real, 'restart': restart, 'restart-unit': restart_unit, 'restart-race': restart_race, 'restart-rollback': restart_rollback, 'restart-hang': restart_hang, 'renew': renew,
              'gnosis': gnosis, 'history': history, 'history-real': history_real, 'composer': composer,
              'composer-real': composer_real, 'launcher': launcher, 'unicode': unicode,
-             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'children': children, 'live_rows': live_rows, 'chat_view': chat_view, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'rpc': rpc,
+             'environment': environment, 'logging': logging, 'board_keys': board_keys, 'start_picker': start_picker, 'chat_log': chat_log, 'ui_review': ui_review, 'select': select, 'select-real': select_real, 'rpc': rpc,
              'instances': instances, 'mcp_tour': mcp_tour}
 
 

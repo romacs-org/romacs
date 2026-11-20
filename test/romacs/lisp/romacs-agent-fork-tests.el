@@ -123,12 +123,6 @@ start launched, its manifest written."
     (should-error (romacs-agent-fork (romacs-agent--make :id "n" :harness 'noforks :state 'idle :turns 1))
                   :type 'user-error)))
 
-(ert-deftest romacs-agent-fork-is-in-the-session-menu ()
-  (require 'romacs-agent-ui)
-  (should (eq (lookup-key romacs-agent-chat-actions-map "f") 'romacs-agent-chat-fork))
-  (should-not (commandp 'romacs-agent-fork))
-  (should (equal (command-modes 'romacs-agent-chat-fork) '(romacs-agent-chat-mode))))
-
 (ert-deftest romacs-agent-fork-claude-forks-until-it-has-spoken ()
   ;; Claude Code writes a fork's transcript with its first message: a run
   ;; that ended before one forks again.
@@ -150,27 +144,6 @@ start launched, its manifest written."
     (cl-letf (((symbol-function 'process-live-p) (lambda (process) (eq process 'live))))
       (should (romacs-agent-fork source)))
     (should launched)))
-
-(ert-deftest romacs-agent-fork-says-where-it-came-from ()
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (let* ((fork (romacs-agent-fork source))
-           (first (car (romacs-agent--journal-records fork)))
-           (note (gethash "note" first)))
-      (should (eql (gethash "seq" first) 1))
-      (should (equal (gethash "type" note) "fork"))
-      (should (equal (gethash "from" note) (romacs-agent-id source)))
-      (should (eql (gethash "seq" note) 1))
-      (should (eql (gethash "turns" note) 1))
-      ;; Its chat says so; what the source said after is not the fork's.
-      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                             (save-window-excursion (romacs-agent-ui--show-chat fork)))))
-        (unwind-protect
-            (with-current-buffer buffer
-              (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                (should-not (string-match-p "after the fork" text))
-                (should (string-match-p "Forked from Plan at its turn 1" text))))
-          (kill-buffer buffer))))))
 
 (defun romacs-agent-fork-tests--turns (session from to)
   "Write turns FROM to TO, a prompt and its end each, as SESSION's journal
@@ -205,24 +178,6 @@ LINES, objects with their own seqs."
                                      note-objects "")
                           (mapconcat (lambda (line) (concat (json-serialize line) "\n")) lines ""))
                   nil (expand-file-name "journal.jsonl" (romacs-agent-dir fork)) nil 'silent)))
-
-(ert-deftest romacs-agent-fork-at-seq-zero-takes-nothing-later ()
-  ;; Forked before its source said anything: what the source says later
-  ;; is not the fork's.
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (romacs-agent-fork-tests--turns source 1 3)
-    (setf (romacs-agent-seq source) 6)
-    (let ((fork (romacs-agent-fork-tests--plain "F")))
-      (romacs-agent-fork-tests--note-then
-       fork (list (romacs-mcp--object "from" (romacs-agent-id source) "seq" 0 "title" "Plan" "turns" 0 "type" "fork")) nil)
-      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                           (save-window-excursion (romacs-agent-ui--show-chat fork)))))
-        (unwind-protect
-            (let ((text (with-current-buffer buffer (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
-              (should-not (string-search "question" text))
-              (should (string-search "Forked from Plan" text)))
-          (kill-buffer buffer))))))
 
 ;; A fork's turns taken of its source are rows of its own (seqs 1..N, its
 ;; note at N+1), each naming its source, kept drawn under the fork's id.
@@ -270,77 +225,6 @@ session's own."
                            (seq-filter (lambda (row) (or (null before) (< (plist-get row :first-seq) before))) borrowed))))
         (list :rows (seq-take rows limit) :after (plist-get own :after) :more (> (length rows) limit))))))
 
-(ert-deftest romacs-agent-fork-draws-its-borrowed-rows-then-its-note ()
-  ;; The rows it took, then the note between them and its own turn, each
-  ;; in its place by seq; a borrowed turn names its source.
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (romacs-agent-test-with-store
-      (let* ((fork (romacs-agent-fork-tests--plain "F"))
-             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two"))))
-        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
-            (unwind-protect
-                (with-current-buffer buffer
-                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                    (should (string-match-p (concat "taken one\\(.\\|\n\\)*taken two\\(.\\|\n\\)*"
-                                                    "Forked from Plan at its turn 2\\(.\\|\n\\)*fork's own")
-                                            text))
-                    (should (equal (get-text-property (1+ (string-search "taken two" text)) 'romacs-agent-from)
-                                   (romacs-agent-id source)))
-                    (should-not (get-text-property (1+ (string-search "fork's own" text)) 'romacs-agent-from))))
-              (kill-buffer buffer))))))))
-
-(ert-deftest romacs-agent-fork-pages-its-borrowed-rows ()
-  ;; Its last two turns: the last taken and its own, the note between;
-  ;; the row above draws the rest.
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (romacs-agent-test-with-store
-      (let* ((romacs-agent-chat-turns 2)
-             (fork (romacs-agent-fork-tests--plain "F"))
-             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two" "taken three"))))
-        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
-            (unwind-protect
-                (with-current-buffer buffer
-                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                    (should (string-prefix-p "▴ Earlier turns" text))
-                    (should-not (string-search "taken two" text))
-                    (should (string-match-p "taken three\\(.\\|\n\\)*Forked from Plan\\(.\\|\n\\)*fork's own" text)))
-                  (romacs-agent-chat-earlier)
-                  (should (string-match-p "taken one\\(.\\|\n\\)*taken two\\(.\\|\n\\)*taken three"
-                                          (buffer-substring-no-properties (point-min) romacs-agent-ui--end))))
-              (kill-buffer buffer))))))))
-
-(ert-deftest romacs-agent-fork-borrowed-row-waits-for-its-form ()
-  ;; A borrowed turn with no form yet: its row waits under the fork's id,
-  ;; naming the source, and the form it gets later keeps the name.
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (romacs-agent-test-with-store
-      (let* ((fork (romacs-agent-fork-tests--plain "F")) (id (romacs-agent-id fork)) (wanted nil)
-             (romacs-agent-drawn-wanted-functions (list (lambda (session seqs) (push (cons session seqs) wanted))))
-             (borrowed (romacs-agent-fork-tests--borrowed fork source '("taken one" "taken two") '(2))))
-        (cl-letf (((symbol-function 'romacs-agent-turns-page) (romacs-agent-fork-tests--paged borrowed)))
-          (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat fork))))
-            (unwind-protect
-                (with-current-buffer buffer
-                  (should (assoc id wanted))
-                  (should (memq 1 (cdr (assoc id wanted))))
-                  (should-not (string-search "taken one" (buffer-string)))
-                  (let ((found (save-excursion (goto-char (point-min))
-                                               (text-property-search-forward 'romacs-agent-placeholder (cons id 1) #'equal))))
-                    (should found)
-                    (should (equal (get-text-property (prop-match-beginning found) 'romacs-agent-from) (romacs-agent-id source))))
-                  (romacs-agent-drawn-put (romacs-agent-turns--db) id 1 (romacs-agent-fork-tests--form "taken one"))
-                  (romacs-agent-ui-drawn-ready id '(1))
-                  (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                    (should (string-match-p "taken one\\(.\\|\n\\)*taken two" text))
-                    (should (equal (get-text-property (1+ (string-search "taken one" text)) 'romacs-agent-from)
-                                   (romacs-agent-id source)))))
-              (kill-buffer buffer))))))))
-
 (ert-deftest romacs-agent-fork-names ()
   ;; A fork's fork is no "(fork) (fork)"; one whose only turn was cut has
   ;; a conversation.
@@ -356,35 +240,6 @@ session's own."
                  (when (and (hash-table-p note) (equal (gethash "type" note) "fork"))
                    (push (list (gethash "seq" note) (gethash "after" note)) notes)))))
     (nreverse notes)))
-
-(ert-deftest romacs-agent-fork-forked-again-says-how-far ()
-  ;; Not yet spoken, it forks its source anew at each run: when the source
-  ;; went on meanwhile, the fork's journal and chat say so.
-  (require 'romacs-agent-ui)
-  (romacs-agent-fork-tests--with 'claude ()
-    (let ((fork (romacs-agent-fork source)))
-      (setf (romacs-agent-seq source) 2 (romacs-agent-turns source) 2 (romacs-agent-state fork) 'ended)
-      (romacs-agent-resume fork)
-      (should (equal (romacs-agent-fork-tests--notes fork) '((1 0) (2 1))))
-      (should (member "--fork-session" (cadr (car launched))))
-      ;; Unchanged since: no note more.
-      (setf (romacs-agent-state fork) 'ended)
-      (romacs-agent-resume fork)
-      (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
-      (let ((buffer (progn (romacs-agent-test-stored source) (romacs-agent-test-stored fork)
-                             (save-window-excursion (romacs-agent-ui--show-chat fork)))))
-        (unwind-protect
-            (with-current-buffer buffer
-              (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-                (should (string-match-p (concat "Forked from Plan at its turn 1\\(.\\|\n\\)*"
-                                                "Forked again from Plan, now at its turn 2")
-                                        text))))
-          (kill-buffer buffer)))
-      ;; Spoken, it has its own conversation: no re-fork, no note.
-      (setf (romacs-agent-seq source) 3 (romacs-agent-input-seq fork) 9 (romacs-agent-state fork) 'ended)
-      (romacs-agent-resume fork)
-      (should (= (length (romacs-agent-fork-tests--notes fork)) 2))
-      (should-not (member "--fork-session" (cadr (car launched)))))))
 
 (ert-deftest romacs-agent-fork-of-an-unspoken-fork ()
   (romacs-agent-fork-tests--with 'claude (:turns 0 :options '(:fork "x"))

@@ -113,20 +113,6 @@ one pick does not answer it all.  Each choosing row carries
      (concat "\n" (propertize (concat (propertize "   ↵ Send" 'face 'romacs-popup-key) "\n")
                               'romacs-agent-ask (cons nil 'send))))))
 
-(defun romacs-agent-ask-record (questions chosen)
-  "The chat's one row for QUESTIONS: the first and how many more, then
-CHOSEN's answers when it is answered, t when how is not known, else
-that it waits."
-  (concat "? " (car (split-string (caar questions) "\n"))
-          (if (cdr questions) (format " (+%d)" (length (cdr questions))) "")
-          (propertize (cond ((consp chosen)
-                             (concat "  → " (mapconcat (lambda (pair) (string-join (cdr pair) ", ")) chosen " · ")))
-                            (chosen "  · answered")
-                            ;; The chat's key for its row (romacs-agent-ui.el).
-                            (t (substitute-command-keys
-                                "  · waiting: \\<romacs-agent-ui--asked-map>\\[romacs-agent-chat-answer] answers")))
-                      'face 'romacs-agent-dim)))
-
 ;;; The layer
 
 (defvar-local romacs-agent-ask--session nil "The session the layer's questions are from.")

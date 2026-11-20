@@ -710,7 +710,7 @@ has it: in a transaction of its own, after the statement FIRST when given."
   (romacs-agent-store-tests--with
     (romacs-agent-store-fill)
     ;; Every module's tables, as the writer makes them.
-    (dolist (table '("events" "turns" "turn_drawn" "transcripts"))
+    (dolist (table '("events" "turns" "transcripts"))
       (sqlite-execute (romacs-agent-store--open) (format "create table if not exists %s (x)" table)))
     (let ((romacs-agent-store--db nil))
       (let ((db (romacs-agent-store--open-to-read (romacs-agent-store--file))))

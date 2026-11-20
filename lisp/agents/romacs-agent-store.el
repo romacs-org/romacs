@@ -108,8 +108,8 @@ never waits on a writer."
           (if (not (and (equal (caar (sqlite-select db "pragma user_version")) romacs-agent-store--version)
                         ;; Every module's tables made: a store the writer is
                         ;; making this moment is not read yet.
-                        (= (caar (sqlite-select db "select count(*) from sqlite_master where name in ('sessions', 'events', 'turns', 'turn_drawn', 'transcripts')"))
-                           5)))
+                        (= (caar (sqlite-select db "select count(*) from sqlite_master where name in ('sessions', 'events', 'turns', 'transcripts')"))
+                           4)))
               (progn (sqlite-close db) (romacs-agent-store--make-soon) nil)
             (setq romacs-agent-store--readonly t)
             (setq romacs-agent-store--db (cons (cons file t) db))

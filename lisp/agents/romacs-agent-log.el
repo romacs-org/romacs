@@ -1089,6 +1089,10 @@ after a batch of events remade sessions' states (their workers')."
     (romacs-agent-mark-seen session)
     buffer))
 
+
+(defun romacs-agent-show (session &optional action)
+  "Show SESSION's chat, as `pop-to-buffer' does with ACTION."
+  (romacs-agent-log-show session action))
 ;; A session outlives the editor in its supervisor: a restored chat
 ;; (desktop.el, warm-restart.el) carries which session it shows and the
 ;; composer's unsent text; its transcript is drawn from the records.

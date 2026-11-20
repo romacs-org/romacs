@@ -138,13 +138,12 @@ call and result, an answer and a result a turn."
 
 ;; A fill draws the rows it writes where rows are drawn, not in the editor;
 ;; a redraw draws what has no form of this version.
-(ert-deftest romacs-agent-turns-a-fill-draws-its-rows-off-the-editor ()
+(ert-deftest romacs-agent-turns-a-fill-writes-its-rows-off-the-editor ()
   (skip-unless (and (fboundp 'sqlite-available-p) (sqlite-available-p)))
-  (require 'romacs-agent-ui)
   (let* ((root (make-temp-file "romacs-turns-" t))
          (process-environment (append (list (concat "XDG_STATE_HOME=" root "/state") (concat "XDG_RUNTIME_DIR=" root "/run"))
                                       process-environment))
-         (romacs-agent-store--db nil) (romacs-agent-turns--made nil) (romacs-agent-drawn--made nil)
+         (romacs-agent-store--db nil) (romacs-agent-turns--made nil)
          (romacs-agent-events-store nil)
          (romacs-agent--sessions (make-hash-table :test #'equal))
          (id "a1a1a1a1-2222-4333-8444-5555666677dd")
@@ -160,49 +159,22 @@ call and result, an answer and a result a turn."
                         (write-region (mapconcat (lambda (r) (concat (romacs-agent--json r) "\n")) (romacs-agent-turns-tests--records turns) "")
                                       nil (expand-file-name "journal.jsonl" dir) nil 'silent)))
                     (session () (romacs-agent--make :id id :harness 'claude :provider "claude" :dir dir :cwd root
-                                                    :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal)))
-                    (forms () (sqlite-select (romacs-agent-turns--db) "select first_seq, version from turn_drawn where session = ? order by first_seq" (list id))))
-            ;; In the editor: rows, no forms.
+                                                    :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))))
+            ;; Each turn its row, from where the rows end.
             (journal 1)
             (should (= (romacs-agent-turns-fill (session)) 1))
-            (should-not (ignore-errors (forms)))
-            ;; Where rows are drawn: each row its form, in its transaction.
             (journal 3)
-            (let ((romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
-              (should (= (romacs-agent-turns-fill (session)) 2))
-              (should (equal (forms) `((7 ,romacs-agent-drawn-version) (12 ,romacs-agent-drawn-version))))
-              (let ((form (caar (sqlite-select (romacs-agent-turns--db) "select form from turn_drawn where session = ? and first_seq = 7" (list id)))))
-                (with-temp-buffer
-                  (romacs-agent-drawn-insert form)
-                  (should (string-search "answer 2 about zebras" (buffer-string)))))
-              ;; The first, drawn by none, and one of an older drawing: drawn again.
-              (sqlite-execute (romacs-agent-turns--db) "update turn_drawn set version = 0 where session = ? and first_seq = 12" (list id))
-              (should (= (romacs-agent-turns-redraw (session)) 2))
-              (should (equal (mapcar #'car (forms)) '(2 7 12)))
-              (should (cl-every (lambda (row) (eql (cadr row) romacs-agent-drawn-version)) (forms)))
-              (should (= (romacs-agent-turns-redraw (session)) 0)))
-            ;; The batch process draws what has none and says so; the
-            ;; editor tells the chat, which asked for them.
-            (sqlite-execute (romacs-agent-turns--db) "delete from turn_drawn where first_seq > 2")
-            (let ((out nil) (ready nil) (asked nil))
+            (should (= (romacs-agent-turns-fill (session)) 2))
+            (should (= (romacs-agent-turns-count (session)) 3))
+            ;; The batch process fills what came since, and says how many.
+            (journal 4)
+            (let ((out nil))
               (cl-letf (((symbol-function 'princ) (lambda (x &rest _) (push x out)))
                         ((symbol-function 'romacs-agent--load)
                          (lambda (_dir) (puthash id (session) romacs-agent--sessions))))
                 (let ((command-line-args-left (list id))) (romacs-agent-turns-fill-batch)))
-              (setq out (apply #'concat (nreverse out)))
-              (should (string-search (format "(romacs-agent-turns-drawn %S (7 12))" id) out))
-              (cl-letf (((symbol-function 'romacs-agent-ui-drawn-ready) (lambda (i seqs) (push (cons i seqs) ready)))
-                        ((symbol-function 'romacs-agent-turns-fill-soon) (lambda (ids) (setq asked ids))))
-                (romacs-agent-turns--drawn-told (concat "romacs-agent-turns: noise\n" out))
-                (should (equal ready `((,id 7 12))))
-                (run-hook-with-args 'romacs-agent-drawn-wanted-functions id '(7))
-                (should (equal asked (list id)))))
-            ;; A drawing that fails leaves its row, with no form.
-            (sqlite-execute (romacs-agent-turns--db) "delete from turn_drawn")
-            (let ((romacs-agent-turns-draw-function (lambda (&rest _) (error "Broken"))))
-              (should (= (romacs-agent-turns-redraw (session)) 0))
-              (should-not (forms))
-              (should (= (romacs-agent-turns-count (session)) 3)))))
+              (should (string-search "1 turns written" (apply #'concat out))))
+            (should (= (romacs-agent-turns-count (session)) 4))))
       (when (cdr romacs-agent-store--db) (ignore-errors (sqlite-close (cdr romacs-agent-store--db))))
       (delete-directory root t))))
 

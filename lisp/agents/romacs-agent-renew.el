@@ -452,7 +452,7 @@ for the next resume, which finishes it, and SESSION's view says so."
      (when (romacs-agent-renewing session)
        (romacs-agent--raise session (list :type 'error
                                           :text (substitute-command-keys
-                                                 "Renewal not finished: resume the session \\<romacs-agent-chat-mode-map>\\[romacs-agent-chat-resume] to finish it")))))))
+                                                 "Renewal not finished: resume the session (\\<romacs-agent-menu-map>\\[romacs-agent-chat-resume] in its actions menu) to finish it")))))))
 
 (add-hook 'romacs-agent-restored-hook #'romacs-agent-renew--restored)
 (add-hook 'romacs-agent-caught-up-functions #'romacs-agent-renew--unfinished)

@@ -183,21 +183,5 @@
       (should-not written)
       (should (equal (gethash "mode" (funcall mode)) "plan")))))
 
-(ert-deftest romacs-agent-plan-the-card ()
-  (with-temp-buffer
-    (romacs-agent-chat-mode)
-    (let ((session (romacs-agent--make :id "c" :harness 'claude :tools (make-hash-table :test #'equal))))
-      (setq romacs-agent-ui--session session romacs-agent-ui--end (point-marker))
-      (romacs-agent-ui--draw session '(:type plan :text "1. Read.\n2. Write.") (current-buffer))
-      (should (string-match-p "Proposed plan" (buffer-string)))
-      (should (string-match-p "1. Read.\n2. Write." (buffer-string)))
-      (should (string-match-p "implement it" (buffer-string))))))
-
-(ert-deftest romacs-agent-plan-implement-waits-for-the-turn ()
-  (with-temp-buffer
-    (romacs-agent-chat-mode)
-    (setq romacs-agent-ui--session (romacs-agent--make :id "r" :harness 'claude :state 'running :options '(:plan t)))
-    (should-error (romacs-agent-chat-implement) :type 'user-error)))
-
 (provide 'romacs-agent-plan-tests)
 ;;; romacs-agent-plan-tests.el ends here

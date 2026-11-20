@@ -161,41 +161,6 @@
         (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
         (delete-directory dir t)))))
 
-(ert-deftest romacs-agent-children-replay-finds-the-harness-subagents ()
-  ;; No supervisor: the session raised no events; its chat replays the
-  ;; turn under way from its records, and that is where they are found.
-  (romacs-agent-children-tests--with
-    (let ((dir (make-temp-file "romacs-children-" t)) (coding-system-for-write 'utf-8-unix))
-      (unwind-protect
-          (let ((session (romacs-agent--make :id "p2" :harness 'claude :provider "claude" :dir dir :state 'ended)))
-            (write-region
-             (concat (romacs-agent--json
-                      (romacs-mcp--object
-                       "seq" 1 "t" 1.0
-                       "out" (romacs-mcp--object
-                              "type" "assistant" "parent_tool_use_id" :null
-                              "message" (romacs-mcp--object
-                                         "id" "m" "content"
-                                         (vector (romacs-mcp--object "type" "tool_use" "id" "t1" "name" "Agent"
-                                                                     "input" (romacs-mcp--object "description" "read")))))))
-                     "\n")
-             nil (expand-file-name "journal.jsonl" dir) nil 'silent)
-            ;; The turn under way, from its records: its subagents found.
-            (with-temp-buffer
-              (romacs-agent-chat-mode)
-              (let ((inhibit-read-only t))
-                (setq romacs-agent-ui--session session
-                      romacs-agent-ui--messages (make-hash-table :test #'equal)
-                      romacs-agent-ui--end (point-marker))
-                (romacs-agent-ui--replay-from session nil)))
-            (romacs-agent-ui--summarize-children session)
-            (should (equal (plist-get (car (romacs-agent-children-rows session)) :title) "read"))
-            ;; A journal that ends mid-call leaves it running: only a turn's
-            ;; end or an exit says otherwise.
-            (should (equal (plist-get (car (romacs-agent-children-rows session)) :state) "running")))
-        (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))
-        (delete-directory dir t)))))
-
 (ert-deftest romacs-agent-children-a-cut-turn-ends-its-subagents ()
   (dolist (type '(done exit))
     (romacs-agent-children-tests--with
@@ -213,61 +178,6 @@
     (cl-letf (((symbol-function 'romacs-agent-ui--summarize-children) (lambda (&rest _) (error "Made for the header")))
               ((symbol-function 'romacs-agent-children) (lambda (&rest _) (error "Scanned for the header"))))
       (should (string-search "Working" (romacs-agent-ui--header-text (romacs-agent-ui--header-inputs parent)))))))
-
-(ert-deftest romacs-agent-children-menu-rows-open-children ()
-  (romacs-agent-children-tests--with
-    (let ((waiting (child 'waiting-approval)) (opened nil))
-      (child 'running)
-      (romacs-agent-ui--summarize-children parent)
-      (with-temp-buffer
-        (let ((romacs-agent-ui--session parent))
-          (should (string-prefix-p "Workers 1 needs approval · 2 threads live" (romacs-agent-ui--children-title)))
-          (should (string-search "task 1" (romacs-agent-ui--child-label 0)))
-          (should (string-search "Needs approval" (romacs-agent-ui--child-label 0)))
-          (should-not (romacs-agent-ui--child-label 2))
-          (cl-letf (((symbol-function 'romacs-agent-show) (lambda (session) (setq opened session))))
-            (let ((last-command-event ?1)) (romacs-agent-chat-open-child))
-            (should (eq opened waiting))
-            (let ((last-command-event ?5))
-              (should-error (romacs-agent-chat-open-child) :type 'user-error))))))))
-
-(ert-deftest romacs-agent-children-a-long-title-is-cut-with-the-sessions-dots ()
-  ;; The menu's next column stays put: no `…', only the session's ellipsis.
-  (let* ((truncate-string-ellipsis "...")
-         (label (romacs-agent-ui--worker-label
-                 (list :key 'working :title "lane unsafe-down (992 -> <100 unsafe sites, a long title)"
-                       :activity "mcp__romacs__romacs_task_status_and_more" :time (float-time)))))
-    (should-not (string-search "…" label))
-    (should (string-search "..." label))
-    (should (<= (string-width label) keymap-popup--max-description-width))))
-
-(ert-deftest romacs-agent-children-menu-rows-take-a-click ()
-  ;; A row carries the popup's click data, its key among it: the popup's
-  ;; mouse path replays that key.
-  (romacs-agent-children-tests--with
-    (child 'running)
-    (romacs-agent-ui--summarize-children parent)
-    (with-temp-buffer
-      (let* ((romacs-agent-ui--session parent)
-             (entry (keymap-popup--entry "1" (lambda () (romacs-agent-ui--child-label 0)) 'suffix
-                                         :command #'romacs-agent-chat-open-child))
-             (line (keymap-popup--render-entry entry))
-             (at (string-search "task 1" line)))
-        (should at)
-        (should (equal (plist-get (get-text-property at 'keymap-popup--entry line) :key) "1"))
-        (should (eq (get-text-property at 'mouse-face line) 'highlight))))))
-
-(ert-deftest romacs-agent-children-a-subagent-row-goes-to-its-card ()
-  (romacs-agent-children-tests--with
-    (with-temp-buffer
-      ;; The card's row: its mark, then its text naming its call.
-      (insert "before\n●" (propertize "card\n" 'romacs-agent-tool "t1"))
-      (setq-local romacs-agent-ui--end (point-max-marker))
-      (let ((romacs-agent-ui--session parent))
-        (setf (romacs-agent-children-rows parent) (list (list :tool "t1" :key 'working :state "running" :title "x")))
-        (cl-letf (((symbol-function 'recenter) #'ignore))
-          (let ((last-command-event ?1)) (romacs-agent-chat-open-child)))
-        (should (= (point) 8))))))
 
 ;; Work the harness runs on past its tool call: a background subagent, or
 ;; a command left running.
@@ -290,27 +200,6 @@
     ;; No tool to hang it on: nothing.
     (should-not (funcall line "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\"}"))))
 
-(ert-deftest romacs-agent-children-a-background-subagent-runs-past-its-call ()
-  (romacs-agent-children-tests--with
-    (let ((row (lambda () (car (romacs-agent-children-rows parent))))
-          (track (lambda (event) (romacs-agent-ui--track-children parent event) (romacs-agent-ui--summarize-children parent))))
-      (funcall track (list :type 'tool :state 'started :id "t1" :name "Agent"
-                           :input (romacs-mcp--object "description" "build the driver")))
-      (funcall track '(:type task :id "t1" :state started :task "a1" :title "build the driver"))
-      ;; Its call returns at once; its turn ends: it still runs.
-      (funcall track '(:type tool :state completed :id "t1"))
-      (funcall track '(:type done))
-      (should (equal (plist-get (funcall row) :state) "running"))
-      (funcall track '(:type task :id "t1" :state progress :activity "Bash"))
-      (with-temp-buffer
-        (let ((romacs-agent-ui--session parent))
-          (should (string-search "Working Bash" (substring-no-properties (romacs-agent-ui--child-label 0))))))
-      ;; Its own notice ends it.
-      (funcall track '(:type task :id "t1" :state failed :summary "no"))
-      (should (equal (plist-get (funcall row) :state) "failed"))
-      (should (equal (romacs-agent-children-tests--summary parent) "1 failed"))
-      (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer)))))
-
 (ert-deftest romacs-agent-children-a-task-ends-with-its-harness ()
   (romacs-agent-children-tests--with
     ;; A command in the foreground is its card's; sent to the background,
@@ -328,58 +217,7 @@
     (should (equal (plist-get (car (romacs-agent-children-rows parent)) :state) "cancelled"))
     (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
 
-(ert-deftest romacs-agent-children-menu-keeps-the-latest-finished ()
-  ;; The latest to finish, however each ended: a seen failure among them.
-  (let ((rows (append (list '(:key working :title "r") '(:key failed :title "f"))
-                      (cl-loop for i below 4 collect (list :key 'idle :title (format "c%d" i) :time i))
-                      (list '(:key idle :title "seen" :time 10)))))
-    (should (equal (mapcar (lambda (row) (plist-get row :title)) (romacs-agent-ui--workers rows))
-                   '("r" "f" "seen" "c3" "c2")))))
-
-(ert-deftest romacs-agent-children-a-worker-is-dated-by-its-end ()
-  (romacs-agent-children-tests--with
-    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state started :task "a" :title "long" :background t :time 1))
-    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state completed :time 50))
-    (romacs-agent-ui--summarize-children parent)
-    (should (= (plist-get (car (romacs-agent-children-rows parent)) :time) 50))
-    ;; Cut by its harness's going: dated by that.
-    (romacs-agent-ui--track-children parent '(:type task :id "t2" :state started :task "b" :title "cut" :background t :time 2))
-    (romacs-agent-ui--track-children parent '(:type exit :time 70))
-    (romacs-agent-ui--summarize-children parent)
-    (should (equal (plist-get (car (romacs-agent-ui--workers (romacs-agent-children-rows parent))) :title) "cut"))
-    (should (= (plist-get (car (romacs-agent-ui--workers (romacs-agent-children-rows parent))) :time) 70))
-    (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
-
-(ert-deftest romacs-agent-children-a-label-fits-the-menu ()
-  (romacs-agent-children-tests--with
-    (romacs-agent-ui--track-children parent '(:type task :id "t1" :state started :task "a" :background t
-                                                 :title "a rather long title for a worker row"))
-    (romacs-agent-ui--track-children parent `(:type task :id "t1" :state progress :activity "mcp__romacs__romacs_eval"
-                                                    :time ,(float-time)))
-    (romacs-agent-ui--summarize-children parent)
-    (with-temp-buffer
-      (let* ((romacs-agent-ui--session parent) (label (romacs-agent-ui--child-label 0)))
-        (should (<= (string-width label) keymap-popup--max-description-width))
-        (should (string-suffix-p "romacs_eval now" (substring-no-properties label)))))
-    (when romacs-agent-ui--children-timer (cancel-timer romacs-agent-ui--children-timer))))
-
 ;; Past nine workers, and glyphs for states.
-
-(ert-deftest romacs-agent-children-past-nine-workers ()
-  (romacs-agent-children-tests--with
-    (dotimes (_ 12) (child 'running))
-    (romacs-agent-ui--summarize-children parent)
-    (with-temp-buffer
-      (let ((romacs-agent-ui--session parent) (opened nil))
-        (should (string-suffix-p "+3 more" (substring-no-properties (romacs-agent-ui--children-title))))
-        ;; Every one is reached through the list of all.
-        (cl-letf (((symbol-function 'completing-read)
-                   (lambda (_prompt table &rest _)
-                     (should (= (length (all-completions "" table)) 12))
-                     (car (last (all-completions "" table)))))
-                  ((symbol-function 'romacs-agent-show) (lambda (session) (setq opened session))))
-          (romacs-agent-chat-workers)
-          (should (eq opened (plist-get (car (last (romacs-agent-children-rows parent))) :session))))))))
 
 (ert-deftest romacs-agent-children-glyphs ()
   (romacs-agent-children-tests--with

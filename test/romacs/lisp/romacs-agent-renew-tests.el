@@ -110,49 +110,6 @@ state root that has said two things, its writes to its harness in
 (defun romacs-agent-renew-tests--manifest (session)
   (romacs-agent--read-json (expand-file-name "manifest.json" (romacs-agent-dir session))))
 
-(ert-deftest romacs-agent-renew-claude-same-session-new-conversation ()
-  ;; The same session goes on in a new conversation: its id stays, its
-  ;; native id is new, journaled with the brief; its next run begins the
-  ;; new conversation under that id.
-  (romacs-agent-renew-tests--with 'claude
-    (let* ((id (romacs-agent-id session))
-           (outcome (romacs-agent-renew-tests--run session "context full"))
-           (native (cadr outcome))
-           (note (car (romacs-agent-renew-tests--notes session))))
-      (should (eq (car outcome) :done))
-      (should (romacs-agent--uuid-p native))
-      (should-not (equal native id))
-      (should (eq (romacs-agent-get id) session))
-      (should (equal (romacs-agent-harness-session session) native))
-      (should (equal (gethash "harnessSession" (romacs-agent-renew-tests--manifest session)) native))
-      (should (equal (gethash "from" note) id))
-      (should (equal (gethash "to" note) native))
-      (should (equal (gethash "why" note) "context full"))
-      ;; The brief: the first request and the latest turns, then the line.
-      (let ((brief (gethash "brief" note)))
-        (should (string-prefix-p "Renewed conversation" brief))
-        (should (string-search "User: build the parser" brief))
-        (should (string-search "Assistant: its tests pass" brief))
-        (should (string-suffix-p "---\n\n" brief))
-        (should (equal (romacs-agent-brief session) brief)))
-      (should (= relaunched 1))
-      ;; Held until its new run starts.
-      (should (romacs-agent--held-p session))
-      (romacs-agent--raise session (list :type 'run :seq 90))
-      (should-not (romacs-agent--held-p session))
-      (should-not written)
-      ;; Its next run begins the new conversation; one said in goes on.
-      (cl-letf (((symbol-function 'romacs-agent--write-json) #'ignore))
-        (let ((argv (romacs-agent--claude-argv session t)))
-          (should (equal (cadr (member "--session-id" argv)) native))
-          (should-not (member "--resume" argv))))
-      ;; The chat draws it.
-      (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat session))))
-        (unwind-protect
-            (should (string-search "── renewed: a new conversation (context full) ──"
-                                   (with-current-buffer buffer (buffer-string))))
-          (kill-buffer buffer))))))
-
 (ert-deftest romacs-agent-renew-brief-goes-with-the-next-message ()
   ;; Messages sent while it renews wait; the first to go carries the
   ;; brief.  The journal keeps the message as written, marked.
@@ -293,11 +250,6 @@ state root that has said two things, its writes to its harness in
       (run-hook-with-args 'romacs-agent-event-functions session '(:type done))
       (accept-process-output nil 0.2)
       (should (= relaunched 1)))))
-
-(ert-deftest romacs-agent-renew-keys-and-tool ()
-  (should (eq (lookup-key romacs-agent-chat-actions-map "F") 'romacs-agent-chat-renew))
-  (should (equal (command-modes 'romacs-agent-chat-renew) '(romacs-agent-chat-mode)))
-  (should (functionp (plist-get (cdr (assoc "romacs_task_renew" (let ((romacs-mcp-tools nil)) (load "romacs-agent-tools" nil t) romacs-mcp-tools))) :handler))))
 
 (ert-deftest romacs-agent-renew-a-failed-write-keeps-the-brief ()
   (romacs-agent-renew-tests--with 'claude

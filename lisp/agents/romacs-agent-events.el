@@ -28,7 +28,6 @@
 (require 'romacs-agent)
 (require 'romacs-agent-store)
 
-(defvar romacs-agent-turns-draw-function)
 
 (defconst romacs-agent-events--schema
   '("create table if not exists events (
@@ -340,8 +339,7 @@ once it is done."
   (when (and romacs-agent-events-store (romacs-agent-dir session) (not (romacs-agent-events-p session))
              ;; From the editor the writer makes the store as it imports:
              ;; a session started before the store is made goes to it too
-             ;; (its supervisor makes its records' tables), not to a journal
-             ;; no store-drawn chat shows while it runs.
+             ;; (its supervisor makes its records' tables), not to a journal.
              (or (romacs-agent-writer-queued-p) (romacs-agent-events--db))
              (not (romacs-agent-events--supervised-p (romacs-agent-id session) (romacs-agent-host-socket session)))
              (<= (or (file-attribute-size (file-attributes (expand-file-name "journal.jsonl" (romacs-agent-dir session)))) 0)
@@ -839,10 +837,8 @@ stays where it is, a backup no reader reads."
 their turn rows.  The ids staged."
   (let ((romacs-agent-store-patience romacs-agent-store-patient))
     (when (romacs-agent-events--db)
-      ;; It writes records; it never makes them a session's own.  The
-      ;; turn rows it writes are drawn here, off the editor.
-      (let ((romacs-agent-events-store nil)
-            (romacs-agent-turns-draw-function #'romacs-agent-ui-draw-turn))
+      ;; It writes records; it never makes them a session's own.
+      (let ((romacs-agent-events-store nil))
         (delq nil (mapcar (lambda (dir) (romacs-agent-events--migrate-one dir)) dirs))))))
 
 (defun romacs-agent-events--migrate-one (dir)

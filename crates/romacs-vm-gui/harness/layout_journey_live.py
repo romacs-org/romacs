@@ -68,7 +68,7 @@ SCENES = r'''
   (setq-local truncate-lines nil word-wrap t) (goto-char (point-min)))
 (defun journey-agent ()
   (switch-to-buffer (get-buffer-create "*agent journey*")) (erase-buffer)
-  (condition-case nil (progn (require 'romacs-agent-ui) (romacs-agent-chat-mode)) (error (fundamental-mode)))
+  (condition-case nil (progn (require 'romacs-agent-log) (romacs-agent-log-mode)) (error (fundamental-mode)))
   (let ((inhibit-read-only t))
     (dotimes (i 25)
       (insert (propertize "You\n" 'face 'bold) (getenv "JOURNEY_PROSE") "\n\n"

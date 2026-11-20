@@ -694,7 +694,7 @@ as `pop-to-buffer' does with ACTION."
       (pop-to-buffer buffer action)
       (with-current-buffer buffer
         (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
-        (romacs-agent-ui--header-show)))
+        (romacs-agent-log--header-show)))
     (pop-to-buffer buffer action)
     (goto-char (point-max))
     (recenter -1)

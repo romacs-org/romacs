@@ -307,8 +307,8 @@
             (setf (romacs-agent-state (car children)) 'running)
             (setf (romacs-agent-state (nth 2 children)) 'waiting-approval)))
         ;; Its values read as values, never dim as a command it cannot run.
-        (let ((romacs-agent-ui--session session))
-          (dolist (label (list (romacs-agent-ui--effort-label) (romacs-agent-ui--model-label)))
+        (let ((romacs-agent-log--session session))
+          (dolist (label (list (romacs-agent-menu--effort-label) (romacs-agent-menu--model-label)))
             (should (string-match-p "default" label))
             (should-not (memq 'romacs-agent-effort-default
                               (ensure-list (get-text-property (string-match "default" label) 'face label))))))))))

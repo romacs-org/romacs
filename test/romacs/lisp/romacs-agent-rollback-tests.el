@@ -405,30 +405,6 @@ and its resume reads none of the session's records."
     (cl-letf (((symbol-function 'romacs-agent--harness-live-p) #'ignore))
       (should-error (romacs-agent--codex-rollback session records 7) :type 'user-error))))
 
-(ert-deftest romacs-agent-rollback-is-drawn-from-the-journal ()
-  (romacs-agent-rollback-tests--with ()
-    (romacs-agent-rollback-tests--journal
-     session (romacs-agent-rollback-tests--prompt 5 "kept prompt") (romacs-agent-rollback-tests--assistant "u1")
-     (romacs-agent-rollback-tests--prompt 9 "dropped prompt") (romacs-agent-rollback-tests--assistant "u2")
-     (romacs-mcp--object "note" (romacs-mcp--object "type" "rollback" "to" 9 "turns" 1 "prompt" "dropped prompt"
-                                                    "files" t)))
-    (romacs-agent-test-stored session)
-    (let ((buffer (save-window-excursion (romacs-agent-ui--show-chat session))))
-      (unwind-protect
-          (with-current-buffer buffer
-            (let ((text (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-              (should (string-match-p "↶ rolled back 1 turn and their files to before: dropped prompt" text))
-              ;; Kept, dimmed; the turn before it is not.
-              (let ((dropped (+ (point-min) (string-search "dropped prompt" text)))
-                    (kept (+ (point-min) (string-search "kept prompt" text))))
-                (should (memq 'romacs-agent-dim (ensure-list (get-text-property dropped 'face))))
-                (should-not (memq 'romacs-agent-dim (ensure-list (get-text-property kept 'face)))))))
-        (kill-buffer buffer)))))
-
-(ert-deftest romacs-agent-rollback-keys ()
-  (should (eq (lookup-key romacs-agent-chat-actions-map "u") 'romacs-agent-chat-rollback))
-  (should (equal (command-modes 'romacs-agent-chat-rollback) '(romacs-agent-chat-mode))))
-
 (ert-deftest romacs-agent-rollback-holds-messages-sent-meanwhile ()
   ;; A message sent while the rollback reads the project waits in the
   ;; queue: it is never accepted and then rolled back.  The turns' end
