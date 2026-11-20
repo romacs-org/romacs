@@ -236,6 +236,12 @@ impl Vm {
         if SCOPED { self.inside_quit_scope(Self::native_poll_text) } else { self.native_poll_text() }
     }
 
+    /// [`Self::native_stop_due`] for a gated kernel ([`Self::kernel_poll`]):
+    /// SCOPED, its own entry is the scope, whatever the flag says.
+    pub(crate) fn kernel_stop_due<const SCOPED: bool>(&self) -> bool {
+        (SCOPED || self.native_quit) && self.own_stop_due()
+    }
+
     /// BODY outside any quit scope, the caller's restored after. A scope is
     /// granted only at a primitive's own entry (`Leaf::quittable`) and ends
     /// at any entry below it: Lisp its native code runs (`execute_args`, the

@@ -4306,7 +4306,10 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         }
         TempBuffer => Vm::eval_buffer_primitive,
         // Their own entry, which raises a poll's escape (`primitive_value`).
-        DeepEqual | Min | Append => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        DeepEqual | Min => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.eval_data_primitive(p, start, n)),
+        // Granting its quit scope at its first chunk boundary
+        // (`Vm::kernel_poll`), as Nreverse below.
+        Append => |vm, _, start, n| vm.append_values::<true>(start, n),
         Max => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.bootstrap_primitive(p, start, n)),
         GetBuffer | ForwardLine | SwitchToBuffer | EmacsLispMode | MenuBarMode
         | ForceModeLineUpdate | LocateLibrary | Daemonp | DaemonInitialized => {
@@ -4326,7 +4329,9 @@ pub(crate) fn primitive_target(p: Primitive) -> PrimitiveCall {
         Add => Vm::add_primitive,
         Sub | Mul | Div | Abs | Less | Equal | Inc | Dec => Vm::numeric_primitive,
         Vector | Aref | Aset => Vm::data_primitive,
-        CopySequence => |vm, p, start, n| vm.inside_quit_scope(|vm| vm.data_primitive(p, start, n)),
+        // A list's copy grants its quit scope at its first chunk boundary
+        // (`Vm::kernel_poll`), as Nreverse below; nothing else here polls.
+        CopySequence => |vm, p, start, n| if n == 1 && vm.stack[start].tag() == 3 { vm.copy_list::<true>(vm.stack[start]) } else { vm.data_primitive(p, start, n) },
         // Its own entry, granting its quit scope at its first chunk
         // boundary (`Vm::kernel_poll`): a shorter call never enters one.
         Nreverse => |vm, _, start, n| if n == 1 { vm.core_nreverse::<true>(vm.stack[start]) } else { Err("wrong primitive arity".into()) },

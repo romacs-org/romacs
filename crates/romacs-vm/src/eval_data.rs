@@ -28,65 +28,70 @@ impl Vm {
                 let args = self.stack[start..start + n].to_vec();
                 self.minmax(&args, std::cmp::Ordering::Less)
             }
-            Append => {
-                if n == 0 {
-                    return Ok(Value::NIL);
-                }
-                let mut prefix = Vec::new();
-                for i in 0..n - 1 {
-                    let v = self.stack[start + i];
-                    if self.str_view(v).is_some() {
-                        self.append_string_codes(v, &mut prefix)?;
-                    } else {
-                        match self.object_if(v) {
-                            Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
-                            Some(data::Object::BoolVector(bits)) => {
-                                // Its bits a chunk at a time, polled between:
-                                // nothing is made from them yet.
-                                let len = bits.len;
-                                for start in (0..len).step_by(KERNEL_CHUNK) {
-                                    if start > 0 { self.native_poll_text()?; }
-                                    let Some(data::Object::BoolVector(bits)) = self.object_if(v) else { unreachable!("a bool-vector stays one") };
-                                    prefix.extend((start..(start + KERNEL_CHUNK).min(len))
-                                        .map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }));
-                                }
-                            }
-                            _ => prefix.extend(self.list_values_polled(v)?),
-                        }
-                    }
-                }
-                // The new list is the caller's only once it returns: a quit
-                // between chunks drops it. One chunk polls not at all.
-                let mut tail = self.stack[start + n - 1];
-                for (i, chunk) in prefix.rchunks(KERNEL_CHUNK).enumerate() {
-                    if i > 0 { self.native_poll_text()?; }
-                    for &value in chunk.iter().rev() {
-                        tail = self.alloc_cons(value, tail);
-                    }
-                }
-                Ok(tail)
-            }
+            Append => self.append_values::<false>(start, n),
             _ => unreachable!("eval data dispatch"),
         }
+    }
+
+    /// `append` of the N arguments at START. Past a chunk, polled per chunk
+    /// of each argument's walk and of the build (`Vm::kernel_poll`, SCOPED
+    /// from its engine target).
+    pub(super) fn append_values<const SCOPED: bool>(&mut self, start: usize, n: usize) -> Result<Value> {
+        if n == 0 {
+            return Ok(Value::NIL);
+        }
+        let mut prefix = Vec::new();
+        for i in 0..n - 1 {
+            let v = self.stack[start + i];
+            if self.str_view(v).is_some() {
+                self.append_string_codes::<SCOPED>(v, &mut prefix)?;
+            } else {
+                match self.object_if(v) {
+                    Some(data::Object::Vector(values)) => prefix.extend_from_slice(values),
+                    Some(data::Object::BoolVector(bits)) => {
+                        // Its bits a chunk at a time, polled between:
+                        // nothing is made from them yet.
+                        let len = bits.len;
+                        for start in (0..len).step_by(KERNEL_CHUNK) {
+                            if start > 0 { self.kernel_poll::<SCOPED>()?; }
+                            let Some(data::Object::BoolVector(bits)) = self.object_if(v) else { unreachable!("a bool-vector stays one") };
+                            prefix.extend((start..(start + KERNEL_CHUNK).min(len))
+                                .map(|i| if bits.get(i) == Some(true) { Value::TRUE } else { Value::NIL }));
+                        }
+                    }
+                    _ => prefix.extend(self.list_values_polled::<SCOPED>(v)?),
+                }
+            }
+        }
+        // The new list is the caller's only once it returns: a quit
+        // between chunks drops it. One chunk polls not at all.
+        let mut tail = self.stack[start + n - 1];
+        for (i, chunk) in prefix.rchunks(KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            for &value in chunk.iter().rev() {
+                tail = self.alloc_cons(value, tail);
+            }
+        }
+        Ok(tail)
     }
 
     /// STRING's characters as fixnums, pushed onto PREFIX a part at a time,
     /// the quit probe asked between parts. Stopped, the poll quits, or, with
     /// nothing to quit for after all, the string's codes are taken again
     /// unpolled: nothing is made from them yet.
-    fn append_string_codes(&mut self, string: Value, prefix: &mut Vec<Value>) -> Result<()> {
+    fn append_string_codes<const SCOPED: bool>(&mut self, string: Value, prefix: &mut Vec<Value>) -> Result<()> {
         let before = prefix.len();
         let stopped = {
             let text = self.str_view(string).ok_or("string required")?;
             let mut stopped = false;
-            for part in text.char_parts(KERNEL_CHUNK) {
+            for (n, part) in text.char_parts(KERNEL_CHUNK).enumerate() {
+                if n > 0 && self.kernel_stop_due::<SCOPED>() { stopped = true; break; }
                 prefix.extend(part.map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));
-                if self.native_stop_due() { stopped = true; break; }
             }
             stopped
         };
         if stopped {
-            self.native_poll_text()?;
+            self.kernel_poll::<SCOPED>()?;
             prefix.truncate(before);
             let text = self.str_view(string).ok_or("string required")?;
             prefix.extend(text.chars().map(|c| Value::integer(i64::from(c)).expect("a character is a fixnum")));

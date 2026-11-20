@@ -653,10 +653,10 @@ impl Vm {
         Ok(values)
     }
     /// `list_values` for a primitive's own walk (`copy-sequence`, `append`,
-    /// `apply`'s spread): polled every `KERNEL_CHUNK` elements, which quits
-    /// only inside the scope its entry grants (`native_poll_text`), nothing
-    /// yet made from the elements.
-    pub(super) fn list_values_polled(&mut self, mut value: Value) -> Result<Vec<Value>> {
+    /// `apply`'s spread): polled every `KERNEL_CHUNK` elements
+    /// (`Vm::kernel_poll`, SCOPED from its engine target), nothing yet made
+    /// from the elements.
+    pub(super) fn list_values_polled<const SCOPED: bool>(&mut self, mut value: Value) -> Result<Vec<Value>> {
         let mut values = Vec::new();
         // One compare a step, for the circularity bound and the poll both.
         let limit = self.list_limit();
@@ -667,7 +667,7 @@ impl Vm {
             value = cdr;
             if values.len() >= check {
                 if values.len() > limit { return Err("circular list".into()); }
-                self.native_poll_text()?;
+                self.kernel_poll::<SCOPED>()?;
                 check = (check + crate::quit::KERNEL_CHUNK).min(limit + 1);
             }
         }
@@ -688,10 +688,10 @@ impl Vm {
         }
         // GNU eval.c Fapply: FUNCTION, ARGS..., then the spread list; with a
         // single argument the list's first element is the function.
-        // The spread is apply's own walk: polled inside the scope granted
-        // here, its escape raised by `t2_prepare_apply`.
+        // The spread is apply's own walk: polled in the scope it grants at
+        // its first chunk, its escape raised by `t2_prepare_apply`.
         let list = self.stack[start + argc - 1];
-        let tail = self.inside_quit_scope(|vm| vm.list_values_polled(list))?;
+        let tail = self.list_values_polled::<true>(list)?;
         let mut values = self.stack[start..start + argc - 1].to_vec();
         values.extend(tail);
         let target = values.first().copied().unwrap_or(Value::NIL);
@@ -934,6 +934,21 @@ impl Vm {
         let data = self.list_value(&values);
         Some((Value::reference(slot + 1, 7), data))
     }
+    /// `copy-sequence` of the list X: a new list, the caller's only once it
+    /// returns. Past a chunk, polled per chunk of the walk and of the build
+    /// (`Vm::kernel_poll`, SCOPED from its engine target).
+    pub(super) fn copy_list<const SCOPED: bool>(&mut self, x: Value) -> Result<Value> {
+        let values = self.list_values_polled::<SCOPED>(x)?;
+        if values.len() <= crate::quit::KERNEL_CHUNK {
+            return Ok(self.list_value(&values));
+        }
+        let mut copy = Value::NIL;
+        for (i, chunk) in values.rchunks(crate::quit::KERNEL_CHUNK).enumerate() {
+            if i > 0 { self.kernel_poll::<SCOPED>()?; }
+            for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }
+        }
+        Ok(copy)
+    }
     pub(super) fn data_primitive(&mut self, p: Primitive, start: usize, n: usize) -> Result<Value> {
         use Primitive::*;
         let arity = match p {
@@ -1109,16 +1124,7 @@ impl Vm {
                     return Ok(x);
                 }
                 if x.tag() == 3 {
-                    // A new list, the caller's only once it returns: polled
-                    // per chunk of the walk and of the build, inside its own
-                    // call target's scope.
-                    let values = self.list_values_polled(x)?;
-                    let mut copy = Value::NIL;
-                    for (i, chunk) in values.rchunks(crate::quit::KERNEL_CHUNK).enumerate() {
-                        if i > 0 { self.native_poll_text()?; }
-                        for &value in chunk.iter().rev() { copy = self.alloc_cons(value, copy); }
-                    }
-                    return Ok(copy);
+                    return self.copy_list::<false>(x);
                 }
                 if Self::image_string(x) {
                     let copy = LispString::new(self.string_value(x)?);
