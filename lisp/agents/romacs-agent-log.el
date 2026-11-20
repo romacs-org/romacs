@@ -916,7 +916,8 @@ from elsewhere, opening one of its own."
   "Draw SESSION's EVENT in the current chat."
   (pcase (plist-get event :type)
     ('input (romacs-agent-log--prompt event))
-    ('incoming (romacs-agent-log--prompt event))
+    ;; A per-turn driver's delivery waiting: its `input' draws it.
+    ('incoming nil)
     ('arrival (romacs-agent-log-rounds-incoming event event))
     ('delta (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'text text)))
     ('thinking (when-let* ((text (plist-get event :text))) (romacs-agent-log--stream event 'thinking text)))
@@ -974,6 +975,9 @@ from elsewhere, opening one of its own."
                                           'romacs-agent-log-note)))
     ('exit (setq romacs-agent-log--current nil romacs-agent-log--early nil)
            (romacs-agent-log--close-asks session event 'exit)
+           ;; A turn the exit cut is a round ended.
+           (romacs-agent-log--close-stream)
+           (romacs-agent-log-rounds-end)
            (unless (and (romacs-agent--per-turn-p session) (eql (plist-get event :status) 0))
              (romacs-agent-log--note event (format "harness exited (%s)" (plist-get event :status)))))
     ('renewed (romacs-agent-log--note event (format "renewed: a new conversation%s"

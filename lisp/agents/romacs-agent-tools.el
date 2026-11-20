@@ -488,6 +488,11 @@ by counting characters from the start."
          (t (setq ok nil))))
       (and ok (nreverse wakes)))))
 
+(defconst romacs-agent--reply-line-regexp
+  (concat "\n\\(?:Reply to \\(?:this message\\|this result\\) with [^\n]*"
+          "\\|Its sender is outside Romacs and has no reply route[^\n]*\\)[ \t\n]*")
+  "The line `romacs-agent--message-reply-line' writes after an envelope.")
+
 (defun romacs-agent-incoming-of (text)
   "TEXT, written to an agent as a user's turn, read as what came from
 elsewhere: other sessions' messages (whole <romacs-message> envelopes,
@@ -513,9 +518,12 @@ the user's own words among them."
                                :text (string-trim-right (substring text open-end close) "\n"))
                          found)
                    (setq at (+ close (length "</romacs-message>")))
-                   ;; The line saying how to answer it, and the space after.
-                   (when (eq (string-match "\n?\\(?:Reply to this [^\n]*\\)?[ \t\n]*" text at) at)
-                     (setq at (match-end 0)))))))
+                   ;; The line its sender wrote saying how to answer it
+                   ;; (`romacs-agent--message-reply-line'), then space: an
+                   ;; envelope without one is a user's example.
+                   (if (eq (string-match romacs-agent--reply-line-regexp text at) at)
+                       (setq at (match-end 0))
+                     (setq ok nil))))))
            (and ok found (nreverse found))))
         ((string-prefix-p "Delegated task " text)
          (mapcar (lambda (wake) (list :from (plist-get wake :title) :state (plist-get wake :state)

@@ -1112,6 +1112,11 @@
                                                            "<romacs-message id=\"2\" kind=\"child\" from=\"b\">\ntwo\n</romacs-message>\nReply to this message with y.")))
                  '("one" "two")))
   (should-not (romacs-agent-incoming-of "<romacs-message-example> is a tag I mean"))
+  ;; Only as its sender writes it: with the line saying how to answer.
+  (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\" from=\"a\">\nan example\n</romacs-message>"))
+  (let ((message (romacs-agent-make-message "m-3" "external" '(:name "far") nil "from outside")))
+    (should (equal (romacs-agent-incoming-of (romacs-agent--message-envelope message "from outside"))
+                   '((:from "far" :state "external" :text "from outside")))))
   (should-not (romacs-agent-incoming-of "<romacs-message id=\"1\">\nnever closed"))
   ;; Delivered by Romacs: each message its own, a wake's state its state.
   (romacs-agent-log-tests--with
@@ -1159,3 +1164,17 @@
     (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))
     (search-forward "the answer")
     (should-not (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
+
+(ert-deftest romacs-agent-log-an-exit-ends-the-round ()
+  ;; A harness that exits mid-turn: its round ends, its words before the
+  ;; last recede.
+  (romacs-agent-log-tests--with
+    (draw :type 'input :text "go" :request 1)
+    (draw :type 'delta :text "First words.")
+    (draw :type 'tool :state 'started :id "t" :name "Bash" :input (romacs-agent-log-tests--input "command" "ls"))
+    (draw :type 'tool :state 'completed :id "t" :output "a")
+    (draw :type 'delta :text "Last words.")
+    (draw :type 'exit :status 1)
+    (goto-char (point-min))
+    (search-forward "First words")
+    (should (memq 'romacs-agent-log-other (ensure-list (get-text-property (match-beginning 0) 'face))))))
