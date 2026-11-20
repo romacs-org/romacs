@@ -839,14 +839,15 @@ kept), is never run again: its state is unknown."
              key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
              (lambda (answer)
                (let ((waiting (cdr (cddr entry)))
-                     (result (if (eq (car answer) 'error)
+                     (result (if (not (and (eq (car answer) 'ok) (eq (cadr answer) t)))
                                  (progn (remhash key romacs-agent-service--commands)
                                         (list 'error -32603 "internal" "The command was not kept: not run"))
                                (condition-case err (funcall effect)
                                  (romacs-agent-service-error
                                   (remhash key romacs-agent-service--commands)
                                   (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text)))
-                                 (error (list 'error -32603 "internal" (error-message-string err)))))))
+                                 (error (remhash key romacs-agent-service--commands)
+                                        (list 'error -32603 "internal" (error-message-string err)))))))
                  (unless (eq (car-safe result) 'error)
                    (let ((json (json-serialize result)))
                      (setcdr entry (cons (float-time) json))
@@ -866,10 +867,13 @@ life: this service's own, else the store's."
   "Let go of the commands past their life, and of all but the newest
 `romacs-agent-service--command-most': at idle, never per command."
   (let ((before (- (float-time) romacs-agent-service--command-life)))
-    (maphash (lambda (key kept) (when (< (cadr kept) before) (remhash key romacs-agent-service--commands)))
-             romacs-agent-service--commands)
-    (when (> (hash-table-count romacs-agent-service--commands) romacs-agent-service--command-most)
-      (clrhash romacs-agent-service--commands))
+    ;; One whose admission is still being kept stays: its repeats wait with it.
+    (cl-flet ((done-p (kept) (not (eq (car-safe (cddr kept)) 'waiting))))
+      (maphash (lambda (key kept) (when (and (done-p kept) (< (cadr kept) before)) (remhash key romacs-agent-service--commands)))
+               romacs-agent-service--commands)
+      (when (> (hash-table-count romacs-agent-service--commands) romacs-agent-service--command-most)
+        (maphash (lambda (key kept) (when (done-p kept) (remhash key romacs-agent-service--commands)))
+                 romacs-agent-service--commands)))
     (romacs-agent-store-commands-prune before romacs-agent-service--command-most)))
 
 (defun romacs-agent-service--live-session (params)
@@ -1052,8 +1056,10 @@ It reads nothing."
       (pcase-dolist (`(,rpc . ,subscription) (romacs-agent-service--subscriptions id))
         (let ((cutoff (romacs-agent-service--subscription-cutoff subscription)))
           (when (> seq cutoff)
-            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq))
-            (romacs-agent-service--pending-changed rpc subscription session nil)))))))
+            (romacs-agent-service--send-unit rpc subscription id seq [] (cons cutoff seq)))
+          ;; What it waits on, whatever its gap: a fold may reach a
+          ;; request kept by the open's cursor only now.
+          (romacs-agent-service--pending-changed rpc subscription session nil))))))
 
 (defun romacs-agent-service--row-changed (row)
   "Tell the subscribers of ROW's session its row."
@@ -1076,8 +1082,17 @@ a session not loaded stays so."
                    "row" (or (gethash id (romacs-agent-service--list-rows romacs-agent-service--list)) :null)
                    "pending" [] "answering" [] "queue" [] "undelivered" [] "more" :null))
            (subscription (romacs-agent-service--subscription-make :cutoff seq)))
-      (let ((requests (romacs-agent-service--requests session)))
-        (puthash "pending" (vconcat (mapcar #'cdr (hash-table-values requests))) reply)
+      (let ((requests (romacs-agent-service--requests session)) (budget romacs-agent-service--unit-budget))
+        ;; Within one reply: past its budget, each request by its handle,
+        ;; kind and since alone (`oversize').
+        (puthash "pending" (vconcat (mapcar (lambda (asked)
+                                              (let* ((request (cdr asked)) (bytes (string-bytes (json-serialize request))))
+                                                (if (<= bytes budget) (progn (setq budget (- budget bytes)) request)
+                                                  (romacs-agent-rpc-object "handle" (gethash "handle" request)
+                                                                           "kind" (gethash "kind" request)
+                                                                           "since" (gethash "since" request) "oversize" t))))
+                                            (hash-table-values requests)))
+                 reply)
         (setf (romacs-agent-service--subscription-pending subscription) requests))
       ;; Made only once its reply is: a reply that fails subscribes nothing.
       (puthash id subscription (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))

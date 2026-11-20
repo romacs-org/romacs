@@ -4465,6 +4465,21 @@ its policy, or another machine's through its service."
   (unless (gethash request-id (romacs-agent-approvals session)) (user-error "No such approval request"))
   (when (member request-id (plist-get (romacs-agent-driver-state session) :answered))
     (user-error "That request is answered"))
+  ;; Claimed before anything is written, which may wait on the host:
+  ;; let go of only should its answer not be written.
+  (setf (romacs-agent-driver-state session)
+        (plist-put (romacs-agent-driver-state session) :answered
+                   (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
+  (condition-case err
+      (romacs-agent--answer session request-id allow message by)
+    ((error quit)
+     (setf (romacs-agent-driver-state session)
+           (plist-put (romacs-agent-driver-state session) :answered
+                      (delete request-id (plist-get (romacs-agent-driver-state session) :answered))))
+     (signal (car err) (cdr err)))))
+
+(defun romacs-agent--answer (session request-id allow message by)
+  "Write SESSION's answer ALLOW (MESSAGE) to REQUEST-ID, BY's note first."
   (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
          ;; A plan is proceeded with once: no rule for the session.
          (allow (if (and plan allow) t allow))
@@ -4480,10 +4495,6 @@ its policy, or another machine's through its service."
                                                  (puthash question answer object))
                                                object))))
     (romacs-agent--line session line)
-    ;; Answered: until its run ends, a second answer is refused.
-    (setf (romacs-agent-driver-state session)
-          (plist-put (romacs-agent-driver-state session) :answered
-                     (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
     ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
     ;; agent goes on to implement it.
     (when (and plan allow (plist-get (romacs-agent-options session) :plan))

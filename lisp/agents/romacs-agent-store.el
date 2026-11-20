@@ -629,9 +629,11 @@ its result, by the writer: DONE, when given, called with (ok VALUE) or
   (romacs-agent-write 'romacs-agent-store--command-row (list key digest outcome (float-time)) done (list 'command key)))
 
 (defun romacs-agent-store--command-row (key digest outcome at)
-  (when-let* ((db (romacs-agent-store--open)))
+  "Keep a command's row: t once it is, an error when it is not."
+  (let ((db (or (romacs-agent-store--open) (error "The agents' store could not be opened"))))
     (sqlite-execute db "insert or replace into commands (key, digest, outcome, at) values (?, ?, ?, ?)"
-                    (list key digest outcome at))))
+                    (list key digest outcome at))
+    t))
 
 (defun romacs-agent-store-commands-prune (before most)
   "Let go of the commands kept before time BEFORE, and of all but the

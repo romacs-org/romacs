@@ -251,8 +251,10 @@ and REFUSED, when given, called then."
        (lambda ()
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (when (string-empty-p (romacs-agent-log--draft))
-               (save-excursion (goto-char (point-max)) (insert text)))))))))
+             (save-excursion
+               (goto-char romacs-agent-log--input)
+               ;; Ahead of a draft written meanwhile, kept whole.
+               (insert text (if (string-empty-p (romacs-agent-log--draft)) "" "\n\n")))))))))
   (when (and (string-empty-p text) (eq when 'interrupt) (romacs-agent-log--running-p session))
     (romacs-agent-log-source-interrupt source session)))
 
@@ -280,7 +282,12 @@ protocol says them for EVENT's questions: a table of question id to
 
 (cl-defmethod romacs-agent-log-source-respond ((source romacs-agent-remote) session id allow reason)
   "Answer SESSION's request ID, a handle's id, through SOURCE's service."
-  (let ((event (gethash id (romacs-agent-approvals session))))
+  (romacs-agent-remote--answer source session (gethash id (romacs-agent-approvals session)) allow reason))
+
+(defun romacs-agent-remote--answer (source session event allow reason)
+  "Answer SESSION's request EVENT asks, as it was asked, its handle whole,
+through SOURCE's service."
+  (let ((id (plist-get event :request-id)))
     (unless event (user-error "That request is answered"))
     (romacs-agent-remote--command
      source "agents/answer"
@@ -301,8 +308,10 @@ protocol says them for EVENT's questions: a table of question id to
 (cl-defmethod romacs-agent-log-source-ask ((source romacs-agent-remote) session id questions)
   "Open the layer answering SESSION's request ID, its answers sent through
 SOURCE's service."
-  (romacs-agent-ask-open session id questions nil
-                         (lambda (allow) (romacs-agent-log-source-respond source session id allow nil))))
+  (let ((event (gethash id (romacs-agent-approvals session))))
+    ;; Its request as asked now, its run too: the layer answers that one.
+    (romacs-agent-ask-open session id questions nil
+                           (lambda (allow) (romacs-agent-remote--answer source session event allow nil)))))
 
 ;;; The board
 
