@@ -129,8 +129,13 @@ pub fn configure(config: Config) {
     let chain = host::getenv(CHAIN).map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     let trace = host::getenv("ROMACS_COMPILED_LISP_TRACE").is_some();
     let no_prune = host::getenv(NO_PRUNE).is_some();
+    // Taken out of the environment, as PARENT is: compile-time code that
+    // reads `process-environment' sees no path of this one compile.
     let record = host::getenv(RECORD).map(PathBuf::from);
-    let scratch = host::getenv("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    if record.is_some() {
+        host::unset_env(RECORD);
+    }
+    let scratch = scratch_dir(host::getenv("TMPDIR"));
     if host::getenv(BACKGROUND).is_some() {
         host::lower_priority(host::Priority::Idle);
     }
@@ -144,6 +149,10 @@ pub fn configure(config: Config) {
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(600));
             eprintln!("romacs-compile: deadline passed");
+            // A nested compile this process waits on keeps its record file
+            // in this process's temporary directory (the store's tmp/, the
+            // compile environment's): a few bytes left there, read by
+            // nothing. A stated limit; see `run_compile`.
             std::process::exit(124);
         });
     }
@@ -252,10 +261,26 @@ pub fn write_record(artifact: &Path, held: bool, load_path: Vec<String>) -> std:
     host::write(file, text).map_err(|e| format!("{}: {e}", file.display()))
 }
 
+/// This process's temporary directory from TMPDIR, else /tmp, absolute:
+/// the compile processes it starts work in another directory.
+fn scratch_dir(tmpdir: Option<OsString>) -> PathBuf {
+    let dir = tmpdir.filter(|dir| !dir.is_empty()).map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    host::absolute(&dir).unwrap_or(dir)
+}
+
+/// A compile process's record file, removed however the compile ends.
+struct RecordFile(PathBuf);
+
+impl Drop for RecordFile {
+    fn drop(&mut self) {
+        let _ = host::remove_file(&self.0);
+    }
+}
+
 /// A new file in this process's temporary directory for the record of a
 /// compile process `run_compile` starts.
-fn record_file(configured: &Configured) -> Option<PathBuf> {
-    host::temp_file(&configured.scratch.join("romacs-compile-record-XXXXXX")).ok().map(|(path, _)| path)
+fn record_file(configured: &Configured) -> Option<RecordFile> {
+    host::temp_file(&configured.scratch.join("romacs-compile-record-XXXXXX")).ok().map(|(path, _)| RecordFile(path))
 }
 
 /// The compile process for the source file PATH on LOAD_PATH, as
@@ -292,25 +317,27 @@ fn compile_command(configured: &Configured, path: &Path, load_path: &[String])
     Some((program.clone(), args, environment))
 }
 
-/// Run the compile process PROGRAM ARGS in ENVIRONMENT, its standard output
-/// and error appended to the store's compile log, within the compile
-/// deadline: its record (`RECORD`) when it succeeded.
+/// Run the compile process PROGRAM ARGS in ENVIRONMENT, its standard error
+/// appended to the store's compile log, within the compile deadline: its
+/// record (`RECORD`) when it succeeded. Its standard output, what the
+/// file's compile-time code prints, is dropped, as it always was: nothing
+/// reads it, and no log write can fail the compile.
 fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, mut environment: Vec<(OsString, OsString)>) -> Option<Record> {
     let store = &configured.config.store;
     let log = store::generation(store).join("compile.log");
     let _ = host::create_dir_all(store::generation(store));
-    let output = || host::open_output(&log, host::OpenOptions::new().append(true).create(true))
+    let stderr = host::open_output(&log, host::OpenOptions::new().append(true).create(true))
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null());
     let record = record_file(configured)?;
-    environment.push((RECORD.into(), record.clone().into()));
+    environment.push((RECORD.into(), record.0.clone().into()));
     let mut command = host::command(program).ok()?;
     command.args(args)
         .env_clear()
         .envs(environment)
         .stdin(std::process::Stdio::null())
-        .stdout(output())
-        .stderr(output());
+        .stdout(std::process::Stdio::null())
+        .stderr(stderr);
     let mut child = command.spawn().ok()?;
     let deadline = host::monotonic() + std::time::Duration::from_secs(600);
     let status = loop {
@@ -324,8 +351,7 @@ fn run_compile(configured: &Configured, program: OsString, args: Vec<OsString>, 
             }
         }
     };
-    let text = host::read_file(&record);
-    let _ = host::remove_file(&record);
+    let text = host::read_file(&record.0);
     status.is_some_and(|s| s.success()).then_some(())?;
     Record::read(&text.ok()?, store)
 }

@@ -435,3 +435,29 @@ fn a_compile_record_round_trips_through_its_text() {
     assert_eq!(outside.text(store), None);
     assert_eq!(Record::read(b"romacs-compiled: /s/a.rlc", store), None);
 }
+
+/// A compile process that cannot start leaves no record file behind.
+#[test]
+fn a_compile_that_does_not_start_leaves_no_record() {
+    let store = test_store("no-start");
+    let scratch = store.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let configured = Configured {
+        config: Config { compiler: vec![], environment: vec![], inherited: &[], defer_misses: false, store: store.clone(),
+                         identity: Box::new(|| None), runtime: vec![], root: None },
+        chain: String::new(), trace: false, no_prune: false, record: None, scratch: scratch.clone(),
+        identity: std::sync::OnceLock::new(),
+    };
+    assert_eq!(run_compile(&configured, store.join("no-such-program").into(), vec![], vec![]), None);
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0, "a record file was left in {}", scratch.display());
+}
+
+/// The temporary directory a compile's record is made in is absolute, as
+/// the compile process works in another directory; /tmp without one.
+#[test]
+fn the_scratch_directory_is_absolute() {
+    let relative = scratch_dir(Some("tmp".into()));
+    assert!(relative.is_absolute() && relative.ends_with("tmp"), "{}", relative.display());
+    assert_eq!(scratch_dir(None), Path::new("/tmp"));
+    assert_eq!(scratch_dir(Some("".into())), Path::new("/tmp"));
+}
