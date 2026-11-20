@@ -12,6 +12,9 @@
   (require 'romacs-agent-codex)
   (require 'romacs-agent-ui))
 
+;; The real `romacs-agent-respond', for tests the fixture stubs it in.
+(defalias 'romacs-agent-plan-tests--respond (symbol-function 'romacs-agent-respond))
+
 (defmacro romacs-agent-plan-tests--with (harness &rest body)
   "BODY with `session' of HARNESS, live; `written' and `answered' collect."
   (declare (indent 1))
@@ -119,19 +122,19 @@
     (should-not (plist-get (romacs-agent-options session) :plan))
     (should (eq (romacs-agent--claude-next session) :ready))))
 
-(ert-deftest romacs-agent-plan-tool-calls-in-plan-mode-ask-the-user ()
+(ert-deftest romacs-agent-plan-tool-calls-in-plan-mode-go-through-the-policy ()
+  ;; Plan mode is the harness's own: Romacs answers its tool calls as it
+  ;; answers any, under its policy; a presented plan stays the user's.
   (romacs-agent-plan-tests--with 'claude
     (let ((romacs-agent-approval-policy 'allow))
       (setf (romacs-agent-options session) '(:plan t))
       (puthash "e1" t (romacs-agent-approvals session))
       (romacs-agent--raise session '(:type approval :request-id "e1" :tool "Edit"))
-      ;; Romacs denies nothing on the user's behalf: the user is asked.
-      (should-not answered)
-      (should (member "e1" (romacs-agent-asks session)))
-      (should (eq (romacs-agent-state session) 'waiting-approval))
-      ;; Nor on catching up.
-      (romacs-agent--allow-tool-calls session)
-      (should-not answered))))
+      (should (equal answered (list (list "e1" t nil 'policy))))
+      (puthash "p1" t (romacs-agent-approvals session))
+      (romacs-agent--raise session '(:type approval :request-id "p1" :tool "ExitPlanMode" :plan t :user t))
+      (should (equal (length answered) 1))
+      (should (member "p1" (romacs-agent-asks session))))))
 
 (ert-deftest romacs-agent-plan-tool-calls-out-of-plan-mode-are-allowed-by-romacs ()
   (romacs-agent-plan-tests--with 'claude
@@ -183,21 +186,104 @@
       (should-not written)
       (should (equal (gethash "mode" (funcall mode)) "plan")))))
 
-(ert-deftest romacs-agent-plan-the-card ()
-  (with-temp-buffer
-    (romacs-agent-chat-mode)
-    (let ((session (romacs-agent--make :id "c" :harness 'claude :tools (make-hash-table :test #'equal))))
-      (setq romacs-agent-ui--session session romacs-agent-ui--end (point-marker))
-      (romacs-agent-ui--draw session '(:type plan :text "1. Read.\n2. Write.") (current-buffer))
-      (should (string-match-p "Proposed plan" (buffer-string)))
-      (should (string-match-p "1. Read.\n2. Write." (buffer-string)))
-      (should (string-match-p "implement it" (buffer-string))))))
+(ert-deftest romacs-agent-plan-claude-proceeds-out-of-plan-mode ()
+  ;; Its presented plan allowed: Claude Code back in the mode it had before
+  ;; plan mode, as its own client sets it, so the next tool call is no
+  ;; plan mode's to block.
+  (romacs-agent-plan-tests--with 'claude
+    (romacs-agent-set-plan session t)
+    (setq written nil)
+    (let ((request (make-hash-table :test #'equal)))
+      (puthash "tool_name" "ExitPlanMode" request)
+      (puthash "p1" request (romacs-agent-approvals session)))
+    (let (given)
+      (cl-letf (((symbol-function 'romacs-agent-respond) (symbol-function 'romacs-agent-plan-tests--respond))
+                ((symbol-function 'romacs-agent--claude-respond)
+                 (lambda (_s _id allow &rest _) (setq given allow) (romacs-mcp--object "type" "control_response"))))
+        ;; Asked for the session, a plan is still allowed once.
+        (romacs-agent-respond session "p1" '(:always t) nil 'user))
+      (should (eq given t)))
+    (should-not (plist-get (romacs-agent-options session) :plan))
+    (should (cl-some (lambda (line) (let ((request (gethash "request" line)))
+                                      (and (hash-table-p request)
+                                           (equal (gethash "mode" request) "bypassPermissions"))))
+                     written))
+    ;; Another request allowed is no plan: plan mode stays as it is.
+    (romacs-agent-set-plan session t)
+    (puthash "e1" (make-hash-table :test #'equal) (romacs-agent-approvals session))
+    (cl-letf (((symbol-function 'romacs-agent-respond) (symbol-function 'romacs-agent-plan-tests--respond))
+              ((symbol-function 'romacs-agent--claude-respond) (lambda (&rest _) (romacs-mcp--object "type" "control_response"))))
+      (romacs-agent-respond session "e1" t nil 'user))
+    (should (plist-get (romacs-agent-options session) :plan))))
 
-(ert-deftest romacs-agent-plan-implement-waits-for-the-turn ()
-  (with-temp-buffer
-    (romacs-agent-chat-mode)
-    (setq romacs-agent-ui--session (romacs-agent--make :id "r" :harness 'claude :state 'running :options '(:plan t)))
-    (should-error (romacs-agent-chat-implement) :type 'user-error)))
+(ert-deftest romacs-agent-plan-codex-proceeds-out-of-plan-mode ()
+  ;; Codex's plan is no request: its event says it is proceeded with by
+  ;; leaving plan mode, and the next turn says the default mode.
+  (romacs-agent-plan-tests--with 'codex
+    (setf (romacs-agent-model session) "gpt-6.1-sol" (romacs-agent-harness-session session) "th"
+          (romacs-agent-driver-state session) (list :experimental t))
+    (romacs-agent-set-plan session t)
+    (should (plist-get (car (romacs-agent--codex-item
+                              session (romacs-mcp--object "type" "plan" "id" "p1" "text" "1. do it") t))
+                       :proceed))
+    (with-temp-buffer
+      (romacs-agent-log-mode)
+      (setq romacs-agent-log--session session
+            romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
+      (set-marker-insertion-type romacs-agent-log--end t)
+      (cl-letf (((symbol-function 'romacs-agent-log--loaded) (lambda (_) session)))
+        ;; A replayed plan offers nothing; the live one its row, by y.
+        (let ((romacs-agent-log--replaying t))
+          (romacs-agent-log-draw session '(:type plan :text "0. old" :proceed t)))
+        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
+        (should-error (romacs-agent-log-proceed) :type 'user-error)
+        (should (plist-get (romacs-agent-options session) :plan))
+        (romacs-agent-log-draw session '(:type plan :text "1. do it" :proceed t))
+        (goto-char (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
+        (call-interactively (lookup-key (get-text-property (point) 'keymap) "y"))
+        (should-not (text-property-any (point-min) (point-max) 'romacs-agent-log-proceed t))
+        ;; The plan's own text whole.
+        (should (string-match-p "1\\. do it\n" (buffer-substring-no-properties (point-min) romacs-agent-log--end)))
+        ;; A plan offered at rest: the separator says so, and C-c C-y
+        ;; from anywhere proceeds, as it allows a request.
+        (romacs-agent-set-plan session t)
+        (setf (romacs-agent-state session) 'idle)
+        (romacs-agent-log-draw session '(:type plan :text "2. again" :proceed t))
+        (should (string-match-p "plan ready" (cdr (romacs-agent-log--doing session))))
+        (goto-char (point-max))
+        (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y"))
+        (should-not (romacs-agent-log--proceed-offered))
+        (should-not (plist-get (romacs-agent-options session) :plan))
+        (should (equal (cdr (romacs-agent-log--doing session)) "idle"))
+        ;; A rollback takes an offered plan back; narrowed, the chat still
+        ;; reads what it offers.
+        (romacs-agent-set-plan session t)
+        (romacs-agent-log-draw session '(:type plan :text "3. once more" :proceed t))
+        (save-restriction
+          (narrow-to-region (point-min) (1+ (point-min)))
+          (should (romacs-agent-log--proceed-offered)))
+        (should (= (romacs-agent-log--waiting-count) 1))
+        ;; Its header's mark is a request's: it waits on the user.
+        (should (eq (plist-get (romacs-agent-log--header-inputs session) :state) 'approval))
+        ;; A failed turn says it failed, the offer or not.
+        (setf (romacs-agent-failed session) t)
+        (should (equal (cdr (romacs-agent-log--doing session)) "failed"))
+        (setf (romacs-agent-failed session) nil)
+        (romacs-agent-log-draw session '(:type rolled-back :to 1 :turns 1 :prompt "x"))
+        (should (= (romacs-agent-log--waiting-count) 0))
+        ;; Narrowed, C-c C-y proceeds and the separator says so.
+        (romacs-agent-set-plan session t)
+        (romacs-agent-log-draw session '(:type plan :text "4. last" :proceed t))
+        (save-restriction
+          (narrow-to-region (point-min) (1+ (point-min)))
+          (call-interactively (keymap-lookup romacs-agent-log-mode-map "C-c C-y")))
+        (should-not (romacs-agent-log--proceed-offered))
+        (should (string-match-p "idle" (buffer-substring-no-properties romacs-agent-log--end romacs-agent-log--input)))
+        (should-not (romacs-agent-log--proceed-offered))
+        (should (equal (cdr (romacs-agent-log--doing session)) "idle"))
+        (romacs-agent-set-plan session nil)))
+    (should (equal (gethash "mode" (gethash "collaborationMode" (gethash "params" (romacs-agent--codex-turn session 1 []))))
+                   "default"))))
 
 (provide 'romacs-agent-plan-tests)
 ;;; romacs-agent-plan-tests.el ends here

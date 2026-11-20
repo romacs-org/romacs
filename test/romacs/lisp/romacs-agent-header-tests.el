@@ -54,20 +54,19 @@ string, an overlay."
                 ((symbol-function 'romacs-agent-ui--dashboard-changed) #'ignore))
        (unwind-protect
            (with-current-buffer chat
-             (romacs-agent-chat-mode)
-             (setq romacs-agent-ui--session session
-                   romacs-agent-ui--messages (make-hash-table :test #'equal)
-                   romacs-agent-ui--end (point-marker)
-                   romacs-agent-ui--composer (make-overlay (point) (point) nil nil nil))
-             (setf (romacs-agent-buffer session) chat)
+             (romacs-agent-log-mode)
+             (setq romacs-agent-log--session session romacs-agent-ui--session session
+                   romacs-agent-log--end (point-min-marker) romacs-agent-log--input (point-min-marker))
+             (set-marker-insertion-type romacs-agent-log--end t)
+             (puthash romacs-agent-header-tests--id chat romacs-agent-log--chats)
              (romacs-agent-ui--header-refresh session)
-             (romacs-agent-ui--composer-update)
              ;; Its views know its state, as a chat's do once it is shown.
              (romacs-agent-ui--announce session)
              (setq written 0)
              ,@body)
          ;; A batch a test started runs with it, never after it.
          (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
+         (remhash romacs-agent-header-tests--id romacs-agent-log--chats)
          (when (buffer-live-p chat) (kill-buffer chat))))))
 
 ;; What runs before a redisplay: a batch session has no host to run it.
@@ -78,6 +77,28 @@ string, an overlay."
   "The chat's header as its buffer hands it to display."
   (should (stringp header-line-format))
   (substring-no-properties header-line-format))
+
+(ert-deftest romacs-agent-header-of-a-transcript-follows-glyphs ()
+  ;; A transcript's view has a session no one records: its header is made
+  ;; again with the others' when what draws a glyph changes.
+  (require 'romacs-agent-history)
+  (let ((romacs-agent-glyphs nil)
+        (romacs-agent--sessions (make-hash-table :test #'equal))
+        (file (make-temp-file "romacs-header-" nil ".jsonl")) (buffer nil))
+    (unwind-protect
+        (save-window-excursion
+          (setq buffer (romacs-agent-history-open
+                        (list :path file :title "h" :harness 'claude :provider "claude" :id "h1" :cwd "/")))
+          (with-current-buffer buffer
+            (should (string-search "  History" (romacs-agent-header-tests--header)))
+            (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
+              (unwind-protect
+                  (progn (customize-set-variable 'romacs-agent-glyphs t)
+                         (should (string-search "  📜" (romacs-agent-header-tests--header))))
+                (customize-set-variable 'romacs-agent-glyphs nil)))
+            (should (string-search "  History" (romacs-agent-header-tests--header)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
 
 (ert-deftest romacs-agent-header-is-a-string ()
   ;; No form: showing the header runs no Lisp, and its `%' is said literally.
@@ -268,40 +289,6 @@ string, an overlay."
       (should (timerp romacs-agent-ui--children-timer))
       (flush))))
 
-(ert-deftest romacs-agent-header-of-a-chat-opened-after-its-turn ()
-  ;; A chat opened on a session whose last turn no one has seen: its
-  ;; journal's replay draws that turn's end in the chat, shown, which sees
-  ;; it.  The replay's events are its own, so the header is made after it.
-  (let* ((dir (make-temp-file "romacs-header-" t))
-         (romacs-agent-glyphs nil)
-         (romacs-agent--sessions (make-hash-table :test #'equal))
-         (romacs-agent-ui--announced (make-hash-table :test #'eq :weakness 'key))
-         (romacs-agent-ui--children-changed (make-hash-table :test #'eq))
-         (romacs-agent-ui--children-timer nil)
-         (session (romacs-agent--make :id romacs-agent-header-tests--id :harness 'claude :provider "claude"
-                                      :state 'idle :dir dir :input-seq 1 :done-seq 2
-                                      :host-socket "/nonexistent/romacs-agent.sock"))
-         (buffer nil))
-    (unwind-protect
-        (save-window-excursion
-          (let ((coding-system-for-write 'utf-8-unix))
-            (write-region (concat (romacs-agent--json (romacs-mcp--object "seq" 1 "t" 1.0 "in" (romacs-mcp--object "prompt" "hi")))
-                                  "\n"
-                                  (romacs-agent--json (romacs-mcp--object "seq" 2 "t" 2.0 "out"
-                                                                          (romacs-mcp--object "type" "result" "result" "ok")))
-                                  "\n")
-                          nil (expand-file-name "journal.jsonl" dir) nil 'silent))
-          (should (eq (romacs-agent-ui--state-key session) 'completed))
-          (cl-letf (((symbol-function 'romacs-agent--manifest-put) #'ignore))
-            (setq buffer (romacs-agent-ui--show-chat session)))
-          (should (eq (romacs-agent-ui--state-key session) 'idle))
-          (with-current-buffer buffer
-            (should (stringp header-line-format))
-            (should-not (string-search "Completed" header-line-format))))
-      (when (timerp romacs-agent-ui--children-timer) (cancel-timer romacs-agent-ui--children-timer))
-      (when (buffer-live-p buffer) (kill-buffer buffer))
-      (delete-directory dir t))))
-
 (ert-deftest romacs-agent-header-unchanged-is-not-written ()
   (romacs-agent-header-tests--with
     (let ((shown header-line-format))
@@ -330,37 +317,16 @@ string, an overlay."
       (should-not (eq header-line-format shown))
       (should (= written 1)))))
 
-(ert-deftest romacs-agent-header-loaded-over-a-running-session ()
-  ;; Chats an older version made hold its form, which names functions this
-  ;; version has changed; a transcript's view's session is no recorded
-  ;; one.  Loading this file makes their headers strings, before any event.
-  (romacs-agent-header-tests--with
-    (let ((view (generate-new-buffer "*romacs-agent-header-tests-view*"))
-          (older '(:eval (romacs-agent-ui--header-line))))
-      (unwind-protect
-          (progn
-            (with-current-buffer view
-              (romacs-agent-chat-mode)
-              (setq romacs-agent-ui--session (romacs-agent--make :id "view" :harness 'claude :provider "claude"
-                                                                :state 'history)))
-            (dolist (buffer (list chat view))
-              (with-current-buffer buffer (setq header-line-format older romacs-agent-ui--header nil)))
-            (load (locate-library "romacs-agent-ui.el") nil t t)
-            (should (equal (romacs-agent-header-tests--header)
-                           (concat (romacs-agent-ui--harness-icon 'claude) "  opus-5-5 high  44%%")))
-            (with-current-buffer view
-              (should (string-search "  History  " (romacs-agent-header-tests--header)))))
-        (kill-buffer view)))))
-
 (ert-deftest romacs-agent-header-is-one-line-for-every-window ()
   ;; Nothing of the header is a window's: two windows of one chat, one too
   ;; narrow for it, are handed the same string, which display clips where
   ;; each ends.  So what matters most comes first: the state, then the model.
   (romacs-agent-header-tests--with
-    (romacs-agent--raise session (list :type 'input :text "go" :time 1.0))
+    (romacs-agent--raise session (list :type 'input :text "go" :time (float-time)))
     (romacs-agent--raise session (list :type 'mode :permission-mode "acceptEdits"))
-    (should (equal (romacs-agent-header-tests--header)
-                   (concat (romacs-agent-ui--harness-icon 'claude) "  Working  opus-5-5 high  acceptEdits  44%%")))
+    ;; Then the chat's own: how long the turn has run, and how to stop it.
+    (should (string-prefix-p (concat (romacs-agent-ui--harness-icon 'claude) "  Working  opus-5-5 high  acceptEdits  44%%  ")
+                             (romacs-agent-header-tests--header)))
     (save-window-excursion
       (delete-other-windows)
       (switch-to-buffer chat)
@@ -376,71 +342,6 @@ string, an overlay."
         (dolist (window (list wide narrow))
           (should-not (seq-some (lambda (parameter) (stringp (cdr parameter))) (window-parameters window)))
           (should (eq (buffer-local-value 'header-line-format (window-buffer window)) header-line-format)))))))
-
-(ert-deftest romacs-agent-header-of-a-transcript-follows-glyphs ()
-  ;; A transcript's view has a session no one records: its header is made
-  ;; again with the others' when what draws a glyph changes.
-  (require 'romacs-agent-history)
-  (let ((romacs-agent-glyphs nil)
-        (romacs-agent--sessions (make-hash-table :test #'equal))
-        (file (make-temp-file "romacs-header-" nil ".jsonl")) (buffer nil))
-    (unwind-protect
-        (save-window-excursion
-          (setq buffer (romacs-agent-history-open
-                        (list :path file :title "h" :harness 'claude :provider "claude" :id "h1" :cwd "/")))
-          (with-current-buffer buffer
-            (should (string-search "  History" (romacs-agent-header-tests--header)))
-            (cl-letf (((symbol-function 'char-displayable-p) (lambda (_) t)))
-              (unwind-protect
-                  (progn (customize-set-variable 'romacs-agent-glyphs t)
-                         (should (string-search "  📜" (romacs-agent-header-tests--header))))
-                (customize-set-variable 'romacs-agent-glyphs nil)))
-            (should (string-search "  History" (romacs-agent-header-tests--header)))))
-      (when (buffer-live-p buffer) (kill-buffer buffer))
-      (delete-file file))))
-
-(ert-deftest romacs-agent-composer-writes-what-changed ()
-  ;; The boundary and the hint are put on the composer's overlay when they
-  ;; read differently, so a tick, a command or a streamed delta that leaves
-  ;; them as they were changes nothing display reads.
-  (romacs-agent-header-tests--with
-    (let ((now 100.0))
-      (cl-letf (((symbol-function 'float-time) (lambda (&rest _) now))
-                ((symbol-function 'romacs-agent-ui--tick-start) #'ignore))
-        (save-window-excursion
-          (switch-to-buffer (current-buffer))
-          (romacs-agent--raise session (list :type 'input :text "go" :time 100.0 :seq 1 :last t))
-          (should (string-search "● Running 0s" (overlay-get romacs-agent-ui--composer 'before-string)))
-          (should (equal (overlay-get romacs-agent-ui--composer 'after-string) (romacs-agent-ui--hint)))
-          ;; The same second: a tick and a command write nothing.
-          (setq written 0)
-          (romacs-agent-ui--tick)
-          (romacs-agent-ui--composer-update)
-          (should (= written 0))
-          ;; The clock's second moved: the boundary alone is put.
-          (setq now 101.0)
-          (romacs-agent-ui--tick)
-          (should (= written 1))
-          (should (string-search "● Running 1s" (overlay-get romacs-agent-ui--composer 'before-string)))
-          ;; A reply streams: its first delta opens a line (the boundary
-          ;; gains the newline that ends it), the rest write nothing, and
-          ;; the overlay follows the transcript's end with no one moving it.
-          (romacs-agent--raise session (list :type 'delta :text "some words " :message "m" :seq 2 :last t))
-          (setq written 0)
-          (dotimes (i 5)
-            (romacs-agent--raise session (list :type 'delta :text "more words " :message "m" :seq (+ 3 i) :last t)))
-          (should (= written 0))
-          (should (= (overlay-start romacs-agent-ui--composer) (marker-position romacs-agent-ui--end)))
-          (should (string-suffix-p "more words " (buffer-substring-no-properties (point-min) romacs-agent-ui--end)))
-          ;; Text typed in the composer: the hint goes, once.
-          (goto-char (point-max))
-          (insert "a")
-          (romacs-agent-ui--composer-update)
-          (should (= written 1))
-          (should-not (overlay-get romacs-agent-ui--composer 'after-string))
-          (insert "b")
-          (romacs-agent-ui--composer-update)
-          (should (= written 1)))))))
 
 (provide 'romacs-agent-header-tests)
 ;;; romacs-agent-header-tests.el ends here

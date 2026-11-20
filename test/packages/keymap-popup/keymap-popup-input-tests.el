@@ -218,5 +218,85 @@
       (should called)
       (keymap-popup-input--clean-p))))
 
+(defun keymap-popup-input--drawn-entry (persistent)
+  "Check that a press with PERSISTENT (else `:stay-open') dispatch acts on
+its row as drawn: settling the prefix runs no label again before the
+command, which sees the label its row showed and the label's properties.
+A row hidden when the popup drew stays out of the repaint, its label
+not run, though it would show now."
+  (keymap-popup-input--with-source
+    (let* ((draws 0) (at-press nil) (seen nil) (later nil) (later-draws 0)
+           (label (lambda () (propertize (format "Row %d" (cl-incf draws)) 'input-test-datum draws)))
+           (command (lambda () (interactive) (push (list draws (keymap-popup-entry) later-draws) seen)))
+           ;; The hidden row would show from the press of "a" on.
+           (note (lambda () (setq at-press draws)
+                   (when (equal (key-description (this-command-keys-vector)) "a") (setq later t))))
+           (map (make-sparse-keymap)))
+      (keymap-set map "a" command)
+      (keymap-set map "b" #'ignore)
+      (keymap-popup-attach
+       map (list "a" (append (list label command :c-u "Prefix") (unless persistent '(:stay-open t)))
+                 "b" (list (lambda () (cl-incf later-draws) "Later") #'ignore :if (lambda () later)))
+       :persistent persistent)
+      (keymap-popup map)
+      (add-hook 'pre-command-hook note -100)
+      (execute-kbd-macro (kbd "C-u a"))
+      (remove-hook 'pre-command-hook note)
+      (pcase-let ((`((,draws-then ,entry ,later-then)) seen))
+        ;; No label ran between the key and its command.
+        (should (= draws-then at-press))
+        (should (= later-then 0))
+        (should (equal (plist-get entry :key) "a"))
+        (should (equal (substring-no-properties (plist-get entry :description)) (format "Row %d" at-press)))
+        (should (eql (get-text-property 0 'input-test-datum (plist-get entry :description)) at-press)))
+      (keymap-popup-input--settled-p)
+      ;; Outside a popup's dispatch there is no entry.
+      (should-not (keymap-popup-entry))
+      (execute-kbd-macro (kbd "q"))
+      (keymap-popup-input--clean-p))))
+
+(ert-deftest keymap-popup-input-persistent-press-acts-on-drawn-entry ()
+  (keymap-popup-input--drawn-entry t))
+
+(ert-deftest keymap-popup-input-stay-open-press-acts-on-drawn-entry ()
+  (keymap-popup-input--drawn-entry nil))
+
+(ert-deftest keymap-popup-input-closing-press-sees-drawn-entry ()
+  "A suffix that closes its popup before it runs still sees the row."
+  (keymap-popup-input--with-source
+    (let* ((seen nil)
+           (command (lambda () (interactive) (push (keymap-popup-entry) seen)))
+           (map (make-sparse-keymap)))
+      (keymap-set map "a" command)
+      (keymap-popup-attach map (list "a" (list (lambda () "Shown") command)))
+      (keymap-popup map)
+      (execute-kbd-macro (kbd "a"))
+      (should (equal (substring-no-properties (plist-get (car seen) :description)) "Shown"))
+      (keymap-popup-input--clean-p)
+      (funcall command)
+      (should-not (car seen)))))
+
+(ert-deftest keymap-popup-input-reading-press-keeps-drawn-entry ()
+  "A row whose command reads the minibuffer still sees its row after the
+read; the minibuffer's own commands see none."
+  (keymap-popup-input--with-source
+    (let* ((seen nil) (inner nil)
+           (note (lambda () (when (minibufferp) (push (keymap-popup-entry) inner))))
+           (command (lambda () (interactive)
+                      (add-hook 'pre-command-hook note)
+                      (unwind-protect (read-string "Text: ")
+                        (remove-hook 'pre-command-hook note))
+                      (push (keymap-popup-entry) seen)))
+           (map (make-sparse-keymap)))
+      (keymap-set map "a" command)
+      (keymap-popup-attach map (list "a" (list "Read" command :stay-open t)))
+      (keymap-popup map)
+      (execute-kbd-macro (kbd "a x y RET"))
+      (should (equal (plist-get (car seen) :key) "a"))
+      (should inner)
+      (should-not (seq-some #'identity inner))
+      (execute-kbd-macro (kbd "q"))
+      (keymap-popup-input--clean-p))))
+
 (provide 'keymap-popup-input-tests)
 ;;; keymap-popup-input-tests.el ends here

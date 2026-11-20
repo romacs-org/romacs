@@ -124,6 +124,7 @@ mod insdel;
 mod indirect;
 use romacs_brand as brand;
 mod gc;
+mod registers;
 mod gc_check;
 mod gc_image;
 mod functions;
@@ -997,6 +998,32 @@ impl Op {
     // Register operands only: slots, function ids, branch targets, and arities
     // are different coordinate spaces. Argument windows stay contiguous because
     // capture pruning removes only unused registers from the frame prefix.
+    /// Every register operand, read where `map_registers` would rewrite: a
+    /// call's argument window aside, which `window` gives whole.
+    fn each_register(&self, visit: &mut impl FnMut(usize)) {
+        match *self {
+            Self::Const(d, _) | Self::Global(d, _) | Self::Closure(d, _, _) | Self::Condition(d, _, _)
+            | Self::Protect(d, _, _) | Self::Direct(d, ..) | Self::Sealed(d, ..) => visit(d),
+            Self::Move(d, s) | Self::ReadCell(d, s) | Self::WriteCell(d, s) | Self::ReadLate(d, s, _)
+            | Self::WriteLate(d, s, _) | Self::LateForwarded(d, s) | Self::Call(d, s, _, _) | Self::Catch(d, s, _) => {
+                visit(d);
+                visit(s);
+            }
+            Self::BindLate(_, r) | Self::UnbindLate(r) | Self::Cell(r) | Self::SetGlobal(_, r) | Self::Bind(_, r)
+            | Self::Define(_, r) | Self::DefineMacro(_, r) | Self::Return(r) | Self::LeaveProtect(r)
+            | Self::Unless(r, _) => visit(r),
+            Self::Unbind(_) | Self::Jump(_) | Self::PopHandlers(_) | Self::ResumeExit => {}
+        }
+    }
+    /// A call's argument window: its first register and its count.
+    fn window(&self) -> Option<(usize, usize)> {
+        match *self {
+            Self::Call(_, _, start, count) | Self::Direct(_, _, _, start, count) | Self::Sealed(_, _, start, count) => {
+                Some((start, count))
+            }
+            _ => None,
+        }
+    }
     fn map_registers(&mut self, map: &mut impl FnMut(usize) -> usize) {
         match self {
             Self::Const(d, _)
@@ -1340,9 +1367,6 @@ pub struct Vm {
     command_point: (i64, Value),
     /// A storage kernel runs inside insdel's bracket, which checked read-only.
     change_prepared: bool,
-    /// The register file natives borrow for their arguments, reused across
-    /// calls (`Vm::with_kernel_stack'): empty between them.
-    kernel_stack: Vec<Value>,
     /// The slots insdel's bracket reads on every change, once resolved.
     change_slots: Option<insdel::ChangeSlots>,
     case_symbols_slot: usize,
@@ -1751,7 +1775,8 @@ pub struct Vm {
     command_set: command_set::CommandSet,
     completion_case_memo: Option<(u64, usize, std::sync::Arc<Vec<(u32, u32, i64)>>)>,
     caches: Vec<Cache>,
-    stack: Vec<Value>,
+    /// The register files, the running engine's current (`registers.rs`).
+    stack: registers::Registers,
     external_roots: Vec<Value>,
     /// alloc.c's `finalizers': every finalizer not yet found unreachable.
     /// Not roots; the collector dooms those it does not reach.
@@ -1771,9 +1796,6 @@ pub struct Vm {
     /// interrupt naming the job waits (`threaded::isolate_quit'), so
     /// finalizers and `post-gc-hook' never take it.
     aftermath_runs: usize,
-    /// Register stacks of engines suspended across a nested run, traced and
-    /// forwarded in place: their frames keep raw pointers into them.
-    suspended_stacks: Vec<Vec<Value>>,
     /// Suspended engines' own state, owned here until they resume: traced and
     /// forwarded in place, and dropped with the engine by a caught panic.
     #[snapshot(at_rest)]
@@ -1821,7 +1843,6 @@ impl Vm {
             standard_case_tables: [Value::NIL; 4],
             command_point: (0, Value::NIL),
             change_prepared: false,
-            kernel_stack: Vec::new(),
             change_slots: None,
             case_symbols_slot: usize::MAX,
             print_number_index: 0,
@@ -1991,7 +2012,7 @@ impl Vm {
             command_set: command_set::CommandSet::default(),
             completion_case_memo: None,
             caches: vec![],
-            stack: vec![],
+            stack: registers::Registers::new(),
             external_roots: vec![],
             finalizers: vec![],
             doomed_finalizers: Default::default(),
@@ -1999,7 +2020,6 @@ impl Vm {
             undo_offers_due: false,
             unwinding: 0,
             aftermath_runs: 0,
-            suspended_stacks: vec![],
             suspended: vec![],
             keymap_filters: Vec::new(),
             keymap_pending_filter: None,
