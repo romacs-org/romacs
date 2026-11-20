@@ -3080,6 +3080,9 @@ def chat_menu(args, base):
             return json.loads(a.called('romacs_delegate_task')['text'])['taskId']
 
         delegate('slow 300', 'long build', 'codex')
+        # A title past what a menu row leaves: the popup cuts its end, the
+        # state before it stays whole.
+        delegate('slow 300', LONG_WORKER, 'codex')
         waiting = delegate('ask true', 'needs approval', 'claude')
         failed = delegate('fail', 'broken task', 'codex')
         a.until(failed, lambda: a.state(failed) == 'idle', 20, 'failed child ended')
@@ -3101,7 +3104,8 @@ def chat_menu(args, base):
             waiting, running = first('asks you · needs approval'), first('running · long build')
             return ('Agent · say ready' in text and 'Model: fake-model' in text and 'Effort: default' in text
                     and 'Plan mode: off' in text and 'broken task' not in text and 'finished task' not in text
-                    and waiting is not None and running is not None and waiting < running)
+                    and waiting is not None and running is not None and waiting < running
+                    and 'running · ' + LONG_WORKER[:20] in text)
 
         shots, result = [], {'menus': {}}
         for theme in UI_THEMES:
@@ -3124,6 +3128,7 @@ def chat_menu(args, base):
         a.close()
 
 
+LONG_WORKER = 'review every caller of the display protocol and report what each one reads'
 UI_RUN_PROMPT = 'Run this shell command and wait for it: for i in $(seq 1 60); do echo step $i; sleep 0.5; done. Then say done.'
 CODEX_PROMPT = ('Think briefly, then run this shell command and wait for it: '
                 'for i in $(seq 1 40); do echo line $i; sleep 0.25; done. Then say how many lines it printed.')
