@@ -42,6 +42,12 @@ and what the merge queue holds it to.
   (`impact.test_file`).
 - Git quotes a path that has a quote, a backslash or a byte past ASCII. Read
   its NUL-delimited output (`-z`) wherever a path is used again.
+- A `CARGO_TARGET_DIR` shared by two checkouts can build one's folded tests
+  with the other's file list: the list's build script
+  (`crates/romacs-vm-test-build/list.rs`) reruns only when something under
+  `crates/romacs-vm/tests` or `crates/romacs-vm-gui/tests` is newer than its
+  last run, and an older checkout's files are not. Give each worktree its own
+  target, or touch both directories before building.
 
 ## Decisions
 - The structural rules that run the compiler (`SLOW_RULES`) are the queue's:
