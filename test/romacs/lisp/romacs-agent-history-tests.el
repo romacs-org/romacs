@@ -93,6 +93,28 @@
                 (romacs-agent-history--settings))))
     (should-not (string-search "romacs-agent-t3-settings" form))))
 
+(ert-deftest romacs-agent-history-view-is-a-read-only-chat ()
+  ;; A transcript is drawn as a chat's; its text's keys read it, and r
+  ;; goes on with it: nothing typed goes to a composer it has not.
+  (let ((file (make-temp-file "romacs-history" nil ".jsonl")) (buffer nil))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "{\"type\":\"user\",\"message\":{\"content\":\"hello there\"}}\n"))
+          (save-window-excursion
+            (setq buffer (romacs-agent-history-open (list :path file :title "h" :harness 'claude :id "h1" :cwd "/"))))
+          (with-current-buffer buffer
+            (should buffer-read-only)
+            (should-not romacs-agent-log--input)
+            (should (string-match-p "hello there" (buffer-string)))
+            (let ((map (get-text-property (point-min) 'keymap)))
+              (should (eq map romacs-agent-history-text-map))
+              (should (eq (lookup-key map "r") #'romacs-agent-history-resume-this))
+              (should (eq (lookup-key map [remap self-insert-command]) #'undefined))
+              (should (eq (lookup-key map "n") #'romacs-agent-log-next)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
+
 (provide 'romacs-agent-history-tests)
 ;;; romacs-agent-history-tests.el ends here
 

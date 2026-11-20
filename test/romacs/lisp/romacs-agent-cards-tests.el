@@ -155,7 +155,9 @@
                     "\"content\":\"{\\\"taskId\\\":\\\"" romacs-agent-cards-tests--child "\\\",\\\"status\\\":\\\"running\\\"}\"}]}}\n"))
           (setq buffer (romacs-agent-history-open (list :path file :title "h" :harness 'claude :id "h1" :cwd "/")))
           (with-current-buffer buffer
-            (should (string-match-p "⇢ Review it  Working  thread" (buffer-string)))))
+            ;; Drawn as a chat draws it: the delegation's line, its call's mark.
+            (should (eq major-mode 'romacs-agent-history-mode))
+            (should (string-match-p "⇢ Review it\n" (buffer-string)))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 

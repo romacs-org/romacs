@@ -625,51 +625,49 @@ the file is gone."
         ;; Cut: from the first prompt on.
         (when (> beg 0)
           (while (and events (not (eq (plist-get (car events) :type) 'input))) (pop events)))
+        ;; A result whose call the cut left out shows nothing.
+        (let ((started (make-hash-table :test #'equal)))
+          (setq events (seq-filter (lambda (event)
+                                     (or (not (eq (plist-get event :type) 'tool))
+                                         (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
+                                           (gethash (plist-get event :id) started))))
+                                   events)))
         (cons events (> beg 0))))))
 
 (defun romacs-agent-history-draw (session imported)
   "Draw the transcript IMPORTED names (:path, and :size, how much of it
-was the harness's before Romacs went on with it) into the current chat
-buffer, for SESSION: its end, from a prompt on."
-  (let* ((path (plist-get imported :path))
-         (read (romacs-agent-history-events (romacs-agent-harness session) imported))
-         (events (car read))
-         (started (make-hash-table :test #'equal))
-         (facts nil))
-    (when (cdr read)
-      (romacs-agent-ui--insert (format "· earlier turns are in %s\n" (abbreviate-file-name path)) 'face 'romacs-agent-dim))
-    (unless (file-readable-p path)
-      (romacs-agent-ui--insert (format "! %s is gone\n" (abbreviate-file-name path)) 'face 'romacs-agent-error))
-    (dolist (event events)
+was the harness's before Romacs went on with it) into the current view,
+for SESSION: its end, from a prompt on."
+  (let ((facts nil))
+    (dolist (event (romacs-agent-log-draw-imported session imported))
       (pcase-dolist (`(,key . ,_) romacs-agent-history--facts)
-        (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key)))))
-      (when (eq (plist-get event :type) 'tool)
-        (if (eq (plist-get event :state) 'started) (puthash (plist-get event :id) t started)
-          ;; A result whose call the cut left out shows nothing.
-          (unless (gethash (plist-get event :id) started) (setq event nil))))
-      (when event (romacs-agent-ui--draw session event (current-buffer))))
-    ;; A transcript is whole: its last steps are done.
-    (romacs-agent-ui--run-settle)
+        (when (plist-get event key) (setq facts (plist-put facts key (plist-get event key))))))
     (romacs-agent-history--keep-facts session facts)))
 
 (defvar-local romacs-agent-history--item nil "The transcript this view shows.")
 
-(defvar romacs-agent-history-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map special-mode-map)
-    (define-key map (kbd "RET") #'romacs-agent-chat-toggle)
-    (define-key map (kbd "TAB") #'romacs-agent-chat-toggle)
-    (define-key map "r" #'romacs-agent-history-resume-this)
-    (define-key map "n" #'romacs-agent-chat-next-turn)
-    (define-key map "p" #'romacs-agent-chat-previous-turn)
-    map)
-  "Keys of a harness transcript's view.")
+(defvar-keymap romacs-agent-history-mode-map
+  :doc "Keys of a harness transcript's view."
+  :parent special-mode-map
+  "r" #'romacs-agent-history-resume-this)
 
-(define-derived-mode romacs-agent-history-mode romacs-agent-chat-mode "Agent history"
-  "A harness's own transcript, read-only: \\[romacs-agent-history-resume-this] goes on with it.
-\\{romacs-agent-history-mode-map}"
+(defvar-keymap romacs-agent-history-text-map
+  :doc "Keys of a harness transcript's text: a chat's, but read-only."
+  :parent romacs-agent-log-transcript-map
+  "<remap> <self-insert-command>" #'undefined
+  "?" #'describe-mode
+  "g" #'undefined
+  "e" #'undefined
+  "q" #'quit-window
+  "r" #'romacs-agent-history-resume-this)
+
+(define-derived-mode romacs-agent-history-mode romacs-agent-log-mode "Agent history"
+  "A harness's own transcript, read-only, drawn as a chat's transcript:
+\\[romacs-agent-history-resume-this] goes on with it.
+\\{romacs-agent-history-text-map}"
   :interactive nil
   (setq-local desktop-save-buffer nil)
+  (setq romacs-agent-log--text-map romacs-agent-history-text-map)
   (setq buffer-read-only t))
 
 ;;;###autoload
@@ -684,16 +682,19 @@ as `pop-to-buffer' does with ACTION."
       (with-current-buffer buffer
         (romacs-agent-history-mode)
         (setq romacs-agent-history--item item
-              romacs-agent-ui--session (romacs-agent--make
-                                        :id (plist-get item :id) :harness (plist-get item :harness)
-                                        :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
-                                        :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history)
-              romacs-agent-ui--messages (make-hash-table :test #'equal)
-              romacs-agent-ui--end (point-marker)))
+              romacs-agent-log--session (romacs-agent--make
+                                         :id (plist-get item :id) :harness (plist-get item :harness)
+                                         :provider (plist-get item :provider) :config-dir (plist-get item :config-dir)
+                                         :cwd (plist-get item :cwd) :title (plist-get item :title) :state 'history
+                                         :tools (make-hash-table :test #'equal) :streamed (make-hash-table :test #'equal))
+              romacs-agent-ui--session romacs-agent-log--session
+              ;; No composer: the transcript is the whole buffer.
+              romacs-agent-log--end (point-max-marker))
+        (set-marker-insertion-type romacs-agent-log--end t))
       ;; Shown first: its rules fit its window.
       (pop-to-buffer buffer action)
       (with-current-buffer buffer
-        (romacs-agent-history-draw romacs-agent-ui--session (list :path (plist-get item :path)))
+        (romacs-agent-history-draw romacs-agent-log--session (list :path (plist-get item :path)))
         (romacs-agent-ui--header-show)))
     (pop-to-buffer buffer action)
     (goto-char (point-max))

@@ -116,6 +116,9 @@ syntax face's, which a theme may draw as red as an error.")
 (defvar-local romacs-agent-log--session nil "The session this chat shows.")
 (defvar-local romacs-agent-log--end nil
   "Marker: the transcript's end, where events are drawn; the separator follows it.")
+(defvar-local romacs-agent-log--text-map nil
+  "The keys of this buffer's transcript text, when not a chat's
+\(`romacs-agent-log-transcript-map'): a view with no composer has its own.")
 (defvar-local romacs-agent-log--input nil
   "Marker: the composer's start, after the separator.")
 (defvar-local romacs-agent-log--seq 0 "The seq of the last record drawn.")
@@ -188,7 +191,7 @@ passing nothing to what is typed after it."
     (let ((position 0))
       (while (setq position (text-property-any position (length text) 'keymap nil text))
         (let ((end (next-single-property-change position 'keymap text (length text))))
-          (put-text-property position end 'keymap romacs-agent-log-transcript-map text)
+          (put-text-property position end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map) text)
           (setq position end))))
     text))
 
@@ -591,7 +594,7 @@ Live, in a chat no window shows, the echo area says so too."
         (add-face-text-property start end 'romacs-agent-log-note)
         ;; It answers nothing any more: no keys, no request to answer.
         (remove-text-properties start end '(keymap nil romacs-agent-log-request nil))
-        (put-text-property start end 'keymap romacs-agent-log-transcript-map)))
+        (put-text-property start end 'keymap (or romacs-agent-log--text-map romacs-agent-log-transcript-map))))
     (setq romacs-agent-log--asks (delq block romacs-agent-log--asks))))
 
 (defun romacs-agent-log--close-asks (session event how)
@@ -937,6 +940,21 @@ of the last run note before it in the store, else the live session's."
                        "\n")
                'romacs-agent-log-earlier from 'romacs-agent-log-entry 'earlier)))
 
+(defun romacs-agent-log-draw-imported (session imported)
+  "Draw the harness transcript IMPORTED names (:path, :size) for SESSION
+at the transcript's end: its end, from a prompt on
+\(`romacs-agent-history-events').  Return the events drawn."
+  (require 'romacs-agent-history)
+  (let* ((path (plist-get imported :path))
+         (read (romacs-agent-history-events (romacs-agent-harness session) imported)))
+    (if (null read)
+        (romacs-agent-log--line nil 'error (format "✘ %s is gone" (abbreviate-file-name path)) 'romacs-agent-log-denied)
+      (when (cdr read)
+        (romacs-agent-log--note nil (format "earlier turns are in %s" (abbreviate-file-name path))))
+      (dolist (event (car read)) (romacs-agent-log-draw session event))
+      (romacs-agent-log--close-stream))
+    (car read)))
+
 (defun romacs-agent-log--fill ()
   "Draw the current chat's session's last `romacs-agent-log-turns' turns."
   (let* ((session romacs-agent-log--session)
@@ -944,14 +962,8 @@ of the last run note before it in the store, else the live session's."
     (setq romacs-agent-log--from from)
     (when from (romacs-agent-log--writing (save-excursion (goto-char (point-min)) (insert (romacs-agent-log--earlier-line from)))))
     ;; From its start: an imported session's harness transcript first.
-    (when-let* (((null from))
-                (imported (romacs-agent-imported session))
-                ((require 'romacs-agent-history nil t))
-                (read (romacs-agent-history-events (romacs-agent-harness session) imported)))
-      (when (cdr read)
-        (romacs-agent-log--note nil (format "earlier turns are in %s" (abbreviate-file-name (plist-get imported :path)))))
-      (dolist (event (car read)) (romacs-agent-log-draw session event))
-      (romacs-agent-log--close-stream))
+    (when-let* (((null from)) (imported (romacs-agent-imported session)))
+      (romacs-agent-log-draw-imported session imported))
     (romacs-agent-log--replay session from nil)
     (romacs-agent-log--sync-asks session)))
 
