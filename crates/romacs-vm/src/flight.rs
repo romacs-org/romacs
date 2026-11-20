@@ -556,7 +556,7 @@ impl crate::Vm {
         let mut buffers = 0usize;
         TEXTS.with(|texts| -> crate::Result<()> {
             let mut texts = texts.borrow_mut();
-            for buffer in self.buffer_order_snapshot() {
+            for buffer in self.buffer_order() {
                 let state = self.buffer_state(buffer)?;
                 if !state.live { continue; }
                 let tick = state.modification.chars_modiff;
@@ -583,7 +583,7 @@ impl crate::Vm {
             }
             // Killed buffers' entries go once they are half the cache.
             if texts.len() > 2 * buffers {
-                let order: std::collections::HashSet<u64> = self.buffer_order_snapshot().iter().map(|b| b.0).collect();
+                let order: std::collections::HashSet<u64> = self.buffer_order().iter().map(|b| b.0).collect();
                 texts.retain(|(object, _), _| order.contains(object));
             }
             Ok(())

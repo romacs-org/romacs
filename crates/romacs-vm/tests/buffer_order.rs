@@ -1,0 +1,110 @@
+//! The buffer list's order (buffer_order.rs), linked through an arena the VM
+//! owns: against pinned GNU after each step that changes it; the lead step
+//! `romacs--lead-buffer-list`, as its comment states; across a moving
+//! collection; and through a world image.
+#[path = "support/gnu_lisp.rs"]
+mod gnu_lisp;
+#[path = "support/gnu_batch.rs"]
+mod gnu_batch;
+use gnu_lisp::{gnu_lisp, gnu_lisp_with};
+
+/// The names of the `bo-` buffers in `buffer-list`'s order: only those, as
+/// each engine starts with buffers of its own (GNU batch has `*Messages*`,
+/// Romacs batch none, romacs#350).
+const NAMES: &str = r#"(lambda () (delq nil (mapcar (lambda (b) (let ((n (buffer-name b))) (and n (string-match "\\`bo-" n) n))) (buffer-list))))"#;
+
+fn printed(mut vm: romacs_vm::Vm, source: &str) -> String {
+    vm.eval_source(&format!("(prin1-to-string {source})")).and_then(romacs_vm::Local::display)
+        .map_or_else(|e| format!("error: {e}"), |s| serde_json::from_str::<String>(&s).unwrap_or(s))
+}
+fn in_thread(f: impl FnOnce() -> String + Send + 'static) -> String {
+    std::thread::Builder::new().stack_size(256 << 20).spawn(f).unwrap().join().unwrap()
+}
+
+/// Create a, b, c; `switch-to-buffer` b; `bury-buffer` a; kill c; create d;
+/// `select-window` on the window once it shows a; rename b; a buffer made
+/// and killed inside a `with-temp-buffer`. The order after every step.
+#[test]
+fn buffer_list_order_matches_pinned_gnu() {
+    let source = format!(r#"(let* ((names {NAMES}) (log nil) (step (lambda () (push (funcall names) log))))
+      (let ((a (get-buffer-create "bo-a")) (b (get-buffer-create "bo-b")) (c (get-buffer-create "bo-c")))
+        (funcall step)
+        (switch-to-buffer b) (funcall step)
+        (bury-buffer a) (funcall step)
+        (kill-buffer c) (funcall step)
+        (get-buffer-create "bo-d") (funcall step)
+        (set-window-buffer nil a) (select-window (selected-window)) (funcall step)
+        (with-current-buffer b (rename-buffer "bo-b2")) (funcall step)
+        (with-temp-buffer (let ((x (get-buffer-create "bo-inner"))) (funcall step) (kill-buffer x)) (funcall step))
+        (funcall step)
+        (nreverse log)))"#);
+    let expected = gnu_batch::outputs(&[format!("(prin1 {source})")]).remove(0);
+    let actual = in_thread(move || printed(gnu_lisp(&[]), &source));
+    assert_eq!(actual, expected);
+}
+
+/// `romacs--lead-buffer-list`: BUFFERS first, each once and in their order,
+/// a dead one passed over; then the others in their order.
+#[test]
+fn lead_buffer_list_puts_its_buffers_first() {
+    let source = format!(r#"(let* ((names {NAMES})
+                                   (a (get-buffer-create "bo-a")) (b (get-buffer-create "bo-b"))
+                                   (c (get-buffer-create "bo-c")) (d (get-buffer-create "bo-d"))
+                                   (dead (get-buffer-create "bo-dead")))
+      (kill-buffer dead)
+      (romacs--lead-buffer-list (list c dead a c))
+      (funcall names))"#);
+    assert_eq!(in_thread(move || printed(gnu_lisp(&[]), &source)), r#"("bo-c" "bo-a" "bo-b" "bo-d")"#);
+}
+
+/// The order through collections that move every object (forced: every
+/// collection compacts, one at every allocation), with buffers made, buried,
+/// recorded and killed in between.
+#[test]
+fn buffer_order_survives_moving_collections() {
+    let mut vm = romacs_vm::Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    vm.set_gc_moving(true);
+    vm.set_gc_stress(1);
+    let source = format!(r#"(let* ((names {NAMES}) (log nil)
+             (churn (lambda () (dotimes (_ 300) (make-string 10 ?x)) (garbage-collect))))
+      (dotimes (i 6) (get-buffer-create (format "bo-%d" i)))
+      (funcall churn) (push (funcall names) log)
+      (bury-buffer-internal (get-buffer "bo-1")) (kill-buffer "bo-3")
+      (funcall churn) (push (funcall names) log)
+      (get-buffer-create "bo-6") (romacs--lead-buffer-list (list (get-buffer "bo-4")))
+      (funcall churn) (push (funcall names) log)
+      (nreverse log))"#);
+    assert_eq!(printed(vm, &source),
+        r#"(("bo-0" "bo-1" "bo-2" "bo-3" "bo-4" "bo-5") ("bo-0" "bo-2" "bo-4" "bo-5" "bo-1") ("bo-4" "bo-0" "bo-2" "bo-5" "bo-1" "bo-6"))"#);
+}
+
+/// A world image keeps the order its builder made: made, buried and killed
+/// before the capture, read after the restore. In the `gnu` target, whose
+/// allocator is the world arena, the session must be the restored world's:
+/// a boot from source would make the same order without any image.
+#[test]
+fn buffer_order_survives_a_world_image() {
+    let actual = in_thread(|| {
+        let vm = gnu_lisp_with(r#"(progn (dolist (n '("bo-w1" "bo-w2" "bo-w3" "bo-w4")) (get-buffer-create n))
+                                           (bury-buffer-internal (get-buffer "bo-w1")) (kill-buffer "bo-w3"))"#);
+        assert!(romacs_vm::world::arena::mapped_image().is_some() || !romacs_vm::world::arena::serves_heap(),
+                "no world was restored: run under nextest's process-per-test, as dev-check does");
+        printed(vm, &format!("(funcall {NAMES})"))
+    });
+    assert_eq!(actual, r#"("bo-w2" "bo-w4" "bo-w1")"#);
+}
+
+/// Burying a killed buffer leaves the order as it was: a dead buffer joins
+/// no list, so nothing keeps it.
+#[test]
+fn burying_a_killed_buffer_changes_nothing() {
+    let mut vm = romacs_vm::Vm::new();
+    vm.install_lisp_prelude().unwrap();
+    let source = format!(r#"(let* ((names {NAMES}) (a (get-buffer-create "bo-a")) (dead (get-buffer-create "bo-dead")))
+      (get-buffer-create "bo-b")
+      (kill-buffer dead)
+      (bury-buffer-internal dead)
+      (list (funcall names) (memq dead (buffer-list)) (buffer-live-p dead)))"#);
+    assert_eq!(printed(vm, &source), r#"(("bo-a" "bo-b") nil nil)"#);
+}

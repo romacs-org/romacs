@@ -1585,7 +1585,7 @@ impl Vm {
     pub(crate) fn file_visits(&self) -> Vec<(Value, Vec<u8>, Option<(u64, u64)>, Option<Vec<u8>>)> {
         let Some(Fwd::Buffer(i)) = Forwarded::lookup("buffer-file-name") else { return Vec::new() };
         // In the buffer list's order, as get-file-buffer walks Vbuffer_alist.
-        let mut buffers = self.buffer_order_snapshot();
+        let mut buffers = self.buffer_order();
         let current = self.slots[self.buffer_slot].value;
         if !buffers.contains(&current) { buffers.push(current); }
         buffers.into_iter().filter_map(|buffer| {
@@ -1627,7 +1627,7 @@ impl Vm {
         };
         let current = self.slots[self.buffer_slot].value;
         if visits(&current) { return Some(current); }
-        self.buffer_order_snapshot().into_iter().find(visits)
+        self.buffer_order().into_iter().find(visits)
     }
 
     /// GNU `bset_<field> (current_buffer, VALUE)`: write the current buffer's

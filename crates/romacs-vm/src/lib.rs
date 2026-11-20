@@ -147,6 +147,7 @@ mod active_keymaps;
 mod annotation_primitives;
 mod annotations;
 mod buffer;
+mod buffer_order;
 mod buffer_swap;
 mod bytes;
 mod modification;
@@ -1507,6 +1508,8 @@ pub struct Vm {
     #[snapshot(at_rest)]
     terminal_host: Option<Box<dyn terminal_host::TerminalHost>>,
     terminal_bindings: Vec<terminal_host::TerminalBinding>,
+    /// The buffer list's order (buffer_order.rs): roots for collection.
+    buffer_order: buffer_order::BufferOrder,
     pending_specials: NameSet<String>,
     /// Names a one-argument top-level `(defvar NAME)` declared in the file
     /// being loaded: special for the rest of that file only (GNU Fdefvar,
@@ -1893,6 +1896,7 @@ impl Vm {
             doc_file: None,
             terminal_host: None,
             terminal_bindings: Vec::new(),
+            buffer_order: buffer_order::BufferOrder::default(),
             propagate_next: false,
             pending_specials: NameSet::default(),
             file_specials: NameSet::default(),

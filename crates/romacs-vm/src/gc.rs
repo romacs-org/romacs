@@ -1479,6 +1479,7 @@ impl Vm {
         {
             rewrite(v);
         }
+        self.buffer_order.visit_values(&mut |v| rewrite(v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| rewrite(v));
         }
@@ -2082,6 +2083,7 @@ impl Vm {
         }
         pending.extend(self.terminal_bindings.iter().map(|binding| binding.buffer));
         pending.extend(self.terminal_bindings.iter().flat_map(|binding| binding.away.iter().chain(&binding.unremapped_maps).copied()));
+        self.buffer_order.visit_values(&mut |v| pending.push(*v));
         if let Some(escape) = &mut self.propagated_escape {
             escape.visit_values(&mut |v| if keep(v) { pending.push(*v) });
         }

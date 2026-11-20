@@ -135,6 +135,7 @@ impl Vm {
             values.extend_from_slice(&binding.away);
             values.extend_from_slice(&binding.unremapped_maps);
         }
+        self.buffer_order.visit_values(&mut |v| values.push(*v));
         if let Some(escape) = &mut self.propagated_escape { escape.visit_values(&mut |v| values.push(*v)); }
         for handler in &mut self.signal_handlers { handler.visit_values(&mut |v| values.push(*v)); }
         self.backtrace.visit_values(&mut |v| values.push(*v));

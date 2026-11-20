@@ -14,6 +14,9 @@ pub(crate) struct BufferState {
     /// A kill that skips that walk for an unnamed buffer is safe only while no
     /// other Rust path makes a window name a buffer.
     pub(crate) window_named: bool,
+    /// Its node in the buffer list's order (`Vm::buffer_order`), while it is
+    /// in that list.
+    pub(crate) order_node: Option<u32>,
     /// Shared with the buffer's indirect buffers, as GNU's MODIFF and
     /// SAVE_MODIFF are in their shared text.
     // CELL(Plain)
@@ -26,7 +29,7 @@ pub(crate) struct BufferState {
 }
 impl Default for BufferState {
     fn default() -> Self {
-        Self { name: None, live: true, inhibit_buffer_hooks: false, window_named: false, modification: Default::default(), defun_start: None, terminal: None }
+        Self { name: None, live: true, inhibit_buffer_hooks: false, window_named: false, order_node: None, modification: Default::default(), defun_start: None, terminal: None }
     }
 }
 impl BufferState {
