@@ -1,0 +1,70 @@
+;;; romacs-popup-card-tests.el --- A key-hint card's order and rows -*- lexical-binding: t; -*-
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Maintainer: Thanos Apollo <public@thanosapollo.org>
+(require 'ert)
+(require 'cl-lib)
+(require 'romacs-popup)
+
+(defun romacs-popup-card-tests--sorted (events)
+  "EVENTS in a card's key order, as their descriptions."
+  (mapcar #'single-key-description
+          (sort (copy-sequence events)
+                (lambda (a b) (romacs-popup--rank< (romacs-popup--event-rank a) (romacs-popup--event-rank b))))))
+
+(defun romacs-popup-card-tests--entry (key label binding &optional prefix-p source)
+  "An entry as `romacs-popup--card-entry' makes it."
+  (list key label prefix-p (or source 'global) 0 binding nil))
+
+(ert-deftest romacs-popup-card-keys-group-by-modifier ()
+  "Unmodified keys first (letters, digits, punctuation, named keys), then
+each modifier's together: C-SPC and C-+ sit with C-a."
+  (should (equal (romacs-popup-card-tests--sorted
+                  (list ?\C-a 'C-left ?+ ?\t ?b ?B ?a ?1 ?\s 'left ?\d (aref (kbd "C-SPC") 0)
+                        (aref (kbd "C-+") 0) (aref (kbd "M-x") 0) (aref (kbd "C-M-x") 0) 'f10 'f2 ?\e
+                        (aref (kbd "M-RET") 0) (aref (kbd "M-DEL") 0) 'C-M-left ?\C-@))
+                 '("a" "b" "B" "1" "SPC" "+" "DEL" "ESC" "TAB" "<f2>" "<f10>" "<left>"
+                   "C-a" "C-SPC" "C-+" "C-@" "C-<left>" "M-x" "M-DEL" "M-RET" "C-M-x" "C-M-<left>"))))
+
+(defun romacs-popup-card-tests--keys (rows)
+  "Each of ROWS as its keys: the first, then the others."
+  (mapcar (lambda (e) (cons (car e) (nth 7 e))) rows))
+
+(ert-deftest romacs-popup-card-one-command-one-row ()
+  "Keys bound to one command share its first key's row, the others drawn
+after its label; a different binding, label or source keeps its own row."
+  (let* ((f (lambda () (interactive)))
+         (g (lambda () (interactive)))
+         (rows (romacs-popup--card-merge
+                (list (romacs-popup-card-tests--entry "C-0" "text-scale-adjust" 'text-scale-adjust)
+                      (romacs-popup-card-tests--entry "a" "other" 'ignore)
+                      (romacs-popup-card-tests--entry "C-+" "text-scale-adjust" 'text-scale-adjust)
+                      (romacs-popup-card-tests--entry "x" "function" f)
+                      (romacs-popup-card-tests--entry "y" "function" g)
+                      (romacs-popup-card-tests--entry "r" "copy" 'kill-ring-save)
+                      (romacs-popup-card-tests--entry "w" "kill-ring-save" 'kill-ring-save)
+                      (romacs-popup-card-tests--entry "m" "text-scale-adjust" 'text-scale-adjust nil 'mode)))))
+    (should (equal (romacs-popup-card-tests--keys rows)
+                   '(("C-0" "C-+") ("a") ("x") ("y") ("r") ("w") ("m"))))
+    ;; Drawn after the label: the key column stays the first key's.
+    (let ((line (car (romacs-popup--card-column (list (car rows)) 80))))
+      (should (equal (substring-no-properties line) "C-0  text-scale-adjust  C-+")))
+    ;; Wider in cells than the room though narrower as painted: still
+    ;; the bare label, never a cut row of keys.
+    (cl-letf (((symbol-function 'romacs-layer--toast-width) (lambda (s) (- (string-width s) 4))))
+      (should (equal (substring-no-properties (car (romacs-popup--card-column (list (car rows)) 26)))
+                     "C-0  text-scale-adjust")))
+    ;; Cut to a narrow room, the other keys go first.
+    (should (equal (substring-no-properties (car (romacs-popup--card-column (list (car rows)) 24)))
+                   "C-0  text-scale-adjust"))))
+
+(ert-deftest romacs-popup-card-a-row-of-keys-stays-narrow ()
+  "A command's keys past `romacs-popup--merged-key-width' start its next
+row, the rest joining that one: rows stay narrow, in order."
+  (let ((rows (romacs-popup--card-merge
+               (mapcar (lambda (k) (romacs-popup-card-tests--entry k "same" 'forward-char))
+                       '("C-a" "C-b" "C-c" "C-d" "C-e" "C-f" "C-g")))))
+    (should (equal (romacs-popup-card-tests--keys rows)
+                   '(("C-a" "C-b" "C-c" "C-d") ("C-e" "C-f" "C-g"))))))
+
+(provide 'romacs-popup-card-tests)
+;;; romacs-popup-card-tests.el ends here

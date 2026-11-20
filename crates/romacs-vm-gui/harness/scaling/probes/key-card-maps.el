@@ -4,7 +4,7 @@
   :setup (progn
            (dotimes (i n)
              (let ((map (make-sparse-keymap)) (mode (intern (format "scaling-card-mode-%d" i))))
-               (define-key map (vector 'f12 (+ #x1000 i)) #'forward-char)
+               (define-key map (vector 'f12 (+ #x1000 i)) (scaling--card-command i))
                (set mode t)
                (push (cons mode map) minor-mode-map-alist)))
            (switch-to-buffer (get-buffer-create "scaling-card-maps")))
