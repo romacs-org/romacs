@@ -686,35 +686,54 @@ comes back as a turn of its own: the turn it steered is no next run's."
                        :user (eq (gethash "user" object) t)
                        :id id :position position :kept t)))
 
-(defun romacs-agent-store-queued-sync (id items)
-  "Make the kept rows of the session ID names be ITEMS, in order, by the
-writer: one write under the session's one key, so a later one supersedes
-it, and one transaction, so it is made whole or not at all."
-  (romacs-agent-write 'romacs-agent-store--queued-rows
-                      (list id (mapcar (lambda (item) (list (romacs-agent-item-id item) (romacs-agent-item-position item)
-                                                            (romacs-agent-store--item-json item)))
-                                       items))
-                      nil (list 'queued id)))
+(defun romacs-agent-store-queued-put (id item)
+  "Keep ITEM, waiting in the queue of the session ID names, by the writer."
+  (romacs-agent-write 'romacs-agent-store--queued-row
+                      (list id (romacs-agent-item-id item) (romacs-agent-item-position item)
+                            (romacs-agent-store--item-json item))
+                      nil (list 'queued id (romacs-agent-item-id item))))
 
-(defun romacs-agent-store--queued-rows (id rows)
-  "Make the rows of session ID be ROWS, (ITEM-ID POSITION JSON), here, in
-one transaction.  A failure signals, its rows as they were."
+(defun romacs-agent-store-queued-reorder (id items)
+  "Move the rows of ITEMS, waiting for the session ID names, to their
+positions now, all in one transaction, by the writer."
+  (when items
+    (romacs-agent-write 'romacs-agent-store--queued-places
+                        (list id (mapcar (lambda (item) (cons (romacs-agent-item-id item) (romacs-agent-item-position item)))
+                                         items))
+                        nil (list 'queued-order id))))
+
+(defun romacs-agent-store--queued-places (id places)
+  "Move each row of session ID in PLACES, (ITEM-ID . POSITION), to its
+position in one transaction, here: a row let go meanwhile (sent,
+cleared) stays gone.  A failure signals, none of them moved."
   (let ((db (or (romacs-agent-store--open) (error "No agents store to keep queued messages in"))))
     (sqlite-execute db "begin immediate")
     (condition-case err
-        (progn (sqlite-execute db "delete from queued where session = ?" (list id))
-               (pcase-dolist (`(,item-id ,position ,json) rows)
-                 (sqlite-execute db "insert into queued values (?, ?, ?, ?)" (list id item-id position json)))
+        (progn (pcase-dolist (`(,item-id . ,position) places)
+                 (sqlite-execute db "update queued set position = ? where session = ? and id = ?" (list position id item-id)))
                (sqlite-execute db "commit"))
       (error (ignore-errors (sqlite-execute db "rollback"))
              (signal (car err) (cdr err))))
     t))
 
+(defun romacs-agent-store-queued-delete (id item-id)
+  "Let go of the kept message ITEM-ID of the session ID names, by the writer."
+  (romacs-agent-write 'romacs-agent-store--queued-row (list id item-id nil nil)
+                      nil (list 'queued id item-id)))
+
 (defun romacs-agent-store-queued-clear (id)
-  "Let go of every message kept for the session ID names, by the writer:
-its rows made none (`romacs-agent-store-queued-sync')."
+  "Let go of every message kept for the session ID names, by the writer."
   (when (file-exists-p (romacs-agent-store--file))
-    (romacs-agent-store-queued-sync id nil)))
+    (romacs-agent-write 'romacs-agent-store--queued-row (list id nil nil nil) nil (list 'queued id))))
+
+(defun romacs-agent-store--queued-row (id item-id position json)
+  "Keep the message ITEM-ID of session ID at POSITION as JSON, or with
+none let it go (ITEM-ID nil: every one of ID's), here.  A failure signals."
+  (let ((db (or (romacs-agent-store--open) (error "No agents store to keep a queued message in"))))
+    (cond (json (sqlite-execute db "insert or replace into queued values (?, ?, ?, ?)" (list id item-id position json)))
+          (item-id (sqlite-execute db "delete from queued where session = ? and id = ?" (list id item-id)))
+          (t (sqlite-execute db "delete from queued where session = ?" (list id))))
+    t))
 
 (defun romacs-agent-store-queued (id)
   "The messages kept waiting for the session ID names, in order."
@@ -730,9 +749,7 @@ its rows made none (`romacs-agent-store-queued-sync')."
 in order with what was sent to it while it loaded, sent once its harness
 may take it.  A cancelled task's is let go."
   (if (romacs-agent-cancelled session)
-      (progn (remhash (romacs-agent-id session) romacs-agent--queue-loading)
-             (remhash (romacs-agent-id session) romacs-agent--queue-left)
-             (romacs-agent--clear-queue session))
+      (romacs-agent--clear-queue session)
     (let* ((waiting (romacs-agent-queue session))
            (ids (delq nil (mapcar #'romacs-agent-item-id waiting)))
            (kept (cl-remove-if (lambda (item) (member (romacs-agent-item-id item) ids))
@@ -740,11 +757,7 @@ may take it.  A cancelled task's is let go."
            ;; Sent already (an editor that ended before its row went): let
            ;; go.  Its lookup failed: kept for the next load, not sent now.
            (found (and kept (romacs-agent--sent-queued session (mapcar #'romacs-agent-item-id kept)))))
-      ;; Those unsure stay in the store for the next load, written with
-      ;; the queue's rows; those sent go with the merged write.
-      (let ((left (cl-remove-if-not (lambda (item) (member (romacs-agent-item-id item) (cdr found))) kept)))
-        (if left (puthash (romacs-agent-id session) left romacs-agent--queue-left)
-          (remhash (romacs-agent-id session) romacs-agent--queue-left)))
+      (dolist (id (car found)) (romacs-agent-store-queued-delete (romacs-agent-id session) id))
       (setq kept (cl-remove-if (lambda (item) (or (member (romacs-agent-item-id item) (car found))
                                                   (member (romacs-agent-item-id item) (cdr found))))
                                kept))
@@ -762,15 +775,14 @@ may take it.  A cancelled task's is let go."
           (when waiting
             (let ((place (- (apply #'min (mapcar #'romacs-agent-item-position order)) 1e-3)))
               (dolist (item order)
-                (setf (romacs-agent-item-position item) (setq place (+ place 1e-3))))))
+                (setf (romacs-agent-item-position item) (setq place (+ place 1e-3))))
+              ;; In one transaction: an end part way never leaves two out of order.
+              (romacs-agent-store-queued-reorder (romacs-agent-id session) (cl-remove-if-not #'romacs-agent-item-kept order))))
           ;; Its views told once, the queue whole.
           (let ((romacs-agent--queue-quiet t))
             (dolist (item order) (romacs-agent--enqueue session item)))
-          (romacs-agent--changed session)))
-      ;; Merged: its rows written whole, once, as its queue holds them.
-      (remhash (romacs-agent-id session) romacs-agent--queue-loading)
-      (when (or found kept waiting) (romacs-agent--queue-sync session))
-      (when kept (romacs-agent--dispatch session)))))
+          (romacs-agent--changed session))
+        (romacs-agent--dispatch session)))))
 
 (add-hook 'romacs-agent-loaded-functions #'romacs-agent-store--requeue)
 ;; A session with messages kept waiting is loaded as a restore runs.

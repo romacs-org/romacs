@@ -4394,7 +4394,10 @@ its kept record too.  Nil when ITEM is no
 longer waiting, or not its user's to change."
   (when (romacs-agent--queue-mine session item)
     (setf (romacs-agent-item-text item) text)
-    (when (romacs-agent-item-kept item) (romacs-agent--queue-sync session))
+    ;; Its row as it is now, under the one key all its writes share: a
+    ;; retry of an older write never lands after this one.
+    (when (romacs-agent-item-kept item)
+      (romacs-agent-store-queued-put (romacs-agent-id session) item))
     (romacs-agent-queue-hold session item nil)))
 
 (defun romacs-agent-queue-drop (session item)
@@ -4424,8 +4427,11 @@ user's to change, or has no place there."
               (romacs-agent-item-position other) position
               (romacs-agent-item-front item) (romacs-agent-item-front other)
               (romacs-agent-item-front other) front)
-        (when (or (romacs-agent-item-kept item) (romacs-agent-item-kept other))
-          (romacs-agent--queue-sync session))
+        ;; The two rows as they are now, each under the one key all its
+        ;; writes share: an older write's retry never lands after these.
+        (dolist (moved (list item other))
+          (when (romacs-agent-item-kept moved)
+            (romacs-agent-store-queued-put (romacs-agent-id session) moved)))
         (romacs-agent--dispatch-soon session)
         (romacs-agent--changed session)
         t))))
@@ -4486,7 +4492,9 @@ loaded or not."
 ;; (a tool's delivery, a send's check) has its own keeping, or none
 ;; worth having after a restart.
 
-(declare-function romacs-agent-store-queued-sync "romacs-agent-store" (id items))
+(declare-function romacs-agent-store-queued-put "romacs-agent-store" (id item))
+(declare-function romacs-agent-store-queued-reorder "romacs-agent-store" (id items))
+(declare-function romacs-agent-store-queued-delete "romacs-agent-store" (id item-id))
 (declare-function romacs-agent-store--file "romacs-agent-store" ())
 (declare-function romacs-agent-store-queued-clear "romacs-agent-store" (id))
 
@@ -4494,27 +4502,6 @@ loaded or not."
   "Whether ITEM is all data, so kept across a restart: not a hold's own
 prompt either, written at once or not at all."
   (not (or (romacs-agent-item-delivered item) (romacs-agent-item-valid item) (romacs-agent-item-token item))))
-
-(defvar romacs-agent--queue-loading (make-hash-table :test #'equal)
-  "Sessions, by id, loading: their kept messages not merged into their
-queue yet (`romacs-agent-store--requeue'), so no write of its rows is made;
-each value the kept rows a merge left waiting, not sent now.")
-
-(defvar romacs-agent--queue-left (make-hash-table :test #'equal)
-  "Sessions' kept messages a merge left in the store, by id: whether they
-went is unsure (`romacs-agent--sent-queued'), kept for the next load.")
-
-(defun romacs-agent--queue-sync (session)
-  "Write SESSION's kept rows as its queue holds them now, with those a
-merge left (`romacs-agent--queue-left'): one write under its one key, so
-the newest stands for every older one, and whole, so a failure leaves the
-rows as the write before left them.  None while it loads."
-  (let ((id (romacs-agent-id session)))
-    ;; One never loaded is not in the table: it writes at once.
-    (when (and (eq (gethash id romacs-agent--queue-loading :merged) :merged)
-               (file-exists-p (romacs-agent-store--file)))
-      (romacs-agent-store-queued-sync id (append (cl-remove-if-not #'romacs-agent-item-kept (romacs-agent-queue session))
-                                                 (gethash id romacs-agent--queue-left))))))
 
 (defun romacs-agent--keep-item (session item)
   "Keep ITEM, waiting in SESSION's queue, across a restart, in the agents'
@@ -4525,14 +4512,14 @@ session marked first, so a start loads it (`romacs-agent-mark')."
     (setf (romacs-agent-item-id item) (or (romacs-agent-item-id item) (romacs-agent--uuid))
           (romacs-agent-item-kept item) t)
     (romacs-agent-mark (romacs-agent-id session) 'queued t)
-    (romacs-agent--queue-sync session)))
+    (romacs-agent-store-queued-put (romacs-agent-id session) item)))
 
 (defun romacs-agent--unkeep-item (session item)
   "ITEM is out of SESSION's queue: so is its record; the session's mark
 goes with its last."
   (when (romacs-agent-item-kept item)
     (setf (romacs-agent-item-kept item) nil)
-    (romacs-agent--queue-sync session)
+    (romacs-agent-store-queued-delete (romacs-agent-id session) (romacs-agent-item-id item))
     (unless (cl-some #'romacs-agent-item-kept (romacs-agent-queue session))
       (romacs-agent-mark (romacs-agent-id session) 'queued nil))))
 
@@ -5327,8 +5314,6 @@ once, and loads on once its kept state is written."
     (when (and manifest (not (gethash (gethash "id" manifest) romacs-agent--sessions)))
       (let ((session (romacs-agent--of-manifest dir manifest)))
         (puthash (romacs-agent-id session) session romacs-agent--sessions)
-        ;; Its kept messages not merged yet: its queue's rows wait for that.
-        (puthash (romacs-agent-id session) nil romacs-agent--queue-loading)
         (romacs-agent--index session)
         ;; Its kept state back, its journal is read on from there: by its
         ;; supervisor's replay from that record, or here.

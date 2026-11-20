@@ -349,8 +349,6 @@ message is sent, `romacs-agent-send' by default.")
       ;; Its steer went at once: never kept past its write.  Made again,
       ;; one sent to it as it loads goes after what was kept.
       (let ((again (romacs-agent--make :id id :harness 'claude :state 'running :title "kept")))
-        ;; Loading, as `romacs-agent--load' marks it: its rows wait for the merge.
-        (puthash id nil romacs-agent--queue-loading)
         (romacs-agent-test-attach again t)
         (romacs-agent-send-later again "meanwhile")
         ;; Put first as it loads: ahead of what was kept too.
@@ -392,7 +390,7 @@ message is sent, `romacs-agent-send' by default.")
         (cl-letf (((symbol-function 'romacs-agent--line)
                    (lambda (_ object &optional journal) (setq journaled (or journal object))))
                   ((symbol-function 'romacs-agent--fold-now) #'ignore)
-                  ((symbol-function 'romacs-agent-store-queued-sync) #'ignore))
+                  ((symbol-function 'romacs-agent-store-queued-delete) #'ignore))
           (romacs-agent--dispatch session))
         (should (gethash "romacsQueued" journaled))
         (write-region (concat (json-serialize (romacs-mcp--object "seq" 1 "t" 1.0 "in" journaled)) "\n")

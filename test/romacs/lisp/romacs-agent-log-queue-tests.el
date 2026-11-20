@@ -235,48 +235,6 @@
       (should-not romacs-agent-log-queue--editing)
       (should (equal (buffer-substring-no-properties romacs-agent-log--input (point-max)) "gone soon")))))
 
-;;; One write per session, whole
-
-(ert-deftest romacs-agent-log-queue-writes-its-rows-whole ()
-  ;; A move is one write under the session's one key, carrying every kept
-  ;; row in its new order: a newer write always stands, whole.
-  (romacs-agent-test-with-store
-    (make-directory (file-name-directory (romacs-agent-store--file)) t)
-    (should (romacs-agent-store--open))
-    (let* ((id "c6c6c6c6-0000-4000-8000-000000000000")
-           (session (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running) t))
-           (writes nil))
-      (romacs-agent-send-later session "a" nil nil nil nil t)
-      (romacs-agent-send-later session "b" nil nil nil nil t)
-      (let ((write (symbol-function 'romacs-agent-write)))
-        (cl-letf (((symbol-function 'romacs-agent-write)
-                   (lambda (function args &optional done key) (push (list function key) writes) (funcall write function args done key))))
-          (should (romacs-agent-queue-move session (car (romacs-agent-queue session)) 1))))
-      (should (equal writes `((romacs-agent-store--queued-rows (queued ,id)))))
-      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("b" "a"))))))
-
-(ert-deftest romacs-agent-log-queue-a-load-merges-before-it-writes ()
-  ;; Sent to while it loads, a session writes no rows: its kept ones are
-  ;; not merged yet.  Merged, all are written, kept ones first.
-  (romacs-agent-test-with-store
-    (make-directory (file-name-directory (romacs-agent-store--file)) t)
-    (should (romacs-agent-store--open))
-    (let* ((id "c7c7c7c7-0000-4000-8000-000000000000")
-           (first (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "k") t)))
-      (romacs-agent-send-later first "kept" nil nil nil nil t)
-      (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept")))
-      (let ((again (romacs-agent-test-attach (romacs-agent--make :id id :harness 'claude :state 'running :title "k") t)))
-        (puthash id nil romacs-agent--queue-loading)
-        (unwind-protect
-            (progn
-              (romacs-agent-send-later again "meanwhile" nil nil nil nil t)
-              (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept")))
-              (romacs-agent-store--requeue again nil)
-              (should-not (gethash id romacs-agent--queue-loading))
-              (should (equal (mapcar #'car (romacs-agent-queue again)) '("kept" "meanwhile")))
-              (should (equal (mapcar #'car (romacs-agent-store-queued id)) '("kept" "meanwhile"))))
-          (remhash id romacs-agent--queue-loading))))))
-
 (ert-deftest romacs-agent-log-queue-keys-run-in-the-chat ()
   ;; Its row's keys and the menu's rows run commands of this mode.
   (dolist (key '("n" "p" "e" "RET" "d" "M-p" "M-n"))
