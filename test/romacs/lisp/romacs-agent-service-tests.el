@@ -701,16 +701,20 @@ a state root of its own, and a service of its own on `socket'."
            (text (lambda (buffer) (with-current-buffer buffer (buffer-substring-no-properties (point-min) (point-max)))))
            (source nil) (client nil) (local nil) (remote nil))
       (funcall question "q-old" "Tea or coffee?")
+      (funcall question "q-old2" "Sugar?")
       (setq source (romacs-agent-remote-connect socket) client (romacs-agent-remote-client source)
             local (romacs-agent-log-chat session))
       (unwind-protect
           (progn
             (should (wait (romacs-agent-client-revision client)))
-            (setq remote (romacs-agent-remote-chat id))
-            (should (wait (string-search "Tea or coffee?" (funcall text remote))))
+            ;; What waits, a request a reply: paged.
+            (let ((romacs-agent-service--unit-budget 1))
+              (setq remote (romacs-agent-remote-chat id))
+              (should (wait (and (string-search "Tea or coffee?" (funcall text remote))
+                                 (string-search "Sugar?" (funcall text remote))))))
             (should (equal (funcall text remote) (funcall text local)))
             (let ((follow (gethash id (romacs-agent-client-follows client))))
-              (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 1))
+              (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2))
               ;; One asked live: its approval event, and it waits.
               (funcall question "q-new" "Milk?")
               (run-hook-with-args 'romacs-agent-event-functions session
@@ -718,7 +722,7 @@ a state root of its own, and a service of its own on `socket'."
                                         :input (romacs-agent-rpc-object)
                                         :questions '(("Milk?" :header nil :options ("Tea" "Coffee") :notes nil :multi nil))
                                         :seq 20 :last t :time (float-time)))
-              (should (wait (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2)))
+              (should (wait (= (hash-table-count (romacs-agent-client--follow-pending follow)) 3)))
               (should (string-search "Milk?" (funcall text remote)))
               ;; Answered: it leaves, answered, by the user.
               (let ((resolved nil))
@@ -735,7 +739,7 @@ a state root of its own, and a service of its own on `socket'."
                 (should (equal (gethash "how" resolved) "answered"))
                 (should (equal (gethash "kind" (gethash "actor" resolved)) "user"))
                 (should (equal (gethash "reason" resolved) "no milk"))
-                (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 1)))))
+                (should (= (hash-table-count (romacs-agent-client--follow-pending follow)) 2)))))
         (romacs-agent-remote-disconnect)
         (kill-buffer local)
         (when remote (kill-buffer remote))))))

@@ -838,21 +838,22 @@ kept), is never run again: its state is unknown."
             (romacs-agent-store-command-put
              key digest (json-serialize (romacs-agent-rpc-object "state" "unknown"))
              (lambda (answer)
-               (let ((waiting (cdr (cddr entry)))
-                     (result (if (not (and (eq (car answer) 'ok) (eq (cadr answer) t)))
+               (let ((result (if (not (and (eq (car answer) 'ok) (eq (cadr answer) t)))
                                  (progn (remhash key romacs-agent-service--commands)
                                         (list 'error -32603 "internal" "The command was not kept: not run"))
                                (condition-case err (funcall effect)
                                  (romacs-agent-service-error
                                   (remhash key romacs-agent-service--commands)
                                   (pcase-let ((`(,code ,kind ,text) (cdr err))) (list 'error code kind text)))
-                                 (error (remhash key romacs-agent-service--commands)
-                                        (list 'error -32603 "internal" (error-message-string err)))))))
-                 (unless (eq (car-safe result) 'error)
-                   (let ((json (json-serialize result)))
-                     (setcdr entry (cons (float-time) json))
-                     (romacs-agent-store-command-put key digest json)))
-                 (dolist (respond waiting) (funcall respond result))))))))))))
+                                 ((error quit) (remhash key romacs-agent-service--commands)
+                                  (list 'error -32603 "internal" (error-message-string err)))))))
+                 ;; Its repeats as they are now: one may have come while it ran.
+                 (let ((waiting (cdr (cddr entry))))
+                   (unless (eq (car-safe result) 'error)
+                     (let ((json (json-serialize result)))
+                       (setcdr entry (cons (float-time) json))
+                       (romacs-agent-store-command-put key digest json)))
+                   (dolist (respond waiting) (funcall respond result)))))))))))))
 
 (defun romacs-agent-service--kept (key)
   "The command KEY names as it is kept, (DIGEST TIME . OUTCOME), within its
@@ -986,9 +987,9 @@ with its time), and its wire request (Pending requests)."
     requests))
 
 (defun romacs-agent-service--bounded-request (request)
-  "REQUEST as sent, within a unit's budget: its strings cut as an event's
-are, the cuts named under `truncated'; still over, its handle, kind and
-since alone, `oversize'."
+  "REQUEST as sent, within one message's limit: its strings cut as an
+event's are, the cuts named under `truncated'; still over, its handle,
+kind and since alone, `oversize'."
   (or (cl-loop for limit in (list romacs-agent-service--string-limit 8192 1024)
                for cut = (list nil)
                for sent = (romacs-agent-service--cut request limit cut "")
@@ -996,10 +997,21 @@ since alone, `oversize'."
                do (let ((lengths (make-hash-table :test #'equal)))
                     (pcase-dolist (`(,path . ,bytes) (car cut)) (puthash path bytes lengths))
                     (puthash "truncated" lengths sent))
-               when (ignore-errors (<= (string-bytes (json-serialize sent)) romacs-agent-service--unit-budget))
+               when (ignore-errors (<= (string-bytes (json-serialize sent)) romacs-agent-service--unit-limit))
                return sent)
       (romacs-agent-rpc-object "handle" (gethash "handle" request) "kind" (gethash "kind" request)
                                "since" (gethash "since" request) "oversize" t)))
+
+(defun romacs-agent-service--pending-page (rpc state)
+  "STATE's requests, its :rest, as one reply's pending: whole requests
+within a unit's budget, at least one, and a token continuing it."
+  (let ((budget romacs-agent-service--unit-budget) (rest (plist-get state :rest)) (taken nil) (first t))
+    (while (and rest (let ((bytes (string-bytes (json-serialize (car rest)))))
+                       (when (or first (<= bytes budget)) (setq budget (- budget bytes) first nil) t)))
+      (push (pop rest) taken))
+    (romacs-agent-rpc-object
+     "pending" (vconcat (nreverse taken))
+     "more" (if rest (romacs-agent-service--token rpc (list :page #'romacs-agent-service--pending-page :rest rest)) :null))))
 
 (defun romacs-agent-service--resolution (session id events)
   "How SESSION's request ID left, as EVENTS, the record unit it left in,
@@ -1082,17 +1094,13 @@ a session not loaded stays so."
                    "row" (or (gethash id (romacs-agent-service--list-rows romacs-agent-service--list)) :null)
                    "pending" [] "answering" [] "queue" [] "undelivered" [] "more" :null))
            (subscription (romacs-agent-service--subscription-make :cutoff seq)))
-      (let ((requests (romacs-agent-service--requests session)) (budget romacs-agent-service--unit-budget))
-        ;; Within one reply: past its budget, each request by its handle,
-        ;; kind and since alone (`oversize').
-        (puthash "pending" (vconcat (mapcar (lambda (asked)
-                                              (let* ((request (cdr asked)) (bytes (string-bytes (json-serialize request))))
-                                                (if (<= bytes budget) (progn (setq budget (- budget bytes)) request)
-                                                  (romacs-agent-rpc-object "handle" (gethash "handle" request)
-                                                                           "kind" (gethash "kind" request)
-                                                                           "since" (gethash "since" request) "oversize" t))))
-                                            (hash-table-values requests)))
-                 reply)
+      (let* ((requests (romacs-agent-service--requests session))
+             (page (romacs-agent-service--pending-page
+                    rpc (list :rest (let ((asked nil)) (maphash (lambda (_ each) (push (cdr each) asked)) requests)
+                                         (nreverse asked))))))
+        ;; What does not fit the reply comes in pages (`agents/page').
+        (puthash "pending" (gethash "pending" page) reply)
+        (puthash "more" (gethash "more" page) reply)
         (setf (romacs-agent-service--subscription-pending subscription) requests))
       ;; Made only once its reply is: a reply that fails subscribes nothing.
       (puthash id subscription (romacs-agent-service--peer-open (romacs-agent-rpc-data rpc)))

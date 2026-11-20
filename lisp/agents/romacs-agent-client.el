@@ -377,15 +377,19 @@ from where a reply stopped asks no more at a time.")
                (romacs-agent-client--follow-pulling follow) t
                (romacs-agent-client--follow-held follow) nil)
          (when (hash-table-p (gethash "row" reply)) (romacs-agent-client--tell client id (list 'row (gethash "row" reply))))
-         (let ((pending (romacs-agent-client--follow-pending follow)))
-           (clrhash pending)
-           (seq-doseq (request (gethash "pending" reply)) (puthash (gethash "id" (gethash "handle" request)) request pending))
-           (romacs-agent-client--tell client id (list 'pending pending)))
-         (romacs-agent-client--read
-          client id follow generation 'drawn (gethash "seq" (gethash "cursor" reply))
-          (romacs-agent-rpc-object "upto" (gethash "seq" (gethash "cursor" reply))
-                                   "turns" (romacs-agent-client--follow-turns follow)
-                                   "records" (romacs-agent-client--follow-records follow)))))
+         (romacs-agent-client--pages
+          client (gethash "pending" reply) (gethash "more" reply) "pending"
+          (lambda (requests)
+            (when (= generation (romacs-agent-client--follow-generation follow))
+              (let ((pending (romacs-agent-client--follow-pending follow)))
+                (clrhash pending)
+                (dolist (request requests) (puthash (gethash "id" (gethash "handle" request)) request pending))
+                (romacs-agent-client--tell client id (list 'pending pending)))
+              (romacs-agent-client--read
+               client id follow generation 'drawn (gethash "seq" (gethash "cursor" reply))
+               (romacs-agent-rpc-object "upto" (gethash "seq" (gethash "cursor" reply))
+                                        "turns" (romacs-agent-client--follow-turns follow)
+                                        "records" (romacs-agent-client--follow-records follow))))))))
       (`(,(and kind (or 'event 'pending-added 'pending-resolved)) ,params)
        (if (romacs-agent-client--follow-pulling follow)
            (push (cons kind params) (romacs-agent-client--follow-held follow))
@@ -396,6 +400,21 @@ from where a reply stopped asks no more at a time.")
        (romacs-agent-client--tell client id (list 'failed error))))))
 
 (add-hook 'romacs-agent-client-session-functions #'romacs-agent-client--followed)
+
+(defun romacs-agent-client--pages (client items more key then)
+  "ITEMS, a reply's, and those of its pages after them while it says
+MORE (`agents/page'), each page's under KEY: THEN called with them all,
+as a list, once they are had; nil for those of a page refused."
+  (let ((all (append items nil)))
+    (cl-labels ((next (more)
+                  (if (not (stringp more)) (funcall then all)
+                    (romacs-agent-client-request
+                     client "agents/page" (romacs-agent-rpc-object "more" more)
+                     (lambda (result error)
+                       (if error (funcall then all)
+                         (setq all (append all (append (gethash key result) nil)))
+                         (next (gethash "more" result))))))))
+      (next more))))
 
 (defun romacs-agent-client--apply (client id follow notice)
   "Apply NOTICE, (KIND . PARAMS), live of session ID, to its FOLLOW: a

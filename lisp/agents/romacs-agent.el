@@ -4470,20 +4470,24 @@ its policy, or another machine's through its service."
   (setf (romacs-agent-driver-state session)
         (plist-put (romacs-agent-driver-state session) :answered
                    (cons request-id (plist-get (romacs-agent-driver-state session) :answered))))
-  (condition-case err
-      (romacs-agent--answer session request-id allow message by)
-    ((error quit)
-     (setf (romacs-agent-driver-state session)
-           (plist-put (romacs-agent-driver-state session) :answered
-                      (delete request-id (plist-get (romacs-agent-driver-state session) :answered))))
-     (signal (car err) (cdr err)))))
+  (let ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans))))
+    (condition-case err
+        (romacs-agent--answer session request-id (if (and plan allow) t allow) message by)
+      ((error quit)
+       (setf (romacs-agent-driver-state session)
+             (plist-put (romacs-agent-driver-state session) :answered
+                        (delete request-id (plist-get (romacs-agent-driver-state session) :answered))))
+       (signal (car err) (cdr err))))
+    ;; Written: whatever follows, it stays answered.  Proceeding with a
+    ;; plan leaves plan mode, as Claude Code's does: the agent goes on to
+    ;; implement it.
+    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
+      (romacs-agent-set-plan session nil))))
 
 (defun romacs-agent--answer (session request-id allow message by)
-  "Write SESSION's answer ALLOW (MESSAGE) to REQUEST-ID, BY's note first."
-  (let* ((plan (member request-id (plist-get (romacs-agent-driver-state session) :plans)))
-         ;; A plan is proceeded with once: no rule for the session.
-         (allow (if (and plan allow) t allow))
-         (line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
+  "Write SESSION's answer ALLOW (MESSAGE) to REQUEST-ID, BY's note first.
+A plan is proceeded with once: its ALLOW is t, no rule for the session."
+  (let ((line (funcall (romacs-agent--harness-get session :respond) session request-id allow message)))
     (when by
       (romacs-agent--note session (romacs-mcp--object
                                    "type" "answer" "request" request-id "by" (symbol-name by)
@@ -4494,11 +4498,7 @@ its policy, or another machine's through its service."
                                                (pcase-dolist (`(,question . ,answer) (and (consp allow) (plist-get allow :answers)))
                                                  (puthash question answer object))
                                                object))))
-    (romacs-agent--line session line)
-    ;; Proceeding with a plan leaves plan mode, as Claude Code's does: the
-    ;; agent goes on to implement it.
-    (when (and plan allow (plist-get (romacs-agent-options session) :plan))
-      (romacs-agent-set-plan session nil))))
+    (romacs-agent--line session line)))
 
 (defun romacs-agent--host-pid (session)
   (let ((host (romacs-agent--read-json (expand-file-name "host.json" (romacs-agent-dir session)))))
