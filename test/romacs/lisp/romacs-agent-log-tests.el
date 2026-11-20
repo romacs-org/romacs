@@ -991,14 +991,18 @@ none when dropped.")
 (defun romacs-agent-log-tests--commands (map)
   (let (commands)
     (map-keymap (lambda (_ binding)
+                  ;; A menu row's (menu-item NAME COMMAND . PROPS), its
+                  ;; filter not run.
+                  (when (eq (car-safe binding) 'menu-item) (setq binding (nth 2 binding)))
                   (cond ((keymapp binding) (setq commands (append (romacs-agent-log-tests--commands binding) commands)))
-                        ((symbolp binding) (push binding commands))))
+                        ((and binding (symbolp binding)) (push binding commands))))
                 map)
     commands))
 
 (ert-deftest romacs-agent-log-every-key-runs-in-the-chat ()
   ;; A command a chat's key or menu row runs is defined, and offered for
   ;; this mode, not for a mode since deleted.
+  (should (memq 'romacs-agent-chat-rename (romacs-agent-log-tests--commands romacs-agent-menu-map)))
   (dolist (command (append (romacs-agent-log-tests--commands romacs-agent-log-mode-map)
                            (romacs-agent-log-tests--commands romacs-agent-log-ask-map)
                            (romacs-agent-log-tests--commands romacs-agent-menu-map)))
