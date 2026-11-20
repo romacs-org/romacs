@@ -597,7 +597,7 @@ In other respects, this behaves like `end-of-buffer', which see."
 (eval-after-load "sendmail"
   '(progn
      (define-key mail-mode-map "\C-c\C-a" #'mail-abbrev-insert-alias)
-     (define-key mail-mode-map "\e\t"	; like completion-at-point
+     (define-key mail-mode-map (kbd "ESC TAB")	; like completion-at-point
        #'mail-abbrev-complete-alias))) ;; FIXME: Use `completion-at-point'.
 
 ;;(define-key mail-mode-map "\C-n" #'mail-abbrev-next-line)

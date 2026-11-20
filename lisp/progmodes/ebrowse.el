@@ -981,10 +981,10 @@ if for some reason a circle is in the inheritance graph."
     (define-key map "/" 'ebrowse-read-class-name-and-go)
     (define-key map " " 'ebrowse-view-class-declaration)
     (define-key map "?" 'describe-mode)
-    (define-key map "\C-i" 'ebrowse-pop/switch-to-member-buffer-for-same-tree)
+    (define-key map (kbd "TAB") 'ebrowse-pop/switch-to-member-buffer-for-same-tree)
     (define-key map "\C-k" 'ebrowse-remove-class-at-point)
     (define-key map "\C-l" 'ebrowse-redraw-tree)
-    (define-key map "\C-m" 'ebrowse-find-class-declaration)))
+    (define-key map (kbd "RET") 'ebrowse-find-class-declaration)))
 
 
 
@@ -1840,7 +1840,7 @@ COLLAPSE non-nil means collapse the branch."
     (setq ebrowse-electric-list-mode-map map)
     (fillarray (car (cdr map)) 'ebrowse-electric-list-undefined)
     (fillarray (car (cdr submap)) 'ebrowse-electric-list-undefined)
-    (define-key map "\e" submap)
+    (define-key map (kbd "ESC") submap)
     (define-key map "\C-z" 'suspend-frame)
     (define-key map "\C-h" 'Helper-help)
     (define-key map "?" 'Helper-describe-bindings)
@@ -1856,11 +1856,11 @@ COLLAPSE non-nil means collapse the branch."
     (define-key map "n" 'next-line)
     (define-key map "v" 'ebrowse-electric-view-buffer)
     (define-key map "\C-v" 'scroll-up-command)
-    (define-key map "\ev" 'scroll-down-command)
-    (define-key map "\e\C-v" 'scroll-other-window)
-    (define-key map "\e>" 'end-of-buffer)
-    (define-key map "\e<" 'beginning-of-buffer)
-    (define-key map "\e>" 'end-of-buffer)))
+    (define-key map (kbd "ESC v") 'scroll-down-command)
+    (define-key map (kbd "ESC C-v") 'scroll-other-window)
+    (define-key map (kbd "ESC >") 'end-of-buffer)
+    (define-key map (kbd "ESC <") 'beginning-of-buffer)
+    (define-key map (kbd "ESC >") 'end-of-buffer)))
 
 (put 'ebrowse-electric-list-mode 'mode-class 'special)
 (put 'ebrowse-electric-list-undefined 'suppress-keymap t)
@@ -2073,9 +2073,9 @@ See `Electric-command-loop' for a description of STATE and CONDITION."
   (define-key map "v" 'ebrowse-view-member-declaration)
   (define-key map " " 'ebrowse-view-member-definition)
   (define-key map "?" 'describe-mode)
-  (define-key map "\C-i" 'ebrowse-pop-from-member-to-tree-buffer)
+  (define-key map (kbd "TAB") 'ebrowse-pop-from-member-to-tree-buffer)
   (define-key map "\C-l" 'ebrowse-redisplay-member-buffer)
-  (define-key map "\C-m" 'ebrowse-find-member-definition)))
+  (define-key map (kbd "RET") 'ebrowse-find-member-definition)))
 
 
 
@@ -3779,7 +3779,7 @@ Prefix arg ARG says how much."
     ;; FIXME: Yuck!
     (fillarray (car (cdr map)) 'ebrowse-electric-position-undefined)
     (fillarray (car (cdr submap)) 'ebrowse-electric-position-undefined)
-    (define-key map "\e" submap)
+    (define-key map (kbd "ESC") submap)
     (define-key map "\C-z" 'suspend-frame)
     (define-key map "\C-h" 'Helper-help)
     (define-key map "?" 'Helper-describe-bindings)
@@ -3795,11 +3795,11 @@ Prefix arg ARG says how much."
     (define-key map "n" 'next-line)
     (define-key map "v" 'ebrowse-electric-view-position)
     (define-key map "\C-v" 'scroll-up-command)
-    (define-key map "\ev" 'scroll-down-command)
-    (define-key map "\e\C-v" 'scroll-other-window)
-    (define-key map "\e>" 'end-of-buffer)
-    (define-key map "\e<" 'beginning-of-buffer)
-    (define-key map "\e>" 'end-of-buffer)
+    (define-key map (kbd "ESC v") 'scroll-down-command)
+    (define-key map (kbd "ESC C-v") 'scroll-other-window)
+    (define-key map (kbd "ESC >") 'end-of-buffer)
+    (define-key map (kbd "ESC <") 'beginning-of-buffer)
+    (define-key map (kbd "ESC >") 'end-of-buffer)
     map)
   "Keymap used in electric position stack window.")
 
@@ -4074,7 +4074,7 @@ NUMBER-OF-STATIC-VARIABLES:"
   (define-key ebrowse-global-map "F" 'ebrowse-tags-find-declaration)
   (define-key ebrowse-global-map "," 'ebrowse-tags-loop-continue)
   (define-key ebrowse-global-map " " 'ebrowse-electric-buffer-list)
-  (define-key ebrowse-global-map "\t" 'ebrowse-tags-complete-symbol)
+  (define-key ebrowse-global-map (kbd "TAB") 'ebrowse-tags-complete-symbol)
   (define-key ebrowse-global-map "4" ebrowse-global-submap-4)
   (define-key ebrowse-global-map "5" ebrowse-global-submap-5)
   (define-key global-map ebrowse-global-prefix-key ebrowse-global-map))

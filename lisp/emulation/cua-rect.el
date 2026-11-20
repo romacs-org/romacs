@@ -1514,8 +1514,8 @@ With prefix arg, indent to that column."
   (define-key cua--rectangle-keymap [t]
     '(menu-item "sic" cua-insert-char-rectangle :filter cua--self-insert-char-p))
 
-  (define-key cua--rectangle-keymap "\r"     #'cua-rotate-rectangle)
-  (define-key cua--rectangle-keymap "\t"     #'cua-indent-rectangle)
+  (define-key cua--rectangle-keymap (kbd "RET")     #'cua-rotate-rectangle)
+  (define-key cua--rectangle-keymap (kbd "TAB")     #'cua-indent-rectangle)
 
   (define-key cua--rectangle-keymap [(control ??)] #'cua-help-for-rectangle)
 

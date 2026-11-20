@@ -128,7 +128,7 @@
 This is useful for talking to other systems on which carriage-return
 is the normal way to end a line."
   (interactive)
-  (define-key shell-mode-map "\r" 'kermit-send-input-cr)
+  (define-key shell-mode-map (kbd "RET") 'kermit-send-input-cr)
   (define-key shell-mode-map "\n" 'comint-send-input))
 
 (defun kermit-default-nl ()
@@ -136,7 +136,7 @@ is the normal way to end a line."
 In this state, use LFD to send a line and end it with a carriage-return."
   (interactive)
   (define-key shell-mode-map "\n" 'kermit-send-input-cr)
-  (define-key shell-mode-map "\r" 'comint-send-input))
+  (define-key shell-mode-map (kbd "RET") 'comint-send-input))
 
 (defun kermit-clean-filter (proc str)
   "Strip ^M and ^@ characters from process output."

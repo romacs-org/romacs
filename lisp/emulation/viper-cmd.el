@@ -373,13 +373,13 @@
   (cond ((memq state '(insert-state replace-state))
 	 (if viper-auto-indent
 	     (progn
-	       (define-key viper-insert-basic-map "\C-m" #'viper-autoindent)
+	       (define-key viper-insert-basic-map (kbd "RET") #'viper-autoindent)
 	       (if viper-want-emacs-keys-in-insert
 		   ;; expert
 		   (define-key viper-insert-basic-map "\C-j" nil)
 		 ;; novice
 		 (define-key viper-insert-basic-map "\C-j" #'viper-autoindent)))
-	   (define-key viper-insert-basic-map "\C-m" nil)
+	   (define-key viper-insert-basic-map (kbd "RET") nil)
 	   (define-key viper-insert-basic-map "\C-j" nil))
 
 	 (setq viper-insert-diehard-minor-mode

@@ -376,7 +376,7 @@ Stores a list of all the shortcuts in the free variable `tmm-short-cuts'."
     (when minibuffer
       (define-key map [pageup] 'tmm-goto-completions)
       (define-key map [prior] 'tmm-goto-completions)
-      (define-key map "\ev" 'tmm-goto-completions)
+      (define-key map (kbd "ESC v") 'tmm-goto-completions)
       (define-key map "\C-n" 'next-history-element)
       (define-key map "\C-p" 'previous-history-element)
       ;; Previous menu shortcut (see `tmm-prompt').
