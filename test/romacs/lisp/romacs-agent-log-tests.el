@@ -496,8 +496,12 @@
             (should-not romacs-agent-ui--session)
             (should-not desktop-save-buffer)
             (should (stringp warm-restart-left-out))
+            ;; Drawn, it holds nothing typed; a draft typed, it does.
+            (should-not (buffer-modified-p))
             (cl-flet ((type (text) (goto-char (point-max)) (insert text)))
-              (type "now") (romacs-agent-log-send)
+              (type "now")
+              (should (buffer-modified-p))
+              (romacs-agent-log-send)
               (type "later") (romacs-agent-log-queue)
               (romacs-agent-log-interrupt)
               (type "after") (romacs-agent-log-interrupt-and-send))

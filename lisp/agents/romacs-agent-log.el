@@ -255,9 +255,10 @@ passing nothing to what is typed after it."
 
 (defmacro romacs-agent-log--writing (&rest body)
   "Run BODY, which writes the transcript: read-only lifted, no undo kept,
-and no hook told of it (it is no edit of the user's)."
+no hook told of it, and the buffer no more modified than it was (it is
+no edit of the user's: only a draft typed is)."
   (declare (indent 0) (debug t))
-  `(let ((inhibit-read-only t) (inhibit-modification-hooks t) (buffer-undo-list t)) ,@body))
+  `(with-silent-modifications ,@body))
 
 (defun romacs-agent-log--put (text &optional block)
   "Insert TEXT, sealed, at the transcript's end, or at the end of BLOCK, an
